@@ -1,7 +1,10 @@
+@using Umbraco.Cms.Core.Security
+@inject IMemberManager MemberManager
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
     ViewBag.Title = "Siktbild - så ska din siktbild se ut";
+    var isLoggedIn = (await MemberManager.GetCurrentMemberAsync()) != null;
 }
 
 <style>
@@ -90,6 +93,51 @@
         justify-content: center;
     }
 
+    .sikt-sim-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .sikt-sim-rowlabel {
+        width: 40px;
+        flex: 0 0 auto;
+    }
+
+    .sikt-sim-track {
+        position: relative;
+        flex: 1 1 auto;
+        height: 10px;
+        background: var(--bs-tertiary-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 5px;
+        overflow: hidden;
+    }
+
+    .sikt-sim-window {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        background: rgba(25, 135, 84, 0.35);
+    }
+
+    .sikt-sim-play {
+        position: absolute;
+        top: -1px;
+        bottom: -1px;
+        width: 2px;
+        background: var(--bs-body-color);
+    }
+
+    .sikt-sim-press {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        background: var(--bs-warning);
+    }
+
     .sikt-caption {
         min-height: 4.5rem;
         font-size: 0.95rem;
@@ -109,13 +157,19 @@
     }
 </style>
 
-<div class="container-fluid py-4">
+<div class="container-fluid py-4" id="siktApp">
     <div class="mb-4">
         <h1 class="h3 mb-1"><i class="bi bi-bullseye me-2"></i>Siktbild</h1>
         <p class="text-muted mb-0">
             Dra i reglagen och se hur siktbilden förändras &ndash; så förstår du varför skärpan ska ligga på kornet,
             och vad en diopter gör.
         </p>
+        @if (!isLoggedIn)
+        {
+            <div class="alert alert-warning py-2 px-3 small mt-2 mb-0 d-inline-flex align-items-center">
+                <i class="bi bi-lock me-2"></i>Logga in som medlem för att styra simulatorn.
+            </div>
+        }
     </div>
 
     <!-- Images side by side -->
@@ -141,6 +195,27 @@
                         <button type="button" class="btn btn-sm btn-outline-danger" onclick="siktScenario('beginner')">
                             <i class="bi bi-exclamation-triangle me-1"></i>Nybörjarens misstag
                         </button>
+                        <button type="button" class="btn btn-sm btn-primary" id="perfectShotBtn" onclick="siktPerfectShot()">
+                            <i class="bi bi-crosshair me-1"></i>Perfekt skott
+                        </button>
+                    </div>
+
+                    <!-- Perfect-shot timing simulation -->
+                    <div id="simOverlay" class="mt-3" style="display:none;">
+                        <div class="fw-semibold small mb-2" id="simPhase"></div>
+                        <div class="sikt-sim-row">
+                            <span class="sikt-sim-rowlabel small text-muted">Tid</span>
+                            <div class="sikt-sim-track">
+                                <div class="sikt-sim-window" id="simWindow"></div>
+                                <div class="sikt-sim-play" id="simPlay"></div>
+                            </div>
+                        </div>
+                        <div class="sikt-sim-row mt-2">
+                            <span class="sikt-sim-rowlabel small text-muted">Tryck</span>
+                            <div class="sikt-sim-track">
+                                <div class="sikt-sim-press" id="simPress"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -427,9 +502,30 @@
     </div>
 </div>
 
+<!-- Login-required modal -->
+<div class="modal fade" id="siktLoginModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-lock me-2"></i>Inloggning krävs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                Du måste vara inloggad som medlem på pistol.nu för att använda siktbildssimulatorn.
+                Du kan titta på sidan utan att logga in, men reglagen är låsta.
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+                <a href="/login-register" class="btn btn-primary"><i class="bi bi-box-arrow-in-right me-1"></i>Logga in</a>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     "use strict";
+    var SIKT_LOGGED_IN = @(isLoggedIn ? "true" : "false");
 
     // ---- Optics model ----------------------------------------------------
     // Three things sit at three distances from the eye (pistol, open sights).
@@ -461,6 +557,15 @@
     // Live wobble offset (px), updated by the animation loop; all zero when steady.
     var wob = { tx: 0, ty: 0, ax: 0, ay: 0 };
     var wobbleRaf = null;
+
+    // Whole-sight-assembly shift (px), driven by the perfect-shot timing simulation; 0 otherwise.
+    var sightShift = { x: 0, y: 0 };
+    var ghostActive = false;   // show the brain's "burned-in" perfect image vs the drifted reality
+    var ghostAlpha = 0;        // fades in 0 -> 1 so the illusion appears gradually
+    var sim = { running: false, t0: null, raf: null, fired: false, scoreText: "", shot: null };
+    // LIFT: settle. fire at BREAK_T. steady window LIFT..DRIFT_START. DRIFT_START: brain starts
+    // substituting the perfect image while sights creep off. TREMOR_START: fine fast tremor adds in.
+    var SIM = { LIFT: 2.5, PRESS_START: 2.3, BREAK_T: 5.0, DRIFT_START: 9.0, TREMOR_START: 12.0, END: 15.0 };
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
     function dTarget() { return 1 / state.distanceM; }
@@ -609,11 +714,16 @@
         }
     }
 
-    function drawFront(c, cx) {
-        // Alignment error shifts the blade in the notch (exaggerated for visibility).
-        var ox = state.sightDx * SIGHT_VIS_PX + wob.ax;  // alignment error + tremor (right +)
-        var oy = -state.sightDy * SIGHT_VIS_PX + wob.ay; // up + -> higher on canvas
+    var GHOST_MAX = 0.40;   // peak opacity of the brain's "burned-in" perfect image
+    function ghostFill() { return "rgba(13,110,253," + (GHOST_MAX * ghostAlpha).toFixed(3) + ")"; }
+
+    function drawFront(c, cx, ox, oy, ghost) {
         var w = FRONT_W, x = cx - w / 2 + ox, top = SIGHT_TOP + oy, bottom = H - 6;
+        if (ghost) {
+            c.fillStyle = ghostFill();
+            c.fillRect(x, top, w, bottom - top);
+            return;
+        }
         var g = c.createLinearGradient(x, 0, x + w, 0);
         g.addColorStop(0, "#717171");
         g.addColorStop(0.5, "#535353");
@@ -624,16 +734,19 @@
         c.fillRect(x, top, w, 4);
     }
 
-    function drawRear(c, cx) {
-        var notchHalf = NOTCH_HALF, top = SIGHT_TOP, postBottom = SIGHT_TOP + 146, baseTop = SIGHT_TOP + 130, baseBottom = H - 6;
-        var left = 96, right = 604;
-        c.fillStyle = "#141414";
-        c.fillRect(left, top, (cx - notchHalf) - left, postBottom - top);          // left post
-        c.fillRect(cx + notchHalf, top, right - (cx + notchHalf), postBottom - top); // right post
-        c.fillRect(left, baseTop, right - left, baseBottom - baseTop);              // base bar
-        c.fillStyle = "rgba(255,255,255,0.06)";
-        c.fillRect(left, top, (cx - notchHalf) - left, 3);
-        c.fillRect(cx + notchHalf, top, right - (cx + notchHalf), 3);
+    function drawRear(c, cx, sgx, sgy, ghost) {
+        var cxs = cx + sgx;
+        var notchHalf = NOTCH_HALF, top = SIGHT_TOP + sgy, postBottom = SIGHT_TOP + 146 + sgy, baseTop = SIGHT_TOP + 130 + sgy, baseBottom = H - 6 + sgy;
+        var left = 96 + sgx, right = 604 + sgx;
+        c.fillStyle = ghost ? ghostFill() : "#141414";
+        c.fillRect(left, top, (cxs - notchHalf) - left, postBottom - top);            // left post
+        c.fillRect(cxs + notchHalf, top, right - (cxs + notchHalf), postBottom - top); // right post
+        c.fillRect(left, baseTop, right - left, baseBottom - baseTop);                // base bar
+        if (!ghost) {
+            c.fillStyle = "rgba(255,255,255,0.06)";
+            c.fillRect(left, top, (cxs - notchHalf) - left, 3);
+            c.fillRect(cxs + notchHalf, top, right - (cxs + notchHalf), 3);
+        }
     }
 
     function draw() {
@@ -667,8 +780,19 @@
 
         // layers, far -> near (correct occlusion); each blurred by its own defocus
         ctx.filter = blurStr(tB); drawTarget(ctx, tcx, tcy, R);
-        ctx.filter = blurStr(fB); drawFront(ctx, CX);
-        ctx.filter = blurStr(rB); drawRear(ctx, CX);
+
+        // Ghost = the perfectly-aligned image the brain "burns in" and keeps showing (faint),
+        // drawn before reality so the solid (actual) sights sit on top of it.
+        if (ghostActive) {
+            ctx.filter = "none";
+            drawFront(ctx, CX, 0, 0, true);
+            drawRear(ctx, CX, 0, 0, true);
+        }
+
+        var fox = state.sightDx * SIGHT_VIS_PX + wob.ax + sightShift.x;  // actual front-sight offset
+        var foy = -state.sightDy * SIGHT_VIS_PX + wob.ay + sightShift.y;
+        ctx.filter = blurStr(fB); drawFront(ctx, CX, fox, foy, false);
+        ctx.filter = blurStr(rB); drawRear(ctx, CX, sightShift.x, sightShift.y, false);
         ctx.filter = "none";
 
         // When the bull is blurred its dark edge bleeds outward and it looks bigger than it is.
@@ -914,6 +1038,7 @@
         wobbleRaf = requestAnimationFrame(wobbleLoop);
     }
     function syncWobbleAnim() {
+        if (sim.running) return;   // the perfect-shot sim owns the picture while it runs
         if (state.wobbleAmp > 0) {
             if (wobbleRaf === null) wobbleRaf = requestAnimationFrame(wobbleLoop);
         } else {
@@ -921,6 +1046,161 @@
             wob.tx = wob.ty = wob.ax = wob.ay = 0;
         }
     }
+
+    // ---- Perfect-shot timing simulation ----------------------------------
+    // Animates the natural arc: the gun rises into the 6-o'clock hold, settles, holds steady for a
+    // few seconds, then the muscles tire and the wobble grows. Trigger pressure builds smoothly and
+    // the shot breaks in the calm window — teaching "squeeze, don't jerk; break within ~10 s".
+    function simScore(distCm) {
+        if (distCm < 1.5) return "X";
+        if (distCm < 5) return "10";
+        if (distCm < 8.3) return "9";
+        if (distCm < 11.6) return "8";
+        if (distCm < 15) return "7";
+        return "bom";
+    }
+
+    function drawSimGroup(shot, score) {
+        grpCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        grpCtx.clearRect(0, 0, GSIZE, GSIZE);
+        grpCtx.fillStyle = "#eef2f8";
+        grpCtx.fillRect(0, 0, GSIZE, GSIZE);
+        drawTarget(grpCtx, GCX, GCY, GR);
+
+        var cmk = GR * 0.07;
+        grpCtx.strokeStyle = "rgba(220,53,69,0.9)";
+        grpCtx.lineWidth = 2;
+        grpCtx.beginPath();
+        grpCtx.moveTo(GCX - cmk, GCY); grpCtx.lineTo(GCX + cmk, GCY);
+        grpCtx.moveTo(GCX, GCY - cmk); grpCtx.lineTo(GCX, GCY + cmk);
+        grpCtx.stroke();
+
+        var lbl = document.getElementById("grpLabel");
+        if (shot) {
+            var pxPerCm = GR / TARGET_RADIUS_CM;
+            grpCtx.beginPath();
+            grpCtx.arc(GCX + shot.x * pxPerCm, GCY + shot.y * pxPerCm, GR * 0.07, 0, Math.PI * 2);
+            grpCtx.fillStyle = "#e0a800"; grpCtx.fill();
+            grpCtx.lineWidth = 2; grpCtx.strokeStyle = "#fff"; grpCtx.stroke();
+            lbl.textContent = "Perfekt skott – " + score;
+            lbl.className = "fw-semibold text-success";
+            document.getElementById("grpSize").innerHTML = "Skottet bröt i lugnet";
+            document.getElementById("grpHint").textContent = "Mjukt, jämnt ökande tryck tills skottet överraskar dig &ndash; aldrig ett ryck. Hinner du inte i lugnet: lägg av och börja om.";
+        } else {
+            lbl.textContent = "Siktar…";
+            lbl.className = "fw-semibold text-muted";
+            document.getElementById("grpSize").innerHTML = "Avvakta rätt ögonblick…";
+            document.getElementById("grpHint").textContent = "";
+        }
+    }
+
+    function fireSimShot() {
+        var PXCM = 150 / TARGET_RADIUS_CM;
+        var shot = { x: sightShift.x / PXCM, y: sightShift.y / PXCM };  // aim error at break (cm)
+        sim.shot = shot;
+        sim.scoreText = simScore(Math.sqrt(shot.x * shot.x + shot.y * shot.y));
+        document.getElementById("simPress").style.background = "var(--bs-success)";
+        drawSimGroup(shot, sim.scoreText);
+    }
+
+    function updateSimUi(t, pressure) {
+        document.getElementById("simPlay").style.left = Math.min(100, t / SIM.END * 100) + "%";
+        document.getElementById("simPress").style.width = (pressure * 100) + "%";
+        var p = document.getElementById("simPhase");
+        if (!sim.fired) {
+            if (t < SIM.LIFT) p.textContent = "Lyfter i läge – stora rörelser som snabbt lägger sig.";
+            else if (t < SIM.BREAK_T - 1.3) p.textContent = "Stilla i 6-läget. Öka trycket mjukt och jämnt.";
+            else p.textContent = "Låt skottet överraska dig – ryck inte av!";
+        } else if (t < SIM.DRIFT_START) {
+            p.innerHTML = "Skottet bröt i lugnet – perfekt <strong>" + sim.scoreText + "</strong>!";
+        } else if (t < SIM.TREMOR_START) {
+            p.innerHTML = "Efter ~10 s <strong>lurar hjärnan dig</strong>: den visar kvar den inövade perfekta bilden (<span style='color:#0d6efd'>blå spökbild</span>) medan kornet i själva verket glidit (heldraget). Du skulle svära på att du låg rätt.";
+        } else {
+            p.innerHTML = "Nu tillkommer en fin, snabb darrning – men hjärnan visar fortfarande den perfekta bilden. Ett &quot;perfekt&quot; skott här sitter där det <strong>heldragna</strong> kornet pekar. <strong>Lägg av och börja om!</strong>";
+        }
+    }
+
+    function simLoop(now) {
+        if (sim.t0 === null) sim.t0 = now;
+        var t = (now - sim.t0) / 1000;
+        var PXCM = 150 / TARGET_RADIUS_CM;
+        var TAU = 2 * Math.PI;
+        var ax = 0, ay = 0;     // actual aim offset (cm); brain "sees" 0
+        var fx = 0, fy = 0;     // extra front-sight alignment jitter (px)
+        ghostActive = false;
+
+        if (t < SIM.LIFT) {                                  // rise into the hold + settle
+            var k = t / SIM.LIFT, ease = 1 - (1 - k) * (1 - k);
+            var ampCm = 9 * (1 - ease) + 1.2 * ease, f = 0.6;
+            ax = ampCm * Math.sin(TAU * f * t);
+            ay = 30 * (1 - k) * (1 - k) + ampCm * 0.7 * Math.sin(TAU * f * 0.78 * t + 1.0);
+            fx = ampCm * PXCM * 0.10 * Math.sin(TAU * f * 2.3 * t);
+            fy = ampCm * PXCM * 0.10 * Math.sin(TAU * f * 2.9 * t + 1.5);
+        } else {
+            var b = 1.2;                                     // baseline steady micro-wander
+            ax = b * Math.sin(TAU * 1.0 * t);
+            ay = b * 0.7 * Math.sin(TAU * 0.78 * t + 1.0);
+            fx = b * PXCM * 0.08 * Math.sin(TAU * 2.3 * t);
+            fy = b * PXCM * 0.08 * Math.sin(TAU * 2.9 * t + 1.5);
+
+            if (t >= SIM.DRIFT_START) {                      // brain shows frozen-perfect; sights creep off
+                ghostActive = true;
+                ghostAlpha = clamp((t - SIM.DRIFT_START) / 1.5, 0, 1);   // fade in over 1.5 s
+                var dp = (t - SIM.DRIFT_START) / (SIM.END - SIM.DRIFT_START);
+                var driftCm = 6 * dp * dp;                   // ease-in to ~6 cm of unseen drift
+                ax += driftCm * Math.sin(TAU * 0.30 * t + 0.7);
+                ay += driftCm * 0.8 * Math.sin(TAU * 0.23 * t + 2.1);
+            }
+            if (t >= SIM.TREMOR_START) {                     // fine tremor: high freq, low amplitude
+                var rmp = Math.min(1, (t - SIM.TREMOR_START) / 1.0);
+                var tremCm = 0.9 * rmp, ftrem = 10;
+                ax += tremCm * Math.sin(TAU * ftrem * t);
+                ay += tremCm * Math.sin(TAU * ftrem * 1.12 * t + 0.6);
+                fx += tremCm * PXCM * 0.6 * Math.sin(TAU * ftrem * t);
+                fy += tremCm * PXCM * 0.6 * Math.sin(TAU * ftrem * 1.1 * t + 1.0);
+            }
+        }
+        sightShift.x = ax * PXCM;
+        sightShift.y = ay * PXCM;
+        wob.ax = fx;
+        wob.ay = fy;
+
+        var pressure = t < SIM.PRESS_START ? 0 : clamp((t - SIM.PRESS_START) / (SIM.BREAK_T - SIM.PRESS_START), 0, 1);
+        if (!sim.fired && t >= SIM.BREAK_T) { sim.fired = true; fireSimShot(); }
+
+        updateSimUi(t, pressure);
+        draw();
+        if (t >= SIM.END) { endSim(); return; }
+        sim.raf = requestAnimationFrame(simLoop);
+    }
+
+    function endSim() {
+        if (sim.raf !== null) { cancelAnimationFrame(sim.raf); sim.raf = null; }
+        sim.running = false;
+        sightShift.x = sightShift.y = 0;
+        wob.ax = wob.ay = 0;
+        ghostActive = false; ghostAlpha = 0;
+        document.getElementById("perfectShotBtn").disabled = false;
+        document.getElementById("simOverlay").style.display = "none";
+        document.getElementById("simPress").style.background = "";
+        syncWobbleAnim();   // resume free-play wobble if its amplitude is up
+        render();           // restore the normal picture + free-play group
+    }
+
+    window.siktPerfectShot = function () {
+        if (sim.running) return;
+        if (wobbleRaf !== null) { cancelAnimationFrame(wobbleRaf); wobbleRaf = null; }
+        wob.tx = wob.ty = wob.ax = wob.ay = 0;
+        sim.running = true; sim.fired = false; sim.t0 = null; sim.shot = null;
+        document.getElementById("perfectShotBtn").disabled = true;
+        document.getElementById("simOverlay").style.display = "";
+        document.getElementById("simWindow").style.left = (SIM.LIFT / SIM.END * 100).toFixed(1) + "%";
+        document.getElementById("simWindow").style.width = ((SIM.DRIFT_START - SIM.LIFT) / SIM.END * 100).toFixed(1) + "%";
+        document.getElementById("simPress").style.width = "0%";
+        document.getElementById("simPress").style.background = "";
+        drawSimGroup(null);
+        sim.raf = requestAnimationFrame(simLoop);
+    };
 
     window.siktNewSeries = function () {
         generateSamples();
@@ -1059,6 +1339,7 @@
     }
 
     window.siktScenario = function (name) {
+        if (sim.running) endSim();
         if (name === "correct") {
             state = { focus: "front", light: 0.70, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
         } else if (name === "beginner") {
@@ -1083,6 +1364,31 @@
     });
 
     window.addEventListener("resize", function () { setupCanvas(); setupGroupCanvas(); render(); });
+
+    // ---- Login gate: page is viewable, but controls are locked until logged in ----
+    function showLoginModal() {
+        var el = document.getElementById("siktLoginModal");
+        if (el && window.bootstrap) bootstrap.Modal.getOrCreateInstance(el).show();
+    }
+    if (!SIKT_LOGGED_IN) {
+        var gate = function (e) {
+            var el = e.target.closest("button, input, label.btn");
+            if (!el) return;
+            if (el.closest("#siktLoginModal")) return;                 // let the login modal work
+            if (!el.closest("#siktApp, #siktSettingsModal")) return;   // only gate the simulator
+            if (e.type === "keydown") {
+                var k = e.key;
+                if (k !== " " && k !== "Enter" && k !== "ArrowLeft" && k !== "ArrowRight" && k !== "ArrowUp" && k !== "ArrowDown") return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            showLoginModal();
+        };
+        ["pointerdown", "mousedown", "touchstart", "click", "keydown"].forEach(function (ev) {
+            document.addEventListener(ev, gate, true);   // capture phase: runs before Bootstrap + inline onclick
+        });
+    }
 
     setupCanvas();
     setupGroupCanvas();
