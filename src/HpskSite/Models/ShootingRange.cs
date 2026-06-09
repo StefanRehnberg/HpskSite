@@ -109,6 +109,12 @@ namespace HpskSite.Models
 
         public string? Description { get; set; }
 
+        /// <summary>
+        /// Default shot count written when a forgotten check-in is auto-closed at end of day.
+        /// Configured on the range modal's Aktivitet tab. Null/0 → write 0 shots on auto-close.
+        /// </summary>
+        public int? DefaultShotCount { get; set; }
+
         /// <summary>'Active' | 'Inactive' | 'Decommissioned' | 'UnclaimedSeed'.</summary>
         public string Status { get; set; } = RangeConstants.StatusUnclaimedSeed;
         /// <summary>'Osm' | 'Manual' | 'Municipal' | 'Claimed'.</summary>

@@ -505,6 +505,16 @@
 
     // ── List ──────────────────────────────────────────────
     async function rngLoad() {
+        // End-of-day auto-checkout for forgotten check-ins (fire-and-forget; throttled per client)
+        try {
+            const _k = 'hpsk_sweep_checkins', _last = parseInt(localStorage.getItem(_k) || '0', 10);
+            if (Date.now() - _last >= 5 * 60 * 1000) {
+                localStorage.setItem(_k, String(Date.now()));
+                fetch('/umbraco/surface/ShootingRange/AutoCloseStaleCheckIns').catch(() => { });
+            }
+        } catch (e) {
+            fetch('/umbraco/surface/ShootingRange/AutoCloseStaleCheckIns').catch(() => { });
+        }
         const d = await getJson('/umbraco/surface/ShootingRange/GetRanges');
         if (!d.success) { alert(d.message || 'Fel'); return; }
         rngState.ranges = d.ranges;
@@ -942,6 +952,15 @@
                     <img src="${qrSrc}" alt="QR" style="max-width:160px" class="border rounded p-1 bg-white">
                     <div class="mt-1"><a href="${checkinUrl}" target="_blank" rel="noopener" class="small">Öppna incheckningssida</a></div>
                     <div class="mt-2"><button class="btn btn-sm btn-outline-primary" onclick="rngPrintRangeSign()"><i class="bi bi-printer me-1"></i>Skriv ut skylt</button></div>
+                    <hr class="my-3">
+                    <div class="text-start">
+                        <label class="form-label mb-1 small fw-semibold" for="rngDefaultShots">Standard antal skott vid auto-utcheckning</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" min="0" step="1" class="form-control" id="rngDefaultShots" value="${rngState.current.range.defaultShotCount ?? ''}" placeholder="0">
+                            <button class="btn btn-outline-primary" onclick="rngSaveDefaultShots()"><i class="bi bi-save me-1"></i>Spara</button>
+                        </div>
+                        <div class="form-text">Antal skott som registreras när ett glömt incheckat pass stängs automatiskt vid dygnets slut.</div>
+                    </div>
                 </div>
             </div>
             <hr><h6 class="mb-2">Registrerade pass (${d.year})</h6>`;
@@ -1030,6 +1049,17 @@
         const d = await postJson('/umbraco/surface/ShootingRange/DeleteActivity', { id });
         if (!d.success) { alert(d.message || 'Fel'); return; }
         rngRenderActivity(document.getElementById('rngActYear')?.value);
+    };
+
+    // Save the per-range default shot count used for end-of-day auto-checkout.
+    window.rngSaveDefaultShots = async function () {
+        const rangeId = rngState.current.range.id;
+        const raw = document.getElementById('rngDefaultShots')?.value;
+        const val = raw === '' || raw == null ? null : parseInt(raw, 10);
+        const d = await postJson('/umbraco/surface/ShootingRange/SetRangeDefaultShotCount',
+            { rangeId, defaultShotCount: (val != null && !isNaN(val) && val > 0) ? val : null });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngState.current.range.defaultShotCount = d.defaultShotCount;
     };
 
     // ── Edit range ────────────────────────────────────────

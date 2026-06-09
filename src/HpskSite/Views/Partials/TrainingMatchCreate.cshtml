@@ -54,6 +54,16 @@
                         </select>
                     </div>
 
+                    <div class="mb-3" id="createMatchClubWrapper" style="display: none;">
+                        <label for="createMatchClub" class="form-label">
+                            <i class="bi bi-geo-alt me-1"></i>Klubb
+                        </label>
+                        <select class="form-select" id="createMatchClub"></select>
+                        <div class="form-text">
+                            Vilken klubb matchen hålls på. Styr var matchen visas i listan.
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <label for="createStartDate" class="form-label">
                             <i class="bi bi-calendar-event me-1"></i>Starttid (valfritt)
@@ -266,6 +276,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 await loadClubs();
             }
 
+            // Populate the creator's own clubs in the match club picker
+            populateCreateMatchClubs();
+
             // Initialize team inputs
             updateTeamInputs();
         });
@@ -290,6 +303,34 @@ function openCreateMatchModal() {
     document.getElementById('createIsTeamMatch').checked = false;
     document.getElementById('teamSettings').style.display = 'none';
     createMatchModalInstance.show();
+}
+
+// Populate the match-club picker with the creator's own clubs (primary + additional).
+// Defaults to the primary club. Hidden entirely when the member has no clubs.
+function populateCreateMatchClubs() {
+    const wrapper = document.getElementById('createMatchClubWrapper');
+    const select = document.getElementById('createMatchClub');
+    if (!wrapper || !select) return;
+
+    const clubs = Array.isArray(window.myClubsForMatch) ? window.myClubsForMatch : [];
+    if (clubs.length === 0) {
+        wrapper.style.display = 'none';
+        select.innerHTML = '';
+        return;
+    }
+
+    const escName = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    select.innerHTML = clubs
+        .map(c => `<option value="${c.id}">${escName(c.name)}</option>`)
+        .join('');
+    // Default to the club the member is checked in at today, else their primary club
+    const preferred = (window.myCheckInClubId && clubs.some(c => c.id === window.myCheckInClubId))
+        ? window.myCheckInClubId
+        : window.myPrimaryClubId;
+    if (preferred) {
+        select.value = String(preferred);
+    }
+    wrapper.style.display = '';
 }
 
 async function loadClubs() {

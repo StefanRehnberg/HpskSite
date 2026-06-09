@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly PushNotificationService _pushNotificationService;
         private readonly EmailService _emailService;
+        private readonly ClubService _clubService;
 
         public TrainingMatchController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -52,7 +53,8 @@ namespace HpskSite.Controllers
             IShooterStatisticsService statisticsService,
             AdminAuthorizationService authorizationService,
             PushNotificationService pushNotificationService,
-            EmailService emailService)
+            EmailService emailService,
+            ClubService clubService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
@@ -64,6 +66,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _pushNotificationService = pushNotificationService;
             _emailService = emailService;
+            _clubService = clubService;
         }
 
         #region Helper Methods
@@ -125,6 +128,31 @@ namespace HpskSite.Controllers
                 }
                 var lastActivity = match.LastActivityDate;
                 return lastActivity != null ? (DateTime?)lastActivity : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Safely get ClubId from a dynamic match object.
+        /// Returns null if the property doesn't exist (e.g., migration hasn't run yet) or is unset.
+        /// </summary>
+        private static int? GetClubId(dynamic match)
+        {
+            try
+            {
+                if (match is IDictionary<string, object> dict)
+                {
+                    if (dict.TryGetValue("ClubId", out var value) && value != null)
+                    {
+                        return Convert.ToInt32(value);
+                    }
+                    return null;
+                }
+                var clubId = match.ClubId;
+                return clubId != null ? (int?)clubId : null;
             }
             catch
             {
@@ -245,6 +273,19 @@ namespace HpskSite.Controllers
                     // Set LastActivityDate (separate query — column may not exist yet)
                     try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE MatchCode = @1", DateTime.Now, matchCode); }
                     catch { /* Column not yet added — migration pending */ }
+
+                    // Set ClubId — the club the match is held at. Defaults to the creator's
+                    // primary club when the create form didn't specify one. Separate query
+                    // (try/catch) so it's a no-op until the migration adds the column.
+                    var creatorPrimaryClub = member.GetValue<int>("primaryClubId");
+                    int? clubIdToSet = (request.ClubId.HasValue && request.ClubId.Value > 0)
+                        ? request.ClubId
+                        : (creatorPrimaryClub > 0 ? creatorPrimaryClub : (int?)null);
+                    if (clubIdToSet.HasValue)
+                    {
+                        try { db.Execute("UPDATE TrainingMatches SET ClubId = @0 WHERE MatchCode = @1", clubIdToSet.Value, matchCode); }
+                        catch { /* Column not yet added — migration pending */ }
+                    }
 
                     // Get the new match ID
                     var newMatch = db.FirstOrDefault<dynamic>(
@@ -1262,76 +1303,93 @@ namespace HpskSite.Controllers
                     int matchId = (int)match.Id;
                     string completeDiscipline = (string)(match.Discipline ?? "Precision");
 
-                    // Check if any participant has scores
-                    var participants = db.Fetch<dynamic>(
-                        @"SELECT DISTINCT MemberId,
-                          CASE
-                            WHEN SeriesScores IS NOT NULL AND ISJSON(SeriesScores) = 1
-                            THEN (SELECT COUNT(*) FROM OPENJSON(SeriesScores))
-                            ELSE 0
-                          END AS SeriesCount,
-                          TotalScore
-                          FROM TrainingScores
-                          WHERE TrainingMatchId = @0",
-                        matchId);
-
-                    bool hasAnyScores = participants.Any(p => p.MemberId != null && (p.SeriesCount ?? 0) > 0);
-
-                    if (!hasAnyScores)
-                    {
-                        // No scores at all — discard the match entirely
-                        db.Execute("DELETE FROM TrainingMatchJoinRequests WHERE TrainingMatchId = @0", matchId);
-                        db.Execute("DELETE FROM TrainingMatchParticipants WHERE TrainingMatchId = @0", matchId);
-                        db.Execute("DELETE FROM TrainingMatches WHERE Id = @0", matchId);
-
-                        await _hubContext.SendMatchCompleted(request.MatchCode ?? "");
-
-                        return Json(new { success = true, message = "Matchen hade inga resultat och har tagits bort" });
-                    }
-
-                    // Update match status
-                    db.Execute(
-                        @"UPDATE TrainingMatches
-                          SET Status = 'Completed', CompletedDate = @0
-                          WHERE Id = @1",
-                        DateTime.Now, matchId);
-
-                    // Recalculate statistics for participants with enough series (min 4)
                     string weaponClass = (string)match.WeaponClass;
 
-                    foreach (var participant in participants)
-                    {
-                        // Skip guest participants (they don't have a MemberId)
-                        if (participant.MemberId == null)
-                            continue;
-
-                        int participantMemberId = (int)participant.MemberId;
-                        int seriesCount = participant.SeriesCount ?? 0;
-
-                        // Skip participants with fewer than 4 series — not enough data for statistics
-                        if (seriesCount < 4)
-                            continue;
-
-                        decimal totalScore = participant.TotalScore != null ? Convert.ToDecimal(participant.TotalScore) : 0m;
-
-                        await _statisticsService.UpdateAfterMatchAsync(
-                            participantMemberId,
-                            weaponClass,
-                            seriesCount,
-                            totalScore,
-                            completeDiscipline);
-                    }
+                    // Prune throwaway (<4 series) results, then delete the match if nothing of
+                    // value remains (empty, or a single user without a full session). Shared with
+                    // the end-of-day auto-close path.
+                    bool deleted = await FinalizeMatchCloseAsync(db, matchId, completeDiscipline, weaponClass);
 
                     // Notify all viewers via SignalR
                     await _hubContext.SendMatchCompleted(request.MatchCode ?? "");
 
-                    return Json(new { success = true, message = "Matchen har avslutats" });
+                    return Json(new
+                    {
+                        success = true,
+                        message = deleted
+                            ? "Matchen hade inga fullständiga resultat och har tagits bort"
+                            : "Matchen har avslutats"
+                    });
                 }
             }
             catch (Exception ex)
             {
                 return Json(new { success = false, message = "Fel vid avslutning av match: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Shared close routine for both manual complete and end-of-day auto-close.
+        /// 1) Prunes throwaway results (&lt;4 series; Springskytte exempt) so they never reach
+        ///    personal logs/stats. 2) If nothing of value survives (empty match, or a single user
+        ///    who never shot a full session), removes the match — detaching any remaining
+        ///    TrainingScores first (those rows are never hard-deleted, per the delete-match
+        ///    invariant). 3) Otherwise marks the match Completed and updates statistics for
+        ///    surviving (&gt;=4 series) members. Returns true when the match was deleted.
+        /// Caller owns the SignalR notification.
+        /// </summary>
+        private async Task<bool> FinalizeMatchCloseAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            int matchId, string discipline, string weaponClass)
+        {
+            bool isSpringskytte = string.Equals(discipline, "Springskytte", StringComparison.OrdinalIgnoreCase);
+
+            // 1) Prune throwaway partials (<4 series) so they never reach the personal training log/stats.
+            if (!isSpringskytte)
+            {
+                db.Execute(@"
+                    DELETE FROM TrainingScores
+                    WHERE TrainingMatchId = @0
+                      AND (CASE WHEN SeriesScores IS NOT NULL AND ISJSON(SeriesScores) = 1
+                                THEN (SELECT COUNT(*) FROM OPENJSON(SeriesScores)) ELSE 0 END) < 4", matchId);
+            }
+
+            // 2) Anything of value left after pruning?
+            var survivors = db.Fetch<dynamic>(@"
+                SELECT MemberId,
+                       CASE WHEN SeriesScores IS NOT NULL AND ISJSON(SeriesScores) = 1
+                            THEN (SELECT COUNT(*) FROM OPENJSON(SeriesScores)) ELSE 0 END AS SeriesCount,
+                       TotalScore
+                FROM TrainingScores WHERE TrainingMatchId = @0", matchId);
+
+            if (survivors.Count == 0)
+            {
+                // Empty / single-user-without-a-full-session → remove the match shell.
+                // Detach any stragglers first; TrainingScores are never hard-deleted here.
+                db.Execute("UPDATE TrainingScores SET TrainingMatchId = NULL WHERE TrainingMatchId = @0", matchId);
+                db.Execute("DELETE FROM TrainingMatchJoinRequests WHERE TrainingMatchId = @0", matchId);
+                db.Execute("DELETE FROM TrainingMatchParticipants WHERE TrainingMatchId = @0", matchId);
+                db.Execute("DELETE FROM TrainingMatches WHERE Id = @0", matchId);
+                return true;
+            }
+
+            // 3) Keep — mark completed and update statistics for surviving (>=4 series) members.
+            db.Execute("UPDATE TrainingMatches SET Status = 'Completed', CompletedDate = @0 WHERE Id = @1",
+                DateTime.Now, matchId);
+
+            if (!isSpringskytte)
+            {
+                foreach (var s in survivors)
+                {
+                    if (s.MemberId == null) continue;
+                    int seriesCount = s.SeriesCount ?? 0;
+                    if (seriesCount < 4) continue; // defensive — already pruned
+                    decimal totalScore = s.TotalScore != null ? Convert.ToDecimal(s.TotalScore) : 0m;
+                    await _statisticsService.UpdateAfterMatchAsync(
+                        (int)s.MemberId, weaponClass, seriesCount, totalScore, discipline);
+                }
+            }
+            return false;
         }
 
         /// <summary>
@@ -2593,6 +2651,7 @@ namespace HpskSite.Controllers
                           ORDER BY tm.StartDate DESC, tm.CreatedDate DESC");
 
                     var matchList = new List<object>();
+                    var clubNameCache = new Dictionary<int, string?>();  // resolve each club name once
                     foreach (var m in matches)
                     {
                         // Get creator info
@@ -2646,6 +2705,18 @@ namespace HpskSite.Controllers
                         var startDate = m.StartDate != null ? (DateTime?)m.StartDate : null;
                         var hasStarted = startDate == null || startDate <= DateTime.Now;
 
+                        // Resolve the match's club name (cached per distinct club id — no per-row lookup churn)
+                        var clubId = GetClubId(m);
+                        string? clubName = null;
+                        if (clubId.HasValue)
+                        {
+                            if (!clubNameCache.TryGetValue(clubId.Value, out clubName))
+                            {
+                                clubName = _clubService.GetClubNameById(clubId.Value);
+                                clubNameCache[clubId.Value] = clubName;
+                            }
+                        }
+
                         matchList.Add(new
                         {
                             id = (int)m.Id,
@@ -2660,7 +2731,9 @@ namespace HpskSite.Controllers
                             createdByName = creatorName,
                             participantCount = (int)m.ParticipantCount,
                             participants = participantList,
-                            isOpen = m.IsOpen != null ? (bool)m.IsOpen : true  // Default true for old matches
+                            isOpen = m.IsOpen != null ? (bool)m.IsOpen : true,  // Default true for old matches
+                            clubId = clubId,
+                            clubName = clubName
                         });
                     }
 
@@ -2702,6 +2775,7 @@ namespace HpskSite.Controllers
                           ORDER BY tm.StartDate ASC");
 
                     var matchList = new List<object>();
+                    var clubNameCache = new Dictionary<int, string?>();  // resolve each club name once
                     foreach (var m in matches)
                     {
                         // Get creator info
@@ -2753,6 +2827,18 @@ namespace HpskSite.Controllers
 
                         var startDate = m.StartDate != null ? (DateTime?)m.StartDate : null;
 
+                        // Resolve the match's club name (cached per distinct club id — no per-row lookup churn)
+                        var clubId = GetClubId(m);
+                        string? clubName = null;
+                        if (clubId.HasValue)
+                        {
+                            if (!clubNameCache.TryGetValue(clubId.Value, out clubName))
+                            {
+                                clubName = _clubService.GetClubNameById(clubId.Value);
+                                clubNameCache[clubId.Value] = clubName;
+                            }
+                        }
+
                         matchList.Add(new
                         {
                             id = (int)m.Id,
@@ -2767,7 +2853,9 @@ namespace HpskSite.Controllers
                             createdByName = creatorName,
                             participantCount = (int)m.ParticipantCount,
                             participants = participantList,
-                            isOpen = m.IsOpen != null ? (bool)m.IsOpen : true  // Default true for old matches
+                            isOpen = m.IsOpen != null ? (bool)m.IsOpen : true,  // Default true for old matches
+                            clubId = clubId,
+                            clubName = clubName
                         });
                     }
 
@@ -2890,24 +2978,33 @@ namespace HpskSite.Controllers
             {
                 using (var db = _databaseFactory.CreateDatabase())
                 {
-                    // Close matches inactive for more than 6 hours
-                    // Try with LastActivityDate first; fall back to StartDate-only if column missing
-                    int closedCount;
+                    // Find stale active matches (inactive > 6 hours). Prefer LastActivityDate; fall
+                    // back to StartDate-only if the column hasn't been added yet.
+                    List<dynamic> stale;
                     try
                     {
-                        closedCount = db.Execute(
-                            @"UPDATE TrainingMatches
-                              SET Status = 'Completed', CompletedDate = GETDATE()
+                        stale = db.Fetch<dynamic>(
+                            @"SELECT Id, MatchCode, Discipline, WeaponClass FROM TrainingMatches
                               WHERE Status = 'Active'
                                 AND COALESCE(LastActivityDate, StartDate) < DATEADD(hour, -6, GETDATE())");
                     }
                     catch
                     {
-                        // LastActivityDate column not yet added — fall back to original logic
-                        closedCount = db.Execute(
-                            @"UPDATE TrainingMatches
-                              SET Status = 'Completed', CompletedDate = GETDATE()
+                        stale = db.Fetch<dynamic>(
+                            @"SELECT Id, MatchCode, Discipline, WeaponClass FROM TrainingMatches
                               WHERE Status = 'Active' AND StartDate < DATEADD(hour, -6, GETDATE())");
+                    }
+
+                    // Apply the same prune + delete-junk routine as a manual close to each one.
+                    int closedCount = 0;
+                    foreach (var m in stale)
+                    {
+                        int matchId = (int)m.Id;
+                        string discipline = (string)(m.Discipline ?? "Precision");
+                        string weaponClass = (string)(m.WeaponClass ?? "C");
+                        await FinalizeMatchCloseAsync(db, matchId, discipline, weaponClass);
+                        await _hubContext.SendMatchCompleted((string)(m.MatchCode ?? ""));
+                        closedCount++;
                     }
 
                     return Json(new
@@ -3734,6 +3831,7 @@ namespace HpskSite.Controllers
         public int? MaxShootersPerTeam { get; set; }  // Required when IsTeamMatch=true
         public List<HpskSite.Shared.Models.TeamDefinition>? Teams { get; set; }  // Team definitions for closed team matches
         public string? Discipline { get; set; }  // "Precision" (default), "Milsnabb", or "Duell"
+        public int? ClubId { get; set; }  // Club the match is held at (defaults to creator's primary club)
     }
 
     public class JoinMatchRequest
