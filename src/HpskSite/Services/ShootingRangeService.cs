@@ -458,6 +458,43 @@ namespace HpskSite.Services
                 "WHERE RangeId = @0 AND MemberId = @1 AND EndTime IS NULL ORDER BY Id DESC", rangeId, memberId);
         }
 
+        /// <summary>
+        /// The member's currently-open check-in across ANY range, scoped to today only.
+        /// Today-only is the "currently here" rule: a forgotten session from a previous day
+        /// is never treated as current (and is closed by <see cref="AutoCloseStaleCheckInsAsync"/>).
+        /// </summary>
+        public async Task<RangeActivitySession?> GetOpenSessionForMemberAsync(int memberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FirstOrDefaultAsync<RangeActivitySession>(
+                "WHERE MemberId = @0 AND EndTime IS NULL AND [Date] = CAST(GETDATE() AS DATE) ORDER BY Id DESC", memberId);
+        }
+
+        /// <summary>The club ids linked to a range (a range can serve several clubs).</summary>
+        public async Task<List<int>> GetClubIdsForRangeAsync(int rangeId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<int>("SELECT ClubId FROM ClubRangeLink WHERE RangeId = @0", rangeId);
+        }
+
+        /// <summary>
+        /// End-of-day auto-checkout: closes every check-in still open from a previous day,
+        /// stamping EndTime 23:59 and the range's configured DefaultShotCount (0 when unset).
+        /// Set-based; safe to call opportunistically on page load. Returns rows closed.
+        /// </summary>
+        public async Task<int> AutoCloseStaleCheckInsAsync()
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.ExecuteAsync(@"
+                UPDATE s
+                SET s.EndTime = '23:59:00',
+                    s.ShotCount = COALESCE(r.DefaultShotCount, 0),
+                    s.ShotCountSource = 'AutoClosed'
+                FROM RangeActivitySession s
+                JOIN ShootingRange r ON r.Id = s.RangeId
+                WHERE s.EndTime IS NULL AND s.[Date] < CAST(GETDATE() AS DATE)");
+        }
+
         public async Task<List<RangeActivitySession>> GetSessionsForYearAsync(int rangeId, int year)
         {
             using var db = _databaseFactory.CreateDatabase();

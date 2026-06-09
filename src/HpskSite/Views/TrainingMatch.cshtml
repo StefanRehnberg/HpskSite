@@ -7,6 +7,7 @@
 @inject IMemberService MemberService
 @inject IMemberGroupService MemberGroupService
 @inject ClubService ClubService
+@inject ShootingRangeService RangeService
 @inject IScopeProvider ScopeProvider
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
@@ -22,6 +23,14 @@
     string memberName = "";
     string profilePictureUrl = "";
     string clubName = "";
+
+    // Creator's clubs (primary + additional) for the create-match club picker + scope selector
+    var myClubsForMatch = new List<object>();
+    int myPrimaryClubIdForMatch = 0;
+    // Club IDs in the member's region (derived from the primary club's regionalPage ancestor)
+    var myRegionClubIds = new List<int>();
+    // If the member is currently checked in at a range today, the club to bias defaults toward (0 = none)
+    int myCheckInClubId = 0;
 
     // Check for join code in URL
     var joinCode = Context.Request.Query["join"].ToString();
@@ -59,6 +68,58 @@
             if (primaryClubId > 0)
             {
                 clubName = ClubService.GetClubNameById(primaryClubId) ?? "";
+            }
+
+            // Build the member's full club set (primary + additional via memberClubIds CSV),
+            // de-duplicated, primary first. Used by the create-match club picker and scope selector.
+            myPrimaryClubIdForMatch = primaryClubId;
+            var clubIdOrder = new List<int>();
+            if (primaryClubId > 0) clubIdOrder.Add(primaryClubId);
+            var additionalClubsCsv = member.HasProperty("memberClubIds") ? member.GetValue<string>("memberClubIds") : null;
+            if (!string.IsNullOrWhiteSpace(additionalClubsCsv))
+            {
+                foreach (var part in additionalClubsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (int.TryParse(part, out var cid) && cid > 0 && !clubIdOrder.Contains(cid))
+                    {
+                        clubIdOrder.Add(cid);
+                    }
+                }
+            }
+            foreach (var cid in clubIdOrder)
+            {
+                var name = ClubService.GetClubNameById(cid);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    myClubsForMatch.Add(new { id = cid, name });
+                }
+            }
+
+            // Region scope: all clubs sharing the primary club's regionalPage ancestor.
+            // Empty when the club isn't under a region (legacy direct clubsPage) → no region tier.
+            if (primaryClubId > 0)
+            {
+                var clubNode = Umbraco.Content(primaryClubId);
+                var regionNode = clubNode?.AncestorOrSelf("regionalPage");
+                if (regionNode != null)
+                {
+                    foreach (var c in regionNode.Descendants("club"))
+                    {
+                        myRegionClubIds.Add(c.Id);
+                    }
+                }
+            }
+
+            // Check-in bias: if the member is checked in at a range today, prefer that range's
+            // club (only when it's one of their own clubs, so it's selectable / in scope).
+            if (memberId.HasValue)
+            {
+                var openSession = await RangeService.GetOpenSessionForMemberAsync(memberId.Value);
+                if (openSession != null)
+                {
+                    var rangeClubIds = await RangeService.GetClubIdsForRangeAsync(openSession.RangeId);
+                    myCheckInClubId = rangeClubIds.FirstOrDefault(cid => clubIdOrder.Contains(cid));
+                }
             }
 
             // Check if user is administrator
@@ -215,6 +276,14 @@
 
                 <!-- Main View (tabs + content) -->
                 <div id="mainView" style="display: none;">
+                    <!-- Scope selector — narrows the live match lists to your clubs/region (populated by JS) -->
+                    <div id="matchScopeWrapper" class="d-flex align-items-center gap-2 mb-3" style="display: none !important;">
+                        <label for="matchScopeSelect" class="form-label mb-0 small text-body-secondary">
+                            <i class="bi bi-funnel me-1"></i>Visa matcher från
+                        </label>
+                        <select id="matchScopeSelect" class="form-select form-select-sm w-auto" onchange="onMatchScopeChange()"></select>
+                    </div>
+
                     <!-- Navigation Tabs -->
                     <ul class="nav nav-tabs mb-4" id="matchTabs" role="tablist">
                         <li class="nav-item" role="presentation">
@@ -361,6 +430,114 @@
         let isGuestUser = @(isGuest ? "true" : "false");
         let guestParticipantId = @(guestSession?.GuestId ?? 0);
         let guestMatchCode = '@(guestSession?.MatchCode ?? "")';
+
+        // The current member's clubs (primary + additional) for the create-match club picker
+        window.myClubsForMatch = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(myClubsForMatch));
+        window.myPrimaryClubId = @(myPrimaryClubIdForMatch);
+        window.myRegionClubIds = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(myRegionClubIds));
+        window.myCheckInClubId = @(myCheckInClubId);
+
+        // Escape text before interpolating into innerHTML (club/match names are user/admin-set)
+        function escMatchHtml(s) {
+            return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        }
+
+        // Throttle a fire-and-forget background sweep so repeated page loads don't spam the endpoint
+        function sweepGate(key, minMs) {
+            try {
+                const last = parseInt(localStorage.getItem(key) || '0', 10);
+                const now = Date.now();
+                if (now - last < minMs) return false;
+                localStorage.setItem(key, String(now));
+                return true;
+            } catch (e) { return true; }
+        }
+
+        // ===== Match scope selector (Mina klubbar / specifik klubb / Min region / Alla) =====
+        // Narrows the live match lists to what's relevant to this member. Filters only —
+        // it never hides unattributed matches (clubId null) and never affects code/QR joins.
+        (function initMatchScope() {
+            let saved = null;
+            try { saved = localStorage.getItem('hpsk_match_scope'); } catch (e) { }
+            window.matchScopeWasSaved = !!saved;
+            window.matchScope = saved || 'myclubs';
+        })();
+
+        function buildMatchScopeOptions() {
+            const sel = document.getElementById('matchScopeSelect');
+            const wrap = document.getElementById('matchScopeWrapper');
+            if (!sel || !wrap) return;
+
+            const clubs = Array.isArray(window.myClubsForMatch) ? window.myClubsForMatch : [];
+            const regionIds = Array.isArray(window.myRegionClubIds) ? window.myRegionClubIds : [];
+
+            // Nothing to filter by → hide the selector and show everything
+            if (clubs.length === 0 && regionIds.length === 0) {
+                wrap.style.setProperty('display', 'none', 'important');
+                window.matchScope = 'all';
+                return;
+            }
+
+            let opts = '';
+            if (clubs.length > 0) {
+                opts += '<option value="myclubs">Mina klubbar</option>';
+                if (clubs.length > 1) {
+                    for (const c of clubs) {
+                        opts += `<option value="club:${c.id}">${c.name}</option>`;
+                    }
+                }
+            }
+            if (regionIds.length > 0) {
+                opts += '<option value="region">Min region</option>';
+            }
+            opts += '<option value="all">Alla</option>';
+            sel.innerHTML = opts;
+
+            // Check-in bias: with no saved preference, default to the club the member is checked
+            // in at today (only when a specific-club option exists for it). Never overrides a
+            // saved choice — purely a default, the user can change it freely.
+            if (!window.matchScopeWasSaved && window.myCheckInClubId > 0 && clubs.length > 1) {
+                if (clubs.some(c => c.id === window.myCheckInClubId)) {
+                    window.matchScope = 'club:' + window.myCheckInClubId;
+                }
+            }
+
+            // Restore saved scope if still a valid option, else fall back
+            const valid = Array.from(sel.options).some(o => o.value === window.matchScope);
+            if (!valid) window.matchScope = (clubs.length > 0) ? 'myclubs' : 'all';
+            sel.value = window.matchScope;
+
+            wrap.style.setProperty('display', 'flex', 'important');
+        }
+
+        function filterMatchesByScope(matches) {
+            if (!Array.isArray(matches)) return matches;
+            const scope = window.matchScope || 'myclubs';
+            if (scope === 'all') return matches;
+
+            let allowed;
+            if (scope === 'region') {
+                allowed = window.myRegionClubIds || [];
+            } else if (scope.indexOf('club:') === 0) {
+                allowed = [parseInt(scope.slice(5), 10)];
+            } else { // myclubs
+                allowed = (window.myClubsForMatch || []).map(c => c.id);
+                if (allowed.length === 0) return matches;
+            }
+            // Never hide unattributed matches (clubId null) — only filter out other clubs' matches
+            return matches.filter(m => !m.clubId || allowed.indexOf(m.clubId) !== -1);
+        }
+
+        function onMatchScopeChange() {
+            const sel = document.getElementById('matchScopeSelect');
+            if (sel) window.matchScope = sel.value;
+            try { localStorage.setItem('hpsk_match_scope', window.matchScope); } catch (e) { }
+            // Re-render already-loaded live tabs from their raw (unfiltered) data
+            if (window.ongoingMatchesRaw) renderOngoingMatches(window.ongoingMatchesRaw);
+            if (window.upcomingMatchesRaw) renderUpcomingMatches(window.upcomingMatchesRaw);
+        }
+
+        document.addEventListener('DOMContentLoaded', buildMatchScopeOptions);
 
         // Inactivity timer state
         let inactivityTimerId = null;
@@ -927,6 +1104,11 @@
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
             console.log('Token:', token ? 'present' : 'MISSING');
 
+            // Club the match is held at — read from the create-match picker (survives the
+            // shooter-class retry path since the field persists in the DOM after the modal hides).
+            const clubSel = document.getElementById('createMatchClub');
+            const clubIdParsed = clubSel && clubSel.value ? parseInt(clubSel.value, 10) : NaN;
+
             const requestBody = {
                 matchName: matchName,
                 weaponClass: weaponClass,
@@ -934,7 +1116,8 @@
                 isOpen: isOpen,
                 hasHandicap: hasHandicap,
                 isTeamMatch: isTeamMatch,
-                discipline: discipline
+                discipline: discipline,
+                clubId: isNaN(clubIdParsed) ? null : clubIdParsed
             };
 
             if (isTeamMatch) {
@@ -1888,6 +2071,10 @@
 
             if (!container) return;
 
+            // Keep the raw list so the scope selector can re-render, then apply the active scope
+            window.ongoingMatchesRaw = matches;
+            matches = filterMatchesByScope(matches);
+
             if (!matches || matches.length === 0) {
                 container.style.display = 'none';
                 if (empty) empty.style.display = 'block';
@@ -1937,6 +2124,11 @@
                     ? `<img src="/images/competition-types/${m.discipline}.png" alt="${m.discipline}" style="height: 18px; width: auto;" class="me-1" title="${m.discipline}">`
                     : '';
 
+                // Club label helps tell similar matches apart at a glance
+                const clubLabel = m.clubName
+                    ? `<span class="text-body-tertiary mx-1">·</span><span class="text-body-tertiary text-truncate">${escMatchHtml(m.clubName)}</span>`
+                    : '';
+
                 return `
                     <div class="list-group-item list-group-item-action match-list-item" onclick="showMatchActionModal(window.ongoingMatchesData[${index}])">
                         <div class="d-flex align-items-center gap-2">
@@ -1955,6 +2147,7 @@
                                     <span class="text-body-secondary">${m.participantCount}</span>
                                     <span class="text-body-tertiary mx-1">·</span>
                                     <span class="text-body-tertiary">${timeStr}</span>
+                                    ${clubLabel}
                                 </div>
                             </div>
 
@@ -2012,6 +2205,16 @@
 
             // Participant count
             document.getElementById('matchActionParticipantCount').textContent = match.participantCount || 0;
+
+            // Creator + club (identity cues to avoid joining the wrong match)
+            document.getElementById('matchActionCreator').textContent = match.createdByName || 'Okänd';
+            const clubWrap = document.getElementById('matchActionClubWrap');
+            if (match.clubName) {
+                document.getElementById('matchActionClub').textContent = match.clubName;
+                clubWrap.style.display = 'inline';
+            } else {
+                clubWrap.style.display = 'none';
+            }
 
             // Lock indicator for private matches
             const lockIndicator = document.getElementById('matchActionLockIndicator');
@@ -2130,6 +2333,10 @@
 
             if (!container) return;
 
+            // Keep the raw list so the scope selector can re-render, then apply the active scope
+            window.upcomingMatchesRaw = matches;
+            matches = filterMatchesByScope(matches);
+
             if (!matches || matches.length === 0) {
                 container.style.display = 'none';
                 if (empty) empty.style.display = 'block';
@@ -2194,6 +2401,11 @@
                     ? `<img src="/images/competition-types/${m.discipline}.png" alt="${m.discipline}" style="height: 18px; width: auto;" class="me-1" title="${m.discipline}">`
                     : '';
 
+                // Club label helps tell similar matches apart at a glance
+                const clubLabel = m.clubName
+                    ? `<span class="text-body-tertiary mx-1">·</span><span class="text-body-tertiary text-truncate">${escMatchHtml(m.clubName)}</span>`
+                    : '';
+
                 return `
                     <div class="list-group-item list-group-item-action match-list-item" onclick="viewMatchAsSpectator('${m.matchCode}')">
                         <div class="d-flex align-items-center gap-2">
@@ -2213,6 +2425,7 @@
                                     <span class="text-body-tertiary mx-1">·</span>
                                     <i class="bi bi-calendar-event text-warning-emphasis"></i>
                                     <span class="text-warning-emphasis">${dateStr} ${timeStr}</span>
+                                    ${clubLabel}
                                 </div>
                             </div>
 
@@ -2229,6 +2442,10 @@
         // ===== Auto-close Stale Matches =====
 
         function autoCloseStaleMatches() {
+            // Throttle: the sweep now prunes/deletes per match, so don't re-run on every page load
+            if (!sweepGate('hpsk_sweep_matches', 5 * 60 * 1000)) {
+                return Promise.resolve({ success: true, skipped: true });
+            }
             return fetch('/umbraco/surface/TrainingMatch/AutoCloseStaleMatches')
                 .then(response => response.json())
                 .then(result => {
@@ -3007,10 +3224,18 @@
                     <div id="matchActionParticipants" class="d-flex justify-content-center mb-2">
                         <!-- Participant avatars will be added here -->
                     </div>
-                    <p class="text-muted mb-0">
+                    <p class="text-muted mb-2">
                         <i class="bi bi-people me-1"></i><span id="matchActionParticipantCount">0</span> deltagare
                         <span id="matchActionLockIndicator" class="ms-2" style="display: none;">
                             <i class="bi bi-lock-fill"></i> Privat
+                        </span>
+                    </p>
+                    <!-- Creator + club: confirm you're joining the right match before tapping Gå med -->
+                    <p class="mb-0 small">
+                        <i class="bi bi-person-circle me-1"></i><span id="matchActionCreator" class="fw-semibold">-</span>
+                        <span id="matchActionClubWrap" style="display: none;">
+                            <span class="text-body-tertiary mx-1">·</span>
+                            <i class="bi bi-geo-alt me-1"></i><span id="matchActionClub"></span>
                         </span>
                     </p>
                 </div>

@@ -48,6 +48,16 @@
         function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
         async function load() {
+            // End-of-day auto-checkout for forgotten check-ins (fire-and-forget; throttled per client)
+            try {
+                const _k = 'hpsk_sweep_checkins', _last = parseInt(localStorage.getItem(_k) || '0', 10);
+                if (Date.now() - _last >= 5 * 60 * 1000) {
+                    localStorage.setItem(_k, String(Date.now()));
+                    fetch('/umbraco/surface/ShootingRange/AutoCloseStaleCheckIns').catch(() => { });
+                }
+            } catch (e) {
+                fetch('/umbraco/surface/ShootingRange/AutoCloseStaleCheckIns').catch(() => { });
+            }
             const d = await (await fetch('/umbraco/surface/ShootingRange/CheckInStatus?rangeId=' + RANGE_ID)).json();
             if (d.needLogin) {
                 el.innerHTML = `<div class="text-center">

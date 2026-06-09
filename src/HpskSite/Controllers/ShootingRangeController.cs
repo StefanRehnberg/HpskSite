@@ -180,6 +180,7 @@ namespace HpskSite.Controllers
                         skjutbanechefName = range.SkjutbanechefName,
                         skjutbanechefContact = range.SkjutbanechefContact,
                         description = range.Description,
+                        defaultShotCount = range.DefaultShotCount,
                         status = range.Status,
                         source = range.Source,
                         osmRef = range.OsmRef
@@ -1257,6 +1258,57 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// End-of-day auto-checkout for forgotten check-ins. Called opportunistically on page
+        /// load (range hub + check-in page), mirroring TrainingMatch.AutoCloseStaleMatches.
+        /// Closes any session still open from a previous day with the range's DefaultShotCount.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> AutoCloseStaleCheckIns()
+        {
+            try
+            {
+                var closedCount = await _rangeService.AutoCloseStaleCheckInsAsync();
+                return Json(new { success = true, closedCount });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error auto-closing stale check-ins");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Saves just the per-range DefaultShotCount (the Aktivitet tab setting). Manager-gated.
+        /// Kept separate from SaveRange so the Aktivitet tab doesn't need the full range form.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetRangeDefaultShotCount([FromBody] SetDefaultShotCountRequest req)
+        {
+            try
+            {
+                var memberId = await _rangeService.GetCurrentMemberIdAsync();
+                if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
+
+                bool canManage = await _rangeService.IsSiteAdminAsync()
+                    || await _rangeService.CanManageRangeAsync(req.RangeId, memberId);
+                if (!canManage) return Json(new { success = false, message = "Behörighet saknas." });
+
+                var range = await _rangeService.GetByIdAsync(req.RangeId);
+                if (range == null) return Json(new { success = false, message = "Skjutbanan hittades inte." });
+
+                range.DefaultShotCount = NormalizeDefaultShotCount(req.DefaultShotCount);
+                await _rangeService.UpdateAsync(range);
+                return Json(new { success = true, defaultShotCount = range.DefaultShotCount });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving default shot count");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
         // ── Helpers ─────────────────────────────────────────────────────────
 
         private static readonly System.Text.Json.JsonSerializerOptions _jsonCI = new() { PropertyNameCaseInsensitive = true };
@@ -1314,6 +1366,7 @@ namespace HpskSite.Controllers
             range.SkjutbanechefName = Trim(req.SkjutbanechefName);
             range.SkjutbanechefContact = Trim(req.SkjutbanechefContact);
             range.Description = Trim(req.Description);
+            range.DefaultShotCount = NormalizeDefaultShotCount(req.DefaultShotCount);
             if (!string.IsNullOrWhiteSpace(req.LocationSensitivity))
                 range.LocationSensitivity = req.LocationSensitivity!;
             if (!string.IsNullOrWhiteSpace(req.Status))
@@ -1333,6 +1386,10 @@ namespace HpskSite.Controllers
         }
 
         private static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        /// <summary>A positive shot count, else null (0/negative/unset are stored as null).</summary>
+        private static int? NormalizeDefaultShotCount(int? value) =>
+            (value.HasValue && value.Value > 0) ? value : null;
 
         private static string HuvudmanDisplay(ShootingRange r) =>
             !string.IsNullOrWhiteSpace(r.HuvudmanName) ? r.HuvudmanName! : "";
@@ -1367,7 +1424,14 @@ namespace HpskSite.Controllers
             public string? SkjutbanechefName { get; set; }
             public string? SkjutbanechefContact { get; set; }
             public string? Description { get; set; }
+            public int? DefaultShotCount { get; set; }
             public string? Status { get; set; }
+        }
+
+        public class SetDefaultShotCountRequest
+        {
+            public int RangeId { get; set; }
+            public int? DefaultShotCount { get; set; }
         }
 
         public class SaveSectionRequest

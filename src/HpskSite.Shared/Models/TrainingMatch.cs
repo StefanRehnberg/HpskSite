@@ -120,6 +120,13 @@ namespace HpskSite.Shared.Models
         public string Discipline { get; set; } = "Precision";
 
         /// <summary>
+        /// Club the match belongs to (captured at creation from the creator's selected club).
+        /// Drives the match card club label and the "Mina klubbar" scope selector. Null when unset.
+        /// </summary>
+        [JsonPropertyName("clubId")]
+        public int? ClubId { get; set; }
+
+        /// <summary>
         /// List of teams in this match (only populated for team matches)
         /// </summary>
         [JsonPropertyName("teams")]
