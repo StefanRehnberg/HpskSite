@@ -198,6 +198,9 @@
                         <button type="button" class="btn btn-sm btn-primary" id="perfectShotBtn" onclick="siktPerfectShot()">
                             <i class="bi bi-crosshair me-1"></i>Perfekt skott
                         </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="jerkShotBtn" onclick="siktPerfectShot('jerk')">
+                            <i class="bi bi-lightning-charge me-1"></i>Ryckskott
+                        </button>
                     </div>
 
                     <!-- Perfect-shot timing simulation -->
@@ -287,9 +290,9 @@
                 <div class="col-md-6 col-xl-3">
                     <div class="sikt-control-label">
                         <span><i class="bi bi-brightness-high me-1"></i>Ljus</span>
-                        <span class="val" id="lightVal">60&nbsp;%</span>
+                        <span class="val" id="lightVal">80&nbsp;%</span>
                     </div>
-                    <input type="range" class="form-range" id="lightRange" min="0" max="100" value="60">
+                    <input type="range" class="form-range" id="lightRange" min="0" max="100" value="80">
                     <div class="sikt-ends"><span>Skymning</span><span>Klart solsken</span></div>
                 </div>
 
@@ -535,11 +538,14 @@
     var D_FRONT = 1 / 0.77;  // front sight ~77 cm -> 1.30 D
     var K_DEF = 2.0;         // px of blur per (mm aperture * diopter defocus); tuned to look right
 
-    var RESIDUAL = 0.5;      // small constant softness so even a focused image isn't pixel-perfect
+    // Residual softness grows with pupil/aperture (aberration): even a perfectly focused sight is
+    // softer with a dilated pupil (dim light) and razor-sharp through a tiny diopter hole. This is
+    // the single channel by which light reaches BOTH the visible picture and the group size.
+    var RES_BASE = 0.30, RES_K = 0.045;
 
     var state = {
         focus: "front",
-        light: 0.60,            // 0..1
+        light: 0.80,            // 0..1 — default = the zeroing light (POI dead centre here)
         refractive: "none",     // "none" | "myopia" | "hyperopia"
         presbyopia: false,      // loss of accommodation (age)
         glasses: false,         // shooting glasses prescribed for the front sight
@@ -562,7 +568,7 @@
     var sightShift = { x: 0, y: 0 };
     var ghostActive = false;   // show the brain's "burned-in" perfect image vs the drifted reality
     var ghostAlpha = 0;        // fades in 0 -> 1 so the illusion appears gradually
-    var sim = { running: false, t0: null, raf: null, fired: false, scoreText: "", shot: null };
+    var sim = { running: false, mode: "perfect", t0: null, raf: null, fired: false, scoreText: "", shots: null };
     // LIFT: settle. fire at BREAK_T. steady window LIFT..DRIFT_START. DRIFT_START: brain starts
     // substituting the perfect image while sights creep off. TREMOR_START: fine fast tremor adds in.
     var SIM = { LIFT: 2.5, PRESS_START: 2.3, BREAK_T: 5.0, DRIFT_START: 9.0, TREMOR_START: 12.0, END: 15.0 };
@@ -609,9 +615,10 @@
     function pupilMm() { return 7 - 5 * state.light; }
     function effectiveAperture() { return state.diopter ? state.aperture : pupilMm(); }
     function diffractionPx() { return state.diopter ? 0.6 / state.aperture : 0; } // tiny; grows as hole shrinks
+    function residualPx() { var a = effectiveAperture(); return RES_BASE + RES_K * a * a; } // aberration grows with pupil
 
     function layerBlur(dObj) {
-        return K_DEF * effectiveAperture() * Math.abs(dObj - focusD()) + RESIDUAL + diffractionPx();
+        return K_DEF * effectiveAperture() * Math.abs(dObj - focusD()) + residualPx() + diffractionPx();
     }
 
     function brightness() {
@@ -623,37 +630,45 @@
         return clamp(base, 0, 1);
     }
 
-    // Shot dispersion as a fraction of the target radius. Grouping depends on how clearly + how
-    // consistently you can hold *sight alignment* — the sharpness of the FRONT sight and the rear
-    // notch (you line the front blade up inside it). The target's own sharpness barely matters:
-    // a blurry aiming mark still groups tight. Three modifiers on top:
-    //   - distance: the same angular wobble spreads more the further away the target is.
-    //   - visibility: in a dark picture you can't see the sights well, so the group opens up.
-    //   - diopter: a bright, crisp peep gives full depth of field + self-centres the eye -> tighter;
-    //     but if the hole is too small/dark to see through, that benefit is lost (caught by visibility).
+    // Group size = how repeatably you can hold the sight ALIGNMENT — driven ONLY by how blurred the
+    // sights are (front dominates; you line the blade up in the notch). The target's own sharpness
+    // doesn't matter (a blurry mark still groups tight). Everything light/diopter-related is already
+    // baked into the blur: dim light dilates the pupil -> softer sights (the same softness you SEE)
+    // -> bigger group; a diopter's tiny aperture -> sharp sights -> tight group. No extra multipliers.
     function groupSigmaFrac() {
-        var align = layerBlur(D_FRONT) + 0.8 * layerBlur(D_REAR);
-        var base = 0.045 + 0.020 * align;
-
+        var align = layerBlur(D_FRONT) + 0.7 * layerBlur(D_REAR);
+        // Visirlinje (sight radius) is the lever arm: a longer one magnifies any alignment
+        // imperfection at the eye, so the same blur becomes a smaller pointing error -> tighter
+        // group (and a short radius is twitchy). 220 mm = neutral reference. Same 1/radius factor
+        // that scales the d-pad alignment-error POI shift, so both say "longer = more forgiving".
+        align *= 220 / cfg.sightRadius;
+        var sigma = 0.028 + 0.030 * align;
+        // The one thing NOT captured by blur: genuine darkness — too dark to make out the black
+        // sights at all, so alignment falls apart (open sights and a too-dark diopter alike).
         var b = brightness();
-        var visPenalty = b < 0.45 ? (1 + (0.45 - b) * 1.8) : 1;        // up to ~1.8x in the dark
-        var diopterBonus = (state.diopter && b > 0.45) ? 0.62 : 1;     // crisp peep tightens the group
-
-        return clamp(base * (state.distanceM / 25) * visPenalty * diopterBonus, 0.03, 0.5);
+        if (b < 0.40) sigma *= 1 + (0.40 - b) * 3.0;
+        // Ceiling is high so stacked errors keep adding up (unreadable sights -> shots all over /
+        // off the paper), instead of saturating once the picture gets bad.
+        return clamp(sigma * (state.distanceM / 25), 0.03, 2.5);
     }
 
     // Pure defocus blur of the TARGET (no eye/diffraction baseline). This is what makes a fuzzy
     // bull's edge bleed outward so it looks larger.
+    var REFERENCE_LIGHT = 0.80;   // sights are zeroed at typical (~80%) light
+    function pupilMmAt(light) { return 7 - 5 * light; }
+    function effectiveApertureAt(light) { return state.diopter ? state.aperture : pupilMmAt(light); }
     function targetDefocusPx() {
         return K_DEF * effectiveAperture() * Math.abs(dTarget() - focusD());
     }
 
-    // Elevation error (downward, as a fraction of target radius): a blurred bull is perceived as
-    // bigger, so with a 6-o'clock hold you instinctively aim lower and hit low. A diopter keeps the
-    // aperture fixed regardless of light, so this shift barely changes with light — no constant
-    // re-zeroing. Focusing ON the target removes the shift (sharp bull) but wrecks the group instead.
+    // Elevation error (down = +, fraction of target radius) RELATIVE to the zeroing light. A blurred
+    // bull looks bigger so with a 6-o'clock hold you aim lower — but you zero your sights at typical
+    // (~80%) light, so it's dead centre there. Brighter -> less blur -> POI creeps UP (negative);
+    // darker -> POI drops. With a diopter the aperture is fixed regardless of light, so this stays
+    // ~0 (stable elevation, no re-zeroing). Focusing ON the target removes it (sharp bull).
     function poiLowFrac() {
-        return clamp(0.024 * targetDefocusPx(), 0, 0.55);
+        var ref = K_DEF * effectiveApertureAt(REFERENCE_LIGHT) * Math.abs(dTarget() - focusD());
+        return clamp(0.024 * (targetDefocusPx() - ref), -0.55, 0.55);
     }
 
     // Point-of-impact shift from a front-sight ALIGNMENT error (geometry, not blur):
@@ -827,7 +842,7 @@
     var grpCtx = grpCvs.getContext("2d");
     var GSIZE = 300, GR = 100, GCX = 150, GCY = 150;  // GR < canvas half so misses outside the rings show
     var TARGET_RADIUS_CM = 15;        // ring-7 radius on paper (~30 cm across); for the cm read-out
-    var WOBBLE_PEAK_CM = 15;          // peak aim-wander (cm) at full amplitude — same scale drives view + group
+    var WOBBLE_PEAK_CM = 22;          // peak aim-wander (cm) at full amplitude — same scale drives view + group
     var shotSamples = [];             // per shot: {x,y} clarity draws + {px,py} random wobble phases
 
     function setupGroupCanvas() {
@@ -928,6 +943,7 @@
         var elevCm = poiLowFrac() * TARGET_RADIUS_CM;
         var sizeHtml = "Gruppstorlek ca " + Math.round(spreadCm) + "&nbsp;cm";
         if (elevCm >= 1) sizeHtml += " &middot; <span class='text-danger'>ca " + Math.round(elevCm) + "&nbsp;cm lågt</span>";
+        else if (elevCm <= -1) sizeHtml += " &middot; <span class='text-danger'>ca " + Math.round(-elevCm) + "&nbsp;cm högt</span>";
         if (misses > 0) sizeHtml += " &middot; <span class='text-danger fw-semibold'>" + misses + " av " + pos.length + " utanför ringarna</span>";
         document.getElementById("grpSize").innerHTML = sizeHtml;
 
@@ -940,8 +956,8 @@
             hint = "Med skärpan på bakre siktet blir kornet otydligt och gruppen öppnar sig.";
         }
         if (state.distanceM > 30) hint += " På längre håll förstoras samma lilla vingel.";
-        if (elevCm >= 2 && !state.diopter) {
-            hint += " Den suddiga tavlan upplevs större, så du håller lägre och skotten sätter sig lågt &ndash; och eftersom suddigheten följer ljuset måste du justera höjden om och om igen.";
+        if (Math.abs(elevCm) >= 2 && !state.diopter) {
+            hint += " Du är inskjuten vid normalt ljus (~80&nbsp;%). När ljuset ändras ändras tavlans suddighet och därmed höjdträffen &ndash; ljusare drar upp, mörkare drar ner. En diopter håller höjden stilla.";
         }
         if (state.diopter) {
             hint += brightness() > 0.45
@@ -1060,7 +1076,10 @@
         return "bom";
     }
 
-    function drawSimGroup(shot, score) {
+    // Jerk ends shortly after the break (it's about the snatch, not riding the hold for 15 s).
+    function simDuration() { return sim.mode === "jerk" ? SIM.BREAK_T + 2.0 : SIM.END; }
+
+    function drawSimGroup(shots) {
         grpCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
         grpCtx.clearRect(0, 0, GSIZE, GSIZE);
         grpCtx.fillStyle = "#eef2f8";
@@ -1076,41 +1095,69 @@
         grpCtx.stroke();
 
         var lbl = document.getElementById("grpLabel");
-        if (shot) {
+        var size = document.getElementById("grpSize");
+        var hint = document.getElementById("grpHint");
+
+        if (shots && shots.length) {
             var pxPerCm = GR / TARGET_RADIUS_CM;
-            grpCtx.beginPath();
-            grpCtx.arc(GCX + shot.x * pxPerCm, GCY + shot.y * pxPerCm, GR * 0.07, 0, Math.PI * 2);
-            grpCtx.fillStyle = "#e0a800"; grpCtx.fill();
-            grpCtx.lineWidth = 2; grpCtx.strokeStyle = "#fff"; grpCtx.stroke();
-            lbl.textContent = "Perfekt skott – " + score;
-            lbl.className = "fw-semibold text-success";
-            document.getElementById("grpSize").innerHTML = "Skottet bröt i lugnet";
-            document.getElementById("grpHint").textContent = "Mjukt, jämnt ökande tryck tills skottet överraskar dig &ndash; aldrig ett ryck. Hinner du inte i lugnet: lägg av och börja om.";
+            var color = sim.mode === "jerk" ? "#c1121f" : "#e0a800";
+            for (var i = 0; i < shots.length; i++) {
+                grpCtx.beginPath();
+                grpCtx.arc(GCX + shots[i].x * pxPerCm, GCY + shots[i].y * pxPerCm, GR * 0.06, 0, Math.PI * 2);
+                grpCtx.fillStyle = color; grpCtx.fill();
+                grpCtx.lineWidth = 2; grpCtx.strokeStyle = "#fff"; grpCtx.stroke();
+            }
+            if (sim.mode === "jerk") {
+                lbl.textContent = "Ryckskott – utflygare";
+                lbl.className = "fw-semibold text-danger";
+                size.innerHTML = "5 skott lågt åt avtryckarsidan";
+                hint.innerHTML = "Du slet i avtryckaren &ndash; riktmedlen kastades ur läge i samma stund skottet gick (lågt åt avtryckarsidan, vänster för en högerhänt). Utflygare trots att siktbilden såg perfekt ut. Kläm av mjukt tills skottet överraskar dig.";
+            } else {
+                lbl.textContent = "Perfekt skott – " + sim.scoreText;
+                lbl.className = "fw-semibold text-success";
+                size.innerHTML = "Skottet bröt i lugnet";
+                hint.innerHTML = "Mjukt, jämnt ökande tryck tills skottet överraskar dig &ndash; aldrig ett ryck. Hinner du inte i lugnet: lägg av och börja om.";
+            }
         } else {
             lbl.textContent = "Siktar…";
             lbl.className = "fw-semibold text-muted";
-            document.getElementById("grpSize").innerHTML = "Avvakta rätt ögonblick…";
-            document.getElementById("grpHint").textContent = "";
+            size.innerHTML = "Avvakta rätt ögonblick…";
+            hint.innerHTML = "";
         }
     }
 
     function fireSimShot() {
         var PXCM = 150 / TARGET_RADIUS_CM;
-        var shot = { x: sightShift.x / PXCM, y: sightShift.y / PXCM };  // aim error at break (cm)
-        sim.shot = shot;
-        sim.scoreText = simScore(Math.sqrt(shot.x * shot.x + shot.y * shot.y));
-        document.getElementById("simPress").style.background = "var(--bs-success)";
-        drawSimGroup(shot, sim.scoreText);
+        if (sim.mode === "jerk") {
+            // A snatched trigger throws the shot low + toward the trigger finger (right-handed = low-left),
+            // and it's inconsistent — five scattered flyers down-left of the aim cross.
+            var flyers = [];
+            for (var i = 0; i < 5; i++) {
+                flyers.push({ x: -8 + gauss() * 3.5, y: 10 + gauss() * 3.5 });  // cm: left + down, scattered
+            }
+            sim.shots = flyers;
+            document.getElementById("simPress").style.background = "var(--bs-danger)";
+            drawSimGroup(flyers);
+        } else {
+            var shot = { x: sightShift.x / PXCM, y: sightShift.y / PXCM };  // aim error at break (cm)
+            sim.shots = [shot];
+            sim.scoreText = simScore(Math.sqrt(shot.x * shot.x + shot.y * shot.y));
+            document.getElementById("simPress").style.background = "var(--bs-success)";
+            drawSimGroup([shot]);
+        }
     }
 
     function updateSimUi(t, pressure) {
-        document.getElementById("simPlay").style.left = Math.min(100, t / SIM.END * 100) + "%";
+        document.getElementById("simPlay").style.left = Math.min(100, t / simDuration() * 100) + "%";
         document.getElementById("simPress").style.width = (pressure * 100) + "%";
         var p = document.getElementById("simPhase");
         if (!sim.fired) {
             if (t < SIM.LIFT) p.textContent = "Lyfter i läge – stora rörelser som snabbt lägger sig.";
             else if (t < SIM.BREAK_T - 1.3) p.textContent = "Stilla i 6-läget. Öka trycket mjukt och jämnt.";
+            else if (sim.mode === "jerk") p.textContent = "Sikten ser rätt ut … och du rycker till i avtryckaren!";
             else p.textContent = "Låt skottet överraska dig – ryck inte av!";
+        } else if (sim.mode === "jerk") {
+            p.innerHTML = "<strong>Ryckskott!</strong> Du slet i avtryckaren – riktmedlen kastades lågt åt avtryckarsidan. Fem utflygare lågt vänster, trots perfekt siktbild.";
         } else if (t < SIM.DRIFT_START) {
             p.innerHTML = "Skottet bröt i lugnet – perfekt <strong>" + sim.scoreText + "</strong>!";
         } else if (t < SIM.TREMOR_START) {
@@ -1165,12 +1212,33 @@
         wob.ax = fx;
         wob.ay = fy;
 
-        var pressure = t < SIM.PRESS_START ? 0 : clamp((t - SIM.PRESS_START) / (SIM.BREAK_T - SIM.PRESS_START), 0, 1);
+        // The jerk: at the break the muzzle is thrown low + toward the trigger finger (left, for a
+        // right-handed shooter), springing back over ~0.35 s.
+        if (sim.mode === "jerk" && sim.fired) {
+            var ja = t - SIM.BREAK_T;
+            if (ja >= 0 && ja < 0.35) {
+                var imp = (1 - ja / 0.35); imp *= imp;
+                sightShift.x += -70 * imp;
+                sightShift.y += 55 * imp;
+            }
+        }
+
+        // Trigger pressure: smooth ramp for a squeeze; held back then SNATCHED for a jerk.
+        var pressure;
+        if (t < SIM.PRESS_START) {
+            pressure = 0;
+        } else if (sim.mode === "jerk") {
+            pressure = (t < SIM.BREAK_T - 0.3)
+                ? clamp((t - SIM.PRESS_START) / (SIM.BREAK_T - SIM.PRESS_START), 0, 1) * 0.55
+                : clamp(0.55 + (t - (SIM.BREAK_T - 0.3)) / 0.3 * 0.45, 0, 1);
+        } else {
+            pressure = clamp((t - SIM.PRESS_START) / (SIM.BREAK_T - SIM.PRESS_START), 0, 1);
+        }
         if (!sim.fired && t >= SIM.BREAK_T) { sim.fired = true; fireSimShot(); }
 
         updateSimUi(t, pressure);
         draw();
-        if (t >= SIM.END) { endSim(); return; }
+        if (t >= simDuration()) { endSim(); return; }
         sim.raf = requestAnimationFrame(simLoop);
     }
 
@@ -1181,21 +1249,27 @@
         wob.ax = wob.ay = 0;
         ghostActive = false; ghostAlpha = 0;
         document.getElementById("perfectShotBtn").disabled = false;
+        document.getElementById("jerkShotBtn").disabled = false;
         document.getElementById("simOverlay").style.display = "none";
         document.getElementById("simPress").style.background = "";
         syncWobbleAnim();   // resume free-play wobble if its amplitude is up
-        render();           // restore the normal picture + free-play group
+        draw(); caption();  // restore the live sight picture + caption…
+        // …but deliberately DON'T redraw the Träffbild — the sim shot(s) stay on it until the user
+        // touches any other control (which calls render() -> the free-play group).
     }
 
-    window.siktPerfectShot = function () {
+    window.siktPerfectShot = function (mode) {
         if (sim.running) return;
         if (wobbleRaf !== null) { cancelAnimationFrame(wobbleRaf); wobbleRaf = null; }
         wob.tx = wob.ty = wob.ax = wob.ay = 0;
-        sim.running = true; sim.fired = false; sim.t0 = null; sim.shot = null;
+        sim.mode = (mode === "jerk") ? "jerk" : "perfect";
+        sim.running = true; sim.fired = false; sim.t0 = null; sim.shots = null;
         document.getElementById("perfectShotBtn").disabled = true;
+        document.getElementById("jerkShotBtn").disabled = true;
         document.getElementById("simOverlay").style.display = "";
-        document.getElementById("simWindow").style.left = (SIM.LIFT / SIM.END * 100).toFixed(1) + "%";
-        document.getElementById("simWindow").style.width = ((SIM.DRIFT_START - SIM.LIFT) / SIM.END * 100).toFixed(1) + "%";
+        var dur = simDuration();
+        document.getElementById("simWindow").style.left = (SIM.LIFT / dur * 100).toFixed(1) + "%";
+        document.getElementById("simWindow").style.width = ((Math.min(SIM.DRIFT_START, dur) - SIM.LIFT) / dur * 100).toFixed(1) + "%";
         document.getElementById("simPress").style.width = "0%";
         document.getElementById("simPress").style.background = "";
         drawSimGroup(null);
@@ -1341,7 +1415,7 @@
     window.siktScenario = function (name) {
         if (sim.running) endSim();
         if (name === "correct") {
-            state = { focus: "front", light: 0.70, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
+            state = { focus: "front", light: 0.80, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
         } else if (name === "beginner") {
             state = { focus: "target", light: 0.55, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
         }
@@ -1350,7 +1424,7 @@
     };
 
     window.siktReset = function () {
-        state = { focus: "front", light: 0.60, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
+        state = { focus: "front", light: 0.80, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
         pushStateToControls();
         render();
     };
