@@ -630,8 +630,14 @@ namespace HpskSite.Services
 
                 if (registrationsHub == null) return result;
 
+                // Do NOT filter on r.Published. RegisterForCompetition Save()s the
+                // registration synchronously (data is committed there) but defers Publish()
+                // to a best-effort background task ~10s later that is unreliable on the
+                // production host. Every other registration read works off the Saved node;
+                // requiring Published here made freshly-registered shooters invisible in the
+                // team builder ("Skapa lag") even though they show in the public list.
                 var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out totalChildren)
-                    .Where(r => r.ContentType.Alias == "competitionRegistration" && r.Published)
+                    .Where(r => r.ContentType.Alias == "competitionRegistration")
                     .ToList();
 
                 foreach (var reg in registrations)
@@ -779,8 +785,14 @@ namespace HpskSite.Services
 
                 if (registrationsHub == null) return result;
 
+                // Do NOT filter on r.Published. RegisterForCompetition Save()s the
+                // registration synchronously (data is committed there) but defers Publish()
+                // to a best-effort background task ~10s later that is unreliable on the
+                // production host. Every other registration read works off the Saved node;
+                // requiring Published here made freshly-registered shooters invisible in the
+                // team builder ("Skapa lag") even though they show in the public list.
                 var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out totalChildren)
-                    .Where(r => r.ContentType.Alias == "competitionRegistration" && r.Published)
+                    .Where(r => r.ContentType.Alias == "competitionRegistration")
                     .ToList();
 
                 foreach (var reg in registrations)
