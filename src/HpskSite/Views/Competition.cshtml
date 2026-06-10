@@ -2010,7 +2010,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const modalBody = document.getElementById('registeredShootersModalBody');
             modalBody.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div></div>';
 
-            fetch(`/umbraco/surface/Competition/GetCompetitionRegistrations?competitionId=${competitionId}`)
+            fetch(`/umbraco/surface/Competition/GetRegisteredShooters?competitionId=${competitionId}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.registrations && data.registrations.length > 0) {

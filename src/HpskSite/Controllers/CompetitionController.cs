@@ -1599,6 +1599,129 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// "Visa anmälda skyttar" list — any LOGGED-IN member can see who is registered
+        /// for a competition (name, club, classes only); anonymous visitors cannot.
+        /// Intentionally NOT gated on competition-manager/club-admin like
+        /// GetCompetitionRegistrations, which also exposes payment/invoice data and is
+        /// admin-only. Using that admin endpoint for this modal made the list show
+        /// "Inga anmälda skyttar" for ordinary shooters while only admins saw the list.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegisteredShooters(int competitionId)
+        {
+            try
+            {
+                // Logged-in only (no anonymous access), but open to every member —
+                // shooters use it to verify their own registration.
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                {
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+                }
+
+                if (UmbracoContext.Content.GetById(competitionId) == null)
+                {
+                    return Json(new { success = false, message = "Competition not found" });
+                }
+
+                // Direct child query (no full-tree traversal). No r.Published filter —
+                // registrations are Save()d synchronously and Publish() is deferred, so
+                // requiring Published would hide freshly-registered shooters here too.
+                var competitionChildren = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
+                var registrationsHub = competitionChildren
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+
+                var registrationContents = registrationsHub != null
+                    ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
+                        .Where(c => c.ContentType.Alias == "competitionRegistration")
+                        .ToList()
+                    : new List<IContent>();
+
+                // Batch-resolve club names (same precedence as the admin endpoint:
+                // explicit clubId → legacy memberClub → member's primaryClubId).
+                var clubIdsToLoad = new HashSet<int>();
+                var memberIdsNeedingClubLookup = new List<(IContent content, int memberId)>();
+                foreach (var content in registrationContents)
+                {
+                    var clubId = content.GetValue<int>("clubId");
+                    if (clubId > 0) { clubIdsToLoad.Add(clubId); continue; }
+                    var memberClubStr = content.GetValue<string>("memberClub");
+                    if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
+                        clubIdsToLoad.Add(legacyClubId);
+                    else if (string.IsNullOrWhiteSpace(memberClubStr))
+                    {
+                        var memberId = content.GetValue<int>("memberId");
+                        if (memberId > 0) memberIdsNeedingClubLookup.Add((content, memberId));
+                    }
+                }
+                foreach (var (_, memberId) in memberIdsNeedingClubLookup)
+                {
+                    var member = _memberService.GetById(memberId);
+                    var primaryClubIdStr = member?.GetValue<string>("primaryClubId");
+                    if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var primaryClubId))
+                        clubIdsToLoad.Add(primaryClubId);
+                }
+                var clubNameMap = clubIdsToLoad.ToDictionary(
+                    id => id,
+                    id => _clubService.GetClubNameById(id) ?? $"Club {id}");
+
+                var registrations = registrationContents.Select(content =>
+                {
+                    var memberId = content.GetValue<int>("memberId");
+
+                    string clubName = "Okänd klubb";
+                    var clubId = content.GetValue<int>("clubId");
+                    if (clubId > 0)
+                    {
+                        clubName = clubNameMap.TryGetValue(clubId, out var name) ? name : $"Club {clubId}";
+                    }
+                    else
+                    {
+                        var memberClubStr = content.GetValue<string>("memberClub");
+                        if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
+                            clubName = clubNameMap.TryGetValue(legacyClubId, out var name) ? name : $"Club {legacyClubId}";
+                        else if (!string.IsNullOrWhiteSpace(memberClubStr))
+                            clubName = memberClubStr;
+                        else if (memberId > 0)
+                        {
+                            var member = _memberService.GetById(memberId);
+                            var primaryClubIdStr = member?.GetValue<string>("primaryClubId");
+                            if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var primaryClubId))
+                                clubName = clubNameMap.TryGetValue(primaryClubId, out var name) ? name : $"Club {primaryClubId}";
+                        }
+                    }
+
+                    var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(
+                        content.GetValue<string>("shootingClasses"));
+
+                    var shootingClassesWithNames = shootingClasses.Select(sc => new
+                    {
+                        @class = sc.Class,
+                        // ShootingClasses only knows the standard disciplines; Springskytte
+                        // composite ids ("A-H 21") aren't there, so fall back to the raw id.
+                        className = ShootingClasses.GetById(sc.Class)?.Name ?? sc.Class
+                    }).ToList();
+
+                    return new
+                    {
+                        memberId = memberId,
+                        memberName = content.GetValue<string>("memberName") ?? "Okänd",
+                        memberClub = clubName,
+                        shootingClasses = shootingClassesWithNames
+                    };
+                })
+                .OrderBy(r => r.memberName)
+                .ToList();
+
+                return Json(new { success = true, registrations = registrations });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error loading registrations: " + ex.Message });
+            }
+        }
+
         private IEnumerable<IContent> GetAllDescendants(IContent content)
         {
             yield return content;
