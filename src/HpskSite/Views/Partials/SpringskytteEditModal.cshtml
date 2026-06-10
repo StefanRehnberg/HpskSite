@@ -395,7 +395,7 @@
                     <div class="mb-3">
                         <label class="form-label">Tavlingsledare</label>
                         <div>
-                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal()">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal('springEdit_competitionManagers_ids', 'springEdit_managerBadges')">
                                 <i class="bi bi-person-plus"></i> Hantera tavlingsledare
                             </button>
                         </div>
@@ -614,10 +614,12 @@ window.populateSpringEditModal = function(comp) {
     const managerIds = Array.isArray(comp.competitionManagers) ? comp.competitionManagers : [];
     setVal('springEdit_competitionManagers_ids', managerIds.join(','));
     const badgesEl = document.getElementById('springEdit_managerBadges');
-    if (badgesEl) {
-        badgesEl.innerHTML = managerIds.length === 0
-            ? '<small class="text-muted">Inga tavlingsledare valda</small>'
-            : '<small class="text-muted">Laddar...</small>';
+    if (managerIds.length === 0) {
+        if (badgesEl) badgesEl.innerHTML = '<small class="text-muted">Inga tavlingsledare valda</small>';
+    } else if (typeof refreshManagerBadgesFromIds === 'function') {
+        if (badgesEl) badgesEl.innerHTML = '<small class="text-muted">Laddar...</small>';
+        // Resolve names into the Springskytte modal's own badge container.
+        refreshManagerBadgesFromIds(managerIds, 'springEdit_competitionManagers_ids', 'springEdit_managerBadges');
     }
 
     // Club + Region
