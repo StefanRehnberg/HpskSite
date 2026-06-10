@@ -411,6 +411,9 @@
 <!-- Score Entry Modal -->
 @await Html.PartialAsync("TrainingMatchScoreEntry")
 
+<!-- Märken: quick "Spara som Guldserie/Snabbserie" submit + QR validation -->
+@await Html.PartialAsync("_MarkenSerieQuickSubmit")
+
 <!-- Add Guest Modal -->
 @await Html.PartialAsync("_AddGuestModal")
 
@@ -933,7 +936,10 @@
                             loadPendingJoinRequests(matchCode);
                         }
                     } else {
-                        alert(result.message || 'Kunde inte ladda matchen');
+                        // Not found is usually benign here (the match was just completed or removed) —
+                        // show a non-blocking toast instead of an alert dialog and return to the list.
+                        currentMatchCode = null;
+                        showToast(result.message || 'Matchen kunde inte laddas (kan ha avslutats).', 'info');
                         showMainView();
                         loadOngoingMatches();
                     }
@@ -941,7 +947,7 @@
                 .catch(error => {
                     console.error('Error loading match:', error);
                     hideLoading();
-                    alert('Något gick fel vid laddning av matchen');
+                    showToast('Något gick fel vid laddning av matchen', 'warning');
                     showMainView();
                     loadOngoingMatches();
                 });
@@ -1311,6 +1317,13 @@
             if (!currentMatchCode) return;
             stopInactivityTimer();
 
+            // Clear the active code up-front so our own SignalR echo (MatchCompleted / MatchDeleted)
+            // can't trigger a refresh of a match that may have just been removed (the <4-series case),
+            // which is what produced the misleading "Match hittades inte" dialog.
+            const codeBeingClosed = currentMatchCode;
+            currentMatchCode = null;
+            currentMatch = null;
+
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
 
             fetch('/umbraco/surface/TrainingMatch/CompleteMatch', {
@@ -1319,14 +1332,14 @@
                     'Content-Type': 'application/json',
                     'RequestVerificationToken': token || ''
                 },
-                body: JSON.stringify({ matchCode: currentMatchCode })
+                body: JSON.stringify({ matchCode: codeBeingClosed })
             })
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
-                    showToast('Matchen har avslutats!', 'success');
-                    currentMatchCode = null;
-                    currentMatch = null;
+                    // Use the server message so the shooter learns *why* a short match wasn't saved
+                    // (fewer than 4 series → not transferred to results).
+                    showToast(result.message || 'Matchen har avslutats!', result.deleted ? 'warning' : 'success');
                     // Hide active match card
                     updateActiveMatchCard(null);
                     // Refresh ongoing matches list and badge immediately
@@ -1334,11 +1347,14 @@
                     loadOngoingMatches();
                     showMainView();
                 } else {
+                    // Restore context so the user can retry if the close genuinely failed.
+                    currentMatchCode = codeBeingClosed;
                     alert(result.message || 'Kunde inte avsluta matchen');
                 }
             })
             .catch(error => {
                 console.error('Error completing match:', error);
+                currentMatchCode = codeBeingClosed;
                 alert('Något gick fel');
             });
         }
@@ -1362,7 +1378,7 @@
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
-                    showToast('Matchen har avslutats', 'success');
+                    showToast(result.message || 'Matchen har avslutats', result.deleted ? 'warning' : 'success');
                     // Refresh ongoing matches list
                     ongoingMatchesLoaded = false;
                     loadOngoingMatches();

@@ -737,6 +737,8 @@
 @await Html.PartialAsync("~/Views/Partials/TrainingScoreEntry.cshtml")
 @await Html.PartialAsync("~/Views/Partials/TrainingScoreDetail.cshtml")
 @await Html.PartialAsync("~/Views/Partials/FaltskytteScoreEntry.cshtml")
+@* Märken: quick "Spara som Guldserie/Snabbserie" submit + QR validation (used by the Resultat-entry modal) *@
+@await Html.PartialAsync("~/Views/Partials/_MarkenSerieQuickSubmit.cshtml")
 
 @* Share Dashboard Modal *@
 <div class="modal fade" id="shareDashboardModal" tabindex="-1" aria-labelledby="shareDashboardModalLabel" aria-hidden="true">

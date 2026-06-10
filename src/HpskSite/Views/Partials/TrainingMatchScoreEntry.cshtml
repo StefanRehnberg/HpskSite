@@ -87,8 +87,13 @@
                         <button type="button" class="btn btn-outline-danger match-delete-btn" onclick="matchDeleteSeries()" style="display: none;">
                             <i class="bi bi-trash"></i> Ta bort serien
                         </button>
-                        <div class="d-flex gap-2 ms-auto">
+                        <div class="d-flex gap-2 ms-auto flex-wrap">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                            @* Märken: save this series AND submit it as a Guldserie (Precision) /
+                               Snabbserie (Duell) for validation. Shot-by-shot only, new entries only. *@
+                            <button type="button" class="btn btn-outline-warning" id="matchGuldserieBtn" style="display:none;" onclick="matchSubmitGuldserie()" disabled>
+                                <i class="bi bi-bullseye"></i> <span id="matchGuldserieBtnText">Spara som Guldserie</span>
+                            </button>
                             <button type="button" class="btn btn-success" id="matchSaveScoreBtn" onclick="matchSaveScore()" disabled>
                                 <i class="bi bi-check-circle"></i> <span id="saveButtonText">Spara serie</span>
                             </button>
@@ -206,6 +211,7 @@ function openScoreEntryModal() {
 
     matchResetEntry();
     setModalMode(false);
+    matchUpdateGuldserieBtn();
     matchEntryState.modal.show();
 }
 
@@ -446,6 +452,41 @@ function updateMatchSaveButton() {
 
     btn.disabled = isDisabled;
     if (btnInline) btnInline.disabled = isDisabled;
+
+    matchUpdateGuldserieBtn();
+}
+
+// ── Märken: "Spara som Guldserie / Snabbserie" from a match series ──────
+// Offered for Precision (→ Guldserie) and Duell (→ Snabbserie, snabbpistoltavla 0–50) matches with a
+// valid A/B/C/R weapon group, shot-by-shot, for new entries (not when editing). Saves the series
+// normally, then opens the Märken submit modal with a QR for on-the-spot validation. Helpers live in
+// the shared _MarkenSerieQuickSubmit partial included on the match page.
+function matchUpdateGuldserieBtn() {
+    const btn = document.getElementById('matchGuldserieBtn');
+    if (!btn || typeof mqsRouteForDiscipline !== 'function') return;
+    const m = (typeof currentMatch !== 'undefined') ? currentMatch : null;
+    const isShotByShot = document.getElementById('matchMethodDetailed').checked;
+    const route = mqsRouteForDiscipline(m ? m.discipline : null);
+    const offer = isShotByShot && !matchEntryState.isEditMode && route.ok && !!mqsWeaponGroup(m ? m.weaponClass : null);
+    btn.style.display = offer ? '' : 'none';
+    if (!offer) return;
+    document.getElementById('matchGuldserieBtnText').textContent = 'Spara som ' + route.label;
+    btn.disabled = matchEntryState.shots.length !== 5;
+}
+
+function matchSubmitGuldserie() {
+    if (matchEntryState.shots.length !== 5) { alert('Du måste ange alla 5 skott'); return; }
+    const m = (typeof currentMatch !== 'undefined') ? currentMatch : null;
+    const wg = mqsWeaponGroup(m ? m.weaponClass : null);
+    const route = mqsRouteForDiscipline(m ? m.discipline : null);
+    if (!route.ok || !wg) { alert('Den här matchens disciplin eller klass kan inte sparas som guldserie.'); return; }
+    const shots = [...matchEntryState.shots];
+    const total = shots.reduce((t, s) => t + (s === 'X' ? 10 : (parseInt(s) || 0)), 0);
+    // Normal per-series save first (hides this modal + refreshes), then open the Märken submit modal.
+    matchSaveScore();
+    setTimeout(() => {
+        mqsOpen({ seriesType: route.seriesType, target: route.target, label: route.label, note: route.note, weaponGroup: wg, shots, total });
+    }, 350);
 }
 
 // Save score (handles both create and update)

@@ -1,0 +1,333 @@
+@*
+    Shared Märken quick-submit component.
+
+    Lets a shooter turn a single just-shot 5-shot series into a Märken submission
+    ("Spara som Guldserie / Snabbserie") from the manual Resultat-entry modal and from a
+    training match, then validate it on the spot via QR — without leaving the page.
+
+    Discipline → series routing (the only two that map to a per-series prov):
+      • Precision → Guldserie  (SeriesType=Precision)  → Pistolskyttemärkets guldfodring + Elit precision
+      • Duell     → Snabbserie (SeriesType=Speed, Snabbpistoltavla, 0–50) → Elitmärket (kräver guldmärke)
+
+    All functions are mqs*-prefixed and self-contained (no dependency on the host page's own
+    Märken script), so the same partial works on UserProfile.cshtml and TrainingMatch.cshtml.
+    Requires an @Html.AntiForgeryToken() somewhere on the host page.
+*@
+
+<div class="modal fade" id="mqsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-bullseye text-warning"></i> <span id="mqsTitle">Skicka in serie</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="mqsConfirm">
+                    <p id="mqsSummary" class="mb-2"></p>
+                    <div id="mqsNote" class="alert alert-info small py-2" style="display:none;"></div>
+                    <div id="mqsClubWrap" class="mb-2" style="display:none;">
+                        <label class="form-label small mb-1" for="mqsClub">Klubb som validerar</label>
+                        <select class="form-select form-select-sm" id="mqsClub"></select>
+                    </div>
+                    <div id="mqsBirthWrap" class="mb-2" style="display:none;">
+                        <label class="form-label small mb-1" for="mqsPersonNumber">Ditt personnummer <span class="text-muted">(frivilligt)</span></label>
+                        <input type="text" class="form-control form-control-sm" id="mqsPersonNumber" placeholder="ÅÅÅÅMMDD-XXXX">
+                        <div class="form-text">
+                            Behövs för att räkna ut rätt guldkrav — äldre skyttar har reducerade krav
+                            (−1&nbsp;p/serie från året efter du fyllt 55, silverkrav från året efter du fyllt 65).
+                            Sparas på din profil. Lämna tomt för att skicka in utan åldersavdrag.
+                        </div>
+                    </div>
+                    <div class="d-grid">
+                        <button type="button" class="btn btn-warning" id="mqsSubmitBtn" onclick="mqsSubmit()">
+                            <i class="bi bi-send"></i> Skicka in för validering
+                        </button>
+                    </div>
+                </div>
+                <div id="mqsResult" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const mqsState = { clubs: null, hasBirthYear: null, birthYear: 0, pending: null, pollTimer: null };
+
+function mqsEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function mqsAntiForgery() {
+    const t = document.querySelector('input[name="__RequestVerificationToken"]');
+    return t ? t.value : '';
+}
+
+// Weapon group ("A"/"B"/"C"/"R") from a class id ("C2", "A_Opt", "R"); null for M/L/unknown.
+function mqsWeaponGroup(cls) {
+    if (!cls) return null;
+    const c = cls.trim().charAt(0).toUpperCase();
+    return (c === 'A' || c === 'B' || c === 'C' || c === 'R') ? c : null;
+}
+
+// The Märken routing for a training/match discipline. ok=false for disciplines with no per-series prov.
+function mqsRouteForDiscipline(d) {
+    if (d === 'Precision') return {
+        ok: true, seriesType: 'Precision', target: null, label: 'Guldserie',
+        note: 'Räknas mot Pistolskyttemärkets guldfodring (3 serier) och Elitmärkets precisionsdel.'
+    };
+    if (d === 'Duell') return {
+        ok: true, seriesType: 'Speed', target: 'Snabbpistol_25m', label: 'Snabbserie',
+        note: 'Snabbpistoltavla 25 m. Räknas mot Elitmärket (brons 45 / silver 48 / guld 49 per serie — kräver guldmärke), inte mot guldfodringen.'
+    };
+    return { ok: false };
+}
+// Whether to offer the quick-submit button for a discipline + class combination.
+function mqsCanOffer(discipline, weaponClass) {
+    return mqsRouteForDiscipline(discipline).ok && !!mqsWeaponGroup(weaponClass);
+}
+
+// opts: { seriesType, target, label, note, weaponGroup, shots[], total, claimedLevel? }
+function mqsOpen(o) {
+    mqsStopPoll();
+    mqsState.pending = o;
+    document.getElementById('mqsTitle').textContent = 'Skicka in ' + (o.label || 'serie').toLowerCase();
+    const totalTxt = (o.total != null) ? (o.total + ' p') : '';
+    document.getElementById('mqsSummary').innerHTML =
+        `<strong>${mqsEsc(o.label)}</strong> · vapengrupp ${mqsEsc(o.weaponGroup)}` + (totalTxt ? ` · ${totalTxt}` : '') +
+        (o.shots && o.shots.length ? `<div class="small text-muted mt-1">Skott: ${o.shots.map(mqsEsc).join(' · ')}</div>` : '');
+    mqsUpdateThresholdNote(); // sets the note (info, or red "når inte kravet") from the entered total
+
+    document.getElementById('mqsConfirm').style.display = 'block';
+    document.getElementById('mqsResult').style.display = 'none';
+    const btn = document.getElementById('mqsSubmitBtn');
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka in för validering';
+
+    mqsLoadClubs();
+    mqsLoadBirthStatus(o.seriesType);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mqsModal')).show();
+}
+
+// Gold (precision) threshold per weapon group, age-adjusted — mirrors Marken.PrecisionThreshold
+// (Guld A43/B45/C46/R46; 55+ → −1/serie; 65+ → silverkrav A38/B39/C40/R40). birthYear 0 = no concession.
+function mqsGuldThreshold(group, birthYear) {
+    const guld = { A: 43, B: 45, C: 46, R: 46 };
+    const silver = { A: 38, B: 39, C: 40, R: 40 };
+    const g = guld[group] != null ? guld[group] : 46;
+    const s = silver[group] != null ? silver[group] : 40;
+    if (birthYear && birthYear > 0) {
+        const age = new Date().getFullYear() - birthYear;
+        if (age >= 66) return s;      // 65+ inteckning → silverkrav
+        if (age >= 56) return g - 1;  // 55+ → −1/serie
+    }
+    return g;
+}
+
+// Lightweight personnummer → birth year (mirrors Marken.BirthYearFromPersonNumber) so the threshold
+// note can update live if an elderly shooter types their personnummer in the modal.
+function mqsBirthYearFromPn(pn) {
+    if (!pn) return 0;
+    const plus = pn.indexOf('+') >= 0;
+    const digits = (pn.match(/\d/g) || []).join('');
+    const yr = new Date().getFullYear();
+    if (digits.length === 12 || digits.length === 13) {
+        const y4 = parseInt(digits.substring(0, 4), 10);
+        return (y4 >= 1900 && y4 <= yr) ? y4 : 0;
+    }
+    if (digits.length >= 10) {
+        const yy = parseInt(digits.substring(0, 2), 10);
+        if (isNaN(yy)) return 0;
+        let year = 2000 + yy;
+        if (year > yr) year = 1900 + yy;
+        if (plus) year -= 100;
+        return (year >= 1900 && year <= yr) ? year : 0;
+    }
+    return 0;
+}
+
+// Set the confirm-modal note: the blue routing info, or a red warning when the entered series doesn't
+// reach the gold krav (precision) / Elit floor (snabbpistol). The series can still be submitted — it
+// just won't count — but the shooter now sees it BEFORE saving, not after the QR shows.
+function mqsUpdateThresholdNote() {
+    const o = mqsState.pending;
+    const note = document.getElementById('mqsNote');
+    if (!o || !note) return;
+
+    const info = () => {
+        note.style.display = o.note ? '' : 'none';
+        note.className = 'alert alert-info small py-2';
+        if (o.note) note.innerHTML = '<i class="bi bi-info-circle"></i> ' + mqsEsc(o.note);
+    };
+    const warn = (msg) => {
+        note.style.display = '';
+        note.className = 'alert alert-danger small py-2';
+        note.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + msg;
+    };
+
+    if (o.total == null) { info(); return; }
+
+    if (o.seriesType === 'Precision') {
+        // Use a personnummer typed in the modal if present, else the known/stored birth year.
+        let by = mqsState.birthYear || 0;
+        const pnInput = document.getElementById('mqsPersonNumber');
+        if (pnInput && pnInput.value.trim()) { const t = mqsBirthYearFromPn(pnInput.value.trim()); if (t) by = t; }
+        const thr = mqsGuldThreshold(o.weaponGroup, by);
+        if (o.total < thr) {
+            warn(`Obs: serien (${o.total} p) når inte guldkravet (${thr} p/serie för vapengrupp ${mqsEsc(o.weaponGroup)}). Den sparas men räknas inte mot guldfodringen.`);
+        } else { info(); }
+        return;
+    }
+
+    if (o.seriesType === 'Speed' && o.target === 'Snabbpistol_25m') {
+        if (o.total < 45) {
+            warn(`Obs: serien (${o.total} p) når inte elitkravet (lägst 45 p/serie). Den sparas men räknas inte mot Elitmärket.`);
+        } else { info(); }
+        return;
+    }
+    info();
+}
+
+function mqsLoadClubs() {
+    const wrap = document.getElementById('mqsClubWrap');
+    const sel = document.getElementById('mqsClub');
+    function render() {
+        if (!mqsState.clubs || !mqsState.clubs.length) { wrap.style.display = 'none'; return; }
+        sel.innerHTML = mqsState.clubs.map(c => `<option value="${c.id}">${mqsEsc(c.name)}</option>`).join('');
+        wrap.style.display = mqsState.clubs.length > 1 ? '' : 'none';
+    }
+    if (mqsState.clubs) { render(); return; }
+    fetch('/umbraco/surface/Marken/GetMyClubsForSeries')
+        .then(r => r.json())
+        .then(d => { mqsState.clubs = (d.success && d.clubs) ? d.clubs : []; render(); })
+        .catch(() => { mqsState.clubs = []; render(); });
+}
+function mqsClubId() {
+    if (!mqsState.clubs || !mqsState.clubs.length) return 0;
+    if (mqsState.clubs.length === 1) return mqsState.clubs[0].id;
+    const sel = document.getElementById('mqsClub');
+    return sel && sel.value ? parseInt(sel.value) : mqsState.clubs[0].id;
+}
+
+// Age only affects the precision Guld threshold; snabbpistol is scored 0–50 absolute. So only
+// ask for a birth year on precision series, and only when it isn't already known.
+function mqsLoadBirthStatus(seriesType) {
+    const wrap = document.getElementById('mqsBirthWrap');
+    if (seriesType !== 'Precision') { wrap.style.display = 'none'; return; }
+    if (mqsState.hasBirthYear === true) { wrap.style.display = 'none'; mqsUpdateThresholdNote(); return; }
+    fetch('/umbraco/surface/Marken/GetMyBirthYearStatus')
+        .then(r => r.json())
+        .then(d => {
+            if (d.success && d.hasBirthYear) { mqsState.hasBirthYear = true; mqsState.birthYear = d.birthYear || 0; wrap.style.display = 'none'; }
+            else { wrap.style.display = ''; }
+            mqsUpdateThresholdNote(); // refine the gold-krav note now that age is known
+        })
+        .catch(() => { wrap.style.display = ''; mqsUpdateThresholdNote(); });
+}
+
+function mqsSubmit() {
+    const o = mqsState.pending;
+    if (!o) return;
+    const clubId = mqsClubId();
+    if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
+    const btn = document.getElementById('mqsSubmitBtn');
+    btn.disabled = true; btn.innerHTML = 'Skickar…';
+    const token = mqsAntiForgery();
+
+    // Capture a freshly entered personnummer (precision only) before submitting, so the age-reduced
+    // Guld krav applies. Resolves to false only when the user typed an invalid personnummer (abort so
+    // they can fix it); an empty field or a network hiccup proceeds without the concession.
+    let birthPromise = Promise.resolve(true);
+    const bw = document.getElementById('mqsBirthWrap');
+    if (o.seriesType === 'Precision' && bw.style.display !== 'none') {
+        const pn = (document.getElementById('mqsPersonNumber').value || '').trim();
+        if (pn) {
+            birthPromise = fetch('/umbraco/surface/Marken/SetMyPersonNumber', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({ personNumber: pn })
+            }).then(r => r.json()).then(d => {
+                if (d.success) { mqsState.hasBirthYear = true; return true; }
+                alert(d.message || 'Ogiltigt personnummer.');
+                return false;
+            }).catch(() => true); // network hiccup → don't block the series submit
+        }
+    }
+
+    birthPromise.then(ok => {
+        if (ok === false) {
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka in för validering';
+            return;
+        }
+        const body = { seriesType: o.seriesType, clubId, weaponGroup: o.weaponGroup };
+        if (o.seriesType === 'Speed') {
+            body.target = o.target;
+            if (o.target === 'Snabbpistol_25m') body.total = o.total;
+            else body.claimedLevel = o.claimedLevel || 'Guld';
+        } else {
+            body.shots = o.shots;
+            body.claimedLevel = 'Guld';
+        }
+        return fetch('/umbraco/surface/Marken/SubmitSeries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify(body)
+        });
+    }).then(r => r ? r.json() : null).then(res => {
+        if (!res) return; // aborted on invalid personnummer (button already reset)
+        if (!res.success) {
+            alert('Fel: ' + (res.message || 'Kunde inte spara.'));
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka in för validering';
+            return;
+        }
+        document.getElementById('mqsConfirm').style.display = 'none';
+        mqsRenderQr(res);
+    }).catch(() => {
+        alert('Något gick fel.');
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka in för validering';
+    });
+}
+
+function mqsRenderQr(res) {
+    const c = document.getElementById('mqsResult');
+    const qr = `/umbraco/surface/Faltskytte/GenerateQrCode?url=${encodeURIComponent(res.verifyUrl)}`;
+    c.innerHTML = `
+        <div class="text-center">
+            <div class="alert ${res.qualifies === false ? 'alert-warning' : 'alert-success'}">${mqsEsc(res.message)}</div>
+            <p class="mb-2">Visa koden för en styrelsemedlem eller skjutledare så kan de validera direkt:</p>
+            <img src="${qr}" alt="QR" class="img-fluid border rounded" style="max-width:240px;">
+            <div class="text-muted small mt-2"><span class="spinner-border spinner-border-sm"></span> Väntar på validering…</div>
+            <div class="d-grid mt-3"><button class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button></div>
+        </div>`;
+    c.style.display = 'block';
+    mqsStartPoll(res.id);
+}
+
+function mqsStartPoll(id) {
+    mqsStopPoll();
+    mqsState.pollTimer = setInterval(() => {
+        fetch(`/umbraco/surface/Marken/GetMySerieStatus?id=${id}`)
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success || (d.status !== 'Verified' && d.status !== 'Rejected')) return;
+                mqsStopPoll();
+                const ok = d.status === 'Verified';
+                const c = document.getElementById('mqsResult');
+                if (c) c.innerHTML = `<div class="text-center py-3"><div class="alert ${ok ? 'alert-success' : 'alert-secondary'} mb-0"><i class="bi ${ok ? 'bi-check-circle-fill' : 'bi-x-circle'}"></i> ${ok ? 'Godkänd!' : 'Avvisad'}</div></div>`;
+                // Refresh the Märken list if this page has one (UserProfile).
+                if (typeof loadMySeries === 'function') {
+                    try { loadMySeries(typeof markenTabYear !== 'undefined' ? markenTabYear : new Date().getFullYear()); } catch (e) {}
+                }
+                setTimeout(() => {
+                    const m = bootstrap.Modal.getInstance(document.getElementById('mqsModal'));
+                    if (m) m.hide();
+                }, 1400);
+            })
+            .catch(() => {});
+    }, 3000);
+}
+function mqsStopPoll() { if (mqsState.pollTimer) { clearInterval(mqsState.pollTimer); mqsState.pollTimer = null; } }
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('mqsModal')?.addEventListener('hidden.bs.modal', mqsStopPoll);
+    // Re-evaluate the gold-krav note live as an elderly shooter types their personnummer.
+    document.getElementById('mqsPersonNumber')?.addEventListener('input', mqsUpdateThresholdNote);
+});
+</script>

@@ -164,6 +164,10 @@
             Dra i reglagen och se hur siktbilden förändras &ndash; så förstår du varför skärpan ska ligga på kornet,
             och vad en diopter gör.
         </p>
+        <button type="button" id="siktTutorialBtn" class="btn btn-sm btn-danger mt-2"
+                onclick="if (window.TutorialHelper) { TutorialHelper.open('tutorial-11'); }">
+            <i class="bi bi-play-circle-fill me-1"></i>Se videolektionen
+        </button>
         @if (!isLoggedIn)
         {
             <div class="alert alert-warning py-2 px-3 small mt-2 mb-0 d-inline-flex align-items-center">
@@ -434,7 +438,7 @@
                         <i class="bi bi-arrow-down-circle fs-4 flex-shrink-0"></i>
                         <div>
                             <strong>Suddig tavla drar skotten lågt &ndash; och träffläget vandrar med ljuset.</strong>
-                            En oskarp tavla upplevs som <em>större</em>. Med riktpunkt strax under tavlan (6-läge)
+                            En oskarp tavla upplevs som <em>större</em>. Med riktpunkt strax under tavlan (klockan 6)
                             håller du då omedvetet lite lägre och träffar lågt. Eftersom suddigheten ändras med ljuset
                             ändras även höjdträffen, så du tvingas justera siktet i höjd om och om igen. En diopter håller
                             tavlan skarp &ndash; och därmed lika stor &ndash; så höjdträffen ligger stilla oavsett ljus.
@@ -483,6 +487,7 @@
                     </div>
                     <input type="range" class="form-range" id="cfgPresby" min="0" max="2" step="0.05" value="0.25">
                     <div class="sikt-ends"><span>Ingen kvar (svårast)</span><span>Mycket kvar (mild)</span></div>
+                    <div class="form-text" id="cfgPresbyHint"></div>
                 </div>
 
                 <div class="mb-2">
@@ -609,6 +614,17 @@
     function focusD() {
         var lo = baseOffsetD() + lensPower();
         return clamp(desiredFocusD(), lo, lo + accommAmp());
+    }
+
+    // True when the layer the shooter is looking at actually comes out SHARP in the picture.
+    // Measured as the DEFOCUS blur of that layer (the part that depends on its distance from the
+    // focus plane), excluding the common-mode pupil/diffraction softness that hits every layer.
+    // Built from the same layerBlur term that draws the canvas, so the captions' "X är skarpt"
+    // claims can never contradict the render: an uncorrected impairment (presbyopia / refractive
+    // error) pushes it past the threshold, while a diopter's tiny aperture shrinks it back below —
+    // correctly counting as "the diopter rescued the sharpness". ~3 px ≈ where softness shows.
+    function focusAchieved() {
+        return K_DEF * effectiveAperture() * Math.abs(focusD() - desiredFocusD()) < 3.0;
     }
 
     // Light -> pupil diameter: bright ~2 mm, dark ~7 mm
@@ -931,9 +947,9 @@
             }
         }
         var label, cls;
-        if (spreadCm < 7) { label = "Tät grupp"; cls = "text-success"; }
-        else if (spreadCm < 13) { label = "Bra grupp"; cls = "text-success"; }
-        else if (spreadCm < 22) { label = "Spridd grupp"; cls = "text-warning"; }
+        if (spreadCm < 7) { label = "Tät träffbild"; cls = "text-success"; }
+        else if (spreadCm < 13) { label = "Bra träffbild"; cls = "text-success"; }
+        else if (spreadCm < 22) { label = "Spridd träffbild"; cls = "text-warning"; }
         else { label = "Mycket spridd"; cls = "text-danger"; }
 
         var lbl = document.getElementById("grpLabel");
@@ -941,7 +957,7 @@
         lbl.className = "fw-semibold " + cls;
 
         var elevCm = poiLowFrac() * TARGET_RADIUS_CM;
-        var sizeHtml = "Gruppstorlek ca " + Math.round(spreadCm) + "&nbsp;cm";
+        var sizeHtml = "Träffbildens storlek ca " + Math.round(spreadCm) + "&nbsp;cm";
         if (elevCm >= 1) sizeHtml += " &middot; <span class='text-danger'>ca " + Math.round(elevCm) + "&nbsp;cm lågt</span>";
         else if (elevCm <= -1) sizeHtml += " &middot; <span class='text-danger'>ca " + Math.round(-elevCm) + "&nbsp;cm högt</span>";
         if (misses > 0) sizeHtml += " &middot; <span class='text-danger fw-semibold'>" + misses + " av " + pos.length + " utanför ringarna</span>";
@@ -949,11 +965,18 @@
 
         var hint;
         if (state.focus === "front") {
-            hint = "Skärpan på kornet håller skotten samlade &ndash; även när tavlan är suddig.";
+            hint = focusAchieved()
+                ? "Skärpan på kornet håller skotten samlade &ndash; även när tavlan är suddig."
+                : "Kornet blir suddigt här, så du kan inte rikta likadant varje skott &ndash; träffbilden öppnar upp trots att du siktar mot kornet.";
         } else if (state.focus === "target") {
-            hint = "Suddiga riktmedel gör att du inte kan rikta likadant varje skott, så gruppen sprids &ndash; trots att tavlan ser skarp ut.";
+            hint = focusAchieved()
+                ? "Suddiga riktmedel gör att du inte kan rikta likadant varje skott, så träffbilden öppnar upp &ndash; trots att tavlan ser skarp ut."
+                : "Varken riktmedel eller tavla är skarpa här, så du kan inte rikta likadant varje skott och träffbilden öppnar upp.";
         } else {
-            hint = "Med skärpan på bakre siktet blir kornet otydligt och gruppen öppnar sig.";
+            hint = "Med skärpan på bakre siktet blir kornet otydligt och träffbilden öppnar upp.";
+        }
+        if (state.presbyopia && !state.glasses && state.refractive === "none" && !focusAchieved()) {
+            hint += " Låt dig inte luras av den skarpa tavlan &ndash; träffbilden styrs av <strong>kornets</strong> skärpa, inte tavlans. Skytteglasögon och diopter flyttar skärpan tillbaka till kornet.";
         }
         if (state.distanceM > 30) hint += " På längre håll förstoras samma lilla vingel.";
         if (Math.abs(elevCm) >= 2 && !state.diopter) {
@@ -961,14 +984,14 @@
         }
         if (state.diopter) {
             hint += brightness() > 0.45
-                ? " Dioptern ger en skarp, stabil siktbild som drar ihop gruppen och håller höjdträffen still oavsett ljus."
-                : " Men hålet är för litet för ljuset &ndash; du ser inte sikten och gruppen sprids.";
+                ? " Dioptern ger en skarp, stabil siktbild som drar ihop träffbilden och håller höjdträffen still oavsett ljus."
+                : " Men hålet är för litet för ljuset &ndash; du ser inte sikten och träffbilden öppnar upp.";
         }
         if (state.sightDx !== 0 || state.sightDy !== 0) {
             hint += " Lägg märke till hur ett pyttelitet linjeringsfel i kornet (bråkdels mm) flyttar hela träffbilden flera cm &ndash; därför är exakt likadan linjering varje skott helt avgörande.";
         }
         if (state.wobbleAmp > 0) {
-            hint += " Skakningen gör att skottet bryter någonstans i vingelområdet &ndash; ju större vingel, desto större grupp. Lugn andning, stödhand och avtryck mitt i vingeln håller ihop den.";
+            hint += " Skakningen gör att skottet går någonstans i vingelområdet &ndash; ju större vingel, desto öppnare träffbild. Lugn andning, stödhand och ett jämnt, kramande avtryck håller ihop den.";
         }
         document.getElementById("grpHint").innerHTML = hint;
     }
@@ -976,15 +999,31 @@
     // ---- Live caption ----------------------------------------------------
     function caption() {
         var parts = [];
+        var reached = focusAchieved();
         if (state.focus === "front") {
-            parts.push("<strong class='text-success'>Skärpan ligger på kornet &ndash; helt rätt.</strong> " +
-                "Kornet är skarpt, tavlan suddig och bakre siktet aningen mjukt. Så ska en bra siktbild se ut.");
+            if (reached) {
+                parts.push("<strong class='text-success'>Skärpan ligger på kornet &ndash; helt rätt.</strong> " +
+                    "Kornet är skarpt, tavlan suddig och bakre siktet aningen mjukt. Så ska en bra siktbild se ut.");
+            } else {
+                parts.push("<strong class='text-success'>Skärpan ska ligga på kornet &ndash; helt rätt tanke.</strong> " +
+                    "Men ögat når inte dit (se nedan), så kornet blir suddigt &ndash; och det är just kornet du riktar med.");
+            }
         } else if (state.focus === "target") {
-            parts.push("<strong class='text-danger'>Skärpan ligger på tavlan &ndash; nybörjarens misstag.</strong> " +
-                "Tavlan blir skarp, men både korn och bakre sikte blir suddiga och du tappar precisionen i riktmedlen.");
+            if (reached) {
+                parts.push("<strong class='text-danger'>Skärpan ligger på tavlan &ndash; nybörjarens misstag.</strong> " +
+                    "Tavlan blir skarp, men både korn och bakre sikte blir suddiga och du tappar precisionen i riktmedlen.");
+            } else {
+                parts.push("<strong class='text-danger'>Du försöker lägga skärpan på tavlan &ndash; nybörjarens misstag.</strong> " +
+                    "Här når ögat inte ens ut till tavlan, så hela bilden blir suddig.");
+            }
         } else {
-            parts.push("<strong>Skärpan ligger på bakre siktet.</strong> " +
-                "Bakre siktet blir skarpt, men kornet &ndash; det du faktiskt riktar med &ndash; och tavlan blir suddiga.");
+            if (reached) {
+                parts.push("<strong>Skärpan ligger på bakre siktet.</strong> " +
+                    "Bakre siktet blir skarpt, men kornet &ndash; det du faktiskt riktar med &ndash; och tavlan blir suddiga.");
+            } else {
+                parts.push("<strong>Du försöker lägga skärpan på bakre siktet.</strong> " +
+                    "Men ögat når inte dit, så även bakre siktet blir suddigt.");
+            }
         }
 
         if (!state.diopter && state.light < 0.30) {
@@ -992,12 +1031,15 @@
         }
         if (state.glasses) {
             parts.push("<strong>Med skytteglasögon</strong> ställs skärpan på kornet &ndash; men ögat låses på det avståndet, så tavlan blir ännu suddigare. Därför blir en <strong>diopter nästan ett måste</strong> för den som behöver glasögon.");
-        } else if (state.presbyopia) {
-            parts.push("<strong>Ålderssynthet:</strong> ögat kan inte längre ställa om till kornet, så det förblir suddigt &ndash; tavlan kan rentav se skarpare ut. Det behövs korrektionsglas.");
+        } else if (state.presbyopia && state.refractive === "none" && !reached) {
+            parts.push("<strong>Ålderssynthet:</strong> ögat kan inte längre ställa om till det nära kornet, så blicken vilar längre bort &ndash; därför ser tavlan skarp ut medan <strong>kornet blir suddigt</strong>. " +
+                "Lurigt nog hjälper dig inte den skarpa tavlan: det är kornet du riktar med, så träffbilden öppnar upp ändå. Det är just därför ålderssynta skyttar behöver <strong>skytteglasögon</strong> (skärpan tillbaka på kornet) och ofta <strong>diopter</strong>.");
         } else if (state.refractive === "myopia") {
-            parts.push("<strong>Närsynthet:</strong> allt bortom ögats närgräns blir suddigt, särskilt tavlan. Korrektionsglas behövs.");
+            parts.push("<strong>Närsynthet:</strong> allt bortom ögats närgräns blir suddigt, särskilt tavlan. Korrektionsglas behövs." +
+                (state.presbyopia ? " Ålderssyntheten gör knappt skillnad för en närsynt i skyttesituationen &ndash; det är tavlan som är suddig oavsett." : ""));
         } else if (state.refractive === "hyperopia") {
-            parts.push("<strong>Långsynthet:</strong> ögat måste anstränga sig extra för att ställa skärpa, särskilt på kornet på nära håll.");
+            parts.push("<strong>Långsynthet:</strong> ögat måste anstränga sig extra för att ställa skärpa, särskilt på kornet på nära håll." +
+                (state.presbyopia ? " Med ålderssynthet dessutom orkar ögat inte alls &ndash; både korn och tavla blir suddiga och allt behöver korrektion." : ""));
         }
 
         if (state.diopter) {
@@ -1111,17 +1153,17 @@
                 lbl.textContent = "Ryckskott – utflygare";
                 lbl.className = "fw-semibold text-danger";
                 size.innerHTML = "5 skott lågt åt avtryckarsidan";
-                hint.innerHTML = "Du slet i avtryckaren &ndash; riktmedlen kastades ur läge i samma stund skottet gick (lågt åt avtryckarsidan, vänster för en högerhänt). Utflygare trots att siktbilden såg perfekt ut. Kläm av mjukt tills skottet överraskar dig.";
+                hint.innerHTML = "Du slet i avtryckaren &ndash; riktmedlen kastades ur läge i samma stund skottet gick (lågt åt avtryckarsidan, vänster för en högerhänt). Utflygare trots att siktbilden såg perfekt ut. Krama avtryckaren mjukt tills det smäller.";
             } else {
                 lbl.textContent = "Perfekt skott – " + sim.scoreText;
                 lbl.className = "fw-semibold text-success";
-                size.innerHTML = "Skottet bröt i lugnet";
-                hint.innerHTML = "Mjukt, jämnt ökande tryck tills skottet överraskar dig &ndash; aldrig ett ryck. Hinner du inte i lugnet: lägg av och börja om.";
+                size.innerHTML = "Skottet smällde av sig självt";
+                hint.innerHTML = "Mjukt, jämnt ökande tryck tills skottet överraskar dig &ndash; aldrig ett ryck. Smäller det inte i tid: ta ner och börja om.";
             }
         } else {
             lbl.textContent = "Siktar…";
             lbl.className = "fw-semibold text-muted";
-            size.innerHTML = "Avvakta rätt ögonblick…";
+            size.innerHTML = "Kramar avtryckaren mjukt…";
             hint.innerHTML = "";
         }
     }
@@ -1153,17 +1195,17 @@
         var p = document.getElementById("simPhase");
         if (!sim.fired) {
             if (t < SIM.LIFT) p.textContent = "Lyfter i läge – stora rörelser som snabbt lägger sig.";
-            else if (t < SIM.BREAK_T - 1.3) p.textContent = "Stilla i 6-läget. Öka trycket mjukt och jämnt.";
+            else if (t < SIM.BREAK_T - 1.3) p.textContent = "Stilla, sikta klockan 6. Öka trycket mjukt och jämnt.";
             else if (sim.mode === "jerk") p.textContent = "Sikten ser rätt ut … och du rycker till i avtryckaren!";
             else p.textContent = "Låt skottet överraska dig – ryck inte av!";
         } else if (sim.mode === "jerk") {
             p.innerHTML = "<strong>Ryckskott!</strong> Du slet i avtryckaren – riktmedlen kastades lågt åt avtryckarsidan. Fem utflygare lågt vänster, trots perfekt siktbild.";
         } else if (t < SIM.DRIFT_START) {
-            p.innerHTML = "Skottet bröt i lugnet – perfekt <strong>" + sim.scoreText + "</strong>!";
+            p.innerHTML = "Skottet smällde – perfekt <strong>" + sim.scoreText + "</strong>!";
         } else if (t < SIM.TREMOR_START) {
             p.innerHTML = "Efter ~10 s <strong>lurar hjärnan dig</strong>: den visar kvar den inövade perfekta bilden (<span style='color:#0d6efd'>blå spökbild</span>) medan kornet i själva verket glidit (heldraget). Du skulle svära på att du låg rätt.";
         } else {
-            p.innerHTML = "Nu tillkommer en fin, snabb darrning – men hjärnan visar fortfarande den perfekta bilden. Ett &quot;perfekt&quot; skott här sitter där det <strong>heldragna</strong> kornet pekar. <strong>Lägg av och börja om!</strong>";
+            p.innerHTML = "Nu tillkommer en fin, snabb darrning – men hjärnan visar fortfarande den perfekta bilden. Ett &quot;perfekt&quot; skott här sitter där det <strong>heldragna</strong> kornet pekar. <strong>Ta ner och börja om!</strong>";
         }
     }
 
@@ -1370,6 +1412,11 @@
         document.getElementById("cfgMyopiaVal").innerHTML = cfg.myopia.toFixed(1) + "&nbsp;D";
         document.getElementById("cfgHyperopiaVal").innerHTML = cfg.hyperopia.toFixed(1) + "&nbsp;D";
         document.getElementById("cfgPresbyVal").innerHTML = cfg.presbyAmp.toFixed(2) + "&nbsp;D";
+        // Residual accommodation -> reading-glasses add: the lens must supply the focus the eye can't.
+        // 40 cm reading demand (2.5 D) minus what's left, rounded to the nearest 0.5 D, clamped to 0.5-4.
+        var readAdd = clamp(Math.round((2.5 - cfg.presbyAmp) / 0.5) * 0.5, 0.5, 4);
+        document.getElementById("cfgPresbyHint").innerHTML =
+            "≈ +" + readAdd.toFixed(1) + " läsglasögon (vid 40&nbsp;cm läsavstånd)";
         document.getElementById("cfgSightRadiusVal").innerHTML = cfg.sightRadius + "&nbsp;mm";
         document.getElementById("cfgSightRadiusHint").innerHTML =
             "≈ " + (2500 / cfg.sightRadius).toFixed(1) + " cm träffläge per mm linjeringsfel (25 m)";
@@ -1449,6 +1496,7 @@
             var el = e.target.closest("button, input, label.btn");
             if (!el) return;
             if (el.closest("#siktLoginModal")) return;                 // let the login modal work
+            if (el.closest("#siktTutorialBtn")) return;                // let the video-lesson button work (no login needed)
             if (!el.closest("#siktApp, #siktSettingsModal")) return;   // only gate the simulator
             if (e.type === "keydown") {
                 var k = e.key;

@@ -229,6 +229,14 @@
                                         <i class="bi bi-x-circle"></i> RENSA
                                     </button>
                                 </div>
+                                @* Märken: turn this single 5-shot series into a Guldserie (Precision) /
+                                   Snabbserie (Duell) submission. Shown only for those disciplines + a
+                                   valid weapon group, enabled when the current series has 5 shots. *@
+                                <div class="d-grid mt-2">
+                                    <button type="button" class="btn btn-outline-warning btn-sm" id="entryGuldserieBtn" style="display:none;" onclick="entrySubmitGuldserie()" disabled>
+                                        <i class="bi bi-bullseye"></i> Spara som Guldserie
+                                    </button>
+                                </div>
                             </div>
 
                             <div class="form-text mt-2">
@@ -443,6 +451,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize with first series input for Series-Total mode
     addSeriesInput();
+
+    // Märken: re-evaluate the "Spara som Guldserie/Snabbserie" button when discipline or class changes.
+    document.getElementById('modalDiscipline')?.addEventListener('change', updateEntryGuldserieBtn);
+    document.getElementById('shootingClass')?.addEventListener('change', updateEntryGuldserieBtn);
 });
 
 // Show/hide the standard-medal proof block depending on whether a medal is selected.
@@ -554,6 +566,7 @@ function switchEntryMethod(method) {
             updateTotalOnlyAverage();
             break;
     }
+    updateEntryGuldserieBtn();
 }
 
 // Series-Total Functions
@@ -766,6 +779,43 @@ function updateSeriesDisplay() {
     document.querySelectorAll('.shot-btn').forEach(btn => {
         btn.disabled = currentSeries.shots.length >= 5;
     });
+
+    updateEntryGuldserieBtn();
+}
+
+// ── Märken: per-series "Spara som Guldserie / Snabbserie" ───────────────
+// Offered only in shot-by-shot mode for Precision (→ Guldserie) and Duell (→ Snabbserie,
+// snabbpistoltavla 0–50), and only for a valid A/B/C/R weapon group. Enabled when the current
+// series has its 5 shots. Submits that one series to Märken (Marken/SubmitSeries) for validation;
+// the normal whole-entry save at the end is unaffected. Helpers live in _MarkenSerieQuickSubmit.
+function updateEntryGuldserieBtn() {
+    const btn = document.getElementById('entryGuldserieBtn');
+    if (!btn || typeof mqsRouteForDiscipline !== 'function') return;
+    const method = document.querySelector('input[name="entryMethod"]:checked')?.value;
+    const disc = document.getElementById('modalDiscipline')?.value;
+    const cls = document.getElementById('shootingClass')?.value;
+    const route = mqsRouteForDiscipline(disc);
+    const offer = method === 'ShotByShot' && route.ok && !!mqsWeaponGroup(cls);
+    btn.style.display = offer ? '' : 'none';
+    if (!offer) return;
+    btn.innerHTML = `<i class="bi bi-bullseye"></i> Spara som ${route.label}`;
+    const cur = trainingEntryState.allSeries[trainingEntryState.currentSeriesIndex];
+    btn.disabled = !cur || cur.shots.length !== 5;
+}
+
+function entrySubmitGuldserie() {
+    const cur = trainingEntryState.allSeries[trainingEntryState.currentSeriesIndex];
+    if (!cur || cur.shots.length !== 5) return;
+    const disc = document.getElementById('modalDiscipline').value;
+    const cls = document.getElementById('shootingClass').value;
+    const wg = mqsWeaponGroup(cls);
+    const route = mqsRouteForDiscipline(disc);
+    if (!route.ok || !wg) { alert('Den här disciplinen eller klassen kan inte sparas som guldserie.'); return; }
+    const shots = [...cur.shots];
+    const total = shots.reduce((t, s) => t + (s === 'X' ? 10 : (parseInt(s) || 0)), 0);
+    // Commit the series into the normal entry too, then open the Märken submit modal.
+    handleEnterSeries();
+    mqsOpen({ seriesType: route.seriesType, target: route.target, label: route.label, note: route.note, weaponGroup: wg, shots, total });
 }
 
 // Update navigation buttons

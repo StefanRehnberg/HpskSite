@@ -238,6 +238,55 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// Whether the current member's birth year is derivable from their <c>personNumber</c>. The
+        /// quick-submit flow uses this to decide whether to ask for the personnummer before submitting
+        /// a precision Guldserie — age drives the reduced Guld krav (−1/serie from the year after 55,
+        /// silverkrav from the year after 65). GET /umbraco/surface/Marken/GetMyBirthYearStatus
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyBirthYearStatus()
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false, message = "Inte inloggad." });
+            int birthYear = _candidates.GetBirthYear(member.Id, DateTime.Now.Year);
+            return Json(new { success = true, hasBirthYear = birthYear > 0, birthYear });
+        }
+
+        public class SetPersonNumberRequest { public string? PersonNumber { get; set; } }
+
+        /// <summary>
+        /// Persist the current member's personnummer to the existing <c>personNumber</c> member property
+        /// (the canonical age source used across the site) when it isn't already on file, so the Guld-krav
+        /// age concession applies here and in every other age-dependent rule. Only fills the gap — never
+        /// overwrites a personnummer that already yields a valid birth year. POST /umbraco/surface/Marken/SetMyPersonNumber
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetMyPersonNumber([FromBody] SetPersonNumberRequest request)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false, message = "Inte inloggad." });
+
+            int currentYear = DateTime.Now.Year;
+            var pn = request?.PersonNumber?.Trim() ?? "";
+            int birthYear = Marken.BirthYearFromPersonNumber(pn, currentYear);
+            if (birthYear <= 0)
+                return Json(new { success = false, message = "Ange ett giltigt personnummer (ÅÅÅÅMMDD-XXXX)." });
+
+            var entity = _memberService.GetById(member.Id);
+            if (entity == null) return Json(new { success = false, message = "Medlem hittades inte." });
+
+            // Don't clobber an existing valid personnummer — only fill the gap.
+            var existing = entity.GetValue("personNumber")?.ToString();
+            if (Marken.BirthYearFromPersonNumber(existing, currentYear) <= 0)
+            {
+                entity.SetValue("personNumber", pn);
+                _memberService.Save(entity);
+            }
+            return Json(new { success = true, birthYear });
+        }
+
         /// <summary>Upload a target photo for a series. Returns an opaque ref to submit with SubmitSeries.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]

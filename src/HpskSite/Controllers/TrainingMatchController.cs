@@ -1310,15 +1310,21 @@ namespace HpskSite.Controllers
                     // the end-of-day auto-close path.
                     bool deleted = await FinalizeMatchCloseAsync(db, matchId, completeDiscipline, weaponClass);
 
-                    // Notify all viewers via SignalR
-                    await _hubContext.SendMatchCompleted(request.MatchCode ?? "");
+                    // Notify all viewers via SignalR. When the match was deleted (no result reached the
+                    // 4-series floor) send the graceful "removed" event instead of "completed" so viewers
+                    // don't try to reload a match that no longer exists (the "Match hittades inte" dialog).
+                    if (deleted)
+                        await _hubContext.SendMatchDeleted(request.MatchCode ?? "");
+                    else
+                        await _hubContext.SendMatchCompleted(request.MatchCode ?? "");
 
                     return Json(new
                     {
                         success = true,
+                        deleted,
                         message = deleted
-                            ? "Matchen hade inga fullständiga resultat och har tagits bort"
-                            : "Matchen har avslutats"
+                            ? "Matchen togs bort — resultat med färre än 4 serier sparas inte och överförs inte till dina resultat."
+                            : "Matchen har avslutats."
                     });
                 }
             }
@@ -3002,8 +3008,12 @@ namespace HpskSite.Controllers
                         int matchId = (int)m.Id;
                         string discipline = (string)(m.Discipline ?? "Precision");
                         string weaponClass = (string)(m.WeaponClass ?? "C");
-                        await FinalizeMatchCloseAsync(db, matchId, discipline, weaponClass);
-                        await _hubContext.SendMatchCompleted((string)(m.MatchCode ?? ""));
+                        bool autoDeleted = await FinalizeMatchCloseAsync(db, matchId, discipline, weaponClass);
+                        // Same graceful signal as a manual close: deleted → MatchDeleted (no reload of a gone match).
+                        if (autoDeleted)
+                            await _hubContext.SendMatchDeleted((string)(m.MatchCode ?? ""));
+                        else
+                            await _hubContext.SendMatchCompleted((string)(m.MatchCode ?? ""));
                         closedCount++;
                     }
 
