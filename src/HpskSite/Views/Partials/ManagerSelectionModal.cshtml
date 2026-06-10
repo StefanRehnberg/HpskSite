@@ -170,10 +170,24 @@ let managerSelectionState = {
     selectedClubId: '' // For club filter
 };
 
+// Which edit modal's fields this picker is currently driving. The picker is
+// shared between the Precision/generic edit modal (comp_*) and the Springskytte
+// edit modal (springEdit_*); each call passes its own field + badges element ids
+// so the selection lands in the modal that actually opened it. Defaults to the
+// generic edit modal for any legacy caller that passes nothing.
+let managerTarget = {
+    fieldId: 'comp_competitionManagers_ids',
+    badgesId: 'selectedManagersBadges'
+};
+
 // Open Manager Selection Modal
-function openManagerSelectionModal() {
-    // Get current selected managers from hidden field
-    const currentIds = document.getElementById('comp_competitionManagers_ids').value;
+function openManagerSelectionModal(fieldId, badgesId) {
+    if (fieldId) managerTarget.fieldId = fieldId;
+    if (badgesId) managerTarget.badgesId = badgesId;
+
+    // Get current selected managers from the target modal's hidden field
+    const fieldEl = document.getElementById(managerTarget.fieldId);
+    const currentIds = fieldEl ? fieldEl.value : '';
     managerSelectionState.selectedManagerIds = currentIds
         ? currentIds.split(',').map(id => parseInt(id)).filter(id => !isNaN(id))
         : [];
@@ -192,9 +206,34 @@ function openManagerSelectionModal() {
         updateSelectedManagersDisplay();
     }
 
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('managerSelectionModal'));
+    // Show modal — opened on top of the competition edit modal (see the
+    // stacked-modal z-index handling registered in DOMContentLoaded below).
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('managerSelectionModal'));
     modal.show();
+}
+
+// Resolve + render the manager badges shown in the competition edit modal
+// WITHOUT opening the picker. Called when the edit modal is populated so saved
+// tävlingsledare are visible immediately instead of being stuck on "Laddar...".
+function refreshManagerBadgesFromIds(ids, fieldId, badgesId) {
+    if (fieldId) managerTarget.fieldId = fieldId;
+    if (badgesId) managerTarget.badgesId = badgesId;
+
+    managerSelectionState.selectedManagerIds = (ids || [])
+        .map(id => parseInt(id))
+        .filter(id => !isNaN(id));
+
+    if (managerSelectionState.selectedManagerIds.length === 0) {
+        updateCompetitionManagerBadges();
+        return;
+    }
+
+    // Render now if we already have the member roster cached…
+    if (managerSelectionState.allMembers.length > 0) {
+        updateCompetitionManagerBadges();
+    }
+    // …and (re)load so names resolve even before the picker is first opened.
+    loadMembersForManagerSelection(null, updateCompetitionManagerBadges);
 }
 
 // Load all clubs for the filter dropdown
@@ -241,7 +280,7 @@ function populateClubFilterFromApi() {
 // clubs would appear nearly empty. We pass a generous pageSize so the whole roster
 // of the picked club fits in one response (the controller backs onto an in-memory
 // list, so a larger pageSize doesn't hit the DB harder).
-function loadMembersForManagerSelection(clubIdFilter = null) {
+function loadMembersForManagerSelection(clubIdFilter = null, onDone = null) {
     // Show loading state on every load — the user may switch clubs repeatedly.
     const spinner = document.getElementById('managerLoadingSpinner');
     if (spinner) spinner.style.display = 'block';
@@ -282,6 +321,7 @@ function loadMembersForManagerSelection(clubIdFilter = null) {
             const currentSearch = document.getElementById('managerSearchInput')?.value || '';
             filterManagerMembers(currentSearch, managerSelectionState.selectedClubId);
             updateSelectedManagersDisplay();
+            if (typeof onDone === 'function') onDone();
         } else {
             alert('Kunde inte ladda medlemmar: ' + (data.message || 'Okänt fel'));
         }
@@ -435,10 +475,11 @@ function updateSelectedManagersDisplay() {
 
 // Save manager selection
 function saveManagerSelection() {
-    // Update hidden field in competition edit modal
-    document.getElementById('comp_competitionManagers_ids').value = managerSelectionState.selectedManagerIds.join(',');
+    // Update the hidden field in whichever edit modal opened the picker
+    const fieldEl = document.getElementById(managerTarget.fieldId);
+    if (fieldEl) fieldEl.value = managerSelectionState.selectedManagerIds.join(',');
 
-    // Update badges display in competition edit modal
+    // Update badges display in that edit modal
     updateCompetitionManagerBadges();
 
     // Close modal
@@ -446,9 +487,10 @@ function saveManagerSelection() {
     modal.hide();
 }
 
-// Update badges in competition edit modal
+// Update badges in the current target edit modal
 function updateCompetitionManagerBadges() {
-    const container = document.getElementById('selectedManagersBadges');
+    const container = document.getElementById(managerTarget.badgesId);
+    if (!container) return;
 
     if (managerSelectionState.selectedManagerIds.length === 0) {
         container.innerHTML = '<small class="text-muted">Inga tävlingsledare valda</small>';
@@ -457,9 +499,10 @@ function updateCompetitionManagerBadges() {
 
     const html = managerSelectionState.selectedManagerIds.map(memberId => {
         const member = managerSelectionState.allMembers.find(m => m.id === memberId);
-        if (!member) return '';
-
-        return `<span class="badge bg-info me-1 mb-1">${escapeHtml(member.name)}</span>`;
+        // Fall back to the id if the member isn't in the loaded roster (e.g. from a
+        // club not in the current page) — never silently drop a saved manager.
+        const label = member ? member.name : `Medlem #${memberId}`;
+        return `<span class="badge bg-info me-1 mb-1">${escapeHtml(label)}</span>`;
     }).join('');
 
     container.innerHTML = html;
@@ -488,11 +531,39 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Reset filters when modal is hidden
-    document.getElementById('managerSelectionModal')?.addEventListener('hidden.bs.modal', function() {
+    const managerModalEl = document.getElementById('managerSelectionModal');
+
+    // Stacked-modal support: this picker is opened from inside the competition
+    // edit modal. Bootstrap does NOT raise the z-index for a modal opened while
+    // another is already open, so without this the picker renders *behind* the
+    // edit modal and a click hits the edit modal's backdrop (which sits on top),
+    // dismissing the edit modal. We lift this modal + its backdrop above any
+    // currently-open modal.
+    managerModalEl?.addEventListener('show.bs.modal', function () {
+        const openModals = document.querySelectorAll('.modal.show').length; // excludes this one (not shown yet)
+        if (openModals > 0) {
+            const z = 1055 + openModals * 20;
+            managerModalEl.style.zIndex = z;
+            // The backdrop is appended during show — bump the newest one just below us.
+            setTimeout(function () {
+                const backdrops = document.querySelectorAll('.modal-backdrop');
+                const last = backdrops[backdrops.length - 1];
+                if (last) last.style.zIndex = z - 10;
+            }, 0);
+        }
+    });
+
+    // Reset filters + stacking state when this modal is hidden.
+    managerModalEl?.addEventListener('hidden.bs.modal', function() {
         if (searchInput) searchInput.value = '';
         if (clubFilterSelect) clubFilterSelect.value = '';
         managerSelectionState.selectedClubId = '';
+        managerModalEl.style.zIndex = '';
+        // Closing a stacked modal strips body.modal-open (and the scroll lock);
+        // restore it so the still-open edit modal keeps its backdrop + lock.
+        if (document.querySelectorAll('.modal.show').length > 0) {
+            document.body.classList.add('modal-open');
+        }
     });
 });
 

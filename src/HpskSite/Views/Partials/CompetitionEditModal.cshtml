@@ -579,7 +579,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="mb-3">
                         <label class="form-label">Tävlingsledare</label>
                         <div>
-                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal()">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal('comp_competitionManagers_ids', 'selectedManagersBadges')">
                                 <i class="bi bi-person-plus"></i> Hantera tävlingsledare
                             </button>
                         </div>
@@ -991,14 +991,17 @@ window.populateEditModal = function(competition) {
     // Store IDs in hidden field
     setFieldValue('comp_competitionManagers_ids', managerIds.join(','));
 
-    // Initialize badges display (will be populated when manager modal loads)
+    // Render the badges now. refreshManagerBadgesFromIds resolves member names in
+    // the background so saved tävlingsledare show immediately (no "Laddar..." that
+    // never clears until the picker is first opened).
     const badgesContainer = document.getElementById('selectedManagersBadges');
-    if (badgesContainer) {
-        if (managerIds.length === 0) {
+    if (managerIds.length === 0) {
+        if (badgesContainer) {
             badgesContainer.innerHTML = '<small class="text-muted">Inga tävlingsledare valda</small>';
-        } else {
-            badgesContainer.innerHTML = '<small class="text-muted">Laddar...</small>';
         }
+    } else if (typeof refreshManagerBadgesFromIds === 'function') {
+        if (badgesContainer) badgesContainer.innerHTML = '<small class="text-muted">Laddar...</small>';
+        refreshManagerBadgesFromIds(managerIds, 'comp_competitionManagers_ids', 'selectedManagersBadges');
     }
 
     setFieldValue('shootingClassIds', competition.shootingClassIds || '');

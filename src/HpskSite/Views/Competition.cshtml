@@ -837,11 +837,54 @@
 						<h3 class="card-title h5 mb-0"><i class="bi bi-text-paragraph me-2"></i>Beskrivning</h3>
 					</div>
 					<div class="card-body">
-						<div class="prose">
-							@Html.Raw(System.Net.WebUtility.HtmlDecode(description))
-						</div>
+						@* Collapsed preview (first sentence) + full description, toggled by JS.
+						   Full HTML is injected via innerHTML so any unclosed RTE tags auto-close
+						   within the target element instead of breaking the surrounding DOM. *@
+						<div id="competitionDescriptionPreview" class="prose mb-0"></div>
+						<div id="competitionDescriptionFull" class="prose mb-0" style="display:none;"></div>
+						<a href="#" id="competitionDescriptionToggle" class="d-inline-block mt-2" style="display:none;">Visa mer</a>
 					</div>
 				</div>
+				<script>
+					(function () {
+						var fullHtml = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(System.Net.WebUtility.HtmlDecode(description)));
+						var previewEl = document.getElementById('competitionDescriptionPreview');
+						var fullEl = document.getElementById('competitionDescriptionFull');
+						var toggleEl = document.getElementById('competitionDescriptionToggle');
+
+						// Render full HTML into its container (isolates any unclosed tags).
+						fullEl.innerHTML = fullHtml;
+
+						// Find the first sentence from the plain text.
+						var text = (fullEl.textContent || '').replace(/\s+/g, ' ').trim();
+						var match = text.match(/^.*?[.!?](?=\s|$)/);
+						var firstSentence = match ? match[0].trim() : text;
+
+						// Only collapse when there is meaningfully more than the first sentence.
+						if (firstSentence && firstSentence.length < text.length - 1) {
+							previewEl.textContent = firstSentence;
+							previewEl.style.display = '';
+							toggleEl.style.display = '';
+
+							toggleEl.addEventListener('click', function (e) {
+								e.preventDefault();
+								var expanded = fullEl.style.display !== 'none';
+								if (expanded) {
+									fullEl.style.display = 'none';
+									previewEl.style.display = '';
+									toggleEl.textContent = 'Visa mer';
+								} else {
+									fullEl.style.display = '';
+									previewEl.style.display = 'none';
+									toggleEl.textContent = 'Visa mindre';
+								}
+							});
+						} else {
+							// Short description - just show it in full.
+							fullEl.style.display = '';
+						}
+					})();
+				</script>
 			}
 
 			@if (hasInvitation || hasResultList)

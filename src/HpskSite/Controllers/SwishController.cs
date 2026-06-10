@@ -771,6 +771,7 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     qrCode = $"data:image/png;base64,{qrCodeBase64}",
+                    swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message),
                     amount = teamFee,
                     teamName = team.TeamName,
                     teamClass = team.TeamClass,
