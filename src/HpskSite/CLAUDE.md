@@ -771,7 +771,7 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 
 ### Cashier Workflow & Multi-Class Walk-In ✅ (2026-05-06)
 
-**Overview:** End-to-end registration-desk experience for the cashier on competition day. Walk-in supports multi-class with per-class slot/patrol pickers, mark-as-paid records actual amount and emails a receipt, registrations can be re-pointed to a different shooter, and the start list updates automatically as walk-ins land.
+**Overview:** End-to-end registration-desk experience for the cashier on competition day. Walk-in supports multi-class with per-class slot/patrol pickers, mark-as-paid records actual amount and emails a betalningsbekräftelse (the printable kvitto lives on the shooter's Min sida), registrations can be re-pointed to a different shooter, and the start list updates automatically as walk-ins land.
 
 **Manual operator steps (one-time, in Umbraco backoffice):**
 - `registrationInvoice` doctype: add property `actualPaidAmount` (Decimal, optional, label "Faktiskt belopp"). Without it, the variance feature silently no-ops — billed and actual stay equal.
@@ -786,8 +786,13 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 
 **Mark-as-paid (`Markera som betald` modal):**
 - Operator records actual amount (defaults to invoice total). Variance triggers an "Avvikande belopp" badge on the row and a "Faktiskt" column in Bokföringsunderlag.
-- Receipt email is opt-out — checkbox defaults to checked. Receipt now fires inside `PaymentService.UpdatePaymentStatusAsync` whenever status transitions to Paid (also covers `InvoiceAdminController.MarkAsPaid`). Members without an email are silently skipped (no audit row, no error).
-- Audit log records `MarkedPaid` and (separately) `ReceiptSent` events.
+- The email on Paid is now a **Betalningsbekräftelse** (confirmation), NOT a kvitto — opt-out checkbox, fires inside `PaymentService.UpdatePaymentStatusAsync` on transition to Paid (also `InvoiceAdminController.MarkAsPaid`). Members without email skipped. The body links to Min sida → Tävlingar where the shooter prints the legal **Kvitto** (`/kvitto/{invoiceId}`). Audit event key stays `ReceiptSent` (display "Betalningsbekräftelse skickad"). See memory `kvitto-vs-betalningsbekraftelse`.
+
+**Invoices are created eagerly (2026-06-11):** every fee-bearing registration/team gets its Pending invoice at *creation* (not lazily on first payment option) via `PaymentService.EnsureRegistrationInvoiceAsync` (wired into public register / late-walk-in / team creation). So a fee'd row shows **Väntande** immediately; "Saknar betalning" was renamed **"Saknar faktura"** (now the error/edge case) and free comps show **"Ingen avgift"** (`No Fee`). The status lookup now matches invoices by the single `registrationId` too, not only legacy `relatedRegistrationIds`. See memory `eager-invoices-and-lag-section`.
+
+**Lag section on the Anmälningar tab (2026-06-11):** teams + relay (stafett) are listed in their own collapsible "Lag" card (`RegistrationAdmin/GetCompetitionTeams`), discipline-agnostic, with the same per-row payment actions as individuals (team-aware manage-payment modal; team invoices use memberId `team-{id}`). **Team edit/delete is now authorized** (`CompetitionTeamController.UpdateTeam`/`DeleteTeam` previously had none): site admin / club+regional admin for the team's club / member whose primary club is that club (`CanManageTeamAsync`); other clubs' edit/delete buttons hidden in the team + stafett registration modals.
+
+**Springskytte deferred team/relay rosters (2026-06-11):** Springskytte lag/stafett can be created with a name only + paid, shooters named any time before the event (relaxation gated to Springskytte in the shared `CompetitionTeamService` + modals; a stafett edit modal was added). See memory `springskytte-deferred-team-roster`.
 
 **Edit Registration (`Redigera anmälan` modal):**
 - Multi-class checkbox list with the same mutex bucket logic as walk-in.
@@ -810,7 +815,7 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 - Cache: invalidates `dp_availability_<competitionId>` runtime cache key so the next `/Competition/GetTeamAvailability` fetch sees the new state.
 
 **Audit trail event types** (`Models/InvoicePaymentEvent.cs`):
-- `Created`, `MarkedPaid`, `Cancelled`, `Refunded`, `EmailSent` (Swish QR email), `ReceiptSent` (payment receipt email), `Transferred`, `StatusChanged`.
+- `Created`, `MarkedPaid`, `Cancelled`, `Refunded`, `EmailSent` (Swish QR email), `ReceiptSent` (betalningsbekräftelse email; key unchanged, display "Betalningsbekräftelse skickad"), `Transferred`, `StatusChanged`.
 
 **Multi-invoice top-up model:**
 - One registration can have several invoices: original Paid + zero-or-more Paid top-ups + at most one Pending top-up. Paid invoices are never modified — they're the historical record. Top-up math is `delta = newFee - sumPaid`.
