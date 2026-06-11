@@ -91,6 +91,12 @@
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <label for="editRegionReceiptEmail" class="form-label">E-post på kvitto</label>
+                        <input type="email" class="form-control" id="editRegionReceiptEmail" name="receiptEmail">
+                        <div class="form-text">Visas på kvitton. Lämna tom för att använda kontakt-e-posten.</div>
+                    </div>
+
                     <h6 class="mt-3">Välkomsttext</h6>
                     <hr class="mt-1 mb-3">
 
@@ -143,6 +149,7 @@ function showEditRegionModal(regionCode) {
                 document.getElementById('editRegionAddress').value = region.address || '';
                 document.getElementById('editRegionCity').value = region.city || '';
                 document.getElementById('editRegionPostalCode').value = region.postalCode || '';
+                document.getElementById('editRegionReceiptEmail').value = region.receiptEmail || '';
                 document.getElementById('editRegionWelcomeTitle').value = region.welcomeTitle;
                 document.getElementById('editRegionWelcomeText').value = region.welcomeText;
             } else {
@@ -175,6 +182,7 @@ function saveRegion() {
     formData.append('address', document.getElementById('editRegionAddress').value);
     formData.append('city', document.getElementById('editRegionCity').value);
     formData.append('postalCode', document.getElementById('editRegionPostalCode').value);
+    formData.append('receiptEmail', document.getElementById('editRegionReceiptEmail').value);
     formData.append('welcomeTitle', document.getElementById('editRegionWelcomeTitle').value);
     formData.append('welcomeText', document.getElementById('editRegionWelcomeText').value);
 

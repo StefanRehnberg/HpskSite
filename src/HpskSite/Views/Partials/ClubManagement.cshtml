@@ -221,6 +221,12 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="mb-3">
+                        <label for="receiptEmail" class="form-label">E-post på kvitto</label>
+                        <input type="email" class="form-control" id="receiptEmail" name="receiptEmail">
+                        <div class="form-text">Visas på kvitton. Lämna tom för att använda kontakt-e-posten.</div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -902,6 +908,7 @@ function editClub(clubId) {
                 document.getElementById('city').value = club.city;
                 document.getElementById('postalCode').value = club.postalCode;
                 document.getElementById('orgNumber').value = club.orgNumber || '';
+                document.getElementById('receiptEmail').value = club.receiptEmail || '';
                 document.getElementById('isActive').checked = club.isActive;
                 document.getElementById('clubIdNumber').value = club.clubIdNumber || '';
 
@@ -965,6 +972,7 @@ function saveClub() {
     formData.append('city', document.getElementById('city').value);
     formData.append('postalCode', document.getElementById('postalCode').value);
     formData.append('orgNumber', document.getElementById('orgNumber').value);
+    formData.append('receiptEmail', document.getElementById('receiptEmail').value);
     formData.append('isActive', document.getElementById('isActive').checked);
     formData.append('clubIdNumber', document.getElementById('clubIdNumber').value);
     formData.append('regionalFederation', document.getElementById('regionalFederation').value);

@@ -303,6 +303,13 @@
                                 <input type="text" class="form-control" id="regionCity" name="city" placeholder="Stockholm">
                             </div>
                         </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">E-post på kvitto</label>
+                                <input type="email" class="form-control" id="regionReceiptEmail" name="receiptEmail" placeholder="kvitto@krets.se">
+                                <small class="text-muted">Visas på kvitton. Lämna tom för att använda kontakt-e-posten.</small>
+                            </div>
+                        </div>
 
                         <hr class="my-4">
 
@@ -812,6 +819,7 @@
                     document.getElementById('regionAddress').value = data.data.address || '';
                     document.getElementById('regionPostalCode').value = data.data.postalCode || '';
                     document.getElementById('regionCity').value = data.data.city || '';
+                    document.getElementById('regionReceiptEmail').value = data.data.receiptEmail || '';
 
                     // Brevo API key
                     var brevoField = document.getElementById('regionBrevoApiKey');

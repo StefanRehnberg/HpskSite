@@ -966,6 +966,7 @@ namespace HpskSite.Controllers
                             city = clubNode.Value<string>("city") ?? "",
                             postalCode = clubNode.Value<string>("postalCode") ?? "",
                             orgNumber = clubNode.Value<string>("orgNumber") ?? "",
+                            receiptEmail = clubNode.Value<string>("receiptEmail") ?? "",
                             description = clubNode.Value<string>("description") ?? "",
                             aboutClub = clubNode.Value<string>("aboutClub") ?? "",
                             logoUrl = logo?.Url() ?? "",
@@ -991,7 +992,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> UpdateClubInfo(int clubId, string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string description = "",
             string webSite = "", string address = "", string city = "",
-            string postalCode = "", string orgNumber = "", string aboutClub = "", string brevoApiKey = "")
+            string postalCode = "", string orgNumber = "", string receiptEmail = "", string aboutClub = "", string brevoApiKey = "")
         {
             try
             {
@@ -1023,6 +1024,7 @@ namespace HpskSite.Controllers
                 clubContent.SetValue("city", city);
                 clubContent.SetValue("postalCode", postalCode);
                 clubContent.SetValue("orgNumber", orgNumber ?? "");
+                clubContent.SetValue("receiptEmail", receiptEmail ?? "");
 
                 // Update description properties
                 clubContent.SetValue("description", description);
@@ -1435,6 +1437,7 @@ namespace HpskSite.Controllers
                         address = regionNode.Value<string>("address") ?? "",
                         city = regionNode.Value<string>("city") ?? "",
                         postalCode = regionNode.Value<string>("postalCode") ?? "",
+                        receiptEmail = regionNode.Value<string>("receiptEmail") ?? "",
                         logoUrl = logo?.Url() ?? "",
                         bannerImageUrl = bannerImage?.Url() ?? "",
                         brevoApiKey = regionNode.Value<string>("brevoApiKey") ?? ""
@@ -1455,7 +1458,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> UpdateRegionInfo(int contentId, string welcomeTitle = "",
             string welcomeText = "", string aboutRegion = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string orgNumber = "",
-            string address = "", string city = "", string postalCode = "", string brevoApiKey = "")
+            string address = "", string city = "", string postalCode = "", string receiptEmail = "", string brevoApiKey = "")
         {
             try
             {
@@ -1498,6 +1501,7 @@ namespace HpskSite.Controllers
                 regionContent.SetValue("address", address ?? "");
                 regionContent.SetValue("city", city ?? "");
                 regionContent.SetValue("postalCode", postalCode ?? "");
+                regionContent.SetValue("receiptEmail", receiptEmail ?? "");
 
                 // Update Brevo API key (if property exists)
                 if (regionContent.HasProperty("brevoApiKey"))

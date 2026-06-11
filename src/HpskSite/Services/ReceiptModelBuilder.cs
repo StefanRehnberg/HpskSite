@@ -135,7 +135,7 @@ namespace HpskSite.Services
                 IssuerStreet = issuerNode?.GetValue<string>("address") ?? "",
                 IssuerPostalCode = issuerNode?.GetValue<string>("postalCode") ?? "",
                 IssuerCity = issuerNode?.GetValue<string>("city") ?? "",
-                IssuerContactEmail = issuerNode?.GetValue<string>("contactEmail") ?? "",
+                IssuerContactEmail = ResolveReceiptEmail(issuerNode),
                 IssuerLogoUrl = issuerNode != null ? ResolveLogoUrl(issuerNode.Id) : "",
 
                 AmountPaid = totalPaid,
@@ -171,6 +171,19 @@ namespace HpskSite.Services
                 .ToList();
 
             return list.Count > 0 ? list : new List<IContent> { fallback };
+        }
+
+        /// <summary>
+        /// Email to print on the Kvitto: the dedicated <c>receiptEmail</c> when the issuer
+        /// has set one, otherwise the general <c>contactEmail</c>. Returns "" when neither
+        /// is set (the row is then omitted from the receipt).
+        /// </summary>
+        private static string ResolveReceiptEmail(IContent? issuerNode)
+        {
+            if (issuerNode == null) return "";
+            var receiptEmail = (issuerNode.GetValue<string>("receiptEmail") ?? "").Trim();
+            if (!string.IsNullOrEmpty(receiptEmail)) return receiptEmail;
+            return (issuerNode.GetValue<string>("contactEmail") ?? "").Trim();
         }
 
         private IContent? FindRegionByCode(string regionCode)
