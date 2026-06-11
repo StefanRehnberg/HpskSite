@@ -16,6 +16,16 @@
         <p class="text-muted">Det finns inga kommande träningsmatcher schemalagda.<br>Skapa en egen match med ett framtida startdatum.</p>
     </div>
 
+    <!-- Scope-filtered empty state: matches exist but are hidden by the "Visa matcher från" filter -->
+    <div id="upcomingMatchesScopeEmpty" class="text-center py-5" style="display: none;">
+        <i class="bi bi-funnel fs-1 text-muted"></i>
+        <h5 class="mt-3">Inga kommande matcher i ditt urval</h5>
+        <p class="text-muted">Det finns <span id="upcomingScopeHiddenCount">0</span> kommande match(er) i andra klubbar eller regioner som döljs av filtret <em>"Visa matcher från"</em>.</p>
+        <button type="button" class="btn btn-outline-primary btn-sm" onclick="revealAllMatches()">
+            <i class="bi bi-eye me-1"></i>Visa alla matcher
+        </button>
+    </div>
+
     <!-- Matches List -->
     <div id="upcomingMatchesList" class="row g-3" style="display: none;">
         <!-- Matches will be rendered here by JavaScript -->

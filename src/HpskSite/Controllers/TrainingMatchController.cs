@@ -2712,7 +2712,11 @@ namespace HpskSite.Controllers
                         var hasStarted = startDate == null || startDate <= DateTime.Now;
 
                         // Resolve the match's club name (cached per distinct club id — no per-row lookup churn)
-                        var clubId = GetClubId(m);
+                        // Note: GetClubId takes a `dynamic` arg, so calling it with a dynamic row makes the
+                        // result `dynamic` too. Assign to an explicit int? — otherwise `clubId.HasValue`
+                        // below is a dynamic dispatch that throws RuntimeBinderException once ClubId is set
+                        // (boxed int has no .HasValue), which blanked the entire ongoing/upcoming list.
+                        int? clubId = GetClubId(m);
                         string? clubName = null;
                         if (clubId.HasValue)
                         {
@@ -2834,7 +2838,11 @@ namespace HpskSite.Controllers
                         var startDate = m.StartDate != null ? (DateTime?)m.StartDate : null;
 
                         // Resolve the match's club name (cached per distinct club id — no per-row lookup churn)
-                        var clubId = GetClubId(m);
+                        // Note: GetClubId takes a `dynamic` arg, so calling it with a dynamic row makes the
+                        // result `dynamic` too. Assign to an explicit int? — otherwise `clubId.HasValue`
+                        // below is a dynamic dispatch that throws RuntimeBinderException once ClubId is set
+                        // (boxed int has no .HasValue), which blanked the entire ongoing/upcoming list.
+                        int? clubId = GetClubId(m);
                         string? clubName = null;
                         if (clubId.HasValue)
                         {

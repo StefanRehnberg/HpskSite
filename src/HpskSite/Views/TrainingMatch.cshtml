@@ -538,6 +538,44 @@
             // Re-render already-loaded live tabs from their raw (unfiltered) data
             if (window.ongoingMatchesRaw) renderOngoingMatches(window.ongoingMatchesRaw);
             if (window.upcomingMatchesRaw) renderUpcomingMatches(window.upcomingMatchesRaw);
+            // Tab badges must track the active scope too (a tab not yet rendered still needs its count refreshed)
+            recomputeMatchBadges();
+        }
+
+        // Show/hide + set a tab count badge
+        function setMatchBadge(id, count) {
+            const badge = document.getElementById(id);
+            if (!badge) return;
+            if (count > 0) {
+                badge.textContent = count;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        // Recompute the Pågående/Kommande tab badges from the cached raw lists, applying the active scope.
+        // This keeps the badge honest with the filtered list — a match in another club no longer shows as a
+        // phantom count on a tab whose list is empty.
+        function recomputeMatchBadges() {
+            if (Array.isArray(window.ongoingMatchesRaw)) {
+                setMatchBadge('ongoingMatchCount', filterMatchesByScope(window.ongoingMatchesRaw).length);
+            }
+            if (Array.isArray(window.upcomingMatchesRaw)) {
+                setMatchBadge('upcomingMatchCount', filterMatchesByScope(window.upcomingMatchesRaw).length);
+            }
+        }
+
+        // Escape hatch from the scope-filtered empty state: switch to "Alla" and re-render so the user can
+        // see and join matches held at other clubs/regions straight from the list (not only via code/QR).
+        function revealAllMatches() {
+            window.matchScope = 'all';
+            const sel = document.getElementById('matchScopeSelect');
+            if (sel) sel.value = 'all';
+            try { localStorage.setItem('hpsk_match_scope', 'all'); } catch (e) { }
+            if (Array.isArray(window.ongoingMatchesRaw)) renderOngoingMatches(window.ongoingMatchesRaw);
+            if (Array.isArray(window.upcomingMatchesRaw)) renderUpcomingMatches(window.upcomingMatchesRaw);
+            recomputeMatchBadges();
         }
 
         document.addEventListener('DOMContentLoaded', buildMatchScopeOptions);
@@ -2038,10 +2076,12 @@
             const container = document.getElementById('ongoingMatchesList');
             const loading = document.getElementById('ongoingMatchesLoading');
             const empty = document.getElementById('ongoingMatchesEmpty');
+            const scopeEmpty = document.getElementById('ongoingMatchesScopeEmpty');
 
             if (loading) loading.style.display = 'block';
             if (container) container.style.display = 'none';
             if (empty) empty.style.display = 'none';
+            if (scopeEmpty) scopeEmpty.style.display = 'none';
 
             fetch('/umbraco/surface/TrainingMatch/GetOngoingMatches')
                 .then(response => response.json())
@@ -2059,16 +2099,8 @@
                         }
 
                         ongoingMatchesLoaded = true;
+                        // renderOngoingMatches sets the badge from the scope-filtered count
                         renderOngoingMatches(result.matches);
-
-                        // Update badge
-                        const badge = document.getElementById('ongoingMatchCount');
-                        if (badge && result.matches.length > 0) {
-                            badge.textContent = result.matches.length;
-                            badge.style.display = 'inline-block';
-                        } else if (badge) {
-                            badge.style.display = 'none';
-                        }
                     } else {
                         console.error('Error loading ongoing matches:', result.message);
                         if (empty) empty.style.display = 'block';
@@ -2084,21 +2116,37 @@
         function renderOngoingMatches(matches) {
             const container = document.getElementById('ongoingMatchesList');
             const empty = document.getElementById('ongoingMatchesEmpty');
+            const scopeEmpty = document.getElementById('ongoingMatchesScopeEmpty');
 
             if (!container) return;
 
             // Keep the raw list so the scope selector can re-render, then apply the active scope
-            window.ongoingMatchesRaw = matches;
-            matches = filterMatchesByScope(matches);
+            const raw = Array.isArray(matches) ? matches : [];
+            window.ongoingMatchesRaw = raw;
+            matches = filterMatchesByScope(raw);
+
+            // Badge tracks what's actually visible under the current scope
+            setMatchBadge('ongoingMatchCount', matches.length);
 
             if (!matches || matches.length === 0) {
                 container.style.display = 'none';
-                if (empty) empty.style.display = 'block';
+                // If matches exist but are hidden by the club/region filter, offer a one-tap reveal
+                // instead of a dead "inga matcher" — so they're joinable from the list, not just code/QR.
+                if (raw.length > 0) {
+                    const cnt = document.getElementById('ongoingScopeHiddenCount');
+                    if (cnt) cnt.textContent = raw.length;
+                    if (scopeEmpty) scopeEmpty.style.display = 'block';
+                    if (empty) empty.style.display = 'none';
+                } else {
+                    if (empty) empty.style.display = 'block';
+                    if (scopeEmpty) scopeEmpty.style.display = 'none';
+                }
                 return;
             }
 
             container.style.display = 'block';
             if (empty) empty.style.display = 'none';
+            if (scopeEmpty) scopeEmpty.style.display = 'none';
 
             // Store matches globally for modal access
             window.ongoingMatchesData = matches;
@@ -2300,10 +2348,12 @@
             const container = document.getElementById('upcomingMatchesList');
             const loading = document.getElementById('upcomingMatchesLoading');
             const empty = document.getElementById('upcomingMatchesEmpty');
+            const scopeEmpty = document.getElementById('upcomingMatchesScopeEmpty');
 
             if (loading) loading.style.display = 'block';
             if (container) container.style.display = 'none';
             if (empty) empty.style.display = 'none';
+            if (scopeEmpty) scopeEmpty.style.display = 'none';
 
             fetch('/umbraco/surface/TrainingMatch/GetUpcomingMatches')
                 .then(response => response.json())
@@ -2321,16 +2371,8 @@
                         }
 
                         upcomingMatchesLoaded = true;
+                        // renderUpcomingMatches sets the badge from the scope-filtered count
                         renderUpcomingMatches(result.matches);
-
-                        // Update badge
-                        const badge = document.getElementById('upcomingMatchCount');
-                        if (badge && result.matches.length > 0) {
-                            badge.textContent = result.matches.length;
-                            badge.style.display = 'inline-block';
-                        } else if (badge) {
-                            badge.style.display = 'none';
-                        }
                     } else {
                         console.error('Error loading upcoming matches:', result.message);
                         if (empty) empty.style.display = 'block';
@@ -2346,21 +2388,36 @@
         function renderUpcomingMatches(matches) {
             const container = document.getElementById('upcomingMatchesList');
             const empty = document.getElementById('upcomingMatchesEmpty');
+            const scopeEmpty = document.getElementById('upcomingMatchesScopeEmpty');
 
             if (!container) return;
 
             // Keep the raw list so the scope selector can re-render, then apply the active scope
-            window.upcomingMatchesRaw = matches;
-            matches = filterMatchesByScope(matches);
+            const raw = Array.isArray(matches) ? matches : [];
+            window.upcomingMatchesRaw = raw;
+            matches = filterMatchesByScope(raw);
+
+            // Badge tracks what's actually visible under the current scope
+            setMatchBadge('upcomingMatchCount', matches.length);
 
             if (!matches || matches.length === 0) {
                 container.style.display = 'none';
-                if (empty) empty.style.display = 'block';
+                // Matches hidden by the club/region filter → offer a one-tap reveal
+                if (raw.length > 0) {
+                    const cnt = document.getElementById('upcomingScopeHiddenCount');
+                    if (cnt) cnt.textContent = raw.length;
+                    if (scopeEmpty) scopeEmpty.style.display = 'block';
+                    if (empty) empty.style.display = 'none';
+                } else {
+                    if (empty) empty.style.display = 'block';
+                    if (scopeEmpty) scopeEmpty.style.display = 'none';
+                }
                 return;
             }
 
             container.style.display = 'block';
             if (empty) empty.style.display = 'none';
+            if (scopeEmpty) scopeEmpty.style.display = 'none';
 
             container.innerHTML = '<div class="list-group">' + matches.map(m => {
                 // Compact avatars (max 3)
@@ -2479,35 +2536,29 @@
         // ===== Badge Count Updates =====
 
         function loadBadgeCounts() {
-            // Single lightweight call to get both counts
-            fetch('/umbraco/surface/TrainingMatch/GetMatchCounts')
+            // Badges must mirror the scope-filtered lists, so we can't use the global GetMatchCounts
+            // server total (that produced a phantom count on a tab whose filtered list was empty).
+            // Fetch both lists, cache them raw (so the scope selector / empty-state reveal can use them
+            // before a tab is ever opened), then count under the active scope.
+            fetch('/umbraco/surface/TrainingMatch/GetOngoingMatches')
                 .then(response => response.json())
                 .then(result => {
-                    if (result.success) {
-                        // Update ongoing badge
-                        const ongoingBadge = document.getElementById('ongoingMatchCount');
-                        if (ongoingBadge) {
-                            if (result.ongoingCount > 0) {
-                                ongoingBadge.textContent = result.ongoingCount;
-                                ongoingBadge.style.display = 'inline-block';
-                            } else {
-                                ongoingBadge.style.display = 'none';
-                            }
-                        }
-
-                        // Update upcoming badge
-                        const upcomingBadge = document.getElementById('upcomingMatchCount');
-                        if (upcomingBadge) {
-                            if (result.upcomingCount > 0) {
-                                upcomingBadge.textContent = result.upcomingCount;
-                                upcomingBadge.style.display = 'inline-block';
-                            } else {
-                                upcomingBadge.style.display = 'none';
-                            }
-                        }
+                    if (result && result.success && Array.isArray(result.matches)) {
+                        window.ongoingMatchesRaw = result.matches;
+                        setMatchBadge('ongoingMatchCount', filterMatchesByScope(result.matches).length);
                     }
                 })
-                .catch(error => console.error('Error loading match counts:', error));
+                .catch(error => console.error('Error loading ongoing count:', error));
+
+            fetch('/umbraco/surface/TrainingMatch/GetUpcomingMatches')
+                .then(response => response.json())
+                .then(result => {
+                    if (result && result.success && Array.isArray(result.matches)) {
+                        window.upcomingMatchesRaw = result.matches;
+                        setMatchBadge('upcomingMatchCount', filterMatchesByScope(result.matches).length);
+                    }
+                })
+                .catch(error => console.error('Error loading upcoming count:', error));
         }
 
         // Request to join the current match (from spectator mode)
