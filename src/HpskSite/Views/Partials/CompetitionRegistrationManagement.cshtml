@@ -609,7 +609,7 @@
                 <div class="form-check mb-0">
                     <input class="form-check-input" type="checkbox" id="markPaidSendReceipt" checked>
                     <label class="form-check-label" for="markPaidSendReceipt">
-                        Skicka kvitto via e-post till skytten
+                        Skicka betalningsbekräftelse via e-post till skytten
                     </label>
                 </div>
             </div>
@@ -1906,14 +1906,36 @@ async function markPaidFromManageModal() {
     const reg = currentManageInvoiceReg;
     const competitionId = $('.competition-registration-management').data('competition-id');
 
-    // No-invoice path: silently create an invoice via GeneratePaymentQR, then open the
-    // mark-as-paid modal with the new invoiceId. The QR itself is discarded — the operator
-    // doesn't need it, they're recording a payment that already happened (or is happening
-    // in cash right now).
+    // No-invoice path: silently create an invoice via RegistrationAdmin/EnsureInvoice,
+    // then open the mark-as-paid modal with the new invoiceId. We deliberately do NOT go
+    // through Swish/GeneratePaymentQR here — recording a cash/bankgiro/Swish-via-app
+    // payment must work even when the competition has no Swish number configured.
     if (!reg.invoiceId) {
         try {
-            const response = await fetch(`/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}&targetMemberId=${reg.memberId}`);
-            const data = await response.json();
+            const token = $('input[name="__RequestVerificationToken"]').val();
+            const response = await fetch('/umbraco/surface/RegistrationAdmin/EnsureInvoice', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: JSON.stringify({ registrationId: reg.id })
+            });
+            // Read as text first so an empty/non-JSON body (e.g. a 404 because the server
+            // wasn't rebuilt, or a 500 error page) gives a clear message instead of the
+            // cryptic "Unexpected end of JSON input".
+            const raw = await response.text();
+            let data;
+            try {
+                data = raw ? JSON.parse(raw) : null;
+            } catch {
+                data = null;
+            }
+            if (!response.ok || !data) {
+                alert('Kunde inte starta betalning: serverfel (' + response.status + '). '
+                    + 'Kontrollera att tjänsten har startats om efter senaste uppdateringen.');
+                return;
+            }
             if (!data.success || !data.invoiceId) {
                 alert('Kunde inte starta betalning: ' + (data.message || 'okänt fel'));
                 return;
@@ -2881,7 +2903,7 @@ function renderInvoiceHistory(data) {
         Cancelled: 'Makulerad',
         Refunded: 'Återbetald',
         EmailSent: 'E-post skickad',
-        ReceiptSent: 'Kvitto skickat',
+        ReceiptSent: 'Betalningsbekräftelse skickad',
         Transferred: 'Överförd till annan skytt',
         StatusChanged: 'Status ändrad'
     })[t] || t;

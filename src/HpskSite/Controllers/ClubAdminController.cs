@@ -175,6 +175,7 @@ namespace HpskSite.Controllers
                     Address = clubNode.Value<string>("address") ?? "",
                     City = clubNode.Value<string>("city") ?? "",
                     PostalCode = clubNode.Value<string>("postalCode") ?? "",
+                    OrgNumber = clubNode.Value<string>("orgNumber") ?? "",
                     WebSite = clubNode.Value<string>("clubUrl") ?? "",
                     IsActive = clubNode.IsPublished(),
                     MemberCount = memberCount,
@@ -204,6 +205,7 @@ namespace HpskSite.Controllers
             string address,
             string city,
             string postalCode,
+            string orgNumber,
             bool isActive,
             int? clubIdNumber,
             string regionalFederation)
@@ -359,6 +361,7 @@ namespace HpskSite.Controllers
                         clubContent.SetValue("address", address ?? "");
                         clubContent.SetValue("city", city ?? "");
                         clubContent.SetValue("postalCode", postalCode ?? "");
+                        clubContent.SetValue("orgNumber", orgNumber ?? "");
                         clubContent.SetValue("clubId", clubIdNumber);
                         clubContent.SetValue("regionalFederation", regionalFederation ?? "");
 
@@ -415,6 +418,7 @@ namespace HpskSite.Controllers
                                 newClubContent.SetValue("address", address ?? "");
                                 newClubContent.SetValue("city", city ?? "");
                                 newClubContent.SetValue("postalCode", postalCode ?? "");
+                                newClubContent.SetValue("orgNumber", orgNumber ?? "");
                                 newClubContent.SetValue("clubId", clubIdNumber);
                                 newClubContent.SetValue("regionalFederation", regionalFederation ?? "");
 
@@ -1909,6 +1913,10 @@ namespace HpskSite.Controllers
                     contactPerson = regionalPage.Value<string>("contactPerson") ?? "",
                     contactEmail = regionalPage.Value<string>("contactEmail") ?? "",
                     contactPhone = regionalPage.Value<string>("contactPhone") ?? "",
+                    orgNumber = regionalPage.Value<string>("orgNumber") ?? "",
+                    address = regionalPage.Value<string>("address") ?? "",
+                    city = regionalPage.Value<string>("city") ?? "",
+                    postalCode = regionalPage.Value<string>("postalCode") ?? "",
                     pageId = regionalPage.Id
                 };
 
@@ -1933,7 +1941,11 @@ namespace HpskSite.Controllers
             string welcomeText,
             string contactPerson,
             string contactEmail,
-            string contactPhone)
+            string contactPhone,
+            string orgNumber,
+            string address,
+            string city,
+            string postalCode)
         {
             if (!await _authService.IsCurrentUserAdminAsync())
             {
@@ -1971,6 +1983,10 @@ namespace HpskSite.Controllers
                 regionalPage.SetValue("contactPerson", contactPerson ?? "");
                 regionalPage.SetValue("contactEmail", contactEmail ?? "");
                 regionalPage.SetValue("contactPhone", contactPhone ?? "");
+                regionalPage.SetValue("orgNumber", orgNumber ?? "");
+                regionalPage.SetValue("address", address ?? "");
+                regionalPage.SetValue("city", city ?? "");
+                regionalPage.SetValue("postalCode", postalCode ?? "");
 
                 _contentService.Save(regionalPage);
                 _contentService.Publish(regionalPage, new[] { "*" }, -1);

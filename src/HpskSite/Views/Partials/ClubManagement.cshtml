@@ -191,9 +191,20 @@
                     </div>
 
                     <h6>Adress</h6>
-                    <div class="mb-3">
-                        <label for="address" class="form-label">Gatuadress</label>
-                        <input type="text" class="form-control" id="address" name="address">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="address" class="form-label">Gatuadress</label>
+                                <input type="text" class="form-control" id="address" name="address">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="orgNumber" class="form-label">Organisationsnummer</label>
+                                <input type="text" class="form-control" id="orgNumber" name="orgNumber" placeholder="T.ex. 802345-6789">
+                                <div class="form-text">Visas på kvitton (t.ex. för friskvårdsbidrag)</div>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="row">
@@ -890,6 +901,7 @@ function editClub(clubId) {
                 document.getElementById('address').value = club.address;
                 document.getElementById('city').value = club.city;
                 document.getElementById('postalCode').value = club.postalCode;
+                document.getElementById('orgNumber').value = club.orgNumber || '';
                 document.getElementById('isActive').checked = club.isActive;
                 document.getElementById('clubIdNumber').value = club.clubIdNumber || '';
 
@@ -952,6 +964,7 @@ function saveClub() {
     formData.append('address', document.getElementById('address').value);
     formData.append('city', document.getElementById('city').value);
     formData.append('postalCode', document.getElementById('postalCode').value);
+    formData.append('orgNumber', document.getElementById('orgNumber').value);
     formData.append('isActive', document.getElementById('isActive').checked);
     formData.append('clubIdNumber', document.getElementById('clubIdNumber').value);
     formData.append('regionalFederation', document.getElementById('regionalFederation').value);

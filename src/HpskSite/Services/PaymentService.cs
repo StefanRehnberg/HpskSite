@@ -571,10 +571,21 @@ namespace HpskSite.Services
                 var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
                 var competitionName = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "";
 
+                // Resolve the organizer name (hosting club, or the region for region-hosted
+                // comps) for the confirmation. The full issuer details (org.nr + address)
+                // live on the printable Kvitto, not in this confirmation email.
                 var organizerClubId = competition?.GetValue<int>("clubId") ?? 0;
-                var organizerName = organizerClubId > 0
-                    ? (_clubService.GetClubNameById(organizerClubId) ?? "")
-                    : "";
+                string organizerName;
+                if (organizerClubId > 0)
+                {
+                    organizerName = _clubService.GetClubNameById(organizerClubId) ?? "";
+                }
+                else
+                {
+                    var regionCode = competition?.GetValue<string>("regionalFederation") ?? "";
+                    var regionNode = !string.IsNullOrWhiteSpace(regionCode) ? FindRegionByCode(regionCode) : null;
+                    organizerName = regionNode?.GetValue<string>("regionName") ?? regionNode?.Name ?? "";
+                }
 
                 // Resolve the linked registration to list class names. Single-reg invoice
                 // (new format) preferred; legacy multi-reg invoices fall back silently to
@@ -601,7 +612,7 @@ namespace HpskSite.Services
                     ? transactionId
                     : invoiceNumber;
 
-                await _emailService.SendPaymentReceiptAsync(
+                await _emailService.SendPaymentConfirmationAsync(
                     memberEmail: memberEmail,
                     memberName: memberName,
                     competitionName: competitionName,
@@ -628,6 +639,21 @@ namespace HpskSite.Services
             {
                 _logger.LogError(ex, "Failed to send payment receipt for invoice {InvoiceId}", invoice.Id);
             }
+        }
+
+        /// <summary>
+        /// Find a regionalPage content node by its regionCode (a club's regionalFederation
+        /// value). Returns null if no match — callers treat that as "no organizer details".
+        /// </summary>
+        private IContent? FindRegionByCode(string regionCode)
+        {
+            var rootContent = _contentService.GetRootContent().FirstOrDefault();
+            if (rootContent == null) return null;
+
+            var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+            return rootChildren.FirstOrDefault(c =>
+                c.ContentType.Alias == "regionalPage" &&
+                (c.GetValue<string>("regionCode") ?? "").Equals(regionCode, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>

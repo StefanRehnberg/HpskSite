@@ -278,6 +278,34 @@
 
                         <hr class="my-4">
 
+                        <!-- Organisation & Address Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-geo-alt-fill me-2"></i>Organisation &amp; adress
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Organisationsnummer</label>
+                                <input type="text" class="form-control" id="regionOrgNumber" name="orgNumber" placeholder="802345-6789">
+                                <small class="text-muted">Visas på kvitton (t.ex. för friskvårdsbidrag)</small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Gatuadress</label>
+                                <input type="text" class="form-control" id="regionAddress" name="address" placeholder="Gatugatan 123">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Postnummer</label>
+                                <input type="text" class="form-control" id="regionPostalCode" name="postalCode" placeholder="123 45">
+                            </div>
+                            <div class="col-md-8 mb-3">
+                                <label class="form-label">Ort</label>
+                                <input type="text" class="form-control" id="regionCity" name="city" placeholder="Stockholm">
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
                         <!-- Brevo Email Integration -->
                         <h6 class="text-muted mb-3">
                             <i class="bi bi-envelope me-2"></i>E-postutskick (Brevo)
@@ -780,6 +808,10 @@
                     document.getElementById('regionContactPerson').value = data.data.contactPerson || '';
                     document.getElementById('regionContactEmail').value = data.data.contactEmail || '';
                     document.getElementById('regionContactPhone').value = data.data.contactPhone || '';
+                    document.getElementById('regionOrgNumber').value = data.data.orgNumber || '';
+                    document.getElementById('regionAddress').value = data.data.address || '';
+                    document.getElementById('regionPostalCode').value = data.data.postalCode || '';
+                    document.getElementById('regionCity').value = data.data.city || '';
 
                     // Brevo API key
                     var brevoField = document.getElementById('regionBrevoApiKey');

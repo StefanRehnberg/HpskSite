@@ -112,6 +112,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionQualifyingResultsService>();
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsStartListBuilder>();
 
+            // Printable Kvitto (receipt) builder — shared by the /kvitto page.
+            builder.Services.AddScoped<ReceiptModelBuilder>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

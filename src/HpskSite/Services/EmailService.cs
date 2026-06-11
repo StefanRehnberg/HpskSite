@@ -1630,15 +1630,16 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Send a payment receipt to the shooter after a cashier marks an invoice as paid.
-        /// Renders a small self-contained HTML body — no attachments, no QR — so the message
-        /// reads as a confirmation, not a payment request. The body covers: shooter, comp,
-        /// classes, billed/actual amount, method, reference, paid date and organizer.
+        /// Send a payment CONFIRMATION ("Betalningsbekräftelse") to the shooter after a
+        /// cashier marks an invoice as paid. This is NOT the receipt — it's a lightweight
+        /// confirmation that the payment was registered, and it points the shooter to
+        /// Min sida → Tävlingar where they can print the actual legal "Kvitto" (the document
+        /// an employer needs for friskvårdsbidrag).
         ///
         /// `actualAmount` is shown as a separate line only when it differs from `billedAmount`,
         /// so a normal exact-match payment renders one amount line.
         /// </summary>
-        public async Task SendPaymentReceiptAsync(
+        public async Task SendPaymentConfirmationAsync(
             string memberEmail,
             string memberName,
             string competitionName,
@@ -1652,14 +1653,17 @@ namespace HpskSite.Services
         {
             if (string.IsNullOrEmpty(_smtpHost))
             {
-                _logger.LogWarning("SMTP host not configured. Receipt not sent to {Email}", memberEmail);
+                _logger.LogWarning("SMTP host not configured. Confirmation not sent to {Email}", memberEmail);
                 return;
             }
 
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             string FormatKr(decimal v) => Math.Round(v).ToString("N0", sv) + " kr";
             var paidLabel = paidAt.ToString("yyyy-MM-dd HH:mm", sv);
-            var subject = $"Kvitto – {competitionName}";
+            var subject = $"Betalningsbekräftelse – {competitionName}";
+
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var receiptPageUrl = $"{siteUrl.TrimEnd('/')}/user-profile-page#tavlingar";
 
             // Variance line only when actual differs from billed; keeps the common case clean.
             var amountRows = Math.Abs(actualAmount - billedAmount) < 0.005m
@@ -1678,16 +1682,18 @@ namespace HpskSite.Services
         table.kv {{ width:100%; border-collapse:collapse; margin:14px 0; }}
         table.kv td {{ padding:6px 8px; border-bottom:1px solid #e9ecef; vertical-align:top; }}
         table.kv td:first-child {{ width:42%; color:#495057; }}
+        .kvitto-box {{ background:#fff; border:1px solid #dee2e6; border-radius:6px; padding:16px; margin-top:16px; }}
+        .btn {{ display:inline-block; background:#198754; color:#fff !important; text-decoration:none; padding:10px 18px; border-radius:6px; margin-top:6px; }}
         .footer {{ margin-top:18px; font-size:12px; color:#6c757d; text-align:center; }}
     </style>
 </head>
 <body>
     <div class='container'>
-        <div class='header'><h2>✓ Kvitto för betalning</h2></div>
+        <div class='header'><h2>✓ Betalningsbekräftelse</h2></div>
         <div class='content'>
             <p>Hej {System.Net.WebUtility.HtmlEncode(memberName)}!</p>
-            <p>Tack för din betalning till <strong>{System.Net.WebUtility.HtmlEncode(competitionName)}</strong>.
-               Detta är ditt kvitto.</p>
+            <p>Vi bekräftar att din betalning till <strong>{System.Net.WebUtility.HtmlEncode(competitionName)}</strong>
+               har registrerats.</p>
             <table class='kv'>
                 <tr><td><strong>Skytt:</strong></td><td>{System.Net.WebUtility.HtmlEncode(memberName)}</td></tr>
                 <tr><td><strong>Tävling:</strong></td><td>{System.Net.WebUtility.HtmlEncode(competitionName)}</td></tr>
@@ -1698,9 +1704,14 @@ namespace HpskSite.Services
                 {amountRows}
                 {(string.IsNullOrEmpty(reference) ? "" : $"<tr><td><strong>Referens:</strong></td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>")}
             </table>
-            <p>Spara gärna detta kvitto för dina egna handlingar.</p>
+            <div class='kvitto-box'>
+                <p style='margin-top:0'><strong>Behöver du ett kvitto?</strong></p>
+                <p>Du kan skriva ut ett kvitto – t.ex. för friskvårdsbidrag – på <strong>Min sida</strong>
+                   under fliken <strong>Tävlingar</strong>. Klicka på kvittoknappen på raden för den här tävlingen.</p>
+                <a class='btn' href='{receiptPageUrl}'>Till Mina tävlingar</a>
+            </div>
         </div>
-        <div class='footer'>Pistol.nu — automatiskt skickat kvitto. Svara ej på detta mejl.</div>
+        <div class='footer'>Pistol.nu — automatisk betalningsbekräftelse. Svara ej på detta mejl.</div>
     </div>
 </body>
 </html>";

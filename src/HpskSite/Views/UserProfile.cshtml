@@ -1101,6 +1101,18 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Deep-link: open the Tävlingar tab when arrived with #tavlingar (e.g. the
+    // "Till Mina tävlingar" link in the Betalningsbekräftelse email). Deferred to a
+    // tick after load — switching during DOMContentLoaded loses the race against the
+    // dashboard's own on-load activation, so the tab snaps back to Dashboard.
+    function openTabFromHash() {
+        if (window.location.hash === '#tavlingar') {
+            switchToTab('competitions-tab');
+        }
+    }
+    window.addEventListener('hashchange', openTabFromHash);
+    setTimeout(openTabFromHash, 0);
+
     // Auto-save shooter class on change
     document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"], input[name="duellShooterClass"], input[name="nationellHelmatchShooterClass"], input[name="magnumPrecisionShooterClass"]').forEach(radio => {
         radio.addEventListener('change', function() {
@@ -4238,6 +4250,11 @@ function renderCompetitionsTable() {
                                             <i class="bi bi-credit-card"></i>
                                         </button>
                                     ` : ''}
+                                    ${comp.paymentStatus === 'paid' && comp.invoiceId ? `
+                                        <a href="/kvitto/${comp.invoiceId}" target="_blank" rel="noopener" class="btn btn-outline-secondary" title="Skriv ut kvitto">
+                                            <i class="bi bi-receipt"></i>
+                                        </a>
+                                    ` : ''}
                                     ${comp.canUnregister ? `
                                         <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')" title="Avanmäl">
                                             <i class="bi bi-x-circle"></i>
@@ -4289,6 +4306,11 @@ function renderCompetitionsCards() {
                                 <button class="btn btn-success" onclick="payInvoice(${comp.competitionId}, ${comp.invoiceId})">
                                     <i class="bi bi-credit-card"></i> Betala med Swish
                                 </button>
+                            ` : ''}
+                            ${comp.paymentStatus === 'paid' && comp.invoiceId ? `
+                                <a href="/kvitto/${comp.invoiceId}" target="_blank" rel="noopener" class="btn btn-outline-secondary">
+                                    <i class="bi bi-receipt"></i> Skriv ut kvitto
+                                </a>
                             ` : ''}
                             ${comp.canUnregister ? `
                                 <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')">

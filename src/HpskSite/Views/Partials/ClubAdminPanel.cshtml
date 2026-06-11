@@ -343,6 +343,13 @@
                                 <input type="text" class="form-control" id="city" name="city" placeholder="Stockholm">
                             </div>
                         </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Organisationsnummer</label>
+                                <input type="text" class="form-control" id="orgNumber" name="orgNumber" placeholder="802345-6789">
+                                <small class="text-muted">Visas på kvitton (t.ex. för friskvårdsbidrag)</small>
+                            </div>
+                        </div>
 
                         <hr class="my-4">
 
@@ -2682,6 +2689,7 @@ function loadClubSettings() {
                 document.getElementById('address').value = data.data.address || '';
                 document.getElementById('city').value = data.data.city || '';
                 document.getElementById('postalCode').value = data.data.postalCode || '';
+                document.getElementById('orgNumber').value = data.data.orgNumber || '';
 
                 // Description
                 document.getElementById('club_description').value = data.data.description || '';

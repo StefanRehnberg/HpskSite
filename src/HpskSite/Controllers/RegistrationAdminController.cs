@@ -1176,6 +1176,119 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Ensure a registration has an invoice so the cashier can record a payment
+        /// (cash/bankgiro/Swish-via-app/etc.) — WITHOUT requiring a Swish number on the
+        /// competition. The old desk flow lazily created the invoice via
+        /// Swish/GeneratePaymentQR, which bails with "Ingen Swish-nummer är konfigurerad"
+        /// when Swish isn't set up, blocking the entirely Swish-independent "Registrera
+        /// betalning" action. This endpoint computes the fee via RegistrationFeeCalculator
+        /// (single source of truth) and creates the invoice directly.
+        ///
+        /// Idempotent: if a non-cancelled invoice already exists for the registration it's
+        /// returned as-is rather than creating a duplicate.
+        /// Auth: same four-tier rule as the rest of the per-competition surface.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> EnsureInvoice([FromBody] EnsureInvoiceRequest request)
+        {
+            try
+            {
+                if (request == null || request.RegistrationId <= 0)
+                    return Json(new { success = false, message = "registrationId krävs." });
+
+                var registration = _contentService.GetById(request.RegistrationId);
+                if (registration == null || registration.ContentType.Alias != "competitionRegistration")
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
+
+                var competitionId = registration.GetValue<int>("competitionId");
+                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(competitionId);
+                if (!authorized)
+                {
+                    var competitionClubId = competition.GetValue<int>("clubId");
+                    if (competitionClubId > 0)
+                    {
+                        authorized = await _authService.IsClubAdminForClub(competitionClubId)
+                                  || await _authService.IsSkjutledareForClub(competitionClubId);
+                    }
+                }
+                if (!authorized)
+                    return Json(new { success = false, message = "Access denied" });
+
+                // Reuse an existing non-cancelled invoice if one is already linked — the
+                // operator just needs *an* invoice to mark paid, not a fresh one each click.
+                var existing = FindInvoiceForRegistration(competition, request.RegistrationId);
+                if (existing != null)
+                {
+                    return Json(new
+                    {
+                        success = true,
+                        invoiceId = existing.Id,
+                        invoiceNumber = existing.GetValue<string>("invoiceNumber") ?? existing.Id.ToString(),
+                        amount = existing.GetValue<decimal>("totalAmount")
+                    });
+                }
+
+                // Compute the fee the same way every other surface does.
+                var classEntries = HpskSite.Models.CompetitionRegistrationDocument
+                    .DeserializeShootingClasses(registration.GetValue<string>("shootingClasses") ?? "");
+                var classCodes = classEntries
+                    .Select(c => c.Class)
+                    .Where(c => !string.IsNullOrEmpty(c))
+                    .ToList();
+                var isSubCompetition = registration.HasProperty("isSubCompetition")
+                    && registration.GetValue<bool>("isSubCompetition");
+
+                // Empty class list → a single non-junior bucket so the base fee applies once
+                // (mirrors SwishController.GeneratePaymentQR).
+                var classesForCalc = classCodes.Count > 0
+                    ? (IReadOnlyCollection<string>)classCodes
+                    : new[] { string.Empty };
+                var totalAmount = HpskSite.Services.RegistrationFeeCalculator
+                    .Calculate(competition, classesForCalc, isSubCompetition);
+
+                if (totalAmount <= 0)
+                    return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad för denna tävling." });
+
+                var memberId = registration.GetValue<int>("memberId");
+                var memberName = registration.GetValue<string>("memberName") ?? "Okänd medlem";
+
+                var invoice = await _paymentService.CreateInvoiceAsync(
+                    competitionId,
+                    memberId.ToString(),
+                    memberName,
+                    request.RegistrationId,
+                    totalAmount,
+                    "Swish");
+
+                if (invoice == null)
+                    return Json(new { success = false, message = "Kunde inte skapa faktura för betalning." });
+
+                // Link the invoice back to the registration so subsequent reads find it.
+                registration.SetValue("invoiceId", invoice.Id);
+                var saveResult = _contentService.Save(registration);
+                if (saveResult.Success)
+                    _contentService.Publish(registration, new[] { "*" }, -1);
+
+                return Json(new
+                {
+                    success = true,
+                    invoiceId = invoice.Id,
+                    invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString(),
+                    amount = totalAmount
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Resolve the current logged-in member to (id, name) for stamping audit rows.
         /// Returns (null, null) when no member is logged in or the lookup fails.
         /// </summary>
@@ -1597,6 +1710,15 @@ namespace HpskSite.Controllers
         {
             public int RegistrationId { get; set; }
             public bool CheckedIn { get; set; }
+        }
+
+        /// <summary>
+        /// Request model for ensuring a registration has an invoice (Swish-independent
+        /// payment recording).
+        /// </summary>
+        public class EnsureInvoiceRequest
+        {
+            public int RegistrationId { get; set; }
         }
 
         /// <summary>
