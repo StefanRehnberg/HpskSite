@@ -1,6 +1,7 @@
 using HpskSite.Models;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Springskytte.Models;
+using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -18,6 +19,7 @@ namespace HpskSite.Services
         private readonly ClubService _clubService;
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
+        private readonly PaymentService _paymentService;
         private readonly ILogger<CompetitionTeamService> _logger;
 
         public CompetitionTeamService(
@@ -27,6 +29,7 @@ namespace HpskSite.Services
             ClubService clubService,
             IMemberService memberService,
             IContentService contentService,
+            PaymentService paymentService,
             ILogger<CompetitionTeamService> logger)
         {
             _databaseFactory = databaseFactory;
@@ -35,6 +38,7 @@ namespace HpskSite.Services
             _clubService = clubService;
             _memberService = memberService;
             _contentService = contentService;
+            _paymentService = paymentService;
             _logger = logger;
         }
 
@@ -43,13 +47,24 @@ namespace HpskSite.Services
             int[] memberIds, int? spareId, int createdByMemberId, bool isRelay = false)
         {
             var (coreMembers, maxSpares) = TeamClassHelper.GetTeamSize(teamClass);
+            // Springskytte: shooters may be named later (any time before the event), so a team
+            // or relay can be created with no/partial members and the fee paid up front. All
+            // other disciplines still require the exact core count at creation.
+            var isSpringskytteComp = GetCompetitionType(competitionId) == "Springskytte";
             var nonSpareIds = spareId.HasValue
                 ? memberIds.Where(id => id != spareId.Value).ToArray()
                 : memberIds;
             var spareIds = spareId.HasValue ? new[] { spareId.Value } : Array.Empty<int>();
 
-            if (nonSpareIds.Length != coreMembers)
+            if (isSpringskytteComp)
+            {
+                if (nonSpareIds.Length > coreMembers)
+                    return (false, $"Max {coreMembers} ordinarie medlemmar.", null);
+            }
+            else if (nonSpareIds.Length != coreMembers)
+            {
                 return (false, $"Laget behöver exakt {coreMembers} ordinarie medlemmar.", null);
+            }
 
             if (spareIds.Length > maxSpares)
                 return (false, $"Max {maxSpares} reserv(er) tillåtna.", null);
@@ -73,7 +88,7 @@ namespace HpskSite.Services
             else
             {
                 // Standard: validate all members are registered in compatible classes
-                var isSpringskytte = GetCompetitionType(competitionId) == "Springskytte";
+                var isSpringskytte = isSpringskytteComp;
                 var compatibleClasses = TeamClassHelper.GetCompatibleIndividualClasses(teamClass, isSpringskytte);
                 var registeredMembers = GetRegisteredMembersInClasses(competitionId, compatibleClasses, isSpringskytte);
                 var registeredMemberIds = registeredMembers.Select(r => r.MemberId).ToHashSet();
@@ -147,6 +162,18 @@ namespace HpskSite.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to create team registration doc for team {TeamId}, continuing anyway", teamId);
+            }
+
+            // Eager team invoice: create the Pending team/relay fee invoice now (best-effort) so
+            // the team carries it from creation and shows a payment status on the Anmälningar desk
+            // — instead of one being lazily minted only when "Betala med Swish" is clicked.
+            try
+            {
+                await EnsureTeamInvoiceCoreAsync(competitionId, teamId, teamName.Trim(), clubId, isRelay);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create eager team invoice for team {TeamId}, continuing anyway", teamId);
             }
 
             return (true, "Laget har skapats.", teamId);
@@ -246,15 +273,24 @@ namespace HpskSite.Services
             if (team == null)
                 return (false, "Laget finns inte.");
 
-            // Validate team size
+            // Validate team size. Springskytte allows naming shooters later, so a partial/
+            // empty roster is accepted on edit too (other disciplines need the exact core).
             var (coreMembers, maxSpares) = TeamClassHelper.GetTeamSize(team.TeamClass);
+            var isSpringskytteComp = GetCompetitionType(team.CompetitionId) == "Springskytte";
             var nonSpareIds = spareId.HasValue
                 ? memberIds.Where(id => id != spareId.Value).ToArray()
                 : memberIds;
             var spareIds = spareId.HasValue ? new[] { spareId.Value } : Array.Empty<int>();
 
-            if (nonSpareIds.Length != coreMembers)
+            if (isSpringskytteComp)
+            {
+                if (nonSpareIds.Length > coreMembers)
+                    return (false, $"Max {coreMembers} ordinarie medlemmar.");
+            }
+            else if (nonSpareIds.Length != coreMembers)
+            {
                 return (false, $"Laget behöver exakt {coreMembers} ordinarie medlemmar.");
+            }
 
             if (spareIds.Length > maxSpares)
                 return (false, $"Max {maxSpares} reserv(er) tillåtna.");
@@ -295,10 +331,25 @@ namespace HpskSite.Services
             // Update the Umbraco registration doc
             try
             {
-                var isSpringskytte2 = GetCompetitionType(team.CompetitionId) == "Springskytte";
-                var compatClasses = TeamClassHelper.GetCompatibleIndividualClasses(team.TeamClass, isSpringskytte2);
-                var regMembers = GetRegisteredMembersInClasses(team.CompetitionId, compatClasses, isSpringskytte2);
-                var nameLookup = regMembers.ToDictionary(r => r.MemberId, r => r.Name);
+                Dictionary<int, string> nameLookup;
+                if (team.IsRelay)
+                {
+                    // Relay members aren't individually registered — resolve names directly.
+                    nameLookup = new Dictionary<int, string>();
+                    foreach (var id in memberIds)
+                    {
+                        var member = _memberService.GetById(id);
+                        nameLookup[id] = member != null
+                            ? $"{member.GetValue<string>("firstName")} {member.GetValue<string>("lastName")}"
+                            : $"Medlem #{id}";
+                    }
+                }
+                else
+                {
+                    var compatClasses = TeamClassHelper.GetCompatibleIndividualClasses(team.TeamClass, isSpringskytteComp);
+                    var regMembers = GetRegisteredMembersInClasses(team.CompetitionId, compatClasses, isSpringskytteComp);
+                    nameLookup = regMembers.ToDictionary(r => r.MemberId, r => r.Name);
+                }
                 string MemberName(int id) => nameLookup.GetValueOrDefault(id, $"Medlem #{id}");
 
                 var memberNames = nonSpareIds.Select(id => MemberName(id)).ToList();
@@ -352,6 +403,18 @@ namespace HpskSite.Services
                 isSpare, teamId, memberId);
 
             return (true, isSpare ? "Medlem ändrad till reserv." : "Medlem ändrad till ordinarie.");
+        }
+
+        /// <summary>
+        /// Returns the owning club id of a team (0 if not found). Used for edit/delete
+        /// authorization — a team is always owned by a single club.
+        /// </summary>
+        public async Task<int> GetTeamClubIdAsync(int teamId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
+                $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
+            return team?.ClubId ?? 0;
         }
 
         public async Task<List<TeamWithMembers>> GetTeamsForCompetitionAsync(int competitionId)
@@ -891,6 +954,56 @@ namespace HpskSite.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Public entry point: ensure a team/relay has its Pending fee invoice and return its
+        /// id (0 when none applies). Resolves the team from SQL, then delegates to the core.
+        /// Used by the Anmälningar desk to mark a team's fee paid even if it was created before
+        /// eager invoicing (or with "Betala senare").
+        /// </summary>
+        public async Task<int> EnsureTeamInvoiceAsync(int competitionId, int teamId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
+                $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0 AND CompetitionId = @1", teamId, competitionId);
+            if (team == null) return 0;
+            var invoice = await EnsureTeamInvoiceCoreAsync(competitionId, team.Id, team.TeamName, team.ClubId, team.IsRelay);
+            return invoice?.Id ?? 0;
+        }
+
+        /// <summary>
+        /// Create (or return the existing) Pending team/relay fee invoice for a team.
+        /// Idempotent — returns the existing non-cancelled team invoice when present. Returns
+        /// null for external competitions or a 0 fee. Team invoices use memberId "team-{teamId}".
+        /// </summary>
+        private async Task<IContent?> EnsureTeamInvoiceCoreAsync(int competitionId, int teamId, string teamName, int clubId, bool isRelay)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null || competition.GetValue<bool>("isExternal")) return null;
+
+            var feeProp = isRelay ? "stafettRegistrationFee" : "teamRegistrationFee";
+            var feeStr = competition.GetValue<string>(feeProp) ?? "0";
+            if (!decimal.TryParse(feeStr, out var fee) || fee <= 0) return null;
+
+            var teamMemberId = $"team-{teamId}";
+            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (hub != null)
+            {
+                var existing = _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
+                    .Where(c => c.ContentType.Alias == "registrationInvoice"
+                        && c.GetValue<string>("memberId") == teamMemberId
+                        && (c.GetValue<string>("paymentStatus") ?? "") != "Cancelled")
+                    .OrderByDescending(c => c.Id)
+                    .FirstOrDefault();
+                if (existing != null) return existing;
+            }
+
+            var clubName = _clubService.GetClubNameById(clubId) ?? "Okänd förening";
+            var teamRegDoc = FindTeamRegistrationDoc(competitionId, teamId);
+            return await _paymentService.CreateTeamInvoiceAsync(
+                competitionId, teamId, teamName, clubName, fee, teamRegDoc?.Id ?? 0);
         }
 
         /// <summary>

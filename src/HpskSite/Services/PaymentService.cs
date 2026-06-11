@@ -453,6 +453,99 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Ensure a registration has a (Pending) invoice — the eager-creation entry point so
+        /// every fee-bearing registration carries an invoice from the moment it's created,
+        /// instead of one being lazily minted when a payment option is first chosen.
+        ///
+        /// Idempotent: if a non-cancelled invoice already exists for the registration (matched
+        /// by the registration's own id or by the member), it is linked + returned rather than
+        /// duplicated. Returns null (no invoice) when the competition is external or the
+        /// computed fee is 0 — a free registration legitimately has no invoice.
+        ///
+        /// Fee is computed via <see cref="RegistrationFeeCalculator"/> (the single source of
+        /// truth) from the registration's own classes + deltävling flag. Best-effort: callers
+        /// should treat a null return as "no invoice yet" and not fail the registration.
+        /// </summary>
+        public async Task<IContent?> EnsureRegistrationInvoiceAsync(int competitionId, int registrationId)
+        {
+            try
+            {
+                var registration = _contentService.GetById(registrationId);
+                if (registration == null || registration.ContentType.Alias != "competitionRegistration")
+                    return null;
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || competition.GetValue<bool>("isExternal"))
+                    return null;
+
+                var memberId = registration.GetValue<int>("memberId");
+                if (memberId <= 0) return null;
+
+                // Idempotent: reuse an existing non-cancelled invoice for this registration.
+                var existing = FindActiveInvoiceForRegistration(competition, registrationId, memberId);
+                if (existing != null)
+                {
+                    if (registration.GetValue<int>("invoiceId") != existing.Id)
+                    {
+                        registration.SetValue("invoiceId", existing.Id);
+                        if (_contentService.Save(registration).Success)
+                            _contentService.Publish(registration, new[] { "*" }, -1);
+                    }
+                    return existing;
+                }
+
+                // Compute the fee the registration owes.
+                var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
+                    registration.GetValue<string>("shootingClasses") ?? "");
+                var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
+                var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
+                var classesForCalc = classCodes.Count > 0
+                    ? (IReadOnlyCollection<string>)classCodes
+                    : new[] { string.Empty };
+                var fee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+                if (fee <= 0) return null; // free registration → no invoice (status shows "Ingen avgift")
+
+                var memberName = registration.GetValue<string>("memberName") ?? "";
+                var invoice = await CreateInvoiceAsync(competitionId, memberId.ToString(), memberName, registrationId, fee, "Swish");
+                if (invoice == null) return null;
+
+                registration.SetValue("invoiceId", invoice.Id);
+                if (_contentService.Save(registration).Success)
+                    _contentService.Publish(registration, new[] { "*" }, -1);
+                return invoice;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "EnsureRegistrationInvoiceAsync failed for registration {RegistrationId}", registrationId);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Find a non-cancelled registrationInvoice for a registration via the writable
+        /// content service (current data, not the published cache). Matches the invoice's
+        /// single <c>registrationId</c>, the legacy <c>relatedRegistrationIds</c> JSON array,
+        /// or — as a fallback for invoices not yet linked — the member id. Newest first.
+        /// </summary>
+        private IContent? FindActiveInvoiceForRegistration(IContent competition, int registrationId, int memberId)
+        {
+            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (hub == null) return null;
+
+            var invoices = _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
+                .Where(c => c.ContentType.Alias == "registrationInvoice")
+                .Where(c => (c.GetValue<string>("paymentStatus") ?? "").Trim().Trim('[', ']').Trim('"') != "Cancelled")
+                .OrderByDescending(c => c.Id)
+                .ToList();
+
+            return invoices.FirstOrDefault(c =>
+                       c.GetValue<int>("registrationId") == registrationId ||
+                       (c.GetValue<string>("relatedRegistrationIds") ?? "").Contains(registrationId.ToString()))
+                   ?? invoices.FirstOrDefault(c => c.GetValue<string>("memberId") == memberId.ToString());
+        }
+
+        /// <summary>
         /// Update payment status for an invoice. Optional fields are only written when supplied,
         /// so callers can use this to set just the status, or to record a full bookkeeping entry
         /// (paymentMethod / paymentDate / transactionId / notes) at the same time.

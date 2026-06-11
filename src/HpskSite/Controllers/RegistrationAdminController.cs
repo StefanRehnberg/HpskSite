@@ -32,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly DirektplaceringStartListService _dpStartListService;
         private readonly StartListHtmlRenderer _startListRenderer;
         private readonly UmbracoStartListRepository _startListRepository;
+        private readonly CompetitionTeamService _teamService;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -49,7 +50,8 @@ namespace HpskSite.Controllers
             InvoiceAuditService auditService,
             DirektplaceringStartListService dpStartListService,
             StartListHtmlRenderer startListRenderer,
-            UmbracoStartListRepository startListRepository)
+            UmbracoStartListRepository startListRepository,
+            CompetitionTeamService teamService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -62,6 +64,7 @@ namespace HpskSite.Controllers
             _dpStartListService = dpStartListService;
             _startListRenderer = startListRenderer;
             _startListRepository = startListRepository;
+            _teamService = teamService;
         }
 
         #region Registration Management
@@ -725,6 +728,10 @@ namespace HpskSite.Controllers
 
                 _contentService.Publish(registration, new[] { "*" }, -1);
 
+                // Eager invoice: create the Pending invoice now so the registration carries it
+                // from the start (best-effort; a free registration just returns null).
+                await _paymentService.EnsureRegistrationInvoiceAsync(request.CompetitionId, registration.Id);
+
                 // Direktplacering: invalidate availability cache and regenerate the auto-built
                 // start list so the new shooter shows up on the right team without the operator
                 // having to click "Generera startlista". Mirrors what RegisterForCompetition does.
@@ -1176,6 +1183,137 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// List the teams and relays (stafett) registered for a competition, with each one's
+        /// payment status, for the "Lag" section of the Anmälningar tab. Discipline-agnostic —
+        /// any competition with teams/relay enabled. Team invoices use memberId "team-{teamId}".
+        /// Auth: same four-tier rule as the rest of the per-competition desk surface.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetCompetitionTeams(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(competitionId);
+                if (!authorized)
+                {
+                    var clubId = competition.GetValue<int>("clubId");
+                    if (clubId > 0)
+                        authorized = await _authService.IsClubAdminForClub(clubId)
+                                  || await _authService.IsSkjutledareForClub(clubId);
+                }
+                if (!authorized)
+                    return Json(new { success = false, message = "Access denied" });
+
+                var teams = await _teamService.GetTeamsForCompetitionAsync(competitionId);
+
+                // Pre-load team invoices (memberId "team-{id}", newest non-cancelled per team).
+                var teamInvoices = new Dictionary<string, IContent>();
+                var invoicesHub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                if (invoicesHub != null)
+                {
+                    foreach (var inv in _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
+                        .Where(c => c.ContentType.Alias == "registrationInvoice")
+                        .OrderByDescending(c => c.Id))
+                    {
+                        var mid = inv.GetValue<string>("memberId") ?? "";
+                        if (mid.StartsWith("team-")
+                            && !teamInvoices.ContainsKey(mid)
+                            && CleanPaymentStatus(inv.GetValue<string>("paymentStatus") ?? "") != "Cancelled")
+                        {
+                            teamInvoices[mid] = inv;
+                        }
+                    }
+                }
+
+                decimal.TryParse(competition.GetValue<string>("teamRegistrationFee") ?? "0", out var teamFee);
+                decimal.TryParse(competition.GetValue<string>("stafettRegistrationFee") ?? "0", out var stafettFee);
+
+                var result = teams.Select(t =>
+                {
+                    teamInvoices.TryGetValue($"team-{t.Team.Id}", out var inv);
+                    var fee = t.Team.IsRelay ? stafettFee : teamFee;
+                    string status = inv != null
+                        ? CleanPaymentStatus(inv.GetValue<string>("paymentStatus") ?? "Unknown")
+                        : (fee > 0 ? "No Invoice" : "No Fee");
+
+                    return new
+                    {
+                        id = t.Team.Id,
+                        teamName = t.Team.TeamName,
+                        teamClass = t.Team.TeamClass,
+                        isRelay = t.Team.IsRelay,
+                        clubName = t.ClubName ?? "",
+                        members = t.Members.Select(m => new { memberId = m.MemberId, name = m.Name, isSpare = m.IsSpare }),
+                        memberCount = t.Members.Count,
+                        paymentStatus = status,
+                        invoiceId = inv?.Id ?? 0,
+                        invoiceNumber = inv?.GetValue<string>("invoiceNumber") ?? "",
+                        amount = inv?.GetValue<decimal>("totalAmount") ?? fee
+                    };
+                }).ToList();
+
+                return Json(new { success = true, teams = result });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Ensure a team/relay has its Pending fee invoice so the cashier can mark it paid
+        /// (covers teams created before eager invoicing or with "Betala senare"). Idempotent.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> EnsureTeamInvoice([FromBody] EnsureTeamInvoiceRequest request)
+        {
+            try
+            {
+                if (request == null || request.TeamId <= 0 || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "competitionId och teamId krävs." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(request.CompetitionId);
+                if (!authorized)
+                {
+                    var clubId = competition.GetValue<int>("clubId");
+                    if (clubId > 0)
+                        authorized = await _authService.IsClubAdminForClub(clubId)
+                                  || await _authService.IsSkjutledareForClub(clubId);
+                }
+                if (!authorized)
+                    return Json(new { success = false, message = "Access denied" });
+
+                var invoiceId = await _teamService.EnsureTeamInvoiceAsync(request.CompetitionId, request.TeamId);
+                if (invoiceId == 0)
+                    return Json(new { success = false, message = "Ingen lagavgift är konfigurerad för denna tävling." });
+
+                var invoice = _contentService.GetById(invoiceId);
+                return Json(new
+                {
+                    success = true,
+                    invoiceId,
+                    invoiceNumber = invoice?.GetValue<string>("invoiceNumber") ?? invoiceId.ToString(),
+                    amount = invoice?.GetValue<decimal>("totalAmount") ?? 0m
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Ensure a registration has an invoice so the cashier can record a payment
         /// (cash/bankgiro/Swish-via-app/etc.) — WITHOUT requiring a Swish number on the
         /// competition. The old desk flow lazily created the invoice via
@@ -1219,67 +1357,18 @@ namespace HpskSite.Controllers
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
-                // Reuse an existing non-cancelled invoice if one is already linked — the
-                // operator just needs *an* invoice to mark paid, not a fresh one each click.
-                var existing = FindInvoiceForRegistration(competition, request.RegistrationId);
-                if (existing != null)
-                {
-                    return Json(new
-                    {
-                        success = true,
-                        invoiceId = existing.Id,
-                        invoiceNumber = existing.GetValue<string>("invoiceNumber") ?? existing.Id.ToString(),
-                        amount = existing.GetValue<decimal>("totalAmount")
-                    });
-                }
-
-                // Compute the fee the same way every other surface does.
-                var classEntries = HpskSite.Models.CompetitionRegistrationDocument
-                    .DeserializeShootingClasses(registration.GetValue<string>("shootingClasses") ?? "");
-                var classCodes = classEntries
-                    .Select(c => c.Class)
-                    .Where(c => !string.IsNullOrEmpty(c))
-                    .ToList();
-                var isSubCompetition = registration.HasProperty("isSubCompetition")
-                    && registration.GetValue<bool>("isSubCompetition");
-
-                // Empty class list → a single non-junior bucket so the base fee applies once
-                // (mirrors SwishController.GeneratePaymentQR).
-                var classesForCalc = classCodes.Count > 0
-                    ? (IReadOnlyCollection<string>)classCodes
-                    : new[] { string.Empty };
-                var totalAmount = HpskSite.Services.RegistrationFeeCalculator
-                    .Calculate(competition, classesForCalc, isSubCompetition);
-
-                if (totalAmount <= 0)
-                    return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad för denna tävling." });
-
-                var memberId = registration.GetValue<int>("memberId");
-                var memberName = registration.GetValue<string>("memberName") ?? "Okänd medlem";
-
-                var invoice = await _paymentService.CreateInvoiceAsync(
-                    competitionId,
-                    memberId.ToString(),
-                    memberName,
-                    request.RegistrationId,
-                    totalAmount,
-                    "Swish");
-
+                // Single source of truth — idempotently creates the Pending invoice (or returns
+                // the existing one). Returns null only for free registrations / external comps.
+                var invoice = await _paymentService.EnsureRegistrationInvoiceAsync(competitionId, request.RegistrationId);
                 if (invoice == null)
-                    return Json(new { success = false, message = "Kunde inte skapa faktura för betalning." });
-
-                // Link the invoice back to the registration so subsequent reads find it.
-                registration.SetValue("invoiceId", invoice.Id);
-                var saveResult = _contentService.Save(registration);
-                if (saveResult.Success)
-                    _contentService.Publish(registration, new[] { "*" }, -1);
+                    return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad för denna tävling." });
 
                 return Json(new
                 {
                     success = true,
                     invoiceId = invoice.Id,
                     invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString(),
-                    amount = totalAmount
+                    amount = invoice.GetValue<decimal>("totalAmount")
                 });
             }
             catch (Exception ex)
@@ -1559,7 +1648,7 @@ namespace HpskSite.Controllers
                 var children = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _);
                 var invoicesHub = children.FirstOrDefault(x => x.ContentType.Alias == "registrationInvoicesHub");
 
-                if (invoicesHub == null) return "No Invoice";
+                if (invoicesHub == null) return NoInvoiceOrNoFee(competition, registrationId);
 
                 // Get all invoices under the hub - filter out cancelled and sort by most recent
                 var allInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, int.MaxValue, out _)
@@ -1568,26 +1657,52 @@ namespace HpskSite.Controllers
                     .OrderByDescending(x => x.Id)
                     .ToList();
 
-                // Search through invoices to find one containing this registration
+                // Match the invoice by the registration's own id (the field CreateInvoiceAsync
+                // writes) OR the legacy relatedRegistrationIds array. Matching only the latter
+                // used to miss every invoice created via CreateInvoiceAsync.
                 foreach (var invoice in allInvoices)
                 {
-                    var relatedIdsJson = invoice.GetValue<string>("relatedRegistrationIds") ?? "";
-                    var registrationIds = ParseRegistrationIds(relatedIdsJson);
-
-                    if (registrationIds.Contains(registrationId))
+                    var single = invoice.GetValue<int>("registrationId");
+                    var relatedIds = ParseRegistrationIds(invoice.GetValue<string>("relatedRegistrationIds") ?? "");
+                    if (single == registrationId || relatedIds.Contains(registrationId))
                     {
-                        // Found the invoice - return its payment status
-                        var status = invoice.GetValue<string>("paymentStatus") ?? "Unknown";
                         // Clean up if it's in JSON array format like ["Paid"]
-                        return CleanPaymentStatus(status);
+                        return CleanPaymentStatus(invoice.GetValue<string>("paymentStatus") ?? "Unknown");
                     }
                 }
 
-                return "No Invoice";
+                return NoInvoiceOrNoFee(competition, registrationId);
             }
             catch
             {
                 return "Unknown";
+            }
+        }
+
+        /// <summary>
+        /// When a registration has no invoice, distinguish a free registration ("No Fee" →
+        /// "Ingen avgift") from a fee-bearing one that's missing its invoice ("No Invoice" →
+        /// "Saknar Faktura", the error/edge case now that invoices are created eagerly).
+        /// </summary>
+        private string NoInvoiceOrNoFee(IContent competition, int registrationId)
+        {
+            try
+            {
+                var reg = _contentService.GetById(registrationId);
+                if (reg == null) return "No Invoice";
+                var entries = HpskSite.Models.CompetitionRegistrationDocument
+                    .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "");
+                var codes = entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
+                var isSub = reg.HasProperty("isSubCompetition") && reg.GetValue<bool>("isSubCompetition");
+                var classesForCalc = codes.Count > 0
+                    ? (IReadOnlyCollection<string>)codes
+                    : new[] { string.Empty };
+                var fee = HpskSite.Services.RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+                return fee > 0 ? "No Invoice" : "No Fee";
+            }
+            catch
+            {
+                return "No Invoice";
             }
         }
 
@@ -1719,6 +1834,13 @@ namespace HpskSite.Controllers
         public class EnsureInvoiceRequest
         {
             public int RegistrationId { get; set; }
+        }
+
+        /// <summary>Request model for ensuring a team/relay has its fee invoice.</summary>
+        public class EnsureTeamInvoiceRequest
+        {
+            public int CompetitionId { get; set; }
+            public int TeamId { get; set; }
         }
 
         /// <summary>

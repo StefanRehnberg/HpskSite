@@ -160,15 +160,13 @@ namespace HpskSite.Controllers
                 if (memberData == null)
                     return Json(new { success = false, message = "Kunde inte hitta din profil." });
 
-                // Auth: creator, club admin, or site admin
-                var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                if (!isSiteAdmin)
-                {
-                    // Check if user is creator or club admin
-                    var teams = await _teamService.GetTeamsForCompetitionAsync(0); // We need to check the specific team
-                    // Simplified: just check club admin for the team's club
-                    // The service will handle the actual deletion
-                }
+                // Auth: a team is owned by one club — only a primary member of that club, a
+                // club admin / regional admin for it, or a site admin may delete it.
+                var teamClubId = await _teamService.GetTeamClubIdAsync(request.TeamId);
+                if (teamClubId == 0)
+                    return Json(new { success = false, message = "Laget hittades inte." });
+                if (!await CanManageTeamAsync(teamClubId, memberData.GetValue<string>("primaryClubId")))
+                    return Json(new { success = false, message = "Du har inte behörighet att ta bort det här laget." });
 
                 var (success, message) = await _teamService.DeleteTeamAsync(request.TeamId);
                 return Json(new { success, message });
@@ -194,6 +192,14 @@ namespace HpskSite.Controllers
                 if (memberData == null)
                     return Json(new { success = false, message = "Kunde inte hitta din profil." });
 
+                // Auth: only a primary member of the team's club, a club/regional admin for it,
+                // or a site admin may edit the roster.
+                var teamClubId = await _teamService.GetTeamClubIdAsync(request.TeamId);
+                if (teamClubId == 0)
+                    return Json(new { success = false, message = "Laget hittades inte." });
+                if (!await CanManageTeamAsync(teamClubId, memberData.GetValue<string>("primaryClubId")))
+                    return Json(new { success = false, message = "Du har inte behörighet att ändra det här laget." });
+
                 var (success, message) = await _teamService.UpdateTeamAsync(
                     request.TeamId, request.TeamName, request.MemberIds, request.SpareId);
 
@@ -204,6 +210,20 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Error updating team");
                 return Json(new { success = false, message = "Ett fel uppstod vid uppdatering av lag." });
             }
+        }
+
+        /// <summary>
+        /// Can the current user manage (edit/delete) a team owned by <paramref name="teamClubId"/>?
+        /// Mirrors the CreateTeam rule: site admin, club admin / regional admin for the team's
+        /// club (IsClubAdminForClub covers regional admins of the club's region), or a member
+        /// whose PRIMARY club is that club. Teams are always made up of a club's own members.
+        /// </summary>
+        private async Task<bool> CanManageTeamAsync(int teamClubId, string? memberPrimaryClubId)
+        {
+            if (teamClubId <= 0) return false;
+            if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
+            if (await _authorizationService.IsClubAdminForClub(teamClubId)) return true;
+            return int.TryParse(memberPrimaryClubId, out var primaryClubId) && primaryClubId == teamClubId;
         }
 
         [HttpPost]
@@ -247,6 +267,7 @@ namespace HpskSite.Controllers
                 return Json(new
                 {
                     success = true,
+                    isSpringskytte,
                     teams = teams.Select(t => new
                     {
                         id = t.Team.Id,

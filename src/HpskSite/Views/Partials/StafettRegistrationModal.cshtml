@@ -70,6 +70,13 @@
                             <div class="form-text" id="stafettClassInfo"></div>
                         </div>
 
+                        @if ((bool)(ViewData["IsSpringskytte"] ?? false))
+                        {
+                            <div id="stafettOptionalMembersHint" class="bg-info-subtle border border-info-subtle text-info-emphasis rounded py-2 px-3 small mb-2">
+                                <i class="bi bi-info-circle me-1"></i>Att välja deltagare är valfritt. Du kan skapa stafettlaget och betala avgiften nu, och lägga till eller ändra deltagarna när som helst före tävlingen (via <i class="bi bi-pencil"></i> Redigera).
+                            </div>
+                        }
+
                         <div id="stafettMemberSelectionArea" style="display:none;">
                             <label class="form-label">Klubbmedlemmar</label>
                             <p class="text-muted small mb-2">Stafettdeltagare behöver inte vara individuellt anmälda i tävlingen.</p>
@@ -104,6 +111,57 @@
     </div>
 </div>
 
+@* ====== Edit Stafett Team Modal (nested) — Springskytte deferred participant selection ====== *@
+<div class="modal fade" id="stafettEditTeamModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Redigera stafettlag</h5>
+                <button type="button" class="btn-close" id="stafettEditCloseBtn" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stafettEditTeamId">
+                <input type="hidden" id="stafettEditTeamClass">
+                <input type="hidden" id="stafettEditClubId">
+
+                <div class="mb-3">
+                    <label for="stafettEditTeamName" class="form-label">Lagnamn</label>
+                    <input type="text" class="form-control" id="stafettEditTeamName" maxlength="100">
+                </div>
+
+                <div class="mb-1">
+                    <span class="form-label">Stafettklass: <strong id="stafettEditClassDisplay"></strong></span>
+                    <span class="form-text ms-2" id="stafettEditClassInfo"></span>
+                </div>
+
+                <p class="text-muted small mb-2">Stafettdeltagare behöver inte vara individuellt anmälda i tävlingen. Du kan namnge dem nu eller senare (när som helst före tävlingen).</p>
+                <div style="max-height: 280px; overflow-y: auto; border: 1px solid var(--bs-border-color); border-radius: 0.375rem;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="sticky-top" style="background: var(--bs-body-bg);">
+                            <tr>
+                                <th style="width:40px;"></th>
+                                <th>Namn</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stafettEditMembersTableBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="form-text mt-1" id="stafettEditMemberCountInfo"></div>
+
+                <div id="stafettEditError" class="alert alert-danger d-none mt-3"></div>
+                <div id="stafettEditSuccess" class="alert alert-success d-none mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="stafettEditCancelBtn">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="stafettEditSaveBtn">
+                    <i class="bi bi-check-lg me-1"></i>Spara ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @{
     var stafettRegionOptions = new List<object>();
     foreach (Federations.RegionalFederations rf in Enum.GetValues(typeof(Federations.RegionalFederations)))
@@ -131,9 +189,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const stafettIsRegionalAdmin = stafettRegRole === 'regionalAdmin';
     const stafettIsMember = !stafettIsAdmin && !stafettIsRegionalAdmin;
 
+    // Edit/Delete is allowed for site admins (all), regional admins (teams whose club is in
+    // their region), and members whose PRIMARY club is the team's club. Mirrors the server check.
+    function stafettCanManageTeam(team) {
+        if (!team) return false;
+        if (stafettIsAdmin) return true;
+        if (stafettIsRegionalAdmin) {
+            const club = (stafettAllClubsWithRegions || []).find(c => Number(c.id) === Number(team.clubId));
+            return !!club && club.region === stafettRegRegionCode;
+        }
+        return Number(team.clubId) === Number(stafettCurrentMemberClubId);
+    }
+
     let stafettTeamClasses = [];
     let stafettClubMembers = [];
     let stafettSelectedMembers = new Set();
+    // Springskytte allows creating/saving a relay with no or partial participants (named later).
+    let stafettIsSpringskytteComp = false;
 
     // ==================== Region/Club dropdowns ====================
     const stafettRegionSelect = document.getElementById('stafettRegionSelect');
@@ -259,6 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${stafettCompetitionId}`);
             const data = await resp.json();
             if (!data.success) return;
+            stafettIsSpringskytteComp = !!data.isSpringskytte;
             stafettTeamClasses = data.stafettTeamClasses || [];
             const select = document.getElementById('stafettClassSelect');
             select.innerHTML = '<option value="">Välj stafettklass...</option>';
@@ -377,7 +450,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const total = stafettSelectedMembers.size;
         countInfo.textContent = total > 0
             ? `Valda: ${total} av ${tc.coreMembers}`
-            : `Välj ${tc.coreMembers} deltagare`;
+            : (stafettIsSpringskytteComp
+                ? `Valfritt nu – välj ${tc.coreMembers} deltagare nu eller senare`
+                : `Välj ${tc.coreMembers} deltagare`);
     }
 
     function stafettValidateCreateForm() {
@@ -394,7 +469,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (tc) {
             const total = stafettSelectedMembers.size;
-            if (total !== tc.coreMembers) {
+            // Springskytte: participants can be added later, so 0..core is OK at create.
+            if (stafettIsSpringskytteComp) {
+                if (total > tc.coreMembers) {
+                    const errorEl = document.getElementById('createStafettError');
+                    errorEl.textContent = `Max ${tc.coreMembers} deltagare (${total} valda).`;
+                    errorEl.classList.remove('d-none');
+                    valid = false;
+                }
+            } else if (total !== tc.coreMembers) {
                 const errorEl = document.getElementById('createStafettError');
                 errorEl.textContent = `Välj exakt ${tc.coreMembers} deltagare (${total} valda).`;
                 errorEl.classList.remove('d-none');
@@ -508,13 +591,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         });
                     }
 
-                    html += `</div></div><div class="d-flex flex-column align-items-end">
-                        <span class="badge bg-info mb-2">${memberCount}/${maxTotal}</span>
-                        <div>
+                    // Only those who may manage this club's teams see edit/delete; others see
+                    // the stafett team read-only. Edit additionally requires Springskytte.
+                    const stafettCanManage = stafettCanManageTeam(team);
+                    const stafettEditBtn = (stafettCanManage && stafettIsSpringskytteComp) ? `
+                            <button class="btn btn-outline-primary btn-sm me-1 stafett-edit-team-btn" data-team-id="${team.id}" data-team-name="${team.teamName.replace(/"/g, '&quot;')}" data-team-class="${team.teamClass}" data-club-id="${team.clubId}" title="Redigera deltagare">
+                                <i class="bi bi-pencil"></i>
+                            </button>` : '';
+                    const stafettDeleteBtn = stafettCanManage ? `
                             <button class="btn btn-outline-danger btn-sm stafett-delete-team-btn" data-team-id="${team.id}" data-team-name="${team.teamName.replace(/"/g, '&quot;')}" title="Ta bort">
                                 <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
+                            </button>` : '';
+
+                    html += `</div></div><div class="d-flex flex-column align-items-end">
+                        <span class="badge bg-info mb-2">${memberCount}/${maxTotal}</span>
+                        <div>${stafettEditBtn}${stafettDeleteBtn}</div>
                     </div></div></div></div>`;
                 });
             }
@@ -527,6 +618,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     const teamName = this.dataset.teamName;
                     if (!confirm(`Vill du verkligen ta bort stafettlaget "${teamName}"?`)) return;
                     await stafettDeleteTeam(teamId);
+                });
+            });
+
+            container.querySelectorAll('.stafett-edit-team-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    stafettOpenEditModal(
+                        parseInt(this.dataset.teamId),
+                        this.dataset.teamName,
+                        this.dataset.teamClass,
+                        parseInt(this.dataset.clubId)
+                    );
                 });
             });
 
@@ -558,6 +660,127 @@ document.addEventListener('DOMContentLoaded', function() {
             msgEl.textContent = 'Ett nätverksfel uppstod.';
         }
     }
+
+    // ==================== Edit Stafett Team Modal (Springskytte deferred selection) ====================
+    let stafettEditClubMembers = [];
+    let stafettEditSelectedMembers = new Set();
+    const stafettEditModalEl = document.getElementById('stafettEditTeamModal');
+
+    document.getElementById('stafettEditCloseBtn').addEventListener('click', stafettCloseEditModal);
+    document.getElementById('stafettEditCancelBtn').addEventListener('click', stafettCloseEditModal);
+
+    function stafettCloseEditModal() {
+        bootstrap.Modal.getOrCreateInstance(stafettEditModalEl).hide();
+        setTimeout(() => bootstrap.Modal.getOrCreateInstance(stafettModal).show(), 200);
+    }
+
+    async function stafettOpenEditModal(teamId, teamName, teamClass, clubId) {
+        bootstrap.Modal.getOrCreateInstance(stafettModal).hide();
+
+        document.getElementById('stafettEditTeamId').value = teamId;
+        document.getElementById('stafettEditTeamName').value = teamName;
+        document.getElementById('stafettEditTeamClass').value = teamClass;
+        document.getElementById('stafettEditClubId').value = clubId;
+        document.getElementById('stafettEditClassDisplay').textContent = teamClass;
+        const tc = stafettTeamClasses.find(t => t.teamClass === teamClass);
+        document.getElementById('stafettEditClassInfo').textContent = tc ? `(${tc.coreMembers} deltagare)` : '';
+
+        stafettEditSelectedMembers.clear();
+        stafettEditClubMembers = [];
+        document.getElementById('stafettEditError').classList.add('d-none');
+        document.getElementById('stafettEditSuccess').classList.add('d-none');
+
+        const tbody = document.getElementById('stafettEditMembersTableBody');
+        tbody.innerHTML = '<tr><td colspan="2" class="text-center"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+
+        setTimeout(() => bootstrap.Modal.getOrCreateInstance(stafettEditModalEl).show(), 200);
+
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetClubMembersForRelay?competitionId=${stafettCompetitionId}&clubId=${clubId}`);
+            const data = await resp.json();
+            stafettEditClubMembers = data.success ? (data.members || []) : [];
+
+            // Pre-select the team's current participants
+            const teamsResp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${stafettCompetitionId}`);
+            const teamsData = await teamsResp.json();
+            if (teamsData.success) {
+                const team = (teamsData.teams || []).find(t => t.id === teamId);
+                if (team?.members) team.members.forEach(m => stafettEditSelectedMembers.add(m.memberId));
+            }
+            stafettRenderEditMembersTable();
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="2" class="text-danger small">Fel vid laddning.</td></tr>';
+        }
+    }
+
+    function stafettRenderEditMembersTable() {
+        const tbody = document.getElementById('stafettEditMembersTableBody');
+        if (!stafettEditClubMembers.length) {
+            tbody.innerHTML = '<tr><td colspan="2" class="text-muted small">Inga medlemmar hittades.</td></tr>';
+            stafettUpdateEditCountInfo();
+            return;
+        }
+        tbody.innerHTML = '';
+        stafettEditClubMembers.forEach(m => {
+            const row = document.createElement('tr');
+            const tdCheck = document.createElement('td');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox'; cb.className = 'form-check-input'; cb.value = m.memberId;
+            cb.checked = stafettEditSelectedMembers.has(m.memberId);
+            tdCheck.appendChild(cb); row.appendChild(tdCheck);
+            const tdName = document.createElement('td'); tdName.textContent = m.name; row.appendChild(tdName);
+            cb.addEventListener('change', function() {
+                if (this.checked) stafettEditSelectedMembers.add(m.memberId);
+                else stafettEditSelectedMembers.delete(m.memberId);
+                stafettUpdateEditCountInfo();
+            });
+            tbody.appendChild(row);
+        });
+        stafettUpdateEditCountInfo();
+    }
+
+    function stafettUpdateEditCountInfo() {
+        const teamClass = document.getElementById('stafettEditTeamClass').value;
+        const tc = stafettTeamClasses.find(t => t.teamClass === teamClass);
+        const info = document.getElementById('stafettEditMemberCountInfo');
+        const btn = document.getElementById('stafettEditSaveBtn');
+        const teamName = document.getElementById('stafettEditTeamName').value.trim();
+        if (!tc) { info.textContent = ''; btn.disabled = !teamName; return; }
+        const total = stafettEditSelectedMembers.size;
+        info.textContent = total > 0 ? `Valda: ${total} av ${tc.coreMembers}` : 'Inga deltagare valda än (kan namnges senare)';
+        // Springskytte: allow saving a partial/empty roster; block only over-fill or missing name.
+        btn.disabled = !teamName || total > tc.coreMembers;
+    }
+
+    document.getElementById('stafettEditTeamName').addEventListener('input', stafettUpdateEditCountInfo);
+
+    document.getElementById('stafettEditSaveBtn').addEventListener('click', async function() {
+        const btn = this; btn.disabled = true;
+        const errorEl = document.getElementById('stafettEditError');
+        const successEl = document.getElementById('stafettEditSuccess');
+        errorEl.classList.add('d-none'); successEl.classList.add('d-none');
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/UpdateTeam', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    teamId: parseInt(document.getElementById('stafettEditTeamId').value),
+                    teamName: document.getElementById('stafettEditTeamName').value.trim(),
+                    memberIds: Array.from(stafettEditSelectedMembers),
+                    spareId: null
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                successEl.textContent = data.message; successEl.classList.remove('d-none');
+                stafettLoadExistingTeams();
+                setTimeout(stafettCloseEditModal, 800);
+            } else {
+                errorEl.textContent = data.message; errorEl.classList.remove('d-none'); btn.disabled = false;
+            }
+        } catch(e) {
+            errorEl.textContent = 'Ett nätverksfel uppstod.'; errorEl.classList.remove('d-none'); btn.disabled = false;
+        }
+    });
 
     // ==================== Payment Options ====================
     function stafettShowPaymentOptions(teamId) {

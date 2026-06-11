@@ -70,6 +70,13 @@
                             <div class="form-text" id="teamClassInfo"></div>
                         </div>
 
+                        @if ((bool)(ViewData["IsSpringskytte"] ?? false))
+                        {
+                            <div id="teamOptionalMembersHint" class="bg-info-subtle border border-info-subtle text-info-emphasis rounded py-2 px-3 small mb-2">
+                                <i class="bi bi-info-circle me-1"></i>Att välja skyttar är valfritt. Du kan skapa laget och betala anmälningsavgiften nu, och lägga till eller ändra skyttarna när som helst före tävlingen (via <i class="bi bi-pencil"></i> Redigera).
+                            </div>
+                        }
+
                         <div id="memberSelectionArea" style="display:none;">
                             <label class="form-label">Anmälda skyttar från vald förening</label>
                             <div class="table-responsive">
@@ -129,6 +136,13 @@
                     <span class="form-text ms-2" id="editTeamClassInfo"></span>
                 </div>
 
+                @if ((bool)(ViewData["IsSpringskytte"] ?? false))
+                {
+                    <div id="editTeamOptionalMembersHint" class="bg-info-subtle border border-info-subtle text-info-emphasis rounded py-2 px-3 small mt-2">
+                        <i class="bi bi-info-circle me-1"></i>Du kan spara laget med färre skyttar – eller inga alls – och fylla på resten när som helst före tävlingen.
+                    </div>
+                }
+
                 <div class="table-responsive mt-2">
                     <table class="table table-sm table-hover mb-0">
                         <thead>
@@ -185,10 +199,25 @@ document.addEventListener('DOMContentLoaded', function() {
     const isRegionalAdmin = regRole === 'regionalAdmin';
     const isMember = !isAdmin && !isRegionalAdmin;
 
+    // A team is owned by one club. Edit/Delete is allowed for: site admins (all), regional
+    // admins (teams whose club is in their region), and members whose PRIMARY club is the
+    // team's club. Other clubs' teams stay visible but read-only. Mirrors the server check.
+    function canManageTeam(team) {
+        if (!team) return false;
+        if (isAdmin) return true;
+        if (isRegionalAdmin) {
+            const club = (allClubsWithRegions || []).find(c => Number(c.id) === Number(team.clubId));
+            return !!club && club.region === regRegionCode;
+        }
+        return Number(team.clubId) === Number(currentMemberClubId);
+    }
+
     let availableTeamClasses = [];
     let allRegisteredMembers = [];
     let selectedMembers = new Set();
     let selectedSpare = null;
+    // Springskytte allows creating/saving a team with no or partial shooters (named later).
+    let isSpringskytteComp = false;
 
     // ==================== Region/Club dropdowns ====================
     const regionSelect = document.getElementById('teamRegionSelect');
@@ -317,6 +346,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${competitionId}`);
             const data = await resp.json();
             if (!data.success) return;
+            isSpringskytteComp = !!data.isSpringskytte;
             availableTeamClasses = data.teamClasses || [];
             const select = document.getElementById('teamClassSelect');
             select.innerHTML = '<option value="">Välj lagklass...</option>';
@@ -464,7 +494,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const maxTotal = tc.coreMembers + tc.maxSpares;
         countInfo.textContent = total > 0
             ? `Valda: ${total} av ${tc.coreMembers}–${maxTotal}${hasSpare ? ' (1 reserv)' : ''}`
-            : `Välj ${tc.coreMembers} ordinarie skyttar${tc.maxSpares > 0 ? ' + ev. reserv' : ''}`;
+            : (isSpringskytteComp
+                ? `Valfritt nu – välj ${tc.coreMembers} ordinarie skyttar nu eller senare`
+                : `Välj ${tc.coreMembers} ordinarie skyttar${tc.maxSpares > 0 ? ' + ev. reserv' : ''}`);
     }
 
     /** Validates all fields; returns true if valid, false if errors shown. */
@@ -485,7 +517,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasSpare = selectedSpare && selectedMembers.has(selectedSpare);
             const nonSpareCount = hasSpare ? total - 1 : total;
             const maxTotal = tc.coreMembers + tc.maxSpares;
-            if (nonSpareCount < tc.coreMembers) {
+            // Springskytte: shooters can be added later, so a partial/empty roster is OK here.
+            if (!isSpringskytteComp && nonSpareCount < tc.coreMembers) {
                 const errorEl = document.getElementById('createTeamError');
                 errorEl.textContent = `Välj minst ${tc.coreMembers} ordinarie skyttar (${nonSpareCount} valda).`;
                 errorEl.classList.remove('d-none');
@@ -609,16 +642,19 @@ document.addEventListener('DOMContentLoaded', function() {
                         });
                     }
 
-                    html += `</div></div><div class="d-flex flex-column align-items-end">
-                        <span class="badge bg-info mb-2">${memberCount}/${maxTotal}</span>
-                        <div>
+                    // Edit/Delete only for those who may manage this club's teams — others see
+                    // the team (read-only) but no action buttons.
+                    const teamActions = canManageTeam(team) ? `
                             <button class="btn btn-outline-primary btn-sm me-1 edit-team-btn" data-team-id="${team.id}" data-team-name="${team.teamName.replace(/"/g, '&quot;')}" data-team-class="${team.teamClass}" data-club-id="${team.clubId}" title="Redigera">
                                 <i class="bi bi-pencil"></i>
                             </button>
                             <button class="btn btn-outline-danger btn-sm delete-team-btn" data-team-id="${team.id}" data-team-name="${team.teamName.replace(/"/g, '&quot;')}" title="Ta bort">
                                 <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
+                            </button>` : '';
+
+                    html += `</div></div><div class="d-flex flex-column align-items-end">
+                        <span class="badge bg-info mb-2">${memberCount}/${maxTotal}</span>
+                        <div>${teamActions}</div>
                     </div></div></div></div>`;
                 });
             }
@@ -772,7 +808,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const nonSpareCount = hasSpare ? total - 1 : total;
         const maxTotal = tc.coreMembers + tc.maxSpares;
         countInfo.textContent = `Valda: ${total} av ${tc.coreMembers}–${maxTotal}${hasSpare ? ' (1 reserv)' : ''} (behövs: ${tc.coreMembers} ordinarie)`;
-        btn.disabled = nonSpareCount < tc.coreMembers || total > maxTotal;
+        // Springskytte: allow saving a partial/empty roster (shooters named later).
+        btn.disabled = isSpringskytteComp ? (total > maxTotal) : (nonSpareCount < tc.coreMembers || total > maxTotal);
     }
 
     document.getElementById('editTeamName').addEventListener('input', updateEditButton);

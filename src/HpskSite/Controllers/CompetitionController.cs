@@ -589,6 +589,21 @@ namespace HpskSite.Controllers
                     }
                 }, $"publish registration {registrationId_forPublish}");
 
+                // Eager invoice: every new fee-bearing registration gets its Pending invoice
+                // up front (instead of one being lazily minted when a payment option is chosen).
+                // Runs in a fresh DI scope after the publish; idempotent + best-effort, so a
+                // racing "Betala med Swish" click that creates the invoice first is harmless.
+                if (!isUpdate)
+                {
+                    var compIdForInvoice = competitionId;
+                    EnqueueBackground(TimeSpan.FromSeconds(12), sp =>
+                    {
+                        var paymentService = sp.GetRequiredService<PaymentService>();
+                        paymentService.EnsureRegistrationInvoiceAsync(compIdForInvoice, registrationId_forPublish)
+                            .GetAwaiter().GetResult();
+                    }, $"ensure invoice for registration {registrationId_forPublish}");
+                }
+
                 // Cancel old invoice in background if fee changed
                 if (isUpdate && oldInvoiceId.HasValue && oldFee != newFee)
                 {
@@ -1530,6 +1545,12 @@ namespace HpskSite.Controllers
                             var isSubComp = content.GetValue<bool>("isSubCompetition");
                             paymentAmount = RegistrationFeeCalculator.Calculate(competition, classIds, isSubComp);
                         }
+
+                        // Now that invoices are created eagerly, a fee-bearing registration with
+                        // no invoice is an error/edge ("No Invoice" → "Saknar Faktura"); a 0-fee
+                        // registration legitimately has none ("No Fee" → "Ingen avgift").
+                        if (paymentStatus == "No Invoice")
+                            paymentStatus = paymentAmount > 0m ? "No Invoice" : "No Fee";
 
                         // Convert class IDs to display names
                         var shootingClassesWithNames = shootingClasses.Select(sc => new

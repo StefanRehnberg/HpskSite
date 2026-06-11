@@ -112,7 +112,7 @@
         <div class="col-6 col-lg">
             <div class="card h-100 border-secondary">
                 <div class="card-body py-2">
-                    <h6 class="card-subtitle mb-1 text-secondary small">Saknar betalning</h6>
+                    <h6 class="card-subtitle mb-1 text-secondary small">Saknar faktura</h6>
                     <div class="d-flex justify-content-between align-items-baseline">
                         <h4 class="card-title mb-0" id="summaryNoInvoiceCount">0</h4>
                         <small class="text-muted">st</small>
@@ -168,7 +168,8 @@
                         <option value="Failed">Misslyckad</option>
                         <option value="Cancelled">Makulerad</option>
                         <option value="Refunded">Återbetald</option>
-                        <option value="No Invoice">Saknar betalning</option>
+                        <option value="No Invoice">Saknar faktura</option>
+                        <option value="No Fee">Ingen avgift</option>
                     </select>
                 </div>
                 <div class="col-xl-2 col-lg-4 col-md-6">
@@ -185,9 +186,13 @@
 
     <!-- Registrations Table -->
     <div class="card">
-        <div class="card-header">
-            <h5 class="mb-0">Anmälningar för denna tävling</h5>
+        <div class="card-header" role="button" data-bs-toggle="collapse" data-bs-target="#individualsCollapse" aria-expanded="true" style="cursor:pointer;">
+            <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-people me-2"></i>Individuella anmälningar</span>
+                <span class="badge bg-secondary" id="individualsCount">0</span>
+            </h5>
         </div>
+        <div class="collapse show" id="individualsCollapse">
         <div class="card-body">
             <!-- Loading State -->
             <div id="competitionRegistrationsLoading" class="text-center py-4">
@@ -235,6 +240,38 @@
             <div id="competitionNoRegistrations" class="text-center py-4 d-none">
                 <i class="bi bi-inbox display-1 text-muted"></i>
                 <p class="text-muted mt-2">No registrations found for this competition.</p>
+            </div>
+        </div>
+        </div>
+    </div>
+
+    <!-- Lag (teams + stafett) — its own collapsible card. Hidden when the competition has no
+         teams. Stafett is a kind of team, so both kinds live here, tagged by a Typ badge. -->
+    <div class="card mt-3 d-none" id="competitionTeamsSection">
+        <div class="card-header" role="button" data-bs-toggle="collapse" data-bs-target="#teamsCollapse" aria-expanded="true" style="cursor:pointer;">
+            <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-people-fill me-2"></i>Lag</span>
+                <span class="badge bg-secondary" id="teamsCount">0</span>
+            </h5>
+        </div>
+        <div class="collapse show" id="teamsCollapse">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Lagnamn</th>
+                                <th>Typ</th>
+                                <th>Klass</th>
+                                <th>Förening</th>
+                                <th>Deltagare</th>
+                                <th>Betalning</th>
+                                <th>Åtgärder</th>
+                            </tr>
+                        </thead>
+                        <tbody id="competitionTeamsTableBody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -770,6 +807,8 @@ function getPaymentStatusBadgeClass(status) {
         case 'Refunded':
             return 'bg-danger';
         case 'No Invoice':
+            return 'bg-danger';
+        case 'No Fee':
             return 'bg-secondary';
         default:
             return 'bg-secondary';
@@ -790,7 +829,9 @@ function getPaymentStatusText(status) {
         case 'Refunded':
             return 'Återbetald';
         case 'No Invoice':
-            return 'Saknar betalning';
+            return 'Saknar faktura';
+        case 'No Fee':
+            return 'Ingen avgift';
         case 'Unknown':
             return 'Okänd';
         default:
@@ -813,6 +854,8 @@ function loadCompetitionRegistrations() {
     .then(data => {
         if (data.success) {
             competitionRegistrations = data.registrations || [];
+            const ic = document.getElementById('individualsCount');
+            if (ic) ic.textContent = competitionRegistrations.length;
             populateCompetitionClubFilter();
             updatePaymentSummary();
             filterCompetitionRegistrations();
@@ -824,6 +867,186 @@ function loadCompetitionRegistrations() {
         console.error('Error loading competition registrations:', error);
         showCompetitionError('Failed to load registrations. Please try again.');
     });
+
+    // Teams/relay live in their own section; load them alongside individuals so they also
+    // refresh after a payment is recorded (which re-runs loadCompetitionRegistrations).
+    loadCompetitionTeams();
+}
+
+// ==================== Lag (teams + stafett) ====================
+let competitionTeams = [];
+
+function loadCompetitionTeams() {
+    const cid = $('.competition-registration-management').data('competition-id');
+    fetch(`/umbraco/surface/RegistrationAdmin/GetCompetitionTeams?competitionId=${cid}`)
+        .then(r => r.json())
+        .then(data => {
+            competitionTeams = (data.success && data.teams) ? data.teams : [];
+            renderCompetitionTeams();
+        })
+        .catch(err => {
+            console.error('Error loading teams:', err);
+            competitionTeams = [];
+            renderCompetitionTeams();
+        });
+}
+
+function renderCompetitionTeams() {
+    const section = document.getElementById('competitionTeamsSection');
+    const tbody = document.getElementById('competitionTeamsTableBody');
+    if (!section || !tbody) return;
+
+    const countEl = document.getElementById('teamsCount');
+    if (countEl) countEl.textContent = competitionTeams.length;
+
+    if (!competitionTeams.length) {
+        section.classList.add('d-none');
+        tbody.innerHTML = '';
+        return;
+    }
+    section.classList.remove('d-none');
+
+    tbody.innerHTML = competitionTeams.map(t => {
+        const typeBadge = t.isRelay
+            ? '<span class="badge bg-primary">Stafett</span>'
+            : '<span class="badge bg-info">Lag</span>';
+        const members = (t.members && t.members.length)
+            ? t.members.map(m => `${escapeHtmlSafe(m.name)}${m.isSpare ? ' <span class="badge bg-secondary">Reserv</span>' : ''}`).join('<br>')
+            : '<span class="text-muted fst-italic">Ej valda än</span>';
+        const statusBadge = `<span class="badge ${getPaymentStatusBadgeClass(t.paymentStatus)}">${getPaymentStatusText(t.paymentStatus)}</span>`;
+
+        // Mirror the individual rows' Åtgärder: Hantera betalning (opens the options modal),
+        // Markera som betald (only when Pending), and Betalningshistorik (when an invoice exists).
+        const nameArg = JSON.stringify(t.teamName).replace(/"/g, '&quot;');
+        const walletBtn = (t.paymentStatus !== 'No Fee')
+            ? `<button class="btn btn-sm btn-outline-success" onclick="showPaymentOptionsForTeam(${t.id})" title="Hantera betalning"><i class="bi bi-wallet2"></i></button>`
+            : '';
+        const markBtn = (t.paymentStatus === 'Pending')
+            ? `<button class="btn btn-sm btn-success" onclick="markTeamAsPaid(${t.id})" title="Markera som betald"><i class="bi bi-check-circle"></i></button>`
+            : '';
+        const histBtn = (t.invoiceId)
+            ? `<button class="btn btn-sm btn-outline-secondary" onclick="showInvoiceHistory(${t.invoiceId}, ${nameArg})" title="Visa betalningshistorik"><i class="bi bi-clock-history"></i></button>`
+            : '';
+
+        return `<tr>
+            <td><strong>${escapeHtmlSafe(t.teamName)}</strong></td>
+            <td>${typeBadge}</td>
+            <td>${escapeHtmlSafe(t.teamClass)}</td>
+            <td>${escapeHtmlSafe(t.clubName)}</td>
+            <td class="small">${members}</td>
+            <td>${statusBadge}</td>
+            <td><div class="d-flex gap-1">${walletBtn}${markBtn}${histBtn}</div></td>
+        </tr>`;
+    }).join('');
+}
+
+function escapeHtmlSafe(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+}
+
+// Open the shared "Hantera betalning" options modal for a team (same modal individuals use:
+// Visa QR-kod / Registrera betalning / Skicka QR via e-post). The three actions branch on
+// currentManageInvoiceReg.isTeam to hit the team-specific endpoints.
+function showPaymentOptionsForTeam(teamId) {
+    const team = competitionTeams.find(t => t.id === teamId);
+    if (!team) { alert('Laget hittades inte'); return; }
+
+    currentManageInvoiceReg = {
+        isTeam: true,
+        teamId: team.id,
+        memberName: `${team.teamName} (${team.isRelay ? 'stafett' : 'lag'})`,
+        memberClub: team.clubName || '',
+        paymentStatus: team.paymentStatus,
+        paymentAmount: Math.round(Number(team.amount) || 0),
+        invoiceId: team.invoiceId || 0,
+        invoiceNumber: team.invoiceNumber || ''
+    };
+
+    document.getElementById('manageInvoiceShooterName').textContent = currentManageInvoiceReg.memberName;
+    document.getElementById('manageInvoiceClub').textContent = currentManageInvoiceReg.memberClub;
+    document.getElementById('manageInvoiceAmount').textContent = currentManageInvoiceReg.paymentAmount;
+
+    const statusEl = document.getElementById('manageInvoiceStatusBadge');
+    statusEl.className = `badge ${getPaymentStatusBadgeClass(team.paymentStatus)}`;
+    statusEl.textContent = getPaymentStatusText(team.paymentStatus);
+
+    const refRow = document.getElementById('manageInvoiceRefRow');
+    if (team.invoiceNumber) {
+        document.getElementById('manageInvoiceRef').textContent = team.invoiceNumber;
+        refRow.style.display = '';
+    } else {
+        refRow.style.display = 'none';
+    }
+
+    backToManageInvoiceActions();
+    if (!manageInvoiceModalInstance) {
+        manageInvoiceModalInstance = new bootstrap.Modal(document.getElementById('manageInvoiceModal'));
+    }
+    manageInvoiceModalInstance.show();
+}
+
+// Direct "Markera som betald" for a team (the green check button) — ensures the invoice then
+// opens the mark-as-paid modal, skipping the options chooser.
+async function markTeamAsPaid(teamId) {
+    const team = competitionTeams.find(t => t.id === teamId);
+    if (team) await openMarkAsPaidForTeam(team);
+}
+
+// Ensure a team has an invoice (covers legacy / "Betala senare" teams), then pre-fill and
+// open the shared mark-as-paid modal (which posts by invoiceId to Payment/UpdatePaymentStatus).
+async function openMarkAsPaidForTeam(team) {
+    const cid = $('.competition-registration-management').data('competition-id');
+    let invoiceId = team.invoiceId;
+    let amount = Math.round(Number(team.amount) || 0);
+    let invoiceNumber = team.invoiceNumber || '';
+
+    if (!invoiceId) {
+        try {
+            const token = $('input[name="__RequestVerificationToken"]').val();
+            const resp = await fetch('/umbraco/surface/RegistrationAdmin/EnsureTeamInvoice', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({ competitionId: parseInt(cid, 10), teamId: team.id })
+            });
+            const raw = await resp.text();
+            const data = raw ? JSON.parse(raw) : null;
+            if (!resp.ok || !data || !data.success || !data.invoiceId) {
+                alert('Kunde inte skapa lagfaktura: ' + ((data && data.message) || 'okänt fel'));
+                return;
+            }
+            invoiceId = data.invoiceId;
+            amount = Math.round(Number(data.amount) || amount);
+            invoiceNumber = data.invoiceNumber || invoiceNumber;
+        } catch (err) {
+            alert('Kunde inte skapa lagfaktura: ' + err.message);
+            return;
+        }
+    }
+
+    document.getElementById('markPaidInvoiceId').value = invoiceId;
+    document.getElementById('markPaidRegistrationId').value = '';
+    document.getElementById('markPaidInvoiceAmount').value = amount;
+    document.getElementById('markPaidShooterName').textContent = `${team.teamName} (${team.isRelay ? 'stafett' : 'lag'})`;
+    document.getElementById('markPaidAmount').textContent = amount;
+    document.getElementById('markPaidActualAmount').value = amount;
+    document.getElementById('markPaidMethod').value = 'Swish';
+    document.getElementById('markPaidTransactionId').value = invoiceNumber;
+    document.getElementById('markPaidNotes').value = '';
+    // Teams have no single member email, so the receipt/confirmation is a no-op — leave it off.
+    const receiptBox = document.getElementById('markPaidSendReceipt');
+    if (receiptBox) receiptBox.checked = false;
+    updateMarkPaidVariance();
+
+    const modalEl = document.getElementById('markAsPaidModal');
+    if (!markPaidModalInstance) markPaidModalInstance = new bootstrap.Modal(modalEl);
+    if (!markPaidDatePicker) {
+        markPaidDatePicker = flatpickr('#markPaidDate', { locale: 'sv', dateFormat: 'Y-m-d', defaultDate: 'today', maxDate: 'today' });
+    } else {
+        markPaidDatePicker.setDate(new Date(), true);
+    }
+    markPaidModalInstance.show();
 }
 
 function filterCompetitionRegistrations() {
@@ -1834,6 +2057,9 @@ function showQrInManageModal() {
     const competitionId = $('.competition-registration-management').data('competition-id');
     const registration = currentManageInvoiceReg;
 
+    // Teams use a dedicated QR endpoint (team fee, memberId "team-{id}").
+    if (registration.isTeam) { showTeamQrInManageModal(registration, competitionId); return; }
+
     // Toggle to QR state immediately so the operator sees feedback
     document.getElementById('manageInvoiceActions').style.display = 'none';
     const qrPanel = document.getElementById('manageInvoiceQr');
@@ -1901,10 +2127,50 @@ function showQrInManageModal() {
     });
 }
 
+// Team QR inside the shared manage-payment modal.
+function showTeamQrInManageModal(reg, competitionId) {
+    document.getElementById('manageInvoiceActions').style.display = 'none';
+    document.getElementById('manageInvoiceQr').style.display = '';
+    const body = document.getElementById('manageInvoiceQrBody');
+    body.innerHTML = `
+        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar QR-kod...</span></div>
+        <p class="mt-2 small text-muted">Genererar QR-kod...</p>`;
+
+    fetch(`/umbraco/surface/Swish/GenerateTeamPaymentQR?competitionId=${competitionId}&teamId=${reg.teamId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const appBtn = data.swishAppUrl
+                    ? `<a href="${data.swishAppUrl}" class="btn btn-success w-100 mb-2"><i class="bi bi-phone me-1"></i>Öppna Swish och betala</a>`
+                    : '';
+                body.innerHTML = `
+                    ${appBtn}
+                    <img src="${data.qrCode}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 280px;" />
+                    <p class="mb-1"><strong>Belopp:</strong> ${data.amount} kr</p>
+                    <p class="mb-1 small text-muted"><strong>Referens:</strong> ${data.invoiceNumber || ''}</p>
+                    <p class="small text-muted mt-2 mb-0">Be laget skanna koden med Swish-appen.</p>`;
+            } else {
+                body.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda QR-kod'}</div>`;
+            }
+        })
+        .catch(err => {
+            console.error('Error loading team Swish QR code:', err);
+            body.innerHTML = '<div class="alert alert-danger">Ett fel uppstod när QR-koden skulle laddas.</div>';
+        });
+}
+
 async function markPaidFromManageModal() {
     if (!currentManageInvoiceReg) return;
     const reg = currentManageInvoiceReg;
     const competitionId = $('.competition-registration-management').data('competition-id');
+
+    // Team: hide the chooser and open the mark-as-paid modal pre-filled for the team.
+    if (reg.isTeam) {
+        manageInvoiceModalInstance?.hide();
+        const team = competitionTeams.find(t => t.id === reg.teamId);
+        if (team) setTimeout(() => openMarkAsPaidForTeam(team), 250);
+        return;
+    }
 
     // No-invoice path: silently create an invoice via RegistrationAdmin/EnsureInvoice,
     // then open the mark-as-paid modal with the new invoiceId. We deliberately do NOT go
@@ -1973,6 +2239,33 @@ async function emailQrFromManageModal(button) {
     const original = button.innerHTML;
     button.disabled = true;
     button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
+
+    // Team: send the team QR via the team-specific endpoint.
+    if (reg.isTeam) {
+        try {
+            const response = await fetch(`/umbraco/surface/Swish/SendTeamQRCodeEmail?competitionId=${competitionId}&teamId=${reg.teamId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                }
+            });
+            const result = await response.json();
+            if (result.success) {
+                manageInvoiceModalInstance?.hide();
+                alert(result.email ? `QR-koden har skickats till ${result.email}` : 'QR-koden har skickats.');
+            } else {
+                alert('Fel: ' + (result.message || 'okänt fel'));
+            }
+        } catch (error) {
+            console.error('Error sending team Swish QR code email:', error);
+            alert('Ett fel uppstod när e-posten skulle skickas. Försök igen.');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+        return;
+    }
 
     try {
         const formData = new FormData();
