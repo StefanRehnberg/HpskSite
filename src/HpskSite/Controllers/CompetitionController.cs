@@ -593,11 +593,20 @@ namespace HpskSite.Controllers
                 // up front (instead of one being lazily minted when a payment option is chosen).
                 // Runs in a fresh DI scope after the publish; idempotent + best-effort, so a
                 // racing "Betala med Swish" click that creates the invoice first is harmless.
+                //
+                // CRITICAL: PaymentService.CreateInvoiceAsync reads the published cache via
+                // IUmbracoContextAccessor.GetRequiredUmbracoContext(), which THROWS on a
+                // background thread (the Umbraco context is per-HTTP-request). Without the
+                // EnsureUmbracoContext() wrapper below the eager invoice silently failed —
+                // the in-request paths (late walk-in, "Hantera betalning" → EnsureInvoice)
+                // worked because they already had a request context. Establish one here.
                 if (!isUpdate)
                 {
                     var compIdForInvoice = competitionId;
                     EnqueueBackground(TimeSpan.FromSeconds(12), sp =>
                     {
+                        var contextFactory = sp.GetRequiredService<IUmbracoContextFactory>();
+                        using var contextRef = contextFactory.EnsureUmbracoContext();
                         var paymentService = sp.GetRequiredService<PaymentService>();
                         paymentService.EnsureRegistrationInvoiceAsync(compIdForInvoice, registrationId_forPublish)
                             .GetAwaiter().GetResult();
