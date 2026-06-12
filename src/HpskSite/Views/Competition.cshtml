@@ -1854,6 +1854,16 @@ window.CompetitionConfig = {
                                 <p class="mb-0"><strong>Fakturanummer:</strong> ${invNum}</p>
                             </div>
                         `;
+                        // Payer-side "Jag har betalat" claim for a shooter paying their own unpaid
+                        // invoice. Auth (CanClaimPaymentForInvoice) gates it server-side; for a team
+                        // invoice the shooter must be the team's club admin or the click is refused.
+                        if (window.swishModalSetPaymentSent && (data.invoiceId || invoiceId)) {
+                            window.swishModalSetPaymentSent({
+                                invoiceId: data.invoiceId || invoiceId,
+                                label: 'Jag har betalat',
+                                alreadySent: !!data.paymentAlreadySent
+                            });
+                        }
                     } else {
                         modalBody.innerHTML = `
                             <div class="alert alert-danger mb-0">
