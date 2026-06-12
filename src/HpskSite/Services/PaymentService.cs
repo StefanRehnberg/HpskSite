@@ -548,6 +548,64 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Record (or withdraw) a "payment sent" CLAIM on an invoice — set by the payer (the
+        /// shooter, or a club admin paying on members' behalf). This deliberately does NOT touch
+        /// <c>paymentStatus</c>: the authoritative "received" state stays organizer-controlled.
+        /// Writes <c>paymentSentDate</c> + <c>paymentSentBy</c> and logs a PaymentSent /
+        /// PaymentSentCleared audit row. Best-effort; missing properties degrade to a no-op.
+        /// </summary>
+        public async Task<bool> SetPaymentSentAsync(
+            int invoiceId,
+            bool sent,
+            int? actorMemberId,
+            string? actorMemberName)
+        {
+            try
+            {
+                var invoice = _contentService.GetById(invoiceId);
+                if (invoice == null || invoice.ContentType.Alias != "registrationInvoice") return false;
+
+                // Never override the organizer's authoritative received state.
+                var currentStatus = (invoice.GetValue<string>("paymentStatus") ?? "").Trim().Trim('[', ']', '"', '\'');
+                if (sent && (currentStatus == "Paid" || currentStatus == "Cancelled" || currentStatus == "Refunded"))
+                    return true; // already settled — a "sent" claim is moot, treat as no-op success
+
+                if (sent)
+                {
+                    invoice.SetValue("paymentSentDate", DateTime.Now);
+                    invoice.SetValue("paymentSentBy", actorMemberName ?? "");
+                }
+                else
+                {
+                    invoice.SetValue("paymentSentDate", null);
+                    invoice.SetValue("paymentSentBy", "");
+                }
+
+                if (!_contentService.Save(invoice).Success) return false;
+                _contentService.Publish(invoice, new[] { "*" }, -1);
+
+                var competitionId = invoice.GetValue<int>("competitionId");
+                await _auditService.LogAsync(
+                    invoiceId: invoiceId,
+                    competitionId: competitionId,
+                    eventType: sent ? InvoicePaymentEventTypes.PaymentSent : InvoicePaymentEventTypes.PaymentSentCleared,
+                    byMemberId: actorMemberId,
+                    byMemberName: actorMemberName,
+                    paymentMethod: null,
+                    amount: invoice.GetValue<decimal>("totalAmount"),
+                    reference: invoice.GetValue<string>("invoiceNumber"),
+                    notes: sent ? "Betalning anmäld av betalaren (ej bekräftad av arrangören)" : "Betalningsanmälan återkallad");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error setting payment-sent flag for invoice {InvoiceId}", invoiceId);
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Update payment status for an invoice. Optional fields are only written when supplied,
         /// so callers can use this to set just the status, or to record a full bookkeeping entry
         /// (paymentMethod / paymentDate / transactionId / notes) at the same time.

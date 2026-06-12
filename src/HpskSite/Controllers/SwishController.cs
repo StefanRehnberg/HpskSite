@@ -498,6 +498,7 @@ namespace HpskSite.Controllers
                     invoiceId = invoice.Id,
                     invoiceNumber = invoiceNumber,
                     message = message,
+                    paymentAlreadySent = invoice.GetValue<DateTime?>("paymentSentDate").HasValue,
                     includesSubCompetition = subCompPortion > 0,
                     subCompetitionName = subCompetitionName,
                     subCompetitionFeeTotal = subCompPortion

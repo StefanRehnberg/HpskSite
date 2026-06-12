@@ -1365,6 +1365,7 @@ namespace HpskSite.Controllers
                 var paidAmountMap = new Dictionary<int, decimal>();        // registrationId -> sum of actual paid amounts (fallback to billed)
                 var pendingAmountMap = new Dictionary<int, decimal>();     // registrationId -> sum of all Pending invoices
                 var hasVarianceMap = new Dictionary<int, bool>();          // registrationId -> any paid invoice where actual != billed
+                var paymentSentMap = new Dictionary<int, (DateTime date, string by)>(); // registrationId -> payer "betalning anmäld" claim
                 if (invoicesHub != null)
                 {
                     var allInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
@@ -1407,6 +1408,10 @@ namespace HpskSite.Controllers
                                 paymentAmountMap[invoiceRegistrationId] = invoiceAmount;
                                 invoiceNumberMap[invoiceRegistrationId] = invoiceNumber;
                                 transactionIdMap[invoiceRegistrationId] = transactionId;
+
+                                var sentDate = invoice.GetValue<DateTime?>("paymentSentDate");
+                                if (sentDate.HasValue)
+                                    paymentSentMap[invoiceRegistrationId] = (sentDate.Value, invoice.GetValue<string>("paymentSentBy") ?? "");
                             }
                         }
 
@@ -1538,6 +1543,13 @@ namespace HpskSite.Controllers
                         var paidAmount = paidAmountMap.TryGetValue(content.Id, out var pa) ? pa : 0m;
                         var pendingAmount = pendingAmountMap.TryGetValue(content.Id, out var pe) ? pe : 0m;
                         var hasVariance = hasVarianceMap.TryGetValue(content.Id, out var hv) && hv;
+                        DateTime? paymentSentDate = null;
+                        string? paymentSentBy = null;
+                        if (paymentSentMap.TryGetValue(content.Id, out var psInfo))
+                        {
+                            paymentSentDate = psInfo.date;
+                            paymentSentBy = psInfo.by;
+                        }
 
                         // Get shooting classes (new JSON array format)
                         var shootingClassesJson = content.GetValue<string>("shootingClasses");
@@ -1588,7 +1600,9 @@ namespace HpskSite.Controllers
                             pendingAmount = pendingAmount,
                             hasVariance = hasVariance,
                             isCheckedIn = content.GetValue<bool>("isCheckedIn"),
-                            isSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition")
+                            isSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition"),
+                            paymentSentDate = paymentSentDate,
+                            paymentSentBy = paymentSentBy
                         };
                     })
                     .OrderBy(r => r.memberName)

@@ -284,6 +284,63 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Record a "payment sent" CLAIM (payer side) — the shooter says "I've paid" or a club
+        /// admin marks "betald av klubben". Does NOT set the organizer's authoritative received
+        /// state (that stays <see cref="MarkAsPaid"/>, gated to the organizer). Auth is the
+        /// payer-side <see cref="AdminAuthorizationService.CanClaimPaymentForInvoice"/>.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> MarkPaymentSent([FromBody] InvoiceActionRequest request)
+        {
+            if (!await _authService.CanClaimPaymentForInvoice(request.InvoiceId))
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var (actorId, actorName) = await GetCurrentActorAsync();
+                var ok = await _paymentService.SetPaymentSentAsync(request.InvoiceId, true, actorId, actorName);
+                if (!ok)
+                    return Json(new { success = false, message = "Kunde inte spara betalningsanmälan." });
+
+                InvalidateInvoiceCaches();
+                return Json(new { success = true, paymentSentBy = actorName, paymentSentDate = DateTime.Now });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Withdraw a "payment sent" claim. Same payer-side auth as <see cref="MarkPaymentSent"/>.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> ClearPaymentSent([FromBody] InvoiceActionRequest request)
+        {
+            if (!await _authService.CanClaimPaymentForInvoice(request.InvoiceId))
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var (actorId, actorName) = await GetCurrentActorAsync();
+                var ok = await _paymentService.SetPaymentSentAsync(request.InvoiceId, false, actorId, actorName);
+                if (!ok)
+                    return Json(new { success = false, message = "Kunde inte uppdatera betalningsanmälan." });
+
+                InvalidateInvoiceCaches();
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Cancel invoice
         /// </summary>
         [HttpPost]

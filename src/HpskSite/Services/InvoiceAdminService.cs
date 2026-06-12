@@ -434,7 +434,9 @@ namespace HpskSite.Services
                 CreatedDate = invoiceNode.GetValue<DateTime?>("createdDate") ?? invoiceNode.CreateDate,
                 PaymentDate = invoiceNode.GetValue<DateTime?>("paymentDate"),
                 RegistrationId = invoiceNode.GetValue<int>("registrationId"),
-                IsActive = invoiceNode.GetValue<bool?>("isActive") ?? true
+                IsActive = invoiceNode.GetValue<bool?>("isActive") ?? true,
+                PaymentSentDate = invoiceNode.GetValue<DateTime?>("paymentSentDate"),
+                PaymentSentBy = invoiceNode.GetValue<string>("paymentSentBy")
             };
         }
 

@@ -13,7 +13,11 @@
                     <span class="visually-hidden">Laddar QR-kod...</span>
                 </div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer flex-wrap">
+                <div id="swishMarkPaidByMeInfo" class="me-auto small text-muted text-start d-none" style="flex-basis:100%;"></div>
+                <button type="button" id="swishMarkPaidByMeBtn" class="btn btn-success d-none">
+                    <i class="bi bi-check2-circle"></i> <span id="swishMarkPaidByMeLabel">Jag har betalat</span>
+                </button>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                     <i class="bi bi-x-circle"></i> Stäng
                 </button>
@@ -21,3 +25,84 @@
         </div>
     </div>
 </div>
+
+@* Payer-side "payment sent" claim button. Hidden by default; a caller that knows the viewer is
+   a legitimate payer (the shooter on their own invoice, or a club admin) calls
+   window.swishModalSetPaymentSent({invoiceId, label, alreadySent}) after rendering the QR.
+   Clicking posts to InvoiceAdmin/MarkPaymentSent — a CLAIM only; it never sets the organizer's
+   authoritative "received" (Paid) state. *@
+<script>
+(function () {
+    if (window._swishPaidBtnBound) return;   // partial may be on a page only once, but guard anyway
+    window._swishPaidBtnBound = true;
+
+    function showSentState() {
+        const btn = document.getElementById('swishMarkPaidByMeBtn');
+        const info = document.getElementById('swishMarkPaidByMeInfo');
+        const label = document.getElementById('swishMarkPaidByMeLabel');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.classList.remove('d-none', 'btn-success');
+        btn.classList.add('btn-outline-success');
+        if (label) label.textContent = 'Betalning anmäld';
+        if (info) {
+            info.classList.remove('d-none');
+            info.textContent = 'Arrangören har meddelats att betalning är gjord och bekräftar när den är mottagen.';
+        }
+    }
+
+    // Public API used by callers to enable/disable the button for the current invoice.
+    window.swishModalSetPaymentSent = function (opts) {
+        const btn = document.getElementById('swishMarkPaidByMeBtn');
+        const info = document.getElementById('swishMarkPaidByMeInfo');
+        const label = document.getElementById('swishMarkPaidByMeLabel');
+        if (!btn) return;
+        if (!opts || !opts.invoiceId) {           // null/clear -> hide (default for organizer contexts)
+            btn.classList.add('d-none');
+            btn.disabled = false;
+            if (info) info.classList.add('d-none');
+            return;
+        }
+        btn.dataset.invoiceId = opts.invoiceId;
+        if (opts.alreadySent) { showSentState(); return; }
+        btn.disabled = false;
+        btn.classList.remove('d-none', 'btn-outline-success');
+        btn.classList.add('btn-success');
+        if (label) label.textContent = opts.label || 'Jag har betalat';
+        if (info) {
+            info.classList.remove('d-none');
+            info.textContent = 'Detta meddelar arrangören att du har betalat. Arrangören bekräftar när betalningen är mottagen.';
+        }
+    };
+
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('#swishMarkPaidByMeBtn');
+        if (!btn || btn.disabled) return;
+        const invoiceId = parseInt(btn.dataset.invoiceId, 10);
+        if (!invoiceId) return;
+        btn.disabled = true;
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        fetch('/umbraco/surface/InvoiceAdmin/MarkPaymentSent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            credentials: 'include',
+            body: JSON.stringify({ invoiceId: invoiceId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showSentState();
+                if (typeof window.onSwishPaymentSent === 'function') window.onSwishPaymentSent(invoiceId);
+            } else {
+                btn.disabled = false;
+                alert(data.message || 'Kunde inte spara betalningsanmälan.');
+            }
+        })
+        .catch(err => { btn.disabled = false; alert('Nätverksfel: ' + err.message); });
+    });
+
+    // Reset to hidden when the modal closes so state never leaks to the next invoice.
+    const modalEl = document.getElementById('swishPaymentModal');
+    if (modalEl) modalEl.addEventListener('hidden.bs.modal', function () { window.swishModalSetPaymentSent(null); });
+})();
+</script>

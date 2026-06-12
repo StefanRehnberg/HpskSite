@@ -667,6 +667,62 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Can the current user lodge a "payment sent" CLAIM on this invoice? This is the
+        /// PAYER-side right, deliberately distinct from <see cref="CanManageCompetitionInvoice"/>
+        /// (the organizer's "received"/mark-paid right). It NEVER lets the holder set the
+        /// authoritative received state. Granted to:
+        ///   • site admin, OR
+        ///   • the shooter the invoice belongs to (self-pay), OR
+        ///   • a club admin for the invoice's member's primary club (individual invoices), or for
+        ///     the team's club (team invoices) — i.e. the club paying on its members' behalf.
+        /// </summary>
+        public async Task<bool> CanClaimPaymentForInvoice(int invoiceId)
+        {
+            try
+            {
+                if (await IsCurrentUserAdminAsync()) return true;
+
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                    return false;
+
+                var invoice = ctx.Content.GetById(invoiceId);
+                if (invoice == null || invoice.ContentType.Alias != "registrationInvoice")
+                    return false;
+
+                var memberIdStr = invoice.Value<string>("memberId") ?? "";
+
+                int payerClubId = 0;
+                if (memberIdStr.StartsWith("team-"))
+                {
+                    // Team invoice: the payer club is the team registration doc's club.
+                    var regId = invoice.Value<int>("registrationId");
+                    if (regId > 0)
+                        payerClubId = ctx.Content.GetById(regId)?.Value<int>("clubId") ?? 0;
+                }
+                else if (int.TryParse(memberIdStr, out var memberId) && memberId > 0)
+                {
+                    // Self-pay: the shooter may claim their own invoice.
+                    var currentMember = await _memberManager.GetCurrentMemberAsync();
+                    if (currentMember != null)
+                    {
+                        var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                        if (currentMemberData != null && currentMemberData.Id == memberId)
+                            return true;
+                    }
+
+                    var member = _memberService.GetById(memberId);
+                    payerClubId = member?.GetValue<int?>("primaryClubId") ?? 0;
+                }
+
+                return payerClubId > 0 && await IsClubAdminForClub(payerClubId);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Checks whether the current user is allowed to manage (mark paid, cancel, resend, etc.)
         /// a specific competition invoice. The four-tier rule is: site admin OR competition manager
         /// for the invoice's competition OR club admin for the competition's club OR skjutledare

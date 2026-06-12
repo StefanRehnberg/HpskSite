@@ -148,7 +148,7 @@
         <td>{competitionName}</td>
         <td>{memberName}</td>
         <td class="text-end">{totalAmount} kr</td>
-        <td><span class="badge bg-{statusClass}">{paymentStatus}</span></td>
+        <td><span class="badge bg-{statusClass}">{paymentStatus}</span>{sentBadge}</td>
         <td>{createdDate}</td>
         <td>{paymentDate}</td>
         <td class="text-end">
@@ -159,9 +159,7 @@
                 <button class="btn btn-outline-info" onclick="resendClubInvoiceEmail({id})" title="Skicka QR-kod via e-post">
                     <i class="bi bi-envelope"></i>
                 </button>
-                <button class="btn btn-outline-success {hideIfPaid}" onclick="markClubInvoiceAsPaid({id})" title="Markera som betald">
-                    <i class="bi bi-check-circle"></i>
-                </button>
+                {markAction}
                 <button class="btn btn-outline-danger {hideIfCancelled}" onclick="cancelClubInvoice({id}, '{invoiceNumber}')" title="Makulera">
                     <i class="bi bi-x-circle"></i>
                 </button>
@@ -298,13 +296,42 @@ function renderClubInvoices(invoices) {
     const tbody = document.getElementById('clubInvoicesTableBody');
     const template = document.getElementById('club-invoice-row-template').textContent;
 
+    // In the payer views (the club pays on members' behalf, or pays its team fees) the
+    // mark action is a "betald av klubben" CLAIM — it must NOT flip the organizer's
+    // authoritative "received" state. Only the organizer (incoming view) sets received.
+    const viewType = document.getElementById('clubInvoiceViewType')?.value || 'outgoing';
+    const isPayerView = (viewType === 'members' || viewType === 'outgoing');
+
     tbody.innerHTML = invoices.map(invoice => {
         const statusClass = getClubStatusClass(invoice.paymentStatus);
         const statusText = translateClubStatus(invoice.paymentStatus);
-        const hideIfPaid = invoice.paymentStatus === 'Paid' ? 'd-none' : '';
         const hideIfCancelled = invoice.paymentStatus === 'Cancelled' ? 'd-none' : '';
         const createdDate = invoice.createdDate ? new Date(invoice.createdDate).toLocaleDateString('sv-SE') : '-';
         const paymentDate = invoice.paymentDate ? new Date(invoice.paymentDate).toLocaleDateString('sv-SE') : '-';
+
+        const isSettled = invoice.paymentStatus === 'Paid' || invoice.paymentStatus === 'Cancelled';
+        const alreadySent = !!invoice.paymentSentDate;
+        const sentDateStr = alreadySent ? new Date(invoice.paymentSentDate).toLocaleDateString('sv-SE') : '';
+
+        // Sent-claim badge (shown alongside the status until the organizer confirms receipt).
+        let sentBadge = '';
+        if (alreadySent && !isSettled) {
+            const by = invoice.paymentSentBy ? ` av ${escapeClubHtml(invoice.paymentSentBy)}` : '';
+            const lbl = isPayerView ? 'Betald av klubben' : 'Betalning anmäld';
+            sentBadge = ` <span class="badge bg-info text-dark" title="Anmäld${by} ${sentDateStr} — ej bekräftad som mottagen av arrangören">${lbl} ${sentDateStr}</span>`;
+        }
+
+        // Mark action: payer-view = sent-claim (+ undo); organizer-view = authoritative received.
+        let markAction = '';
+        if (!isSettled) {
+            if (isPayerView) {
+                markAction = alreadySent
+                    ? `<button class="btn btn-outline-secondary" onclick="clearClubInvoicePaymentSent(${invoice.id})" title="Ångra betalningsanmälan"><i class="bi bi-arrow-counterclockwise"></i></button>`
+                    : `<button class="btn btn-outline-success" onclick="markClubInvoicePaymentSent(${invoice.id})" title="Markera som betald av klubben"><i class="bi bi-check-circle"></i></button>`;
+            } else {
+                markAction = `<button class="btn btn-outline-success" onclick="markClubInvoiceAsPaid(${invoice.id})" title="Markera som betald (mottagen)"><i class="bi bi-check-circle"></i></button>`;
+            }
+        }
 
         return template
             .replace(/{id}/g, invoice.id)
@@ -314,9 +341,10 @@ function renderClubInvoices(invoices) {
             .replace(/{totalAmount}/g, invoice.totalAmount.toFixed(2))
             .replace(/{paymentStatus}/g, escapeClubHtml(statusText))
             .replace(/{statusClass}/g, statusClass)
+            .replace(/{sentBadge}/g, sentBadge)
+            .replace(/{markAction}/g, markAction)
             .replace(/{createdDate}/g, createdDate)
             .replace(/{paymentDate}/g, paymentDate)
-            .replace(/{hideIfPaid}/g, hideIfPaid)
             .replace(/{hideIfCancelled}/g, hideIfCancelled);
     }).join('');
 }
@@ -491,6 +519,44 @@ function markClubInvoiceAsPaid(invoiceId) {
         .then(data => {
             if (data.success) {
                 alert('Faktura markerad som betald');
+                loadClubInvoices();
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Nätverksfel: ' + error.message);
+        });
+}
+
+// Payer-side claim: "Betald av klubben". Records that the club has paid on the members'
+// behalf — it does NOT mark the invoice received at the organizer. The organizer confirms
+// receipt separately. Distinct from markClubInvoiceAsPaid (which sets received).
+function markClubInvoicePaymentSent(invoiceId) {
+    if (!confirm('Markera som betald av klubben?\n\nDetta meddelar arrangören att klubben har betalat. Arrangören bekräftar själv när betalningen är mottagen.')) {
+        return;
+    }
+    postClubPaymentSentAction('/umbraco/surface/InvoiceAdmin/MarkPaymentSent', invoiceId);
+}
+
+function clearClubInvoicePaymentSent(invoiceId) {
+    if (!confirm('Ångra betalningsanmälan för denna faktura?')) {
+        return;
+    }
+    postClubPaymentSentAction('/umbraco/surface/InvoiceAdmin/ClearPaymentSent', invoiceId);
+}
+
+function postClubPaymentSentAction(url, invoiceId) {
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+        credentials: 'include',
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
                 loadClubInvoices();
             } else {
                 alert('Fel: ' + data.message);

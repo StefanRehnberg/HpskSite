@@ -4472,6 +4472,12 @@ function loadSwishQrCode(competitionId, invoiceId) {
             const instructions = document.getElementById('swishInstructions');
 
             if (data.success && data.qrCode) {
+                const invId = data.invoiceId || invoiceId || 0;
+                // Payer-side "Jag har betalat" claim — records a claim only; the organizer still
+                // confirms receipt. Opening this modal marks nothing.
+                const paidBtnHtml = data.paymentAlreadySent
+                    ? `<button type="button" class="btn btn-outline-success" disabled><i class="bi bi-check2-circle me-1"></i>Betalning anmäld</button>`
+                    : `<button type="button" class="btn btn-success" onclick="markMinaSidorPaymentSent(${invId}, this)"><i class="bi bi-check2-circle me-1"></i>Jag har betalat</button>`;
                 container.innerHTML = `
                     <img src="${data.qrCode}" alt="Swish QR Code" class="img-fluid" style="max-width: 300px;">
                     <p class="text-muted mt-2">
@@ -4479,6 +4485,8 @@ function loadSwishQrCode(competitionId, invoiceId) {
                         ${data.includesSubCompetition ? `<small>Inkluderar ${data.subCompetitionFeeTotal} kr i deltävlingsavgift${data.subCompetitionName ? ` (${data.subCompetitionName})` : ''}.</small><br>` : ''}
                         <strong>Fakturanr:</strong> ${data.invoiceNumber || invoiceId}
                     </p>
+                    <div class="mt-3">${paidBtnHtml}</div>
+                    <div class="small text-muted mt-2">Detta meddelar arrangören att du har betalat. Arrangören bekräftar när betalningen är mottagen.</div>
                 `;
                 instructions.classList.remove('d-none');
             } else {
@@ -4499,6 +4507,34 @@ function loadSwishQrCode(competitionId, invoiceId) {
                 </div>
             `;
         });
+}
+
+// Payer-side "Jag har betalat" claim from Min sida. Records a claim only — never sets the
+// organizer's authoritative received state (paymentStatus=Paid stays organizer-controlled).
+function markMinaSidorPaymentSent(invoiceId, btn) {
+    if (!invoiceId) return;
+    btn.disabled = true;
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    fetch('/umbraco/surface/InvoiceAdmin/MarkPaymentSent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            btn.className = 'btn btn-outline-success';
+            btn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Betalning anmäld';
+            btn.disabled = true;
+        } else {
+            btn.disabled = false;
+            alert(data.message || 'Kunde inte spara betalningsanmälan.');
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        alert('Nätverksfel: ' + error.message);
+    });
 }
 
 function unregisterFromCompetition(registrationId, competitionName) {

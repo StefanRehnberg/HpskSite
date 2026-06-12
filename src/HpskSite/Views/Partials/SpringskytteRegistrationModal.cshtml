@@ -564,6 +564,15 @@ function springRegShowSwish(competitionId, targetMemberId) {
                     <p class="mb-1"><strong>Klasser:</strong> ${data.shootingClasses}</p>
                     <p class="mb-1 text-muted"><small>Referens: ${data.invoiceNumber}</small></p>
                 `;
+                // Payer-side "Jag har betalat" claim button (records a claim only — the organizer
+                // still confirms receipt; opening the modal marks nothing).
+                if (window.swishModalSetPaymentSent && data.invoiceId) {
+                    window.swishModalSetPaymentSent({
+                        invoiceId: data.invoiceId,
+                        label: 'Jag har betalat',
+                        alreadySent: !!data.paymentAlreadySent
+                    });
+                }
             } else {
                 modalBody.innerHTML = `
                     <div class="alert alert-warning">

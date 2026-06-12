@@ -1364,6 +1364,11 @@ function displayCompetitionRegistrations() {
                         <i class="bi bi-exclamation-triangle me-1"></i>Avvikande belopp
                     </span>
                 ` : ''}
+                ${(reg.paymentSentDate && reg.paymentStatus !== 'Paid') ? `
+                    <span class="badge bg-info text-dark ms-1" title="Betalaren${reg.paymentSentBy ? ' (' + escapeHistory(reg.paymentSentBy) + ')' : ''} anger att betalning är gjord — bekräfta när den är mottagen">
+                        <i class="bi bi-cash-coin me-1"></i>Betalning anmäld
+                    </span>
+                ` : ''}
                 ${invoiceRef}
             </td>
             <td>
@@ -3287,13 +3292,15 @@ function renderInvoiceHistory(data) {
     // Pretty event-type labels in Swedish
     const labelFor = t => ({
         Created: 'Faktura skapad',
-        MarkedPaid: 'Markerad som betald',
+        MarkedPaid: 'Markerad som betald (mottagen)',
         Cancelled: 'Makulerad',
         Refunded: 'Återbetald',
         EmailSent: 'E-post skickad',
         ReceiptSent: 'Betalningsbekräftelse skickad',
         Transferred: 'Överförd till annan skytt',
-        StatusChanged: 'Status ändrad'
+        StatusChanged: 'Status ändrad',
+        PaymentSent: 'Betalning anmäld av betalaren',
+        PaymentSentCleared: 'Betalningsanmälan återkallad'
     })[t] || t;
     const colorFor = t => ({
         Created: 'secondary',
@@ -3303,7 +3310,9 @@ function renderInvoiceHistory(data) {
         EmailSent: 'info',
         ReceiptSent: 'info',
         Transferred: 'warning',
-        StatusChanged: 'secondary'
+        StatusChanged: 'secondary',
+        PaymentSent: 'info',
+        PaymentSentCleared: 'secondary'
     })[t] || 'secondary';
 
     let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';

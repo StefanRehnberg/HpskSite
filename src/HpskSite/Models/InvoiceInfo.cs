@@ -71,5 +71,15 @@ namespace HpskSite.Models
         /// Whether invoice is active
         /// </summary>
         public bool IsActive { get; set; }
+
+        /// <summary>
+        /// "Payment sent" CLAIM date — set when the payer (the shooter, or a club admin paying on
+        /// the members' behalf) states they have paid. This is NOT organizer-confirmed receipt;
+        /// the authoritative "received" state is <see cref="PaymentStatus"/> = "Paid". Null = no claim.
+        /// </summary>
+        public DateTime? PaymentSentDate { get; set; }
+
+        /// <summary>Who lodged the "payment sent" claim (shooter or club admin name).</summary>
+        public string? PaymentSentBy { get; set; }
     }
 }

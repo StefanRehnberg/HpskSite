@@ -1039,6 +1039,16 @@ function showSwishPaymentModal(competitionId, targetMemberId = '') {
                         <p class="mb-0"><strong>Fakturanummer:</strong> ${data.invoiceNumber}</p>
                     </div>
                 `;
+                // Enable the payer-side "Jag har betalat" claim button for the shooter who just
+                // paid for their own registration. It records a claim only — the organizer still
+                // confirms receipt. Opening this modal does NOT mark anything paid.
+                if (window.swishModalSetPaymentSent && data.invoiceId) {
+                    window.swishModalSetPaymentSent({
+                        invoiceId: data.invoiceId,
+                        label: 'Jag har betalat',
+                        alreadySent: !!data.paymentAlreadySent
+                    });
+                }
             } else {
                 modalBody.innerHTML = `
                     <div class="alert alert-danger mb-0">

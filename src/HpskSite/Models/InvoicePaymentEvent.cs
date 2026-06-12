@@ -18,6 +18,8 @@ namespace HpskSite.Models
         public const string ReceiptSent    = "ReceiptSent";   // payment receipt emailed to the shooter after mark-as-paid
         public const string Transferred    = "Transferred";   // registration (and this invoice) re-pointed to a different member
         public const string StatusChanged  = "StatusChanged"; // catch-all for status flips that aren't one of the above
+        public const string PaymentSent    = "PaymentSent";        // payer (shooter or club) CLAIMS they have paid — NOT organizer-confirmed receipt
+        public const string PaymentSentCleared = "PaymentSentCleared"; // payer withdrew the "betald"-claim
 
         /// <summary>Resolves a paymentStatus value into the event type that should be logged when transitioning to it.</summary>
         public static string FromStatus(string paymentStatus) => paymentStatus switch
