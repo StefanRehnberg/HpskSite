@@ -1716,28 +1716,10 @@ window.CompetitionConfig = {
 </div>
 
 @* Swish Payment Modal *@
-<div class="modal fade" id="swishPaymentModal" tabindex="-1" aria-labelledby="swishPaymentModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title" id="swishPaymentModalLabel">
-                    <i class="bi bi-qr-code"></i> Betala med Swish
-                </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body text-center" id="swishPaymentModalBody">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Laddar QR-kod...</span>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                    <i class="bi bi-x-circle"></i> Stäng
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
+@* Shared Swish QR modal — used by the regular registration flow (competition-registration.js)
+   and the Springskytte flow (springRegShowSwish). Using the partial (instead of an inline copy)
+   gives it the payer-side "Jag har betalat" button + window.swishModalSetPaymentSent. *@
+@await Html.PartialAsync("SwishPaymentModal")
 
 @* ======================================== Unpaid Invoices Modal ======================================== *@
 <div class="modal fade" id="unpaidInvoicesModal" tabindex="-1" aria-labelledby="unpaidInvoicesModalLabel" aria-hidden="true">
