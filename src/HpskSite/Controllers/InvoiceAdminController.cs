@@ -786,6 +786,50 @@ namespace HpskSite.Controllers
                 return s.Trim().Trim('[', ']').Trim('"', '\'').Trim();
             }
 
+            // Deltävling (sub-competition) revenue is bundled into each invoice's totalAmount by
+            // RegistrationFeeCalculator. To itemise it on the books, derive the sub-comp portion
+            // per registration and credit it once — to the registration's representative invoice
+            // (its first Paid one, else its oldest) — so multi-invoice top-ups don't double-count.
+            var regById = registrations.ToDictionary(r => r.Id);
+
+            int ResolveRegistrationId(IContent inv)
+            {
+                var rid = inv.GetValue<int>("registrationId");
+                if (rid > 0) return rid;
+                var rel = inv.GetValue<string>("relatedRegistrationIds");
+                if (!string.IsNullOrWhiteSpace(rel))
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(rel, @"\d+");
+                    if (m.Success && int.TryParse(m.Value, out var legacyId)) return legacyId;
+                }
+                return 0;
+            }
+
+            decimal SubPortionForRegistration(int registrationId)
+            {
+                if (!regById.TryGetValue(registrationId, out var reg)) return 0m;
+                var isSub = reg.HasProperty("isSubCompetition") && reg.GetValue<bool>("isSubCompetition");
+                if (!isSub) return 0m;
+                var classes = CompetitionRegistrationDocument
+                    .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "")
+                    .Select(c => c.Class)
+                    .Where(c => !string.IsNullOrEmpty(c))
+                    .ToList();
+                return RegistrationFeeCalculator.CalculateSubCompetitionPortion(competition, classes, true);
+            }
+
+            // invoices are already ordered oldest-first, so the representative pick is stable.
+            var subCompByInvoiceId = new Dictionary<int, decimal>();
+            foreach (var grp in invoices.GroupBy(ResolveRegistrationId).Where(g => g.Key > 0))
+            {
+                var portion = SubPortionForRegistration(grp.Key);
+                if (portion <= 0m) continue;
+                var ordered = grp.ToList();
+                var representative = ordered.FirstOrDefault(i =>
+                    CleanStatus(i.GetValue<string>("paymentStatus") ?? "Pending") == "Paid") ?? ordered.First();
+                subCompByInvoiceId[representative.Id] = portion;
+            }
+
             BokforingsTransactionRow ToRow(IContent inv)
             {
                 var memberIdStr = inv.GetValue<string>("memberId") ?? "";
@@ -803,7 +847,8 @@ namespace HpskSite.Controllers
                     PaymentDate = inv.GetValue<DateTime?>("paymentDate"),
                     CreatedDate = inv.GetValue<DateTime?>("createdDate"),
                     TransactionId = inv.GetValue<string>("transactionId"),
-                    Notes = inv.GetValue<string>("notes")
+                    Notes = inv.GetValue<string>("notes"),
+                    SubCompetitionAmount = subCompByInvoiceId.TryGetValue(inv.Id, out var sub) ? sub : 0m
                 };
             }
 
@@ -825,6 +870,8 @@ namespace HpskSite.Controllers
                 PaidTotal = paidRows.Sum(r => r.RecordedAmount),
                 PendingTotal = outstandingRows.Sum(r => r.Amount),
                 RefundedTotal = refundedRows.Sum(r => r.RecordedAmount),
+                PaidSubCompetitionTotal = paidRows.Sum(r => r.SubCompetitionAmount),
+                PendingSubCompetitionTotal = outstandingRows.Sum(r => r.SubCompetitionAmount),
                 PaidByMethod = paidRows
                     .GroupBy(r => string.IsNullOrEmpty(r.PaymentMethod) ? "Okänd" : r.PaymentMethod!)
                     .ToDictionary(g => g.Key, g => g.Sum(r => r.RecordedAmount)),
@@ -851,6 +898,7 @@ namespace HpskSite.Controllers
                 Venue = competition.GetValue<string>("venue"),
                 Organizer = organizerName,
                 Scope = competition.GetValue<string>("competitionScope"),
+                SubCompetitionName = competition.GetValue<string>("subCompetitionName"),
                 GeneratedAt = DateTime.Now,
                 GeneratedBy = actorName,
                 IncludeOutstanding = includeOutstanding,

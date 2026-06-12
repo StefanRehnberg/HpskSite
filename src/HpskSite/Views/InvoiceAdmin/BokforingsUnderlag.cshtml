@@ -165,6 +165,44 @@
     </tfoot>
 </table>
 
+@* ── Breakdown by fee type (only when the competition has a Deltävling) ── *@
+@if (!string.IsNullOrEmpty(Model.SubCompetitionName))
+{
+    var baseFeeTotal = Model.Summary.PaidTotal - Model.Summary.PaidSubCompetitionTotal;
+    <h2>Intäkter per avgiftstyp</h2>
+    <table class="acc">
+        <thead>
+            <tr>
+                <th>Avgiftstyp</th>
+                <th class="num">Summa</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Anmälningsavgift</td>
+                <td class="num">@FormatKr(baseFeeTotal)</td>
+            </tr>
+            <tr>
+                <td>Deltävlingsavgift (@Model.SubCompetitionName)</td>
+                <td class="num">@FormatKr(Model.Summary.PaidSubCompetitionTotal)</td>
+            </tr>
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Totalt betalt</td>
+                <td class="num">@FormatKr(Model.Summary.PaidTotal)</td>
+            </tr>
+        </tfoot>
+    </table>
+    <div class="muted" style="font-size:10px;margin-top:-8px;margin-bottom:8px;">
+        Deltävlingsavgiften är beräknad utifrån varje anmälans klasser och val, och ingår i totalen ovan. Resterande belopp avser anmälningsavgift.
+        @if (Model.IncludeOutstanding && Model.Summary.PendingSubCompetitionTotal > 0)
+        {
+            <text> Av utestående belopp avser @FormatKr(Model.Summary.PendingSubCompetitionTotal) deltävlingsavgift.</text>
+        }
+    </div>
+}
+
 @* ── Paid transactions (the headline list for bookkeeping) ──── *@
 @{
     var anyPaidVariance = Model.PaidTransactions.Any(t => t.HasVariance);
