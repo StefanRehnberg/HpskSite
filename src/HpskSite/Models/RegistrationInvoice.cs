@@ -149,10 +149,16 @@ namespace HpskSite.Models
         }
 
         /// <summary>
-        /// Get payment method display text
+        /// Get payment method display text. A payment method is only meaningful once money has
+        /// actually moved, so it's blank until the invoice is Paid/Refunded — the stored value
+        /// defaults to "Swish" (the *intended* channel) and showing it on an unpaid invoice makes
+        /// it look paid.
         /// </summary>
         public string GetPaymentMethodDisplay()
         {
+            if (PaymentStatus != "Paid" && PaymentStatus != "Refunded")
+                return "";
+
             return PaymentMethod switch
             {
                 "Swish" => "Swish",

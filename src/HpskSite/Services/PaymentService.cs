@@ -418,16 +418,18 @@ namespace HpskSite.Services
 
                         // Log a Created event in the audit table. Fire-and-forget; the audit
                         // service swallows its own exceptions and the invoice is already saved.
+                        // No paymentMethod on the creation event — nothing has been paid yet.
+                        // Stamping the intended method (Swish) here made unpaid invoices look paid.
                         _ = _auditService.LogAsync(
                             invoiceId: invoice.Id,
                             competitionId: competitionId,
                             eventType: InvoicePaymentEventTypes.Created,
                             byMemberId: null,
                             byMemberName: null,
-                            paymentMethod: paymentMethod,
+                            paymentMethod: null,
                             amount: totalAmount,
                             reference: invoiceNumber,
-                            notes: "Betalningsunderlag skapat");
+                            notes: "Faktura skapad – väntar på betalning");
 
                         return Task.FromResult<IContent?>(invoice);
                     }
@@ -989,14 +991,15 @@ namespace HpskSite.Services
                     {
                         _logger.LogInformation("Team invoice {InvoiceId} created successfully for team {TeamId}", invoice.Id, teamId);
 
+                        // No paymentMethod on the creation event — nothing has been paid yet.
                         _ = _auditService.LogAsync(
                             invoiceId: invoice.Id,
                             competitionId: competitionId,
                             eventType: InvoicePaymentEventTypes.Created,
-                            paymentMethod: paymentMethod,
+                            paymentMethod: null,
                             amount: totalAmount,
                             reference: invoiceNumber,
-                            notes: $"Betalningsunderlag skapat: {teamName} ({clubName})");
+                            notes: $"Faktura skapad – väntar på betalning: {teamName} ({clubName})");
 
                         return Task.FromResult<IContent?>(invoice);
                     }

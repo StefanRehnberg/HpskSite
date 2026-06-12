@@ -3268,7 +3268,7 @@ function renderInvoiceHistory(data) {
 
     // Pretty event-type labels in Swedish
     const labelFor = t => ({
-        Created: 'Betalning skapad',
+        Created: 'Faktura skapad',
         MarkedPaid: 'Markerad som betald',
         Cancelled: 'Makulerad',
         Refunded: 'Återbetald',
@@ -3295,11 +3295,16 @@ function renderInvoiceHistory(data) {
             year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
         }) : '';
         const amount = (e.amount != null && e.amount !== '') ? Math.round(Number(e.amount)) + ' kr' : '';
+        // A payment method is only meaningful for events where money actually moved.
+        // For "Faktura skapad", cancellations, emails, transfers etc. the stored method
+        // is just the *intended* channel (defaults to Swish) — showing it there makes an
+        // unpaid invoice look paid, so suppress it everywhere except real payment/refund events.
+        const showMethod = (e.eventType === 'MarkedPaid' || e.eventType === 'Refunded');
         html += `<tr>
             <td class="small text-nowrap">${escapeHistory(when)}</td>
             <td><span class="badge bg-${colorFor(e.eventType)}">${escapeHistory(labelFor(e.eventType))}</span></td>
             <td class="small">${escapeHistory(e.byMemberName || '—')}</td>
-            <td class="small">${escapeHistory(e.paymentMethod || '')}</td>
+            <td class="small">${showMethod ? escapeHistory(e.paymentMethod || '') : ''}</td>
             <td class="small text-end">${escapeHistory(amount)}</td>
             <td class="small">${escapeHistory(e.reference || '')}</td>
             <td class="small">${escapeHistory(e.notes || '')}</td>
