@@ -218,6 +218,7 @@
                                 <th>Medlem</th>
                                 <th>Klubb</th>
                                 <th>Klass</th>
+                                <th id="subCompColHeader" style="display:none;">Deltävling</th>
                                 <th>Anmälningsdatum</th>
                                 <th>Status</th>
                                 <th>Närvaro</th>
@@ -794,6 +795,9 @@ let competitionRegistrations = [];
 let filteredCompetitionRegistrations = [];
 let currentCompetitionPage = 1;
 const competitionPageSize = 20;
+// Name of the competition's optional Deltävling (sub-competition); '' when it has none.
+// Drives the conditional "Deltävling" column on the individuals table.
+let competitionSubCompetitionName = '';
 
 // Helper function to get payment status badge class
 function getPaymentStatusBadgeClass(status) {
@@ -854,6 +858,7 @@ function loadCompetitionRegistrations() {
     .then(data => {
         if (data.success) {
             competitionRegistrations = data.registrations || [];
+            competitionSubCompetitionName = data.subCompetitionName || '';
             const ic = document.getElementById('individualsCount');
             if (ic) ic.textContent = competitionRegistrations.length;
             populateCompetitionClubFilter();
@@ -1302,6 +1307,14 @@ function displayCompetitionRegistrations() {
         return;
     }
 
+    // Show the Deltävling column only when this competition actually has one.
+    const showSubComp = !!competitionSubCompetitionName;
+    const subCompHeader = document.getElementById('subCompColHeader');
+    if (subCompHeader) {
+        subCompHeader.style.display = showSubComp ? '' : 'none';
+        subCompHeader.title = showSubComp ? competitionSubCompetitionName : '';
+    }
+
     tbody.innerHTML = '';
 
     pageRegistrations.forEach(reg => {
@@ -1333,6 +1346,11 @@ function displayCompetitionRegistrations() {
             <td>${reg.memberClub}</td>
             <td>
                 ${classBadges}
+            </td>
+            <td style="display:${showSubComp ? '' : 'none'};">
+                ${reg.isSubCompetition
+                    ? `<span class="badge bg-success" title="Anmäld till ${escapeHtmlSafe(competitionSubCompetitionName)}"><i class="bi bi-check-lg"></i></span>`
+                    : '<span class="text-muted">—</span>'}
             </td>
             <td>
                 ${new Date(reg.registrationDate).toLocaleString('sv-SE', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}

@@ -1620,7 +1620,11 @@ namespace HpskSite.Controllers
                 return Json(new {
                     success = true,
                     registrations = registrations,
-                    statistics = statistics
+                    statistics = statistics,
+                    // Name of the optional sub-competition (Deltävling), empty when the
+                    // competition has none. Lets the Anmälningar tab show a Deltävling column
+                    // (with a check on rows where the shooter opted in) only when relevant.
+                    subCompetitionName = competition.Value<string>("subCompetitionName") ?? ""
                 });
             }
             catch (Exception ex)
