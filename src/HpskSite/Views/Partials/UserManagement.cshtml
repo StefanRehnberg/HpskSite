@@ -931,22 +931,25 @@ function updateLockedAccountsBar(lockedCount) {
     const label = document.getElementById('lockedAccountsLabel');
     if (!bar || !toggle || !label) return;
 
+    // Always visible so the filter is discoverable even when nothing is locked.
+    bar.classList.remove('d-none');
+    toggle.classList.remove('btn-danger', 'btn-outline-danger', 'btn-outline-secondary');
+    toggle.disabled = false;
+
     if (currentFilters.lockedOnly) {
-        // Filter is active — always show the bar so the user can switch back.
-        bar.classList.remove('d-none');
-        toggle.classList.remove('btn-outline-danger');
+        // Filter is active — let the user switch back.
         toggle.classList.add('btn-danger');
         label.textContent = `Visar endast låsta konton (${lockedCount}) — visa alla`;
     } else if (lockedCount > 0) {
-        bar.classList.remove('d-none');
-        toggle.classList.remove('btn-danger');
         toggle.classList.add('btn-outline-danger');
         label.textContent = lockedCount === 1
             ? '1 låst konto — visa endast låsta'
             : `${lockedCount} låsta konton — visa endast låsta`;
     } else {
-        // Nothing locked in scope — hide the bar entirely.
-        bar.classList.add('d-none');
+        // No locked accounts in scope — neutral, non-actionable, but still shown.
+        toggle.classList.add('btn-outline-secondary');
+        toggle.disabled = true;
+        label.textContent = 'Inga låsta konton';
     }
 }
 
