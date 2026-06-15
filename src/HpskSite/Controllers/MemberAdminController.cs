@@ -71,6 +71,7 @@ namespace HpskSite.Controllers
             string? region = null,
             int? clubId = null,
             string? role = null,
+            bool lockedOnly = false,
             string sortBy = "lastActiveSortValue",
             bool sortDesc = true)
         {
@@ -236,6 +237,18 @@ namespace HpskSite.Controllers
                     }).ToList();
                 }
 
+                // Count locked-out members within the current scope (region/club/search/role all
+                // applied above), so the badge honours a regional admin's region restriction. This
+                // is computed BEFORE the lockedOnly filter so the count is stable whether or not the
+                // "show only locked" toggle is on. IMember.IsLockedOut is already loaded — no N+1.
+                var lockedCount = filteredMembers.Count(m => m.IsLockedOut);
+
+                // Apply "locked accounts only" filter
+                if (lockedOnly)
+                {
+                    filteredMembers = filteredMembers.Where(m => m.IsLockedOut).ToList();
+                }
+
                 // Transform to view models using pre-loaded roles
                 var memberList = filteredMembers.Select(m => {
                     var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
@@ -278,6 +291,7 @@ namespace HpskSite.Controllers
                         Region = memberRegion,
                         PhoneNumber = phoneNumber,
                         IsApproved = m.IsApproved,
+                        IsLockedOut = m.IsLockedOut,
                         Groups = memberRoles,
                         HasInvalidClubReference = hasInvalidClubReference,
                         LastActive = lastActive,
@@ -331,7 +345,8 @@ namespace HpskSite.Controllers
                         totalPages = totalPages,
                         hasNextPage = page < totalPages,
                         hasPreviousPage = page > 1,
-                        clubLookup = clubLookup
+                        clubLookup = clubLookup,
+                        lockedCount = lockedCount
                     }
                 });
             }
@@ -631,6 +646,7 @@ namespace HpskSite.Controllers
             public string Region { get; set; } = "";
             public string PhoneNumber { get; set; } = "";
             public bool IsApproved { get; set; }
+            public bool IsLockedOut { get; set; }
             public string[] Groups { get; set; } = Array.Empty<string>();
             public bool HasInvalidClubReference { get; set; }
             public DateTime? LastActive { get; set; }

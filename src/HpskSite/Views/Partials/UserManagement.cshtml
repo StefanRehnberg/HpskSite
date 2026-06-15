@@ -137,6 +137,16 @@
         </div>
     </div>
 
+    <!-- Locked accounts quick filter. The count honours the active region/club scope, so a
+         regional admin only ever sees locked members within their region. Hidden when there are
+         none in scope. -->
+    <div id="lockedAccountsBar" class="mb-3 d-none">
+        <button type="button" id="lockedAccountsToggle" class="btn btn-outline-danger btn-sm w-100 text-start"
+                onclick="toggleLockedOnly()">
+            <i class="bi bi-lock-fill me-1"></i><span id="lockedAccountsLabel"></span>
+        </button>
+    </div>
+
     <!-- Loading State -->
     <div class="spinner-border text-primary d-none" id="usersLoadingSpinner" role="status">
         <span class="visually-hidden">Laddar...</span>
@@ -528,7 +538,7 @@
             <div class="member-name-cell">
                 {avatarHtml}
                 <div>
-                    <strong>{firstName} {lastName}</strong><br>
+                    <strong>{firstName} {lastName}</strong>{lockedBadge}<br>
                     <small class="text-muted">{email}</small>
                 </div>
             </div>
@@ -585,7 +595,7 @@ let currentSortDirection = 'desc';  // Newest first
 
 // Pagination and filtering state
 let currentPage = 1;
-let currentFilters = { search: '', region: '', clubId: '', role: '' };
+let currentFilters = { search: '', region: '', clubId: '', role: '', lockedOnly: false };
 let debounceTimer = null;
 let paginationData = null;
 let clubLookup = {};
@@ -913,6 +923,40 @@ function loadClubsForDropdown() {
         .catch(error => console.error('Error loading clubs:', error));
 }
 
+// Update the "locked accounts" quick-filter bar. The count is scoped server-side (region/club),
+// so a regional admin only sees locked members in their region.
+function updateLockedAccountsBar(lockedCount) {
+    const bar = document.getElementById('lockedAccountsBar');
+    const toggle = document.getElementById('lockedAccountsToggle');
+    const label = document.getElementById('lockedAccountsLabel');
+    if (!bar || !toggle || !label) return;
+
+    if (currentFilters.lockedOnly) {
+        // Filter is active — always show the bar so the user can switch back.
+        bar.classList.remove('d-none');
+        toggle.classList.remove('btn-outline-danger');
+        toggle.classList.add('btn-danger');
+        label.textContent = `Visar endast låsta konton (${lockedCount}) — visa alla`;
+    } else if (lockedCount > 0) {
+        bar.classList.remove('d-none');
+        toggle.classList.remove('btn-danger');
+        toggle.classList.add('btn-outline-danger');
+        label.textContent = lockedCount === 1
+            ? '1 låst konto — visa endast låsta'
+            : `${lockedCount} låsta konton — visa endast låsta`;
+    } else {
+        // Nothing locked in scope — hide the bar entirely.
+        bar.classList.add('d-none');
+    }
+}
+
+// Toggle the "show only locked accounts" filter and reload from page 1.
+function toggleLockedOnly() {
+    currentFilters.lockedOnly = !currentFilters.lockedOnly;
+    currentPage = 1;
+    loadUsers();
+}
+
 function loadUsers() {
     const spinner = document.getElementById('usersLoadingSpinner');
     const tableContainer = document.getElementById('usersTableContainer');
@@ -937,6 +981,7 @@ function loadUsers() {
     if (currentFilters.region) params.append('region', currentFilters.region);
     if (currentFilters.clubId) params.append('clubId', currentFilters.clubId);
     if (currentFilters.role) params.append('role', currentFilters.role);
+    if (currentFilters.lockedOnly) params.append('lockedOnly', 'true');
 
     fetch(`/umbraco/surface/MemberAdmin/GetMembers?${params.toString()}`)
         .then(response => response.json())
@@ -954,6 +999,7 @@ function loadUsers() {
             paginationData = data.data;
             clubLookup = data.data.clubLookup || {};
             allUsers = data.data.items || [];
+            updateLockedAccountsBar(data.data.lockedCount || 0);
 
             if (allUsers.length === 0) {
                 tableContainer.classList.add('d-none');
@@ -1027,9 +1073,15 @@ function displayUsers() {
         // Render avatar
         const avatarHtml = renderUserAvatar(user);
 
+        // Locked-account badge
+        const lockedBadge = user.isLockedOut
+            ? ' <span class="badge bg-danger ms-1"><i class="bi bi-lock-fill me-1"></i>Låst</span>'
+            : '';
+
         return template
             .replace(/{id}/g, user.id)
             .replace(/{avatarHtml}/g, avatarHtml)
+            .replace(/{lockedBadge}/g, lockedBadge)
             .replace(/{firstName}/g, escapeHtml(user.firstName || ''))
             .replace(/{lastName}/g, escapeHtml(user.lastName || ''))
             .replace(/{email}/g, escapeHtml(user.email || ''))

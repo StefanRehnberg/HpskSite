@@ -6,22 +6,34 @@
 @using Umbraco.Cms.Web.Website.Controllers
 @using Umbraco.Cms.Core.Services
 @using Umbraco.Extensions
+@using HpskSite.Controllers
 @inject IMemberExternalLoginProviders memberExternalLoginProviders
 @inject ITwoFactorLoginService twoFactorLoginService
 @{
     var loginModel = new LoginModel();
-    // Redirect to previous page or home page after successful login
+
+    // "Min sida" (the member dashboard) is the default landing page after login.
+    var minSidaUrl = Model.Root()?.Children?.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url()
+                     ?? "/user-profile-page/";
+
+    // Where to send the member after a successful login:
+    //  1) an explicit ?returnUrl= (set when a protected page bounced them here),
+    //  2) otherwise the page they came from (same site, not a login page),
+    //  3) otherwise Min sida.
     var returnUrl = Context.Request.Query["returnUrl"].ToString();
     if (string.IsNullOrEmpty(returnUrl))
     {
-        returnUrl = Context.Request.Headers["Referer"].ToString();
-        // If referrer is the login page itself, go to home instead
-        if (!string.IsNullOrEmpty(returnUrl) && returnUrl.Contains("/member-login"))
+        var referer = Context.Request.Headers["Referer"].ToString();
+        if (!string.IsNullOrEmpty(referer)
+            && Uri.TryCreate(referer, UriKind.Absolute, out var refUri)
+            && string.Equals(refUri.Host, Context.Request.Host.Host, StringComparison.OrdinalIgnoreCase)
+            && refUri.AbsolutePath.Trim('/').Length > 0
+            && !refUri.AbsolutePath.Contains("login", StringComparison.OrdinalIgnoreCase))
         {
-            returnUrl = "/";
+            returnUrl = refUri.PathAndQuery;
         }
     }
-    loginModel.RedirectUrl = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl;
+    loginModel.RedirectUrl = string.IsNullOrEmpty(returnUrl) ? minSidaUrl : returnUrl;
 }
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
@@ -57,13 +69,55 @@ else
 
 <div class="login-form">
 
-    @* Custom error message div *@
-    <div id="loginErrorMessage" style="display: none;" class="alert alert-danger mb-3"></div>
+    @{
+        var loginErrorType = ViewData["LoginErrorType"] as string;
+        var attemptedEmail = (ViewData["LoginAttemptedEmail"] as string ?? "").Replace("'", "\\'");
+    }
 
-    @using (Html.BeginUmbracoForm<UmbLoginController>(
+    @* Account locked — temporary, the user can recover immediately by resetting their password *@
+    @if (loginErrorType == "locked")
+    {
+        <div class="alert alert-warning mb-3" role="alert">
+            <div class="d-flex">
+                <i class="bi bi-lock-fill fs-3 me-3"></i>
+                <div>
+                    <h6 class="alert-heading mb-1">Kontot är låst</h6>
+                    <p class="mb-2 small">Vi har låst kontot efter för många misslyckade inloggningsförsök.</p>
+                    <p class="mb-0 small"><strong>Återställ ditt lösenord</strong> så låses kontot upp och du kan logga in igen.</p>
+                </div>
+            </div>
+            <button type="button" class="btn btn-primary w-100 mt-3" onclick="openPasswordReset('@attemptedEmail')">
+                <i class="bi bi-key me-1"></i> Återställ lösenord
+            </button>
+        </div>
+    }
+    else if (loginErrorType == "notallowed")
+    {
+        <div class="alert alert-info mb-3" role="alert">
+            <h6 class="alert-heading mb-1"><i class="bi bi-hourglass-split me-1"></i> Kontot väntar på godkännande</h6>
+            <p class="mb-0 small">Du får ett e-postmeddelande när en klubbadministratör har godkänt ditt konto.</p>
+        </div>
+    }
+    else if (loginErrorType == "invalid")
+    {
+        <div class="alert alert-danger mb-3" role="alert">
+            <h6 class="alert-heading mb-1"><i class="bi bi-exclamation-triangle me-1"></i> Fel e-post eller lösenord</h6>
+            <p class="mb-0 small">Kontrollera uppgifterna och försök igen.
+                <a href="#" class="alert-link" onclick="openPasswordReset('@attemptedEmail'); return false;">Glömt lösenordet?</a>
+            </p>
+        </div>
+    }
+    else if (loginErrorType == "missing")
+    {
+        <div class="alert alert-danger mb-3" role="alert">
+            <p class="mb-0 small"><i class="bi bi-exclamation-triangle me-1"></i> Fyll i både e-postadress och lösenord.</p>
+        </div>
+    }
+
+    @using (Html.BeginUmbracoForm<LoginController>(
         "HandleLogin", new { RedirectUrl = loginModel.RedirectUrl })) {
 
-            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <input asp-for="@loginModel.RedirectUrl" type="hidden" />
             <div class="mb-3">
                 <label for="@Html.IdFor(m => loginModel.Username)" class="form-label">E-postadress</label>
                 <input asp-for="@loginModel.Username" class="form-control" type="email" autocomplete="username" />
@@ -121,44 +175,17 @@ else
 </div>
 
 <script>
-// Enhanced login error handling
-$(document).ready(function() {
-    var form = $('form');
-    var errorDiv = $('#loginErrorMessage');
-
-    form.on('submit', function() {
-        errorDiv.hide();
-    });
-
-    // Check for validation errors after page load
-    setTimeout(function() {
-        var validationSummary = $('.validation-summary-errors, .text-danger').filter(':visible');
-        if (validationSummary.length > 0) {
-            var errorText = validationSummary.text().trim();
-
-            // Parse and enhance error messages
-            if (errorText) {
-                var enhancedMessage = errorText;
-
-                // Check for common error patterns and enhance them
-                if (errorText.toLowerCase().includes('invalid') || errorText.toLowerCase().includes('incorrect')) {
-                    enhancedMessage = 'Inloggningen misslyckades. Kontrollera att e-postadress och lösenord är korrekta.';
-                }
-                else if (errorText.toLowerCase().includes('not found') || errorText.toLowerCase().includes('does not exist')) {
-                    enhancedMessage = 'E-postadressen hittades inte. Kontrollera att du har registrerat dig.';
-                }
-                else if (errorText.toLowerCase().includes('not approved') || errorText.toLowerCase().includes('pending')) {
-                    enhancedMessage = 'Ditt konto väntar på godkännande från en klubbadministratör. Du kommer att meddelas via e-post när ditt konto har godkänts.';
-                }
-                else if (errorText.toLowerCase().includes('locked')) {
-                    enhancedMessage = 'Ditt konto har låsts. Kontakta administratören för hjälp.';
-                }
-
-                errorDiv.html('<strong>Inloggning misslyckades:</strong> ' + enhancedMessage).show();
-                validationSummary.hide();
-            }
-        }
-    }, 100);
-});
+// Open the password-reset modal, pre-filling the email the user just tried to log in with
+// so they don't have to retype it on a phone.
+function openPasswordReset(prefillEmail) {
+    var field = document.getElementById('resetEmail');
+    if (field && prefillEmail) {
+        field.value = prefillEmail;
+    }
+    var modalEl = document.getElementById('passwordResetModal');
+    if (modalEl && window.bootstrap) {
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+}
 </script>
 }

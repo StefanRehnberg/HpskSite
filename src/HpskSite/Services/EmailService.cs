@@ -869,7 +869,7 @@ namespace HpskSite.Services
         /// <summary>
         /// Core method to send an email
         /// </summary>
-        private async Task SendEmailAsync(string toEmail, string subject, string htmlBody)
+        private async Task SendEmailAsync(string toEmail, string subject, string htmlBody, string? bccEmail = null)
         {
             // If SMTP is not configured, log and return
             if (string.IsNullOrEmpty(_smtpHost))
@@ -884,6 +884,11 @@ namespace HpskSite.Services
                 {
                     message.From = new MailAddress(_fromAddress, _fromName);
                     message.To.Add(toEmail);
+                    if (!string.IsNullOrWhiteSpace(bccEmail)
+                        && !string.Equals(bccEmail, toEmail, StringComparison.OrdinalIgnoreCase))
+                    {
+                        message.Bcc.Add(bccEmail);
+                    }
                     message.Subject = subject;
                     message.Body = htmlBody;
                     message.IsBodyHtml = true;
@@ -1099,6 +1104,81 @@ namespace HpskSite.Services
 </html>";
 
             await SendEmailAsync(memberEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Notify a member that their account was temporarily locked after too many failed login
+        /// attempts. The lock is temporary (see MemberIdentityComposer), but the member can log in
+        /// immediately by resetting their password — so the email both informs (a security signal)
+        /// and points to the recovery path.
+        /// </summary>
+        public async Task SendAccountLockedEmailAsync(string memberEmail, string memberName)
+        {
+            var siteUrl = _configuration["Email:SiteUrl"] ?? "https://pistol.nu";
+            var loginUrl = $"{siteUrl}/login-&-register/";
+
+            var subject = "Ditt konto har låsts - Pistol.nu";
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #ffc107; color: #333; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+        .content {{ background-color: #f8f9fa; padding: 30px; border: 1px solid #dee2e6; }}
+        .button {{ display: inline-block; padding: 14px 30px; background-color: #0d6efd; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; font-size: 16px; }}
+        .button:hover {{ background-color: #0b5ed7; }}
+        .warning {{ background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }}
+        .footer {{ margin-top: 20px; padding: 15px; background-color: #e9ecef; border-radius: 0 0 5px 5px; font-size: 12px; color: #6c757d; text-align: center; }}
+        .code {{ background-color: #e9ecef; padding: 2px 6px; border-radius: 3px; font-family: monospace; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h2>🔒 Ditt konto har låsts</h2>
+        </div>
+        <div class='content'>
+            <p>Hej {memberName}!</p>
+
+            <p>Vi har låst ditt Pistol.nu-konto efter för många misslyckade inloggningsförsök.
+               Det är en säkerhetsåtgärd för att skydda ditt konto.</p>
+
+            <div class='warning'>
+                <strong>Så loggar du in igen:</strong> återställ ditt lösenord — då låses kontot upp direkt och du kan logga in med det nya lösenordet.
+            </div>
+
+            <div style='text-align: center;'>
+                <a href='{loginUrl}' class='button'>Logga in &amp; återställ lösenord</a>
+            </div>
+
+            <p style='font-size: 12px; color: #6c757d;'>
+                Om knappen inte fungerar, kopiera och klistra in följande länk i din webbläsare:<br/>
+                <span class='code'>{loginUrl}</span>
+            </p>
+
+            <p>På inloggningssidan klickar du på <strong>Glömt lösenord?</strong> så skickar vi en återställningslänk till denna e-postadress.</p>
+
+            <div class='warning'>
+                <strong>🛡️ Var det inte du?</strong> Om du inte har försökt logga in kan någon ha försökt gissa ditt lösenord.
+                Vi rekommenderar att du återställer lösenordet och väljer ett nytt som du inte använder någon annanstans.
+            </div>
+
+            <p>Om du har frågor, kontakta din klubbadministratör eller webbansvarig.</p>
+
+            <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+        </div>
+        <div class='footer'>
+            <p>Detta är ett automatiskt meddelande från Pistol.nu.</p>
+            <p>Svara inte på detta e-postmeddelande.</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+            // Copy the site admin so they get a real-time feed of lockouts (the admin sees the
+            // member address in the To header). BCC keeps the admin address off the member's copy.
+            await SendEmailAsync(memberEmail, subject, body, _adminEmail);
         }
 
         /// <summary>
