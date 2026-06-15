@@ -17,6 +17,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? Description { get; set; }
         public int OwnerMemberId { get; set; }
         public int? OwnerClubId { get; set; }
+        /// <summary>Optional Projekt this config belongs to. Null = standalone. Members of the
+        /// project get view + edit on the config (access rolls up).</summary>
+        public int? ProjectId { get; set; }
         /// <summary>Private | Club | Region | Public. Overridden by SecretUntil while still in force.</summary>
         public string Visibility { get; set; } = "Private";
         /// <summary>While &gt; UtcNow only owner + collaborators see the config, regardless of Visibility.</summary>
@@ -58,6 +61,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string OwnerMemberName { get; set; } = "";
         public int? OwnerClubId { get; set; }
         public string? OwnerClubName { get; set; }
+        /// <summary>Projekt this config belongs to (null = standalone).</summary>
+        public int? ProjectId { get; set; }
+        public string? ProjectName { get; set; }
+        /// <summary>True when the owning project is archived — used by the listing to hide by default.</summary>
+        public bool IsInArchivedProject { get; set; }
         public string Visibility { get; set; } = "Private";
         public DateTime? SecretUntil { get; set; }
         public bool IsSecret { get; set; }

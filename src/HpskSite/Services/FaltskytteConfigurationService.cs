@@ -105,6 +105,11 @@ namespace HpskSite.Services
             // Collaborator — always yes (overrides secrecy + visibility tier).
             if (await IsCollaboratorAsync(config.Id, viewerMemberId.Value)) return true;
 
+            // Project member/owner — access rolls up: being on the config's project
+            // grants the same view rights as a collaborator (overrides secrecy + tier).
+            if (config.ProjectId.HasValue && await IsProjectMemberOrOwnerAsync(config.ProjectId.Value, viewerMemberId.Value))
+                return true;
+
             // Currently-requested approver gets view rights even if the config is
             // Private / sekretessbelagd — otherwise the email link is unusable.
             if (config.RequestedApproverMemberId == viewerMemberId.Value) return true;
@@ -133,7 +138,25 @@ namespace HpskSite.Services
             if (config == null || viewerMemberId == null) return false;
             if (config.OwnerMemberId == viewerMemberId.Value) return true;
             if (await _authService.IsCurrentUserAdminAsync()) return true;
-            return await IsCollaboratorAsync(config.Id, viewerMemberId.Value);
+            if (await IsCollaboratorAsync(config.Id, viewerMemberId.Value)) return true;
+            // Project member/owner — access rolls up to edit too.
+            return config.ProjectId.HasValue && await IsProjectMemberOrOwnerAsync(config.ProjectId.Value, viewerMemberId.Value);
+        }
+
+        /// <summary>
+        /// True if the member owns, or is on the member-list of, the given project.
+        /// Queried directly (raw SQL) rather than via FaltskytteProjectService to avoid a
+        /// circular service dependency.
+        /// </summary>
+        private async Task<bool> IsProjectMemberOrOwnerAsync(int projectId, int memberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ownerCount = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM FaltskytteProject WHERE Id = @0 AND OwnerMemberId = @1", projectId, memberId);
+            if (ownerCount > 0) return true;
+            var memberCount = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM FaltskytteProjectMember WHERE ProjectId = @0 AND MemberId = @1", projectId, memberId);
+            return memberCount > 0;
         }
 
         /// <summary>True if the given member can delete (only owner + site admin, not collaborators).</summary>
@@ -506,6 +529,38 @@ namespace HpskSite.Services
             return (true, null);
         }
 
+        // ── Project assignment ───────────────────────────────────────────
+
+        /// <summary>
+        /// Moves a configuration into a project (or clears it when projectId is null).
+        /// The caller must be able to edit the config; when setting a project, the caller
+        /// must also own or be a member of that project.
+        /// </summary>
+        public async Task<(bool Success, string? Message)> AssignToProjectAsync(
+            int configId, int? projectId, int viewerMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", configId);
+            if (config == null) return (false, "Konfigurationen hittades inte.");
+            if (!await CanEditAsync(config, viewerMemberId))
+                return (false, "Du har inte rättighet att ändra konfigurationen.");
+
+            if (projectId.HasValue)
+            {
+                var projectExists = await db.ExecuteScalarAsync<int>(
+                    "SELECT COUNT(*) FROM FaltskytteProject WHERE Id = @0", projectId.Value);
+                if (projectExists == 0) return (false, "Projektet hittades inte.");
+                if (!await IsProjectMemberOrOwnerAsync(projectId.Value, viewerMemberId)
+                    && !await _authService.IsCurrentUserAdminAsync())
+                    return (false, "Du måste vara medlem i projektet för att lägga till konfigurationen där.");
+            }
+
+            config.ProjectId = projectId;
+            config.ModifiedDate = DateTime.Now;
+            await db.UpdateAsync(config);
+            return (true, null);
+        }
+
         // ── View-model builder ───────────────────────────────────────────
 
         /// <summary>
@@ -517,6 +572,20 @@ namespace HpskSite.Services
             FaltskytteConfiguration config, int? viewerMemberId, bool includeJson)
         {
             var collaborators = await GetCollaboratorsAsync(config.Id);
+
+            // Resolve the owning project (name + archived flag) for the listing.
+            string? projectName = null;
+            bool isInArchivedProject = false;
+            if (config.ProjectId.HasValue)
+            {
+                using var pdb = _databaseFactory.CreateDatabase();
+                var project = await pdb.SingleOrDefaultAsync<FaltskytteProject>("WHERE Id = @0", config.ProjectId.Value);
+                if (project != null)
+                {
+                    projectName = project.Name;
+                    isInArchivedProject = FaltskytteProjectService.IsArchived(project);
+                }
+            }
 
             int stationCount = 0;
             try
@@ -556,6 +625,9 @@ namespace HpskSite.Services
                 OwnerMemberName = ResolveMemberName(config.OwnerMemberId) ?? $"Medlem {config.OwnerMemberId}",
                 OwnerClubId = config.OwnerClubId,
                 OwnerClubName = config.OwnerClubId.HasValue ? _clubService.GetClubNameById(config.OwnerClubId.Value) : null,
+                ProjectId = config.ProjectId,
+                ProjectName = projectName,
+                IsInArchivedProject = isInArchivedProject,
                 Visibility = config.Visibility,
                 SecretUntil = config.SecretUntil,
                 IsSecret = config.SecretUntil.HasValue && config.SecretUntil.Value > DateTime.Now,

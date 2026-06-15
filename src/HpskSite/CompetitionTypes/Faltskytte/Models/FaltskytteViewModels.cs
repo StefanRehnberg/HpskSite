@@ -311,6 +311,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public int CompetitionId { get; set; }
         public int StationNumber { get; set; }
+        /// <summary>Optional station name (first non-empty across weapon classes). Shown after "Station X".</summary>
+        public string? StationName { get; set; }
         public int MaxReshoots { get; set; }
         public string ScoringMode { get; set; } = "Normal";
         /// <summary>Per-weapon-class station configs for this station number</summary>

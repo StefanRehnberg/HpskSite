@@ -104,6 +104,10 @@ namespace HpskSite.Composers
             // Standalone Fältskytte station configurations (CRUD + sharing + secrecy gate)
             builder.Services.AddScoped<FaltskytteConfigurationService>();
 
+            // Fältskytte "Projekt" — lightweight containers that group configurations
+            // (shared access + archive). Config-access rolls up to project members.
+            builder.Services.AddScoped<FaltskytteProjectService>();
+
             // Precision finals start list pipeline:
             //   QualificationService — ranks shooters and computes the 1/6+min10 cutoff (existed before, now DI-registered)
             //   QualifyingResultsService — snapshot the qualifying leaderboard before finals are built

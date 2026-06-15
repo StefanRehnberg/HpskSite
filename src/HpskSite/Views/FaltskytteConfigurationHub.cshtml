@@ -1,4 +1,4 @@
-﻿@using Umbraco.Cms.Core.Security
+@using Umbraco.Cms.Core.Security
 @inject IMemberManager MemberManager
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
@@ -19,56 +19,116 @@
     return;
 }
 
+<style>
+    .faltkonfig-hub .fk-toolbar {
+        position: sticky; top: 0; z-index: 20;
+        background: var(--bs-body-bg);
+        padding: .5rem 0; border-bottom: 1px solid var(--bs-border-color);
+    }
+    .faltkonfig-hub .fk-project-head {
+        background: var(--bs-tertiary-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: .5rem; padding: .5rem .75rem;
+    }
+    .faltkonfig-hub .fk-project-head.collapsed { opacity: .75; }
+    .faltkonfig-hub table.fk-list td { vertical-align: middle; }
+    .faltkonfig-hub table.fk-list th { white-space: nowrap; cursor: pointer; user-select: none; }
+    .faltkonfig-hub .fk-pin { cursor: pointer; color: var(--bs-secondary); }
+    .faltkonfig-hub .fk-pin.pinned { color: var(--bs-warning); }
+    .faltkonfig-hub .fk-group-body { padding-left: .25rem; }
+</style>
+
 <div class="container-fluid faltkonfig-hub py-3">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
         <div>
             <h4 class="mb-1"><i class="bi bi-bullseye me-2"></i>Fältskytte-konfigurationer</h4>
             <p class="text-muted small mb-0">
-                Bygg och dela uppsättningar av Fältskytte-stationer. En tävling använder en konfiguration genom
-                att kopiera in den eller länka enstaka stationer.
+                Bygg och dela uppsättningar av Fältskytte-stationer. Samla dem i <strong>projekt</strong> för
+                att organisera arbetet och dela åtkomst. En tävling använder en konfiguration genom att
+                kopiera in den eller länka enstaka stationer.
             </p>
         </div>
-        <button class="btn btn-success" onclick="fkHubOpenCreate()">
-            <i class="bi bi-plus-lg me-1"></i>Skapa ny
-        </button>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" onclick="fkProjOpenCreate()">
+                <i class="bi bi-folder-plus me-1"></i>Nytt projekt
+            </button>
+            <button class="btn btn-success" onclick="fkHubOpenCreate()">
+                <i class="bi bi-plus-lg me-1"></i>Skapa ny
+            </button>
+        </div>
     </div>
 
-    <!-- Filter row -->
-    <div class="row g-2 mb-3 align-items-center">
-        <div class="col-md-4">
-            <input type="text" class="form-control" id="fkHubSearch" placeholder="Sök på namn, ägare eller klubb..." oninput="fkHubRender()">
-        </div>
-        <div class="col-md-auto">
-            <div class="btn-group btn-group-sm" role="group" id="fkHubFilterButtons">
-                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_all" value="all" checked onchange="fkHubRender()">
-                <label class="btn btn-outline-primary" for="fkHubFilter_all">Alla</label>
+    <!-- Sticky toolbar -->
+    <div class="fk-toolbar mb-3">
+        <div class="row g-2 align-items-center">
+            <div class="col-md-4">
+                <input type="text" class="form-control form-control-sm" id="fkHubSearch" placeholder="Sök på namn, ägare, klubb eller projekt..." oninput="fkHubRender()">
+            </div>
+            <div class="col-md-auto">
+                <div class="btn-group btn-group-sm" role="group" id="fkHubFilterButtons">
+                    <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_all" value="all" checked onchange="fkHubRender()">
+                    <label class="btn btn-outline-primary" for="fkHubFilter_all">Alla</label>
 
-                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_mine" value="mine" onchange="fkHubRender()">
-                <label class="btn btn-outline-primary" for="fkHubFilter_mine">Mina</label>
+                    <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_mine" value="mine" onchange="fkHubRender()">
+                    <label class="btn btn-outline-primary" for="fkHubFilter_mine">Mina</label>
 
-                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_collab" value="collab" onchange="fkHubRender()">
-                <label class="btn btn-outline-primary" for="fkHubFilter_collab">Delade med mig</label>
+                    <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_collab" value="collab" onchange="fkHubRender()">
+                    <label class="btn btn-outline-primary" for="fkHubFilter_collab">Delade med mig</label>
 
-                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_public" value="public" onchange="fkHubRender()">
-                <label class="btn btn-outline-primary" for="fkHubFilter_public">Publika</label>
+                    <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_public" value="public" onchange="fkHubRender()">
+                    <label class="btn btn-outline-primary" for="fkHubFilter_public">Publika</label>
 
-                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_pending" value="pending" onchange="fkHubRender()">
-                <label class="btn btn-outline-warning" for="fkHubFilter_pending" id="fkHubFilter_pendingLabel" style="display:none">Väntar på godkännande</label>
+                    <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_pending" value="pending" onchange="fkHubRender()">
+                    <label class="btn btn-outline-warning" for="fkHubFilter_pending" id="fkHubFilter_pendingLabel" style="display:none">Väntar på godkännande</label>
+                </div>
             </div>
         </div>
-        <div class="col-md-auto ms-auto">
-            <small class="text-muted" id="fkHubCount"></small>
+        <div class="row g-2 align-items-center mt-1">
+            <div class="col-md-auto">
+                <div class="input-group input-group-sm" style="width:auto">
+                    <label class="input-group-text" for="fkHubSort"><i class="bi bi-sort-down"></i></label>
+                    <select class="form-select form-select-sm" id="fkHubSort" onchange="fkHubSetSort(this.value)" style="width:auto">
+                        <option value="modified">Senast ändrad</option>
+                        <option value="name">Namn (A–Ö)</option>
+                        <option value="stations">Antal stationer</option>
+                        <option value="owner">Ägare</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-auto">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Vy">
+                    <input type="radio" class="btn-check" name="fkHubViewToggle" id="fkHubView_cards" value="cards" onchange="fkHubSetView('cards')">
+                    <label class="btn btn-outline-secondary" for="fkHubView_cards" title="Kort"><i class="bi bi-grid-3x3-gap"></i> Kort</label>
+                    <input type="radio" class="btn-check" name="fkHubViewToggle" id="fkHubView_list" value="list" onchange="fkHubSetView('list')">
+                    <label class="btn btn-outline-secondary" for="fkHubView_list" title="Lista"><i class="bi bi-list-ul"></i> Lista</label>
+                </div>
+            </div>
+            <div class="col-md-auto">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="fkHubGroupToggle" onchange="fkHubSetGroup(this.checked)">
+                    <label class="form-check-label small" for="fkHubGroupToggle">Gruppera efter projekt</label>
+                </div>
+            </div>
+            <div class="col-md-auto">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="fkHubArchivedToggle" onchange="fkHubRender()">
+                    <label class="form-check-label small" for="fkHubArchivedToggle">Visa arkiverade</label>
+                </div>
+            </div>
+            <div class="col-md-auto ms-auto">
+                <small class="text-muted" id="fkHubCount"></small>
+            </div>
         </div>
     </div>
 
-    <div id="fkHubList" class="row g-3"></div>
+    <div id="fkHubList"></div>
     <div id="fkHubEmpty" class="text-center py-5 text-muted" style="display:none">
         <i class="bi bi-folder2-open" style="font-size:2rem"></i>
         <p class="mt-2 mb-0">Inga konfigurationer matchar filtret.</p>
     </div>
 </div>
 
-<!-- Create modal -->
+<!-- Create config modal -->
 <div class="modal fade" id="fkHubCreateModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -84,6 +144,12 @@
                 <div class="mb-2">
                     <label class="form-label small fw-bold">Beskrivning</label>
                     <textarea class="form-control" id="fkHubNewDesc" rows="2" placeholder="Valfri kort beskrivning..."></textarea>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Projekt</label>
+                    <select class="form-select" id="fkHubNewProject">
+                        <option value="">Inget projekt (fristående)</option>
+                    </select>
                 </div>
                 <div class="mb-2">
                     <label class="form-label small fw-bold">Synlighet</label>
@@ -110,6 +176,72 @@
     </div>
 </div>
 
+<!-- Create/edit project modal -->
+<div class="modal fade" id="fkProjModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-folder me-2"></i><span id="fkProjModalTitle">Nytt projekt</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="fkProjId" value="">
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Namn *</label>
+                    <input type="text" class="form-control" id="fkProjName" placeholder="t.ex. SM Fält 2026" autocomplete="off">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Beskrivning</label>
+                    <textarea class="form-control" id="fkProjDesc" rows="2" placeholder="Valfri kort beskrivning..."></textarea>
+                </div>
+
+                <!-- Member management — only shown when editing an existing project -->
+                <div id="fkProjMembersBlock" style="display:none">
+                    <hr>
+                    <label class="form-label small fw-bold mb-1"><i class="bi bi-people me-1"></i>Medlemmar</label>
+                    <p class="form-text small mt-0">Medlemmar får se och redigera alla konfigurationer i projektet.</p>
+                    <div id="fkProjMembers" class="mb-2"></div>
+                    <input type="text" class="form-control form-control-sm" id="fkProjMemberSearch" placeholder="Sök medlem på namn eller e-post (minst 2 tecken)..." oninput="fkProjMemberSearch()" autocomplete="off">
+                    <div id="fkProjMemberResults" class="list-group mt-1" style="max-height:180px;overflow:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <div id="fkProjDangerZone" style="display:none">
+                    <button type="button" class="btn btn-outline-warning btn-sm" id="fkProjArchiveBtn" onclick="fkProjToggleArchive()"><i class="bi bi-archive me-1"></i>Arkivera</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="fkProjDelete()"><i class="bi bi-trash me-1"></i>Ta bort</button>
+                </div>
+                <div class="ms-auto">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                    <button type="button" class="btn btn-primary" onclick="fkProjSubmit()"><i class="bi bi-check-lg me-1"></i>Spara</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Assign config to project modal -->
+<div class="modal fade" id="fkAssignModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-folder-symlink me-2"></i>Flytta till projekt</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="fkAssignConfigId" value="">
+                <p class="small text-muted mb-2" id="fkAssignConfigName"></p>
+                <select class="form-select" id="fkAssignProject">
+                    <option value="">Inget projekt (fristående)</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="fkAssignSubmit()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @Html.AntiForgeryToken()
 
 <!-- Flatpickr for the secrecy timestamp -->
@@ -119,30 +251,44 @@
 
 <script>
 var fkHubConfigs = [];
+var fkHubProjects = [];
+var fkHubView = localStorage.getItem('fkHubView') || 'cards';
+var fkHubSort = localStorage.getItem('fkHubSort') || 'modified';
+var fkHubGroup = localStorage.getItem('fkHubGroup') !== '0'; // default true
+var fkHubPins = loadPins();
+var fkProjMemberSearchTimer = null;
+
+function loadPins() {
+    try { return JSON.parse(localStorage.getItem('fkHubPins') || '[]'); } catch (e) { return []; }
+}
+function savePins() { localStorage.setItem('fkHubPins', JSON.stringify(fkHubPins)); }
+function isPinned(id) { return fkHubPins.indexOf(id) >= 0; }
 
 document.addEventListener('DOMContentLoaded', function() {
     flatpickr('#fkHubNewSecretUntil', {
-        locale: 'sv',
-        enableTime: true,
-        time_24hr: true,
-        dateFormat: 'Y-m-d H:i',
-        minDate: 'today'
+        locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i', minDate: 'today'
     });
+    // Restore toolbar state.
+    document.getElementById('fkHubSort').value = fkHubSort;
+    document.getElementById('fkHubView_' + (fkHubView === 'list' ? 'list' : 'cards')).checked = true;
+    document.getElementById('fkHubGroupToggle').checked = fkHubGroup;
     fkHubLoad();
 });
 
 async function fkHubLoad() {
     try {
-        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/ListAccessible');
-        var data = await resp.json();
-        if (!data.success) {
-            alert('Kunde inte ladda konfigurationer: ' + (data.message || 'Okänt fel'));
-            return;
-        }
+        var results = await Promise.all([
+            fetch('/umbraco/surface/FaltskytteConfiguration/ListAccessible').then(function(r){return r.json();}),
+            fetch('/umbraco/surface/FaltskytteProject/ListAccessible').then(function(r){return r.json();})
+        ]);
+        var data = results[0];
+        var projData = results[1];
+        if (!data.success) { alert('Kunde inte ladda konfigurationer: ' + (data.message || 'Okänt fel')); return; }
         fkHubConfigs = data.configurations || [];
-        // "Väntar på godkännande"-fliken visas bara för Banläggare (eller sajtadmin).
+        fkHubProjects = (projData && projData.success) ? (projData.projects || []) : [];
         var pendingLabel = document.getElementById('fkHubFilter_pendingLabel');
         if (pendingLabel) pendingLabel.style.display = data.viewerCanApprove ? '' : 'none';
+        fkHubPopulateProjectSelects();
         fkHubRender();
     } catch (e) {
         console.error(e);
@@ -150,53 +296,193 @@ async function fkHubLoad() {
     }
 }
 
+// ─── Toolbar state setters ────────────────────────────────────────────
+function fkHubSetView(v) { fkHubView = v; localStorage.setItem('fkHubView', v); fkHubRender(); }
+function fkHubSetSort(s) { fkHubSort = s; localStorage.setItem('fkHubSort', s); fkHubRender(); }
+function fkHubSetGroup(g) { fkHubGroup = g; localStorage.setItem('fkHubGroup', g ? '1' : '0'); fkHubRender(); }
+
+function fkHubTogglePin(id) {
+    var i = fkHubPins.indexOf(id);
+    if (i >= 0) fkHubPins.splice(i, 1); else fkHubPins.push(id);
+    savePins();
+    fkHubRender();
+}
+
+// ─── Filtering + sorting ──────────────────────────────────────────────
 function fkHubFilteredConfigs() {
     var q = (document.getElementById('fkHubSearch').value || '').trim().toLowerCase();
     var filter = document.querySelector('input[name="fkHubFilter"]:checked').value;
-    return fkHubConfigs.filter(function(c) {
-        // Filter by tab.
-        if (filter === 'mine' && !c.canDelete) return false;            // owner-only proxy
-        if (filter === 'collab' && c.canEdit && c.canDelete) return false; // mine = owner; collab = can-edit but not owner
+    var showArchived = document.getElementById('fkHubArchivedToggle').checked;
+    var list = fkHubConfigs.filter(function(c) {
+        if (!showArchived && c.isInArchivedProject) return false;
+        if (filter === 'mine' && !c.canDelete) return false;
+        if (filter === 'collab' && c.canEdit && c.canDelete) return false;
         if (filter === 'public' && c.visibility !== 'Public') return false;
         if (filter === 'pending' && c.approvalStatus !== 'PendingApproval') return false;
         if (!q) return true;
-        return (c.name + ' ' + (c.ownerMemberName || '') + ' ' + (c.ownerClubName || '')).toLowerCase().indexOf(q) >= 0;
+        return (c.name + ' ' + (c.ownerMemberName || '') + ' ' + (c.ownerClubName || '') + ' ' + (c.projectName || '')).toLowerCase().indexOf(q) >= 0;
     });
+    return fkHubSortConfigs(list);
 }
 
+function fkHubSortConfigs(list) {
+    var s = fkHubSort;
+    var sorted = list.slice();
+    sorted.sort(function(a, b) {
+        switch (s) {
+            case 'name':     return collator.compare(a.name || '', b.name || '');
+            case 'stations': return (b.stationCount || 0) - (a.stationCount || 0);
+            case 'owner':    return collator.compare(a.ownerMemberName || '', b.ownerMemberName || '');
+            default:         return new Date(b.modifiedDate) - new Date(a.modifiedDate);
+        }
+    });
+    return sorted;
+}
+var collator = new Intl.Collator('sv-SE', { sensitivity: 'base' });
+
+// ─── Main render ──────────────────────────────────────────────────────
 function fkHubRender() {
     var list = fkHubFilteredConfigs();
     var container = document.getElementById('fkHubList');
     var empty = document.getElementById('fkHubEmpty');
     var count = document.getElementById('fkHubCount');
     count.textContent = list.length + ' av ' + fkHubConfigs.length + ' konfigurationer';
-    if (list.length === 0) {
+
+    if (list.length === 0 && fkHubProjects.length === 0) {
         container.innerHTML = '';
         empty.style.display = '';
         return;
     }
     empty.style.display = 'none';
 
-    container.innerHTML = list.map(function(c) {
-        var visBadge = visibilityBadge(c);
-        var secretBadge = c.isSecret
-            ? '<span class="badge bg-warning text-dark" title="Hemlig fram till ' + formatDate(c.secretUntil) + '"><i class="bi bi-shield-lock me-1"></i>Hemlig</span>'
+    var html = '';
+
+    // Pinned section (always at top, both views).
+    var pinned = list.filter(function(c) { return isPinned(c.id); });
+    if (pinned.length > 0) {
+        html += '<div class="mb-3">' +
+            '<div class="fk-project-head mb-2"><i class="bi bi-star-fill text-warning me-2"></i><strong>Fästa</strong> <span class="badge bg-secondary ms-1">' + pinned.length + '</span></div>' +
+            '<div class="fk-group-body">' + fkHubRenderConfigs(pinned) + '</div></div>';
+    }
+
+    if (fkHubGroup) {
+        html += fkHubRenderGrouped(list);
+    } else {
+        html += fkHubRenderConfigs(list);
+    }
+    container.innerHTML = html;
+}
+
+function fkHubRenderGrouped(list) {
+    var showArchived = document.getElementById('fkHubArchivedToggle').checked;
+    // Build project buckets from accessible projects + any projectIds referenced by configs.
+    var buckets = {}; // projectId -> { name, project (view|null), configs: [] }
+    var noProject = [];
+
+    list.forEach(function(c) {
+        if (c.projectId) {
+            if (!buckets[c.projectId]) buckets[c.projectId] = { name: c.projectName || ('Projekt ' + c.projectId), project: null, configs: [] };
+            buckets[c.projectId].configs.push(c);
+        } else {
+            noProject.push(c);
+        }
+    });
+    // Attach project views + ensure empty (but accessible) projects still show a manageable header.
+    fkHubProjects.forEach(function(p) {
+        if (!showArchived && p.isArchived) return;
+        if (!buckets[p.id]) buckets[p.id] = { name: p.name, project: p, configs: [] };
+        else buckets[p.id].project = p;
+    });
+
+    // Order projects: active first, then by name.
+    var ids = Object.keys(buckets);
+    ids.sort(function(a, b) {
+        var pa = buckets[a].project, pb = buckets[b].project;
+        var aa = pa && pa.isArchived ? 1 : 0, ab = pb && pb.isArchived ? 1 : 0;
+        if (aa !== ab) return aa - ab;
+        return collator.compare(buckets[a].name, buckets[b].name);
+    });
+
+    var html = '';
+    ids.forEach(function(id) {
+        var b = buckets[id];
+        if (b.project && b.project.isArchived && !showArchived) return;
+        html += fkHubRenderProjectGroup(id, b);
+    });
+
+    if (noProject.length > 0) {
+        html += '<div class="mb-3">' +
+            '<div class="fk-project-head mb-2"><i class="bi bi-folder2 me-2"></i><strong>Utan projekt</strong> <span class="badge bg-secondary ms-1">' + noProject.length + '</span></div>' +
+            '<div class="fk-group-body">' + fkHubRenderConfigs(noProject) + '</div></div>';
+    }
+    return html;
+}
+
+function fkHubRenderProjectGroup(id, bucket) {
+    var p = bucket.project;
+    var headExtras = '';
+    var manageBtn = '';
+    if (p) {
+        var rollup = p.configCount > 0
+            ? '<span class="badge bg-success-subtle text-success-emphasis ms-1" title="Godkända konfigurationer">' + p.approvedConfigCount + '/' + p.configCount + ' godkända</span>'
             : '';
-        var approvalBadge = approvalBadgeFor(c);
+        var pendBadge = (p.pendingConfigCount > 0)
+            ? '<span class="badge bg-warning text-dark ms-1">' + p.pendingConfigCount + ' väntar</span>' : '';
+        var archBadge = p.isArchived ? '<span class="badge bg-secondary ms-1"><i class="bi bi-archive me-1"></i>Arkiverat</span>' : '';
+        var memBadge = '<span class="badge bg-info-subtle text-info-emphasis ms-1" title="Medlemmar"><i class="bi bi-people me-1"></i>' + (p.members ? p.members.length : 0) + '</span>';
+        headExtras = rollup + pendBadge + memBadge + archBadge;
+        if (p.canEdit) {
+            manageBtn = '<button class="btn btn-outline-secondary btn-sm ms-2" onclick="fkProjOpenEdit(' + p.id + ')" title="Hantera projekt"><i class="bi bi-gear"></i></button>';
+        }
+        if (p.description) headExtras += '<div class="small text-muted mt-1">' + escapeHtml(p.description) + '</div>';
+    }
+    var collapsed = p && p.isArchived;
+    var bodyId = 'fkGroup_' + id;
+    return '<div class="mb-3">' +
+        '<div class="fk-project-head d-flex justify-content-between align-items-start mb-2' + (collapsed ? ' collapsed' : '') + '">' +
+            '<div class="flex-grow-1" role="button" onclick="fkHubToggleGroup(\'' + bodyId + '\', this)">' +
+                '<i class="bi bi-folder' + (collapsed ? '' : '2-open') + ' me-2"></i><strong>' + escapeHtml(bucket.name) + '</strong>' +
+                ' <span class="badge bg-secondary ms-1">' + bucket.configs.length + '</span>' + headExtras +
+            '</div>' +
+            '<div class="d-flex align-items-center">' + manageBtn + '</div>' +
+        '</div>' +
+        '<div class="fk-group-body" id="' + bodyId + '"' + (collapsed ? ' style="display:none"' : '') + '>' +
+            (bucket.configs.length ? fkHubRenderConfigs(bucket.configs) : '<p class="small text-muted ms-2 mb-0">Inga konfigurationer i projektet ännu.</p>') +
+        '</div></div>';
+}
+
+function fkHubToggleGroup(bodyId, headEl) {
+    var body = document.getElementById(bodyId);
+    if (!body) return;
+    var show = body.style.display === 'none';
+    body.style.display = show ? '' : 'none';
+}
+
+function fkHubRenderConfigs(list) {
+    return fkHubView === 'list' ? fkHubRenderTable(list) : fkHubRenderCards(list);
+}
+
+// ─── Card view ────────────────────────────────────────────────────────
+function fkHubRenderCards(list) {
+    return '<div class="row g-3">' + list.map(function(c) {
         var deleteBtn = c.canDelete
             ? '<button class="btn btn-outline-danger btn-sm" onclick="fkHubDelete(' + c.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>'
+            : '';
+        var assignBtn = c.canEdit
+            ? '<button class="btn btn-outline-secondary btn-sm" onclick="fkAssignOpen(' + c.id + ')" title="Flytta till projekt"><i class="bi bi-folder-symlink"></i></button>'
             : '';
         return '<div class="col-md-6 col-lg-4">' +
             '<div class="card h-100">' +
                 '<div class="card-body">' +
                     '<div class="d-flex justify-content-between align-items-start mb-2">' +
-                        '<h6 class="card-title mb-0 text-truncate" title="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</h6>' +
-                        '<div class="d-flex gap-1 align-items-center flex-wrap">' + visBadge + secretBadge + approvalBadge + '</div>' +
+                        '<h6 class="card-title mb-0 text-truncate" title="' + escapeHtml(c.name) + '">' +
+                            pinStar(c.id) + escapeHtml(c.name) + '</h6>' +
+                        '<div class="d-flex gap-1 align-items-center flex-wrap">' + visibilityBadge(c) + secretBadge(c) + approvalBadgeFor(c) + '</div>' +
                     '</div>' +
+                    (c.projectName ? '<div class="small mb-1"><span class="badge bg-light text-dark border"><i class="bi bi-folder me-1"></i>' + escapeHtml(c.projectName) + '</span></div>' : '') +
                     (c.description ? '<p class="card-text small text-muted mb-2">' + escapeHtml(c.description) + '</p>' : '') +
                     '<div class="small text-muted mb-1"><i class="bi bi-person me-1"></i>' + escapeHtml(c.ownerMemberName) +
-                        (c.ownerClubName ? ' &middot; <i class="bi bi-building me-1"></i>' + escapeHtml(c.ownerClubName) : '') +
-                    '</div>' +
+                        (c.ownerClubName ? ' &middot; <i class="bi bi-building me-1"></i>' + escapeHtml(c.ownerClubName) : '') + '</div>' +
                     '<div class="small text-muted mb-1"><i class="bi bi-list-ol me-1"></i>' + c.stationCount + ' stationer</div>' +
                     '<div class="small text-muted mb-3"><i class="bi bi-clock me-1"></i>Ändrad ' + formatDate(c.modifiedDate) + '</div>' +
                     '<div class="d-flex gap-1">' +
@@ -204,14 +490,64 @@ function fkHubRender() {
                             ? '<a class="btn btn-primary btn-sm flex-grow-1" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-pencil me-1"></i>Redigera</a>'
                             : '<a class="btn btn-outline-secondary btn-sm flex-grow-1" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-eye me-1"></i>Visa</a>') +
                         '<button class="btn btn-outline-secondary btn-sm" onclick="fkHubDuplicate(' + c.id + ')" title="Duplicera"><i class="bi bi-copy"></i></button>' +
-                        deleteBtn +
+                        assignBtn + deleteBtn +
                     '</div>' +
                 '</div>' +
             '</div>' +
         '</div>';
-    }).join('');
+    }).join('') + '</div>';
 }
 
+// ─── List/table view ──────────────────────────────────────────────────
+function fkHubRenderTable(list) {
+    var rows = list.map(function(c) {
+        var actions = (c.canEdit
+                ? '<a class="btn btn-primary btn-sm" href="/faltkonfig/' + c.id + '/redigera" title="Redigera"><i class="bi bi-pencil"></i></a>'
+                : '<a class="btn btn-outline-secondary btn-sm" href="/faltkonfig/' + c.id + '/redigera" title="Visa"><i class="bi bi-eye"></i></a>') +
+            ' <button class="btn btn-outline-secondary btn-sm" onclick="fkHubDuplicate(' + c.id + ')" title="Duplicera"><i class="bi bi-copy"></i></button>' +
+            (c.canEdit ? ' <button class="btn btn-outline-secondary btn-sm" onclick="fkAssignOpen(' + c.id + ')" title="Flytta till projekt"><i class="bi bi-folder-symlink"></i></button>' : '') +
+            (c.canDelete ? ' <button class="btn btn-outline-danger btn-sm" onclick="fkHubDelete(' + c.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>' : '');
+        return '<tr>' +
+            '<td>' + pinStar(c.id) + '</td>' +
+            '<td><a href="/faltkonfig/' + c.id + '/redigera" class="text-decoration-none fw-semibold">' + escapeHtml(c.name) + '</a>' +
+                (c.description ? '<div class="small text-muted text-truncate" style="max-width:340px">' + escapeHtml(c.description) + '</div>' : '') + '</td>' +
+            '<td class="small">' + (c.projectName ? '<span class="badge bg-light text-dark border"><i class="bi bi-folder me-1"></i>' + escapeHtml(c.projectName) + '</span>' : '<span class="text-muted">—</span>') + '</td>' +
+            '<td class="text-center">' + c.stationCount + '</td>' +
+            '<td class="small">' + escapeHtml(c.ownerMemberName) + (c.ownerClubName ? '<div class="text-muted">' + escapeHtml(c.ownerClubName) + '</div>' : '') + '</td>' +
+            '<td>' + visibilityBadge(c) + ' ' + secretBadge(c) + ' ' + approvalBadgeFor(c) + '</td>' +
+            '<td class="small text-muted">' + formatDate(c.modifiedDate) + '</td>' +
+            '<td class="text-nowrap text-end">' + actions + '</td>' +
+        '</tr>';
+    }).join('');
+    return '<div class="table-responsive"><table class="table table-sm table-hover fk-list align-middle mb-0">' +
+        '<thead><tr>' +
+            '<th></th>' +
+            '<th onclick="fkHubSetSortRadio(\'name\')">Namn</th>' +
+            '<th>Projekt</th>' +
+            '<th class="text-center" onclick="fkHubSetSortRadio(\'stations\')">Stn</th>' +
+            '<th onclick="fkHubSetSortRadio(\'owner\')">Ägare</th>' +
+            '<th>Status</th>' +
+            '<th onclick="fkHubSetSortRadio(\'modified\')">Ändrad</th>' +
+            '<th></th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function fkHubSetSortRadio(s) {
+    document.getElementById('fkHubSort').value = s;
+    fkHubSetSort(s);
+}
+
+// ─── Small render helpers ─────────────────────────────────────────────
+function pinStar(id) {
+    var on = isPinned(id);
+    return '<i class="bi ' + (on ? 'bi-star-fill fk-pin pinned' : 'bi-star fk-pin') + ' me-1" title="' +
+        (on ? 'Ta bort fäste' : 'Fäst högst upp') + '" onclick="event.preventDefault();event.stopPropagation();fkHubTogglePin(' + id + ')"></i>';
+}
+function secretBadge(c) {
+    return c.isSecret
+        ? '<span class="badge bg-warning text-dark" title="Hemlig fram till ' + formatDate(c.secretUntil) + '"><i class="bi bi-shield-lock me-1"></i>Hemlig</span>'
+        : '';
+}
 function visibilityBadge(c) {
     switch (c.visibility) {
         case 'Public':  return '<span class="badge bg-success">Publik</span>';
@@ -220,47 +556,56 @@ function visibilityBadge(c) {
         default:        return '<span class="badge bg-secondary">Privat</span>';
     }
 }
-
 function approvalBadgeFor(c) {
     if (c.approvalStatus === 'Approved') {
-        var title = 'Godkänd' +
-            (c.approvedByName ? ' av ' + c.approvedByName : '') +
-            (c.approvedDate ? ' den ' + formatDate(c.approvedDate) : '');
+        var title = 'Godkänd' + (c.approvedByName ? ' av ' + c.approvedByName : '') + (c.approvedDate ? ' den ' + formatDate(c.approvedDate) : '');
         return '<span class="badge bg-success" title="' + title.replace(/"/g, '&quot;') + '"><i class="bi bi-shield-check me-1"></i>Godkänd</span>';
     }
     if (c.approvalStatus === 'PendingApproval') {
-        var pendTitle = c.requestedApproverName
-            ? 'Väntar på godkännande från ' + c.requestedApproverName
-            : 'Väntar på godkännande av Banläggare';
+        var pendTitle = c.requestedApproverName ? 'Väntar på godkännande från ' + c.requestedApproverName : 'Väntar på godkännande av Banläggare';
         return '<span class="badge bg-warning text-dark" title="' + pendTitle.replace(/"/g, '&quot;') + '"><i class="bi bi-hourglass-split me-1"></i>Väntar</span>';
     }
     return '';
 }
-
 function formatDate(iso) {
     if (!iso) return '';
     var d = new Date(iso);
     return d.toLocaleDateString('sv-SE', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
-
 function escapeHtml(s) {
     if (s == null) return '';
     return String(s).replace(/[&<>"']/g, function(c) {
         return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
     });
 }
+function getToken() { return document.querySelector('input[name="__RequestVerificationToken"]').value; }
 
+// ─── Project select population ────────────────────────────────────────
+function fkHubPopulateProjectSelects() {
+    var opts = '<option value="">Inget projekt (fristående)</option>';
+    fkHubProjects.filter(function(p){ return !p.isArchived; }).forEach(function(p) {
+        opts += '<option value="' + p.id + '">' + escapeHtml(p.name).replace(/"/g, '&quot;') + '</option>';
+    });
+    var newSel = document.getElementById('fkHubNewProject');
+    var assignSel = document.getElementById('fkAssignProject');
+    if (newSel) newSel.innerHTML = opts;
+    if (assignSel) assignSel.innerHTML = opts;
+}
+
+// ─── Create config ────────────────────────────────────────────────────
 function fkHubOpenCreate() {
     document.getElementById('fkHubNewName').value = '';
     document.getElementById('fkHubNewDesc').value = '';
     document.getElementById('fkHubNewVis').value = 'Private';
     document.getElementById('fkHubNewSecretUntil').value = '';
+    document.getElementById('fkHubNewProject').value = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('fkHubCreateModal')).show();
 }
 
 async function fkHubSubmitCreate() {
     var name = document.getElementById('fkHubNewName').value.trim();
     if (!name) { alert('Namn krävs.'); return; }
+    var projVal = document.getElementById('fkHubNewProject').value;
     var body = {
         name: name,
         description: document.getElementById('fkHubNewDesc').value || null,
@@ -270,24 +615,22 @@ async function fkHubSubmitCreate() {
     try {
         var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Create', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-            },
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
             body: JSON.stringify(body)
         });
         var data = await resp.json();
-        if (!data.success) {
-            alert('Kunde inte skapa: ' + (data.message || 'Okänt fel'));
-            return;
+        if (!data.success) { alert('Kunde inte skapa: ' + (data.message || 'Okänt fel')); return; }
+        // Optionally assign to a project before jumping into the editor.
+        if (projVal) {
+            await fetch('/umbraco/surface/FaltskytteProject/AssignConfig', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ configId: data.configurationId, projectId: parseInt(projVal) })
+            });
         }
         bootstrap.Modal.getInstance(document.getElementById('fkHubCreateModal')).hide();
-        // Jump straight into the editor for the new config.
         window.location.href = '/faltkonfig/' + data.configurationId + '/redigera';
-    } catch (e) {
-        console.error(e);
-        alert('Nätverksfel.');
-    }
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
 }
 
 async function fkHubDuplicate(id) {
@@ -295,18 +638,12 @@ async function fkHubDuplicate(id) {
     if (newName == null) return;
     try {
         var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Duplicate?id=' + id + (newName ? '&newName=' + encodeURIComponent(newName) : ''), {
-            method: 'POST',
-            headers: {
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-            }
+            method: 'POST', headers: { 'RequestVerificationToken': getToken() }
         });
         var data = await resp.json();
         if (!data.success) { alert('Kunde inte duplicera: ' + (data.message || 'Okänt fel')); return; }
         fkHubLoad();
-    } catch (e) {
-        console.error(e);
-        alert('Nätverksfel.');
-    }
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
 }
 
 async function fkHubDelete(id) {
@@ -315,17 +652,213 @@ async function fkHubDelete(id) {
     if (!confirm('Ta bort konfigurationen "' + cfg.name + '"?\n\nMedredigerare-listan tas också bort. Tävlingar som har kopierat eller länkat stationer från denna konfiguration påverkas inte direkt, men länkade stationer kommer inte längre kunna laddas om.')) return;
     try {
         var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Delete?id=' + id, {
-            method: 'POST',
-            headers: {
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-            }
+            method: 'POST', headers: { 'RequestVerificationToken': getToken() }
         });
         var data = await resp.json();
         if (!data.success) { alert('Kunde inte ta bort: ' + (data.message || 'Okänt fel')); return; }
         fkHubLoad();
-    } catch (e) {
-        console.error(e);
-        alert('Nätverksfel.');
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+// ─── Assign config to project ─────────────────────────────────────────
+function fkAssignOpen(configId) {
+    var cfg = fkHubConfigs.find(function(c) { return c.id === configId; });
+    document.getElementById('fkAssignConfigId').value = configId;
+    document.getElementById('fkAssignConfigName').textContent = cfg ? cfg.name : '';
+    document.getElementById('fkAssignProject').value = (cfg && cfg.projectId) ? String(cfg.projectId) : '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkAssignModal')).show();
+}
+
+async function fkAssignSubmit() {
+    var configId = parseInt(document.getElementById('fkAssignConfigId').value);
+    var projVal = document.getElementById('fkAssignProject').value;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteProject/AssignConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify({ configId: configId, projectId: projVal ? parseInt(projVal) : null })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte flytta: ' + (data.message || 'Okänt fel')); return; }
+        bootstrap.Modal.getInstance(document.getElementById('fkAssignModal')).hide();
+        fkHubLoad();
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+// ─── Project create / edit ────────────────────────────────────────────
+function fkProjOpenCreate() {
+    document.getElementById('fkProjModalTitle').textContent = 'Nytt projekt';
+    document.getElementById('fkProjId').value = '';
+    document.getElementById('fkProjName').value = '';
+    document.getElementById('fkProjDesc').value = '';
+    document.getElementById('fkProjMembersBlock').style.display = 'none';
+    document.getElementById('fkProjDangerZone').style.display = 'none';
+    document.getElementById('fkProjMemberResults').innerHTML = '';
+    document.getElementById('fkProjMemberSearch').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkProjModal')).show();
+}
+
+function fkProjOpenEdit(projectId) {
+    var p = fkHubProjects.find(function(x) { return x.id === projectId; });
+    if (!p) return;
+    document.getElementById('fkProjModalTitle').textContent = 'Hantera projekt';
+    document.getElementById('fkProjId').value = p.id;
+    document.getElementById('fkProjName').value = p.name;
+    document.getElementById('fkProjDesc').value = p.description || '';
+    document.getElementById('fkProjMembersBlock').style.display = p.canEdit ? '' : 'none';
+    document.getElementById('fkProjDangerZone').style.display = p.canDelete ? '' : 'none';
+    document.getElementById('fkProjArchiveBtn').innerHTML = p.isArchived
+        ? '<i class="bi bi-arrow-counterclockwise me-1"></i>Återställ'
+        : '<i class="bi bi-archive me-1"></i>Arkivera';
+    document.getElementById('fkProjMemberResults').innerHTML = '';
+    document.getElementById('fkProjMemberSearch').value = '';
+    fkProjRenderMembers(p);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkProjModal')).show();
+}
+
+function fkProjRenderMembers(p) {
+    var container = document.getElementById('fkProjMembers');
+    if (!p.members || p.members.length === 0) {
+        container.innerHTML = '<p class="small text-muted mb-0">Inga medlemmar ännu (bara ägaren).</p>';
+        return;
     }
+    container.innerHTML = p.members.map(function(m) {
+        return '<span class="badge bg-secondary me-1 mb-1">' + escapeHtml(m.memberName) +
+            ' <i class="bi bi-x-circle-fill ms-1" role="button" onclick="fkProjRemoveMember(' + p.id + ',' + m.memberId + ')"></i></span>';
+    }).join('');
+}
+
+async function fkProjSubmit() {
+    var id = document.getElementById('fkProjId').value;
+    var name = document.getElementById('fkProjName').value.trim();
+    if (!name) { alert('Namn krävs.'); return; }
+    var desc = document.getElementById('fkProjDesc').value || null;
+    var url = id ? '/umbraco/surface/FaltskytteProject/Update' : '/umbraco/surface/FaltskytteProject/Create';
+    var body = id ? { id: parseInt(id), name: name, description: desc } : { name: name, description: desc };
+    try {
+        var resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify(body)
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte spara: ' + (data.message || 'Okänt fel')); return; }
+        if (!id) {
+            // New project: keep modal open in edit mode so members can be added.
+            await fkHubReloadProjects();
+            fkProjOpenEdit(data.projectId);
+        } else {
+            bootstrap.Modal.getInstance(document.getElementById('fkProjModal')).hide();
+            fkHubLoad();
+        }
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+async function fkProjToggleArchive() {
+    var id = parseInt(document.getElementById('fkProjId').value);
+    var p = fkHubProjects.find(function(x) { return x.id === id; });
+    if (!p) return;
+    var url = p.isArchived ? '/umbraco/surface/FaltskytteProject/Unarchive' : '/umbraco/surface/FaltskytteProject/Archive';
+    try {
+        var resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify({ projectId: id })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte ändra: ' + (data.message || 'Okänt fel')); return; }
+        bootstrap.Modal.getInstance(document.getElementById('fkProjModal')).hide();
+        fkHubLoad();
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+async function fkProjDelete() {
+    var id = parseInt(document.getElementById('fkProjId').value);
+    var p = fkHubProjects.find(function(x) { return x.id === id; });
+    if (!p) return;
+    if (!confirm('Ta bort projektet "' + p.name + '"?\n\nKonfigurationerna tas INTE bort — de blir fristående igen.')) return;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteProject/Delete?id=' + id, {
+            method: 'POST', headers: { 'RequestVerificationToken': getToken() }
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte ta bort: ' + (data.message || 'Okänt fel')); return; }
+        bootstrap.Modal.getInstance(document.getElementById('fkProjModal')).hide();
+        fkHubLoad();
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+// ─── Project member management ────────────────────────────────────────
+function fkProjMemberSearch() {
+    if (fkProjMemberSearchTimer) clearTimeout(fkProjMemberSearchTimer);
+    var q = document.getElementById('fkProjMemberSearch').value.trim();
+    if (q.length < 2) { document.getElementById('fkProjMemberResults').innerHTML = ''; return; }
+    fkProjMemberSearchTimer = setTimeout(function() { fkProjMemberSearchDo(q); }, 250);
+}
+
+async function fkProjMemberSearchDo(q) {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/SearchMembers?query=' + encodeURIComponent(q));
+        var data = await resp.json();
+        var box = document.getElementById('fkProjMemberResults');
+        if (!data.success || !data.members || data.members.length === 0) {
+            box.innerHTML = '<div class="list-group-item small text-muted">Inga träffar.</div>';
+            return;
+        }
+        var id = parseInt(document.getElementById('fkProjId').value);
+        var p = fkHubProjects.find(function(x) { return x.id === id; });
+        var existing = (p && p.members) ? p.members.map(function(m){ return m.memberId; }) : [];
+        box.innerHTML = data.members.map(function(m) {
+            var already = existing.indexOf(m.memberId) >= 0 || (p && p.ownerMemberId === m.memberId);
+            return '<button type="button" class="list-group-item list-group-item-action small d-flex justify-content-between' +
+                (already ? ' disabled' : '') + '"' +
+                (already ? '' : ' onclick="fkProjAddMember(' + m.memberId + ')"') + '>' +
+                '<span>' + escapeHtml(m.memberName || ('Medlem ' + m.memberId)) + (m.clubName ? ' <small class="text-muted">(' + escapeHtml(m.clubName) + ')</small>' : '') + '</span>' +
+                (already ? '<span class="text-muted">redan med</span>' : '<span class="text-primary"><i class="bi bi-plus-lg"></i></span>') +
+                '</button>';
+        }).join('');
+    } catch (e) { console.error(e); }
+}
+
+async function fkProjAddMember(memberId) {
+    var id = parseInt(document.getElementById('fkProjId').value);
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteProject/AddMember', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify({ projectId: id, memberId: memberId })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte lägga till: ' + (data.message || 'Okänt fel')); return; }
+        document.getElementById('fkProjMemberSearch').value = '';
+        document.getElementById('fkProjMemberResults').innerHTML = '';
+        await fkHubReloadProjects();
+        var p = fkHubProjects.find(function(x) { return x.id === id; });
+        if (p) fkProjRenderMembers(p);
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+async function fkProjRemoveMember(projectId, memberId) {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteProject/RemoveMember', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify({ projectId: projectId, memberId: memberId })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte ta bort: ' + (data.message || 'Okänt fel')); return; }
+        await fkHubReloadProjects();
+        var p = fkHubProjects.find(function(x) { return x.id === projectId; });
+        if (p) fkProjRenderMembers(p);
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+// Reload just the projects list (used while the project modal stays open).
+async function fkHubReloadProjects() {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteProject/ListAccessible');
+        var data = await resp.json();
+        if (data.success) { fkHubProjects = data.projects || []; fkHubPopulateProjectSelects(); }
+    } catch (e) { console.error(e); }
 }
 </script>

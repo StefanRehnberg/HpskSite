@@ -38,6 +38,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     public class FaltskytteStationConfig
     {
         public int Station { get; set; }
+        /// <summary>Optional free-text station name (e.g. "Skog", "Älg"). Shown after
+        /// "Station X" in headers. Set in the configurator; null/empty = no name.</summary>
+        public string? Name { get; set; }
         public int ShootingTimeSec { get; set; }
         public string ShooterStartPosition { get; set; } = "";
         public string WeaponStartPosition { get; set; } = "";

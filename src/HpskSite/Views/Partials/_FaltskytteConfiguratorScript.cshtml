@@ -594,10 +594,22 @@ function ensureStations(wc) {
         delete faltCfgData[wc].Stations;
     }
     const existing = faltCfgData[wc].stations || [];
+    // Preserve the operator's custom ordering: keep existing stations whose number
+    // is within the current count IN THEIR CURRENT ARRAY ORDER, then append any
+    // missing numbers (1..count) at the end. The station NUMBER stays the stable
+    // identity (referenced by result entry, QR, IsShootOffOnly, patrol pages); the
+    // ARRAY ORDER is the display/sequence order and may differ per weapon class.
     const stations = [];
+    const seen = new Set();
+    existing.forEach(function(s) {
+        var num = s.station || s.Station;
+        if (num >= 1 && num <= faltCfgStationCount && !seen.has(num)) {
+            stations.push(s);
+            seen.add(num);
+        }
+    });
     for (let i = 1; i <= faltCfgStationCount; i++) {
-        const ex = existing.find(s => s.station || s.Station ? (s.station || s.Station) === i : false);
-        stations.push(ex || createDefaultStation(i));
+        if (!seen.has(i)) { stations.push(createDefaultStation(i)); seen.add(i); }
     }
     faltCfgData[wc].stations = stations;
 }
@@ -605,6 +617,7 @@ function ensureStations(wc) {
 function createDefaultStation(num) {
     return {
         station: num,
+        name: "",
         shootingTimeSec: 30,
         shooterStartPosition: "Stående",
         weaponStartPosition: "45 grader",
@@ -816,6 +829,59 @@ function faltCfgCopyStation(stationNum, wc) {
     renderActiveTab();
 }
 
+// Reorder a station within the active weapon class. direction = -1 (up) / +1 (down).
+// Swaps array positions only — the station NUMBER (its stable identity) doesn't
+// change, so result entry / QR / patrol pages (which look up by number) are
+// unaffected. The order is per weapon class; linked classes stay in sync because
+// faltCfgMarkDirty → faltCfgSyncLinked copies the whole (reordered) config across.
+function faltCfgMoveStation(wc, stationNum, direction) {
+    var stations = faltCfgData[wc] && faltCfgData[wc].stations;
+    if (!stations) return;
+    var idx = stations.findIndex(function(s) { return s.station === stationNum; });
+    if (idx < 0) return;
+    var target = idx + direction;
+    if (target < 0 || target >= stations.length) return;
+    var neighbourNum = stations[target].station;
+    var tmp = stations[idx];
+    stations[idx] = stations[target];
+    stations[target] = tmp;
+    faltCfgMarkDirty(wc, stationNum);
+    faltCfgMarkDirty(wc, neighbourNum);
+    renderActiveTab();
+}
+
+function faltCfgEscapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, function(c) {
+        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+}
+
+// Simple mode presents one unified station list for all classes, so name + order
+// are applied uniformly across every weapon class (not per-class).
+function faltCfgSimpleSetName(stationNum, value) {
+    faltCfgWeaponClasses.forEach(function(wc) {
+        var s = faltCfgData[wc] && faltCfgData[wc].stations
+            ? faltCfgData[wc].stations.find(function(x){ return x.station === stationNum; }) : null;
+        if (s) s.name = value;
+    });
+    faltCfgMarkDirty(faltCfgGetCanonicalClass(), stationNum);
+}
+
+function faltCfgSimpleMoveStation(stationNum, direction) {
+    faltCfgWeaponClasses.forEach(function(wc) {
+        var stations = faltCfgData[wc] && faltCfgData[wc].stations;
+        if (!stations) return;
+        var idx = stations.findIndex(function(s){ return s.station === stationNum; });
+        var target = idx + direction;
+        if (idx < 0 || target < 0 || target >= stations.length) return;
+        var tmp = stations[idx]; stations[idx] = stations[target]; stations[target] = tmp;
+    });
+    // Mark dirty (badge only; the whole blob saves regardless of which is flagged).
+    faltCfgMarkDirty(faltCfgGetCanonicalClass(), stationNum);
+    renderActiveTab();
+}
+
 // ─── Rendering ──────────────────────────────────────────────────────
 
 function renderActiveTab() {
@@ -833,12 +899,16 @@ function renderActiveTab() {
             <div class="card-header py-2" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
                 <div class="d-flex justify-content-between align-items-center">
                     <span>
-                        <strong>Station ${st.station}</strong>
+                        <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}
                         <span id="faltCfgSaved_${wc}_${st.station}" class="badge bg-success ms-2" style="display:none">Sparad</span>
                         <span id="faltCfgDirty_${wc}_${st.station}" class="badge bg-warning text-dark ms-2" style="display:none">Osparad</span>
                     </span>
                     <span class="d-flex align-items-center gap-2">
                         <span class="text-muted small">${st.shootingTimeSec}s | ${st.shooterStartPosition}${st.weaponStartPosition === '45 grader' ? ' | 45 grader' : ''} | ${st.targetGroups.length} målgr.</span>
+                        <span class="btn-group btn-group-sm" role="group" aria-label="Ordning">
+                            <button class="btn btn-outline-secondary" onclick="event.stopPropagation(); faltCfgMoveStation('${wc}', ${st.station}, -1)" title="Flytta upp" ${idx === 0 ? 'disabled' : ''}><i class="bi bi-arrow-up"></i></button>
+                            <button class="btn btn-outline-secondary" onclick="event.stopPropagation(); faltCfgMoveStation('${wc}', ${st.station}, 1)" title="Flytta ned" ${idx === stations.length - 1 ? 'disabled' : ''}><i class="bi bi-arrow-down"></i></button>
+                        </span>
                         <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSaveStation(${st.station}, '${wc}')">
                             <i class="bi bi-check-lg me-1"></i>Spara stationen
                         </button>
@@ -854,6 +924,11 @@ function renderActiveTab() {
             <div id="${collapseId}" class="collapse ${st.station === faltCfgExpandedStation ? 'show' : ''}">
                 <div class="card-body">
                     <div class="row g-2 mb-3">
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Namn (valfritt)</label>
+                            <input type="text" class="form-control form-control-sm" maxlength="60" value="${st.name ? faltCfgEscapeHtml(st.name) : ''}" style="width:180px" placeholder="t.ex. Skog, Älg, Sittande"
+                                onchange="faltCfgUpdateStation('${wc}',${st.station},'name',this.value)">
+                        </div>
                         <div class="col-auto">
                             <label class="form-label small mb-0">Skjuttid (sek)</label>
                             <input type="number" class="form-control form-control-sm" min="5" max="120" value="${st.shootingTimeSec}" style="width:80px"
@@ -1474,7 +1549,7 @@ function faltCfgRenderSimpleMode() {
     var stations = faltCfgData[canonical]?.stations || [];
     var isPoang = faltCfgScoringMode() === 'Poang';
     var html = '';
-    stations.forEach(function (st) {
+    stations.forEach(function (st, idx) {
         var collapseId = 'faltCfgStationSimple_' + st.station;
         var anyDirty = faltCfgWeaponClasses.some(function (c) {
             return faltCfgDirtyStations.has(c + '_' + st.station);
@@ -1557,11 +1632,16 @@ function faltCfgRenderSimpleMode() {
             '<div class="card mb-2" data-station="' + st.station + '">' +
               '<div class="card-header py-2" role="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '">' +
                 '<div class="d-flex justify-content-between align-items-center">' +
-                  '<span><strong>Station ' + st.station + '</strong>' +
+                  '<span><strong>Station ' + st.station + '</strong>' + (st.name ? ' <span class="text-body-secondary">– ' + faltCfgEscapeHtml(st.name) + '</span>' : '') +
                     '<span id="faltCfgSimpleSaved_' + st.station + '" class="badge bg-success ms-2" style="display:none">Sparad</span>' +
                     '<span id="faltCfgSimpleDirty_' + st.station + '" class="badge bg-warning text-dark ms-2"' + (anyDirty ? '' : ' style="display:none"') + '>Osparad</span>' +
                   '</span>' +
                   '<span class="d-flex align-items-center gap-2">' +
+                    '<input type="text" class="form-control form-control-sm" maxlength="60" value="' + (st.name ? faltCfgEscapeHtml(st.name) : '') + '" style="width:150px" placeholder="Namn (valfritt)" onclick="event.stopPropagation()" onchange="faltCfgSimpleSetName(' + st.station + ', this.value)">' +
+                    '<span class="btn-group btn-group-sm" role="group" aria-label="Ordning">' +
+                      '<button class="btn btn-outline-secondary" onclick="event.stopPropagation(); faltCfgSimpleMoveStation(' + st.station + ', -1)" title="Flytta upp"' + (idx === 0 ? ' disabled' : '') + '><i class="bi bi-arrow-up"></i></button>' +
+                      '<button class="btn btn-outline-secondary" onclick="event.stopPropagation(); faltCfgSimpleMoveStation(' + st.station + ', 1)" title="Flytta ned"' + (idx === stations.length - 1 ? ' disabled' : '') + '><i class="bi bi-arrow-down"></i></button>' +
+                    '</span>' +
                     '<span class="text-muted small">' + (st.targetGroups || []).length + ' målgr.</span>' +
                     '<button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSimpleSaveStation(' + st.station + ')">' +
                       '<i class="bi bi-check-lg me-1"></i>Spara stationen' +
@@ -1920,6 +2000,7 @@ function faltCfgStationsStructurallyEqual(a, b) {
 function faltCfgPrintStation(stationNum, wc) {
     var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
     if (!station) return;
+    var stNameSuffix = station.name ? ' – ' + faltCfgEscapeHtml(station.name) : '';
 
     // Combine classes that share STRUCTURE — figures, behaviours, images. In
     // simple mode per-class params (Skjuttid, positions, Stödhand, Max skott)
@@ -1981,9 +2062,9 @@ function faltCfgPrintStation(stationNum, wc) {
 
     // Header
     if (isCombined) {
-        w.document.write('<h1>Station ' + stationNum + '<' + '/h1>');
+        w.document.write('<h1>Station ' + stationNum + stNameSuffix + '<' + '/h1>');
     } else {
-        w.document.write('<h1>Station ' + stationNum + ' \u2014 Vapenklass ' + wc + '<' + '/h1>');
+        w.document.write('<h1>Station ' + stationNum + stNameSuffix + ' \u2014 Vapenklass ' + wc + '<' + '/h1>');
     }
 
     // Förutsättningar

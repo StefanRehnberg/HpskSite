@@ -86,6 +86,9 @@
     // stored value is never user-set — don't surface it as a station condition here.
     var isPoang = string.Equals(ViewData["ScoringMode"] as string, "Poang", StringComparison.OrdinalIgnoreCase);
     var anyMaxLimited = !isPoang && classKeys.Any(c => stationsByWc[c].MaxShotsPerFigure < 6);
+    // Optional station name (first non-empty across weapon classes) — shown after "Station X".
+    var stationName = classKeys.Select(c => stationsByWc[c].Name).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+    var stationNameSuffix = string.IsNullOrWhiteSpace(stationName) ? "" : " – " + stationName;
 }
 
 <div class="fss-root">
@@ -98,11 +101,11 @@ else
     // Header
     if (isCombined)
     {
-        <h1 class="fss-h1">Station @stationNumber@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</h1>
+        <h1 class="fss-h1">Station @stationNumber@stationNameSuffix@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</h1>
     }
     else
     {
-        <h1 class="fss-h1">Station @stationNumber — Vapenklass @firstWc@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</h1>
+        <h1 class="fss-h1">Station @stationNumber@stationNameSuffix — Vapenklass @firstWc@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</h1>
     }
 
     // Förutsättningar

@@ -286,6 +286,13 @@
         }
     })();
 
+    // "Station X" header, with the optional station name appended ("Station 3 – Skog").
+    function fseStationLabel() {
+        var n = stationData ? stationData.stationNumber : '';
+        var name = stationData && stationData.stationName ? stationData.stationName : '';
+        return 'Station ' + n + (name ? ' – ' + name : '');
+    }
+
     window.fseLoadStation = async function() {
         var stationNum = parseInt(document.getElementById('fseStationSelect').value);
         var listEl = document.getElementById('fsePatrolList');
@@ -359,7 +366,7 @@
         }
 
         // Show roll call screen
-        document.getElementById('fseRcStationLabel').textContent = 'Station ' + stationData.stationNumber;
+        document.getElementById('fseRcStationLabel').textContent = fseStationLabel();
         document.getElementById('fseRcPatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber + (currentPatrol.label ? ' — ' + currentPatrol.label : '');
 
         // Render Förutsättningar on roll call screen
@@ -419,7 +426,7 @@
         while (currentShooterIdx < members.length && !presentMembers.has(members[currentShooterIdx].memberId))
             currentShooterIdx++;
 
-        document.getElementById('fseStationLabel').textContent = 'Station ' + stationData.stationNumber;
+        document.getElementById('fseStationLabel').textContent = fseStationLabel();
         document.getElementById('fsePatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber + (currentPatrol.label ? ' — ' + currentPatrol.label : '');
         fseApplySelfServiceUi();
 

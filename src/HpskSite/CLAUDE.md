@@ -563,7 +563,7 @@ if (stringValue.TrimStart().StartsWith("[")) {
 ### Särskjutning (Shoot-Off) for Championship Medal Positions ✅ (2026-05-19)
 **Rule:** In Championship competitions (`competitionScope` ∈ {`Svenskt Mästerskap`, `Landsdelsmästerskap`, `Kretsmästerskap`, `Klubbmästerskap`}), tied medal positions 1–3 are resolved **only** by a 5-shot shoot-off. **None of the normal tie-breakers apply at medal positions** — not X-count, not series countback. Repeat rounds until separated. Ranks 4+ continue to use X-count + countback as before.
 
-**Scope (this iteration):** Precision, Duell, Milsnabb, MagnumPrecision, NationellHelmatch (all five share the same code path through `CompetitionResultsController.CalculateFinalResults`). Fältskytte (station re-shoot semantics) and Springskytte (full re-run) are TODO.
+**Scope:** Precision, Duell, Milsnabb, MagnumPrecision, NationellHelmatch (all five share the same code path through `CompetitionResultsController.CalculateFinalResults`). **Fältskytte is also done** — Normal/Poäng/Magnumfält, shipped 2026-05-20, via its own `FaltskytteShootOffEntry` table + per-variation comparers (see "Fältskytte Särskjutning" section below). Springskytte (full re-run) is intentionally not implemented (vanishingly rare; would re-run the whole event).
 
 **Implementation:**
 - Single SQL table `CompetitionShootOffEntry` keyed `(CompetitionId, MemberId, ShootingClass, Round, SeriesNumber)` — identity-based so start-list / class regeneration can't orphan entries.

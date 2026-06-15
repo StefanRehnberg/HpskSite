@@ -554,6 +554,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var st = kvp.Value.Stations.FirstOrDefault(s => s.Station == stationNumber);
                 if (st != null) wcStations[kvp.Key] = st;
             }
+            // Station name: first non-empty across weapon classes (uniform in simple mode).
+            var stationName = wcStations.Values
+                .Select(s => s.Name)
+                .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
 
             return Json(new
             {
@@ -562,6 +566,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 {
                     CompetitionId = competitionId,
                     StationNumber = stationNumber,
+                    StationName = stationName,
                     MaxReshoots = maxReshoots,
                     ScoringMode = scoringMode,
                     WeaponClassStations = wcStations,
