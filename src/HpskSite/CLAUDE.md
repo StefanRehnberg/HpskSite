@@ -1261,6 +1261,23 @@ Two SQL migrations: `add-approval-to-faltskytte-configuration.sql` (status + app
 
 **Banläggare cert check** uses the existing `CertificationService.HasActiveCertAsync(memberId, CertificationTypes.Banlaggare)` — no new role plumbing.
 
+### Fältskytte Projekt + hub UX + per-station name/reorder (2026-06-15)
+
+**Projekt (Phase 1)** — a lightweight container that groups standalone configs for organisation, shared access, and archiving.
+- Tables `FaltskytteProject` (Id, Name, Description, OwnerMemberId, OwnerClubId, Status [Active/Archived], dates) + `FaltskytteProjectMember` (ProjectId, MemberId; PK composite; FK CASCADE). `FaltskytteConfiguration` gains nullable `ProjectId` (FK → FaltskytteProject **ON DELETE SET NULL** — deleting a project orphans configs to standalone, never cascades). Migration `Migrations/create-faltskytte-project-tables.sql` (gitignored; run in SSMS).
+- `Services/FaltskytteProjectService.cs` + `Controllers/FaltskytteProjectController.cs` (ListAccessible, Create, Update, Delete, Archive/Unarchive, AddMember/RemoveMember, AssignConfig). Member picker reuses `FaltskytteConfiguration/SearchMembers`.
+- **Access rolls up, doesn't compete:** `FaltskytteConfigurationService.CanViewAsync`/`CanEditAsync` now also pass when the config's `ProjectId` is set and the viewer owns/belongs-to that project (private helper `IsProjectMemberOrOwnerAsync`, raw SQL to avoid a circular service dep). `AssignToProjectAsync` requires edit on the config + membership of the target project. `BuildViewAsync` resolves `ProjectName` + `IsInArchivedProject`; the project view carries rollup counts (ConfigCount/ApprovedConfigCount/PendingConfigCount).
+- **Phase 2 (deferred):** manager role, a designated responsible Banläggare, and a one-click "approve all" rolling up the existing per-config approvals.
+
+**Hub UX** (`FaltskytteConfigurationHub.cshtml`, full rewrite): compact list/table toggle, sorting (modified/name/stations/owner), sticky toolbar, pinned ⭐ favorites, group-by-project (collapsible sections + "Utan projekt" + name-only header for projects the viewer can't manage), show-archived. View/sort/group/pins persist in localStorage. New create/edit-project modal (member search/add/remove, archive, delete) + assign-config modal; create-config modal gained a project picker.
+
+**Per-station name + reorder** (`_FaltskytteConfiguratorScript.cshtml`):
+- `name` added to `createDefaultStation`; editable in advanced-mode card body + simple-mode header; `faltCfgEscapeHtml` helper added.
+- **Reorder is per weapon class** with array order = display/sequence and the station NUMBER as stable identity (looked up everywhere by `.station`, and a single-station save serializes the whole blob — so no renumber, nothing downstream breaks). `ensureStations` rewritten to PRESERVE array order (keep in-order ≤count, append missing). `faltCfgMoveStation` (advanced, per-class; linked classes sync via faltCfgMarkDirty) + `faltCfgSimpleMoveStation`/`faltCfgSimpleSetName` (simple, uniform across classes). Scope: editor + printout only — NOT patrol generation / result-entry order (those sort by number).
+- **Station name in headers:** added `Name` to `FaltskytteStationConfig` (server model) + `StationName` to `FaltskytteStationView`; `GetStationEntryData` returns it (first non-empty across classes). Shown after "Station X" in: editor cards, printed station card (`faltCfgPrintStation`), result-entry roll-call + entry headers (`fseStationLabel()`), public `StationInfoCard`, and `FaltskytteStationInfoStatic` (QR Förutsättningar). Intentionally NOT on Tidur / live results.
+
+Verified end-to-end via Playwright (32/32, 2026-06-15) — see KB `faltskytte-konfigurationer.md` for the user-facing guide.
+
 ### Stationschef Tidur (2026-05-26)
 
 **What:** Audio-driven shooting-time clock on the station entry page (`FaltskytteStationEntry.cshtml`), sitting between Upprop and "Starta resultatinmatning" on the roll-call screen. Reads the patrol's weapon-class `shootingTimeSec` from the loaded station config and runs a 10 s upprop → ELD → skjuttid → Eld upphör auto-sequence with per-figure visibility timelines. Four extra manual command buttons (Ladda / Alla klara pre-fire, Patron ur / Visitation post-fire) round out the full Fältskytte cycle.
