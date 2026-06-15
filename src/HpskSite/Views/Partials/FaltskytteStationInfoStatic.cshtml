@@ -82,7 +82,10 @@
     var primary = firstWc != null ? stationsByWc[firstWc] : null;
     var isCombined = classKeys.Count > 1;
     var anyMin = classKeys.Any(c => stationsByWc[c].MinShotsPerFigure > 0);
-    var anyMaxLimited = classKeys.Any(c => stationsByWc[c].MaxShotsPerFigure < 6);
+    // In Poäng mode the Max träff/fig control is hidden in the configurator, so the
+    // stored value is never user-set — don't surface it as a station condition here.
+    var isPoang = string.Equals(ViewData["ScoringMode"] as string, "Poang", StringComparison.OrdinalIgnoreCase);
+    var anyMaxLimited = !isPoang && classKeys.Any(c => stationsByWc[c].MaxShotsPerFigure < 6);
 }
 
 <div class="fss-root">
@@ -131,7 +134,7 @@ else
                         : weapon;
                     var stod = string.Equals(st.SupportHand, "Ej stödhand", StringComparison.OrdinalIgnoreCase) ? "Nej" : "Ja";
                     var traffParts = new List<string>();
-                    if (st.MaxShotsPerFigure < 6) { traffParts.Add($"max {st.MaxShotsPerFigure}"); }
+                    if (!isPoang && st.MaxShotsPerFigure < 6) { traffParts.Add($"max {st.MaxShotsPerFigure}"); }
                     if (st.MinShotsPerFigure > 0) { traffParts.Add($"min {st.MinShotsPerFigure}"); }
                     var traffStr = traffParts.Count > 0 ? string.Join(", ", traffParts) : "—";
                     <tr class="fss-row-clickable @activeAttr" data-fss-wc-row="@c">
@@ -159,7 +162,7 @@ else
                 <br />
                 <span><strong>Min träff/fig:</strong> @primary.MinShotsPerFigure</span>
             }
-            if (primary.MaxShotsPerFigure < 6)
+            if (!isPoang && primary.MaxShotsPerFigure < 6)
             {
                 <span>&nbsp;|&nbsp; <strong>Max träff/fig:</strong> @primary.MaxShotsPerFigure</span>
             }

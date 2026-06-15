@@ -482,9 +482,18 @@
         }
     }
 
-    // 2. Start list availability from published content
-    var startListsHub = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-    var officialStartList = startListsHub?.Children()?.FirstOrDefault(sl => sl.Value<bool>("isOfficialStartList"));
+    // 2. Start list availability from published content.
+    //    New architecture: precisionStartList is a DIRECT child of the competition
+    //    (mirrors the finals + Springskytte direct-child reads below, and the
+    //    generator/publish endpoints which were migrated to this layout).
+    //    Legacy: nested under a competitionStartListsHub — kept as a fallback.
+    var officialStartList = competitionChildren
+        .FirstOrDefault(c => c.ContentType.Alias == "precisionStartList" && c.Value<bool>("isOfficialStartList"));
+    if (officialStartList == null)
+    {
+        var startListsHub = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+        officialStartList = startListsHub?.Children()?.FirstOrDefault(sl => sl.Value<bool>("isOfficialStartList"));
+    }
     var hasOfficialStartList = officialStartList != null;
     var startListPageUrl = hasOfficialStartList ? officialStartList.Url() : "";
 

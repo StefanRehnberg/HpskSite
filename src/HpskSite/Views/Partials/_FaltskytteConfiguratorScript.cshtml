@@ -609,7 +609,7 @@ function createDefaultStation(num) {
         shooterStartPosition: "Stående",
         weaponStartPosition: "45 grader",
         supportHand: "Ej stödhand",
-        maxShotsPerFigure: 2,
+        maxShotsPerFigure: 6, // 6 = "no cap" (matches FaltskytteStationConfig default + every `|| 6` fallback). NOT 2 — a stored 2 leaks "Max träff/fig: 2" onto station cards, even in Poäng mode where the field is hidden.
         targetGroups: [{ group: 1, figures: [createDefaultFigure(1)] }]
     };
 }
@@ -1934,6 +1934,9 @@ function faltCfgPrintStation(stationNum, wc) {
     });
     var classKeys = Object.keys(combinedClasses);
     var isCombined = classKeys.length > 1;
+    // In Poäng mode the Max träff/fig control is hidden in the editor, so the
+    // value is never user-set — don't print it as a station condition either.
+    var isPoang = faltCfgScoringMode() === 'Poang';
 
     // Group classes by the value of `field`. When all classes share the
     // same value, prefixes are dropped ("16 sek" instead of "A,B,C: 16 sek").
@@ -2004,7 +2007,7 @@ function faltCfgPrintStation(stationNum, wc) {
         });
         if (anyMinSet) fields.push({ key: 'minShotsPerFigure', label: 'Min träff/fig' });
         // Max skott column only when any class actually limits it (< 6).
-        var anyMaxLimited = classKeys.some(function (c) {
+        var anyMaxLimited = !isPoang && classKeys.some(function (c) {
             var v = combinedClasses[c].maxShotsPerFigure;
             return v && v < 6;
         });
@@ -2056,7 +2059,7 @@ function faltCfgPrintStation(stationNum, wc) {
         w.document.write(' &nbsp;|&nbsp; <strong>Vapenl\u00e4ge:<' + '/strong> ' + station.weaponStartPosition);
         w.document.write(' &nbsp;|&nbsp; <strong>' + station.supportHand + '<' + '/strong>');
         if (station.minShotsPerFigure && station.minShotsPerFigure > 0) w.document.write('<br><strong>Min träff/fig:<' + '/strong> ' + station.minShotsPerFigure);
-        if (station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write(' &nbsp;|&nbsp; <strong>Max träff/fig:<' + '/strong> ' + station.maxShotsPerFigure);
+        if (!isPoang && station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write(' &nbsp;|&nbsp; <strong>Max träff/fig:<' + '/strong> ' + station.maxShotsPerFigure);
     }
     w.document.write('<' + '/div>');
 

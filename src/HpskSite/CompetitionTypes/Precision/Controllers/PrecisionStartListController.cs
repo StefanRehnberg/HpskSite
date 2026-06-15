@@ -552,7 +552,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var saveResult = _contentService.Save(startList);
                 if (saveResult.Success)
                 {
-                    _logger.LogInformation("{Action} start list {StartListId} by user {UserId}", 
+                    // Save() only writes the DRAFT version. The public competition page reads the
+                    // PUBLISHED version via Model.Children(), so the isOfficialStartList flag must be
+                    // pushed to the content cache with Publish() — otherwise "Visa startlista" never
+                    // appears (the flag sits unpublished on the draft). Same Save()+Publish() pattern
+                    // used by every other mutation in this controller.
+                    _contentService.Publish(startList, new[] { "*" }, -1);
+
+                    _logger.LogInformation("{Action} start list {StartListId} by user {UserId}",
                                          request.IsPublished ? "Published" : "Unpublished", request.StartListId, memberData.Id);
                     
                     var actionText = request.IsPublished ? "publicerad" : "avpublicerad";
@@ -590,6 +597,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     directStartList.SetValue("isOfficialStartList", false);
                     _contentService.Save(directStartList);
+                    _contentService.Publish(directStartList, new[] { "*" }, -1); // push the flag to the published cache, not just the draft
                     _logger.LogInformation("Unpublished direct start list {StartListId} for competition {CompetitionId}",
                         directStartList.Id, competitionId);
                     return;
@@ -608,6 +616,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     startList.SetValue("isOfficialStartList", false);
                     _contentService.Save(startList);
+                    _contentService.Publish(startList, new[] { "*" }, -1); // push the flag to the published cache, not just the draft
                 }
 
                 _logger.LogInformation("Unpublished {Count} start lists (legacy hub) for competition {CompetitionId}",
@@ -2378,13 +2387,15 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            // Mirrors PublishStartList for the qualifying card: just flip the custom flag
-            // and Save. The Umbraco node was already Published by GenerateFinalsStartList,
-            // so there's no expensive Publish/cache rebuild here.
+            // Flip the custom flag, then Save() AND Publish(). Save() alone only updates the
+            // DRAFT version; the public competition page reads the PUBLISHED version via
+            // Model.Children(), so without Publish() the isOfficialFinalsStartList flag never
+            // reaches the content cache and "Visa finalsstartlista" never appears.
             node.SetValue("isOfficialFinalsStartList", request.IsPublished);
             var saveResult = _contentService.Save(node);
             if (!saveResult.Success)
                 return Json(new { success = false, message = "Kunde inte spara." });
+            _contentService.Publish(node, new[] { "*" }, -1);
 
             return Json(new
             {

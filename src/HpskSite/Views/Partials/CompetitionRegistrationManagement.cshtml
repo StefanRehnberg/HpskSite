@@ -62,16 +62,28 @@
         </div>
     </div>
 
-    <!-- Payment Summary Cards. 5 cards across at lg+, 2 per row on mobile/tablet so the
-         odd-count layout still wraps cleanly without leaving an orphan card. -->
+    <!-- Payment Summary Cards. 6 cards across at lg+, 2 per row on mobile/tablet so the
+         layout still wraps cleanly. Money totals (Betalat/Väntande) include both
+         individual registrations AND teams/stafett (Lag). -->
     <div class="row g-2 mb-3" id="paymentSummaryCards" style="display:none">
         <div class="col-6 col-lg">
             <div class="card h-100">
                 <div class="card-body py-2">
-                    <h6 class="card-subtitle mb-1 text-muted small">Anmälda</h6>
+                    <h6 class="card-subtitle mb-1 text-muted small">Anmälda Ind.</h6>
                     <div class="d-flex justify-content-between align-items-baseline">
                         <h4 class="card-title mb-0" id="summaryRegCount">0</h4>
                         <small class="text-muted"><span id="summaryUniqueMembers">0</span> unika</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card h-100">
+                <div class="card-body py-2">
+                    <h6 class="card-subtitle mb-1 text-muted small">Anmälda Lag</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <h4 class="card-title mb-0" id="summaryTeamCount">0</h4>
+                        <small class="text-muted">lag/stafett</small>
                     </div>
                 </div>
             </div>
@@ -90,7 +102,7 @@
         <div class="col-6 col-lg">
             <div class="card h-100 border-success">
                 <div class="card-body py-2">
-                    <h6 class="card-subtitle mb-1 text-success small">Betalt</h6>
+                    <h6 class="card-subtitle mb-1 text-success small">Betalat</h6>
                     <div class="d-flex justify-content-between align-items-baseline">
                         <h4 class="card-title mb-0 text-success" id="summaryPaidAmount">0 kr</h4>
                         <small class="text-muted"><span id="summaryPaidCount">0</span> st</small>
@@ -904,6 +916,10 @@ function renderCompetitionTeams() {
     const countEl = document.getElementById('teamsCount');
     if (countEl) countEl.textContent = competitionTeams.length;
 
+    // Teams load asynchronously after individuals; recompute the summary cards so the
+    // money totals + "Anmälda Lag" count include teams once they arrive.
+    updatePaymentSummary();
+
     if (!competitionTeams.length) {
         section.classList.add('d-none');
         tbody.innerHTML = '';
@@ -1176,7 +1192,8 @@ function updatePaymentSummary() {
     if (!cards) return;
 
     const regs = competitionRegistrations || [];
-    if (regs.length === 0) {
+    const teams = competitionTeams || [];
+    if (regs.length === 0 && teams.length === 0) {
         cards.style.display = 'none';
         return;
     }
@@ -1201,8 +1218,20 @@ function updatePaymentSummary() {
         totalStarts += Array.isArray(r.shootingClasses) ? r.shootingClasses.length : 0;
     });
 
+    // Fold teams/stafett (Lag) into the money totals so the sums above the lists
+    // reflect the whole competition, not just individuals. Teams carry a single
+    // invoice (amount + status), not the multi-invoice aggregates individuals have.
+    teams.forEach(t => {
+        const status = t.paymentStatus || 'No Invoice';
+        const amount = Number(t.amount) || 0;
+        if (status === 'Paid') { paidCount++; paidAmount += amount; }
+        else if (status === 'Pending') { pendingCount++; pendingAmount += amount; }
+        else if (status === 'No Invoice') noInvoiceCount++;
+    });
+
     document.getElementById('summaryRegCount').textContent = regs.length;
     document.getElementById('summaryUniqueMembers').textContent = uniqueMembers;
+    document.getElementById('summaryTeamCount').textContent = teams.length;
     document.getElementById('summaryStartsCount').textContent = totalStarts;
     document.getElementById('summaryPaidCount').textContent = paidCount;
     document.getElementById('summaryPaidAmount').textContent = `${Math.round(paidAmount)} kr`;
