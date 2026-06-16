@@ -40,14 +40,15 @@
                         <i class="bi bi-camera-video me-1"></i>Se videolektion
                     </a>
                 }
-                <a href="@contentUrl" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+                <button type="button" class="btn btn-primary btn-sm" onclick="utbPresent()">
                     <i class="bi bi-easel me-1"></i>Presentationsläge
-                </a>
+                </button>
             </div>
         </div>
 
-        <div class="ratio" style="--bs-aspect-ratio: 130%; min-height: 80vh; border:1px solid var(--bs-border-color); border-radius:.5rem; overflow:hidden;">
-            <iframe src="@contentUrl" title="@module.Title" style="width:100%; height:100%; border:0;"></iframe>
+        <div id="lessonFrameWrap" style="border:1px solid var(--bs-border-color); border-radius:.5rem; overflow:hidden;">
+            <iframe id="lessonFrame" src="@contentUrl" title="@module.Title"
+                    style="display:block; width:100%; height:82vh; border:0;"></iframe>
         </div>
 
         <!-- Chapter navigation -->
@@ -83,8 +84,22 @@
         </div>
 
         <p class="text-body-secondary small mt-2 mb-0">
-            <i class="bi bi-info-circle me-1"></i>Klicka <strong>Presentationsläge</strong> för att visa lektionen i helskärm
-            för en grupp (öppnas i ny flik – pilarna bläddrar mellan bilderna).
+            <i class="bi bi-info-circle me-1"></i><strong>Presentationsläge</strong> visar lektionen i helskärm för en grupp
+            (piltangenterna bläddrar, Esc avslutar).
         </p>
     }
 </div>
+
+<script>
+function utbPresent() {
+    var f = document.getElementById('lessonFrame');
+    if (!f) return;
+    // Enter the lesson's built-in present mode first (reliable), then go fullscreen (best-effort).
+    try {
+        f.contentWindow.focus();
+        if (f.contentWindow.__goto) f.contentWindow.__goto(0);
+    } catch (e) { /* same-origin expected */ }
+    var req = f.requestFullscreen || f.webkitRequestFullscreen || f.msRequestFullscreen;
+    if (req) { try { var p = req.call(f); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
+}
+</script>
