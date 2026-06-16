@@ -183,11 +183,13 @@ namespace HpskSite.Controllers
                 (!module.IsPublished && !isAdmin))
                 return Forbid();
 
-            // Resolve the file under wwwroot and ensure it can't escape the utbildning folder.
-            var webRoot = _env.WebRootPath;
+            // Lesson HTML lives OUTSIDE the web root, under App_Data, so it cannot be fetched as a
+            // static file (which would bypass this gate AND expose the proprietary content).
+            // LessonPath stays relative (e.g. "utbildning/foreningsinstruktor/.../lektion.html").
+            var appData = Path.GetFullPath(Path.Combine(_env.ContentRootPath, "App_Data"));
             var relative = module.LessonPath!.Replace('\\', '/').TrimStart('/');
-            var fullPath = Path.GetFullPath(Path.Combine(webRoot, relative));
-            var utbildningRoot = Path.GetFullPath(Path.Combine(webRoot, "utbildning"));
+            var fullPath = Path.GetFullPath(Path.Combine(appData, relative));
+            var utbildningRoot = Path.GetFullPath(Path.Combine(appData, "utbildning"));
             if (!fullPath.StartsWith(utbildningRoot, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(fullPath))
                 return NotFound();
 

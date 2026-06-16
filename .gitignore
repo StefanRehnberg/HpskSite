@@ -51,8 +51,9 @@ appsettings.Development.json
 /src/HpskSite/KnowledgeBase/docs/
 /src/HpskSite/Documentation/
 
-# Course / Utbildning lesson material — proprietary content, deployed by file (not source)
-/src/HpskSite/wwwroot/utbildning/
+# Course / Utbildning lesson material is proprietary content and lives under App_Data/utbildning
+# (already covered by the App_Data/ ignore above) — served only via the gated /innehall route,
+# never as a static file. Deployed by file, not source.
 
 # Operational scripts + DB migrations (run locally / in SSMS; not part of source)
 /src/HpskSite/Migrations/
