@@ -51,6 +51,9 @@ appsettings.Development.json
 /src/HpskSite/KnowledgeBase/docs/
 /src/HpskSite/Documentation/
 
+# Course / Utbildning lesson material — proprietary content, deployed by file (not source)
+/src/HpskSite/wwwroot/utbildning/
+
 # Operational scripts + DB migrations (run locally / in SSMS; not part of source)
 /src/HpskSite/Migrations/
 /src/HpskSite/publishToProd.ps1
