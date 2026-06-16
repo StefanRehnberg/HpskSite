@@ -615,7 +615,11 @@ namespace HpskSite.Controllers
             if (!await _authService.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Access denied" });
 
-            var rows = await _certService.GetRequestsForClubAsync(clubId);
+            // Hide approved requests — once issued, the member appears in the verified list,
+            // so an "Approved" line here is redundant. Pending + Rejected stay (Rejected is the
+            // only place the club admin sees the rejection reason).
+            var rows = (await _certService.GetRequestsForClubAsync(clubId))
+                .Where(r => r.Status != CertificationRequestStatus.Approved);
             return Json(new { success = true, data = rows.Select(ProjectRequest).ToList() });
         }
 
