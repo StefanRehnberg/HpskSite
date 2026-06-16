@@ -23,6 +23,7 @@ namespace HpskSite.Controllers
     {
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly CourseService _courseService;
+        private readonly CourseTestService _testService;
         private readonly CertificationService _certificationService;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberManager _memberManager;
@@ -33,6 +34,7 @@ namespace HpskSite.Controllers
         public UtbildningController(
             IUmbracoContextAccessor umbracoContextAccessor,
             CourseService courseService,
+            CourseTestService testService,
             CertificationService certificationService,
             AdminAuthorizationService authorizationService,
             IMemberManager memberManager,
@@ -42,6 +44,7 @@ namespace HpskSite.Controllers
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _courseService = courseService;
+            _testService = testService;
             _certificationService = certificationService;
             _authorizationService = authorizationService;
             _memberManager = memberManager;
@@ -80,11 +83,19 @@ namespace HpskSite.Controllers
                 publishedCounts[c.Id] = mods.Count(m => m.IsPublished);
             }
 
+            // Courses where this member has been enabled to take the test (the one participant touchpoint).
+            var pendingTests = new List<Course>();
+            if (memberId > 0)
+                foreach (var c in all)
+                    if (c.HasTest && await _testService.GetActiveAccessAsync(memberId, c.Id) != null)
+                        pendingTests.Add(c);
+
             ViewBag.Courses = courses;
             ViewBag.Unlocked = unlocked;
             ViewBag.ModuleCounts = moduleCounts;        // total (for "X moduler" / "Kommande")
             ViewBag.PublishedCounts = publishedCounts;  // published modules → material is ready
             ViewBag.HasAnyUnlocked = courses.Any(c => unlocked[c.Id] && publishedCounts[c.Id] > 0);
+            ViewBag.PendingTests = pendingTests;
             return View("Utbildning", root);
         }
 
@@ -182,6 +193,54 @@ namespace HpskSite.Controllers
 
             var html = await System.IO.File.ReadAllTextAsync(fullPath);
             return Content(html, "text/html");
+        }
+
+        /// <summary>The online test page — only for a member who has been enabled to take it.</summary>
+        [HttpGet("prov/{courseKey}")]
+        public async Task<IActionResult> ProvPage(string courseKey)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            ViewBag.Course = course;
+
+            if (memberId == 0 || course == null || !course.HasTest ||
+                await _testService.GetActiveAccessAsync(memberId, course.Id) == null)
+            {
+                ViewBag.Denied = true;
+                return View("UtbildningProv", root);
+            }
+
+            var version = await _testService.PickVersionForMemberAsync(memberId, course.Id);
+            if (version == null)
+            {
+                ViewBag.NoTest = true;
+                return View("UtbildningProv", root);
+            }
+
+            ViewBag.Version = version;
+            ViewBag.Questions = CourseTestService.ParseContent(version.ContentRef).Questions; // Correct never rendered
+            ViewBag.PassMark = course.TestPassMark;
+            return View("UtbildningProv", root);
+        }
+
+        /// <summary>Trainer cockpit for a course's test — enable access + record results per participant.</summary>
+        [HttpGet("prov-admin/{courseKey}")]
+        public async Task<IActionResult> ProvAdminPage(string courseKey)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            ViewBag.Course = course;
+
+            if (memberId == 0 || course == null || !course.HasTest || !await CanAccessCourseAsync(course, memberId))
+                ViewBag.Denied = true;
+
+            return View("UtbildningProvAdmin", root);
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

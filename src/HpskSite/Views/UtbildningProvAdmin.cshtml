@@ -1,0 +1,143 @@
+@using HpskSite.Models
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var denied = ViewBag.Denied == true;
+    var course = ViewBag.Course as Course;
+    ViewBag.Title = course != null ? $"Prov – {course.Title}" : "Prov";
+}
+
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/utbildning">Utbildning</a></li>
+            <li class="breadcrumb-item active">Prov: @(course?.Title ?? "")</li>
+        </ol>
+    </nav>
+
+    @if (denied || course == null)
+    {
+        <div class="alert alert-warning"><i class="bi bi-lock me-2"></i>Du har inte behörighet att hantera det här provet.</div>
+    }
+    else
+    {
+        @Html.AntiForgeryToken()
+        <h1 class="h3 mb-1">Hantera prov &amp; deltagare</h1>
+        <p class="text-body-secondary">@course.Title. Aktivera provet för behöriga deltagare (kräver Brons-märket) och registrera resultat.</p>
+
+        <div class="row g-2 align-items-end mb-3" style="max-width:520px;">
+            <div class="col">
+                <label class="form-label mb-1">Träningsgrupp</label>
+                <select class="form-select" id="provGroupSelect" onchange="provLoadStatus()"><option value="">Välj grupp…</option></select>
+            </div>
+        </div>
+
+        <div id="provStatusList"><div class="text-body-secondary">Välj en träningsgrupp för att se deltagare.</div></div>
+    }
+</div>
+
+<!-- Record result modal -->
+<div class="modal fade" id="provResultModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Registrera provresultat – <span id="provResultName"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="provResultMemberId">
+                <div class="row g-2">
+                    <div class="col-6"><label class="form-label">Poäng</label><input type="number" class="form-control" id="provResultScore"></div>
+                    <div class="col-6"><label class="form-label">Maxpoäng</label><input type="number" class="form-control" id="provResultMax"></div>
+                    <div class="col-12"><div class="form-check mt-2"><input class="form-check-input" type="checkbox" id="provResultPassed"><label class="form-check-label" for="provResultPassed">Godkänd</label></div></div>
+                    <div class="col-12"><label class="form-label">Anteckning</label><input type="text" class="form-control" id="provResultNotes"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button class="btn btn-primary" onclick="provSaveResult()">Spara resultat</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const courseId = @(course?.Id ?? 0);
+    function token() { return document.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function esc(t) { const d = document.createElement('div'); d.textContent = (t == null ? '' : t); return d.innerHTML; }
+    if (!courseId) return;
+
+    fetch('/umbraco/surface/CourseTest/GetManageableGroups').then(r => r.json()).then(d => {
+        if (!d.success) return;
+        const sel = document.getElementById('provGroupSelect');
+        (d.groups || []).forEach(g => { const o = document.createElement('option'); o.value = g.id; o.textContent = g.name; sel.appendChild(o); });
+    });
+
+    window.provLoadStatus = function () {
+        const groupId = document.getElementById('provGroupSelect').value;
+        const box = document.getElementById('provStatusList');
+        if (!groupId) { box.innerHTML = '<div class="text-body-secondary">Välj en träningsgrupp för att se deltagare.</div>'; return; }
+        box.innerHTML = '<div class="text-center py-3"><div class="spinner-border"></div></div>';
+        fetch('/umbraco/surface/CourseTest/GetGroupTestStatus?courseId=' + courseId + '&groupId=' + groupId).then(r => r.json()).then(d => {
+            if (!d.success) { box.innerHTML = '<div class="alert alert-danger">' + esc(d.message) + '</div>'; return; }
+            if (!d.members.length) { box.innerHTML = '<div class="alert alert-info">Inga deltagare i gruppen.</div>'; return; }
+            let h = '<div class="table-responsive"><table class="table align-middle"><thead><tr>' +
+                '<th>Deltagare</th><th>Förkunskaper</th><th>Provåtkomst</th><th>Resultat</th><th class="text-end">Åtgärder</th></tr></thead><tbody>';
+            d.members.forEach(function (m) {
+                const elig = m.eligible
+                    ? '<span class="badge bg-success-subtle text-success-emphasis">Behörig</span>'
+                    : '<span class="badge bg-warning-subtle text-warning-emphasis" title="' + esc((m.missing || []).join(', ')) + '">Saknar: ' + esc((m.missing || []).join(', ')) + '</span>';
+                const access = m.hasAccess ? '<span class="badge bg-info-subtle text-info-emphasis">Aktiverat</span>' : '<span class="text-body-secondary">–</span>';
+                let res = '<span class="text-body-secondary">–</span>';
+                if (m.lastResult) {
+                    res = (m.passed ? '<span class="badge bg-success-subtle text-success-emphasis">Godkänd</span> ' : '<span class="badge bg-danger-subtle text-danger-emphasis">Ej godkänd</span> ') +
+                          esc('' + (m.lastResult.score ?? '') + '/' + (m.lastResult.maxScore ?? ''));
+                }
+                let actions = '';
+                if (!m.passed) {
+                    actions += m.hasAccess
+                        ? '<button class="btn btn-sm btn-outline-secondary me-1" onclick="provRevoke(' + m.memberId + ')">Återkalla</button>'
+                        : '<button class="btn btn-sm btn-outline-primary me-1" ' + (m.eligible ? '' : 'disabled title="Saknar förkunskaper"') + ' onclick="provEnable(' + m.memberId + ')">Aktivera prov</button>';
+                }
+                actions += '<button class="btn btn-sm btn-primary" onclick="provOpenResult(' + m.memberId + ',\'' + esc(m.name).replace(/'/g, "\\'") + '\')">Registrera resultat</button>';
+                h += '<tr><td>' + esc(m.name) + '</td><td>' + elig + '</td><td>' + access + '</td><td>' + res + '</td><td class="text-end">' + actions + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            box.innerHTML = h;
+        });
+    };
+
+    function post(url, fd) { fd.append('__RequestVerificationToken', token()); return fetch(url, { method: 'POST', body: fd }).then(r => r.json()); }
+
+    window.provEnable = function (memberId) {
+        const fd = new FormData(); fd.append('memberId', memberId); fd.append('courseId', courseId);
+        post('/umbraco/surface/CourseTest/EnableAccess', fd).then(d => { if (!d.success) alert(d.message); provLoadStatus(); });
+    };
+    window.provRevoke = function (memberId) {
+        const fd = new FormData(); fd.append('memberId', memberId); fd.append('courseId', courseId);
+        post('/umbraco/surface/CourseTest/RevokeAccess', fd).then(() => provLoadStatus());
+    };
+    window.provOpenResult = function (memberId, name) {
+        document.getElementById('provResultMemberId').value = memberId;
+        document.getElementById('provResultName').textContent = name;
+        document.getElementById('provResultScore').value = '';
+        document.getElementById('provResultMax').value = '';
+        document.getElementById('provResultPassed').checked = false;
+        document.getElementById('provResultNotes').value = '';
+        new bootstrap.Modal(document.getElementById('provResultModal')).show();
+    };
+    window.provSaveResult = function () {
+        const fd = new FormData();
+        fd.append('memberId', document.getElementById('provResultMemberId').value);
+        fd.append('courseId', courseId);
+        fd.append('score', document.getElementById('provResultScore').value || '0');
+        fd.append('maxScore', document.getElementById('provResultMax').value || '0');
+        fd.append('passed', document.getElementById('provResultPassed').checked);
+        fd.append('notes', document.getElementById('provResultNotes').value);
+        post('/umbraco/surface/CourseTest/RecordPaperResult', fd).then(d => {
+            if (!d.success) { alert('Fel: ' + d.message); return; }
+            bootstrap.Modal.getInstance(document.getElementById('provResultModal')).hide();
+            provLoadStatus();
+        });
+    };
+})();
+</script>

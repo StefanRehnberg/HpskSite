@@ -123,6 +123,16 @@ namespace HpskSite.Services
                 memberId);
         }
 
+        /// <summary>Active 'Member'-role member ids in a training group.</summary>
+        public List<int> GetGroupMemberIds(int trainingGroupId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return db.Fetch<int>(
+                @"SELECT MemberId FROM TrainingGroupMembers
+                  WHERE TrainingGroupId = @0 AND IsActive = 1 AND Role = 'Member'",
+                trainingGroupId);
+        }
+
         public TrainingGroup? GetTrainingGroup(int trainingGroupId)
         {
             using var db = _databaseFactory.CreateDatabase();

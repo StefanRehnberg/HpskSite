@@ -10,6 +10,7 @@
     var unlocked = ViewBag.Unlocked as Dictionary<int, bool> ?? new Dictionary<int, bool>();
     var moduleCounts = ViewBag.ModuleCounts as Dictionary<int, int> ?? new Dictionary<int, int>();
     var publishedCounts = ViewBag.PublishedCounts as Dictionary<int, int> ?? new Dictionary<int, int>();
+    var pendingTests = ViewBag.PendingTests as List<Course> ?? new List<Course>();
 }
 
 <style>
@@ -45,6 +46,14 @@
     }
     else
     {
+        @foreach (var pt in pendingTests)
+        {
+            <div class="alert alert-success d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span><i class="bi bi-pencil-square me-2"></i>Du är inbjuden att göra provet för <strong>@pt.Title</strong>.</span>
+                <a href="/utbildning/prov/@pt.CourseKey" class="btn btn-success btn-sm">Gör provet</a>
+            </div>
+        }
+
         @if (!hasAnyUnlocked)
         {
             <div class="alert alert-info d-flex align-items-start gap-2">
@@ -136,6 +145,10 @@
                                             <span class="badge bg-secondary-subtle text-body-secondary">För @c.EducatorCertDisplay</span>
                                         }
                                     </div>
+                                    @if (isUnlocked && c.HasTest)
+                                    {
+                                        <a href="/utbildning/prov-admin/@c.CourseKey" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-clipboard-check me-1"></i>Hantera prov</a>
+                                    }
                                 </div>
                                 @if (state == "locked")
                                 {
