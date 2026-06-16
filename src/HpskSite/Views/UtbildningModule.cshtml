@@ -91,14 +91,35 @@
 </div>
 
 <script>
+var _utbPresentObs = null;
+function utbExitFullscreen() {
+    if (document.fullscreenElement && document.exitFullscreen) { try { document.exitFullscreen(); } catch (e) {} }
+}
 function utbPresent() {
     var f = document.getElementById('lessonFrame');
     if (!f) return;
+    var doc = null;
     // Enter the lesson's built-in present mode first (reliable), then go fullscreen (best-effort).
     try {
+        doc = f.contentDocument;
         f.contentWindow.focus();
         if (f.contentWindow.__goto) f.contentWindow.__goto(0);
     } catch (e) { /* same-origin expected */ }
+
+    // The lesson's "Avsluta" button / Esc removes its 'present' class but can't exit the
+    // fullscreen the parent requested on the iframe — so exit it here when present mode ends.
+    if (doc && doc.body && 'MutationObserver' in window) {
+        if (_utbPresentObs) _utbPresentObs.disconnect();
+        _utbPresentObs = new MutationObserver(function () {
+            if (!doc.body.classList.contains('present')) {
+                utbExitFullscreen();
+                _utbPresentObs.disconnect();
+                _utbPresentObs = null;
+            }
+        });
+        _utbPresentObs.observe(doc.body, { attributes: true, attributeFilter: ['class'] });
+    }
+
     var req = f.requestFullscreen || f.webkitRequestFullscreen || f.msRequestFullscreen;
     if (req) { try { var p = req.call(f); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
 }
