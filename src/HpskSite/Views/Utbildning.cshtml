@@ -69,8 +69,12 @@
                     var isUnlocked = unlocked.ContainsKey(c.Id) && unlocked[c.Id];
                     var total = moduleCounts.ContainsKey(c.Id) ? moduleCounts[c.Id] : 0;
                     var published = publishedCounts.ContainsKey(c.Id) ? publishedCounts[c.Id] : 0;
-                    var hasMaterial = published > 0;
-                    var state = !hasMaterial ? "kommande" : (isUnlocked ? "open" : "locked");
+                    // Admins can open unpublished modules, so for them any module counts as "material";
+                    // educators only see sakgranskad (published) modules.
+                    var viewerCount = isAdmin ? total : published;
+                    var state = isUnlocked
+                        ? (viewerCount > 0 ? "open" : "kommande")
+                        : (published > 0 ? "locked" : "kommande");
 
                     <div class="col-md-6 col-lg-4">
                         @if (state == "open")
@@ -94,7 +98,7 @@
                                         {
                                             <p class="card-text text-body-secondary small">@c.Description</p>
                                         }
-                                        <div class="mt-2"><span class="badge bg-secondary-subtle text-secondary-emphasis">@published moduler</span></div>
+                                        <div class="mt-2"><span class="badge bg-secondary-subtle text-secondary-emphasis">@viewerCount moduler</span></div>
                                     </div>
                                 </div>
                             </a>
