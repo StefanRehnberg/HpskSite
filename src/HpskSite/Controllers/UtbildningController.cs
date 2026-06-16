@@ -59,24 +59,28 @@ namespace HpskSite.Controllers
             if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
 
             var memberId = await GetCurrentMemberIdAsync();
+            var isAdmin = await IsAdminAsync();
             ViewBag.IsLoggedIn = memberId > 0;
-            ViewBag.IsAdmin = await IsAdminAsync();
+            ViewBag.IsAdmin = isAdmin;
 
-            var visible = new List<Course>();
-            if (memberId > 0)
+            // Showcase: any logged-in member sees the published catalog. Educators see THEIR
+            // courses unlocked (clickable into the material); everyone else sees a locked teaser
+            // of the breadth of modernised material. Admins also see unpublished (draft) courses.
+            var all = await _courseService.GetAllCoursesAsync();
+            var courses = all.Where(c => c.IsPublished || isAdmin).ToList();
+
+            var unlocked = new Dictionary<int, bool>();
+            var moduleCounts = new Dictionary<int, int>();
+            foreach (var c in courses)
             {
-                foreach (var c in await _courseService.GetAllCoursesAsync())
-                    if (await CanAccessCourseAsync(c, memberId))
-                        visible.Add(c);
+                unlocked[c.Id] = memberId > 0 && await CanAccessCourseAsync(c, memberId);
+                moduleCounts[c.Id] = (await _courseService.GetModulesAsync(c.Id)).Count;
             }
 
-            // module counts for the cards
-            var counts = new Dictionary<int, int>();
-            foreach (var c in visible)
-                counts[c.Id] = (await _courseService.GetModulesAsync(c.Id)).Count(m => m.IsPublished || (bool)ViewBag.IsAdmin);
-            ViewBag.ModuleCounts = counts;
-            ViewBag.Courses = visible;
-
+            ViewBag.Courses = courses;
+            ViewBag.Unlocked = unlocked;
+            ViewBag.ModuleCounts = moduleCounts;
+            ViewBag.HasAnyUnlocked = unlocked.Values.Any(v => v);
             return View("Utbildning", root);
         }
 

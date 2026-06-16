@@ -5,63 +5,127 @@
     ViewBag.Title = "Utbildning – kursmaterial";
     var isLoggedIn = ViewBag.IsLoggedIn == true;
     var isAdmin = ViewBag.IsAdmin == true;
+    var hasAnyUnlocked = ViewBag.HasAnyUnlocked == true;
     var courses = ViewBag.Courses as List<Course> ?? new List<Course>();
+    var unlocked = ViewBag.Unlocked as Dictionary<int, bool> ?? new Dictionary<int, bool>();
     var moduleCounts = ViewBag.ModuleCounts as Dictionary<int, int> ?? new Dictionary<int, int>();
 }
 
+<style>
+    .utb-hero { background: linear-gradient(135deg, #0f2540, #16365c); color: #fff; border-radius: 1rem; padding: 2.25rem 2rem; }
+    .utb-hero h1 { color: #fff; }
+    .utb-card { transition: transform .15s, box-shadow .15s; height: 100%; }
+    .utb-card.unlocked:hover { transform: translateY(-3px); box-shadow: 0 .75rem 1.5rem rgba(15,37,64,.15); }
+    .utb-card.locked { position: relative; }
+    .utb-card.locked .utb-lock-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        background: rgba(248,250,252,.55); border-radius: inherit; }
+    .utb-card.locked .utb-lock-overlay i { font-size: 2rem; color: #6c757d; opacity: .8; }
+    .utb-card.locked .card-body { filter: grayscale(.3); }
+</style>
+
 <div class="container py-4">
-    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
-        <h1 class="mb-0"><i class="bi bi-mortarboard me-2"></i>Utbildning</h1>
+    <div class="utb-hero mb-4">
+        <h1 class="mb-2"><i class="bi bi-mortarboard me-2"></i>Utbildning</h1>
+        <p class="mb-0 lead" style="max-width:720px;opacity:.92;">
+            Allt kursmaterial för pistolskyttets utbildningar – i ett modernt, interaktivt format.
+            Bemötande, ledarskap, säkerhet, vapenlära, skjutteknik och mer, byggt för både klassrum och eget bruk.
+        </p>
     </div>
-    <p class="text-muted">Kursmaterial för de utbildningar du håller. Materialet är avsett för dig som
-        instruktör/utbildare – deltagarna får inte tillgång till materialet.</p>
 
     @if (!isLoggedIn)
     {
-        <div class="alert alert-warning mt-4">
-            <i class="bi bi-lock me-2"></i>Du måste vara inloggad för att se kursmaterial.
+        <div class="alert alert-warning">
+            <i class="bi bi-lock me-2"></i>Logga in för att se utbildningsutbudet.
             <a href="/login-&-register/?tab=login" class="alert-link">Logga in</a>.
-        </div>
-    }
-    else if (courses.Count == 0)
-    {
-        <div class="alert alert-info mt-4">
-            <i class="bi bi-info-circle me-2"></i>Det finns inget kursmaterial som du har behörighet att se ännu.
-            Materialet för en kurs visas för den som håller utbildningen (t.ex. en Kretsinstruktör ser
-            Föreningsinstruktörsmaterialet).
         </div>
     }
     else
     {
-        <div class="row g-3 mt-1">
-            @foreach (var c in courses)
-            {
-                var count = moduleCounts.ContainsKey(c.Id) ? moduleCounts[c.Id] : 0;
-                <div class="col-md-6 col-lg-4">
-                    <a href="/utbildning/@c.CourseKey" class="text-decoration-none">
-                        <div class="card h-100 shadow-sm">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <h5 class="card-title text-dark mb-1">@c.Title</h5>
-                                    @if (!c.IsPublished)
-                                    {
-                                        <span class="badge bg-secondary">Utkast</span>
-                                    }
+        @if (!hasAnyUnlocked)
+        {
+            <div class="alert alert-info d-flex align-items-start gap-2">
+                <i class="bi bi-stars fs-5"></i>
+                <div>
+                    <strong>Hela utbildningsmaterialet finns här – i modern form.</strong><br>
+                    Som utbildare (t.ex. Föreningsinstruktör eller Kretsinstruktör) får du tillgång till materialet
+                    för de kurser du håller. Nedan ser du bredden på det som finns.
+                </div>
+            </div>
+        }
+
+        @if (courses.Count == 0)
+        {
+            <div class="alert alert-light border">Inga kurser är publicerade ännu.</div>
+        }
+        else
+        {
+            <div class="row g-3">
+                @foreach (var c in courses)
+                {
+                    var isUnlocked = unlocked.ContainsKey(c.Id) && unlocked[c.Id];
+                    var count = moduleCounts.ContainsKey(c.Id) ? moduleCounts[c.Id] : 0;
+
+                    <div class="col-md-6 col-lg-4">
+                        @if (isUnlocked)
+                        {
+                            <a href="/utbildning/@c.CourseKey" class="text-decoration-none">
+                                <div class="card utb-card unlocked shadow-sm">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start">
+                                            <h5 class="card-title text-dark mb-1">@c.Title</h5>
+                                            <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-unlock me-1"></i>Tillgänglig</span>
+                                        </div>
+                                        @if (!c.IsPublished)
+                                        {
+                                            <span class="badge bg-secondary mb-2">Utkast</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(c.TargetCertDisplay))
+                                        {
+                                            <div class="text-muted small mb-2">Leder till: @c.TargetCertDisplay</div>
+                                        }
+                                        @if (!string.IsNullOrEmpty(c.Description))
+                                        {
+                                            <p class="card-text text-muted small">@c.Description</p>
+                                        }
+                                        <div class="mt-2"><span class="badge bg-light text-dark border">@count moduler</span></div>
+                                    </div>
                                 </div>
-                                @if (!string.IsNullOrEmpty(c.TargetCertDisplay))
-                                {
-                                    <div class="text-muted small mb-2">Leder till: @c.TargetCertDisplay</div>
-                                }
-                                @if (!string.IsNullOrEmpty(c.Description))
-                                {
-                                    <p class="card-text text-muted small">@c.Description</p>
-                                }
-                                <div class="mt-2"><span class="badge bg-light text-dark border">@count moduler</span></div>
+                            </a>
+                        }
+                        else
+                        {
+                            <div class="card utb-card locked shadow-sm">
+                                <div class="card-body">
+                                    <h5 class="card-title text-dark mb-1">@c.Title</h5>
+                                    @if (!string.IsNullOrEmpty(c.TargetCertDisplay))
+                                    {
+                                        <div class="text-muted small mb-2">Leder till: @c.TargetCertDisplay</div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(c.Description))
+                                    {
+                                        <p class="card-text text-muted small">@c.Description</p>
+                                    }
+                                    <div class="mt-2">
+                                        <span class="badge bg-light text-dark border">@count moduler</span>
+                                        @if (!string.IsNullOrEmpty(c.EducatorCertDisplay))
+                                        {
+                                            <span class="badge bg-light text-muted border">För @c.EducatorCertDisplay</span>
+                                        }
+                                    </div>
+                                </div>
+                                <div class="utb-lock-overlay"><i class="bi bi-lock-fill" title="Tillgängligt för utbildare"></i></div>
                             </div>
-                        </div>
-                    </a>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (!hasAnyUnlocked)
+            {
+                <div class="text-center text-muted mt-4">
+                    <i class="bi bi-camera-video me-1"></i><em>Demovideo som visar materialet kommer snart.</em>
                 </div>
             }
-        </div>
+        }
     }
 </div>
