@@ -124,6 +124,10 @@ namespace HpskSite.Composers
             // Run create-course-tables.sql. See COURSE_SYSTEM.md.
             builder.Services.AddScoped<CourseService>();
 
+            // Course test engine (Phase 2): versions, prerequisite-gated access, results
+            // (online auto-scored + instructor-recorded paper). Reads Märken + certs for eligibility.
+            builder.Services.AddScoped<CourseTestService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

@@ -65,6 +65,20 @@ namespace HpskSite.Models
         public string? Notes { get; set; }
     }
 
+    // ── Online test content (stored as JSON in CourseTestVersion.ContentRef) ──
+    public class CourseTestContent
+    {
+        public List<CourseTestQuestion> Questions { get; set; } = new();
+    }
+
+    public class CourseTestQuestion
+    {
+        public string Q { get; set; } = "";
+        public List<string> Options { get; set; } = new();
+        /// <summary>Index into Options of the correct answer (server-side only; never sent to the taker).</summary>
+        public int Correct { get; set; }
+    }
+
     public static class CourseTestModes
     {
         public const string Online = "Online";

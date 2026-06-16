@@ -19,6 +19,7 @@ namespace HpskSite.Controllers
     public class UtbildningAdminController : SurfaceController
     {
         private readonly CourseService _courseService;
+        private readonly CourseTestService _testService;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly ILogger<UtbildningAdminController> _logger;
 
@@ -30,11 +31,13 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             CourseService courseService,
+            CourseTestService testService,
             AdminAuthorizationService authorizationService,
             ILogger<UtbildningAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _courseService = courseService;
+            _testService = testService;
             _authorizationService = authorizationService;
             _logger = logger;
         }
@@ -220,6 +223,70 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Endast administratörer." });
 
             var ok = await _courseService.DeletePrerequisiteAsync(id);
+            return Json(new { success = ok });
+        }
+
+        // ── Test versions ────────────────────────────────────────────────────
+
+        [HttpGet]
+        public async Task<IActionResult> GetTestVersions(int courseId)
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            var versions = (await _testService.GetVersionsAsync(courseId)).Select(v => new
+            {
+                v.Id, v.VersionLabel, v.IsActive,
+                questionCount = CourseTestService.ParseContent(v.ContentRef).Questions.Count,
+                v.ContentRef
+            });
+            return Json(new { success = true, versions });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveTestVersion(int id, int courseId, string versionLabel, bool isActive, string? contentRef)
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            if (string.IsNullOrWhiteSpace(versionLabel))
+                return Json(new { success = false, message = "Versionsnamn krävs." });
+
+            // Validate the questions JSON if supplied.
+            if (!string.IsNullOrWhiteSpace(contentRef))
+            {
+                var parsed = CourseTestService.ParseContent(contentRef);
+                if (parsed.Questions.Count == 0)
+                    return Json(new { success = false, message = "Frågor-JSON kunde inte tolkas (förväntar { \"questions\": [ { \"q\", \"options\", \"correct\" } ] })." });
+            }
+
+            var version = new CourseTestVersion
+            {
+                Id = id,
+                CourseId = courseId,
+                VersionLabel = versionLabel.Trim(),
+                IsActive = isActive,
+                ContentRef = string.IsNullOrWhiteSpace(contentRef) ? null : contentRef
+            };
+
+            if (id > 0)
+            {
+                var ok = await _testService.UpdateVersionAsync(version);
+                return Json(new { success = ok, id, message = ok ? null : "Versionen hittades inte." });
+            }
+            var newId = await _testService.CreateVersionAsync(version);
+            return Json(new { success = true, id = newId });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteTestVersion(int id)
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            var ok = await _testService.DeleteVersionAsync(id);
             return Json(new { success = ok });
         }
     }

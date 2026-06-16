@@ -117,6 +117,27 @@
                         </div>
                     </div>
                 </div>
+
+                <hr class="my-3 utb-test-section" style="display:none;">
+                <div class="utb-test-section" style="display:none;">
+                    <h6 class="mb-2">Provversioner</h6>
+                    <p class="text-body-secondary small mb-2">Spara kursen först. Varje version är en variant av provet (2–3 rekommenderas). Frågor anges som JSON.</p>
+                    <div id="utbVersionList" class="mb-2"></div>
+                    <div class="row g-2 utb-version-add" style="display:none;">
+                        <input type="hidden" id="utbVersionId" value="0">
+                        <div class="col-md-5"><input type="text" class="form-control form-control-sm" id="utbVersionLabel" placeholder="Version A"></div>
+                        <div class="col-md-3 d-flex align-items-center">
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="utbVersionActive" checked><label class="form-check-label" for="utbVersionActive">Aktiv</label></div>
+                        </div>
+                        <div class="col-12">
+                            <textarea class="form-control form-control-sm font-monospace" id="utbVersionContent" rows="6" placeholder='{ "questions": [ { "q": "Fråga?", "options": ["A","B","C"], "correct": 0 } ] }'></textarea>
+                        </div>
+                        <div class="col-12 d-flex gap-2">
+                            <button class="btn btn-sm btn-primary" onclick="utbSaveVersion()">Spara version</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="utbResetVersionForm()">Rensa</button>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-danger me-auto" id="utbDeleteCourseBtn" style="display:none;" onclick="utbDeleteCourse()"><i class="bi bi-trash"></i> Ta bort</button>
@@ -202,6 +223,10 @@
     window.utbToggleTestFields = function () {
         const on = document.getElementById('utbCourseHasTest').checked;
         document.querySelectorAll('.utb-test-field').forEach(el => el.style.display = on ? '' : 'none');
+        document.querySelectorAll('.utb-test-section').forEach(el => el.style.display = on ? '' : 'none');
+        const hasCourse = document.getElementById('utbCourseId').value !== '0';
+        document.querySelector('.utb-version-add').style.display = (on && hasCourse) ? 'flex' : 'none';
+        if (on && hasCourse) utbLoadVersions();
     };
 
     window.utbShowCourseModal = function (id) {
@@ -217,6 +242,8 @@
         utbToggleTestFields();
         document.getElementById('utbPrereqList').innerHTML = '';
         document.querySelector('.utb-prereq-add').style.display = id > 0 ? 'flex' : 'none';
+        document.getElementById('utbVersionList').innerHTML = '';
+        utbResetVersionForm();
 
         if (id > 0) {
             fetch('/umbraco/surface/UtbildningAdmin/GetCourse?id=' + id).then(r => r.json()).then(d => {
@@ -259,6 +286,10 @@
                 document.getElementById('utbCourseId').value = d.id;
                 document.getElementById('utbDeleteCourseBtn').style.display = '';
                 document.querySelector('.utb-prereq-add').style.display = 'flex';
+                if (document.getElementById('utbCourseHasTest').checked) {
+                    document.querySelector('.utb-version-add').style.display = 'flex';
+                    utbLoadVersions();
+                }
                 utbLoadCourses();
                 alert('Sparat.');
             }).catch(() => alert('Nätverksfel'));
@@ -311,6 +342,68 @@
         const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('id', id);
         fetch('/umbraco/surface/UtbildningAdmin/DeletePrerequisite', { method: 'POST', body: fd })
             .then(r => r.json()).then(() => fetch('/umbraco/surface/UtbildningAdmin/GetCourse?id=' + courseId).then(r => r.json()).then(d2 => utbRenderPrereqs(d2.prerequisites || [])));
+    };
+
+    // ── Test versions ──
+    window.utbResetVersionForm = function () {
+        document.getElementById('utbVersionId').value = '0';
+        document.getElementById('utbVersionLabel').value = '';
+        document.getElementById('utbVersionActive').checked = true;
+        document.getElementById('utbVersionContent').value = '';
+    };
+
+    window.utbLoadVersions = function () {
+        const courseId = document.getElementById('utbCourseId').value;
+        if (courseId === '0') return;
+        fetch('/umbraco/surface/UtbildningAdmin/GetTestVersions?courseId=' + courseId).then(r => r.json()).then(d => {
+            const el = document.getElementById('utbVersionList');
+            if (!d.success) { el.innerHTML = ''; return; }
+            window._utbVersions = d.versions || [];
+            if (!d.versions.length) { el.innerHTML = '<div class="text-body-secondary small">Inga versioner ännu.</div>'; return; }
+            let h = '<ul class="list-group list-group-flush mb-2">';
+            d.versions.forEach(function (v, i) {
+                h += '<li class="list-group-item d-flex justify-content-between align-items-center px-0 py-1">' +
+                    '<span>' + esc(v.versionLabel) + (v.isActive ? '' : ' <span class="badge bg-secondary-subtle text-secondary-emphasis">inaktiv</span>') +
+                    ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' + v.questionCount + ' frågor</span></span>' +
+                    '<span><button class="btn btn-sm btn-warning me-1" onclick="utbEditVersion(' + i + ')"><i class="bi bi-pencil"></i></button>' +
+                    '<button class="btn btn-sm btn-outline-danger" onclick="utbDeleteVersion(' + v.id + ')"><i class="bi bi-x"></i></button></span></li>';
+            });
+            h += '</ul>';
+            el.innerHTML = h;
+        });
+    };
+
+    window.utbEditVersion = function (idx) {
+        const v = (window._utbVersions || [])[idx];
+        if (!v) return;
+        document.getElementById('utbVersionId').value = v.id;
+        document.getElementById('utbVersionLabel').value = v.versionLabel;
+        document.getElementById('utbVersionActive').checked = v.isActive;
+        document.getElementById('utbVersionContent').value = v.contentRef || '';
+    };
+
+    window.utbSaveVersion = function () {
+        const courseId = document.getElementById('utbCourseId').value;
+        if (courseId === '0') { alert('Spara kursen först.'); return; }
+        const fd = new FormData();
+        fd.append('__RequestVerificationToken', token());
+        fd.append('id', document.getElementById('utbVersionId').value);
+        fd.append('courseId', courseId);
+        fd.append('versionLabel', document.getElementById('utbVersionLabel').value);
+        fd.append('isActive', document.getElementById('utbVersionActive').checked);
+        fd.append('contentRef', document.getElementById('utbVersionContent').value);
+        fetch('/umbraco/surface/UtbildningAdmin/SaveTestVersion', { method: 'POST', body: fd })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { alert('Fel: ' + d.message); return; }
+                utbResetVersionForm(); utbLoadVersions();
+            }).catch(() => alert('Nätverksfel'));
+    };
+
+    window.utbDeleteVersion = function (id) {
+        if (!confirm('Ta bort provversionen?')) return;
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('id', id);
+        fetch('/umbraco/surface/UtbildningAdmin/DeleteTestVersion', { method: 'POST', body: fd })
+            .then(r => r.json()).then(() => utbLoadVersions());
     };
 
     // ── Modules ──
