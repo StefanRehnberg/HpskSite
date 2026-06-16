@@ -71,16 +71,20 @@ namespace HpskSite.Controllers
 
             var unlocked = new Dictionary<int, bool>();
             var moduleCounts = new Dictionary<int, int>();
+            var publishedCounts = new Dictionary<int, int>();
             foreach (var c in courses)
             {
                 unlocked[c.Id] = memberId > 0 && await CanAccessCourseAsync(c, memberId);
-                moduleCounts[c.Id] = (await _courseService.GetModulesAsync(c.Id)).Count;
+                var mods = await _courseService.GetModulesAsync(c.Id);
+                moduleCounts[c.Id] = mods.Count;
+                publishedCounts[c.Id] = mods.Count(m => m.IsPublished);
             }
 
             ViewBag.Courses = courses;
             ViewBag.Unlocked = unlocked;
-            ViewBag.ModuleCounts = moduleCounts;
-            ViewBag.HasAnyUnlocked = unlocked.Values.Any(v => v);
+            ViewBag.ModuleCounts = moduleCounts;        // total (for "X moduler" / "Kommande")
+            ViewBag.PublishedCounts = publishedCounts;  // published modules → material is ready
+            ViewBag.HasAnyUnlocked = courses.Any(c => unlocked[c.Id] && publishedCounts[c.Id] > 0);
             return View("Utbildning", root);
         }
 
@@ -122,17 +126,29 @@ namespace HpskSite.Controllers
             ViewBag.IsAdmin = isAdmin;
 
             var course = await _courseService.GetCourseByKeyAsync(courseKey);
-            var module = course == null ? null : (await _courseService.GetModulesAsync(course.Id))
-                .FirstOrDefault(m => string.Equals(m.Slug, moduleSlug, StringComparison.OrdinalIgnoreCase));
 
-            if (course == null || module == null || memberId == 0 ||
-                !await CanAccessCourseAsync(course, memberId) ||
-                (!module.IsPublished && !isAdmin))
+            // The set of modules this viewer may navigate (published only, unless admin), in order.
+            var visibleModules = new List<CourseModule>();
+            if (course != null)
+            {
+                var mods = await _courseService.GetModulesAsync(course.Id);
+                visibleModules = isAdmin ? mods : mods.Where(m => m.IsPublished).ToList();
+            }
+            var module = visibleModules.FirstOrDefault(m => string.Equals(m.Slug, moduleSlug, StringComparison.OrdinalIgnoreCase));
+
+            if (course == null || module == null || memberId == 0 || !await CanAccessCourseAsync(course, memberId))
             {
                 ViewBag.Denied = true;
                 ViewBag.Course = course;
                 return View("UtbildningModule", root);
             }
+
+            // Prev/next within the visible, ordered list — for in-place chapter navigation.
+            var idx = visibleModules.FindIndex(m => m.Id == module.Id);
+            ViewBag.PrevModule = idx > 0 ? visibleModules[idx - 1] : null;
+            ViewBag.NextModule = (idx >= 0 && idx < visibleModules.Count - 1) ? visibleModules[idx + 1] : null;
+            ViewBag.ModuleNumber = idx + 1;
+            ViewBag.ModuleTotal = visibleModules.Count;
 
             ViewBag.Course = course;
             ViewBag.Module = module;

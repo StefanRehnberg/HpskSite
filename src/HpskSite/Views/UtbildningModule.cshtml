@@ -5,6 +5,10 @@
     var denied = ViewBag.Denied == true;
     var course = ViewBag.Course as Course;
     var module = ViewBag.Module as CourseModule;
+    var prev = ViewBag.PrevModule as CourseModule;
+    var next = ViewBag.NextModule as CourseModule;
+    var moduleNumber = ViewBag.ModuleNumber as int? ?? 0;
+    var moduleTotal = ViewBag.ModuleTotal as int? ?? 0;
     ViewBag.Title = module != null ? module.Title : "Utbildning";
     var contentUrl = (course != null && module != null) ? $"/utbildning/{course.CourseKey}/{module.Slug}/innehall" : "";
 }
@@ -45,7 +49,40 @@
         <div class="ratio" style="--bs-aspect-ratio: 130%; min-height: 80vh; border:1px solid var(--bs-border-color); border-radius:.5rem; overflow:hidden;">
             <iframe src="@contentUrl" title="@module.Title" style="width:100%; height:100%; border:0;"></iframe>
         </div>
-        <p class="text-muted small mt-2">
+
+        <!-- Chapter navigation -->
+        <div class="d-flex align-items-center justify-content-between gap-2 mt-3">
+            <div style="flex:1 1 0; min-width:0;">
+                @if (prev != null)
+                {
+                    <a href="/utbildning/@course.CourseKey/@prev.Slug" class="btn btn-outline-secondary text-truncate mw-100">
+                        <i class="bi bi-arrow-left me-1"></i><span class="d-none d-sm-inline">Föregående: </span>@prev.Title
+                    </a>
+                }
+            </div>
+            <div class="text-body-secondary small text-center" style="flex:0 0 auto;">
+                @if (moduleTotal > 0)
+                {
+                    <text>Kapitel @moduleNumber av @moduleTotal</text>
+                }
+            </div>
+            <div class="text-end" style="flex:1 1 0; min-width:0;">
+                @if (next != null)
+                {
+                    <a href="/utbildning/@course.CourseKey/@next.Slug" class="btn btn-primary text-truncate mw-100">
+                        <span class="d-none d-sm-inline">Nästa: </span>@next.Title<i class="bi bi-arrow-right ms-1"></i>
+                    </a>
+                }
+                else
+                {
+                    <a href="/utbildning/@course.CourseKey" class="btn btn-outline-success">
+                        <i class="bi bi-check2-circle me-1"></i>Avsluta – tillbaka till kursen
+                    </a>
+                }
+            </div>
+        </div>
+
+        <p class="text-body-secondary small mt-2 mb-0">
             <i class="bi bi-info-circle me-1"></i>Klicka <strong>Presentationsläge</strong> för att visa lektionen i helskärm
             för en grupp (öppnas i ny flik – pilarna bläddrar mellan bilderna).
         </p>

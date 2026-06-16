@@ -283,7 +283,7 @@
         let h = '<ul class="list-group list-group-flush mb-2">';
         list.forEach(p => {
             h += '<li class="list-group-item d-flex justify-content-between align-items-center px-0 py-1">' +
-                '<span><span class="badge bg-light text-dark border me-2">' + esc(p.prereqType) + '</span><code>' + esc(p.prereqKey) + '</code></span>' +
+                '<span><span class="badge bg-secondary-subtle text-secondary-emphasis border me-2">' + esc(p.prereqType) + '</span><code>' + esc(p.prereqKey) + '</code></span>' +
                 '<button class="btn btn-sm btn-outline-danger" onclick="utbDeletePrereq(' + p.id + ')"><i class="bi bi-x"></i></button></li>';
         });
         h += '</ul>';
