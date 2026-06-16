@@ -243,6 +243,27 @@ namespace HpskSite.Controllers
             return View("UtbildningProvAdmin", root);
         }
 
+        /// <summary>Printable paper version of a test (questions + answer key), for the grader.</summary>
+        [HttpGet("prov-utskrift/{courseKey}")]
+        public async Task<IActionResult> PrintTest(string courseKey, int v)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            if (memberId == 0 || course == null || !course.HasTest || !await CanAccessCourseAsync(course, memberId))
+                return Forbid();
+
+            var version = await _testService.GetVersionAsync(v);
+            if (version == null || version.CourseId != course.Id) return NotFound();
+
+            ViewBag.Course = course;
+            ViewBag.Version = version;
+            ViewBag.Questions = CourseTestService.ParseContent(version.ContentRef).Questions;
+            return View("UtbildningProvUtskrift", root);
+        }
+
         // ── Helpers ──────────────────────────────────────────────────────────
 
         private Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent? GetRoot()
