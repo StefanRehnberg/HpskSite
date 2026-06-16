@@ -416,10 +416,16 @@ namespace HpskSite.Controllers
                     .Where(m => m.ContentType.Alias != ClubMemberTypeAlias && m.IsApproved)
                     .ToList();
 
+                // Scope: participants/trainers see only their own training-group peers;
+                // club/regional admins + skjutledare see their clubs; site admins see everyone.
+                var currentMemberData = currentMember != null ? _memberService.GetByEmail(currentMember.Email ?? "") : null;
+                var scope = await GetVisibleMemberScopeAsync(currentMemberData, allMembers);
+
                 var leaderboard = new List<object>();
 
                 foreach (var member in allMembers)
                 {
+                    if (scope != null && !scope.Contains(member.Id)) continue;
                     var progress = MemberProgress.FromMember(member);
                     if (progress.IsActive)
                     {
@@ -507,6 +513,36 @@ namespace HpskSite.Controllers
             {
                 return Json(new { success = false, message = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// The set of member ids the current viewer may see on Skyttetrappan.
+        /// Returns null when unrestricted (site admin). Participants/trainers are scoped to their
+        /// own training-group peers; club/regional admins + skjutledare to their clubs.
+        /// </summary>
+        private async Task<HashSet<int>?> GetVisibleMemberScopeAsync(IMember? currentMemberData, List<IMember> allMembers)
+        {
+            if (await _authorizationService.IsCurrentUserAdminAsync()) return null;
+
+            var clubScope = (await _authorizationService.GetManagedClubIds())
+                .Concat(await _authorizationService.GetSkjutledareClubIds())
+                .ToHashSet();
+            if (clubScope.Count > 0)
+            {
+                var set = new HashSet<int>();
+                foreach (var m in allMembers)
+                {
+                    var pc = m.GetValue("primaryClubId")?.ToString();
+                    if (int.TryParse(pc, out var pcid) && clubScope.Contains(pcid)) { set.Add(m.Id); continue; }
+                    var extra = m.GetValue("memberClubIds")?.ToString() ?? "";
+                    if (extra.Split(',').Select(s => s.Trim()).Any(s => int.TryParse(s, out var cid) && clubScope.Contains(cid)))
+                        set.Add(m.Id);
+                }
+                return set;
+            }
+
+            if (currentMemberData == null) return new HashSet<int>();
+            return _trainingGroupService.GetGroupPeerMemberIds(currentMemberData.Id).ToHashSet();
         }
 
         /// <summary>

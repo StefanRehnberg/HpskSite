@@ -1,0 +1,53 @@
+@using HpskSite.Models
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var denied = ViewBag.Denied == true;
+    var course = ViewBag.Course as Course;
+    var module = ViewBag.Module as CourseModule;
+    ViewBag.Title = module != null ? module.Title : "Utbildning";
+    var contentUrl = (course != null && module != null) ? $"/utbildning/{course.CourseKey}/{module.Slug}/innehall" : "";
+}
+
+<div class="container-fluid py-3">
+    @if (denied || course == null || module == null)
+    {
+        <div class="container">
+            <div class="alert alert-warning mt-3">
+                <i class="bi bi-lock me-2"></i>Du har inte behörighet att se det här kursmaterialet.
+                <a href="/utbildning" class="alert-link">Tillbaka till Utbildning</a>.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+            <nav aria-label="breadcrumb" class="mb-0">
+                <ol class="breadcrumb mb-0">
+                    <li class="breadcrumb-item"><a href="/utbildning">Utbildning</a></li>
+                    <li class="breadcrumb-item"><a href="/utbildning/@course.CourseKey">@course.Title</a></li>
+                    <li class="breadcrumb-item active">@module.Title</li>
+                </ol>
+            </nav>
+            <div class="d-flex gap-2">
+                @if (!string.IsNullOrEmpty(module.VideoUrl))
+                {
+                    <a href="@module.VideoUrl" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-camera-video me-1"></i>Se videolektion
+                    </a>
+                }
+                <a href="@contentUrl" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+                    <i class="bi bi-easel me-1"></i>Presentationsläge
+                </a>
+            </div>
+        </div>
+
+        <div class="ratio" style="--bs-aspect-ratio: 130%; min-height: 80vh; border:1px solid var(--bs-border-color); border-radius:.5rem; overflow:hidden;">
+            <iframe src="@contentUrl" title="@module.Title" style="width:100%; height:100%; border:0;"></iframe>
+        </div>
+        <p class="text-muted small mt-2">
+            <i class="bi bi-info-circle me-1"></i>Klicka <strong>Presentationsläge</strong> för att visa lektionen i helskärm
+            för en grupp (öppnas i ny flik – pilarna bläddrar mellan bilderna).
+        </p>
+    }
+</div>

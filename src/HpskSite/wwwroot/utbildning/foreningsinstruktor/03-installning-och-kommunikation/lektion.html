@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inställning och kommunikation · Föreningsinstruktör · pistol.nu</title>
+<style>
+  :root{
+    --navy:#0f2540; --navy-2:#16365c; --amber:#f4a32c; --amber-deep:#d6850f;
+    --ink:#1b2533; --muted:#5d6b7e; --paper:#f6f8fb; --card:#ffffff;
+    --good:#1f9d72; --bad:#d65745; --line:#e3e9f1;
+    --shadow:0 10px 30px rgba(15,37,64,.10);
+    --maxw:780px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font:17px/1.65 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 20px}
+  h1,h2,h3{line-height:1.2; color:var(--navy); margin:0 0 .4em}
+  h2{font-size:1.7rem; margin-top:0}
+  p{margin:0 0 1em}
+  a{color:var(--amber-deep)}
+
+  /* ---- top bar ---- */
+  .topbar{
+    position:sticky; top:0; z-index:30; background:rgba(255,255,255,.92);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+  }
+  .topbar .wrap{display:flex; align-items:center; gap:12px; height:56px}
+  .brand{font-weight:700; color:var(--navy); letter-spacing:.2px}
+  .brand b{color:var(--amber-deep)}
+  .crumb{color:var(--muted); font-size:.85rem; margin-left:2px}
+  .spacer{flex:1}
+  .btn{
+    border:1px solid var(--line); background:var(--card); color:var(--navy);
+    padding:8px 14px; border-radius:10px; font-weight:600; cursor:pointer; font-size:.9rem;
+    transition:.15s;
+  }
+  .btn:hover{border-color:var(--amber); color:var(--amber-deep)}
+  .progress{position:fixed; top:0; left:0; height:3px; background:var(--amber); width:0; z-index:40; transition:width .15s}
+
+  /* ---- hero ---- */
+  .hero{
+    background:linear-gradient(135deg,var(--navy),var(--navy-2));
+    color:#fff; padding:64px 0 56px; position:relative; overflow:hidden;
+  }
+  .hero:after{content:""; position:absolute; right:-80px; top:-80px; width:300px; height:300px;
+    background:radial-gradient(circle,rgba(244,163,44,.35),transparent 70%)}
+  .hero .tag{display:inline-block; background:rgba(255,255,255,.12); color:#ffd9a0;
+    padding:5px 12px; border-radius:999px; font-size:.8rem; font-weight:600; letter-spacing:.4px; margin-bottom:18px}
+  .hero h1{color:#fff; font-size:2.5rem; margin-bottom:.3em}
+  .hero p{color:#cfdbeb; font-size:1.15rem; max-width:560px; margin-bottom:0}
+  .meta{margin-top:26px; display:flex; gap:22px; flex-wrap:wrap; color:#9fb4cf; font-size:.9rem}
+  .meta b{color:#fff}
+
+  /* ---- sections ---- */
+  section{padding:46px 0; border-bottom:1px solid var(--line)}
+  .kicker{color:var(--amber-deep); font-weight:700; letter-spacing:.6px; font-size:.8rem; text-transform:uppercase; margin-bottom:6px}
+  .lead{font-size:1.15rem; color:var(--ink)}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:22px 24px; box-shadow:var(--shadow); margin:18px 0}
+  .pull{border-left:4px solid var(--amber); background:#fff8ee; padding:14px 18px; border-radius:0 12px 12px 0; margin:18px 0; font-weight:600; color:var(--navy)}
+
+  .objlist{list-style:none; padding:0; margin:0}
+  .objlist li{padding:10px 0 10px 34px; position:relative; border-bottom:1px dashed var(--line)}
+  .objlist li:last-child{border-bottom:0}
+  .objlist li:before{content:"✓"; position:absolute; left:0; top:9px; width:22px; height:22px; background:var(--amber);
+    color:#fff; border-radius:6px; display:grid; place-items:center; font-size:.8rem; font-weight:700}
+
+  /* ---- människosyn interactive ---- */
+  .toggle{display:flex; gap:8px; background:#eef2f8; padding:6px; border-radius:14px; margin:8px 0 20px}
+  .toggle button{flex:1; border:0; background:transparent; padding:12px; border-radius:10px; font-weight:700; cursor:pointer; color:var(--muted); font-size:1rem; transition:.18s}
+  .toggle button.active{background:#fff; box-shadow:var(--shadow)}
+  .toggle button[data-v="neg"].active{color:var(--bad)}
+  .toggle button[data-v="pos"].active{color:var(--good)}
+  .panes{position:relative}
+  .pane{display:none}
+  .pane.show{display:block; animation:fade .35s ease}
+  @keyframes fade{from{opacity:0; transform:translateY(6px)}to{opacity:1; transform:none}}
+  .traits{list-style:none; padding:0; margin:0 0 16px}
+  .traits li{padding:9px 14px; margin:8px 0; border-radius:10px; background:#f1f5fa; font-weight:600}
+  .pane.neg .traits li{border-left:4px solid var(--bad)}
+  .pane.pos .traits li{border-left:4px solid var(--good)}
+  .outcome{padding:14px 18px; border-radius:12px; font-weight:600}
+  .pane.neg .outcome{background:#fdecea; color:#a3372c}
+  .pane.pos .outcome{background:#e8f6f0; color:#15795a}
+
+  /* ---- flip cards ---- */
+  .flips{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:18px 0}
+  @media(max-width:560px){.flips{grid-template-columns:1fr}}
+  .flip{perspective:1200px; height:230px; cursor:pointer}
+  .flip-in{position:relative; width:100%; height:100%; transition:transform .6s; transform-style:preserve-3d}
+  .flip.flipped .flip-in{transform:rotateY(180deg)}
+  .face{position:absolute; inset:0; backface-visibility:hidden; border-radius:16px; padding:20px; box-shadow:var(--shadow); display:flex; flex-direction:column}
+  .face .lbl{font-size:.75rem; font-weight:700; letter-spacing:.5px; text-transform:uppercase; margin-bottom:8px}
+  .front{background:var(--card); border:1px solid var(--line)}
+  .back{transform:rotateY(180deg); color:#fff}
+  .flip.say .back{background:linear-gradient(135deg,#b85647,#d65745)}
+  .flip.ask .back{background:linear-gradient(135deg,#178a64,#1f9d72)}
+  .flip .hint{margin-top:auto; font-size:.8rem; color:var(--muted)}
+  .flip.say .front .lbl{color:var(--bad)} .flip.ask .front .lbl{color:var(--good)}
+
+  /* ---- quiz ---- */
+  .q{margin:22px 0; border:1px solid var(--line); border-radius:16px; padding:20px 22px; background:var(--card); box-shadow:var(--shadow)}
+  .q h4{margin:0 0 12px; color:var(--navy); font-size:1.05rem}
+  .opt{display:block; width:100%; text-align:left; border:1.5px solid var(--line); background:#fff; padding:13px 16px;
+    border-radius:11px; margin:8px 0; cursor:pointer; font-size:.98rem; transition:.15s; color:var(--ink)}
+  .opt:hover{border-color:var(--amber)}
+  .opt.correct{border-color:var(--good); background:#e8f6f0; font-weight:600}
+  .opt.wrong{border-color:var(--bad); background:#fdecea}
+  .opt:disabled{cursor:default}
+  .fb{margin-top:8px; font-size:.9rem; font-weight:600; min-height:1.2em}
+  .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .score{font-size:1.1rem; font-weight:700; color:var(--navy); margin-top:8px}
+
+  ul.tips{list-style:none; padding:0; margin:0}
+  ul.tips li{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px 12px 44px;
+    position:relative; margin:10px 0; box-shadow:var(--shadow)}
+  ul.tips li:before{content:"→"; position:absolute; left:16px; top:12px; color:var(--amber-deep); font-weight:700}
+
+  .reflect{background:linear-gradient(135deg,var(--navy),var(--navy-2)); color:#fff; border-radius:18px; padding:28px}
+  .reflect h2{color:#fff} .reflect ol{margin:0; padding-left:20px} .reflect li{margin:10px 0; color:#dfe8f4}
+
+  footer{padding:40px 0 70px; text-align:center; color:var(--muted); font-size:.85rem}
+
+  /* ---- presentation mode ---- */
+  body.present .topbar,body.present .progress{display:none}
+  body.present section,body.present .hero{min-height:100vh; display:none; padding:6vh 0; place-content:center}
+  body.present section.live,body.present .hero.live{display:flex; flex-direction:column; justify-content:center}
+  body.present .wrap{max-width:920px}
+  body.present h2{font-size:2.4rem}
+  body.present .lead,body.present p{font-size:1.4rem}
+  .pres-nav{display:none}
+  body.present .pres-nav{display:flex; position:fixed; bottom:18px; right:18px; gap:10px; z-index:50; align-items:center}
+  body.present .pres-nav .pgn{color:var(--muted); font-size:.85rem; margin-right:6px}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<div class="topbar">
+  <div class="wrap">
+    <span class="brand">pistol<b>.nu</b></span>
+    <span class="crumb">Utbildning · Föreningsinstruktör · Modul 3</span>
+    <span class="spacer"></span>
+    <button class="btn" id="presBtn">▶ Presentationsläge</button>
+  </div>
+</div>
+
+<!-- ============ SLIDE 0 — HERO ============ -->
+<header class="hero slide" data-slide>
+  <div class="wrap">
+    <span class="tag">FÖRENINGSINSTRUKTÖR · MODUL 3 AV 10</span>
+    <h1>Inställning och kommunikation</h1>
+    <p>Hur du tänker formar hur du beter dig – och hur du säger något formar hur det landar. Två verktyg du kan välja medvetet.</p>
+    <div class="meta">
+      <span><b>⏱ ca 20 min</b> lektion</span>
+      <span><b>4 frågor</b> kunskapskoll</span>
+      <span><b>Originalmaterial</b> · pistol.nu</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ SLIDE 1 — MÅL ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">Lärandemål</div>
+    <h2>Det här tar du med dig</h2>
+    <ul class="objlist">
+      <li>Hur din <b>inställning</b> styr ditt beteende – och därmed hur du påverkar skytten.</li>
+      <li>Att <b>välja fokus</b> och formulera dig i positiva ordalag i stället för negativa.</li>
+      <li>Varför ditt <b>språkval</b> speglar din människosyn och påverkar hur skytten ser på sig själv.</li>
+      <li>Att känna igen <b>laddade ord</b> – <i>inte, varför, måste, alltid, aldrig</i> – och varför de skapar motstånd.</li>
+      <li>Att <b>skriva om</b> laddade formuleringar till sådant som talar om vad skytten ska göra.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ SLIDE 2 — INSTÄLLNING ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">1 · Inställning</div>
+    <h2>Din inställning styr ditt beteende</h2>
+    <p class="lead">Sättet du tänker, talar och agerar är en spegling av dina erfarenheter, föreställningar och attityder.</p>
+    <p>Det du tänker om en skytt sätter sig i hur du beter dig mot henne – ofta utan att du märker det. Och skytten är en bra avläsare: hon känner snabbt om du tror på henne eller inte.</p>
+    <div class="pull">Det goda är att kedjan går att vända. Ändrar du ditt sätt att tänka, ändras också ditt sätt att vara. Inställningen kommer först – beteendet följer efter.</div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 3 — VÄLJ FOKUS (interactive) ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">2 · Välj fokus</div>
+    <h2>Se det positiva</h2>
+    <p>För att få fram det bästa hos en människa riktar du blicken mot möjligheterna, inte mot problemen. Det fina är att du kan <b>välja</b> fokus. Växla nedan – och känn hur samma situation kan landa helt olika.</p>
+    <div class="toggle" role="tablist">
+      <button data-v="neg">Fokus på problem</button>
+      <button data-v="pos" class="active">Fokus på möjlighet</button>
+    </div>
+    <div class="panes">
+      <div class="pane neg" data-pane="neg">
+        <p>När du riktar tankarna mot hinder låter det så här…</p>
+        <ul class="traits">
+          <li>"Glöm inte…"</li>
+          <li>"Ge inte upp!"</li>
+          <li>"48 – med en sänkande etta"</li>
+          <li>"Det är svårt / jag är dålig på det här"</li>
+        </ul>
+        <div class="outcome">⟶ Sprider en känsla av otillräcklighet. Det skytten hör om sig själv blir lätt det hon tror om sig själv.</div>
+      </div>
+      <div class="pane pos show" data-pane="pos">
+        <p>När du riktar tankarna mot möjligheten låter det så här…</p>
+        <ul class="traits">
+          <li>"Kom ihåg…"</li>
+          <li>"Kämpa vidare!"</li>
+          <li>"48 – med fyra fullträffar"</li>
+          <li>"Det är en utmaning / jag är mindre bra på det ännu"</li>
+        </ul>
+        <div class="outcome">⟶ Samma sakinnehåll, men riktningen pekar framåt. De negativa tankarna faller bort nästan av sig själv.</div>
+      </div>
+    </div>
+    <div class="pull">Ändra inte verkligheten – ändra var du sätter ljuset.</div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 4 — KOMMUNIKATION ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">3 · Kommunikation</div>
+    <h2>Ditt språk speglar din människosyn</h2>
+    <p class="lead">Som förebild spelar inte bara <i>vad</i> du säger någon roll – minst lika mycket <i>hur</i> du säger det.</p>
+    <p>Har du en positiv människosyn bör också ditt språk visa det. Det betyder att du väljer dina ord och ditt sätt att uttrycka dig så att <b>risken för missförstånd minimeras</b>.</p>
+    <div class="card">
+      <p style="margin:0">Två skyttar kan höra exakt samma mening och tolka den helt olika beroende på tonfall och ordval. Du kan inte styra hur allt landar – men du kan göra mycket för att det ska landa rätt.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 5 — LADDADE ORD (flip cards) ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">4 · Laddade ord</div>
+    <h2>"Inte" och "varför"</h2>
+    <p>Vissa ord bär på en laddning och drar med sig negativ energi du inte hade tänkt skicka. Två av de vanligaste: <b>inte</b> och <b>varför</b>. <i>(Tryck på korten.)</i></p>
+    <div class="flips">
+      <div class="flip say" tabindex="0">
+        <div class="flip-in">
+          <div class="face front"><div class="lbl">Laddat: inte</div><p style="margin:0">"Ryck inte av skottet."</p><div class="hint">Tryck för att se vad som hör →</div></div>
+          <div class="face back"><div class="lbl">Vad skytten hör</div><p style="margin:0">Hjärnan hoppar över <i>inte</i> och fastnar på "rycka av skottet". Säg vad hon <b>ska</b> göra: "Öka trycket lugnt och mjukt" – krama tills det smäller.</p></div>
+        </div>
+      </div>
+      <div class="flip say" tabindex="0">
+        <div class="flip-in">
+          <div class="face front"><div class="lbl">Laddat: varför</div><p style="margin:0">"Varför sköt du en etta?"</p><div class="hint">Tryck för att se vad som hör →</div></div>
+          <div class="face back"><div class="lbl">Vad skytten hör</div><p style="margin:0">En anklagelse – hon går i försvar. Skriv om till <i>vad</i> eller <i>hur</i>: "Gjorde du något annorlunda på det skottet?"</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 6 — MÅSTE, ALLTID, ALDRIG ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">4 · Laddade ord, forts.</div>
+    <h2>"Måste", "alltid", "aldrig"</h2>
+    <p><b>Måste</b> känns påtvingat och väcker lätt motstånd – ordet lyfter ingen. <b>Alltid</b> och <b>aldrig</b> generaliserar, dömer och stämmer sällan. Skriv om till något konkret som talar om vad skytten ska göra.</p>
+    <ul class="tips">
+      <li><b>"Du måste slappna av i benen!"</b> → "Kan du pröva att slappna av i benen?"</li>
+      <li><b>"Du skjuter alltid för fort!"</b> → "Jag har lagt märke till att du skjuter ganska snabbt."</li>
+      <li><b>"Du efterriktar aldrig."</b> → "Du verkar hoppa över efterriktningen när det blir stressigt."</li>
+    </ul>
+    <div class="pull">Ord som <i>alltid, aldrig, måste</i> ger inga precisa besked. Var konkret – så vet skytten vad hon ska göra åt saken.</div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 7 — TÄNK INTE ÖVNING ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">5 · Prova själv</div>
+    <h2>"Tänk inte på en bil"</h2>
+    <p class="lead">Den bästa förklaringen till varför <i>inte</i> inte fungerar känner du i kroppen.</p>
+    <div class="card">
+      <h3>Gör övningen två och två</h3>
+      <p style="margin:0">Den ene blundar medan den andre säger lugnt: <b>"Tänk inte på en bil."</b> … och sedan <b>"Tänk inte på en säng."</b> Fråga sedan: vad tänkte du på?</p>
+    </div>
+    <div class="pull">Svaret är förstås en bil och en säng. Hjärnan måste först bilda bilden för att kunna "inte tänka" på den. Precis så fungerar "Ryck inte av skottet".</div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 8 — QUIZ ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">Kunskapskoll</div>
+    <h2>Testa dig själv</h2>
+    <div id="quiz"></div>
+    <div class="score" id="score"></div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 9 — REFLEKTION ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="reflect">
+      <div class="kicker" style="color:#ffd9a0">Reflektion</div>
+      <h2>Ta med till klubben</h2>
+      <ol>
+        <li>Lista fler ord och uttryck med <i>negativ energi</i> – och skriv om dem till en positiv formulering. Vilka använder du själv oftast?</li>
+        <li>Har du råkat ut för en reaktion eller ett missförstånd på grund av en oaktsam användning av ett laddat ord?</li>
+        <li>Gör "Tänk inte på en bil / en säng"-övningen och diskutera: vad säger den om ordet <i>inte</i>?</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<footer class="slide" data-slide>
+  <div class="wrap">
+    Modul 3 av 10 · Föreningsinstruktör · <b>pistol.nu</b> utbildning<br>
+    Originalmaterial framtaget för pistol.nu. Nästa modul: <b>Att instruera</b>.
+  </div>
+</footer>
+
+<div class="pres-nav">
+  <span class="pgn" id="pgn"></span>
+  <button class="btn" id="prevBtn">←</button>
+  <button class="btn" id="nextBtn">→</button>
+  <button class="btn" id="exitBtn">Avsluta</button>
+</div>
+
+<script>
+// ---- människosyn toggle ----
+document.querySelectorAll('.toggle button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.toggle button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.pane').forEach(p=>p.classList.remove('show'));
+    document.querySelector('.pane[data-pane="'+b.dataset.v+'"]').classList.add('show');
+  });
+});
+
+// ---- flip cards ----
+document.querySelectorAll('.flip').forEach(f=>{
+  const t=()=>f.classList.toggle('flipped');
+  f.addEventListener('click',t);
+  f.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();t();}});
+});
+
+// ---- quiz ----
+const QUIZ=[
+  {q:'Vad är sambandet mellan inställning och beteende?',
+   a:['De har inget med varandra att göra.',
+      'Hur du tänker om skytten styr hur du beter dig – ändrar du tanken, ändras beteendet.',
+      'Beteendet kommer först, och inställningen följer efter.'],c:1,
+   why:'Inställningen kommer först och beteendet följer efter – därför kan du vända kedjan genom att ändra hur du tänker.'},
+  {q:'Vad innebär att "välja fokus och se det positiva"?',
+   a:['Att rikta blicken mot möjligheterna i stället för problemen – och formulera sig framåt.',
+      'Att alltid berömma, även när inget fungerar.',
+      'Att låtsas att problem inte finns.'],c:0,
+   why:'Du ändrar inte verkligheten – du väljer var du sätter ljuset och formulerar dig i positiva ordalag.'},
+  {q:'Varför bör du undvika att säga "Ryck inte av skottet"?',
+   a:['För att det är för långt.',
+      'För att hjärnan hoppar över ordet "inte" och fastnar på "rycka av skottet".',
+      'För att skytten inte förstår ordet "ryck".'],c:1,
+   why:'Säg i stället vad skytten ska göra: "Öka trycket lugnt och mjukt" – krama tills det smäller.'},
+  {q:'Hur skriver du bäst om "Varför sköt du en etta?"',
+   a:['"Varför lyssnar du inte?"',
+      '"Du måste skärpa dig på nästa skott."',
+      '"Gjorde du något annorlunda på det skottet?"'],c:2,
+   why:'En "varför"-fråga uppfattas som anklagande. Skriv om till vad eller hur, så slipper skytten gå i försvar.'}
+];
+let answered=0, correct=0;
+const quizEl=document.getElementById('quiz');
+QUIZ.forEach((item,i)=>{
+  const box=document.createElement('div'); box.className='q';
+  box.innerHTML='<h4>'+(i+1)+'. '+item.q+'</h4>';
+  const fb=document.createElement('div'); fb.className='fb';
+  item.a.forEach((txt,j)=>{
+    const btn=document.createElement('button'); btn.className='opt'; btn.textContent=txt;
+    btn.addEventListener('click',()=>{
+      if(box.dataset.done) return; box.dataset.done='1'; answered++;
+      [...box.querySelectorAll('.opt')].forEach(o=>o.disabled=true);
+      if(j===item.c){btn.classList.add('correct'); fb.className='fb ok'; fb.textContent='Rätt! '+item.why; correct++;}
+      else{btn.classList.add('wrong'); box.querySelectorAll('.opt')[item.c].classList.add('correct');
+           fb.className='fb no'; fb.textContent='Inte riktigt. '+item.why;}
+      if(answered===QUIZ.length) document.getElementById('score').textContent='Resultat: '+correct+' av '+QUIZ.length+' rätt.';
+    });
+    box.appendChild(btn);
+  });
+  box.appendChild(fb); quizEl.appendChild(box);
+});
+
+// ---- scroll progress ----
+const prog=document.getElementById('progress');
+addEventListener('scroll',()=>{
+  const h=document.documentElement; const sc=h.scrollTop/(h.scrollHeight-h.clientHeight);
+  prog.style.width=(sc*100)+'%';
+});
+
+// ---- presentation mode (also drives video filming: one [data-slide] = one shot) ----
+const slides=[...document.querySelectorAll('[data-slide]')];
+let cur=0;
+function showSlide(i){
+  cur=Math.max(0,Math.min(slides.length-1,i));
+  slides.forEach((s,k)=>s.classList.toggle('live',k===cur));
+  document.getElementById('pgn').textContent=(cur+1)+' / '+slides.length;
+}
+function enterPres(){document.body.classList.add('present'); showSlide(0); window.scrollTo(0,0);}
+function exitPres(){document.body.classList.remove('present'); slides.forEach(s=>s.classList.remove('live'));}
+document.getElementById('presBtn').onclick=enterPres;
+document.getElementById('exitBtn').onclick=exitPres;
+document.getElementById('nextBtn').onclick=()=>showSlide(cur+1);
+document.getElementById('prevBtn').onclick=()=>showSlide(cur-1);
+addEventListener('keydown',e=>{
+  if(!document.body.classList.contains('present')) return;
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ') showSlide(cur+1);
+  if(e.key==='ArrowLeft'||e.key==='PageUp') showSlide(cur-1);
+  if(e.key==='Escape') exitPres();
+});
+// Expose for the Playwright film harness: window.__goto(n)
+window.__slideCount=slides.length;
+window.__goto=n=>{enterPres(); showSlide(n);};
+</script>
+</body>
+</html>

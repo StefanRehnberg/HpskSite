@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Att instruera · Föreningsinstruktör · pistol.nu</title>
+<style>
+  :root{
+    --navy:#0f2540; --navy-2:#16365c; --amber:#f4a32c; --amber-deep:#d6850f;
+    --ink:#1b2533; --muted:#5d6b7e; --paper:#f6f8fb; --card:#ffffff;
+    --good:#1f9d72; --bad:#d65745; --line:#e3e9f1;
+    --shadow:0 10px 30px rgba(15,37,64,.10);
+    --maxw:780px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font:17px/1.65 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 20px}
+  h1,h2,h3{line-height:1.2; color:var(--navy); margin:0 0 .4em}
+  h2{font-size:1.7rem; margin-top:0}
+  p{margin:0 0 1em}
+  a{color:var(--amber-deep)}
+
+  /* ---- top bar ---- */
+  .topbar{
+    position:sticky; top:0; z-index:30; background:rgba(255,255,255,.92);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+  }
+  .topbar .wrap{display:flex; align-items:center; gap:12px; height:56px}
+  .brand{font-weight:700; color:var(--navy); letter-spacing:.2px}
+  .brand b{color:var(--amber-deep)}
+  .crumb{color:var(--muted); font-size:.85rem; margin-left:2px}
+  .spacer{flex:1}
+  .btn{
+    border:1px solid var(--line); background:var(--card); color:var(--navy);
+    padding:8px 14px; border-radius:10px; font-weight:600; cursor:pointer; font-size:.9rem;
+    transition:.15s;
+  }
+  .btn:hover{border-color:var(--amber); color:var(--amber-deep)}
+  .progress{position:fixed; top:0; left:0; height:3px; background:var(--amber); width:0; z-index:40; transition:width .15s}
+
+  /* ---- hero ---- */
+  .hero{
+    background:linear-gradient(135deg,var(--navy),var(--navy-2));
+    color:#fff; padding:64px 0 56px; position:relative; overflow:hidden;
+  }
+  .hero:after{content:""; position:absolute; right:-80px; top:-80px; width:300px; height:300px;
+    background:radial-gradient(circle,rgba(244,163,44,.35),transparent 70%)}
+  .hero .tag{display:inline-block; background:rgba(255,255,255,.12); color:#ffd9a0;
+    padding:5px 12px; border-radius:999px; font-size:.8rem; font-weight:600; letter-spacing:.4px; margin-bottom:18px}
+  .hero h1{color:#fff; font-size:2.5rem; margin-bottom:.3em}
+  .hero p{color:#cfdbeb; font-size:1.15rem; max-width:560px; margin-bottom:0}
+  .meta{margin-top:26px; display:flex; gap:22px; flex-wrap:wrap; color:#9fb4cf; font-size:.9rem}
+  .meta b{color:#fff}
+
+  /* ---- sections ---- */
+  section{padding:46px 0; border-bottom:1px solid var(--line)}
+  .kicker{color:var(--amber-deep); font-weight:700; letter-spacing:.6px; font-size:.8rem; text-transform:uppercase; margin-bottom:6px}
+  .lead{font-size:1.15rem; color:var(--ink)}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:22px 24px; box-shadow:var(--shadow); margin:18px 0}
+  .pull{border-left:4px solid var(--amber); background:#fff8ee; padding:14px 18px; border-radius:0 12px 12px 0; margin:18px 0; font-weight:600; color:var(--navy)}
+
+  .objlist{list-style:none; padding:0; margin:0}
+  .objlist li{padding:10px 0 10px 34px; position:relative; border-bottom:1px dashed var(--line)}
+  .objlist li:last-child{border-bottom:0}
+  .objlist li:before{content:"✓"; position:absolute; left:0; top:9px; width:22px; height:22px; background:var(--amber);
+    color:#fff; border-radius:6px; display:grid; place-items:center; font-size:.8rem; font-weight:700}
+
+  /* ---- människosyn interactive ---- */
+  .toggle{display:flex; gap:8px; background:#eef2f8; padding:6px; border-radius:14px; margin:8px 0 20px}
+  .toggle button{flex:1; border:0; background:transparent; padding:12px; border-radius:10px; font-weight:700; cursor:pointer; color:var(--muted); font-size:1rem; transition:.18s}
+  .toggle button.active{background:#fff; box-shadow:var(--shadow)}
+  .toggle button[data-v="neg"].active{color:var(--bad)}
+  .toggle button[data-v="pos"].active{color:var(--good)}
+  .panes{position:relative}
+  .pane{display:none}
+  .pane.show{display:block; animation:fade .35s ease}
+  @keyframes fade{from{opacity:0; transform:translateY(6px)}to{opacity:1; transform:none}}
+  .traits{list-style:none; padding:0; margin:0 0 16px}
+  .traits li{padding:9px 14px; margin:8px 0; border-radius:10px; background:#f1f5fa; font-weight:600}
+  .pane.neg .traits li{border-left:4px solid var(--bad)}
+  .pane.pos .traits li{border-left:4px solid var(--good)}
+  .outcome{padding:14px 18px; border-radius:12px; font-weight:600}
+  .pane.neg .outcome{background:#fdecea; color:#a3372c}
+  .pane.pos .outcome{background:#e8f6f0; color:#15795a}
+
+  /* ---- flip cards ---- */
+  .flips{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:18px 0}
+  @media(max-width:560px){.flips{grid-template-columns:1fr}}
+  .flip{perspective:1200px; height:230px; cursor:pointer}
+  .flip-in{position:relative; width:100%; height:100%; transition:transform .6s; transform-style:preserve-3d}
+  .flip.flipped .flip-in{transform:rotateY(180deg)}
+  .face{position:absolute; inset:0; backface-visibility:hidden; border-radius:16px; padding:20px; box-shadow:var(--shadow); display:flex; flex-direction:column}
+  .face .lbl{font-size:.75rem; font-weight:700; letter-spacing:.5px; text-transform:uppercase; margin-bottom:8px}
+  .front{background:var(--card); border:1px solid var(--line)}
+  .back{transform:rotateY(180deg); color:#fff}
+  .flip.say .back{background:linear-gradient(135deg,#b85647,#d65745)}
+  .flip.ask .back{background:linear-gradient(135deg,#178a64,#1f9d72)}
+  .flip .hint{margin-top:auto; font-size:.8rem; color:var(--muted)}
+  .flip.say .front .lbl{color:var(--bad)} .flip.ask .front .lbl{color:var(--good)}
+
+  /* ---- quiz ---- */
+  .q{margin:22px 0; border:1px solid var(--line); border-radius:16px; padding:20px 22px; background:var(--card); box-shadow:var(--shadow)}
+  .q h4{margin:0 0 12px; color:var(--navy); font-size:1.05rem}
+  .opt{display:block; width:100%; text-align:left; border:1.5px solid var(--line); background:#fff; padding:13px 16px;
+    border-radius:11px; margin:8px 0; cursor:pointer; font-size:.98rem; transition:.15s; color:var(--ink)}
+  .opt:hover{border-color:var(--amber)}
+  .opt.correct{border-color:var(--good); background:#e8f6f0; font-weight:600}
+  .opt.wrong{border-color:var(--bad); background:#fdecea}
+  .opt:disabled{cursor:default}
+  .fb{margin-top:8px; font-size:.9rem; font-weight:600; min-height:1.2em}
+  .fb.ok{color:var(--good)} .fb.no{color:var(--bad)}
+  .score{font-size:1.1rem; font-weight:700; color:var(--navy); margin-top:8px}
+
+  ul.tips{list-style:none; padding:0; margin:0}
+  ul.tips li{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px 12px 44px;
+    position:relative; margin:10px 0; box-shadow:var(--shadow)}
+  ul.tips li:before{content:"→"; position:absolute; left:16px; top:12px; color:var(--amber-deep); font-weight:700}
+
+  .reflect{background:linear-gradient(135deg,var(--navy),var(--navy-2)); color:#fff; border-radius:18px; padding:28px}
+  .reflect h2{color:#fff} .reflect ol{margin:0; padding-left:20px} .reflect li{margin:10px 0; color:#dfe8f4}
+
+  footer{padding:40px 0 70px; text-align:center; color:var(--muted); font-size:.85rem}
+
+  /* ---- presentation mode ---- */
+  body.present .topbar,body.present .progress{display:none}
+  body.present section,body.present .hero{min-height:100vh; display:none; padding:6vh 0; place-content:center}
+  body.present section.live,body.present .hero.live{display:flex; flex-direction:column; justify-content:center}
+  body.present .wrap{max-width:920px}
+  body.present h2{font-size:2.4rem}
+  body.present .lead,body.present p{font-size:1.4rem}
+  .pres-nav{display:none}
+  body.present .pres-nav{display:flex; position:fixed; bottom:18px; right:18px; gap:10px; z-index:50; align-items:center}
+  body.present .pres-nav .pgn{color:var(--muted); font-size:.85rem; margin-right:6px}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<div class="topbar">
+  <div class="wrap">
+    <span class="brand">pistol<b>.nu</b></span>
+    <span class="crumb">Utbildning · Föreningsinstruktör · Modul 4</span>
+    <span class="spacer"></span>
+    <button class="btn" id="presBtn">▶ Presentationsläge</button>
+  </div>
+</div>
+
+<!-- ============ SLIDE 0 — HERO ============ -->
+<header class="hero slide" data-slide>
+  <div class="wrap">
+    <span class="tag">FÖRENINGSINSTRUKTÖR · MODUL 4 AV 10</span>
+    <h1>Att instruera</h1>
+    <p>Att veta hur ett moment ska göras räcker inte – budskapet ska landa hos skytten. Så här instruerar du så att alla hänger med.</p>
+    <div class="meta">
+      <span><b>⏱ ca 20 min</b> lektion</span>
+      <span><b>4 frågor</b> kunskapskoll</span>
+      <span><b>Originalmaterial</b> · pistol.nu</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ SLIDE 1 — MÅL ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">Lärandemål</div>
+    <h2>Det här tar du med dig</h2>
+    <ul class="objlist">
+      <li><b>VAK</b> – att människor lär sig genom olika sinnen (se, höra, göra) och varför du bör instruera på flera sätt samtidigt.</li>
+      <li>Fyra principer för en levande instruktion: <b>aktivera, variera, individualisera</b> och <b>förklara varför</b>.</li>
+      <li>Vad <b>stegvis inlärning</b> innebär – och varför det är riskabelt att hoppa över ett steg.</li>
+      <li>Att känna igen <b>inlärningsplatåer</b> och bemöta dem så att skytten inte tappar motet.</li>
+      <li>Att sätta <b>mål</b> utifrån skyttens behov och föreningens ambition.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ SLIDE 2 — KOMMUNIKATION ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">1 · Grunden</div>
+    <h2>Att instruera är att kommunicera</h2>
+    <p class="lead">Att veta hur ett moment ska göras räcker inte – din uppgift är att få budskapet att <i>landa</i> hos skytten och väcka lust att träna.</p>
+    <p>Människor tar in information olika. Lutar du dig bara på din egen favoritkanal når du en del av gruppen och missar resten. Därför handlar god instruktion lika mycket om <i>hur</i> du förmedlar som om <i>vad</i> du förmedlar.</p>
+  </div>
+</section>
+
+<!-- ============ SLIDE 3 — VAK ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">2 · VAK</div>
+    <h2>Se, höra, göra</h2>
+    <p>Förenklat lär vi oss via tre sinneskanaler. De flesta har <b>ett eller två</b> dominerande sätt att ta in nytt.</p>
+    <div class="card">
+      <h3>Visuellt – se</h3>
+      <p style="margin:0">Lär sig bäst genom att <b>se</b>: en demonstration, en bild, ett tydligt handgrepp visat framför ögonen.</p>
+    </div>
+    <div class="card">
+      <h3>Auditivt – höra</h3>
+      <p style="margin:0">Lär sig bäst genom att <b>höra</b>: en förklaring i ord, en beskrivning, en dialog.</p>
+    </div>
+    <div class="card">
+      <h3>Kinestetiskt – göra</h3>
+      <p style="margin:0">Lär sig bäst genom att <b>göra</b>: känna greppet i handen, prova själv, upprepa rörelsen.</p>
+    </div>
+    <div class="pull">Du vet inte hur skytten lär sig bäst – så täck alla kanaler. Visa, säg <i>och</i> låt göra.</div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 4 — FYRA PRINCIPER ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">3 · Metod</div>
+    <h2>Fyra principer för en levande instruktion</h2>
+    <div class="card">
+      <h3>Aktivera</h3>
+      <p style="margin:0">Få skytten delaktig från första stund. En passiv åhörare glider iväg i tankarna – ju mer hon gör själv, desto mer fastnar.</p>
+    </div>
+    <div class="card">
+      <h3>Variera</h3>
+      <p style="margin:0">Samma upplägg gång på gång blir förutsägbart och tråkigt. Byt övningar, tempo och infallsvinkel så att nyfikenheten hålls vid liv.</p>
+    </div>
+    <div class="card">
+      <h3>Individualisera</h3>
+      <p style="margin:0">Anpassa dig efter personen framför dig, inte efter en mall. Använd namn, och kom ihåg att alla utvecklas i olika takt.</p>
+    </div>
+    <div class="card">
+      <h3>Förklara varför</h3>
+      <p style="margin:0">Ställ dig frågan "Varför?" innan en övning. Förklarar du syftet bygger du förtroende – och skytten som vet vart det leder tränar med mer driv.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 5 — STEGVIS INLÄRNING (flip cards) ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">4 · Tempo</div>
+    <h2>Stegvis inlärning</h2>
+    <p>Gå <b>lugnt och metodiskt</b> fram. Varje moment kräver sin tid – och man kan inte hoppa över ett steg. <i>(Tryck på korten.)</i></p>
+    <div class="flips">
+      <div class="flip say" tabindex="0">
+        <div class="flip-in">
+          <div class="face front"><div class="lbl">Forcera / hoppa över steg</div><p style="margin:0">"Vi skippar grunden – hon fattar galoppen ändå."</p><div class="hint">Tryck för att se effekten →</div></div>
+          <div class="face back"><div class="lbl">Effekt</div><p style="margin:0">Ofta lärs en <b>felaktig teknik</b> in – som sedan blir svår att rätta till.</p></div>
+        </div>
+      </div>
+      <div class="flip ask" tabindex="0">
+        <div class="flip-in">
+          <div class="face front"><div class="lbl">Steg för steg</div><p style="margin:0">"Vi befäster det här momentet innan vi går vidare."</p><div class="hint">Tryck för att se effekten →</div></div>
+          <div class="face back"><div class="lbl">Effekt</div><p style="margin:0">Varje sak får sätta sig. Grunden håller – och nästa steg blir lättare att lära.</p></div>
+        </div>
+      </div>
+    </div>
+    <div class="pull">Var sak har sin tid – var sak tar sin tid.</div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 6 — INLÄRNINGSPLATÅER ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">5 · Platåer</div>
+    <h2>Inlärningsplatåer</h2>
+    <p class="lead">Inlärning går i vågor. En period av framsteg avlöses av en period då det <i>står stilla</i> – eller till och med backar lite.</p>
+    <p>Det är inget fel; det är kroppens sätt att bearbeta och befästa det som håller på att läras in. Först när momentet sitter helt är skytten redo för nästa. Hur länge en platå varar är <b>högst personligt</b> och skiljer sig mycket från individ till individ.</p>
+    <div class="pull">Vid en platå: lugna, uppmuntra och håll motivationen uppe. Stillaståendet är en naturlig del av att lära – inte ett misslyckande.</div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 7 — MÅL + TIPS ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">6 · I praktiken</div>
+    <h2>Bestäm mål – och tio tips</h2>
+    <p>För att höja både motivation och kvalitet behöver gruppen ett <b>mål att arbeta mot</b>. Utgå från föreningens policy och skyttarnas egen ambition – om det så är att nå en cup eller bara att ha roligt och umgås.</p>
+    <ul class="tips">
+      <li><b>Utgå alltid</b> från skyttens behov.</li>
+      <li><b>Förbered dig</b> – ta fram material och utrustning i förväg.</li>
+      <li><b>Uttryck dig enkelt</b> och <b>tala tydligt</b>.</li>
+      <li><b>Visa så att alla ser</b> tydligt.</li>
+      <li><b>Förklara och visa på flera sätt</b> så att alla förstår (VAK).</li>
+      <li><b>Uppmuntra</b>, ge beröm och tala i <b>positiva termer</b>.</li>
+      <li><b>Uppmuntra till frågor</b> – och var dig själv.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ SLIDE 8 — QUIZ ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="kicker">Kunskapskoll</div>
+    <h2>Testa dig själv</h2>
+    <div id="quiz"></div>
+    <div class="score" id="score"></div>
+  </div>
+</section>
+
+<!-- ============ SLIDE 9 — REFLEKTION ============ -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <div class="reflect">
+      <div class="kicker" style="color:#ffd9a0">Reflektion</div>
+      <h2>Övning rygg mot rygg</h2>
+      <p style="color:#dfe8f4">Sitt två och två, rygg mot rygg. A ritar en enkel figur av cirklar och rektanglar och beskriver den med ord medan B ritar – helt tyst, utan att se originalet. Byt sedan: nu får den som ritar avbryta och ställa frågor. Jämför rundorna.</p>
+      <ol>
+        <li>Vilka <i>två sinnen</i> dominerade i övningen – och vad säger det om hur du bör instruera?</li>
+        <li>Hur kan samma instruktion anpassas för visuella, auditiva och kinestetiska skyttar?</li>
+        <li>Vilken erfarenhet har du av inlärningsplatåer – och hur bör du förhålla dig till dem som ledare?</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<footer class="slide" data-slide>
+  <div class="wrap">
+    Modul 4 av 10 · Föreningsinstruktör · <b>pistol.nu</b> utbildning<br>
+    Originalmaterial framtaget för pistol.nu. Nästa modul: <b>Verksamhet för barn och ungdom</b>.
+  </div>
+</footer>
+
+<div class="pres-nav">
+  <span class="pgn" id="pgn"></span>
+  <button class="btn" id="prevBtn">←</button>
+  <button class="btn" id="nextBtn">→</button>
+  <button class="btn" id="exitBtn">Avsluta</button>
+</div>
+
+<script>
+// ---- människosyn toggle ----
+document.querySelectorAll('.toggle button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.toggle button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.pane').forEach(p=>p.classList.remove('show'));
+    document.querySelector('.pane[data-pane="'+b.dataset.v+'"]').classList.add('show');
+  });
+});
+
+// ---- flip cards ----
+document.querySelectorAll('.flip').forEach(f=>{
+  const t=()=>f.classList.toggle('flipped');
+  f.addEventListener('click',t);
+  f.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();t();}});
+});
+
+// ---- quiz ----
+const QUIZ=[
+  {q:'Vad står VAK för i instruktionssammanhang?',
+   a:['Tre sinneskanaler vi lär oss genom: visuellt (se), auditivt (höra) och kinestetiskt (göra).',
+      'Vapen, ammunition och kläder som skytten behöver.',
+      'En tävlingsklass inom pistolskytte.'],c:0,
+   why:'VAK = visuellt, auditivt, kinestetiskt – de tre kanaler vi tar in nytt genom.'},
+  {q:'Du vet inte vilken sinneskanal en ny skytt lär sig bäst genom. Vad gör du?',
+   a:['Väljer min egen favoritkanal och kör på den.',
+      'Visar, förklarar i ord och låter skytten prova själv – täcker alla kanaler.',
+      'Ber skytten läsa instruktionen på egen hand.'],c:1,
+   why:'Eftersom du sällan vet vilken kanal som passar bäst – täck alla tre: visa, säg och låt göra.'},
+  {q:'Varför ska man inte hoppa över ett steg i den stegvisa inlärningen?',
+   a:['Det går mot reglementet.',
+      'Då lärs ofta en felaktig teknik in som sedan blir svår att rätta till.',
+      'Det spelar ingen roll – snabbare är alltid bättre.'],c:1,
+   why:'Hoppar man över ett steg befästs ofta en felaktig teknik som blir svår att korrigera senare.'},
+  {q:'En skytt har nått en inlärningsplatå och står stilla i utvecklingen. Hur bör du agera?',
+   a:['Lugna och uppmuntra – stillaståendet är en naturlig del av att lära.',
+      'Påpeka att hon slutat utvecklas och måste skärpa sig.',
+      'Byta till en mycket svårare övning direkt.'],c:0,
+   why:'Platåer är kroppens sätt att befästa det inlärda. Lugna, uppmuntra och håll motivationen uppe.'}
+];
+let answered=0, correct=0;
+const quizEl=document.getElementById('quiz');
+QUIZ.forEach((item,i)=>{
+  const box=document.createElement('div'); box.className='q';
+  box.innerHTML='<h4>'+(i+1)+'. '+item.q+'</h4>';
+  const fb=document.createElement('div'); fb.className='fb';
+  item.a.forEach((txt,j)=>{
+    const btn=document.createElement('button'); btn.className='opt'; btn.textContent=txt;
+    btn.addEventListener('click',()=>{
+      if(box.dataset.done) return; box.dataset.done='1'; answered++;
+      [...box.querySelectorAll('.opt')].forEach(o=>o.disabled=true);
+      if(j===item.c){btn.classList.add('correct'); fb.className='fb ok'; fb.textContent='Rätt! '+item.why; correct++;}
+      else{btn.classList.add('wrong'); box.querySelectorAll('.opt')[item.c].classList.add('correct');
+           fb.className='fb no'; fb.textContent='Inte riktigt. '+item.why;}
+      if(answered===QUIZ.length) document.getElementById('score').textContent='Resultat: '+correct+' av '+QUIZ.length+' rätt.';
+    });
+    box.appendChild(btn);
+  });
+  box.appendChild(fb); quizEl.appendChild(box);
+});
+
+// ---- scroll progress ----
+const prog=document.getElementById('progress');
+addEventListener('scroll',()=>{
+  const h=document.documentElement; const sc=h.scrollTop/(h.scrollHeight-h.clientHeight);
+  prog.style.width=(sc*100)+'%';
+});
+
+// ---- presentation mode (also drives video filming: one [data-slide] = one shot) ----
+const slides=[...document.querySelectorAll('[data-slide]')];
+let cur=0;
+function showSlide(i){
+  cur=Math.max(0,Math.min(slides.length-1,i));
+  slides.forEach((s,k)=>s.classList.toggle('live',k===cur));
+  document.getElementById('pgn').textContent=(cur+1)+' / '+slides.length;
+}
+function enterPres(){document.body.classList.add('present'); showSlide(0); window.scrollTo(0,0);}
+function exitPres(){document.body.classList.remove('present'); slides.forEach(s=>s.classList.remove('live'));}
+document.getElementById('presBtn').onclick=enterPres;
+document.getElementById('exitBtn').onclick=exitPres;
+document.getElementById('nextBtn').onclick=()=>showSlide(cur+1);
+document.getElementById('prevBtn').onclick=()=>showSlide(cur-1);
+addEventListener('keydown',e=>{
+  if(!document.body.classList.contains('present')) return;
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ') showSlide(cur+1);
+  if(e.key==='ArrowLeft'||e.key==='PageUp') showSlide(cur-1);
+  if(e.key==='Escape') exitPres();
+});
+// Expose for the Playwright film harness: window.__goto(n)
+window.__slideCount=slides.length;
+window.__goto=n=>{enterPres(); showSlide(n);};
+</script>
+</body>
+</html>

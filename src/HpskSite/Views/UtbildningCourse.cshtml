@@ -1,0 +1,71 @@
+@using HpskSite.Models
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var denied = ViewBag.Denied == true;
+    var isAdmin = ViewBag.IsAdmin == true;
+    var course = ViewBag.Course as Course;
+    var modules = ViewBag.Modules as List<CourseModule> ?? new List<CourseModule>();
+    ViewBag.Title = course != null ? course.Title : "Utbildning";
+}
+
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/utbildning">Utbildning</a></li>
+            <li class="breadcrumb-item active">@(course?.Title ?? "Kurs")</li>
+        </ol>
+    </nav>
+
+    @if (denied || course == null)
+    {
+        <div class="alert alert-warning mt-3">
+            <i class="bi bi-lock me-2"></i>Du har inte behörighet att se det här kursmaterialet.
+            Materialet visas endast för den som håller utbildningen samt administratörer.
+        </div>
+    }
+    else
+    {
+        <h1 class="mb-1">@course.Title</h1>
+        @if (!string.IsNullOrEmpty(course.TargetCertDisplay))
+        {
+            <div class="text-muted mb-2">Leder till certifiering: <strong>@course.TargetCertDisplay</strong></div>
+        }
+        @if (!string.IsNullOrEmpty(course.Description))
+        {
+            <p class="text-muted">@course.Description</p>
+        }
+
+        @if (modules.Count == 0)
+        {
+            <div class="alert alert-info mt-3">Inga moduler är publicerade i den här kursen ännu.</div>
+        }
+        else
+        {
+            <div class="list-group mt-3 shadow-sm">
+                @{ var n = 0; }
+                @foreach (var m in modules)
+                {
+                    n++;
+                    <a href="/utbildning/@course.CourseKey/@m.Slug" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                        <span>
+                            <span class="badge bg-primary rounded-pill me-2">@n</span>
+                            @m.Title
+                            @if (!m.IsPublished)
+                            {
+                                <span class="badge bg-secondary ms-2">Utkast</span>
+                            }
+                        </span>
+                        <span class="text-muted">
+                            @if (!string.IsNullOrEmpty(m.VideoUrl))
+                            {
+                                <i class="bi bi-camera-video me-2" title="Videolektion finns"></i>
+                            }
+                            <i class="bi bi-chevron-right"></i>
+                        </span>
+                    </a>
+                }
+            </div>
+        }
+    }
+</div>

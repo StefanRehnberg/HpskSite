@@ -122,12 +122,8 @@
                         <i class="bi bi-people-fill me-1"></i>Min Träningsgrupp
                     </button>
                 </li>
-                <!-- Tab 4: Deltagare -->
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="leaderboard-tab" data-bs-toggle="tab" data-bs-target="#leaderboard-content" type="button" role="tab">
-                        <i class="bi bi-trophy me-1"></i>Deltagare
-                    </button>
-                </li>
+                <!-- Tab 4 (Deltagare/leaderboard) removed 2026-06-16: Skyttetrappan is scoped to
+                     "Min Träningsgrupp"; the global participant list was dropped. -->
                 <!-- Tab 5: Administration (only visible if admin, hidden by default) -->
                 <li class="nav-item" role="presentation" id="admin-tab-item" style="display: none;">
                     <button class="nav-link" id="admin-tab" data-bs-toggle="tab" data-bs-target="#admin" type="button" role="tab">
@@ -203,23 +199,7 @@
                     </div>
                 </div>
 
-                <!-- Leaderboard Tab (Tab 4 - Deltagare) -->
-                <div class="tab-pane fade" id="leaderboard-content" role="tabpanel">
-                    <div class="card border-info">
-                        <div class="card-header bg-info text-white">
-                            <h4 class="mb-0"><i class="bi bi-people me-2"></i>Deltagare</h4>
-                            <small>Se vilka medlemmar som tränar på Skyttetrappan</small>
-                        </div>
-                        <div class="card-body" id="leaderboard">
-                            <div class="text-center py-5">
-                                <div class="spinner-border text-warning" role="status">
-                                    <span class="visually-hidden">Laddar...</span>
-                                </div>
-                                <p class="mt-3">Laddar träningsdeltagare...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <!-- Leaderboard pane removed 2026-06-16 (see tab note above). -->
 
                 <!-- Admin Tab (Tab 5 - Administration) -->
                 <div class="tab-pane fade" id="admin" role="tabpanel">
@@ -2345,6 +2325,8 @@ function loadFallbackData() {
 }
 
 async function loadLeaderboard() {
+    // Leaderboard UI removed 2026-06-16 — no-op when the container is absent.
+    if (!document.getElementById('leaderboard')) return;
     try {
         const requestOptions = {
             method: 'GET',

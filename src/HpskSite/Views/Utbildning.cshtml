@@ -1,0 +1,67 @@
+@using HpskSite.Models
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Utbildning – kursmaterial";
+    var isLoggedIn = ViewBag.IsLoggedIn == true;
+    var isAdmin = ViewBag.IsAdmin == true;
+    var courses = ViewBag.Courses as List<Course> ?? new List<Course>();
+    var moduleCounts = ViewBag.ModuleCounts as Dictionary<int, int> ?? new Dictionary<int, int>();
+}
+
+<div class="container py-4">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <h1 class="mb-0"><i class="bi bi-mortarboard me-2"></i>Utbildning</h1>
+    </div>
+    <p class="text-muted">Kursmaterial för de utbildningar du håller. Materialet är avsett för dig som
+        instruktör/utbildare – deltagarna får inte tillgång till materialet.</p>
+
+    @if (!isLoggedIn)
+    {
+        <div class="alert alert-warning mt-4">
+            <i class="bi bi-lock me-2"></i>Du måste vara inloggad för att se kursmaterial.
+            <a href="/login-&-register/?tab=login" class="alert-link">Logga in</a>.
+        </div>
+    }
+    else if (courses.Count == 0)
+    {
+        <div class="alert alert-info mt-4">
+            <i class="bi bi-info-circle me-2"></i>Det finns inget kursmaterial som du har behörighet att se ännu.
+            Materialet för en kurs visas för den som håller utbildningen (t.ex. en Kretsinstruktör ser
+            Föreningsinstruktörsmaterialet).
+        </div>
+    }
+    else
+    {
+        <div class="row g-3 mt-1">
+            @foreach (var c in courses)
+            {
+                var count = moduleCounts.ContainsKey(c.Id) ? moduleCounts[c.Id] : 0;
+                <div class="col-md-6 col-lg-4">
+                    <a href="/utbildning/@c.CourseKey" class="text-decoration-none">
+                        <div class="card h-100 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <h5 class="card-title text-dark mb-1">@c.Title</h5>
+                                    @if (!c.IsPublished)
+                                    {
+                                        <span class="badge bg-secondary">Utkast</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrEmpty(c.TargetCertDisplay))
+                                {
+                                    <div class="text-muted small mb-2">Leder till: @c.TargetCertDisplay</div>
+                                }
+                                @if (!string.IsNullOrEmpty(c.Description))
+                                {
+                                    <p class="card-text text-muted small">@c.Description</p>
+                                }
+                                <div class="mt-2"><span class="badge bg-light text-dark border">@count moduler</span></div>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+            }
+        </div>
+    }
+</div>

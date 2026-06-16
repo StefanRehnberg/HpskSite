@@ -119,6 +119,11 @@ namespace HpskSite.Composers
             // Printable Kvitto (receipt) builder — shared by the /kvitto page.
             builder.Services.AddScoped<ReceiptModelBuilder>();
 
+            // Utbildning course catalog (Courses + CourseModules + CoursePrerequisites).
+            // Data layer only; access/eligibility gating lives in the controllers.
+            // Run create-course-tables.sql. See COURSE_SYSTEM.md.
+            builder.Services.AddScoped<CourseService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();
