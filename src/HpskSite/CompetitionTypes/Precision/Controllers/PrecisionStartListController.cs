@@ -542,8 +542,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         return Json(new { success = false, message = "Du har inte behörighet att hantera denna startlista." });
                     }
 
-                    // First, unpublish all other start lists for this competition
+                    // First, unpublish all other start lists for this competition.
+                    // NOTE: under the direct-child architecture this also touches THIS node
+                    // (it's a direct child of the competition), loading a fresh IContent and
+                    // Save()+Publish()ing it. That bumps the version, so the `startList` instance
+                    // captured above becomes non-current — saving it then throws
+                    // "Cannot save a non-current version". Re-fetch after the call to get the
+                    // current version before we mutate + save it.
                     await UnpublishAllStartListsForCompetition(competitionId);
+
+                    startList = _contentService.GetById(request.StartListId);
+                    if (startList == null)
+                    {
+                        return Json(new { success = false, message = "Startlista hittades inte." });
+                    }
                 }
 
                 // Set the start list as published
