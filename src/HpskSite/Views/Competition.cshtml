@@ -1375,14 +1375,14 @@
 
 								@if (showLiveResults)
 								{
-									<a class="btn btn-outline-light w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>
+									<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>
 								}
 							}
 							else if (showLiveResults)
 							{
 								@if (hasResultPage)
 								{
-									<a class="btn btn-outline-light w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>
+									<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>
 								}
 								else
 								{
@@ -1998,7 +1998,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (hasResults) {
                 var container = document.getElementById('liveResultsCheck');
                 if (container) {
-                    container.innerHTML = '<a class="btn btn-outline-light w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>';
+                    container.innerHTML = '<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>';
                 }
             }
         })
