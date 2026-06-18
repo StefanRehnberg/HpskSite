@@ -48,6 +48,7 @@ appsettings.Development.json
 /src/HpskSite/Associations.json
 /src/HpskSite/access.txt
 /src/HpskSite/wwwroot/images/
+/src/HpskSite/wwwroot/assets/illustrations/
 /src/HpskSite/KnowledgeBase/docs/
 /src/HpskSite/Documentation/
 
@@ -64,3 +65,4 @@ appsettings.Development.json
 /Pokalen 2 tidutrakning.xls
 /*.xls
 /*.xlsx
+/src/HpskSite/wwwroot/assets/skjuthandboken/
