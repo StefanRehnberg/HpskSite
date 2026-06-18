@@ -426,32 +426,33 @@
                     </div>
                 </div>
 
+                <!-- Unified num-pad: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3, then
+                     0 + SPARA (Enter=save) + RENSA (clear). Ångra skott (backspace)
+                     kept as a secondary control below. -->
                 <div class="so-keypad">
                     <div class="row g-2">
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="X">X</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="10">10</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="9">9</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="8">8</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-primary w-100 so-key" data-value="10">10</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-primary w-100 so-key" data-value="X">X</button></div>
                         <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="7">7</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="6">6</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="5">5</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="8">8</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="9">9</button></div>
                         <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="4">4</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="3">3</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="2">2</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="5">5</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="6">6</button></div>
                         <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="1">1</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="2">2</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="3">3</button></div>
                         <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="0">0</button></div>
-                        <div class="col-6"><button type="button" class="btn btn-outline-danger w-100" id="soModalClear">RENSA</button></div>
-                        <div class="col-6"><button type="button" class="btn btn-outline-secondary w-100" id="soModalBackspace"><i class="bi bi-backspace"></i> Ta bort</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-success w-100" id="soModalSave" disabled><i class="bi bi-check-circle"></i> SPARA</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-danger w-100" id="soModalClear">RENSA</button></div>
+                        <div class="col-12"><button type="button" class="btn btn-outline-secondary w-100 btn-sm" id="soModalBackspace"><i class="bi bi-backspace"></i> Ångra skott</button></div>
                     </div>
                 </div>
 
-                <div class="text-muted small mt-2 text-center">Tangentbord: 0–9 / X för värde · Backspace för att ta bort · Enter för Spara · Esc för Avbryt</div>
+                <div class="text-muted small mt-2 text-center">Tangentbord: 0–9 / X för värde · Backspace för att ångra · Enter för Spara · Esc för Avbryt</div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-success" id="soModalSave" disabled>
-                    <i class="bi bi-check-circle me-1"></i>Spara skott
-                </button>
             </div>
         </div>
     </div>
@@ -2249,48 +2250,50 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                             </div>
 
                             <div class="entry-buttons">
+                                <!-- Unified num-pad: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3,
+                                     then 0 + SPARA (enter) + RENSA (clear) on the bottom row. -->
                                 <div class="row g-2">
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="X">X</button>
-                                    </div>
-                                    <div class="col-4">
+                                    <div class="col-6">
                                         <button type="button" class="btn btn-primary w-100 shot-btn" data-value="10">10</button>
                                     </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="9">9</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="8">8</button>
+                                    <div class="col-6">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="X">X</button>
                                     </div>
                                     <div class="col-4">
                                         <button type="button" class="btn btn-primary w-100 shot-btn" data-value="7">7</button>
                                     </div>
                                     <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="6">6</button>
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="8">8</button>
                                     </div>
                                     <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="5">5</button>
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="9">9</button>
                                     </div>
                                     <div class="col-4">
                                         <button type="button" class="btn btn-primary w-100 shot-btn" data-value="4">4</button>
                                     </div>
                                     <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="3">3</button>
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="5">5</button>
                                     </div>
                                     <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="2">2</button>
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="6">6</button>
                                     </div>
                                     <div class="col-4">
                                         <button type="button" class="btn btn-primary w-100 shot-btn" data-value="1">1</button>
                                     </div>
                                     <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="2">2</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="3">3</button>
+                                    </div>
+                                    <div class="col-4">
                                         <button type="button" class="btn btn-primary w-100 shot-btn" data-value="0">0</button>
                                     </div>
-                                    <div class="col-6">
-                                        <button type="button" class="btn btn-success w-100 enter-btn">ENTER</button>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-success w-100 enter-btn">SPARA</button>
                                     </div>
-                                    <div class="col-6">
-                                        <button type="button" class="btn btn-danger w-100 clear-btn">CLEAR</button>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-danger w-100 clear-btn">RENSA</button>
                                     </div>
             </div>
         </div>

@@ -207,25 +207,25 @@
 
                             @* Button Grid *@
                             <div class="button-grid">
+                                @* Unified num-pad layout: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3,
+                                   then 0 + SPARA (enter) + RENSA (clear) on the bottom row. *@
                                 <div class="shot-buttons">
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="X" onclick="addShot('X')">X</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="10" onclick="addShot('10')">10</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="9" onclick="addShot('9')">9</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="8" onclick="addShot('8')">8</button>
+                                    <button type="button" class="btn btn-primary shot-btn k-wide" data-value="10" onclick="addShot('10')">10</button>
+                                    <button type="button" class="btn btn-primary shot-btn k-wide" data-value="X" onclick="addShot('X')">X</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="7" onclick="addShot('7')">7</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="6" onclick="addShot('6')">6</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="5" onclick="addShot('5')">5</button>
+                                    <button type="button" class="btn btn-primary shot-btn" data-value="8" onclick="addShot('8')">8</button>
+                                    <button type="button" class="btn btn-primary shot-btn" data-value="9" onclick="addShot('9')">9</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="4" onclick="addShot('4')">4</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="3" onclick="addShot('3')">3</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="2" onclick="addShot('2')">2</button>
+                                    <button type="button" class="btn btn-primary shot-btn" data-value="5" onclick="addShot('5')">5</button>
+                                    <button type="button" class="btn btn-primary shot-btn" data-value="6" onclick="addShot('6')">6</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="1" onclick="addShot('1')">1</button>
+                                    <button type="button" class="btn btn-primary shot-btn" data-value="2" onclick="addShot('2')">2</button>
+                                    <button type="button" class="btn btn-primary shot-btn" data-value="3" onclick="addShot('3')">3</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="0" onclick="addShot('0')">0</button>
-                                </div>
-                                <div class="button-row action-row">
                                     <button type="button" class="btn btn-success enter-btn" id="enterBtn" onclick="handleEnterSeries()" disabled>
-                                        <i class="bi bi-check-circle"></i> SPARA SERIE
+                                        <i class="bi bi-check-circle"></i> SPARA
                                     </button>
-                                    <button type="button" class="btn btn-warning clear-btn" onclick="clearCurrentSeries()">
+                                    <button type="button" class="btn btn-danger clear-btn" onclick="clearCurrentSeries()">
                                         <i class="bi bi-x-circle"></i> RENSA
                                     </button>
                                 </div>
@@ -1138,16 +1138,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
 .shot-buttons {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 0.5rem;
 }
 
-.button-row.action-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    margin-top: 0.5rem;
-}
+/* Each number key spans 2 of 6 columns (3 per row); 10/X span 3 (2 per row);
+   0 / SPARA / RENSA each span 2 to form the bottom row. */
+.shot-buttons .shot-btn { grid-column: span 2; }
+.shot-buttons .shot-btn.k-wide { grid-column: span 3; }
+.shot-buttons .enter-btn,
+.shot-buttons .clear-btn { grid-column: span 2; }
 
 .shot-btn {
     height: 60px;
@@ -1172,7 +1172,7 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 
 .enter-btn, .clear-btn {
-    height: 50px;
+    height: 60px;
     font-size: 1.1rem;
     font-weight: bold;
 }
@@ -1229,9 +1229,8 @@ document.addEventListener('DOMContentLoaded', function() {
         padding: 1rem;
     }
 
-    /* Shot button grid - 3 columns on tablets */
+    /* Keep the 6-column num-pad grid; just relax spacing on tablets */
     .shot-buttons {
-        grid-template-columns: repeat(3, 1fr);
         gap: 0.75rem;
     }
 

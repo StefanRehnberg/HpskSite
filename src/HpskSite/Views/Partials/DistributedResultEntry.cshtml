@@ -119,9 +119,6 @@
                                     (inmatat av <span id="dr-entered-by-name"></span>)
                                 </span>
                             </label>
-                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="drClearCurrentSeries()">
-                                <i class="bi bi-x-circle"></i> Rensa
-                            </button>
                         </div>
 
                         <!-- Shot circles -->
@@ -139,31 +136,27 @@
                             </div>
                         </div>
 
-                        <!-- Button grid -->
+                        <!-- Button grid — unified num-pad: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3,
+                             then 0 + SPARA (enter) + RENSA (clear) on the bottom row. -->
                         <div class="dr-button-grid">
-                            <div class="dr-button-row">
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('X')">X</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('10')">10</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('9')">9</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('8')">8</button>
-                            </div>
-                            <div class="dr-button-row">
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('7')">7</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('6')">6</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('5')">5</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('4')">4</button>
-                            </div>
-                            <div class="dr-button-row">
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('3')">3</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('2')">2</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('1')">1</button>
-                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('0')">0</button>
-                            </div>
-                            <div class="dr-button-row dr-action-row">
-                                <button type="button" class="btn btn-success dr-enter-btn" id="dr-save-series-btn" onclick="drSaveSeries()" disabled>
-                                    <i class="bi bi-check-circle"></i> SPARA SERIE
-                                </button>
-                            </div>
+                            <button type="button" class="btn btn-primary dr-shot-btn dr-wide" onclick="drAddShot('10')">10</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn dr-wide" onclick="drAddShot('X')">X</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('7')">7</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('8')">8</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('9')">9</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('4')">4</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('5')">5</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('6')">6</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('1')">1</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('2')">2</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('3')">3</button>
+                            <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('0')">0</button>
+                            <button type="button" class="btn btn-success dr-enter-btn" id="dr-save-series-btn" onclick="drSaveSeries()" disabled>
+                                <i class="bi bi-check-circle"></i> SPARA
+                            </button>
+                            <button type="button" class="btn btn-danger dr-clear-btn" onclick="drClearCurrentSeries()">
+                                <i class="bi bi-x-circle"></i> RENSA
+                            </button>
                         </div>
 
                         <div class="form-text mt-2 text-center">
@@ -233,17 +226,17 @@
     color: var(--bs-success-text-emphasis);
 }
 
-/* Button grid */
+/* Button grid — unified 6-column num-pad. Numbers span 2 of 6 (3 per row),
+   10/X span 3 (2 per row), 0 / SPARA / RENSA each span 2 (bottom row). */
 .dr-button-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-.dr-button-row {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 6px;
 }
+.dr-button-grid .dr-shot-btn { grid-column: span 2; }
+.dr-button-grid .dr-shot-btn.dr-wide { grid-column: span 3; }
+.dr-button-grid .dr-enter-btn,
+.dr-button-grid .dr-clear-btn { grid-column: span 2; }
 .dr-shot-btn {
     font-size: 1.3rem;
     font-weight: bold;
@@ -251,10 +244,7 @@
     min-height: 56px;
     border-radius: 8px;
 }
-.dr-action-row {
-    grid-template-columns: 1fr;
-    margin-top: 4px;
-}
+.dr-clear-btn,
 .dr-enter-btn {
     font-size: 1.2rem;
     font-weight: bold;
@@ -303,7 +293,8 @@
         height: 44px;
         font-size: 1rem;
     }
-    .dr-enter-btn {
+    .dr-enter-btn,
+    .dr-clear-btn {
         font-size: 1.3rem;
         padding: 16px 8px;
     }

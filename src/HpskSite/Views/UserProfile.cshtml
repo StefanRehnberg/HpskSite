@@ -865,32 +865,33 @@
                         <div class="mt-2 text-center"><strong>Totalt: <span id="gsTotal">0</span> p</strong></div>
                     </div>
 
-                    <div class="gs-keypad mb-3">
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('X')">X</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('10')">10</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('9')">9</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('8')">8</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('7')">7</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('6')">6</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('5')">5</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('4')">4</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('3')">3</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('2')">2</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('1')">1</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('0')">0</button>
-                    </div>
-                    <div class="d-flex gap-2 mb-3">
-                        <button type="button" class="btn btn-outline-warning flex-fill" onclick="gsClear()"><i class="bi bi-x-circle"></i> Rensa</button>
-                        <button type="button" class="btn btn-outline-secondary flex-fill" onclick="gsBackspace()"><i class="bi bi-backspace"></i> Ångra skott</button>
-                    </div>
-
                     <div class="mb-2">
                         <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto på tavlan (valfritt)</label>
                         <input type="file" class="form-control" id="gsPhoto" accept="image/*" capture="environment">
                     </div>
-                    <button type="button" class="btn btn-success btn-lg w-100" id="gsSaveBtn" onclick="gsSave()" disabled>
-                        <i class="bi bi-send"></i> Skicka för validering
-                    </button>
+
+                    @* Unified num-pad: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3, then
+                       0 + SKICKA (Enter=send for validation) + RENSA (clear).
+                       Ångra skott (backspace) kept as a secondary control below. *@
+                    <div class="gs-keypad mb-2">
+                        <button type="button" class="btn btn-primary shot-btn k-wide" onclick="gsAddShot('10')">10</button>
+                        <button type="button" class="btn btn-primary shot-btn k-wide" onclick="gsAddShot('X')">X</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('7')">7</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('8')">8</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('9')">9</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('4')">4</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('5')">5</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('6')">6</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('1')">1</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('2')">2</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('3')">3</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('0')">0</button>
+                        <button type="button" class="btn btn-success gs-enter-btn" id="gsSaveBtn" onclick="gsSave()" disabled><i class="bi bi-send"></i> SKICKA</button>
+                        <button type="button" class="btn btn-danger gs-clear-btn" onclick="gsClear()"><i class="bi bi-x-circle"></i> RENSA</button>
+                    </div>
+                    <div class="d-grid mb-3">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="gsBackspace()"><i class="bi bi-backspace"></i> Ångra skott</button>
+                    </div>
                 </div>
                 <div id="gsResult" style="display:none;"></div>
             </div>
@@ -1056,8 +1057,14 @@
 </div>
 
 <style>
-    .gs-keypad { display:grid; grid-template-columns:repeat(4,1fr); gap:.5rem; }
+    /* Unified 6-column num-pad: numbers span 2 (3 per row), 10/X span 3 (2 per row),
+       0 / SKICKA / RENSA each span 2 (bottom row). */
+    .gs-keypad { display:grid; grid-template-columns:repeat(6,1fr); gap:.5rem; }
+    .gs-keypad .shot-btn { grid-column:span 2; }
+    .gs-keypad .shot-btn.k-wide { grid-column:span 3; }
+    .gs-keypad .gs-enter-btn, .gs-keypad .gs-clear-btn { grid-column:span 2; }
     #guldserieModal .shot-btn { height:54px; font-size:1.4rem; font-weight:bold; }
+    #guldserieModal .gs-enter-btn, #guldserieModal .gs-clear-btn { height:54px; font-size:1rem; font-weight:bold; }
     #guldserieModal .shot-circles { display:flex; justify-content:center; gap:.75rem; font-size:1.6rem; font-weight:bold; }
     #guldserieModal .shot-circle { width:46px; height:46px; display:inline-flex; align-items:center; justify-content:center; border:3px solid var(--bs-border-color); border-radius:50%; background:var(--bs-body-bg); color:var(--bs-secondary-color); }
     #guldserieModal .shot-circle.filled { border-color:var(--bs-primary); color:var(--bs-body-color); }
@@ -3302,7 +3309,7 @@ function gsSave() {
             body: JSON.stringify({ seriesType: 'Precision', clubId, weaponGroup: document.getElementById('gsWeapon').value, shots: gsShots, claimedLevel: 'Guld', photoRef })
         });
     }).then(r => r.json()).then(res => {
-        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka för validering'; return; }
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> SKICKA'; return; }
         document.getElementById('gsForm').style.display = 'none';
         markenRenderQr(document.getElementById('gsResult'), res, 'guldserieModal');
         loadMySeries(markenTabYear);
