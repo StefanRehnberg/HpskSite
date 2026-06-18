@@ -1,0 +1,126 @@
+@using HpskSite.Models
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var denied = ViewBag.Denied == true;
+    var course = ViewBag.Course as Course;
+    var module = ViewBag.Module as CourseModule;
+    var prev = ViewBag.PrevModule as CourseModule;
+    var next = ViewBag.NextModule as CourseModule;
+    var moduleNumber = ViewBag.ModuleNumber as int? ?? 0;
+    var moduleTotal = ViewBag.ModuleTotal as int? ?? 0;
+    ViewBag.Title = module != null ? module.Title : "Utbildning";
+    var contentUrl = (course != null && module != null) ? $"/utbildning/{course.CourseKey}/{module.Slug}/innehall" : "";
+}
+
+<div class="container-fluid py-3">
+    @if (denied || course == null || module == null)
+    {
+        <div class="container">
+            <div class="alert alert-warning mt-3">
+                <i class="bi bi-lock me-2"></i>Du har inte behörighet att se det här kursmaterialet.
+                <a href="/utbildning" class="alert-link">Tillbaka till Utbildning</a>.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+            <nav aria-label="breadcrumb" class="mb-0">
+                <ol class="breadcrumb mb-0">
+                    <li class="breadcrumb-item"><a href="/utbildning">Utbildning</a></li>
+                    <li class="breadcrumb-item"><a href="/utbildning/@course.CourseKey">@course.Title</a></li>
+                    <li class="breadcrumb-item active">@module.Title</li>
+                </ol>
+            </nav>
+            <div class="d-flex gap-2">
+                @if (!string.IsNullOrEmpty(module.VideoUrl))
+                {
+                    <a href="@module.VideoUrl" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-camera-video me-1"></i>Se videolektion
+                    </a>
+                }
+                <button type="button" class="btn btn-primary btn-sm" onclick="utbPresent()">
+                    <i class="bi bi-easel me-1"></i>Presentationsläge
+                </button>
+            </div>
+        </div>
+
+        <div id="lessonFrameWrap" style="border:1px solid var(--bs-border-color); border-radius:.5rem; overflow:hidden;">
+            <iframe id="lessonFrame" src="@contentUrl" title="@module.Title"
+                    style="display:block; width:100%; height:82vh; border:0;"></iframe>
+        </div>
+
+        <!-- Chapter navigation -->
+        <div class="d-flex align-items-center justify-content-between gap-2 mt-3">
+            <div style="flex:1 1 0; min-width:0;">
+                @if (prev != null)
+                {
+                    <a href="/utbildning/@course.CourseKey/@prev.Slug" class="btn btn-outline-secondary text-truncate mw-100">
+                        <i class="bi bi-arrow-left me-1"></i><span class="d-none d-sm-inline">Föregående: </span>@prev.Title
+                    </a>
+                }
+            </div>
+            <div class="text-body-secondary small text-center" style="flex:0 0 auto;">
+                @if (moduleTotal > 0)
+                {
+                    <text>Kapitel @moduleNumber av @moduleTotal</text>
+                }
+            </div>
+            <div class="text-end" style="flex:1 1 0; min-width:0;">
+                @if (next != null)
+                {
+                    <a href="/utbildning/@course.CourseKey/@next.Slug" class="btn btn-primary text-truncate mw-100">
+                        <span class="d-none d-sm-inline">Nästa: </span>@next.Title<i class="bi bi-arrow-right ms-1"></i>
+                    </a>
+                }
+                else
+                {
+                    <a href="/utbildning/@course.CourseKey" class="btn btn-outline-success">
+                        <i class="bi bi-check2-circle me-1"></i>Avsluta – tillbaka till kursen
+                    </a>
+                }
+            </div>
+        </div>
+
+        <p class="text-body-secondary small mt-2 mb-0">
+            <i class="bi bi-info-circle me-1"></i><strong>Presentationsläge</strong> visar lektionen i helskärm för en grupp
+            (piltangenterna bläddrar, Esc avslutar).
+        </p>
+    }
+</div>
+
+<script>
+var _utbPresentObs = null;
+function utbExitFullscreen() {
+    if (document.fullscreenElement && document.exitFullscreen) { try { document.exitFullscreen(); } catch (e) {} }
+}
+function utbPresent() {
+    var f = document.getElementById('lessonFrame');
+    if (!f) return;
+    var doc = null;
+    // Enter the lesson's built-in present mode first (reliable), then go fullscreen (best-effort).
+    try {
+        doc = f.contentDocument;
+        f.contentWindow.focus();
+        if (f.contentWindow.__goto) f.contentWindow.__goto(0);
+    } catch (e) { /* same-origin expected */ }
+
+    // The lesson's "Avsluta" button / Esc removes its 'present' class but can't exit the
+    // fullscreen the parent requested on the iframe — so exit it here when present mode ends.
+    if (doc && doc.body && 'MutationObserver' in window) {
+        if (_utbPresentObs) _utbPresentObs.disconnect();
+        _utbPresentObs = new MutationObserver(function () {
+            if (!doc.body.classList.contains('present')) {
+                utbExitFullscreen();
+                _utbPresentObs.disconnect();
+                _utbPresentObs = null;
+            }
+        });
+        _utbPresentObs.observe(doc.body, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    var req = f.requestFullscreen || f.webkitRequestFullscreen || f.msRequestFullscreen;
+    if (req) { try { var p = req.call(f); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
+}
+</script>

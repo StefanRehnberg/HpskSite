@@ -107,6 +107,32 @@ namespace HpskSite.Services
             return groups;
         }
 
+        /// <summary>
+        /// All member ids that share an active training group with the given member
+        /// (includes the member themself). Used to scope the Skyttetrappan view to "my group".
+        /// </summary>
+        public List<int> GetGroupPeerMemberIds(int memberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return db.Fetch<int>(
+                @"SELECT DISTINCT gm2.MemberId
+                  FROM TrainingGroupMembers gm1
+                  INNER JOIN TrainingGroupMembers gm2 ON gm1.TrainingGroupId = gm2.TrainingGroupId
+                  INNER JOIN TrainingGroups g ON g.Id = gm1.TrainingGroupId
+                  WHERE gm1.MemberId = @0 AND gm1.IsActive = 1 AND gm2.IsActive = 1 AND g.IsActive = 1",
+                memberId);
+        }
+
+        /// <summary>Active 'Member'-role member ids in a training group.</summary>
+        public List<int> GetGroupMemberIds(int trainingGroupId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return db.Fetch<int>(
+                @"SELECT MemberId FROM TrainingGroupMembers
+                  WHERE TrainingGroupId = @0 AND IsActive = 1 AND Role = 'Member'",
+                trainingGroupId);
+        }
+
         public TrainingGroup? GetTrainingGroup(int trainingGroupId)
         {
             using var db = _databaseFactory.CreateDatabase();

@@ -1,0 +1,63 @@
+@using HpskSite.Models
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = null;
+    var course = ViewBag.Course as Course;
+    var version = ViewBag.Version as CourseTestVersion;
+    var questions = ViewBag.Questions as List<CourseTestQuestion> ?? new List<CourseTestQuestion>();
+    var letters = new[] { "A", "B", "C", "D", "E", "F" };
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Prov – @(course?.Title)</title>
+    <style>
+        body { font-family: Georgia, "Times New Roman", serif; color: #000; background: #fff; margin: 2rem; line-height: 1.5; }
+        h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+        .meta { color: #333; margin-bottom: 1rem; font-size: .95rem; }
+        .namerow { margin: 1rem 0 1.5rem; }
+        .q { margin: 0 0 1rem; page-break-inside: avoid; }
+        .q .opt { margin-left: 1.5rem; }
+        .box { display: inline-block; width: 1rem; height: 1rem; border: 1px solid #000; margin-right: .5rem; vertical-align: middle; }
+        .facit { margin-top: 2rem; border-top: 2px solid #000; padding-top: .5rem; page-break-before: always; }
+        .noprint { margin-bottom: 1rem; }
+        @@media print { .noprint { display: none; } body { margin: 1cm; } }
+    </style>
+</head>
+<body>
+    <div class="noprint">
+        <button onclick="window.print()">Skriv ut</button>
+    </div>
+
+    <h1>@course?.Title – prov</h1>
+    <div class="meta">
+        Version: @version?.VersionLabel.
+        @(course?.TestPassMark.HasValue == true ? $"Godkänt: minst {course.TestPassMark} rätt av {questions.Count}." : $"{questions.Count} frågor.")
+    </div>
+    <div class="namerow">Namn: __________________________________   Datum: ____________</div>
+
+    @for (var qi = 0; qi < questions.Count; qi++)
+    {
+        var q = questions[qi];
+        <div class="q">
+            <div><strong>@(qi + 1).</strong> @q.Q</div>
+            @for (var oi = 0; oi < q.Options.Count; oi++)
+            {
+                <div class="opt"><span class="box"></span>@(oi < letters.Length ? letters[oi] + ". " : "")@q.Options[oi]</div>
+            }
+        </div>
+    }
+
+    <div class="facit">
+        <h2 style="font-size:1.1rem;">Facit (för rättande instruktör)</h2>
+        @for (var qi = 0; qi < questions.Count; qi++)
+        {
+            var q = questions[qi];
+            var ci = q.Correct;
+            <div>@(qi + 1). @(ci >= 0 && ci < letters.Length ? letters[ci] : ci.ToString())@(ci >= 0 && ci < q.Options.Count ? " – " + q.Options[ci] : "")</div>
+        }
+    </div>
+</body>
+</html>

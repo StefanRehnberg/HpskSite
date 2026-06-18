@@ -1,0 +1,171 @@
+@using HpskSite.Models
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Utbildning – kursmaterial";
+    var isLoggedIn = ViewBag.IsLoggedIn == true;
+    var isAdmin = ViewBag.IsAdmin == true;
+    var hasAnyUnlocked = ViewBag.HasAnyUnlocked == true;
+    var courses = ViewBag.Courses as List<Course> ?? new List<Course>();
+    var unlocked = ViewBag.Unlocked as Dictionary<int, bool> ?? new Dictionary<int, bool>();
+    var moduleCounts = ViewBag.ModuleCounts as Dictionary<int, int> ?? new Dictionary<int, int>();
+    var publishedCounts = ViewBag.PublishedCounts as Dictionary<int, int> ?? new Dictionary<int, int>();
+    var pendingTests = ViewBag.PendingTests as List<Course> ?? new List<Course>();
+}
+
+<style>
+    /* Hero is a dark banner in both themes (white text on navy) — theme-independent by design. */
+    .utb-hero { background: linear-gradient(135deg, #0f2540, #16365c); color: #fff; border-radius: 1rem; padding: 2.25rem 2rem; }
+    .utb-hero h1 { color: #fff; }
+    .utb-hero .lead { opacity: .92; }
+    .utb-card { height: 100%; transition: transform .15s, box-shadow .15s; }
+    .utb-card.unlocked:hover { transform: translateY(-3px); box-shadow: 0 .75rem 1.5rem rgba(0,0,0,.18); }
+    .utb-card.locked, .utb-card.kommande { position: relative; }
+    /* Theme-aware translucent wash (adapts via --bs-body-bg-rgb) — never a hardcoded light colour. */
+    .utb-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        background: rgba(var(--bs-body-bg-rgb), .45); border-radius: inherit; }
+    .utb-overlay i { font-size: 1.9rem; color: var(--bs-secondary-color); }
+    .utb-card.locked .card-body, .utb-card.kommande .card-body { opacity: .85; }
+</style>
+
+<div class="container py-4">
+    <div class="utb-hero mb-4">
+        <h1 class="mb-2"><i class="bi bi-mortarboard me-2"></i>Utbildning</h1>
+        <p class="lead mb-0">
+            Allt kursmaterial för pistolskyttets utbildningar – i ett modernt, interaktivt format.
+            Bemötande, ledarskap, säkerhet, vapenlära, skjutteknik och mer, byggt för både klassrum och eget bruk.
+        </p>
+    </div>
+
+    @if (!isLoggedIn)
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-lock me-2"></i>Logga in för att se utbildningsutbudet.
+            <a href="/login-&-register/?tab=login" class="alert-link">Logga in</a>.
+        </div>
+    }
+    else
+    {
+        @foreach (var pt in pendingTests)
+        {
+            <div class="alert alert-success d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span><i class="bi bi-pencil-square me-2"></i>Du är inbjuden att göra provet för <strong>@pt.Title</strong>.</span>
+                <a href="/utbildning/prov/@pt.CourseKey" class="btn btn-success btn-sm">Gör provet</a>
+            </div>
+        }
+
+        @if (!hasAnyUnlocked)
+        {
+            <div class="alert alert-info d-flex align-items-start gap-2">
+                <i class="bi bi-stars fs-5"></i>
+                <div>
+                    <strong>Hela utbildningsmaterialet finns här – i modern form.</strong><br>
+                    Som utbildare (t.ex. Föreningsinstruktör eller Kretsinstruktör) får du tillgång till materialet
+                    för de kurser du håller. Nedan ser du bredden på det som finns och är på väg.
+                </div>
+            </div>
+        }
+
+        @if (courses.Count == 0)
+        {
+            <div class="alert alert-light border">Inga kurser är publicerade ännu.</div>
+        }
+        else
+        {
+            <div class="row g-3">
+                @foreach (var c in courses)
+                {
+                    var isUnlocked = unlocked.ContainsKey(c.Id) && unlocked[c.Id];
+                    var total = moduleCounts.ContainsKey(c.Id) ? moduleCounts[c.Id] : 0;
+                    var published = publishedCounts.ContainsKey(c.Id) ? publishedCounts[c.Id] : 0;
+                    // Admins can open unpublished modules, so for them any module counts as "material";
+                    // educators only see sakgranskad (published) modules.
+                    var viewerCount = isAdmin ? total : published;
+                    var state = isUnlocked
+                        ? (viewerCount > 0 ? "open" : "kommande")
+                        : (published > 0 ? "locked" : "kommande");
+
+                    <div class="col-md-6 col-lg-4">
+                        @if (state == "open")
+                        {
+                            <a href="/utbildning/@c.CourseKey" class="text-decoration-none">
+                                <div class="card utb-card unlocked shadow-sm">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start">
+                                            <h5 class="card-title text-body mb-1">@c.Title</h5>
+                                            <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle"><i class="bi bi-unlock me-1"></i>Tillgänglig</span>
+                                        </div>
+                                        @if (!c.IsPublished)
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary-emphasis mb-2">Utkast</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(c.TargetCertDisplay))
+                                        {
+                                            <div class="text-body-secondary small mb-2">Leder till: @c.TargetCertDisplay</div>
+                                        }
+                                        @if (!string.IsNullOrEmpty(c.Description))
+                                        {
+                                            <p class="card-text text-body-secondary small">@c.Description</p>
+                                        }
+                                        <div class="mt-2"><span class="badge bg-secondary-subtle text-secondary-emphasis">@viewerCount moduler</span></div>
+                                    </div>
+                                </div>
+                            </a>
+                        }
+                        else
+                        {
+                            <div class="card utb-card @state shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <h5 class="card-title text-body mb-1">@c.Title</h5>
+                                        @if (state == "kommande")
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle"><i class="bi bi-hourglass-split me-1"></i>Kommande</span>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrEmpty(c.TargetCertDisplay))
+                                    {
+                                        <div class="text-body-secondary small mb-2">Leder till: @c.TargetCertDisplay</div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(c.Description))
+                                    {
+                                        <p class="card-text text-body-secondary small">@c.Description</p>
+                                    }
+                                    <div class="mt-2">
+                                        @if (state == "kommande")
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary-emphasis">@(total > 0 ? $"{total} moduler planerade" : "Material på väg")</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary-emphasis">@total moduler</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(c.EducatorCertDisplay))
+                                        {
+                                            <span class="badge bg-secondary-subtle text-body-secondary">För @c.EducatorCertDisplay</span>
+                                        }
+                                    </div>
+                                    @if (isUnlocked && c.HasTest)
+                                    {
+                                        <a href="/utbildning/prov-admin/@c.CourseKey" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-clipboard-check me-1"></i>Hantera prov</a>
+                                    }
+                                </div>
+                                @if (state == "locked")
+                                {
+                                    <div class="utb-overlay"><i class="bi bi-lock-fill" title="Tillgängligt för utbildare"></i></div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (!hasAnyUnlocked)
+            {
+                <div class="text-center text-body-secondary mt-4">
+                    <i class="bi bi-camera-video me-1"></i><em>Demovideo som visar materialet kommer snart.</em>
+                </div>
+            }
+        }
+    }
+</div>

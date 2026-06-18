@@ -1,0 +1,504 @@
+@using HpskSite.Models
+@{
+    // Site-admin course catalog management (the "Utbildning" admin tab).
+    // CRUD over Courses + CourseModules + CoursePrerequisites via UtbildningAdminController.
+    var educatorOptions = new (string val, string label)[]
+    {
+        (CertificationTypes.Foreningsinstruktor, "Föreningsinstruktör"),
+        (CertificationTypes.Kretsinstruktor, "Kretsinstruktör"),
+        (CertificationTypes.Riksinstruktor, "Riksinstruktör"),
+        (CertificationTypes.Vapenkontrollant, "Vapenkontrollant"),
+        (CertificationTypes.Banlaggare, "Banläggare")
+    };
+}
+
+<div id="utbildningManagement">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0">Utbildning – kurser</h4>
+            <small class="text-muted">Materialet visas för den som <em>håller</em> kursen (utbildaren) + administratörer. Deltagare får aldrig tillgång till materialet.</small>
+        </div>
+        <button class="btn btn-success" onclick="utbShowCourseModal(0)"><i class="bi bi-plus-circle me-1"></i>Ny kurs</button>
+    </div>
+
+    <div id="utbCoursesList">
+        <div class="text-center py-4"><div class="spinner-border" role="status"></div><p class="mt-2">Laddar kurser...</p></div>
+    </div>
+</div>
+
+<!-- Course modal -->
+<div class="modal fade" id="utbCourseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="utbCourseModalTitle">Ny kurs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="utbCourseId" value="0">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Nyckel (slug) *</label>
+                        <input type="text" class="form-control" id="utbCourseKey" placeholder="foreningsinstruktor">
+                        <div class="form-text">Unik, små bokstäver. Används i URL:en /utbildning/&lt;nyckel&gt;.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Titel *</label>
+                        <input type="text" class="form-control" id="utbCourseTitle" placeholder="Föreningsinstruktör">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="utbCourseDescription" rows="2"></textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Leder till certifiering</label>
+                        <select class="form-select" id="utbTargetCertType">
+                            <option value="">(ingen)</option>
+                            <option value="Pistolskyttekort">Pistolskyttekortet</option>
+                            @foreach (var o in educatorOptions)
+                            {
+                                <option value="@o.val">@o.label</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Hålls av (utbildare som ser materialet)</label>
+                        <select class="form-select" id="utbEducatorCertType">
+                            <option value="">(endast administratörer)</option>
+                            @foreach (var o in educatorOptions)
+                            {
+                                <option value="@o.val">@o.label</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Sortering</label>
+                        <input type="number" class="form-control" id="utbCourseSortOrder" value="0">
+                    </div>
+                    <div class="col-md-8 d-flex align-items-end gap-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="utbCoursePublished">
+                            <label class="form-check-label" for="utbCoursePublished">Publicerad</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="utbCourseHasTest" onchange="utbToggleTestFields()">
+                            <label class="form-check-label" for="utbCourseHasTest">Har prov (Fas 2)</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6 utb-test-field" style="display:none;">
+                        <label class="form-label">Godkäntgräns (poäng)</label>
+                        <input type="number" class="form-control" id="utbTestPassMark">
+                    </div>
+                    <div class="col-md-6 utb-test-field" style="display:none;">
+                        <label class="form-label">Maxpoäng</label>
+                        <input type="number" class="form-control" id="utbTestMaxScore">
+                    </div>
+                </div>
+
+                <hr class="my-3">
+                <div id="utbPrereqSection">
+                    <h6 class="mb-2">Förkunskapskrav</h6>
+                    <p class="text-muted small mb-2">Spara kursen först för att lägga till förkunskapskrav (t.ex. märket Pistolskytte:Brons).</p>
+                    <div id="utbPrereqList"></div>
+                    <div class="row g-2 mt-1 utb-prereq-add" style="display:none;">
+                        <div class="col-md-4">
+                            <select class="form-select form-select-sm" id="utbPrereqType">
+                                <option value="Badge">Märke (Family:Level)</option>
+                                <option value="Certification">Certifiering</option>
+                                <option value="Course">Annan kurs (nyckel)</option>
+                                <option value="SkyttetrappanLevel">Skyttetrappan-nivå</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <input type="text" class="form-control form-control-sm" id="utbPrereqKey" placeholder="Pistolskytte:Brons">
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-sm btn-outline-primary w-100" onclick="utbAddPrereq()">Lägg till krav</button>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="my-3 utb-test-section" style="display:none;">
+                <div class="utb-test-section" style="display:none;">
+                    <h6 class="mb-2">Provversioner</h6>
+                    <p class="text-body-secondary small mb-2">Spara kursen först. Varje version är en variant av provet (2–3 rekommenderas). Frågor anges som JSON.</p>
+                    <div id="utbVersionList" class="mb-2"></div>
+                    <div class="row g-2 utb-version-add" style="display:none;">
+                        <input type="hidden" id="utbVersionId" value="0">
+                        <div class="col-md-5"><input type="text" class="form-control form-control-sm" id="utbVersionLabel" placeholder="Version A"></div>
+                        <div class="col-md-3 d-flex align-items-center">
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="utbVersionActive" checked><label class="form-check-label" for="utbVersionActive">Aktiv</label></div>
+                        </div>
+                        <div class="col-12">
+                            <textarea class="form-control form-control-sm font-monospace" id="utbVersionContent" rows="6" placeholder='{ "questions": [ { "q": "Fråga?", "options": ["A","B","C"], "correct": 0 } ] }'></textarea>
+                        </div>
+                        <div class="col-12 d-flex gap-2">
+                            <button class="btn btn-sm btn-primary" onclick="utbSaveVersion()">Spara version</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="utbResetVersionForm()">Rensa</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger me-auto" id="utbDeleteCourseBtn" style="display:none;" onclick="utbDeleteCourse()"><i class="bi bi-trash"></i> Ta bort</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="utbSaveCourse()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modules modal -->
+<div class="modal fade" id="utbModulesModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Moduler – <span id="utbModulesCourseTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="utbModulesCourseId" value="0">
+                <div id="utbModulesList" class="mb-3"></div>
+                <hr>
+                <h6 id="utbModuleFormTitle">Ny modul</h6>
+                <input type="hidden" id="utbModuleId" value="0">
+                <div class="row g-2">
+                    <div class="col-md-3"><label class="form-label">Slug *</label><input type="text" class="form-control form-control-sm" id="utbModuleSlug" placeholder="01-mota-nya-medlemmar"></div>
+                    <div class="col-md-4"><label class="form-label">Titel *</label><input type="text" class="form-control form-control-sm" id="utbModuleTitle"></div>
+                    <div class="col-md-5"><label class="form-label">Lektionsfil (sökväg under App_Data)</label><input type="text" class="form-control form-control-sm" id="utbModuleLessonPath" placeholder="utbildning/foreningsinstruktor/01-mota-nya-medlemmar/lektion.html"></div>
+                    <div class="col-md-6"><label class="form-label">Video-URL (valfritt)</label><input type="text" class="form-control form-control-sm" id="utbModuleVideoUrl"></div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <div class="form-check"><input class="form-check-input" type="checkbox" id="utbModulePublished"><label class="form-check-label" for="utbModulePublished">Publicerad (sakgranskad)</label></div>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end gap-2">
+                        <button class="btn btn-sm btn-primary" onclick="utbSaveModule()">Spara modul</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="utbResetModuleForm()">Rensa</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    let utbLoaded = false;
+    function token() { return document.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function esc(t) { const d = document.createElement('div'); d.textContent = (t == null ? '' : t); return d.innerHTML; }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const tab = document.getElementById('utbildning-tab');
+        if (tab) tab.addEventListener('shown.bs.tab', function () { if (!utbLoaded) { utbLoadCourses(); utbLoaded = true; } });
+    });
+
+    window.utbLoadCourses = function () {
+        const c = document.getElementById('utbCoursesList');
+        c.innerHTML = '<div class="text-center py-3"><div class="spinner-border"></div></div>';
+        fetch('/umbraco/surface/UtbildningAdmin/GetCourses')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) { c.innerHTML = '<div class="alert alert-danger">' + esc(d.message) + '</div>'; return; }
+                if (!d.courses.length) { c.innerHTML = '<div class="alert alert-info">Inga kurser ännu. Klicka "Ny kurs".</div>'; return; }
+                let h = '<div class="table-responsive"><table class="table table-striped align-middle"><thead><tr>' +
+                    '<th>Titel</th><th>Nyckel</th><th>Leder till</th><th>Hålls av</th><th>Moduler</th><th>Status</th><th class="text-end">Åtgärder</th></tr></thead><tbody>';
+                d.courses.forEach(function (c2) {
+                    h += '<tr>' +
+                        '<td><strong>' + esc(c2.title) + '</strong></td>' +
+                        '<td><code>' + esc(c2.courseKey) + '</code></td>' +
+                        '<td>' + esc(c2.targetCertType || '-') + '</td>' +
+                        '<td>' + esc(c2.educatorCertDisplay || 'Endast admin') + '</td>' +
+                        '<td>' + c2.publishedModuleCount + ' / ' + c2.moduleCount + '</td>' +
+                        '<td>' + (c2.isPublished ? '<span class="badge bg-success">Publicerad</span>' : '<span class="badge bg-secondary">Utkast</span>') + '</td>' +
+                        '<td class="text-end">' +
+                          '<button class="btn btn-sm btn-outline-primary me-1" onclick="utbShowModulesModal(' + c2.id + ',\'' + esc(c2.title).replace(/'/g, "\\'") + '\')"><i class="bi bi-list-ol"></i> Moduler</button>' +
+                          '<button class="btn btn-sm btn-warning me-1" onclick="utbShowCourseModal(' + c2.id + ')"><i class="bi bi-pencil"></i></button>' +
+                        '</td></tr>';
+                });
+                h += '</tbody></table></div>';
+                c.innerHTML = h;
+            })
+            .catch(e => { c.innerHTML = '<div class="alert alert-danger">Nätverksfel</div>'; });
+    };
+
+    window.utbToggleTestFields = function () {
+        const on = document.getElementById('utbCourseHasTest').checked;
+        document.querySelectorAll('.utb-test-field').forEach(el => el.style.display = on ? '' : 'none');
+        document.querySelectorAll('.utb-test-section').forEach(el => el.style.display = on ? '' : 'none');
+        const hasCourse = document.getElementById('utbCourseId').value !== '0';
+        document.querySelector('.utb-version-add').style.display = (on && hasCourse) ? 'flex' : 'none';
+        if (on && hasCourse) utbLoadVersions();
+    };
+
+    window.utbShowCourseModal = function (id) {
+        document.getElementById('utbCourseId').value = id;
+        document.getElementById('utbCourseModalTitle').textContent = id > 0 ? 'Redigera kurs' : 'Ny kurs';
+        document.getElementById('utbDeleteCourseBtn').style.display = id > 0 ? '' : 'none';
+        ['utbCourseKey', 'utbCourseTitle', 'utbCourseDescription', 'utbTestPassMark', 'utbTestMaxScore'].forEach(i => document.getElementById(i).value = '');
+        document.getElementById('utbTargetCertType').value = '';
+        document.getElementById('utbEducatorCertType').value = '';
+        document.getElementById('utbCourseSortOrder').value = '0';
+        document.getElementById('utbCoursePublished').checked = false;
+        document.getElementById('utbCourseHasTest').checked = false;
+        utbToggleTestFields();
+        document.getElementById('utbPrereqList').innerHTML = '';
+        document.querySelector('.utb-prereq-add').style.display = id > 0 ? 'flex' : 'none';
+        document.getElementById('utbVersionList').innerHTML = '';
+        utbResetVersionForm();
+
+        if (id > 0) {
+            fetch('/umbraco/surface/UtbildningAdmin/GetCourse?id=' + id).then(r => r.json()).then(d => {
+                if (!d.success) { alert(d.message); return; }
+                const c = d.course;
+                document.getElementById('utbCourseKey').value = c.courseKey;
+                document.getElementById('utbCourseTitle').value = c.title;
+                document.getElementById('utbCourseDescription').value = c.description || '';
+                document.getElementById('utbTargetCertType').value = c.targetCertType || '';
+                document.getElementById('utbEducatorCertType').value = c.educatorCertType || '';
+                document.getElementById('utbCourseSortOrder').value = c.sortOrder;
+                document.getElementById('utbCoursePublished').checked = c.isPublished;
+                document.getElementById('utbCourseHasTest').checked = c.hasTest;
+                document.getElementById('utbTestPassMark').value = c.testPassMark || '';
+                document.getElementById('utbTestMaxScore').value = c.testMaxScore || '';
+                utbToggleTestFields();
+                utbRenderPrereqs(d.prerequisites || []);
+            });
+        }
+        new bootstrap.Modal(document.getElementById('utbCourseModal')).show();
+    };
+
+    window.utbSaveCourse = function () {
+        const fd = new FormData();
+        fd.append('__RequestVerificationToken', token());
+        fd.append('id', document.getElementById('utbCourseId').value);
+        fd.append('courseKey', document.getElementById('utbCourseKey').value);
+        fd.append('title', document.getElementById('utbCourseTitle').value);
+        fd.append('description', document.getElementById('utbCourseDescription').value);
+        fd.append('targetCertType', document.getElementById('utbTargetCertType').value);
+        fd.append('educatorCertType', document.getElementById('utbEducatorCertType').value);
+        fd.append('isPublished', document.getElementById('utbCoursePublished').checked);
+        fd.append('sortOrder', document.getElementById('utbCourseSortOrder').value || '0');
+        fd.append('hasTest', document.getElementById('utbCourseHasTest').checked);
+        fd.append('testPassMark', document.getElementById('utbTestPassMark').value || '');
+        fd.append('testMaxScore', document.getElementById('utbTestMaxScore').value || '');
+        fetch('/umbraco/surface/UtbildningAdmin/SaveCourse', { method: 'POST', body: fd })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { alert('Fel: ' + d.message); return; }
+                document.getElementById('utbCourseId').value = d.id;
+                document.getElementById('utbDeleteCourseBtn').style.display = '';
+                document.querySelector('.utb-prereq-add').style.display = 'flex';
+                if (document.getElementById('utbCourseHasTest').checked) {
+                    document.querySelector('.utb-version-add').style.display = 'flex';
+                    utbLoadVersions();
+                }
+                utbLoadCourses();
+                alert('Sparat.');
+            }).catch(() => alert('Nätverksfel'));
+    };
+
+    window.utbDeleteCourse = function () {
+        const id = document.getElementById('utbCourseId').value;
+        if (!confirm('Ta bort kursen och alla dess moduler?')) return;
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('id', id);
+        fetch('/umbraco/surface/UtbildningAdmin/DeleteCourse', { method: 'POST', body: fd })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { alert('Fel: ' + d.message); return; }
+                bootstrap.Modal.getInstance(document.getElementById('utbCourseModal')).hide();
+                utbLoadCourses();
+            });
+    };
+
+    // ── Prerequisites ──
+    window.utbRenderPrereqs = function (list) {
+        const el = document.getElementById('utbPrereqList');
+        if (!list.length) { el.innerHTML = '<div class="text-muted small">Inga krav.</div>'; return; }
+        let h = '<ul class="list-group list-group-flush mb-2">';
+        list.forEach(p => {
+            h += '<li class="list-group-item d-flex justify-content-between align-items-center px-0 py-1">' +
+                '<span><span class="badge bg-secondary-subtle text-secondary-emphasis border me-2">' + esc(p.prereqType) + '</span><code>' + esc(p.prereqKey) + '</code></span>' +
+                '<button class="btn btn-sm btn-outline-danger" onclick="utbDeletePrereq(' + p.id + ')"><i class="bi bi-x"></i></button></li>';
+        });
+        h += '</ul>';
+        el.innerHTML = h;
+    };
+
+    window.utbAddPrereq = function () {
+        const courseId = document.getElementById('utbCourseId').value;
+        if (courseId === '0') { alert('Spara kursen först.'); return; }
+        const fd = new FormData();
+        fd.append('__RequestVerificationToken', token());
+        fd.append('courseId', courseId);
+        fd.append('prereqType', document.getElementById('utbPrereqType').value);
+        fd.append('prereqKey', document.getElementById('utbPrereqKey').value);
+        fetch('/umbraco/surface/UtbildningAdmin/AddPrerequisite', { method: 'POST', body: fd })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { alert(d.message); return; }
+                document.getElementById('utbPrereqKey').value = '';
+                fetch('/umbraco/surface/UtbildningAdmin/GetCourse?id=' + courseId).then(r => r.json()).then(d2 => utbRenderPrereqs(d2.prerequisites || []));
+            });
+    };
+
+    window.utbDeletePrereq = function (id) {
+        const courseId = document.getElementById('utbCourseId').value;
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('id', id);
+        fetch('/umbraco/surface/UtbildningAdmin/DeletePrerequisite', { method: 'POST', body: fd })
+            .then(r => r.json()).then(() => fetch('/umbraco/surface/UtbildningAdmin/GetCourse?id=' + courseId).then(r => r.json()).then(d2 => utbRenderPrereqs(d2.prerequisites || [])));
+    };
+
+    // ── Test versions ──
+    window.utbResetVersionForm = function () {
+        document.getElementById('utbVersionId').value = '0';
+        document.getElementById('utbVersionLabel').value = '';
+        document.getElementById('utbVersionActive').checked = true;
+        document.getElementById('utbVersionContent').value = '';
+    };
+
+    window.utbLoadVersions = function () {
+        const courseId = document.getElementById('utbCourseId').value;
+        if (courseId === '0') return;
+        fetch('/umbraco/surface/UtbildningAdmin/GetTestVersions?courseId=' + courseId).then(r => r.json()).then(d => {
+            const el = document.getElementById('utbVersionList');
+            if (!d.success) { el.innerHTML = ''; return; }
+            window._utbVersions = d.versions || [];
+            if (!d.versions.length) { el.innerHTML = '<div class="text-body-secondary small">Inga versioner ännu.</div>'; return; }
+            let h = '<ul class="list-group list-group-flush mb-2">';
+            d.versions.forEach(function (v, i) {
+                h += '<li class="list-group-item d-flex justify-content-between align-items-center px-0 py-1">' +
+                    '<span>' + esc(v.versionLabel) + (v.isActive ? '' : ' <span class="badge bg-secondary-subtle text-secondary-emphasis">inaktiv</span>') +
+                    ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' + v.questionCount + ' frågor</span></span>' +
+                    '<span><a class="btn btn-sm btn-outline-secondary me-1" target="_blank" title="Skriv ut papperprov" href="/utbildning/prov-utskrift/' + encodeURIComponent(document.getElementById('utbCourseKey').value) + '?v=' + v.id + '"><i class="bi bi-printer"></i></a>' +
+                    '<button class="btn btn-sm btn-warning me-1" onclick="utbEditVersion(' + i + ')"><i class="bi bi-pencil"></i></button>' +
+                    '<button class="btn btn-sm btn-outline-danger" onclick="utbDeleteVersion(' + v.id + ')"><i class="bi bi-x"></i></button></span></li>';
+            });
+            h += '</ul>';
+            el.innerHTML = h;
+        });
+    };
+
+    window.utbEditVersion = function (idx) {
+        const v = (window._utbVersions || [])[idx];
+        if (!v) return;
+        document.getElementById('utbVersionId').value = v.id;
+        document.getElementById('utbVersionLabel').value = v.versionLabel;
+        document.getElementById('utbVersionActive').checked = v.isActive;
+        document.getElementById('utbVersionContent').value = v.contentRef || '';
+    };
+
+    window.utbSaveVersion = function () {
+        const courseId = document.getElementById('utbCourseId').value;
+        if (courseId === '0') { alert('Spara kursen först.'); return; }
+        const fd = new FormData();
+        fd.append('__RequestVerificationToken', token());
+        fd.append('id', document.getElementById('utbVersionId').value);
+        fd.append('courseId', courseId);
+        fd.append('versionLabel', document.getElementById('utbVersionLabel').value);
+        fd.append('isActive', document.getElementById('utbVersionActive').checked);
+        fd.append('contentRef', document.getElementById('utbVersionContent').value);
+        fetch('/umbraco/surface/UtbildningAdmin/SaveTestVersion', { method: 'POST', body: fd })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { alert('Fel: ' + d.message); return; }
+                utbResetVersionForm(); utbLoadVersions();
+            }).catch(() => alert('Nätverksfel'));
+    };
+
+    window.utbDeleteVersion = function (id) {
+        if (!confirm('Ta bort provversionen?')) return;
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('id', id);
+        fetch('/umbraco/surface/UtbildningAdmin/DeleteTestVersion', { method: 'POST', body: fd })
+            .then(r => r.json()).then(() => utbLoadVersions());
+    };
+
+    // ── Modules ──
+    window.utbShowModulesModal = function (courseId, title) {
+        document.getElementById('utbModulesCourseId').value = courseId;
+        document.getElementById('utbModulesCourseTitle').textContent = title;
+        utbResetModuleForm();
+        utbLoadModules();
+        new bootstrap.Modal(document.getElementById('utbModulesModal')).show();
+    };
+
+    window.utbLoadModules = function () {
+        const courseId = document.getElementById('utbModulesCourseId').value;
+        const el = document.getElementById('utbModulesList');
+        fetch('/umbraco/surface/UtbildningAdmin/GetCourse?id=' + courseId).then(r => r.json()).then(d => {
+            const mods = d.modules || [];
+            if (!mods.length) { el.innerHTML = '<div class="text-muted">Inga moduler ännu.</div>'; return; }
+            let h = '<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr>' +
+                '<th style="width:90px">Ordning</th><th>Titel</th><th>Slug</th><th>Lektionsfil</th><th>Status</th><th class="text-end">Åtgärder</th></tr></thead><tbody>';
+            mods.forEach(function (m, idx) {
+                h += '<tr>' +
+                    '<td>' +
+                      '<button class="btn btn-sm btn-light" ' + (idx === 0 ? 'disabled' : '') + ' onclick="utbMoveModule(' + idx + ',-1)"><i class="bi bi-arrow-up"></i></button> ' +
+                      '<button class="btn btn-sm btn-light" ' + (idx === mods.length - 1 ? 'disabled' : '') + ' onclick="utbMoveModule(' + idx + ',1)"><i class="bi bi-arrow-down"></i></button>' +
+                    '</td>' +
+                    '<td>' + esc(m.title) + '</td>' +
+                    '<td><code>' + esc(m.slug) + '</code></td>' +
+                    '<td><small>' + esc(m.lessonPath || '-') + '</small></td>' +
+                    '<td>' + (m.isPublished ? '<span class="badge bg-success">Publ.</span>' : '<span class="badge bg-secondary">Utkast</span>') + '</td>' +
+                    '<td class="text-end">' +
+                      '<button class="btn btn-sm btn-warning me-1" onclick=\'utbEditModule(' + JSON.stringify(m) + ')\'><i class="bi bi-pencil"></i></button>' +
+                      '<button class="btn btn-sm btn-outline-danger" onclick="utbDeleteModule(' + m.id + ')"><i class="bi bi-trash"></i></button>' +
+                    '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            el.innerHTML = h;
+            window._utbModules = mods;
+        });
+    };
+
+    window.utbMoveModule = function (idx, dir) {
+        const mods = window._utbModules || [];
+        const j = idx + dir;
+        if (j < 0 || j >= mods.length) return;
+        const tmp = mods[idx]; mods[idx] = mods[j]; mods[j] = tmp;
+        const courseId = document.getElementById('utbModulesCourseId').value;
+        const fd = new FormData();
+        fd.append('__RequestVerificationToken', token());
+        fd.append('courseId', courseId);
+        mods.forEach(m => fd.append('moduleIds', m.id));
+        fetch('/umbraco/surface/UtbildningAdmin/ReorderModules', { method: 'POST', body: fd })
+            .then(r => r.json()).then(() => utbLoadModules());
+    };
+
+    window.utbResetModuleForm = function () {
+        document.getElementById('utbModuleId').value = '0';
+        document.getElementById('utbModuleFormTitle').textContent = 'Ny modul';
+        ['utbModuleSlug', 'utbModuleTitle', 'utbModuleLessonPath', 'utbModuleVideoUrl'].forEach(i => document.getElementById(i).value = '');
+        document.getElementById('utbModulePublished').checked = false;
+    };
+
+    window.utbEditModule = function (m) {
+        document.getElementById('utbModuleId').value = m.id;
+        document.getElementById('utbModuleFormTitle').textContent = 'Redigera modul';
+        document.getElementById('utbModuleSlug').value = m.slug;
+        document.getElementById('utbModuleTitle').value = m.title;
+        document.getElementById('utbModuleLessonPath').value = m.lessonPath || '';
+        document.getElementById('utbModuleVideoUrl').value = m.videoUrl || '';
+        document.getElementById('utbModulePublished').checked = m.isPublished;
+    };
+
+    window.utbSaveModule = function () {
+        const fd = new FormData();
+        fd.append('__RequestVerificationToken', token());
+        fd.append('id', document.getElementById('utbModuleId').value);
+        fd.append('courseId', document.getElementById('utbModulesCourseId').value);
+        fd.append('slug', document.getElementById('utbModuleSlug').value);
+        fd.append('title', document.getElementById('utbModuleTitle').value);
+        fd.append('lessonPath', document.getElementById('utbModuleLessonPath').value);
+        fd.append('videoUrl', document.getElementById('utbModuleVideoUrl').value);
+        fd.append('sortOrder', '0');
+        fd.append('isPublished', document.getElementById('utbModulePublished').checked);
+        fetch('/umbraco/surface/UtbildningAdmin/SaveModule', { method: 'POST', body: fd })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { alert('Fel: ' + d.message); return; }
+                utbResetModuleForm(); utbLoadModules(); utbLoadCourses();
+            }).catch(() => alert('Nätverksfel'));
+    };
+
+    window.utbDeleteModule = function (id) {
+        if (!confirm('Ta bort modulen?')) return;
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('id', id);
+        fetch('/umbraco/surface/UtbildningAdmin/DeleteModule', { method: 'POST', body: fd })
+            .then(r => r.json()).then(() => { utbLoadModules(); utbLoadCourses(); });
+    };
+})();
+</script>

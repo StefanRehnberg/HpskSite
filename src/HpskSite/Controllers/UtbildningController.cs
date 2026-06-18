@@ -1,0 +1,300 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Umbraco.Cms.Core.Security;
+using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Core.Web;
+using Umbraco.Extensions;
+using HpskSite.Models;
+using HpskSite.Services;
+
+namespace HpskSite.Controllers
+{
+    /// <summary>
+    /// The educator-facing Utbildning library at /utbildning. Course material (lessons,
+    /// slides, videos) is visible ONLY to holders of a course's EducatorCertType + admins —
+    /// participants never reach it (their only touchpoint is the test, Phase 2).
+    /// Routed MVC Controller (parameterised URLs) — passes the site root node as the Model so
+    /// Master.cshtml renders the chrome. Same approach as SightPictureController. No Umbraco node.
+    /// See COURSE_SYSTEM.md.
+    /// </summary>
+    [Route("utbildning")]
+    public class UtbildningController : Controller
+    {
+        private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly CourseService _courseService;
+        private readonly CourseTestService _testService;
+        private readonly CertificationService _certificationService;
+        private readonly AdminAuthorizationService _authorizationService;
+        private readonly IMemberManager _memberManager;
+        private readonly IMemberService _memberService;
+        private readonly IWebHostEnvironment _env;
+        private readonly ILogger<UtbildningController> _logger;
+
+        public UtbildningController(
+            IUmbracoContextAccessor umbracoContextAccessor,
+            CourseService courseService,
+            CourseTestService testService,
+            CertificationService certificationService,
+            AdminAuthorizationService authorizationService,
+            IMemberManager memberManager,
+            IMemberService memberService,
+            IWebHostEnvironment env,
+            ILogger<UtbildningController> logger)
+        {
+            _umbracoContextAccessor = umbracoContextAccessor;
+            _courseService = courseService;
+            _testService = testService;
+            _certificationService = certificationService;
+            _authorizationService = authorizationService;
+            _memberManager = memberManager;
+            _memberService = memberService;
+            _env = env;
+            _logger = logger;
+        }
+
+        // ── Routed pages ───────────────────────────────────────────────────────
+
+        [HttpGet("")]
+        public async Task<IActionResult> Index()
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var isAdmin = await IsAdminAsync();
+            ViewBag.IsLoggedIn = memberId > 0;
+            ViewBag.IsAdmin = isAdmin;
+
+            // Showcase: any logged-in member sees the published catalog. Educators see THEIR
+            // courses unlocked (clickable into the material); everyone else sees a locked teaser
+            // of the breadth of modernised material. Admins also see unpublished (draft) courses.
+            var all = await _courseService.GetAllCoursesAsync();
+            var courses = all.Where(c => c.IsPublished || isAdmin).ToList();
+
+            var unlocked = new Dictionary<int, bool>();
+            var moduleCounts = new Dictionary<int, int>();
+            var publishedCounts = new Dictionary<int, int>();
+            foreach (var c in courses)
+            {
+                unlocked[c.Id] = memberId > 0 && await CanAccessCourseAsync(c, memberId);
+                var mods = await _courseService.GetModulesAsync(c.Id);
+                moduleCounts[c.Id] = mods.Count;
+                publishedCounts[c.Id] = mods.Count(m => m.IsPublished);
+            }
+
+            // Courses where this member has been enabled to take the test (the one participant touchpoint).
+            var pendingTests = new List<Course>();
+            if (memberId > 0)
+                foreach (var c in all)
+                    if (c.HasTest && await _testService.GetActiveAccessAsync(memberId, c.Id) != null)
+                        pendingTests.Add(c);
+
+            ViewBag.Courses = courses;
+            ViewBag.Unlocked = unlocked;
+            ViewBag.ModuleCounts = moduleCounts;        // total (for "X moduler" / "Kommande")
+            ViewBag.PublishedCounts = publishedCounts;  // published modules → material is ready
+            ViewBag.HasAnyUnlocked = courses.Any(c => unlocked[c.Id] && publishedCounts[c.Id] > 0);
+            ViewBag.PendingTests = pendingTests;
+            return View("Utbildning", root);
+        }
+
+        [HttpGet("{courseKey}")]
+        public async Task<IActionResult> CourseOverview(string courseKey)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var isAdmin = await IsAdminAsync();
+            ViewBag.IsLoggedIn = memberId > 0;
+            ViewBag.IsAdmin = isAdmin;
+
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            if (course == null || (memberId > 0 && !await CanAccessCourseAsync(course, memberId)) || memberId == 0)
+            {
+                ViewBag.Denied = true;
+                ViewBag.Course = course;
+                return View("UtbildningCourse", root);
+            }
+
+            var modules = await _courseService.GetModulesAsync(course.Id);
+            if (!isAdmin) modules = modules.Where(m => m.IsPublished).ToList();
+            ViewBag.Course = course;
+            ViewBag.Modules = modules;
+            return View("UtbildningCourse", root);
+        }
+
+        [HttpGet("{courseKey}/{moduleSlug}")]
+        public async Task<IActionResult> Module(string courseKey, string moduleSlug)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var isAdmin = await IsAdminAsync();
+            ViewBag.IsLoggedIn = memberId > 0;
+            ViewBag.IsAdmin = isAdmin;
+
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+
+            // The set of modules this viewer may navigate (published only, unless admin), in order.
+            var visibleModules = new List<CourseModule>();
+            if (course != null)
+            {
+                var mods = await _courseService.GetModulesAsync(course.Id);
+                visibleModules = isAdmin ? mods : mods.Where(m => m.IsPublished).ToList();
+            }
+            var module = visibleModules.FirstOrDefault(m => string.Equals(m.Slug, moduleSlug, StringComparison.OrdinalIgnoreCase));
+
+            if (course == null || module == null || memberId == 0 || !await CanAccessCourseAsync(course, memberId))
+            {
+                ViewBag.Denied = true;
+                ViewBag.Course = course;
+                return View("UtbildningModule", root);
+            }
+
+            // Prev/next within the visible, ordered list — for in-place chapter navigation.
+            var idx = visibleModules.FindIndex(m => m.Id == module.Id);
+            ViewBag.PrevModule = idx > 0 ? visibleModules[idx - 1] : null;
+            ViewBag.NextModule = (idx >= 0 && idx < visibleModules.Count - 1) ? visibleModules[idx + 1] : null;
+            ViewBag.ModuleNumber = idx + 1;
+            ViewBag.ModuleTotal = visibleModules.Count;
+
+            ViewBag.Course = course;
+            ViewBag.Module = module;
+            return View("UtbildningModule", root);
+        }
+
+        /// <summary>Raw self-contained lesson HTML for the iframe. Auth-gated; no chrome.</summary>
+        [HttpGet("{courseKey}/{moduleSlug}/innehall")]
+        public async Task<IActionResult> ModuleContent(string courseKey, string moduleSlug)
+        {
+            var memberId = await GetCurrentMemberIdAsync();
+            if (memberId == 0) return Unauthorized();
+
+            var isAdmin = await IsAdminAsync();
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            var module = course == null ? null : (await _courseService.GetModulesAsync(course.Id))
+                .FirstOrDefault(m => string.Equals(m.Slug, moduleSlug, StringComparison.OrdinalIgnoreCase));
+
+            if (course == null || module == null || string.IsNullOrEmpty(module.LessonPath) ||
+                !await CanAccessCourseAsync(course, memberId) ||
+                (!module.IsPublished && !isAdmin))
+                return Forbid();
+
+            // Lesson HTML lives OUTSIDE the web root, under App_Data, so it cannot be fetched as a
+            // static file (which would bypass this gate AND expose the proprietary content).
+            // LessonPath stays relative (e.g. "utbildning/foreningsinstruktor/.../lektion.html").
+            var appData = Path.GetFullPath(Path.Combine(_env.ContentRootPath, "App_Data"));
+            var relative = module.LessonPath!.Replace('\\', '/').TrimStart('/');
+            var fullPath = Path.GetFullPath(Path.Combine(appData, relative));
+            var utbildningRoot = Path.GetFullPath(Path.Combine(appData, "utbildning"));
+            if (!fullPath.StartsWith(utbildningRoot, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(fullPath))
+                return NotFound();
+
+            var html = await System.IO.File.ReadAllTextAsync(fullPath);
+            return Content(html, "text/html");
+        }
+
+        /// <summary>The online test page — only for a member who has been enabled to take it.</summary>
+        [HttpGet("prov/{courseKey}")]
+        public async Task<IActionResult> ProvPage(string courseKey)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            ViewBag.Course = course;
+
+            if (memberId == 0 || course == null || !course.HasTest ||
+                await _testService.GetActiveAccessAsync(memberId, course.Id) == null)
+            {
+                ViewBag.Denied = true;
+                return View("UtbildningProv", root);
+            }
+
+            var version = await _testService.PickVersionForMemberAsync(memberId, course.Id);
+            if (version == null)
+            {
+                ViewBag.NoTest = true;
+                return View("UtbildningProv", root);
+            }
+
+            ViewBag.Version = version;
+            ViewBag.Questions = CourseTestService.ParseContent(version.ContentRef).Questions; // Correct never rendered
+            ViewBag.PassMark = course.TestPassMark;
+            return View("UtbildningProv", root);
+        }
+
+        /// <summary>Trainer cockpit for a course's test — enable access + record results per participant.</summary>
+        [HttpGet("prov-admin/{courseKey}")]
+        public async Task<IActionResult> ProvAdminPage(string courseKey)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            ViewBag.Course = course;
+
+            if (memberId == 0 || course == null || !course.HasTest || !await CanAccessCourseAsync(course, memberId))
+                ViewBag.Denied = true;
+
+            return View("UtbildningProvAdmin", root);
+        }
+
+        /// <summary>Printable paper version of a test (questions + answer key), for the grader.</summary>
+        [HttpGet("prov-utskrift/{courseKey}")]
+        public async Task<IActionResult> PrintTest(string courseKey, int v)
+        {
+            var root = GetRoot();
+            if (root == null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            var memberId = await GetCurrentMemberIdAsync();
+            var course = await _courseService.GetCourseByKeyAsync(courseKey);
+            if (memberId == 0 || course == null || !course.HasTest || !await CanAccessCourseAsync(course, memberId))
+                return Forbid();
+
+            var version = await _testService.GetVersionAsync(v);
+            if (version == null || version.CourseId != course.Id) return NotFound();
+
+            ViewBag.Course = course;
+            ViewBag.Version = version;
+            ViewBag.Questions = CourseTestService.ParseContent(version.ContentRef).Questions;
+            return View("UtbildningProvUtskrift", root);
+        }
+
+        // ── Helpers ──────────────────────────────────────────────────────────
+
+        private Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent? GetRoot()
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return null;
+            return ctx.Content.GetAtRoot().FirstOrDefault();
+        }
+
+        private async Task<int> GetCurrentMemberIdAsync()
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return 0;
+            var member = _memberService.GetByEmail(currentMember.Email ?? "");
+            return member?.Id ?? 0;
+        }
+
+        private async Task<bool> IsAdminAsync()
+        {
+            if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
+            return (await _authorizationService.GetManagedRegions()).Any();
+        }
+
+        /// <summary>Material visibility: admins, or holders of the course's EducatorCertType.</summary>
+        private async Task<bool> CanAccessCourseAsync(Course course, int memberId)
+        {
+            if (await IsAdminAsync()) return true;
+            if (string.IsNullOrEmpty(course.EducatorCertType)) return false;
+            return await _certificationService.HasActiveCertAsync(memberId, course.EducatorCertType);
+        }
+    }
+}
