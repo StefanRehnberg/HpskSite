@@ -265,13 +265,19 @@
     };
 
     window.utbAddReviewer = function (memberId) {
-        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('memberId', memberId);
+        const sendEmail = confirm('Medlemmen läggs till som granskare med full åtkomst till allt kursmaterial.\n\nVill du även skicka ett informationsmejl till medlemmen med en länk till Utbildning?\n\nOK = lägg till och skicka mejl\nAvbryt = lägg till utan mejl');
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token());
+        fd.append('memberId', memberId); fd.append('sendEmail', sendEmail);
         fetch('/umbraco/surface/UtbildningAdmin/AddReviewer', { method: 'POST', body: fd })
             .then(r => r.json())
             .then(d => {
                 if (!d.success) { alert(d.message || 'Kunde inte lägga till.'); return; }
                 const inp = document.getElementById('utbReviewerSearch'); if (inp) inp.value = '';
                 const res = document.getElementById('utbReviewerResults'); if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+                if (sendEmail && !d.emailSent) {
+                    alert(d.hasEmail ? 'Tillagd, men mejlet kunde inte skickas just nu.'
+                                     : 'Tillagd. Inget mejl skickades – medlemmen saknar e-postadress.');
+                }
                 utbLoadReviewers();
             })
             .catch(() => alert('Nätverksfel'));

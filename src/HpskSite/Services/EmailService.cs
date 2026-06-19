@@ -718,6 +718,61 @@ namespace HpskSite.Services
             await SendEmailAsync(toEmail, subject, body);
         }
 
+        /// <summary>Notify a member that a site admin has granted them full access to ALL course
+        /// material (reviewer) — for proofreading/verification. Best-effort; no-op without an email.</summary>
+        public async Task SendCourseReviewerGrantedAsync(string toEmail, string toName, string? grantedByName = null)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("SendCourseReviewerGrantedAsync skipped — no email address for {Name}", toName);
+                return;
+            }
+
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var url = $"{siteUrl}/utbildning";
+            var subject = "Du har fått tillgång till allt kursmaterial på pistol.nu";
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeBy = string.IsNullOrWhiteSpace(grantedByName)
+                ? ""
+                : $" av <strong>{System.Web.HttpUtility.HtmlEncode(grantedByName)}</strong>";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .button {{
+            display: inline-block;
+            background-color: #198754;
+            color: white !important;
+            padding: 14px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 16px;
+        }}
+        .button:hover {{ background-color: #146c43; }}
+        .notice {{ color: #666; font-size: 13px; margin-top: 10px; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p>Du har fått <strong>granskaråtkomst</strong> till utbildningsmaterialet på pistol.nu{safeBy}.</p>
+    <p>Det innebär att du nu kan se <strong>allt kursmaterial i alla kurser</strong> – samtliga moduler, även de som ännu inte är publicerade – så att du kan läsa och granska dem.</p>
+    <p style=""text-align: center; margin: 30px 0;"">
+        <a href=""{url}"" class=""button"">Öppna Utbildning</a>
+    </p>
+    <p class=""notice"">
+        Materialet är upphovsrättsskyddat och avsett för instruktörer och granskare – sprid det inte vidare. Har du synpunkter på innehållet, hör gärna av dig till den som gav dig åtkomsten.
+    </p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
         /// <summary>
         /// Notify a regional admin that a club has requested a certification for a member whose
         /// issuing instructor is not on pistol.nu. The approver verifies the candidate against
