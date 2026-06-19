@@ -155,5 +155,46 @@ namespace HpskSite.Services
             using var db = _databaseFactory.CreateDatabase();
             return await db.ExecuteAsync("DELETE FROM CoursePrerequisites WHERE Id = @0", id) > 0;
         }
+
+        // ── Reviewers (site-admin-granted full material access) ─────────────────
+
+        public async Task<List<CourseReviewer>> GetReviewersAsync()
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<CourseReviewer>("ORDER BY GrantedAt DESC");
+        }
+
+        /// <summary>True if this member has been granted full course-material access.</summary>
+        public async Task<bool> IsReviewerAsync(int memberId)
+        {
+            if (memberId <= 0) return false;
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM CourseReviewers WHERE MemberId = @0", memberId) > 0;
+        }
+
+        public async Task<(bool Success, string? Message)> AddReviewerAsync(
+            int memberId, string? memberName, int grantedByMemberId, string? grantedByName)
+        {
+            if (memberId <= 0) return (false, "Saknar medlem.");
+            using var db = _databaseFactory.CreateDatabase();
+            if (await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM CourseReviewers WHERE MemberId = @0", memberId) > 0)
+                return (false, "Medlemmen har redan granskaråtkomst.");
+            await db.InsertAsync(new CourseReviewer
+            {
+                MemberId = memberId,
+                MemberName = memberName,
+                GrantedByMemberId = grantedByMemberId,
+                GrantedByName = grantedByName,
+                GrantedAt = DateTime.UtcNow
+            });
+            return (true, null);
+        }
+
+        public async Task<bool> RemoveReviewerAsync(int id)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.ExecuteAsync("DELETE FROM CourseReviewers WHERE Id = @0", id) > 0;
+        }
     }
 }

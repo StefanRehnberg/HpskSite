@@ -95,9 +95,26 @@ namespace HpskSite.Models
         public string PrereqKey { get; set; } = "";
     }
 
+    /// <summary>A member the site admin has granted FULL course-material access to (all
+    /// courses, all modules incl. unpublished) — for proofreaders/verifiers, independent of
+    /// certifications. Checked in UtbildningController.CanAccessCourseAsync.</summary>
+    [TableName("CourseReviewers")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class CourseReviewer
+    {
+        public int Id { get; set; }
+        public int MemberId { get; set; }
+        public string? MemberName { get; set; }
+        public int? GrantedByMemberId { get; set; }
+        public string? GrantedByName { get; set; }
+        public DateTime GrantedAt { get; set; }
+        public string? Note { get; set; }
+    }
+
     public static class CourseAccessRules
     {
-        /// <summary>Material visible to holders of the course's EducatorCertType + admins.</summary>
+        /// <summary>Material visible to holders of the course's EducatorCertType (or higher
+        /// in the instructor ladder) + reviewers + admins.</summary>
         public const string Educator = "Educator";
     }
 

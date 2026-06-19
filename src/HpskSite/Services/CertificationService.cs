@@ -85,6 +85,27 @@ namespace HpskSite.Services
             return count > 0;
         }
 
+        /// <summary>The instructor ladder, low → high. A higher instructor cert subsumes a lower
+        /// one for COURSE-MATERIAL access (a Riksinstruktör may open a Kretsinstruktör-gated
+        /// course). Order matters.</summary>
+        private static readonly string[] InstructorLadder =
+            { CertificationTypes.Foreningsinstruktor, CertificationTypes.Kretsinstruktor, CertificationTypes.Riksinstruktor };
+
+        /// <summary>Course-material gate: does the member satisfy a course's required
+        /// EducatorCertType? For the instructor ladder, holding the required level OR ANY higher
+        /// level qualifies (Förening ≤ Krets ≤ Riks). For non-ladder cert types
+        /// (Vapenkontrollant/Banläggare) it's an exact match. NOT used for course PREREQUISITES
+        /// (participant eligibility), which stay exact via HasActiveCertAsync.</summary>
+        public async Task<bool> SatisfiesEducatorRequirementAsync(int memberId, string requiredCertType)
+        {
+            if (memberId <= 0 || string.IsNullOrEmpty(requiredCertType)) return false;
+            int idx = Array.IndexOf(InstructorLadder, requiredCertType);
+            if (idx < 0) return await HasActiveCertAsync(memberId, requiredCertType);  // non-ladder → exact
+            for (int i = idx; i < InstructorLadder.Length; i++)                          // required level and up
+                if (await HasActiveCertAsync(memberId, InstructorLadder[i])) return true;
+            return false;
+        }
+
         // ── Granting ──────────────────────────────────────────────────
 
         public async Task<(bool Success, int CertId, string? Message)> GrantAsync(
