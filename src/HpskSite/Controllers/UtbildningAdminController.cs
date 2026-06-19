@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
+        private readonly EmailService _emailService;
         private readonly ILogger<UtbildningAdminController> _logger;
 
         public UtbildningAdminController(
@@ -38,6 +39,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
             IMemberManager memberManager,
+            EmailService emailService,
             ILogger<UtbildningAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -46,6 +48,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _memberService = memberService;
             _memberManager = memberManager;
+            _emailService = emailService;
             _logger = logger;
         }
 
@@ -338,7 +341,7 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddReviewer(int memberId)
+        public async Task<IActionResult> AddReviewer(int memberId, bool sendEmail = false)
         {
             if (!await _authorizationService.IsCurrentUserAdminAsync())
                 return Json(new { success = false, message = "Endast administratörer." });
@@ -346,9 +349,26 @@ namespace HpskSite.Controllers
             var member = _memberService.GetById(memberId);
             if (member == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
 
+            var name = MemberDisplayName(member);
             var (byId, byName) = await CurrentMemberAsync();
-            var (ok, msg) = await _courseService.AddReviewerAsync(memberId, MemberDisplayName(member), byId, byName);
-            return Json(new { success = ok, message = msg });
+            var (ok, msg) = await _courseService.AddReviewerAsync(memberId, name, byId, byName);
+
+            var emailSent = false;
+            var hasEmail = !string.IsNullOrWhiteSpace(member.Email);
+            if (ok && sendEmail && hasEmail)
+            {
+                try
+                {
+                    await _emailService.SendCourseReviewerGrantedAsync(member.Email!, name, byName);
+                    emailSent = true;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Reviewer-grant email failed for member {MemberId}", memberId);
+                }
+            }
+
+            return Json(new { success = ok, message = msg, emailSent, hasEmail });
         }
 
         [HttpPost]
