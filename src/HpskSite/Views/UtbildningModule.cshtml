@@ -11,7 +11,16 @@
     var moduleTotal = ViewBag.ModuleTotal as int? ?? 0;
     ViewBag.Title = module != null ? module.Title : "Utbildning";
     var contentUrl = (course != null && module != null) ? $"/utbildning/{course.CourseKey}/{module.Slug}/innehall" : "";
+    var autoPresent = Context.Request.Query["present"] == "1";
+    var nextUrl = (course != null && next != null) ? $"/utbildning/{course.CourseKey}/{next.Slug}?present=1" : "";
+    var nextTitle = next?.Title ?? "";
 }
+
+<style>
+    /* Presentationsläge fyller fönstret även utan OS-fullskärm (krävs när nästa modul auto-startar utan en ny användargest). */
+    body.utb-presenting #lessonFrameWrap { position: fixed; inset: 0; z-index: 1080; border: 0; border-radius: 0; }
+    body.utb-presenting #lessonFrame { height: 100vh !important; }
+</style>
 
 <div class="container-fluid py-3">
     @if (denied || course == null || module == null)
@@ -92,35 +101,56 @@
 
 <script>
 var _utbPresentObs = null;
+var UTB_NEXT_URL  = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(nextUrl));
+var UTB_HAS_NEXT  = @(next != null ? "true" : "false");
+var UTB_NEXT_TITLE= @Html.Raw(System.Text.Json.JsonSerializer.Serialize(nextTitle));
+var UTB_AUTO      = @(autoPresent ? "true" : "false");
+
 function utbExitFullscreen() {
     if (document.fullscreenElement && document.exitFullscreen) { try { document.exitFullscreen(); } catch (e) {} }
 }
+function utbUnpin() { document.body.classList.remove('utb-presenting'); }
+
 function utbPresent() {
     var f = document.getElementById('lessonFrame');
     if (!f) return;
+    document.body.classList.add('utb-presenting');   // CSS fills the window — works even without a fresh user gesture
     var doc = null;
-    // Enter the lesson's built-in present mode first (reliable), then go fullscreen (best-effort).
     try {
         doc = f.contentDocument;
         f.contentWindow.focus();
-        if (f.contentWindow.__goto) f.contentWindow.__goto(0);
+        if (f.contentWindow.__goto) f.contentWindow.__goto(0);   // enters lesson present mode + broadcasts its deck to any open Talarvy
     } catch (e) { /* same-origin expected */ }
 
-    // The lesson's "Avsluta" button / Esc removes its 'present' class but can't exit the
-    // fullscreen the parent requested on the iframe — so exit it here when present mode ends.
+    // The lesson's "Avsluta"/Esc removes its 'present' class — un-pin + exit fullscreen when that happens.
     if (doc && doc.body && 'MutationObserver' in window) {
         if (_utbPresentObs) _utbPresentObs.disconnect();
         _utbPresentObs = new MutationObserver(function () {
             if (!doc.body.classList.contains('present')) {
-                utbExitFullscreen();
-                _utbPresentObs.disconnect();
-                _utbPresentObs = null;
+                utbExitFullscreen(); utbUnpin();
+                _utbPresentObs.disconnect(); _utbPresentObs = null;
             }
         });
         _utbPresentObs.observe(doc.body, { attributes: true, attributeFilter: ['class'] });
     }
 
-    var req = f.requestFullscreen || f.webkitRequestFullscreen || f.msRequestFullscreen;
+    var req = f.requestFullscreen || f.webkitRequestFullscreen || f.msRequestFullscreen;   // best-effort true fullscreen (only when a gesture is active)
     if (req) { try { var p = req.call(f); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
 }
+
+// Tell the lesson whether a next module exists (so it shows its "Nästa modul →" button in present mode + Talarvy).
+function utbSendCtx() {
+    var f = document.getElementById('lessonFrame');
+    if (f && f.contentWindow) { try { f.contentWindow.postMessage({ pk: 'utbNavCtx', hasNext: UTB_HAS_NEXT, nextTitle: UTB_NEXT_TITLE }, '*'); } catch (e) {} }
+}
+window.addEventListener('message', function (e) {
+    var m = e.data || {};
+    if (m.pk === 'utbReady') { utbSendCtx(); }                              // lesson loaded → hand it the nav context
+    else if (m.pk === 'utbNext') { if (UTB_NEXT_URL) location.href = UTB_NEXT_URL; }   // "Nästa modul" (deck or Talarvy) → chain, auto-presenting the next
+});
+(function () {
+    var f = document.getElementById('lessonFrame');
+    if (!f) return;
+    f.addEventListener('load', function () { utbSendCtx(); if (UTB_AUTO) setTimeout(utbPresent, 80); });
+})();
 </script>

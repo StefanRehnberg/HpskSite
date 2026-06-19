@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
+using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -21,6 +22,8 @@ namespace HpskSite.Controllers
         private readonly CourseService _courseService;
         private readonly CourseTestService _testService;
         private readonly AdminAuthorizationService _authorizationService;
+        private readonly IMemberService _memberService;
+        private readonly IMemberManager _memberManager;
         private readonly ILogger<UtbildningAdminController> _logger;
 
         public UtbildningAdminController(
@@ -33,12 +36,16 @@ namespace HpskSite.Controllers
             CourseService courseService,
             CourseTestService testService,
             AdminAuthorizationService authorizationService,
+            IMemberService memberService,
+            IMemberManager memberManager,
             ILogger<UtbildningAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _courseService = courseService;
             _testService = testService;
             _authorizationService = authorizationService;
+            _memberService = memberService;
+            _memberManager = memberManager;
             _logger = logger;
         }
 
@@ -288,6 +295,87 @@ namespace HpskSite.Controllers
 
             var ok = await _testService.DeleteVersionAsync(id);
             return Json(new { success = ok });
+        }
+
+        // ── Reviewers — site-admin grants FULL course-material access ───────────
+        // For proofreaders/verifiers: a reviewer sees every course's material
+        // (all modules, incl. unpublished) regardless of certifications.
+
+        [HttpGet]
+        public async Task<IActionResult> GetReviewers()
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            var reviewers = (await _courseService.GetReviewersAsync()).Select(r => new
+            {
+                r.Id, r.MemberId,
+                name = string.IsNullOrWhiteSpace(r.MemberName) ? (_memberService.GetById(r.MemberId)?.Name ?? $"Medlem {r.MemberId}") : r.MemberName,
+                grantedBy = r.GrantedByName,
+                grantedAt = r.GrantedAt
+            });
+            return Json(new { success = true, reviewers });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> SearchMembers(string query)
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
+                return Json(new { success = true, members = new List<object>() });
+
+            var q = query.Trim();
+            var matches = _memberService.GetAll(0, int.MaxValue, out _)
+                .Where(m => (m.Name ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                         || (m.Email ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+                .Take(20)
+                .Select(m => new { memberId = m.Id, name = MemberDisplayName(m), email = m.Email })
+                .ToList();
+            return Json(new { success = true, members = matches });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddReviewer(int memberId)
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            var member = _memberService.GetById(memberId);
+            if (member == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
+
+            var (byId, byName) = await CurrentMemberAsync();
+            var (ok, msg) = await _courseService.AddReviewerAsync(memberId, MemberDisplayName(member), byId, byName);
+            return Json(new { success = ok, message = msg });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveReviewer(int id)
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            var ok = await _courseService.RemoveReviewerAsync(id);
+            return Json(new { success = ok });
+        }
+
+        private static string MemberDisplayName(Umbraco.Cms.Core.Models.IMember m)
+        {
+            var first = m.HasProperty("firstName") ? m.GetValue<string>("firstName") : null;
+            var last = m.HasProperty("lastName") ? m.GetValue<string>("lastName") : null;
+            var full = $"{first} {last}".Trim();
+            return string.IsNullOrWhiteSpace(full) ? m.Name : full;
+        }
+
+        private async Task<(int Id, string? Name)> CurrentMemberAsync()
+        {
+            var cur = await _memberManager.GetCurrentMemberAsync();
+            if (cur == null) return (0, null);
+            var m = _memberService.GetByEmail(cur.Email ?? "");
+            return m == null ? (0, null) : (m.Id, MemberDisplayName(m));
         }
     }
 }

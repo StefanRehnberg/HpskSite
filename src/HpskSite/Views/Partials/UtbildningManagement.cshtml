@@ -24,6 +24,29 @@
     <div id="utbCoursesList">
         <div class="text-center py-4"><div class="spinner-border" role="status"></div><p class="mt-2">Laddar kurser...</p></div>
     </div>
+
+    <!-- Reviewers: site-admin-granted full access to ALL course material -->
+    <div class="card mt-4">
+        <div class="card-header d-flex align-items-center">
+            <i class="bi bi-eye me-2"></i>
+            <strong>Granskare – fullständig åtkomst</strong>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Medlemmar här ser <strong>allt kursmaterial i alla kurser</strong> (även opublicerade moduler),
+                oavsett certifieringar – för korrekturläsare och granskare du vill släppa in.
+            </p>
+            <div class="row g-2 align-items-start mb-3">
+                <div class="col-md-6 position-relative">
+                    <input type="text" class="form-control" id="utbReviewerSearch" placeholder="Sök medlem (namn eller e-post)…" autocomplete="off">
+                    <div id="utbReviewerResults" class="list-group position-absolute w-100 shadow" style="z-index:1056; display:none; max-height:280px; overflow:auto;"></div>
+                </div>
+            </div>
+            <div id="utbReviewersList">
+                <div class="text-muted small">Laddar…</div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Course modal -->
@@ -62,7 +85,7 @@
                         </select>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Hålls av (utbildare som ser materialet)</label>
+                        <label class="form-label">Hålls av (lägsta nivå som ser materialet)</label>
                         <select class="form-select" id="utbEducatorCertType">
                             <option value="">(endast administratörer)</option>
                             @foreach (var o in educatorOptions)
@@ -70,6 +93,7 @@
                                 <option value="@o.val">@o.label</option>
                             }
                         </select>
+                        <div class="form-text">Den valda nivån <strong>och högre</strong> ser materialet (Föreningsinstruktör ≤ Kretsinstruktör ≤ Riksinstruktör). Ex: väljer du Föreningsinstruktör ser FI, Krets och Riks kursen.</div>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">Sortering</label>
@@ -188,8 +212,79 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         const tab = document.getElementById('utbildning-tab');
-        if (tab) tab.addEventListener('shown.bs.tab', function () { if (!utbLoaded) { utbLoadCourses(); utbLoaded = true; } });
+        if (tab) tab.addEventListener('shown.bs.tab', function () { if (!utbLoaded) { utbLoadCourses(); utbLoadReviewers(); utbInitReviewerSearch(); utbLoaded = true; } });
     });
+
+    // ── Reviewers (full course-material access) ─────────────────────────────
+    window.utbLoadReviewers = function () {
+        const box = document.getElementById('utbReviewersList');
+        if (!box) return;
+        fetch('/umbraco/surface/UtbildningAdmin/GetReviewers')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) { box.innerHTML = '<div class="text-danger small">' + esc(d.message) + '</div>'; return; }
+                if (!d.reviewers.length) { box.innerHTML = '<div class="text-muted small">Inga granskare tillagda.</div>'; return; }
+                let h = '<table class="table table-sm align-middle mb-0"><thead><tr><th>Medlem</th><th>Tillagd av</th><th>Datum</th><th class="text-end"></th></tr></thead><tbody>';
+                d.reviewers.forEach(function (r) {
+                    const dt = r.grantedAt ? new Date(r.grantedAt).toLocaleDateString('sv-SE') : '';
+                    h += '<tr><td>' + esc(r.name) + '</td><td class="text-muted small">' + esc(r.grantedBy || '-') + '</td><td class="text-muted small">' + esc(dt) + '</td>' +
+                         '<td class="text-end"><button class="btn btn-sm btn-outline-danger" onclick="utbRemoveReviewer(' + r.id + ')"><i class="bi bi-trash"></i></button></td></tr>';
+                });
+                h += '</tbody></table>';
+                box.innerHTML = h;
+            })
+            .catch(() => { box.innerHTML = '<div class="text-danger small">Nätverksfel</div>'; });
+    };
+
+    let utbReviewerTimer = null;
+    window.utbInitReviewerSearch = function () {
+        const inp = document.getElementById('utbReviewerSearch');
+        const res = document.getElementById('utbReviewerResults');
+        if (!inp || inp.dataset.bound) return;
+        inp.dataset.bound = '1';
+        inp.addEventListener('input', function () {
+            clearTimeout(utbReviewerTimer);
+            const q = inp.value.trim();
+            if (q.length < 2) { res.style.display = 'none'; res.innerHTML = ''; return; }
+            utbReviewerTimer = setTimeout(function () {
+                fetch('/umbraco/surface/UtbildningAdmin/SearchMembers?query=' + encodeURIComponent(q))
+                    .then(r => r.json())
+                    .then(d => {
+                        if (!d.success || !d.members.length) { res.innerHTML = '<div class="list-group-item small text-muted">Inga träffar</div>'; res.style.display = 'block'; return; }
+                        res.innerHTML = d.members.map(m =>
+                            '<button type="button" class="list-group-item list-group-item-action" onclick="utbAddReviewer(' + m.memberId + ')">' +
+                            esc(m.name) + ' <span class="text-muted small">' + esc(m.email || '') + '</span></button>').join('');
+                        res.style.display = 'block';
+                    })
+                    .catch(() => { res.style.display = 'none'; });
+            }, 250);
+        });
+        document.addEventListener('click', function (e) {
+            if (!inp.contains(e.target) && !res.contains(e.target)) res.style.display = 'none';
+        });
+    };
+
+    window.utbAddReviewer = function (memberId) {
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('memberId', memberId);
+        fetch('/umbraco/surface/UtbildningAdmin/AddReviewer', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) { alert(d.message || 'Kunde inte lägga till.'); return; }
+                const inp = document.getElementById('utbReviewerSearch'); if (inp) inp.value = '';
+                const res = document.getElementById('utbReviewerResults'); if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+                utbLoadReviewers();
+            })
+            .catch(() => alert('Nätverksfel'));
+    };
+
+    window.utbRemoveReviewer = function (id) {
+        if (!confirm('Ta bort granskaråtkomst för den här medlemmen?')) return;
+        const fd = new FormData(); fd.append('__RequestVerificationToken', token()); fd.append('id', id);
+        fetch('/umbraco/surface/UtbildningAdmin/RemoveReviewer', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(() => utbLoadReviewers())
+            .catch(() => alert('Nätverksfel'));
+    };
 
     window.utbLoadCourses = function () {
         const c = document.getElementById('utbCoursesList');

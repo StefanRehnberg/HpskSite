@@ -289,12 +289,16 @@ namespace HpskSite.Controllers
             return (await _authorizationService.GetManagedRegions()).Any();
         }
 
-        /// <summary>Material visibility: admins, or holders of the course's EducatorCertType.</summary>
+        /// <summary>Material visibility: admins, site-admin-granted reviewers, or holders of the
+        /// course's EducatorCertType — or a HIGHER instructor cert (Förening ≤ Krets ≤ Riks). So a
+        /// course gated at Föreningsinstruktör is open to FI/Krets/Riks; one gated at
+        /// Kretsinstruktör to Krets/Riks; one gated at Riksinstruktör to Riks only.</summary>
         private async Task<bool> CanAccessCourseAsync(Course course, int memberId)
         {
             if (await IsAdminAsync()) return true;
+            if (memberId > 0 && await _courseService.IsReviewerAsync(memberId)) return true;
             if (string.IsNullOrEmpty(course.EducatorCertType)) return false;
-            return await _certificationService.HasActiveCertAsync(memberId, course.EducatorCertType);
+            return await _certificationService.SatisfiesEducatorRequirementAsync(memberId, course.EducatorCertType);
         }
     }
 }
