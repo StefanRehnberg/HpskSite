@@ -64,18 +64,6 @@
             </div>
         }
 
-        @if (!hasAnyUnlocked)
-        {
-            <div class="alert alert-info d-flex align-items-start gap-2">
-                <i class="bi bi-stars fs-5"></i>
-                <div>
-                    <strong>Hela utbildningsmaterialet finns här – i modern form.</strong><br>
-                    Som utbildare (t.ex. Föreningsinstruktör eller Kretsinstruktör) får du tillgång till materialet
-                    för de kurser du håller. Nedan ser du bredden på det som finns och är på väg.
-                </div>
-            </div>
-        }
-
         @if (courses.Count == 0)
         {
             <div class="alert alert-light border">Inga kurser är publicerade ännu.</div>
