@@ -42,6 +42,12 @@
         <div class="alert alert-warning">
             <i class="bi bi-lock me-2"></i>Logga in för att se utbildningsutbudet.
             <a href="/login-register/?tab=login" class="alert-link">Logga in</a>.
+            <div class="mt-2">
+                <button type="button" class="btn btn-sm btn-outline-dark"
+                        onclick="if (window.TutorialHelper) { TutorialHelper.open('tutorial-utbildning'); }">
+                    <i class="bi bi-play-circle-fill me-1"></i>Se demovideon
+                </button>
+            </div>
         </div>
     }
     else
@@ -162,8 +168,11 @@
 
             @if (!hasAnyUnlocked)
             {
-                <div class="text-center text-body-secondary mt-4">
-                    <i class="bi bi-camera-video me-1"></i><em>Demovideo som visar materialet kommer snart.</em>
+                <div class="text-center mt-4">
+                    <button type="button" class="btn btn-outline-primary"
+                            onclick="if (window.TutorialHelper) { TutorialHelper.open('tutorial-utbildning'); }">
+                        <i class="bi bi-play-circle-fill me-1"></i>Se demovideon
+                    </button>
                 </div>
             }
         }
