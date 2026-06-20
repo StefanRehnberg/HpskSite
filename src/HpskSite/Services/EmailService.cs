@@ -1170,7 +1170,7 @@ namespace HpskSite.Services
         public async Task SendAccountLockedEmailAsync(string memberEmail, string memberName)
         {
             var siteUrl = _configuration["Email:SiteUrl"] ?? "https://pistol.nu";
-            var loginUrl = $"{siteUrl}/login-&-register/";
+            var loginUrl = $"{siteUrl}/login-register/";
 
             var subject = "Ditt konto har låsts - Pistol.nu";
             var body = $@"
