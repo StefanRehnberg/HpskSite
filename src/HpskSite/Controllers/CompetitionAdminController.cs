@@ -531,12 +531,12 @@ namespace HpskSite.Controllers
                             {
                                 status = "Active";
                             }
-                            else if (compDate.Value.Date >= today.AddDays(-7))
-                            {
-                                status = "Active";
-                            }
                             else
                             {
+                                // Finished the day after the end date — same rule the public club page
+                                // (ClubCompetitionsList) and the "visa även avslutade" filter use. No grace
+                                // window: it previously kept a just-ended comp "Aktiv" for 7 days, which
+                                // contradicted the filter (already counting it completed) and every other view.
                                 status = "Completed";
                             }
                         }
