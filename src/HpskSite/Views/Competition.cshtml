@@ -526,10 +526,38 @@
     <div class="row">
         <div class="col-12">
             <!-- Breadcrumb with Series Context -->
+            @{
+                // Club-hosted competitions get a club-scoped canonical URL (/competitions/{year}/{region}/{club}/…)
+                // from CompetitionUrlProvider, but the content tree parent is still the general competitions hub —
+                // so the default breadcrumb always pointed "back" to the general list. When appropriate, mirror the
+                // URL: link back to the club's Tävlingar tab (#clubCompetitions deep-link, handled in Club.cshtml)
+                // instead of the general hub.
+                //
+                // The club's Tävlingar tab lists ALL of the club's competitions (club-only AND open invitationals).
+                // We show the club crumb when:
+                //   • the comp is club-only (it belongs solely to that club), OR
+                //   • the visitor arrived from the club's Tävlingar tab (?fromClub=<clubId> marker on those links).
+                // An open comp reached from the general list keeps the normal "Tävlingar" crumb.
+                var hostClubId = Model.Value<int>("clubId");
+                var hostClubNode = hostClubId > 0 ? Umbraco.Content(hostClubId) : null;
+                if (hostClubNode != null && hostClubNode.ContentType.Alias != "club") hostClubNode = null;
+                var cameFromClubTab = hostClubId > 0
+                    && string.Equals(Context.Request.Query["fromClub"].ToString(), hostClubId.ToString(), StringComparison.Ordinal);
+                var showClubCrumb = hostClubNode != null && (Model.Value<bool>("isClubOnly") || cameFromClubTab);
+                var hostClubCompUrl = hostClubNode != null ? hostClubNode.Url().TrimEnd('/') + "/#clubCompetitions" : "";
+            }
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb">
                     <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
-                    @if (Model.Parent?.ContentType.Alias == "competitionsHub")
+                    @if (showClubCrumb)
+                    {
+                        <li class="breadcrumb-item"><a href="@hostClubCompUrl">@hostClubNode.Name</a></li>
+                        @if (Model.Parent?.ContentType.Alias == "competitionSeries")
+                        {
+                            <li class="breadcrumb-item"><a href="@Model.Parent.Url()">@Model.Parent.Name</a></li>
+                        }
+                    }
+                    else if (Model.Parent?.ContentType.Alias == "competitionsHub")
                     {
                         <li class="breadcrumb-item"><a href="@Model.Parent.Url()">Tävlingar</a></li>
                     }

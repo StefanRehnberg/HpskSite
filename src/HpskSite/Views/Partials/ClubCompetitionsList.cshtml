@@ -152,6 +152,16 @@
                                 }
                             }
 
+                            // Mark links that land on the competition page (the "Visa" link, and the legacy
+                            // Fältskytte "Resultat" case that also opens the competition page) with ?fromClub
+                            // so its breadcrumb offers "back to this club's Tävlingar" even for open
+                            // (non-club-only) comps. Result-page (/resultat/) and external-file links are left
+                            // alone — they don't carry the club breadcrumb.
+                            if (linkUrl == compUrl)
+                            {
+                                linkUrl = compUrl.TrimEnd('/') + "/?fromClub=" + clubId;
+                            }
+
                             var rowStyle = (year == defaultYear) ? "" : "display:none;";
                             <tr class="club-competition-row"
                                 data-year="@year"
