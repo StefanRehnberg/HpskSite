@@ -1814,12 +1814,28 @@ function renderMarkenFamiliesBlock(families, stormastar, canSign, memberId, name
         const art = (f.artalsmarke && f.artalsmarke.fulfilledYears > 0)
             ? ` <span class="text-muted small">· ${escapeMedalHtml(f.artalsmarke.current)}</span>` : '';
         const prereq = f.prereqText ? `<div class="small text-warning">${escapeMedalHtml(f.prereqText)}</div>` : '';
-        const del = (canSign && f.earnedLevel)
-            ? `<button class="btn btn-sm btn-outline-danger ms-2" title="Ta bort märket" onclick="deleteMarkenFamily(${memberId}, '${escapeMedalAttr(f.family)}', '${escapeMedalAttr(name)}', '${escapeMedalAttr(f.displayName)}')"><i class="bi bi-trash"></i></button>`
-            : '';
-        return `<li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-2">
-            <span><strong>${escapeMedalHtml(f.displayName)}</strong> ${earned}${art}
-            <div class="small text-muted">${escapeMedalHtml(f.statusText || '')}</div>${prereq}</span>${del}</li>`;
+        // Manual award control (functionary only) — for badges earned before the system / off
+        // pistol.nu where the underlying series/competition evidence can't be reconstructed.
+        let actions = '';
+        if (canSign) {
+            const famAttr = escapeMedalAttr(f.family);
+            const selId = 'famLvl_' + String(f.family).replace(/[^A-Za-z0-9_]/g, '');
+            const defLvl = f.nextLevel || f.earnedLevel || 'Brons';
+            const opts = ['Brons', 'Silver', 'Guld'].map(l => `<option value="${l}"${l === defLvl ? ' selected' : ''}>${l}</option>`).join('');
+            const delBtn = f.earnedLevel
+                ? `<button class="btn btn-outline-danger" title="Ta bort märket" onclick="deleteMarkenFamily(${memberId}, '${famAttr}', '${escapeMedalAttr(name)}', '${escapeMedalAttr(f.displayName)}')"><i class="bi bi-trash"></i></button>`
+                : '';
+            actions = `<div class="input-group input-group-sm mt-1" style="max-width:300px;">
+                <select class="form-select" id="${selId}">${opts}</select>
+                <button class="btn btn-outline-warning" onclick="awardMarkenFamilyBadge(${memberId}, '${famAttr}', '${escapeMedalAttr(name)}', '${escapeMedalAttr(f.displayName)}', document.getElementById('${selId}').value)">${f.earnedLevel ? 'Ändra' : 'Tilldela'}</button>
+                ${delBtn}
+              </div>`;
+        }
+        return `<li class="list-group-item px-0">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <span><strong>${escapeMedalHtml(f.displayName)}</strong> ${earned}${art}
+              <div class="small text-muted">${escapeMedalHtml(f.statusText || '')}</div>${prereq}</span>
+            </div>${actions}</li>`;
     }).join('');
     let storm = '';
     if (stormastar) {
@@ -1880,7 +1896,8 @@ function renderMarkenArtalsmarke(art, canSign, memberId, name) {
 
     let progress;
     if (art.nextAtYears > 0) {
-        progress = `<span class="text-muted">— ${count} godkända guldfodringar · nästa (${escapeMedalHtml(art.next)}) vid ${art.nextAtYears}</span>`;
+        const remain = Math.max(0, art.nextAtYears - count);
+        progress = `<span class="text-muted">— ${count} godkända guldfodringar · nästa (${escapeMedalHtml(art.next)}) om ${remain} till (vid ${art.nextAtYears} totalt)</span>`;
     } else if (count > 0) {
         progress = `<span class="text-muted">— ${count} godkända guldfodringar</span>`;
     } else {
@@ -2188,6 +2205,28 @@ function awardMarkenBadge(memberId, level, name) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
         body: JSON.stringify({ memberId, level, year, uniqueNumber })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte tilldela.')); return; }
+        openMemberMarkenDetail(memberId, name);
+        loadClubMarken();
+    })
+    .catch(() => alert('Kunde inte tilldela märket.'));
+}
+
+// Manual award of an "Andra märken" family valör (Elit/Fält/Precision/Milsnabb/Nat.helmatch/
+// Luftpistol) — for badges earned before the system / off pistol.nu. Sticks even without evidence
+// (the auto-derive is add-only and never downgrades).
+function awardMarkenFamilyBadge(memberId, family, name, displayName, level) {
+    if (!level) { alert('Välj en valör.'); return; }
+    const yStr = prompt(`Tilldela ${displayName} i ${level.toLowerCase()} till ${name}.\nÅrtal då märket erövrades:`, new Date().getFullYear());
+    if (yStr === null) return;
+    const year = parseInt(yStr) || new Date().getFullYear();
+    fetch('/umbraco/surface/Marken/AwardFamilyBadge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ memberId, family, level, year })
     })
     .then(r => r.json())
     .then(res => {

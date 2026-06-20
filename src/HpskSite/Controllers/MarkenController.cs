@@ -1186,6 +1186,72 @@ namespace HpskSite.Controllers
             return Json(new { success = true, message = $"{Marken.FamilyDisplayName(Family)} i {level} tilldelat." });
         }
 
+        /// <summary>
+        /// Functionary manual award of an "Andra märken" family valör — the competition-achievement
+        /// (Elit*/Fält/Precision/Milsnabb/Nationell helmatch) and series-proof (Luftpistol/Elit)
+        /// families surfaced read-only in the secretary detail. For badges earned before the system /
+        /// off pistol.nu, where reconstructing the underlying series/competition evidence isn't feasible.
+        /// Upserts one MemberBadge per (member, family, level), Source=Admin, Verified. The lazy
+        /// auto-derive (RecomputeSeriesProofFamiliesAsync / comp auto-award) is insert-missing-level-only
+        /// and never downgrades, so a manual award sticks even when the evidence doesn't (yet) support it.
+        /// Family must be a known MarkenFamilies key (excludes Pistolskytte/Mästar/Stormästar, which have
+        /// their own award surfaces). POST /umbraco/surface/Marken/AwardFamilyBadge { memberId, family, level, year, note? }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AwardFamilyBadge([FromBody] AwardFamilyBadgeRequest request)
+        {
+            int memberId = request?.MemberId ?? 0;
+            string family = (request?.Family ?? "").Trim();
+            string level = (request?.Level ?? "").Trim();
+            if (memberId <= 0) return Json(new { success = false, message = "Ogiltigt medlems-ID." });
+
+            var def = MarkenFamilies.Get(family);
+            if (def == null) return Json(new { success = false, message = "Ogiltig märkesfamilj." });
+            if (Marken.LevelOrdinal(level) is < 1 or > 3)
+                return Json(new { success = false, message = "Ogiltig valör." });
+            if (!await CanSignOffForMemberAsync(memberId))
+                return Json(new { success = false, message = "Du har inte behörighet att tilldela märken för den här medlemmen." });
+
+            int actingId = await GetCurrentMemberIdAsync();
+            int y = request?.Year is > 0 ? request!.Year : DateTime.Now.Year;
+
+            // Upsert: one badge per (member, family, level). Re-awarding updates date/year.
+            var existing = (await _ledger.GetBadgesForMemberAsync(memberId, family, includeRejected: true))
+                .FirstOrDefault(b => b.Level == level);
+
+            if (existing == null)
+            {
+                await _ledger.InsertBadgeAsync(new MemberBadge
+                {
+                    MemberId = memberId,
+                    BadgeFamily = family,
+                    Level = level,
+                    LevelOrdinal = Marken.LevelOrdinal(level),
+                    AchievedYear = y,
+                    AchievedDate = DateTime.Now,
+                    Source = Marken.SourceAdmin,
+                    Status = Marken.StatusVerified,
+                    SignedOffByMemberId = actingId,
+                    SignedOffDate = DateTime.Now,
+                    Notes = string.IsNullOrWhiteSpace(request?.Note) ? null : request!.Note!.Trim(),
+                    EnteredByMemberId = actingId
+                });
+            }
+            else
+            {
+                existing.AchievedYear = y;
+                existing.AchievedDate ??= DateTime.Now;
+                existing.Status = Marken.StatusVerified;
+                existing.SignedOffByMemberId = actingId;
+                existing.SignedOffDate = DateTime.Now;
+                if (!string.IsNullOrWhiteSpace(request?.Note)) existing.Notes = request!.Note!.Trim();
+                await _ledger.UpdateBadgeAsync(existing);
+            }
+
+            return Json(new { success = true, message = $"{def.DisplayName} i {level} tilldelat." });
+        }
+
         /// <summary>Set/replace the national registration number AND/OR the achieved year on a member's
         /// Guld badge. The year matters for the Elitmärke timing gate (proofs count from the year after).</summary>
         [HttpPost]
@@ -2394,6 +2460,7 @@ namespace HpskSite.Controllers
         public class YearRequest { public int Year { get; set; } }
         public class IdRequest { public int Id { get; set; } }
         public class AwardBadgeRequest { public int MemberId { get; set; } public string Level { get; set; } = ""; public int Year { get; set; } public string? UniqueNumber { get; set; } public string? Note { get; set; } }
+        public class AwardFamilyBadgeRequest { public int MemberId { get; set; } public string Family { get; set; } = ""; public string Level { get; set; } = ""; public int Year { get; set; } public string? Note { get; set; } }
         public class UniqueNumberRequest { public int BadgeId { get; set; } public string? UniqueNumber { get; set; } public int? Year { get; set; } }
         public class SetMemberPistolskytteRequest { public int MemberId { get; set; } public string Level { get; set; } = ""; public string? GuldNumber { get; set; } }
         public class FamilyMemberRequest { public int MemberId { get; set; } public string Family { get; set; } = ""; }
