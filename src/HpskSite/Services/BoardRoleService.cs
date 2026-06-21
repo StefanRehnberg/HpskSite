@@ -16,33 +16,62 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Get all active roles for a club or region. When boardOnly=true, filters to IsBoardMember=1.
+        /// Get roles for a club or region. When boardOnly=true, filters to IsBoardMember=1.
+        /// When includeInactive=true, soft-deleted past holders are included too (for the history view).
         /// </summary>
-        public List<BoardRole> GetBoardMembers(int ownerType, int ownerId, bool boardOnly = false)
+        public List<BoardRole> GetBoardMembers(int ownerType, int ownerId, bool boardOnly = false, bool includeInactive = false)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
 
-            var sql = boardOnly
-                ? "SELECT * FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1 AND IsActive = 1 AND IsBoardMember = 1 ORDER BY SortOrder, RoleKey"
-                : "SELECT * FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1 AND IsActive = 1 ORDER BY SortOrder, RoleKey";
+            var sql = "SELECT * FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1";
+            if (!includeInactive) sql += " AND IsActive = 1";
+            if (boardOnly) sql += " AND IsBoardMember = 1";
+            sql += " ORDER BY SortOrder, RoleKey";
 
             var roles = db.Fetch<BoardRole>(sql, ownerType, ownerId);
 
-            // Resolve member names
-            foreach (var role in roles)
+            ResolveMemberNames(roles);
+            return roles;
+        }
+
+        /// <summary>
+        /// Resolve display names for a set of roles, batching distinct member lookups to avoid an
+        /// N+1 cascade (matters for the region rollup which spans many clubs).
+        /// </summary>
+        private void ResolveMemberNames(List<BoardRole> roles)
+        {
+            var byId = new Dictionary<int, string>();
+            foreach (var memberId in roles.Select(r => r.MemberId).Distinct())
             {
-                var member = _memberService.GetById(role.MemberId);
-                if (member != null)
-                {
-                    var first = member.GetValue<string>("firstName") ?? "";
-                    var last = member.GetValue<string>("lastName") ?? "";
-                    role.MemberName = $"{first} {last}".Trim();
-                    if (string.IsNullOrEmpty(role.MemberName))
-                        role.MemberName = member.Name;
-                }
+                var member = _memberService.GetById(memberId);
+                if (member == null) continue;
+                var first = member.GetValue<string>("firstName") ?? "";
+                var last = member.GetValue<string>("lastName") ?? "";
+                var name = $"{first} {last}".Trim();
+                byId[memberId] = string.IsNullOrEmpty(name) ? member.Name : name;
             }
 
+            foreach (var role in roles)
+                if (byId.TryGetValue(role.MemberId, out var name))
+                    role.MemberName = name;
+        }
+
+        /// <summary>
+        /// Active roles whose mandate ends before the given date (ordered soonest-first).
+        /// Drives the "Mandat som löper ut" / valberedning view. Roles with no term set are excluded.
+        /// </summary>
+        public List<BoardRole> GetExpiringRoles(int ownerType, int ownerId, DateTime before)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+
+            var roles = db.Fetch<BoardRole>(
+                "SELECT * FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1 AND IsActive = 1 " +
+                "AND TermEndsDate IS NOT NULL AND TermEndsDate < @2 ORDER BY TermEndsDate, SortOrder",
+                ownerType, ownerId, before);
+
+            ResolveMemberNames(roles);
             return roles;
         }
 
@@ -79,7 +108,8 @@ namespace HpskSite.Services
         /// Assign a board role. If the same role was previously soft-deleted, reactivate it.
         /// </summary>
         public BoardRole AssignBoardRole(int ownerType, int ownerId, int memberId, string roleKey,
-            string? customTitle, bool isBoardMember, int assignedByMemberId)
+            string? customTitle, bool isBoardMember, int assignedByMemberId,
+            DateTime? electedDate = null, DateTime? termEndsDate = null, int? termYears = null)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -97,6 +127,9 @@ namespace HpskSite.Services
                 existing.SortOrder = BoardRoleDefinitions.GetDefaultSort(roleKey);
                 existing.AssignedDate = DateTime.UtcNow;
                 existing.AssignedByMemberId = assignedByMemberId;
+                existing.ElectedDate = electedDate;
+                existing.TermEndsDate = termEndsDate;
+                existing.TermYears = termYears;
                 db.Update(existing);
                 return existing;
             }
@@ -112,6 +145,9 @@ namespace HpskSite.Services
                 SortOrder = BoardRoleDefinitions.GetDefaultSort(roleKey),
                 AssignedDate = DateTime.UtcNow,
                 AssignedByMemberId = assignedByMemberId,
+                ElectedDate = electedDate,
+                TermEndsDate = termEndsDate,
+                TermYears = termYears,
                 IsActive = true
             };
 
@@ -138,7 +174,8 @@ namespace HpskSite.Services
         /// <summary>
         /// Update an existing board role's key, custom title, board member flag, or sort order.
         /// </summary>
-        public bool UpdateBoardRole(int id, string roleKey, string? customTitle, bool isBoardMember, int sortOrder)
+        public bool UpdateBoardRole(int id, string roleKey, string? customTitle, bool isBoardMember, int sortOrder,
+            DateTime? electedDate = null, DateTime? termEndsDate = null, int? termYears = null)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -150,6 +187,9 @@ namespace HpskSite.Services
             role.CustomTitle = roleKey == "Custom" ? customTitle : null;
             role.IsBoardMember = isBoardMember;
             role.SortOrder = sortOrder;
+            role.ElectedDate = electedDate;
+            role.TermEndsDate = termEndsDate;
+            role.TermYears = termYears;
             db.Update(role);
             return true;
         }

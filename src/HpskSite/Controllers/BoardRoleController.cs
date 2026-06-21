@@ -53,20 +53,56 @@ namespace HpskSite.Controllers
 
             var roles = _boardRoleService.GetBoardMembers(ownerType, ownerId, boardOnly);
 
-            var data = roles.Select(r => new
-            {
-                r.Id,
-                r.MemberId,
-                r.MemberName,
-                title = r.DisplayTitle,
-                r.RoleKey,
-                r.CustomTitle,
-                r.IsBoardMember,
-                r.SortOrder
-            });
+            var data = roles.Select(ToDto);
 
             return Json(new { success = true, data });
         }
+
+        /// <summary>
+        /// Active roles whose mandate ends within the given window (default 12 months). Requires login.
+        /// Drives the "Mandat som löper ut" / valberedning panel.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetExpiringTerms(int ownerType, int ownerId, int withinDays = 365)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Inte inloggad" });
+
+            var before = DateTime.Today.AddDays(withinDays);
+            var roles = _boardRoleService.GetExpiringRoles(ownerType, ownerId, before);
+
+            return Json(new { success = true, data = roles.Select(ToDto) });
+        }
+
+        /// <summary>
+        /// Serialize a role for the management UI, including term fields (ISO date strings for Flatpickr).
+        /// </summary>
+        private static object ToDto(BoardRole r) => new
+        {
+            r.Id,
+            r.MemberId,
+            r.MemberName,
+            title = r.DisplayTitle,
+            r.RoleKey,
+            r.CustomTitle,
+            r.IsBoardMember,
+            r.SortOrder,
+            electedDate = r.ElectedDate?.ToString("yyyy-MM-dd"),
+            termEndsDate = r.TermEndsDate?.ToString("yyyy-MM-dd"),
+            r.TermYears,
+            r.IsTermExpired,
+            r.DaysLeftInTerm
+        };
+
+        /// <summary>
+        /// Parse a Flatpickr Y-m-d date string; returns null for empty/invalid input.
+        /// </summary>
+        private static DateTime? ParseDate(string? value) =>
+            DateTime.TryParseExact(value, "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d)
+                ? d : (DateTime?)null;
 
         /// <summary>
         /// Get board roles for all members in a club (for member directory column). Requires login.
@@ -156,7 +192,8 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> AssignBoardRole(int ownerType, int ownerId, int memberId,
-            string roleKey, string? customTitle, bool isBoardMember)
+            string roleKey, string? customTitle, bool isBoardMember,
+            string? electedDate = null, string? termEndsDate = null, int? termYears = null)
         {
             try
             {
@@ -179,7 +216,8 @@ namespace HpskSite.Controllers
                 var assignedBy = currentMemberData?.Id ?? 0;
 
                 var role = _boardRoleService.AssignBoardRole(ownerType, ownerId, memberId, roleKey,
-                    customTitle, isBoardMember, assignedBy);
+                    customTitle, isBoardMember, assignedBy,
+                    ParseDate(electedDate), ParseDate(termEndsDate), termYears);
 
                 _logger.LogInformation("Board role {RoleKey} assigned to member {MemberId} for {OwnerType}/{OwnerId}",
                     roleKey, memberId, ownerType, ownerId);
@@ -229,7 +267,8 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateBoardRole(int boardRoleId, string roleKey,
-            string? customTitle, bool isBoardMember, int sortOrder)
+            string? customTitle, bool isBoardMember, int sortOrder,
+            string? electedDate = null, string? termEndsDate = null, int? termYears = null)
         {
             try
             {
@@ -240,7 +279,8 @@ namespace HpskSite.Controllers
                 if (!await CanManageBoardRoles(role.OwnerType, role.OwnerId))
                     return Json(new { success = false, message = "Åtkomst nekad" });
 
-                _boardRoleService.UpdateBoardRole(boardRoleId, roleKey, customTitle, isBoardMember, sortOrder);
+                _boardRoleService.UpdateBoardRole(boardRoleId, roleKey, customTitle, isBoardMember, sortOrder,
+                    ParseDate(electedDate), ParseDate(termEndsDate), termYears);
 
                 return Json(new { success = true, message = "Roll uppdaterad" });
             }
