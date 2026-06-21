@@ -60,6 +60,19 @@ namespace HpskSite.Models
         public bool IsPresent => AttendanceStatus == "Närvarande";
     }
 
+    [TableName("BoardMeetingAgendaLinks")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class BoardMeetingAgendaLink
+    {
+        public int Id { get; set; }
+        public int AgendaItemId { get; set; }
+        public string Kind { get; set; } = "url";   // meeting / document / url
+        public int? RefId { get; set; }              // target meeting id or document id
+        public string? Url { get; set; }             // for kind=url
+        public string Label { get; set; } = string.Empty;
+        public bool IsActive { get; set; } = true;
+    }
+
     [TableName("BoardMeetingActions")]
     [PrimaryKey("Id", AutoIncrement = true)]
     public class BoardMeetingAction

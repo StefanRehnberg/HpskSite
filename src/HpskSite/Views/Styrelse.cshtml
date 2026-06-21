@@ -95,6 +95,7 @@
     const OWNER_ID = @sel.OwnerId;
     const CAN_MANAGE = @(sel.CanManageRoles ? "true" : "false");
     const IS_CLUB = OWNER_TYPE === 0;
+    let svMeetings = [], svActions = [], svYear = null, svDocs = null;
 
     const $ = id => document.getElementById(id);
     function token() { return document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''; }
@@ -145,18 +146,24 @@
     }
 
     function renderMoten(c, meetings, actions) {
-        const upcoming = meetings.filter(x => !x.isPast);
-        const past = meetings.filter(x => x.isPast);
+        svMeetings = meetings; svActions = actions;
+        // Year list = years present in meetings + the current year, newest first.
+        const yrs = new Set(meetings.map(m => (m.meetingDate || '').slice(0, 4)).filter(Boolean));
+        yrs.add(String(new Date().getFullYear()));
+        const years = Array.from(yrs).sort().reverse();
+        if (svYear == null || !years.includes(svYear)) svYear = years[0];
+
         let html = '';
 
-        // Next meeting (most prominent)
+        // Next meeting (nearest future) — independent of the year filter.
+        const upcoming = meetings.filter(x => !x.isPast);
         if (upcoming.length) {
-            const n = upcoming[0];
+            const n = upcoming[upcoming.length - 1]; // meetings are date DESC, so last upcoming = soonest
             html += `<div class="sv-card highlight">
                 <h2><i class="bi bi-calendar-event me-2"></i>Nästa möte</h2>
                 <p style="font-size:1.2rem;margin:.4rem 0 .2rem;"><strong>${esc(n.title)}</strong></p>
                 <p class="sv-help mb-3">${esc(n.meetingDate)}${n.location ? ' · ' + esc(n.location) : ''}</p>
-                <button class="btn btn-primary btn-xl" onclick="openMeeting(${n.id})"><i class="bi bi-folder2-open me-2"></i>Öppna mötet</button>
+                <button class="btn btn-primary btn-xl" onclick="openMeeting(${n.id}, true)"><i class="bi bi-folder2-open me-2"></i>Öppna mötet</button>
             </div>`;
         }
 
@@ -177,65 +184,80 @@
             </div>
         </div>`;
 
-        // My / open tasks
+        // Att göra — ALL open tasks (incl. unfinished ones from earlier years), never year-filtered.
         html += `<div class="sv-card">
             <h2><i class="bi bi-check2-square me-2"></i>Att göra</h2>`;
         if (!actions.length) {
             html += `<p class="sv-help mb-0">Inga öppna uppgifter just nu.</p>`;
         } else {
-            html += `<p class="sv-help">Uppgifter som styrelsen beslutat och som ännu inte är klara.</p>`;
+            html += `<p class="sv-help">Uppgifter som styrelsen beslutat och som ännu inte är klara (oavsett år).</p>`;
             actions.forEach(a => {
                 const who = a.assignedToName ? ` – ${esc(a.assignedToName)}` : '';
                 const due = a.dueDate ? `<span class="${a.isOverdue ? 'text-danger' : 'sv-help'}"> (senast ${esc(a.dueDate)})</span>` : '';
-                html += `<div class="sv-person">
+                html += `<div class="sv-person" id="svTask_${a.id}">
                     <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
                         <input type="checkbox" class="form-check-input sv-check" onchange="markActionDone(${a.id}, this.checked, 'moten')">
-                        <span>${esc(a.description)}<span class="sv-help">${who}</span>${due}</span>
+                        <span class="svTaskText">${esc(a.description)}<span class="sv-help">${who}</span>${due}</span>
                     </label>
                 </div>`;
             });
         }
         html += `</div>`;
 
-        // Past meetings
-        if (past.length) {
-            html += `<div class="sv-card">
-                <h2><i class="bi bi-clock-history me-2"></i>Tidigare möten</h2>`;
-            past.forEach(m => {
-                html += `<div class="sv-person">
-                    <span><strong>${esc(m.title)}</strong><span class="sv-help d-block">${esc(m.meetingDate)}</span></span>
-                    <span class="d-flex align-items-center gap-2">
-                        ${statusBadge(m.status)}
-                        <button class="btn btn-outline-primary" onclick="openMeeting(${m.id})">Öppna</button>
-                    </span>
-                </div>`;
-            });
-            html += `</div>`;
-        }
+        // Meetings for the selected year (year selector lives here).
+        html += `<div class="sv-card">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h2 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Möten</h2>
+                <div><label class="sv-help me-1" for="svYear">Visa år</label>
+                    <select id="svYear" class="form-select d-inline-block" style="width:auto;" onchange="svChangeYear()">
+                        ${years.map(y => `<option value="${y}" ${y === svYear ? 'selected' : ''}>${y}</option>`).join('')}
+                    </select></div>
+            </div>
+            <div id="svMeetingList" class="mt-2"></div>
+        </div>`;
 
-        if (!meetings.length) html += `<p class="sv-help text-center py-2">Inga möten ännu – skapa ert första möte ovan.</p>`;
         c.innerHTML = html;
+        renderMeetingList();
     }
+
+    function renderMeetingList() {
+        const list = $('svMeetingList'); if (!list) return;
+        const ofYear = svMeetings.filter(m => (m.meetingDate || '').slice(0, 4) === svYear);
+        if (!ofYear.length) { list.innerHTML = `<p class="sv-help mb-0">Inga möten ${svYear}.</p>`; return; }
+        let h = '';
+        ofYear.forEach(m => {
+            h += `<div class="sv-person">
+                <span><strong>${esc(m.title)}</strong><span class="sv-help d-block">${esc(m.meetingDate)}</span></span>
+                <span class="d-flex align-items-center gap-2">${statusBadge(m.status)}
+                    <button class="btn btn-outline-primary" onclick="openMeeting(${m.id}, true)">Öppna</button></span>
+            </div>`;
+        });
+        list.innerHTML = h;
+    }
+
+    window.svChangeYear = function () { svYear = $('svYear').value; renderMeetingList(); };
 
     window.createMeeting = function () {
         const type = $('svNewType').value;
         const now = new Date();
         const def = now.toISOString().slice(0, 10) + ' 18:30';
         post('BoardMeeting', 'CreateMeeting', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingType: type, title: '', meetingDate: def, location: '' })
-            .then(r => { if (r.success) openMeeting(r.data.id); else alert(r.message || 'Kunde inte skapa mötet'); });
+            .then(r => { if (r.success) openMeeting(r.data.id, true); else alert(r.message || 'Kunde inte skapa mötet'); });
     };
 
     // =====================================================================
     //  ETT MÖTE (protokoll)
     // =====================================================================
-    window.openMeeting = function (meetingId) {
+    // scroll=true only when navigating in from the list/create; in-place refreshes keep the position.
+    window.openMeeting = function (meetingId, scroll) {
         $('svMoten').style.display = 'none';
         $('svStyrelse').style.display = 'none';
-        const c = $('svMeeting'); c.style.display = ''; c.innerHTML = spinner();
+        const c = $('svMeeting'); c.style.display = '';
+        if (scroll) c.innerHTML = spinner();
         get('BoardMeeting', 'GetMeetingDetail', { meetingId }).then(d => {
             if (!d.success) { c.innerHTML = errBox(d.message || 'Kunde inte öppna mötet.'); return; }
             renderMeeting(c, d);
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
         }).catch(() => c.innerHTML = errBox('Kunde inte öppna mötet.'));
     };
 
@@ -262,15 +284,10 @@
         }
         html += `</div>`;
 
-        // Quorum + attendance
-        html += `<div class="sv-card ${q.isMet ? 'sv-quorum-ok' : 'sv-quorum-no'}">
+        // Quorum + attendance (toggling presence updates the banner in place — no reload/scroll)
+        html += `<div id="svQuorum" class="sv-card ${q.isMet ? 'sv-quorum-ok' : 'sv-quorum-no'}" data-required="${q.required}" data-total="${q.total}">
             <h2><i class="bi bi-people me-2"></i>Närvaro</h2>
-            <p style="font-size:1.15rem;margin-bottom:.75rem;">
-                ${q.isMet
-                    ? `<i class="bi bi-check-circle-fill text-success me-1"></i><strong>Styrelsen är beslutsför.</strong>`
-                    : `<i class="bi bi-exclamation-triangle-fill text-warning me-1"></i><strong>Styrelsen är inte beslutsför.</strong>`}
-                <span class="sv-help d-block">${q.present} av ${q.total} närvarande (minst ${q.required} krävs).</span>
-            </p>`;
+            <p id="svQuorumMsg" style="font-size:1.15rem;margin-bottom:.75rem;">${quorumMsgHtml(q)}</p>`;
         d.attendees.forEach(a => {
             const roleTxt = a.roleTitle ? `<span class="sv-help">${esc(a.roleTitle)}</span>` : '';
             if (locked) {
@@ -278,10 +295,10 @@
             } else {
                 html += `<div class="sv-person">
                     <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
-                        <input type="checkbox" class="form-check-input sv-check" ${a.attendanceStatus === 'Närvarande' ? 'checked' : ''} onchange="togglePresent(${a.id}, this.checked)">
+                        <input type="checkbox" class="form-check-input sv-check svAttChk" ${a.attendanceStatus === 'Närvarande' ? 'checked' : ''} onchange="togglePresent(${a.id}, this.checked)">
                         <span>${esc(a.memberName || '-')}<br>${roleTxt}</span>
                     </label>
-                    <span class="sv-help">${a.attendanceStatus === 'Närvarande' ? 'Närvarande' : 'Frånvarande'}</span>
+                    <span class="sv-help" id="svAttStatus_${a.id}">${a.attendanceStatus === 'Närvarande' ? 'Närvarande' : 'Frånvarande'}</span>
                 </div>`;
             }
         });
@@ -293,7 +310,7 @@
         // Agenda / protokoll
         html += `<div class="sv-card">
             <h2><i class="bi bi-list-ol me-2"></i>Dagordning och beslut</h2>`;
-        d.agenda.forEach((it, i) => html += agendaCard(it, i + 1, locked));
+        d.agenda.forEach((it, i) => html += agendaCard(it, i + 1, locked, d.links || []));
         if (!locked) {
             html += `<div class="mt-3"><label class="sv-label">Lägg till en punkt</label>
                 <div class="d-flex gap-2" style="max-width:540px;">
@@ -310,10 +327,10 @@
             d.actions.forEach(a => {
                 const who = a.assignedToName ? ` – ${esc(a.assignedToName)}` : '';
                 const due = a.dueDate ? `<span class="${a.isOverdue ? 'text-danger' : 'sv-help'}"> (senast ${esc(a.dueDate)})</span>` : '';
-                html += `<div class="sv-person">
+                html += `<div class="sv-person" id="svAct_${a.id}">
                     <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
-                        <input type="checkbox" class="form-check-input sv-check" ${a.isDone ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="markActionDone(${a.id}, this.checked, 'meeting', ${m.id})">
-                        <span class="${a.isDone ? 'text-decoration-line-through sv-help' : ''}">${esc(a.description)}<span class="sv-help">${who}</span>${due}</span>
+                        <input type="checkbox" class="form-check-input sv-check" ${a.isDone ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="markActionDone(${a.id}, this.checked, 'meeting')">
+                        <span class="svActText ${a.isDone ? 'text-decoration-line-through sv-help' : ''}">${esc(a.description)}<span class="sv-help">${who}</span>${due}</span>
                     </label>
                     ${locked ? '' : `<button class="btn btn-sm btn-outline-danger sv-noprint" onclick="removeAction(${a.id}, ${m.id})" title="Ta bort">Ta bort</button>`}
                 </div>`;
@@ -344,7 +361,10 @@
                 <button class="btn btn-success btn-xl" onclick="justera(${m.id})"><i class="bi bi-lock-fill me-2"></i>Markera som justerat</button>
             </div>`;
         }
-        html += `<div class="mt-2"><button class="btn btn-outline-secondary btn-xl sv-noprint" onclick="window.print()"><i class="bi bi-printer me-2"></i>Skriv ut protokollet</button></div>`;
+        html += `<div class="mt-3 d-flex gap-2 flex-wrap sv-noprint">
+            <a class="btn btn-outline-secondary btn-xl" href="/styrelse/dagordning/${m.id}" target="_blank"><i class="bi bi-card-list me-2"></i>Skriv ut dagordning</a>
+            <a class="btn btn-outline-secondary btn-xl" href="/styrelse/protokoll/${m.id}" target="_blank"><i class="bi bi-printer me-2"></i>Skriv ut protokoll</a>
+        </div>`;
 
         c.innerHTML = html;
 
@@ -355,12 +375,15 @@
         window._mId = m.id;
     }
 
-    function agendaCard(it, num, locked) {
+    function agendaCard(it, num, locked, allLinks) {
+        const links = (allLinks || []).filter(l => l.agendaItemId === it.id);
+        const linksHtml = links.map(l => linkChip(l, locked)).join('');
         if (locked) {
             return `<div class="mb-3 pb-2" style="border-bottom:1px solid var(--bs-border-color);">
                 <div style="font-size:1.15rem;font-weight:600;"><span class="sv-agenda-num">${num}</span>${esc(it.heading)}</div>
                 ${it.discussion ? `<div class="mt-1" style="white-space:pre-wrap;">${esc(it.discussion)}</div>` : ''}
                 ${it.decision ? `<div class="mt-1"><strong>Beslut:</strong> <span style="white-space:pre-wrap;">${esc(it.decision)}</span></div>` : ''}
+                ${linksHtml ? `<div class="mt-1">${linksHtml}</div>` : ''}
             </div>`;
         }
         return `<div class="mb-3 pb-3" style="border-bottom:1px solid var(--bs-border-color);">
@@ -374,7 +397,25 @@
             <label class="sv-help">Beslut</label>
             <textarea class="form-control" rows="2" id="ag_dec_${it.id}" onchange="saveAgenda(${it.id})" placeholder="Vad beslutade styrelsen?">${esc(it.decision || '')}</textarea>
             <span id="ag_saved_${it.id}" class="sv-saved"><i class="bi bi-check-lg"></i> Sparat</span>
+            <div class="mt-2">${linksHtml}</div>
+            <details class="sv-noprint mt-1"><summary class="sv-help" style="cursor:pointer;">+ Bifoga dokument, möte eller länk</summary>
+                <div class="mt-2 d-flex gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="attachDoc(${it.id})"><i class="bi bi-file-earmark me-1"></i>Dokument</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="attachMeeting(${it.id})"><i class="bi bi-calendar-event me-1"></i>Tidigare möte</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="attachUrl(${it.id})"><i class="bi bi-link-45deg me-1"></i>Länk (URL)</button>
+                </div>
+            </details>
         </div>`;
+    }
+
+    function linkChip(l, locked) {
+        const icon = l.kind === 'document' ? 'bi-file-earmark-text' : l.kind === 'meeting' ? 'bi-calendar-event' : 'bi-link-45deg';
+        let href = '#', extra = 'target="_blank"';
+        if (l.kind === 'document') href = '/umbraco/surface/Document/DownloadDocument?id=' + l.refId;
+        else if (l.kind === 'meeting') { href = '#'; extra = `onclick="event.preventDefault();openMeeting(${l.refId}, true)"`; }
+        else href = l.url || '#';
+        const rm = locked ? '' : ` <a href="#" class="text-danger ms-1 sv-noprint" title="Ta bort" onclick="event.preventDefault();removeLink(${l.id})">✕</a>`;
+        return `<div class="sv-help" style="margin:.1rem 0;"><i class="bi ${icon} me-1"></i><a href="${href}" ${extra}>${esc(l.label)}</a>${rm}</div>`;
     }
 
     window.saveMeeting = function () {
@@ -395,22 +436,104 @@
         if (!confirm('Ta bort den här punkten?')) return;
         post('BoardMeeting', 'RemoveAgendaItem', { agendaItemId: id }).then(r => { if (r.success) openMeeting(window._mId); });
     };
+    // Presence toggle updates the beslutsför banner in place — no reload, no scroll jump.
     window.togglePresent = function (id, present) {
-        post('BoardMeeting', 'UpdateAttendee', { attendeeId: id, attendanceStatus: present ? 'Närvarande' : 'Frånvarande', isChairman: false, isSecretary: false, isAdjuster: false })
-            .then(r => { if (r.success) openMeeting(window._mId); });
+        const lbl = $('svAttStatus_' + id);
+        post('BoardMeeting', 'SetAttendance', { attendeeId: id, attendanceStatus: present ? 'Närvarande' : 'Frånvarande' })
+            .then(r => { if (r.success) { if (lbl) lbl.textContent = present ? 'Närvarande' : 'Frånvarande'; updateQuorum(); } });
     };
+    function updateQuorum() {
+        const card = $('svQuorum'); if (!card) return;
+        const req = parseInt(card.dataset.required, 10) || 0;
+        const total = parseInt(card.dataset.total, 10) || 0;
+        const present = card.querySelectorAll('.svAttChk:checked').length;
+        const met = present >= req && req > 0;
+        card.classList.toggle('sv-quorum-ok', met);
+        card.classList.toggle('sv-quorum-no', !met);
+        $('svQuorumMsg').innerHTML = quorumMsgHtml({ isMet: met, present, total, required: req });
+    }
+    function quorumMsgHtml(q) {
+        return (q.isMet
+            ? `<i class="bi bi-check-circle-fill text-success me-1"></i><strong>Styrelsen är beslutsför.</strong>`
+            : `<i class="bi bi-exclamation-triangle-fill text-warning me-1"></i><strong>Styrelsen är inte beslutsför.</strong>`)
+            + `<span class="sv-help d-block">${q.present} av ${q.total} närvarande (minst ${q.required} krävs).</span>`;
+    }
     window.syncBoard = function (mid) { post('BoardMeeting', 'SyncAttendees', { meetingId: mid }).then(r => { if (r.success) openMeeting(mid); }); };
     window.addAction = function (mid) {
         const desc = $('actDesc').value.trim(); if (!desc) { alert('Skriv vad som ska göras'); return; }
         post('BoardMeeting', 'AddAction', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingId: mid, agendaItemId: '', description: desc, assignedToMemberId: $('actWho').value || '', dueDate: $('actDue').value || '' })
             .then(r => { if (r.success) openMeeting(mid); else alert(r.message || 'Kunde inte lägga till'); });
     };
-    window.markActionDone = function (id, done, ctx, mid) {
-        post('BoardMeeting', 'SetActionDone', { actionId: id, done }).then(r => { if (r.success) { if (ctx === 'meeting') openMeeting(mid); else loadMoten(); } });
+    // Checking off a task updates the row in place — no reload, no scroll to top.
+    window.markActionDone = function (id, done, ctx) {
+        post('BoardMeeting', 'SetActionDone', { actionId: id, done }).then(r => {
+            if (!r.success) return;
+            const row = $((ctx === 'moten' ? 'svTask_' : 'svAct_') + id);
+            const txt = row && row.querySelector('.svTaskText, .svActText');
+            if (txt) { txt.classList.toggle('text-decoration-line-through', done); txt.classList.toggle('sv-help', done); }
+        });
     };
     window.removeAction = function (id, mid) {
         if (!confirm('Ta bort uppgiften?')) return;
         post('BoardMeeting', 'RemoveAction', { actionId: id }).then(r => { if (r.success) openMeeting(mid); });
+    };
+
+    // ---- Agenda attachments (dokument / tidigare möte / länk) ----------
+    function svChoose(title, options, cb) {
+        if (!options.length) { alert('Inget att välja.'); return; }
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+        ov.innerHTML = `<div style="background:var(--bs-body-bg);border-radius:.8rem;padding:1.2rem;max-width:480px;width:100%;max-height:80vh;overflow:auto;">
+            <h3 style="font-size:1.3rem;">${esc(title)}</h3><div id="svChooseList" class="mt-2"></div>
+            <div class="text-end mt-2"><button class="btn btn-outline-secondary btn-xl" id="svChooseCancel">Avbryt</button></div></div>`;
+        document.body.appendChild(ov);
+        const list = ov.querySelector('#svChooseList');
+        options.forEach(o => {
+            const b = document.createElement('button');
+            b.className = 'btn btn-outline-primary w-100 text-start mb-2'; b.style.padding = '.7rem 1rem';
+            b.textContent = o.label;
+            b.onclick = () => { document.body.removeChild(ov); cb(o); };
+            list.appendChild(b);
+        });
+        const close = () => document.body.removeChild(ov);
+        ov.querySelector('#svChooseCancel').onclick = close;
+        ov.onclick = e => { if (e.target === ov) close(); };
+    }
+    function loadDocs() {
+        if (svDocs) return Promise.resolve(svDocs);
+        return get('Document', 'GetPublicDocuments', { ownerType: OWNER_TYPE, ownerId: OWNER_ID })
+            .then(r => { svDocs = (r.success && r.data) ? r.data : []; return svDocs; });
+    }
+    function loadMeetingsForPicker() {
+        if (svMeetings.length) return Promise.resolve(svMeetings);
+        return get('BoardMeeting', 'GetMeetings', { ownerType: OWNER_TYPE, ownerId: OWNER_ID })
+            .then(r => { svMeetings = (r.success && r.data) ? r.data : []; return svMeetings; });
+    }
+    window.attachDoc = function (itemId) {
+        loadDocs().then(docs => {
+            if (!docs.length) { alert('Det finns inga dokument i arkivet för den här klubben/kretsen ännu. Lägg upp dokument under fliken Dokument först.'); return; }
+            svChoose('Välj dokument att bifoga', docs.map(d => ({ label: d.title + (d.fileName ? ' (' + d.fileName + ')' : ''), v: d })), o =>
+                post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'document', refId: o.v.id, url: '', label: o.v.title })
+                    .then(r => { if (r.success) openMeeting(window._mId); }));
+        });
+    };
+    window.attachMeeting = function (itemId) {
+        loadMeetingsForPicker().then(ms => {
+            const opts = ms.filter(m => m.id !== window._mId).map(m => ({ label: m.title + ' (' + m.meetingDate + ')', v: m }));
+            if (!opts.length) { alert('Det finns inga andra möten att länka till.'); return; }
+            svChoose('Välj möte att länka', opts, o =>
+                post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'meeting', refId: o.v.id, url: '', label: o.v.title })
+                    .then(r => { if (r.success) openMeeting(window._mId); }));
+        });
+    };
+    window.attachUrl = function (itemId) {
+        const label = prompt('Vad heter länken? (t.ex. Verksamhetsberättelse 2025)'); if (!label) return;
+        const url = prompt('Klistra in webbadressen (URL):'); if (!url) return;
+        post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'url', refId: '', url, label })
+            .then(r => { if (r.success) openMeeting(window._mId); });
+    };
+    window.removeLink = function (id) {
+        post('BoardMeeting', 'RemoveAgendaLink', { linkId: id }).then(r => { if (r.success) openMeeting(window._mId); });
     };
     window.justera = function (mid) {
         const adj = $('adjuster').value; if (!adj) { alert('Välj vem som justerar'); return; }

@@ -17,4 +17,18 @@ namespace HpskSite.Models
         public StyrelseScope? Selected { get; set; }
         public string MemberName { get; set; } = "";
     }
+
+    /// <summary>Model for the formal print views (dagordning / protokoll). Chromeless, Layout=null.</summary>
+    public class StyrelsePrintModel
+    {
+        public string Mode { get; set; } = "protokoll";   // "dagordning" or "protokoll"
+        public BoardMeeting Meeting { get; set; } = new();
+        public List<BoardMeetingAgendaItem> Agenda { get; set; } = new();
+        public List<BoardMeetingAttendee> Attendees { get; set; } = new();
+        public List<BoardMeetingAgendaLink> Links { get; set; } = new();
+        public string OrgName { get; set; } = "";
+        public string? ChairmanName { get; set; }
+        public string? SecretaryName { get; set; }
+        public string? AdjusterName { get; set; }
+    }
 }

@@ -188,6 +188,54 @@ namespace HpskSite.Services
             return true;
         }
 
+        // ---- Agenda attachments (links) ------------------------------------
+
+        public List<BoardMeetingAgendaLink> GetLinksForMeeting(int meetingId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<BoardMeetingAgendaLink>(
+                "SELECT l.* FROM BoardMeetingAgendaLinks l " +
+                "JOIN BoardMeetingAgendaItems a ON a.Id = l.AgendaItemId " +
+                "WHERE a.MeetingId = @0 AND l.IsActive = 1 ORDER BY l.Id", meetingId);
+        }
+
+        public BoardMeetingAgendaLink AddAgendaLink(int agendaItemId, string kind, int? refId, string? url, string label)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var link = new BoardMeetingAgendaLink
+            {
+                AgendaItemId = agendaItemId,
+                Kind = kind,
+                RefId = refId,
+                Url = url,
+                Label = label,
+                IsActive = true
+            };
+            db.Insert(link);
+            return link;
+        }
+
+        public bool RemoveAgendaLink(int id)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var l = db.SingleOrDefaultById<BoardMeetingAgendaLink>(id);
+            if (l == null) return false;
+            l.IsActive = false;
+            db.Update(l);
+            return true;
+        }
+
+        public int? GetLinkMeetingId(int linkId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var l = db.SingleOrDefaultById<BoardMeetingAgendaLink>(linkId);
+            if (l == null) return null;
+            return db.SingleOrDefaultById<BoardMeetingAgendaItem>(l.AgendaItemId)?.MeetingId;
+        }
+
         public int? GetAgendaItemMeetingId(int id)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
@@ -230,6 +278,18 @@ namespace HpskSite.Services
                 MemberId = memberId,
                 AttendanceStatus = "Närvarande"
             });
+            return true;
+        }
+
+        /// <summary>Update only the attendance status (preserves chairman/secretary/adjuster flags).</summary>
+        public bool SetAttendance(int id, string attendanceStatus)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var a = db.SingleOrDefaultById<BoardMeetingAttendee>(id);
+            if (a == null) return false;
+            a.AttendanceStatus = attendanceStatus;
+            db.Update(a);
             return true;
         }
 

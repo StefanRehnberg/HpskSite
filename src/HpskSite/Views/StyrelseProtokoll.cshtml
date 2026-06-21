@@ -1,0 +1,143 @@
+@using System.Globalization
+@model HpskSite.Models.StyrelsePrintModel
+@{
+    Layout = null;
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+    var m = Model.Meeting;
+    var isProt = Model.Mode == "protokoll";
+    var present = Model.Attendees.Where(a => a.AttendanceStatus == "Närvarande").ToList();
+    var absent = Model.Attendees.Where(a => a.AttendanceStatus != "Närvarande").ToList();
+    string LinkHref(HpskSite.Models.BoardMeetingAgendaLink l) => l.Kind switch
+    {
+        "document" => $"/umbraco/surface/Document/DownloadDocument?id={l.RefId}",
+        "meeting" => $"/styrelse/protokoll/{l.RefId}",
+        _ => l.Url ?? "#"
+    };
+}
+<!DOCTYPE html>
+<html lang="sv" data-bs-theme="light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(isProt ? "Protokoll" : "Dagordning") – @m.Title</title>
+    <style>
+        :root { --ink:#1a1a1a; --muted:#555; --line:#cfcfcf; }
+        * { box-sizing: border-box; }
+        body { font-family: Georgia, 'Times New Roman', serif; color: var(--ink); line-height: 1.5;
+            max-width: 21cm; margin: 0 auto; padding: 2.2cm 2cm 2cm; font-size: 12pt; background:#fff; }
+        h1 { font-size: 17pt; margin: 0 0 .1cm; }
+        h2 { font-size: 12.5pt; margin: .7cm 0 .15cm; border-bottom: 1px solid var(--line); padding-bottom: 2px; }
+        .org { font-size: 13pt; font-weight: bold; letter-spacing: .02em; }
+        .doctype { text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-size: 11pt; margin-top: .1cm; }
+        .meta { margin: .5cm 0 .2cm; }
+        .meta div { margin: 2px 0; }
+        .meta .lbl { display: inline-block; min-width: 4.5cm; color: var(--muted); }
+        .item { margin: .45cm 0; page-break-inside: avoid; }
+        .item .h { font-weight: bold; }
+        .item .body { white-space: pre-wrap; margin: .1cm 0; }
+        .item .beslut { margin-top: .12cm; }
+        .item .beslut b { text-decoration: underline; }
+        .bilaga { font-style: italic; color: var(--muted); font-size: 10.5pt; }
+        .people { columns: 2; margin: .1cm 0 .3cm; }
+        .people div { break-inside: avoid; }
+        .sign { margin-top: 1.4cm; display: flex; gap: 1.5cm; flex-wrap: wrap; page-break-inside: avoid; }
+        .sign .slot { flex: 1; min-width: 6cm; }
+        .sign .line { border-top: 1px solid var(--ink); margin-top: 1.3cm; padding-top: 3px; font-size: 10.5pt; color: var(--muted); }
+        .toolbar { max-width: 21cm; margin: .6cm auto; text-align: right; }
+        .toolbar button, .toolbar a { font-family: system-ui, sans-serif; font-size: 11pt; padding: .5rem 1rem;
+            border: 1px solid #888; border-radius: .4rem; background: #f4f4f4; color:#222; text-decoration:none; cursor: pointer; }
+        @@media print { .toolbar { display: none; } body { padding: 0; } }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="/styrelse?type=@m.OwnerType&id=@m.OwnerId">&larr; Tillbaka</a>
+        <button onclick="window.print()">Skriv ut / Spara som PDF</button>
+    </div>
+
+    <header>
+        <div class="org">@Model.OrgName</div>
+        <div class="doctype">@(isProt ? "Protokoll" : "Kallelse · Dagordning")</div>
+    </header>
+
+    <h1>@m.TypeLabel</h1>
+
+    <div class="meta">
+        @if (isProt)
+        {
+            <div><span class="lbl">Protokoll fört vid</span> @m.TypeLabel</div>
+        }
+        <div><span class="lbl">Datum och tid</span> @m.MeetingDate.ToString("dddd d MMMM yyyy, HH:mm", sv)</div>
+        @if (!string.IsNullOrWhiteSpace(m.Location))
+        {
+            <div><span class="lbl">Plats</span> @m.Location</div>
+        }
+    </div>
+
+    @if (isProt)
+    {
+        <h2>Närvarande</h2>
+        <div class="people">
+            @foreach (var a in present)
+            {
+                var tag = a.IsChairman ? " (ordförande)" : a.IsSecretary ? " (sekreterare)" : "";
+                <div>@a.MemberName@(string.IsNullOrEmpty(a.RoleTitle) ? "" : $" – {a.RoleTitle}")@tag</div>
+            }
+        </div>
+        @if (absent.Any())
+        {
+            <h2>Frånvarande</h2>
+            <div class="people">
+                @foreach (var a in absent)
+                {
+                    <div>@a.MemberName (@a.AttendanceStatus.ToLower())</div>
+                }
+            </div>
+        }
+    }
+
+    <h2>@(isProt ? "Ärenden" : "Dagordning")</h2>
+    @{ int n = 0; }
+    @foreach (var it in Model.Agenda)
+    {
+        n++;
+        var links = Model.Links.Where(l => l.AgendaItemId == it.Id).ToList();
+        <div class="item">
+            <div class="h">@(isProt ? $"§ {n}" : $"{n}.") @it.Heading</div>
+            @if (isProt && !string.IsNullOrWhiteSpace(it.Discussion))
+            {
+                <div class="body">@it.Discussion</div>
+            }
+            @if (isProt && !string.IsNullOrWhiteSpace(it.Decision))
+            {
+                <div class="beslut"><b>Beslut:</b> @it.Decision</div>
+            }
+            @foreach (var l in links)
+            {
+                <div class="bilaga">Bilaga: <a href="@LinkHref(l)">@l.Label</a></div>
+            }
+        </div>
+    }
+
+    @if (isProt)
+    {
+        <div class="sign">
+            <div class="slot">
+                <div class="line">Sekreterare@(string.IsNullOrEmpty(Model.SecretaryName) ? "" : $": {Model.SecretaryName}")</div>
+            </div>
+            <div class="slot">
+                <div class="line">Ordförande@(string.IsNullOrEmpty(Model.ChairmanName) ? "" : $": {Model.ChairmanName}")</div>
+            </div>
+            <div class="slot">
+                <div class="line">Justeras@(string.IsNullOrEmpty(Model.AdjusterName) ? "" : $": {Model.AdjusterName}")</div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <p style="margin-top:1cm;color:var(--muted);font-style:italic;">
+            Handlingar till mötet bifogas enligt ovan. Eventuella motioner och övriga frågor anmäls till styrelsen.
+        </p>
+    }
+</body>
+</html>

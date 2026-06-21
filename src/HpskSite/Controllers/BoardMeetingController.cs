@@ -72,6 +72,7 @@ namespace HpskSite.Controllers
             var agenda = _meetingService.GetAgenda(meetingId);
             var attendees = _meetingService.GetAttendees(meetingId);
             var actions = _meetingService.GetActionsForMeeting(meetingId);
+            var links = _meetingService.GetLinksForMeeting(meetingId);
             var (present, total, required, isMet) = _meetingService.GetQuorum(meetingId);
 
             return Json(new
@@ -81,6 +82,7 @@ namespace HpskSite.Controllers
                 agenda = agenda.Select(a => new { a.Id, a.SortOrder, a.Heading, a.Discussion, a.Decision }),
                 attendees = attendees.Select(AttendeeDto),
                 actions = actions.Select(ActionDto),
+                links = links.Select(l => new { l.Id, l.AgendaItemId, l.Kind, l.RefId, l.Url, l.Label }),
                 quorum = new { present, total, required, isMet }
             });
         }
@@ -194,6 +196,32 @@ namespace HpskSite.Controllers
             return Json(new { success = ok });
         }
 
+        // ---- Agenda attachments (links) ------------------------------------
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddAgendaLink(int agendaItemId, string kind, int? refId, string? url, string label)
+        {
+            var mid = _meetingService.GetAgendaItemMeetingId(agendaItemId);
+            if (mid == null || !await CanAccessMeeting(mid.Value))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            if (string.IsNullOrWhiteSpace(label))
+                return Json(new { success = false, message = "Text krävs" });
+            var link = _meetingService.AddAgendaLink(agendaItemId, kind, refId, url, label);
+            return Json(new { success = true, data = new { link.Id } });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveAgendaLink(int linkId)
+        {
+            var mid = _meetingService.GetLinkMeetingId(linkId);
+            if (mid == null || !await CanAccessMeeting(mid.Value))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var ok = _meetingService.RemoveAgendaLink(linkId);
+            return Json(new { success = ok });
+        }
+
         // ---- Attendees ------------------------------------------------------
 
         [HttpPost]
@@ -214,6 +242,17 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var added = _meetingService.SyncBoardAttendees(meetingId);
             return Json(new { success = true, added });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetAttendance(int attendeeId, string attendanceStatus)
+        {
+            var mid = _meetingService.GetAttendeeMeetingId(attendeeId);
+            if (mid == null || !await CanAccessMeeting(mid.Value))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var ok = _meetingService.SetAttendance(attendeeId, attendanceStatus);
+            return Json(new { success = ok });
         }
 
         [HttpPost]
