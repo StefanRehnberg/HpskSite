@@ -376,7 +376,9 @@ namespace HpskSite.Controllers
             m.QuorumOverride,
             meetingDate = m.MeetingDate.ToString("yyyy-MM-dd HH:mm"),
             m.AdjusterMemberId,
-            justifiedDate = m.JustifiedDate?.ToString("yyyy-MM-dd")
+            justifiedDate = m.JustifiedDate?.ToString("yyyy-MM-dd"),
+            kallelseSentDate = m.KallelseSentDate?.ToString("yyyy-MM-dd"),
+            m.KallelseRecipientCount
         };
 
         private static object AttendeeDto(BoardMeetingAttendee a) => new

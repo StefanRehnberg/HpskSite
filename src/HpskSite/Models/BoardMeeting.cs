@@ -18,6 +18,9 @@ namespace HpskSite.Models
         public string? Notes { get; set; }
         public int? AdjusterMemberId { get; set; }
         public DateTime? JustifiedDate { get; set; }
+        public DateTime? KallelseSentDate { get; set; }
+        public int? KallelseSentByMemberId { get; set; }
+        public int? KallelseRecipientCount { get; set; }
         public int? CreatedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }
         public bool IsActive { get; set; } = true;

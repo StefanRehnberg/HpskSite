@@ -292,6 +292,18 @@
         }
         html += `</div>`;
 
+        // Kallelse (send the meeting notice by email)
+        const isArs = m.meetingType === 'Arsmote' || m.meetingType === 'ExtraArsmote';
+        html += `<div class="sv-card sv-noprint"><h2><i class="bi bi-envelope-paper me-2"></i>Kallelse</h2>`;
+        if (m.kallelseSentDate)
+            html += `<p class="text-success mb-2"><i class="bi bi-check-circle me-1"></i>Kallelse skickad ${esc(m.kallelseSentDate)}${m.kallelseRecipientCount != null ? ' till ' + m.kallelseRecipientCount + ' mottagare' : ''}.</p>`;
+        if (!locked) {
+            html += `<p class="sv-help">Skicka kallelse med dagordningen via e-post. ${isArs ? 'För årsmöte går kallelsen till <strong>alla medlemmar i klubben</strong>.' : 'Kallelsen går till <strong>styrelsen</strong>.'}</p>
+                <textarea id="kallelseMsg" class="form-control mb-2" rows="2" placeholder="Eget meddelande i kallelsen (frivilligt)…"></textarea>
+                <button class="btn btn-primary btn-xl" onclick="sendKallelse(${m.id})"><i class="bi bi-envelope-paper me-2"></i>${m.kallelseSentDate ? 'Skicka kallelse igen' : 'Skicka kallelse'}</button>`;
+        }
+        html += `</div>`;
+
         // Quorum + attendance (toggling presence updates the banner in place — no reload/scroll)
         html += `<div id="svQuorum" class="sv-card ${q.isMet ? 'sv-quorum-ok' : 'sv-quorum-no'}" data-required="${q.required}" data-total="${q.total}">
             <h2><i class="bi bi-people me-2"></i>Närvaro</h2>
@@ -471,6 +483,19 @@
             + `<span class="sv-help d-block">${q.present} av ${q.total} närvarande (minst ${q.required} krävs).</span>`;
     }
     window.syncBoard = function (mid) { post('BoardMeeting', 'SyncAttendees', { meetingId: mid }).then(r => { if (r.success) openMeeting(mid); }); };
+    window.sendKallelse = function (mid) {
+        const msg = $('kallelseMsg') ? $('kallelseMsg').value : '';
+        get('BoardKallelse', 'GetKallelsePreview', { meetingId: mid }).then(p => {
+            if (!p.success) { alert(p.message || 'Kunde inte förbereda kallelsen'); return; }
+            if (p.count === 0) { alert('Inga mottagare med e-postadress hittades (' + p.audience + ').'); return; }
+            if (p.tooMany) { alert('För många mottagare (' + p.count + ') för direktutskick. Använd klubbens Brevo-utskick under Medlemmar.'); return; }
+            if (!confirm('Skicka kallelse till ' + p.count + ' mottagare (' + p.audience + ')?')) return;
+            post('BoardKallelse', 'SendKallelse', { meetingId: mid, message: msg }).then(r => {
+                if (r.success) { alert('Kallelsen skickades till ' + r.sent + ' mottagare' + (r.failed ? ' (' + r.failed + ' misslyckades)' : '') + '.'); openMeeting(mid, true); }
+                else alert(r.message || 'Utskicket misslyckades');
+            });
+        });
+    };
     window.addAction = function (mid) {
         const desc = $('actDesc').value.trim(); if (!desc) { alert('Skriv vad som ska göras'); return; }
         post('BoardMeeting', 'AddAction', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingId: mid, agendaItemId: '', description: desc, assignedToMemberId: $('actWho').value || '', dueDate: $('actDue').value || '' })

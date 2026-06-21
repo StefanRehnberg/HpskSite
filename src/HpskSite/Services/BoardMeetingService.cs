@@ -124,6 +124,19 @@ namespace HpskSite.Services
             return true;
         }
 
+        public bool MarkKallelseSent(int id, int byMemberId, int recipientCount)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var m = db.SingleOrDefaultById<BoardMeeting>(id);
+            if (m == null) return false;
+            m.KallelseSentDate = DateTime.UtcNow;
+            m.KallelseSentByMemberId = byMemberId;
+            m.KallelseRecipientCount = recipientCount;
+            db.Update(m);
+            return true;
+        }
+
         public bool SetJusterat(int id, int adjusterMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
