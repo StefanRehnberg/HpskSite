@@ -31,4 +31,12 @@ namespace HpskSite.Models
         public string? SecretaryName { get; set; }
         public string? AdjusterName { get; set; }
     }
+
+    /// <summary>Model for the formal "Valberedningens förslag" print. Chromeless, Layout=null.</summary>
+    public class StyrelseValforslagModel
+    {
+        public string OrgName { get; set; } = "";
+        public int Year { get; set; }
+        public List<BoardNomination> Nominations { get; set; } = new();
+    }
 }

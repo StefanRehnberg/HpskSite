@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _auth;
         private readonly BoardRoleService _boardRoleService;
         private readonly BoardMeetingService _meetingService;
+        private readonly BoardGovernanceService _gov;
         private readonly ClubService _clubService;
 
         public StyrelseController(
@@ -34,6 +35,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService auth,
             BoardRoleService boardRoleService,
             BoardMeetingService meetingService,
+            BoardGovernanceService gov,
             ClubService clubService)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -42,6 +44,7 @@ namespace HpskSite.Controllers
             _auth = auth;
             _boardRoleService = boardRoleService;
             _meetingService = meetingService;
+            _gov = gov;
             _clubService = clubService;
         }
 
@@ -127,6 +130,23 @@ namespace HpskSite.Controllers
                     : attendees.FirstOrDefault(a => a.IsAdjuster)?.MemberName
             };
             return View("StyrelseProtokoll", pm);
+        }
+
+        [HttpGet("valforslag")]
+        public async Task<IActionResult> Valforslag(int type, int id, int year)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember?.Email == null)
+                return Redirect($"/login-&-register/?tab=login&RedirectUrl=/styrelse/valforslag?type={type}%26id={id}%26year={year}");
+            bool isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
+            if (!await CanAccessScopeAsync(type, id, isSiteAdmin)) return Forbid();
+
+            return View("StyrelseValforslag", new StyrelseValforslagModel
+            {
+                OrgName = ResolveOrgName(type, id),
+                Year = year,
+                Nominations = _gov.GetNominations(type, id, year)
+            });
         }
 
         // ---- Helpers --------------------------------------------------------

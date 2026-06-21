@@ -74,11 +74,15 @@
         <div class="sv-nav sv-noprint">
             <button id="svTabMoten" class="active" onclick="svShow('moten')"><i class="bi bi-calendar-event me-2"></i>Möten</button>
             <button id="svTabStyrelse" onclick="svShow('styrelse')"><i class="bi bi-people me-2"></i>Styrelsen</button>
+            <button id="svTabArshjul" onclick="svShow('arshjul')"><i class="bi bi-arrow-repeat me-2"></i>Årshjul</button>
+            <button id="svTabValb" onclick="svShow('valberedning')"><i class="bi bi-person-check me-2"></i>Valberedning</button>
         </div>
 
         <div id="svMoten"></div>
         <div id="svStyrelse" style="display:none;"></div>
         <div id="svMeeting" style="display:none;"></div>
+        <div id="svArshjul" style="display:none;"></div>
+        <div id="svValb" style="display:none;"></div>
     }
 </div>
 
@@ -96,6 +100,9 @@
     const CAN_MANAGE = @(sel.CanManageRoles ? "true" : "false");
     const IS_CLUB = OWNER_TYPE === 0;
     let svMeetings = [], svActions = [], svYear = null, svDocs = null;
+    let svWheelYear = null, svNomYear = null;
+    const POST_KEYS = [['Ordforande','Ordförande'],['ViceOrdforande','Vice ordförande'],['Sekreterare','Sekreterare'],['Kassor','Kassör'],['Ledamot','Ledamot'],['Suppleant','Suppleant'],['Revisor','Revisor'],['Valberedning','Valberedning']];
+    const NOM_STATUSES = ['Föreslagen','Tillfrågad','Tackat ja','Tackat nej'];
 
     const $ = id => document.getElementById(id);
     function token() { return document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''; }
@@ -123,12 +130,13 @@
 
     window.svShow = function (which) {
         $('svMeeting').style.display = 'none';
-        $('svMoten').style.display = which === 'moten' ? '' : 'none';
-        $('svStyrelse').style.display = which === 'styrelse' ? '' : 'none';
-        $('svTabMoten').classList.toggle('active', which === 'moten');
-        $('svTabStyrelse').classList.toggle('active', which === 'styrelse');
+        const panes = { moten: 'svMoten', styrelse: 'svStyrelse', arshjul: 'svArshjul', valberedning: 'svValb' };
+        const tabs = { moten: 'svTabMoten', styrelse: 'svTabStyrelse', arshjul: 'svTabArshjul', valberedning: 'svTabValb' };
+        Object.keys(panes).forEach(k => { $(panes[k]).style.display = (k === which) ? '' : 'none'; $(tabs[k]).classList.toggle('active', k === which); });
         if (which === 'moten') loadMoten();
         if (which === 'styrelse') loadStyrelse();
+        if (which === 'arshjul') loadArshjul();
+        if (which === 'valberedning') loadValberedning();
     };
 
     // =====================================================================
@@ -673,6 +681,144 @@
     window.removeRole = function (id, name, title) {
         if (!confirm(`Ta bort ${name} (${title}) från styrelsen?`)) return;
         post('BoardRole', 'RemoveBoardRole', { boardRoleId: id }).then(r => { if (r.success) loadStyrelse(); });
+    };
+
+    // =====================================================================
+    //  ÅRSHJUL (annual cycle checklist)
+    // =====================================================================
+    function loadArshjul() {
+        const c = $('svArshjul'); c.innerHTML = spinner();
+        const y = svWheelYear || new Date().getFullYear();
+        get('BoardGovernance', 'GetYearWheel', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: y })
+            .then(r => { if (!r.success) { c.innerHTML = errBox(r.message || 'Fel'); return; } svWheelYear = y; renderArshjul(c, r.data || [], r.years || [y]); })
+            .catch(() => c.innerHTML = errBox('Kunde inte hämta årshjulet.'));
+    }
+    function renderArshjul(c, items, years) {
+        if (!years.includes(svWheelYear)) years.unshift(svWheelYear);
+        let html = `<div class="sv-card">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h2 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Årshjul ${svWheelYear}</h2>
+                <div><label class="sv-help me-1">Visa år</label>
+                    <select class="form-select d-inline-block" style="width:auto;" onchange="svWheelSetYear(this.value)">
+                        ${years.map(y => `<option value="${y}" ${y == svWheelYear ? 'selected' : ''}>${y}</option>`).join('')}
+                    </select></div>
+            </div>
+            <p class="sv-help mt-1">Föreningens årliga uppgifter. Bocka av när de är klara. (Standarduppgifter fylls i automatiskt – ändra fritt.)</p>`;
+        items.forEach(it => {
+            const dt = it.targetDate ? `<span class="${it.isOverdue ? 'text-danger' : 'sv-help'}"> · ${esc(it.targetDate)}${it.isOverdue ? ' (försenat)' : ''}</span>` : '';
+            html += `<div class="sv-person" id="svWheel_${it.id}">
+                <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
+                    <input type="checkbox" class="form-check-input sv-check" ${it.done ? 'checked' : ''} onchange="svWheelDone(${it.id}, this.checked)">
+                    <span class="svWheelText ${it.done ? 'text-decoration-line-through sv-help' : ''}">${esc(it.title)}${dt}</span>
+                </label>
+                ${CAN_MANAGE ? `<button class="btn btn-sm btn-outline-danger sv-noprint" onclick="svWheelRemove(${it.id})" title="Ta bort">Ta bort</button>` : ''}
+            </div>`;
+        });
+        html += `<div class="row g-2 mt-2" style="max-width:640px;">
+            <div class="col-12 col-md-7"><input type="text" id="svWheelNewTitle" class="form-control" placeholder="Lägg till egen uppgift…"></div>
+            <div class="col-6 col-md-3"><input type="text" id="svWheelNewDate" class="form-control" placeholder="Datum (frivilligt)"></div>
+            <div class="col-6 col-md-2"><button class="btn btn-primary w-100" onclick="svWheelAdd()"><i class="bi bi-plus-lg"></i></button></div>
+        </div></div>`;
+        c.innerHTML = html;
+        if (typeof flatpickr !== 'undefined' && $('svWheelNewDate')) flatpickr('#svWheelNewDate', { locale: 'sv', dateFormat: 'Y-m-d' });
+    }
+    window.svWheelSetYear = function (y) { svWheelYear = parseInt(y, 10); loadArshjul(); };
+    window.svWheelDone = function (id, done) {
+        post('BoardGovernance', 'SetWheelDone', { itemId: id, done }).then(r => {
+            if (!r.success) return;
+            const t = $('svWheel_' + id) && $('svWheel_' + id).querySelector('.svWheelText');
+            if (t) { t.classList.toggle('text-decoration-line-through', done); t.classList.toggle('sv-help', done); }
+        });
+    };
+    window.svWheelAdd = function () {
+        const title = $('svWheelNewTitle').value.trim(); if (!title) return;
+        post('BoardGovernance', 'AddWheelItem', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: svWheelYear, title, targetDate: $('svWheelNewDate').value || '' })
+            .then(r => { if (r.success) loadArshjul(); });
+    };
+    window.svWheelRemove = function (id) {
+        if (!confirm('Ta bort uppgiften från årshjulet?')) return;
+        post('BoardGovernance', 'RemoveWheelItem', { itemId: id }).then(r => { if (r.success) loadArshjul(); });
+    };
+
+    // =====================================================================
+    //  VALBEREDNING (nominations)
+    // =====================================================================
+    function loadValberedning() {
+        const c = $('svValb'); c.innerHTML = spinner();
+        const y = svNomYear || new Date().getFullYear();
+        get('BoardGovernance', 'GetNominations', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: y })
+            .then(r => { if (!r.success) { c.innerHTML = errBox(r.message || 'Fel'); return; } svNomYear = y; renderValberedning(c, r); })
+            .catch(() => c.innerHTML = errBox('Kunde inte hämta valberedningen.'));
+    }
+    function renderValberedning(c, r) {
+        const noms = r.data || [], posts = r.postsUpForElection || [], years = r.years || [svNomYear];
+        if (!years.includes(svNomYear)) years.unshift(svNomYear);
+        let html = `<div class="sv-card">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h2 class="mb-0"><i class="bi bi-person-check me-2"></i>Valberedning ${svNomYear}</h2>
+                <div class="d-flex gap-2 align-items-center">
+                    <label class="sv-help">Inför år</label>
+                    <select class="form-select d-inline-block" style="width:auto;" onchange="svNomSetYear(this.value)">
+                        ${years.map(y => `<option value="${y}" ${y == svNomYear ? 'selected' : ''}>${y}</option>`).join('')}
+                    </select>
+                    <a class="btn btn-outline-secondary sv-noprint" href="/styrelse/valforslag?type=${OWNER_TYPE}&id=${OWNER_ID}&year=${svNomYear}" target="_blank"><i class="bi bi-printer me-1"></i>Skriv ut förslag</a>
+                </div>
+            </div>`;
+
+        // Posts up for election
+        html += `<p class="sv-help mt-1"><strong>Poster på val (mandat går ut):</strong> `;
+        html += posts.length ? posts.map(p => `${esc(p.title)} (${esc(p.memberName || '')})`).join(', ') : 'inga registrerade mandat går ut i år – se fliken Styrelsen.';
+        html += `</p></div>`;
+
+        // Nominations
+        html += `<div class="sv-card"><h2><i class="bi bi-people me-2"></i>Förslag på kandidater</h2>`;
+        if (!noms.length) html += `<p class="sv-help">Inga förslag ännu.</p>`;
+        noms.forEach(n => {
+            html += `<div class="sv-person">
+                <span><strong>${esc(n.candidateName)}</strong> <span class="sv-help">till ${esc(n.postLabel)}</span>
+                    <span class="badge ${nomBadge(n.status)} ms-1">${esc(n.status)}</span>
+                    ${n.notes ? `<span class="sv-help d-block">${esc(n.notes)}</span>` : ''}</span>
+                <span class="d-flex gap-1 sv-noprint">
+                    <select class="form-select form-select-sm" style="width:auto;" onchange="svNomStatus(${n.id}, this.value)">
+                        ${NOM_STATUSES.map(s => `<option ${s === n.status ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-sm btn-outline-danger" onclick="svNomRemove(${n.id})" title="Ta bort">✕</button>
+                </span>
+            </div>`;
+        });
+        // Add form
+        html += `<div class="row g-2 mt-2" style="max-width:720px;">
+            <div class="col-12 col-md-4"><label class="sv-help">Namn på kandidat</label><input type="text" id="svNomName" class="form-control" placeholder="För- och efternamn"></div>
+            <div class="col-12 col-md-4"><label class="sv-help">Föreslås till post</label>
+                <select id="svNomPost" class="form-select">${POST_KEYS.map(p => `<option value="${p[0]}">${p[1]}</option>`).join('')}<option value="">Annan…</option></select>
+                <input type="text" id="svNomPostCustom" class="form-control mt-1 d-none" placeholder="Egen post">
+            </div>
+            <div class="col-12 col-md-4"><label class="sv-help">Status</label><select id="svNomStatusNew" class="form-select">${NOM_STATUSES.map(s => `<option>${s}</option>`).join('')}</select></div>
+            <div class="col-12"><input type="text" id="svNomNotes" class="form-control" placeholder="Anteckning (frivilligt)"></div>
+            <div class="col-12"><button class="btn btn-success btn-xl" onclick="svNomAdd()"><i class="bi bi-plus-lg me-2"></i>Lägg till förslag</button></div>
+        </div></div>`;
+        c.innerHTML = html;
+        const postSel = $('svNomPost');
+        if (postSel) postSel.addEventListener('change', () => $('svNomPostCustom').classList.toggle('d-none', postSel.value !== ''));
+    }
+    function nomBadge(s) { return s === 'Tackat ja' ? 'bg-success' : s === 'Tackat nej' ? 'bg-secondary' : s === 'Tillfrågad' ? 'bg-info text-dark' : 'bg-light text-dark'; }
+    window.svNomSetYear = function (y) { svNomYear = parseInt(y, 10); loadValberedning(); };
+    window.svNomAdd = function () {
+        const name = $('svNomName').value.trim();
+        const postKey = $('svNomPost').value;
+        const postLabel = postKey ? (POST_KEYS.find(p => p[0] === postKey)?.[1] || postKey) : $('svNomPostCustom').value.trim();
+        if (!name) { alert('Skriv kandidatens namn'); return; }
+        if (!postLabel) { alert('Ange vilken post'); return; }
+        post('BoardGovernance', 'AddNomination', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: svNomYear, postKey, postLabel, candidateName: name, status: $('svNomStatusNew').value, notes: $('svNomNotes').value || '' })
+            .then(r => { if (r.success) loadValberedning(); else alert(r.message || 'Kunde inte lägga till'); });
+    };
+    window.svNomStatus = function (id, status) {
+        post('BoardGovernance', 'SetNominationStatus', { nominationId: id, status })
+            .then(r => { if (r.success) loadValberedning(); });
+    };
+    window.svNomRemove = function (id) {
+        if (!confirm('Ta bort förslaget?')) return;
+        post('BoardGovernance', 'RemoveNomination', { nominationId: id }).then(r => { if (r.success) loadValberedning(); });
     };
 
     // ---- shared ----

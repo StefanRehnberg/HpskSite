@@ -60,6 +60,45 @@ namespace HpskSite.Models
         public bool IsPresent => AttendanceStatus == "Närvarande";
     }
 
+    [TableName("BoardYearWheelItems")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class BoardYearWheelItem
+    {
+        public int Id { get; set; }
+        public int OwnerType { get; set; }
+        public int OwnerId { get; set; }
+        public int Year { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public DateTime? TargetDate { get; set; }
+        public bool Done { get; set; }
+        public DateTime? DoneDate { get; set; }
+        public int SortOrder { get; set; }
+        public bool IsActive { get; set; } = true;
+
+        [Ignore]
+        public bool IsOverdue => !Done && TargetDate.HasValue && TargetDate.Value.Date < DateTime.Today;
+    }
+
+    [TableName("BoardNominations")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class BoardNomination
+    {
+        public int Id { get; set; }
+        public int OwnerType { get; set; }
+        public int OwnerId { get; set; }
+        public int Year { get; set; }
+        public string? PostKey { get; set; }
+        public string PostLabel { get; set; } = string.Empty;
+        public string CandidateName { get; set; } = string.Empty;
+        public int? CandidateMemberId { get; set; }
+        public string Status { get; set; } = "Föreslagen";
+        public string? Notes { get; set; }
+        public int SortOrder { get; set; }
+        public int? CreatedByMemberId { get; set; }
+        public DateTime CreatedDate { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
+
     [TableName("BoardMeetingAgendaLinks")]
     [PrimaryKey("Id", AutoIncrement = true)]
     public class BoardMeetingAgendaLink
