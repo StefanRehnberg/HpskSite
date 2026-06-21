@@ -129,14 +129,9 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionBoardAdmin-tab" data-bs-toggle="tab" data-bs-target="#regionBoardAdminTab" type="button">
-                <i class="bi bi-award me-2"></i>Roller
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionMeetings-tab" data-bs-toggle="tab" data-bs-target="#regionMeetingsTab" type="button">
-                <i class="bi bi-calendar-event me-2"></i>Styrelsemöten
-            </button>
+            <a class="nav-link" href="/styrelse?type=1&id=@regionContentId">
+                <i class="bi bi-clipboard-check me-2"></i>Styrelse
+            </a>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="regionCertifications-tab" data-bs-toggle="tab" data-bs-target="#regionCertificationsTab" type="button">
@@ -383,23 +378,7 @@
             </div>
         </div>
 
-        <!-- Board Roles Admin Sub-Tab -->
-        <div class="tab-pane fade" id="regionBoardAdminTab">
-            @{
-                ViewBag.BoardOwnerType = 1;
-                ViewBag.BoardOwnerId = regionContentId;
-            }
-            @await Html.PartialAsync("BoardRolesManagement")
-        </div>
-
-        <!-- Board Meetings Sub-Tab -->
-        <div class="tab-pane fade" id="regionMeetingsTab">
-            @{
-                ViewBag.BoardOwnerType = 1;
-                ViewBag.BoardOwnerId = regionContentId;
-            }
-            @await Html.PartialAsync("BoardMeetingsManagement")
-        </div>
+        <!-- Board work (roles + meetings) moved to the dedicated /styrelse page (Styrelse link in the tab bar). -->
 
         <!-- Certifieringar Sub-Tab -->
         <div class="tab-pane fade" id="regionCertificationsTab">

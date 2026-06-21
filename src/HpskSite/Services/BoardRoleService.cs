@@ -220,6 +220,25 @@ namespace HpskSite.Services
                 ownerType, ownerId, memberId) > 0;
         }
 
+        /// <summary>True if the member sits on any active board (club or region). Cheap menu-gate check.</summary>
+        public bool IsOnAnyBoard(int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM BoardRoles WHERE MemberId = @0 AND IsActive = 1 AND IsBoardMember = 1", memberId) > 0;
+        }
+
+        /// <summary>Distinct (OwnerType, OwnerId) scopes where the member is an active board member.</summary>
+        public List<(int OwnerType, int OwnerId)> GetBoardMembershipsForMember(int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<BoardRole>(
+                    "SELECT DISTINCT OwnerType, OwnerId FROM BoardRoles WHERE MemberId = @0 AND IsActive = 1 AND IsBoardMember = 1",
+                    memberId)
+                .Select(r => (r.OwnerType, r.OwnerId))
+                .ToList();
+        }
+
         /// <summary>
         /// Get a single board role by ID.
         /// </summary>

@@ -5,6 +5,7 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthService
+@inject HpskSite.Services.BoardRoleService BoardRoleService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = null;
@@ -19,6 +20,7 @@
     var memberClubs = new List<(int Id, string Name, string ClubUrl)>();
     var memberRegionPages = new List<(string Name, string RegionUrl)>();
     var hasAdminAccess = false; // True if site admin OR regional admin
+    var isOnBoard = false;      // True if the member sits on any club/region board (shows the Styrelse link)
 
     if (isLoggedIn && currentMember != null)
     {
@@ -102,6 +104,12 @@
 
         // User has admin access if they are a site admin OR regional admin
         hasAdminAccess = isAdmin || isRegionalAdmin;
+
+        // Cheap indexed check so board members (not only admins) see the Styrelse link
+        if (memberData != null)
+        {
+            isOnBoard = BoardRoleService.IsOnAnyBoard(memberData.Id);
+        }
     }
 }
 <!DOCTYPE html>
@@ -610,6 +618,10 @@
                                         var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
                                     }
                                     <li><a class="dropdown-item" href="@userProfileUrl"><i class="bi bi-person"></i> Min Sida</a></li>
+                                    @if (isOnBoard || hasAdminAccess)
+                                    {
+                                        <li><a class="dropdown-item" href="/styrelse"><i class="bi bi-clipboard-check"></i> Styrelse</a></li>
+                                    }
                                     @if (memberClubs.Count > 0)
                                     {
                                         foreach (var club in memberClubs)
