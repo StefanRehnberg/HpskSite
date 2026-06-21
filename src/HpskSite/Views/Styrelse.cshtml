@@ -381,6 +381,7 @@
             if ($('actDue')) flatpickr('#actDue', { locale: 'sv', dateFormat: 'Y-m-d' });
         }
         window._mId = m.id;
+        window._mYear = parseInt((m.meetingDate || '').slice(0, 4), 10) || new Date().getFullYear();
     }
 
     function agendaCard(it, num, locked, allLinks) {
@@ -406,10 +407,11 @@
             <textarea class="form-control" rows="2" id="ag_dec_${it.id}" onchange="saveAgenda(${it.id})" placeholder="Vad beslutade styrelsen?">${esc(it.decision || '')}</textarea>
             <span id="ag_saved_${it.id}" class="sv-saved"><i class="bi bi-check-lg"></i> Sparat</span>
             <div class="mt-2">${linksHtml}</div>
-            <details class="sv-noprint mt-1"><summary class="sv-help" style="cursor:pointer;">+ Bifoga dokument, möte eller länk</summary>
+            <details class="sv-noprint mt-1"><summary class="sv-help" style="cursor:pointer;">+ Bifoga dokument, möte, valberedningens förslag eller länk</summary>
                 <div class="mt-2 d-flex gap-2 flex-wrap">
                     <button class="btn btn-sm btn-outline-secondary" onclick="attachDoc(${it.id})"><i class="bi bi-file-earmark me-1"></i>Dokument</button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="attachMeeting(${it.id})"><i class="bi bi-calendar-event me-1"></i>Tidigare möte</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="attachValforslag(${it.id})"><i class="bi bi-person-check me-1"></i>Valberedningens förslag</button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="attachUrl(${it.id})"><i class="bi bi-link-45deg me-1"></i>Länk (URL)</button>
                 </div>
             </details>
@@ -417,10 +419,12 @@
     }
 
     function linkChip(l, locked) {
-        const icon = l.kind === 'document' ? 'bi-file-earmark-text' : l.kind === 'meeting' ? 'bi-calendar-event' : 'bi-link-45deg';
+        const icon = l.kind === 'document' ? 'bi-file-earmark-text' : l.kind === 'meeting' ? 'bi-calendar-event'
+            : l.kind === 'valforslag' ? 'bi-person-check' : 'bi-link-45deg';
         let href = '#', extra = 'target="_blank"';
         if (l.kind === 'document') href = '/umbraco/surface/Document/DownloadDocument?id=' + l.refId;
         else if (l.kind === 'meeting') { href = '#'; extra = `onclick="event.preventDefault();openMeeting(${l.refId}, true)"`; }
+        else if (l.kind === 'valforslag') href = `/styrelse/valforslag?type=${OWNER_TYPE}&id=${OWNER_ID}&year=${l.refId}`;
         else href = l.url || '#';
         const rm = locked ? '' : ` <a href="#" class="text-danger ms-1 sv-noprint" title="Ta bort" onclick="event.preventDefault();removeLink(${l.id})">✕</a>`;
         return `<div class="sv-help" style="margin:.1rem 0;"><i class="bi ${icon} me-1"></i><a href="${href}" ${extra}>${esc(l.label)}</a>${rm}</div>`;
@@ -533,6 +537,13 @@
                 post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'meeting', refId: o.v.id, url: '', label: o.v.title })
                     .then(r => { if (r.success) openMeeting(window._mId); }));
         });
+    };
+    window.attachValforslag = function (itemId) {
+        // Links the valberedningens förslag for the meeting's year (årsmöte-året). Offer ±1 year too.
+        const y = window._mYear || new Date().getFullYear();
+        svChoose('Vilket års förslag?', [y, y - 1, y + 1].map(yr => ({ label: 'Valberedningens förslag ' + yr, v: yr })), o =>
+            post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'valforslag', refId: o.v, url: '', label: 'Valberedningens förslag ' + o.v })
+                .then(r => { if (r.success) openMeeting(window._mId); }));
     };
     window.attachUrl = function (itemId) {
         const label = prompt('Vad heter länken? (t.ex. Verksamhetsberättelse 2025)'); if (!label) return;

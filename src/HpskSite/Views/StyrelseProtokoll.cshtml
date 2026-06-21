@@ -11,6 +11,7 @@
     {
         "document" => $"/umbraco/surface/Document/DownloadDocument?id={l.RefId}",
         "meeting" => $"/styrelse/protokoll/{l.RefId}",
+        "valforslag" => $"/styrelse/valforslag?type={m.OwnerType}&id={m.OwnerId}&year={l.RefId}",
         _ => l.Url ?? "#"
     };
 }
