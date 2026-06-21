@@ -42,6 +42,10 @@ namespace HpskSite.Composers
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
 
+            // Board work: meeting lifecycle (meetings + agenda + attendance/quorum + protokoll + actions).
+            // Run create-board-meeting-tables.sql. See BOARD_WORK_PHASE2_MEETINGS.md.
+            builder.Services.AddScoped<BoardMeetingService>();
+
             // Tracks each club's electronic acceptance of the Personuppgiftsbiträdesavtal (DPA).
             // Backed by the ClubDpaAcceptance table — run create-club-dpa-acceptance-table.sql.
             builder.Services.AddScoped<DpaAcceptanceService>();

@@ -241,6 +241,9 @@
                     <button class="btn btn-outline-primary" onclick="showBoardRolesModal()">
                         <i class="bi bi-award me-2"></i>Roller
                     </button>
+                    <button class="btn btn-outline-primary" onclick="showBoardMeetingsModal()">
+                        <i class="bi bi-calendar-event me-2"></i>Styrelsemöten
+                    </button>
                     <button class="btn btn-outline-info" onclick="showClubEmailModal()">
                         <i class="bi bi-envelope me-2"></i>Skicka mail
                     </button>
@@ -866,6 +869,13 @@
     ViewBag.BoardOwnerId = clubId;
 }
 @await Html.PartialAsync("BoardRolesManagement")
+
+<!-- Board Meetings Modal -->
+@{
+    ViewBag.BoardOwnerType = 0;
+    ViewBag.BoardOwnerId = clubId;
+}
+@await Html.PartialAsync("BoardMeetingsManagement")
 
 <!-- Club Email Modal -->
 @{

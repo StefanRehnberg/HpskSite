@@ -134,6 +134,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionMeetings-tab" data-bs-toggle="tab" data-bs-target="#regionMeetingsTab" type="button">
+                <i class="bi bi-calendar-event me-2"></i>Styrelsemöten
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="regionCertifications-tab" data-bs-toggle="tab" data-bs-target="#regionCertificationsTab" type="button">
                 <i class="bi bi-mortarboard me-2"></i>Certifieringar
             </button>
@@ -385,6 +390,15 @@
                 ViewBag.BoardOwnerId = regionContentId;
             }
             @await Html.PartialAsync("BoardRolesManagement")
+        </div>
+
+        <!-- Board Meetings Sub-Tab -->
+        <div class="tab-pane fade" id="regionMeetingsTab">
+            @{
+                ViewBag.BoardOwnerType = 1;
+                ViewBag.BoardOwnerId = regionContentId;
+            }
+            @await Html.PartialAsync("BoardMeetingsManagement")
         </div>
 
         <!-- Certifieringar Sub-Tab -->

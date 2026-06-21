@@ -208,6 +208,19 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// True if the member holds an active board-member role (IsBoardMember=1) for the owner.
+        /// The single capability check used to gate board-work access (no per-post permissions).
+        /// </summary>
+        public bool IsBoardMemberOf(int ownerType, int ownerId, int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            return db.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1 AND MemberId = @2 AND IsActive = 1 AND IsBoardMember = 1",
+                ownerType, ownerId, memberId) > 0;
+        }
+
+        /// <summary>
         /// Get a single board role by ID.
         /// </summary>
         public BoardRole? GetById(int id)
