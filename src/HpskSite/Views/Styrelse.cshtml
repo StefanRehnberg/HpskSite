@@ -781,7 +781,8 @@
     // =====================================================================
     function loadValberedning() {
         const c = $('svValb'); c.innerHTML = spinner();
-        const y = svNomYear || new Date().getFullYear();
+        // Valberedningen arbetar inför NÄSTA årsmöte → utgå från nästa år (året går att byta i listan).
+        const y = svNomYear || (new Date().getFullYear() + 1);
         get('BoardGovernance', 'GetNominations', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: y })
             .then(r => { if (!r.success) { c.innerHTML = errBox(r.message || 'Fel'); return; } svNomYear = y; renderValberedning(c, r); })
             .catch(() => c.innerHTML = errBox('Kunde inte hämta valberedningen.'));
@@ -802,8 +803,10 @@
             </div>`;
 
         // Posts up for election
-        html += `<p class="sv-help mt-1"><strong>Poster på val (mandat går ut):</strong> `;
-        html += posts.length ? posts.map(p => `${esc(p.title)} (${esc(p.memberName || '')})`).join(', ') : 'inga registrerade mandat går ut i år – se fliken Styrelsen.';
+        html += `<p class="sv-help mt-1"><strong>Poster på val (mandat t.o.m. ${svNomYear}):</strong> `;
+        html += posts.length
+            ? posts.map(p => `${esc(p.title)} (${esc(p.memberName || '')})`).join(', ')
+            : `inga mandat med slutdatum t.o.m. ${svNomYear}. Ange mandattider på fliken <strong>Styrelsen</strong> (eller välj ett annat år ovan) så listas posterna automatiskt.`;
         html += `</p></div>`;
 
         // Nominations

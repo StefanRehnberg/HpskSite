@@ -56,8 +56,7 @@ namespace HpskSite.Controllers
             if (!await CanAccessBoardWork(ownerType, ownerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var items = _gov.GetYearWheel(ownerType, ownerId, year);
-            var years = _gov.GetWheelYears(ownerType, ownerId);
-            if (!years.Contains(year)) years.Insert(0, year);
+            var years = BuildYearOptions(_gov.GetWheelYears(ownerType, ownerId), year);
             return Json(new { success = true, data = items.Select(WheelDto), years });
         }
 
@@ -112,8 +111,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var noms = _gov.GetNominations(ownerType, ownerId, year);
             var posts = _gov.GetPostsUpForElection(ownerType, ownerId, year);
-            var years = _gov.GetNominationYears(ownerType, ownerId);
-            if (!years.Contains(year)) years.Insert(0, year);
+            var years = BuildYearOptions(_gov.GetNominationYears(ownerType, ownerId), year);
             return Json(new
             {
                 success = true,
@@ -165,6 +163,20 @@ namespace HpskSite.Controllers
             if (n == null || !await CanAccessBoardWork(n.OwnerType, n.OwnerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             return Json(new { success = _gov.RemoveNomination(nominationId) });
+        }
+
+        // ---- Helpers --------------------------------------------------------
+
+        /// <summary>
+        /// Year-dropdown options: any years that already have data, plus a forward-looking window
+        /// (last year through two years ahead) so a brand-new scope isn't stuck on the current year —
+        /// the valberedning especially needs to look ahead to the next årsmöte. Newest first.
+        /// </summary>
+        private static List<int> BuildYearOptions(List<int> dataYears, int selected)
+        {
+            int y = DateTime.Today.Year;
+            var set = new HashSet<int>(dataYears) { y - 1, y, y + 1, y + 2, selected };
+            return set.OrderByDescending(v => v).ToList();
         }
 
         // ---- DTOs + auth ----------------------------------------------------
