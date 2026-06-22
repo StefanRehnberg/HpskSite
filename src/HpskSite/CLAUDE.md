@@ -1463,8 +1463,8 @@ the owner. Replicated as `CanAccessBoardWork` in `BoardMeetingController` / `Boa
 - **Roles & terms** (`BoardRoleService`): `ElectedDate`/`TermEndsDate`/`TermYears` on `BoardRoles`;
   "mandat som går ut" view.
 - **Årshjul** (`BoardGovernanceService`, `BoardYearWheelItems`): per-year checklist seeded from
-  `BoardYearWheelTemplate` (årsmöte/bokslut/revision/budget/**LOK-stöd 25 feb+25 aug**/medlemsrapportering),
-  target dates, in-place done-toggle, overdue highlight.
+  `BoardYearWheelTemplate` (bokslut/verksamhetsberättelse/revision/kallelse/årsmöte/konstituering/budget/medlemsrapportering
+  — NO LOK-stöd item; pistol.nu has no LOK-stöd support, don't seed/mention it), target dates, in-place done-toggle, overdue highlight.
 - **Valberedning** (`BoardNominations`): posts-up-for-election from term dates + candidate nominations +
   formal printable förslag.
 - **Kallelse** (`BoardKallelseController`): emails the dagordning. Recipients by type — club årsmöte → all
