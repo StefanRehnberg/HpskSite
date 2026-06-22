@@ -238,9 +238,9 @@
                     <button class="btn btn-outline-warning" onclick="showClubAdminsModal()" title="Hantera vilka medlemmar som är klubbadmins">
                         <i class="bi bi-person-gear me-2"></i>Klubbadmins
                     </button>
-                    <button class="btn btn-outline-primary" onclick="showBoardRolesModal()">
-                        <i class="bi bi-award me-2"></i>Roller
-                    </button>
+                    <a class="btn btn-outline-primary" href="/styrelse?type=0&id=@clubId">
+                        <i class="bi bi-clipboard-check me-2"></i>Styrelsearbete
+                    </a>
                     <button class="btn btn-outline-info" onclick="showClubEmailModal()">
                         <i class="bi bi-envelope me-2"></i>Skicka mail
                     </button>
@@ -860,12 +860,8 @@
     </div>
 </div>
 
-<!-- Board Roles Management Modal -->
-@{
-    ViewBag.BoardOwnerType = 0;
-    ViewBag.BoardOwnerId = clubId;
-}
-@await Html.PartialAsync("BoardRolesManagement")
+<!-- Board work (roles + meetings) moved to the dedicated /styrelse page (linked from the Members tab). -->
+
 
 <!-- Club Email Modal -->
 @{

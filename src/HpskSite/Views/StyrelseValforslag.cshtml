@@ -1,0 +1,66 @@
+@using System.Globalization
+@model HpskSite.Models.StyrelseValforslagModel
+@{
+    Layout = null;
+    // Group nominations by post, in a sensible order.
+    var byPost = Model.Nominations
+        .GroupBy(n => n.PostLabel)
+        .OrderBy(g => g.Key, StringComparer.CurrentCulture)
+        .ToList();
+}
+<!DOCTYPE html>
+<html lang="sv" data-bs-theme="light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Valberedningens förslag @Model.Year – @Model.OrgName</title>
+    <style>
+        :root { --ink:#1a1a1a; --muted:#555; --line:#cfcfcf; }
+        body { font-family: Georgia, 'Times New Roman', serif; color: var(--ink); line-height: 1.5;
+            max-width: 21cm; margin: 0 auto; padding: 2.2cm 2cm 2cm; font-size: 12pt; background:#fff; }
+        h1 { font-size: 17pt; margin: 0 0 .1cm; }
+        .org { font-size: 13pt; font-weight: bold; }
+        .doctype { text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-size: 11pt; }
+        h2 { font-size: 12.5pt; margin: .7cm 0 .15cm; border-bottom: 1px solid var(--line); padding-bottom: 2px; }
+        .cand { margin: .15cm 0; }
+        .cand .name { font-weight: bold; }
+        .cand .status { color: var(--muted); font-size: 10.5pt; }
+        .cand .notes { color: var(--muted); font-size: 10.5pt; font-style: italic; }
+        .toolbar { max-width: 21cm; margin: .6cm auto; text-align: right; }
+        .toolbar button, .toolbar a { font-family: system-ui, sans-serif; font-size: 11pt; padding: .5rem 1rem;
+            border: 1px solid #888; border-radius: .4rem; background: #f4f4f4; color:#222; text-decoration:none; cursor:pointer; }
+        @@media print { .toolbar { display:none; } body { padding:0; } }
+    </style>
+</head>
+<body>
+    <div class="toolbar"><button onclick="window.print()">Skriv ut / Spara som PDF</button></div>
+    <div class="org">@Model.OrgName</div>
+    <div class="doctype">Valberedningens förslag</div>
+    <h1>Valberedningens förslag inför @Model.Year</h1>
+
+    @if (!Model.Nominations.Any())
+    {
+        <p style="color:var(--muted);font-style:italic;">Inga förslag har lagts in ännu.</p>
+    }
+    else
+    {
+        foreach (var grp in byPost)
+        {
+            <h2>@grp.Key</h2>
+            foreach (var n in grp)
+            {
+                <div class="cand">
+                    <span class="name">@n.CandidateName</span>
+                    <span class="status">— @n.Status</span>
+                    @if (!string.IsNullOrWhiteSpace(n.Notes))
+                    {
+                        <div class="notes">@n.Notes</div>
+                    }
+                </div>
+            }
+        }
+    }
+
+    <p style="margin-top:1.4cm;color:var(--muted);">Förslaget presenteras vid årsmötet. Nomineringar kan även lämnas på mötet.</p>
+</body>
+</html>

@@ -18,6 +18,11 @@ namespace HpskSite.Models
         public int? AssignedByMemberId { get; set; }
         public bool IsActive { get; set; } = true;
 
+        // Term tracking (Phase 1). Nullable: existing rows have no term and render as "—", never expired.
+        public DateTime? ElectedDate { get; set; }     // date elected at årsmöte
+        public DateTime? TermEndsDate { get; set; }    // mandate runs to (source of truth)
+        public int? TermYears { get; set; }            // 1 or 2 typically (context only)
+
         // Display-only properties (not mapped to DB columns)
         [ResultColumn]
         public string? MemberName { get; set; }
@@ -26,5 +31,16 @@ namespace HpskSite.Models
         public string DisplayTitle => RoleKey == "Custom" && !string.IsNullOrEmpty(CustomTitle)
             ? CustomTitle
             : BoardRoleDefinitions.GetLabel(RoleKey);
+
+        [Ignore]
+        public bool HasTerm => TermEndsDate.HasValue;
+
+        [Ignore]
+        public bool IsTermExpired => TermEndsDate.HasValue && TermEndsDate.Value.Date < DateTime.Today;
+
+        [Ignore]
+        public int? DaysLeftInTerm => TermEndsDate.HasValue
+            ? (int?)(TermEndsDate.Value.Date - DateTime.Today).TotalDays
+            : null;
     }
 }
