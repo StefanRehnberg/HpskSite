@@ -1443,6 +1443,45 @@ No state machine — every command button is tappable any time so the chief can 
 
 **All four pages are routed MVC `Controller`s — no Umbraco node/doctype needed** (pattern from `FaltskytteConfigurationEditorController`; chromeless `Layout = null` + a typed `@model`, except the Stationer tab which is a partial in CompetitionManagement). Build is green on these but Razor views are **runtime-compiled** — `dotnet build` does NOT validate them (a named-tuple bug once shipped that way; now `int[]`), so load each page once after deploy. Adds C# → full rebuild.
 
+## Board Work (Styrelsearbete) — dedicated /styrelse page
+
+Senior-friendly board workspace for clubs & regions, built on the existing `BoardRoles` table.
+Lives at **`/styrelse`** (routed `StyrelseController`, **no Umbraco node** — grabs the site root like
+`SightPictureController`), reached from a **"Styrelse"** link in the user menu (Master.cshtml; shown to
+board members via `BoardRoleService.IsOnAnyBoard` OR admins). Scope picker lists only the boards the
+member sits on; admins can deep-link `?type=&id=` from the club/region admin panels' "Styrelsearbete"
+link. Four tabs: **Möten, Styrelsen, Årshjul, Valberedning**.
+
+**Single access gate** (no per-post permissions): site/club/regional admin OR an active board member of
+the owner. Replicated as `CanAccessBoardWork` in `BoardMeetingController` / `BoardGovernanceController` /
+`BoardKallelseController`, and `CanAccessScopeAsync` in `StyrelseController`.
+
+- **Meetings** (`BoardMeetingService` / `BoardMeetingController`): create-from-type seeds the dagordning
+  (`BoardMeetingTemplates`) + attendees from the board roster; närvaro + beslutsförhet (majority); beslut
+  per agenda item; åtgärder (assignee + due, open ones surface across years); attachments
+  (`BoardMeetingAgendaLinks`: document / previous meeting / valförslag / URL); justering locks the protokoll.
+- **Roles & terms** (`BoardRoleService`): `ElectedDate`/`TermEndsDate`/`TermYears` on `BoardRoles`;
+  "mandat som går ut" view.
+- **Årshjul** (`BoardGovernanceService`, `BoardYearWheelItems`): per-year checklist seeded from
+  `BoardYearWheelTemplate` (årsmöte/bokslut/revision/budget/**LOK-stöd 25 feb+25 aug**/medlemsrapportering),
+  target dates, in-place done-toggle, overdue highlight.
+- **Valberedning** (`BoardNominations`): posts-up-for-election from term dates + candidate nominations +
+  formal printable förslag.
+- **Kallelse** (`BoardKallelseController`): emails the dagordning. Recipients by type — club årsmöte → all
+  approved members; club other → board; region → region board. Confirm-before-send w/ count; reuses
+  `EmailService` (SMTP ≤250) / `BrevoEmailService` (club `brevoApiKey`); records `KallelseSentDate/By/Count`;
+  ticks the årshjul kallelse item; admin oversight copy.
+- **Formal prints** (routed on StyrelseController, `Layout=null`): `/styrelse/dagordning/{id}`,
+  `/styrelse/protokoll/{id}` (`StyrelseProtokoll.cshtml`), `/styrelse/valforslag?type=&id=&year=`
+  (`StyrelseValforslag.cshtml`).
+
+**Deploy:** run `Migrations/add-terms-to-board-roles.sql` + `Migrations/create-board-meeting-tables.sql`
+(idempotent; creates meeting/agenda/attendee/action/agenda-link/yearwheel/nomination tables + kallelse
+columns) in SSMS, then full rebuild. **No Umbraco doctype/property/node.** UI JS reads **camelCase** DTO
+keys (System.Text.Json camelCases output) and never passes strings through inline onclick/onchange attrs
+(use id-only handlers). Spec: `Documentation/BOARD_WORK_PHASE1_TERMS.md`, `_PHASE2_MEETINGS.md`,
+`_PHASE3_GOVERNANCE.md`. KB: `KnowledgeBase/docs/styrelsearbete.md`. Marketed on /om-pistol-nu (Årshjul shot).
+
 ## Common Patterns
 
 ### Model Usage
