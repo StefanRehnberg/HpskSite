@@ -29,6 +29,9 @@ namespace HpskSite.Controllers
     /// </summary>
     public class LoginController : SurfaceController
     {
+        // Must match MemberIdentityComposer's options.Lockout.MaxFailedAccessAttempts.
+        private const int LockoutThreshold = 10;
+
         private readonly SignInManager<MemberIdentityUser> _signInManager;
         private readonly IMemberManager _memberManager;
         private readonly ITwoFactorLoginService _twoFactorLoginService;
@@ -104,9 +107,19 @@ namespace HpskSite.Controllers
 
             // "Locked now" covers both cases: the attempt that just tripped the lock (the result is
             // Failed but the member is now locked) and subsequent attempts while still locked
-            // (result.IsLockedOut). See MemberIdentityComposer for the policy (10 attempts / 5 min).
+            // (result.IsLockedOut). See MemberIdentityComposer for the policy (10 attempts).
+            //
+            // IMPORTANT: the IsLockedOutAsync fallback is gated on the member having actually reached
+            // the failed-attempt threshold. Umbraco's IsLockedOutAsync returns a FALSE POSITIVE for a
+            // freshly-created member who has never failed a login (LockoutEnd maps to a future
+            // sentinel), so without this guard a brand-new member's very first login attempt would
+            // wrongly be treated as "locked" and trigger the lockout email. A real lockout always has
+            // failedPasswordAttempts == LockoutThreshold (> 0), so genuine lockouts are still caught.
+            var failedCount = attemptedUser?.AccessFailedCount ?? 0;
             var lockedNow = result.IsLockedOut
-                            || (attemptedUser is not null && await _memberManager.IsLockedOutAsync(attemptedUser));
+                            || (attemptedUser is not null
+                                && failedCount >= LockoutThreshold
+                                && await _memberManager.IsLockedOutAsync(attemptedUser));
 
             if (lockedNow)
             {
