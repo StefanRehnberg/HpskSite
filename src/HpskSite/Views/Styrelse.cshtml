@@ -26,6 +26,8 @@
     .sv-card.highlight { border-color: var(--bs-primary); border-width: 2px; }
     .sv-label { font-weight: 600; margin-bottom: .25rem; display: block; }
     .styrelse-page .form-control, .styrelse-page .form-select { font-size: 1.1rem; padding: .6rem .8rem; }
+    /* Reserve room for the caret so the dropdown arrow isn't obscured by the text (esp. width:auto selects). */
+    .styrelse-page .form-select { padding-right: 2.5rem; background-position: right .9rem center; }
     .styrelse-page textarea.form-control { line-height: 1.5; }
     .sv-help { color: var(--bs-secondary-color); font-size: .98rem; }
     .sv-person { display: flex; align-items: center; justify-content: space-between; gap: .75rem;
