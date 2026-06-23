@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.DataProtection;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -23,6 +24,9 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
+        private readonly EmailService _emailService;
+        private readonly ClubService _clubService;
+        private readonly IDataProtector _protector;
         private readonly ILogger<BoardMeetingController> _logger;
 
         public BoardMeetingController(
@@ -37,6 +41,9 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
             IMemberManager memberManager,
+            EmailService emailService,
+            ClubService clubService,
+            IDataProtectionProvider dataProtection,
             ILogger<BoardMeetingController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -45,7 +52,17 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _memberService = memberService;
             _memberManager = memberManager;
+            _emailService = emailService;
+            _clubService = clubService;
+            _protector = dataProtection.CreateProtector("Board.Justering.v1");
             _logger = logger;
+        }
+
+        /// <summary>Protect/unprotect a meeting id into an opaque, non-enumerable QR/email token.</summary>
+        public string ProtectMeetingToken(int meetingId) => _protector.Protect(meetingId.ToString());
+        private int? UnprotectMeetingToken(string token)
+        {
+            try { return int.Parse(_protector.Unprotect(token)); } catch { return null; }
         }
 
         // ---- Meetings -------------------------------------------------------
@@ -75,11 +92,59 @@ namespace HpskSite.Controllers
             var links = _meetingService.GetLinksForMeeting(meetingId);
             var (present, total, required, isMet) = _meetingService.GetQuorum(meetingId);
 
+            // Resolve elected-member names (electees may be non-attendees in "members"-source elections).
+            var nameById = attendees.Where(a => !string.IsNullOrEmpty(a.MemberName))
+                .GroupBy(a => a.MemberId).ToDictionary(g => g.Key, g => g.First().MemberName!);
+            int[] ElectedIds(BoardMeetingAgendaItem a) => string.IsNullOrEmpty(a.ElectedMemberIds)
+                ? Array.Empty<int>()
+                : a.ElectedMemberIds.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => int.TryParse(s, out var n) ? n : 0).Where(n => n > 0).ToArray();
+            foreach (var id in agenda.SelectMany(ElectedIds).Distinct().Where(id => !nameById.ContainsKey(id)))
+            {
+                var mem = _memberService.GetById(id);
+                if (mem == null) continue;
+                var nm = $"{mem.GetValue<string>("firstName")} {mem.GetValue<string>("lastName")}".Trim();
+                nameById[id] = string.IsNullOrEmpty(nm) ? mem.Name : nm;
+            }
+
+            // Digital justering state (required signers + who has approved + whether *I* can approve).
+            var meId = await GetCurrentMemberId();
+            var signers = attendees.Where(a => a.IsChairman || a.IsSecretary || a.IsAdjuster).ToList();
+            var justering = new
+            {
+                status = meeting.Status,
+                requested = meeting.Status == "VantarJustering" || meeting.Status == "Justerat",
+                requestedDate = meeting.JusteringRequestedDate?.ToString("yyyy-MM-dd HH:mm"),
+                approvedCount = signers.Count(s => s.ApprovedDate != null),
+                totalSigners = signers.Count,
+                canApprove = meeting.Status == "VantarJustering" && signers.Any(s => s.MemberId == meId && s.ApprovedDate == null),
+                signers = signers.Select(s => new
+                {
+                    s.MemberId, s.MemberName,
+                    role = s.IsChairman ? "Ordförande" : s.IsSecretary ? "Sekreterare" : "Justerare",
+                    approved = s.ApprovedDate != null,
+                    approvedDate = s.ApprovedDate?.ToString("yyyy-MM-dd HH:mm"),
+                    via = s.ApprovedVia ?? ""
+                })
+            };
+
             return Json(new
             {
                 success = true,
                 meeting = MeetingDetailDto(meeting),
-                agenda = agenda.Select(a => new { a.Id, a.SortOrder, a.Heading, a.Discussion, a.Decision }),
+                justering,
+                agenda = agenda.Select(a =>
+                {
+                    var eids = ElectedIds(a);
+                    return new
+                    {
+                        a.Id, a.SortOrder, a.Heading, a.Discussion, a.Decision,
+                        a.ItemType, electionRole = a.ElectionRole ?? "", a.ElectionCount, a.ElectionSource,
+                        electedMemberIds = eids,
+                        // Aligned 1:1 with electedMemberIds (may contain "" if a member was deleted).
+                        electedNames = eids.Select(id => nameById.TryGetValue(id, out var nm) ? nm : "").ToArray()
+                    };
+                }),
                 attendees = attendees.Select(AttendeeDto),
                 actions = actions.Select(ActionDto),
                 links = links.Select(l => new { l.Id, l.AgendaItemId, l.Kind, l.RefId, l.Url, l.Label }),
@@ -140,14 +205,161 @@ namespace HpskSite.Controllers
             return Json(new { success = ok });
         }
 
+        // ---- Digital justering (Phase 2) -----------------------------------
+
+        /// <summary>Send the protocol for justering — locks edits, the signers then approve it.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SetJusterat(int meetingId, int adjusterMemberId)
+        public async Task<IActionResult> SendForJustering(int meetingId)
         {
             if (!await CanAccessMeeting(meetingId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
-            var ok = _meetingService.SetJusterat(meetingId, adjusterMemberId);
-            return Json(new { success = ok, message = ok ? "Protokoll justerat" : "Kunde inte justera" });
+            if (_meetingService.GetSigners(meetingId).Count == 0)
+                return Json(new { success = false, message = "Inga justerare valda. Välj ordförande, sekreterare och justerare i dagordningen först." });
+            var ok = _meetingService.SendForJustering(meetingId);
+            return Json(new { success = ok, message = ok ? "Skickat för justering" : "Kunde inte skicka" });
+        }
+
+        /// <summary>The current member (a required signer) approves the protocol in-app.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApproveProtokoll(int meetingId)
+        {
+            var meeting = _meetingService.GetMeeting(meetingId);
+            if (meeting == null || !await CanAccessBoardWork(meeting.OwnerType, meeting.OwnerId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var meId = await GetCurrentMemberId();
+            var r = _meetingService.ApproveByMember(meetingId, meId, "web");
+            return Json(new { success = r.Ok, locked = r.Locked, approved = r.Approved, total = r.Total, message = r.Ok ? "" : r.Message });
+        }
+
+        /// <summary>Approve via the QR/email token (identifies the meeting; the signer is the logged-in member).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApproveProtokollByToken(string t)
+        {
+            var meetingId = UnprotectMeetingToken(t);
+            if (meetingId == null) return Json(new { success = false, message = "Ogiltig länk" });
+            var meId = await GetCurrentMemberId();
+            if (meId <= 0) return Json(new { success = false, message = "Inte inloggad" });
+            var r = _meetingService.ApproveByMember(meetingId.Value, meId, "qr");
+            return Json(new { success = r.Ok, locked = r.Locked, approved = r.Approved, total = r.Total, message = r.Ok ? "" : r.Message });
+        }
+
+        /// <summary>Justering summary for the chromeless QR sign-off page (read by token; login required).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetJusteringByToken(string t)
+        {
+            var meetingId = UnprotectMeetingToken(t);
+            if (meetingId == null) return Json(new { success = false, message = "Ogiltig länk" });
+            var meeting = _meetingService.GetMeeting(meetingId.Value);
+            if (meeting == null || !meeting.IsActive) return Json(new { success = false, message = "Mötet hittades inte" });
+
+            var meId = await GetCurrentMemberId();
+            if (meId <= 0) return Json(new { success = false, needsLogin = true, message = "Logga in för att justera" });
+
+            var signers = _meetingService.GetSigners(meeting.Id);
+            var mine = signers.FirstOrDefault(s => s.MemberId == meId);
+            return Json(new
+            {
+                success = true,
+                title = meeting.Title,
+                date = meeting.MeetingDate.ToString("yyyy-MM-dd HH:mm"),
+                org = ResolveOrgName(meeting.OwnerType, meeting.OwnerId),
+                status = meeting.Status,
+                locked = meeting.Status == "Justerat",
+                isSigner = mine != null,
+                alreadyApproved = mine?.ApprovedDate != null,
+                canApprove = meeting.Status == "VantarJustering" && mine != null && mine.ApprovedDate == null,
+                approvedCount = signers.Count(s => s.ApprovedDate != null),
+                totalSigners = signers.Count,
+                protokollUrl = $"/styrelse/protokoll/{meeting.Id}",
+                signers = signers.Select(s => new
+                {
+                    s.MemberName,
+                    role = s.IsChairman ? "Ordförande" : s.IsSecretary ? "Sekreterare" : "Justerare",
+                    approved = s.ApprovedDate != null
+                })
+            });
+        }
+
+        /// <summary>Reopen a sent/justerat protocol for editing (clears approvals).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ReopenJustering(int meetingId)
+        {
+            if (!await CanAccessMeeting(meetingId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var ok = _meetingService.ReopenForEditing(meetingId);
+            return Json(new { success = ok, message = ok ? "Protokollet öppnat för redigering" : "Kunde inte öppna" });
+        }
+
+        /// <summary>QR PNG that opens the chromeless sign-off page for this protocol (on-site justering).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetJusteringQr(int meetingId)
+        {
+            if (!await CanAccessMeeting(meetingId))
+                return Content("Åtkomst nekad");
+            var url = $"{Request.Scheme}://{Request.Host}/styrelse/justera?t={Uri.EscapeDataString(ProtectMeetingToken(meetingId))}";
+            var png = QrPng(url);
+            return png == null ? Content("QR-fel") : File(png, "image/png");
+        }
+
+        /// <summary>Email a justering link to the signers who haven't approved yet.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendJusteringEmails(int meetingId)
+        {
+            var meeting = _meetingService.GetMeeting(meetingId);
+            if (meeting == null || !await CanAccessMeeting(meetingId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            if (meeting.Status != "VantarJustering")
+                return Json(new { success = false, message = "Protokollet är inte skickat för justering" });
+
+            var link = $"{Request.Scheme}://{Request.Host}/styrelse/justera?t={Uri.EscapeDataString(ProtectMeetingToken(meetingId))}";
+            var orgName = ResolveOrgName(meeting.OwnerType, meeting.OwnerId);
+            int sent = 0;
+            foreach (var s in _meetingService.GetSigners(meetingId).Where(s => s.ApprovedDate == null))
+            {
+                var member = _memberService.GetById(s.MemberId);
+                var email = member?.Email;
+                if (string.IsNullOrWhiteSpace(email)) continue;
+                var html = $@"<p>Hej {System.Net.WebUtility.HtmlEncode(s.MemberName ?? "")},</p>
+<p>Protokollet för <strong>{System.Net.WebUtility.HtmlEncode(meeting.Title)}</strong> ({meeting.MeetingDate:yyyy-MM-dd}) i {System.Net.WebUtility.HtmlEncode(orgName)} är klart att justera.</p>
+<p>Logga in och granska protokollet, klicka sedan på <strong>Godkänn protokollet</strong>:</p>
+<p><a href=""{link}"">Öppna och justera protokollet</a></p>
+<p>Hälsningar,<br>{System.Net.WebUtility.HtmlEncode(orgName)}</p>";
+                if (await _emailService.SendHtmlEmailAsync(email, $"Justera protokoll – {meeting.Title}", html, orgName)) sent++;
+            }
+            return Json(new { success = true, sent });
+        }
+
+        private string ResolveOrgName(int ownerType, int ownerId)
+        {
+            if (ownerType == DocumentOwnerType.Club)
+                return _clubService.GetClubNameById(ownerId) ?? "din förening";
+            var node = UmbracoContext.Content?.GetById(ownerId);
+            return node?.Value<string>("regionName") ?? node?.Name ?? "din krets";
+        }
+
+        /// <summary>Render a QR code PNG for a URL; null on failure. (Same approach as Faltskytte/Marken.)</summary>
+        private byte[]? QrPng(string url)
+        {
+            try
+            {
+                var gen = new QRCoder.QRCodeGenerator();
+                using var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.Q);
+                var qr = new QRCoder.QRCode(data);
+                using var img = qr.GetGraphic(10, SixLabors.ImageSharp.Color.Black, SixLabors.ImageSharp.Color.White, true);
+                using var ms = new System.IO.MemoryStream();
+                img.Save(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                return ms.ToArray();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Board justering QR generation failed");
+                return null;
+            }
         }
 
         [HttpPost]
@@ -164,14 +376,42 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddAgendaItem(int meetingId, string heading)
+        public async Task<IActionResult> AddAgendaItem(int meetingId, string heading,
+            string? itemType, string? electionRole, int? electionCount, string? electionSource)
         {
             if (!await CanAccessMeeting(meetingId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             if (string.IsNullOrWhiteSpace(heading))
                 return Json(new { success = false, message = "Rubrik krävs" });
-            var item = _meetingService.AddAgendaItem(meetingId, heading);
+            var item = _meetingService.AddAgendaItem(meetingId, heading,
+                itemType ?? "text", electionRole, electionCount ?? 1, electionSource ?? "attendees");
             return Json(new { success = true, data = new { item.Id } });
+        }
+
+        /// <summary>Owner members for a "members"-source election picker (e.g. årsmöte justerare).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetOwnerMembers(int meetingId, string? q)
+        {
+            var meeting = _meetingService.GetMeeting(meetingId);
+            if (meeting == null || !await CanAccessBoardWork(meeting.OwnerType, meeting.OwnerId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var members = _meetingService.SearchOwnerMembers(meeting.OwnerType, meeting.OwnerId, q);
+            return Json(new { success = true, data = members.Select(m => new { id = m.Id, name = m.Name }) });
+        }
+
+        /// <summary>Record the persons chosen in an election agenda item (e.g. Val av justerare).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveAgendaElection(int agendaItemId, string? memberIds)
+        {
+            var mid = _meetingService.GetAgendaItemMeetingId(agendaItemId);
+            if (mid == null || !await CanAccessMeeting(mid.Value))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var ids = (memberIds ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var n) ? n : 0).Where(n => n > 0);
+            var ok = _meetingService.SaveAgendaElection(agendaItemId, ids);
+            return Json(new { success = ok });
         }
 
         [HttpPost]

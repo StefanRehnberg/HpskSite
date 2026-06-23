@@ -1452,21 +1452,59 @@ board members via `BoardRoleService.IsOnAnyBoard` OR admins). Scope picker lists
 member sits on; admins can deep-link `?type=&id=` from the club/region admin panels' "Styrelsearbete"
 link. Four tabs: **Möten, Styrelsen, Årshjul, Valberedning**.
 
-**Single access gate** (no per-post permissions): site/club/regional admin OR an active board member of
-the owner. Replicated as `CanAccessBoardWork` in `BoardMeetingController` / `BoardGovernanceController` /
-`BoardKallelseController`, and `CanAccessScopeAsync` in `StyrelseController`.
+**Access gate** (no per-post permissions): site/club/regional admin OR an active board member of
+the owner = `CanAccessBoardWork` (full access; in `BoardMeetingController` / `BoardGovernanceController` /
+`BoardKallelseController`, and `CanAccessScopeAsync` in `StyrelseController`). **Scoped valberedning access
+(2026-06-22):** valberedning members (non-board, see below) get a *looser* gate `CanAccessValberedning`
+(full OR active valberedning role) used only by the **nomination** endpoints + the page load + valförslag
+print; the UI then shows them **only the Valberedning tab** (`StyrelseScope.ValberedningOnly`, computed in
+`StyrelseController.Index`). Protokoll/dagordning prints + årshjul + meetings stay on the strict gate.
 
+- **Roles: board vs övriga förtroendevalda (2026-06-22).** `IsBoardMember` on each `BoardRole` row decides
+  who actually sits on the styrelse (seeded into attendance, counted in quorum, gates full board access) vs
+  other elected functionaries. **Revisor/Revisorssuppleant + the two valberedning keys default to
+  `IsBoardMember=false`** in `BoardRoleDefinitions`. The /styrelse add-form drives a "Sitter i styrelsen"
+  checkbox from each role's `data-board` default (restored from the old `BoardRolesManagement.cshtml`
+  pattern) instead of the earlier hardcoded `true`. Styrelsen tab renders board members + an "Övriga
+  förtroendevalda" section (revisor m.fl.); valberedning roles are excluded there.
 - **Meetings** (`BoardMeetingService` / `BoardMeetingController`): create-from-type seeds the dagordning
-  (`BoardMeetingTemplates`) + attendees from the board roster; närvaro + beslutsförhet (majority); beslut
-  per agenda item; åtgärder (assignee + due, open ones surface across years); attachments
-  (`BoardMeetingAgendaLinks`: document / previous meeting / valförslag / URL); justering locks the protokoll.
+  (`BoardMeetingTemplates`) + attendees from the board roster (boardOnly → revisor/valb excluded); närvaro +
+  beslutsförhet (majority); beslut per agenda item; åtgärder (assignee + due, open ones surface across years);
+  attachments (`BoardMeetingAgendaLinks`); justering locks the protokoll. **Edit date** (mDate field,
+  onchange→UpdateMeeting) + **delete** (`DeleteMeeting`; trash button in list + "Ta bort möte" in detail)
+  are wired in the UI (the endpoints had always existed).
+  **Typed agenda items + editable templates (2026-06-23, Phase 1):** agenda items carry an `ItemType` —
+  `note` (anteckningar only) / `text` (anteckningar+beslut) / `election` (pick N present persons).
+  `Models/BoardAgendaItemCatalog.cs` is the ready-made "Lägg till punkt" dropdown; `BoardMeetingTemplates`
+  = ordered catalog keys per meeting type. **Election items replaced the old end-of-meeting justerare
+  picker** — `SaveAgendaElection(itemId, ids)` stores `ElectedMemberIds` and mirrors role-mapped elections
+  (`val-ordforande`→IsChairman / `val-sekreterare`→IsSecretary / `val-justerare(-2)`→IsAdjuster) to attendee
+  flags, which drive the protokoll signatures (multi-justerare → `StyrelsePrintModel.AdjusterNames`, one slot
+  each) and the Phase-2 approver set. Clubs/regions edit + save their own agenda per type
+  (`BoardMeetingTemplates` table, `BoardMeetingTemplateService` / `BoardMeetingTemplateController`, "Anpassa
+  mötesmallar" editor on the Möten tab); `CreateMeeting` seeds saved-or-default. Run
+  `add-typed-agenda-items-and-templates.sql`.
+- **Digital justering (2026-06-23, Phase 2).** Required signers = ordförande+sekreterare+justerare (the
+  attendee role flags the election items set). Status flow **Genomfört → VantarJustering → Justerat**;
+  "Skicka för justering" locks edits, each signer approves, last approval → Justerat. **QR sign-off on the
+  spot:** `BoardMeeting/GetJusteringQr` (QRCoder PNG of an IDataProtector token) → chromeless
+  **`/styrelse/justera?t=…`** (`StyrelseController.Justera` → `Views/StyrelseJustera.cshtml`, login-gated, no
+  Umbraco node) → `GetJusteringByToken` + `ApproveProtokollByToken`. **Email fallback:** `SendJusteringEmails`
+  mails the link to signers who haven't approved. In-app "Godkänn protokollet" = `ApproveProtokoll`. Admin
+  "Återöppna för redigering" = `ReopenJustering` (clears approvals). State: `ApprovedDate`/`ApprovedVia` on
+  `BoardMeetingAttendee` + `JusteringRequestedDate` on `BoardMeeting` — run `add-board-justering-approvals.sql`.
+  All board members need pistol.nu accounts (no offline override). Verified via `hpsk-verify/verify-justering.mjs`.
 - **Roles & terms** (`BoardRoleService`): `ElectedDate`/`TermEndsDate`/`TermYears` on `BoardRoles`;
-  "mandat som går ut" view.
+  "mandat som går ut" view. Valberedning helpers: `IsValberedningOf` / `IsOnAnyValberedning` /
+  `GetValberedningMembershipsForMember` (RoleKey ∈ `BoardRoleDefinitions.ValberedningRoleKeys`, NOT gated on IsBoardMember).
 - **Årshjul** (`BoardGovernanceService`, `BoardYearWheelItems`): per-year checklist seeded from
-  `BoardYearWheelTemplate` (bokslut/verksamhetsberättelse/revision/kallelse/årsmöte/konstituering/budget/medlemsrapportering
-  — NO LOK-stöd item; pistol.nu has no LOK-stöd support, don't seed/mention it), target dates, in-place done-toggle, overdue highlight.
-- **Valberedning** (`BoardNominations`): posts-up-for-election from term dates + candidate nominations +
-  formal printable förslag.
+  `BoardYearWheelTemplate` (bokslut+årsredovisning / **årsredovisning i MAP (31/1)** / verksamhetsberättelse /
+  revision / kallelse / årsmöte / konstituering / budget / medlemsrapportering — NO LOK-stöd item; pistol.nu
+  has no LOK-stöd support), target dates, in-place done-toggle, overdue highlight, **per-item inline edit**
+  (`svWheelEdit`/`svWheelSave` → existing `UpdateWheelItem`). Template change seeds NEW year-wheels only.
+- **Valberedning** (`BoardNominations` + `BoardRoles`): a **committee roster** at the top (RoleKeys
+  `Valberedning` / `ValberedningSammankallande`, one sammankallande, non-board — managed by admins) + the
+  existing posts-up-for-election + candidate nominations + formal printable förslag.
 - **Kallelse** (`BoardKallelseController`): emails the dagordning. Recipients by type — club årsmöte → all
   approved members; club other → board; region → region board. Confirm-before-send w/ count; reuses
   `EmailService` (SMTP ≤250) / `BrevoEmailService` (club `brevoApiKey`); records `KallelseSentDate/By/Count`;
@@ -1477,7 +1515,13 @@ the owner. Replicated as `CanAccessBoardWork` in `BoardMeetingController` / `Boa
 
 **Deploy:** run `Migrations/add-terms-to-board-roles.sql` + `Migrations/create-board-meeting-tables.sql`
 (idempotent; creates meeting/agenda/attendee/action/agenda-link/yearwheel/nomination tables + kallelse
-columns) in SSMS, then full rebuild. **No Umbraco doctype/property/node.** UI JS reads **camelCase** DTO
+columns) in SSMS, then full rebuild. **For the 2026-06-22 revision also run
+`Migrations/fix-revisor-valberedning-not-board-members.sql`** (flips existing Revisor/Valberedning rows to
+IsBoardMember=0 + removes them as attendees on non-justerade meetings) — without it, legacy data keeps
+counting them in attendance/quorum. **For the typed-agenda/templates revision (2026-06-23) also run
+`Migrations/add-typed-agenda-items-and-templates.sql`** (agenda item type cols + `BoardMeetingTemplates`
+table) **and `Migrations/add-board-justering-approvals.sql`** (per-signer approval cols + justering status);
+both idempotent, existing agenda items default to `text`. **No Umbraco doctype/property/node.** UI JS reads **camelCase** DTO
 keys (System.Text.Json camelCases output) and never passes strings through inline onclick/onchange attrs
 (use id-only handlers). Spec: `Documentation/BOARD_WORK_PHASE1_TERMS.md`, `_PHASE2_MEETINGS.md`,
 `_PHASE3_GOVERNANCE.md`. KB: `KnowledgeBase/docs/styrelsearbete.md`. Marketed on /om-pistol-nu (Årshjul shot).

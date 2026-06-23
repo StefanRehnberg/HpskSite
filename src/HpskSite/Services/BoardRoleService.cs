@@ -239,6 +239,41 @@ namespace HpskSite.Services
                 .ToList();
         }
 
+        // ---- Valberedning (elected, but NOT board members) -----------------
+        // Valberedning members get scoped board-work access: they reach /styrelse but only the
+        // Valberedning tab. These checks deliberately do NOT require IsBoardMember.
+
+        private static string ValberedningInClause =>
+            string.Join(",", BoardRoleDefinitions.ValberedningRoleKeys.Select(k => $"'{k}'"));
+
+        /// <summary>True if the member holds an active valberedning role for the owner.</summary>
+        public bool IsValberedningOf(int ownerType, int ownerId, int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                $"SELECT COUNT(1) FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1 AND MemberId = @2 AND IsActive = 1 AND RoleKey IN ({ValberedningInClause})",
+                ownerType, ownerId, memberId) > 0;
+        }
+
+        /// <summary>True if the member sits on any club/region valberedning. Cheap menu-gate check.</summary>
+        public bool IsOnAnyValberedning(int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                $"SELECT COUNT(1) FROM BoardRoles WHERE MemberId = @0 AND IsActive = 1 AND RoleKey IN ({ValberedningInClause})", memberId) > 0;
+        }
+
+        /// <summary>Distinct (OwnerType, OwnerId) scopes where the member holds a valberedning role.</summary>
+        public List<(int OwnerType, int OwnerId)> GetValberedningMembershipsForMember(int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<BoardRole>(
+                    $"SELECT DISTINCT OwnerType, OwnerId FROM BoardRoles WHERE MemberId = @0 AND IsActive = 1 AND RoleKey IN ({ValberedningInClause})",
+                    memberId)
+                .Select(r => (r.OwnerType, r.OwnerId))
+                .ToList();
+        }
+
         /// <summary>
         /// Get a single board role by ID.
         /// </summary>

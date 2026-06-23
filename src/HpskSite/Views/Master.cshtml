@@ -105,10 +105,11 @@
         // User has admin access if they are a site admin OR regional admin
         hasAdminAccess = isAdmin || isRegionalAdmin;
 
-        // Cheap indexed check so board members (not only admins) see the Styrelse link
+        // Cheap indexed check so board members and valberedning (not only admins) see the Styrelse link
         if (memberData != null)
         {
-            isOnBoard = BoardRoleService.IsOnAnyBoard(memberData.Id);
+            isOnBoard = BoardRoleService.IsOnAnyBoard(memberData.Id)
+                        || BoardRoleService.IsOnAnyValberedning(memberData.Id);
         }
     }
 }

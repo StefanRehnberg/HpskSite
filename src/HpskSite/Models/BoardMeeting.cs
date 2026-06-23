@@ -18,6 +18,7 @@ namespace HpskSite.Models
         public string? Notes { get; set; }
         public int? AdjusterMemberId { get; set; }
         public DateTime? JustifiedDate { get; set; }
+        public DateTime? JusteringRequestedDate { get; set; }   // when sent for digital justering
         public DateTime? KallelseSentDate { get; set; }
         public int? KallelseSentByMemberId { get; set; }
         public int? KallelseRecipientCount { get; set; }
@@ -40,6 +41,21 @@ namespace HpskSite.Models
         public string? Discussion { get; set; }
         public string? Decision { get; set; }
         public bool IsActive { get; set; } = true;
+
+        // Typed agenda items (2026-06-23). ItemType decides which fields show + how it prints:
+        //   "note"     — heading + Anteckningar only (no Beslut)
+        //   "text"     — heading + Anteckningar + Beslut (the original behaviour; also "Övrigt")
+        //   "election" — pick ElectionCount present persons; ElectionRole maps them to a signing role.
+        public string ItemType { get; set; } = "text";
+        // For ItemType="election": "chairman" / "secretary" / "adjuster" (sets the attendee flag that
+        // drives the protokoll signatures), or "" for a generic election (e.g. valberedning).
+        public string? ElectionRole { get; set; }
+        public int ElectionCount { get; set; } = 1;
+        // "attendees" = pick among present attendees (board); "members" = pick any club/region member
+        // (common for justerare at an årsmöte). Role-mapped members get added as attendees automatically.
+        public string ElectionSource { get; set; } = "attendees";
+        // CSV of elected member ids (the persons chosen in an election item).
+        public string? ElectedMemberIds { get; set; }
     }
 
     [TableName("BoardMeetingAttendees")]
@@ -54,6 +70,8 @@ namespace HpskSite.Models
         public bool IsChairman { get; set; }
         public bool IsSecretary { get; set; }
         public bool IsAdjuster { get; set; }
+        public DateTime? ApprovedDate { get; set; }   // digital justering: when this signer approved
+        public string? ApprovedVia { get; set; }      // qr / web / email
 
         // Display-only
         [ResultColumn]
@@ -61,6 +79,10 @@ namespace HpskSite.Models
 
         [Ignore]
         public bool IsPresent => AttendanceStatus == "Närvarande";
+
+        /// <summary>A required protocol signer: ordförande, sekreterare or justerare.</summary>
+        [Ignore]
+        public bool IsSigner => IsChairman || IsSecretary || IsAdjuster;
     }
 
     [TableName("BoardYearWheelItems")]

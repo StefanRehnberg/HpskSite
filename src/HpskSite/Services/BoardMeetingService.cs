@@ -13,12 +13,15 @@ namespace HpskSite.Services
         private readonly IScopeProvider _scopeProvider;
         private readonly IMemberService _memberService;
         private readonly BoardRoleService _boardRoleService;
+        private readonly BoardMeetingTemplateService _templateService;
 
-        public BoardMeetingService(IScopeProvider scopeProvider, IMemberService memberService, BoardRoleService boardRoleService)
+        public BoardMeetingService(IScopeProvider scopeProvider, IMemberService memberService,
+            BoardRoleService boardRoleService, BoardMeetingTemplateService templateService)
         {
             _scopeProvider = scopeProvider;
             _memberService = memberService;
             _boardRoleService = boardRoleService;
+            _templateService = templateService;
         }
 
         // ---- Meetings -------------------------------------------------------
@@ -27,6 +30,9 @@ namespace HpskSite.Services
         public BoardMeeting CreateMeeting(int ownerType, int ownerId, string meetingType, string title,
             DateTime meetingDate, string? location, int createdByMemberId)
         {
+            // Resolve the typed agenda (saved club template or built-in default) before opening our scope.
+            var agenda = _templateService.GetEffectiveAgenda(ownerType, ownerId, meetingType);
+
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
 
@@ -45,15 +51,19 @@ namespace HpskSite.Services
             };
             db.Insert(meeting);
 
-            // Seed agenda from the template
-            var agenda = BoardMeetingTemplates.GetAgenda(meetingType);
-            for (int i = 0; i < agenda.Length; i++)
+            // Seed typed agenda items from the effective template.
+            for (int i = 0; i < agenda.Count; i++)
             {
+                var d = agenda[i];
                 db.Insert(new BoardMeetingAgendaItem
                 {
                     MeetingId = meeting.Id,
                     SortOrder = i,
-                    Heading = agenda[i],
+                    Heading = d.Heading,
+                    ItemType = string.IsNullOrWhiteSpace(d.ItemType) ? "text" : d.ItemType,
+                    ElectionRole = string.IsNullOrEmpty(d.ElectionRole) ? null : d.ElectionRole,
+                    ElectionCount = d.ElectionCount < 1 ? 1 : d.ElectionCount,
+                    ElectionSource = d.ElectionSource == "members" ? "members" : "attendees",
                     IsActive = true
                 });
             }
@@ -137,15 +147,111 @@ namespace HpskSite.Services
             return true;
         }
 
-        public bool SetJusterat(int id, int adjusterMemberId)
+        /// <summary>
+        /// Lock the protokoll as justerat. Justerare count varies (0–2 besides ordförande/sekreterare,
+        /// who always sign) — the selected attendees are flagged IsAdjuster; any previous flags are cleared.
+        /// AdjusterMemberId keeps the first id for backward compatibility, but the IsAdjuster flags are the
+        /// source of truth for who justerade.
+        /// </summary>
+        public bool SetJusterat(int id, IEnumerable<int> adjusterMemberIds)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var m = db.SingleOrDefaultById<BoardMeeting>(id);
             if (m == null) return false;
-            m.AdjusterMemberId = adjusterMemberId;
+
+            var ids = (adjusterMemberIds ?? Enumerable.Empty<int>()).Where(x => x > 0).Distinct().ToList();
+            db.Execute("UPDATE BoardMeetingAttendees SET IsAdjuster = 0 WHERE MeetingId = @0", id);
+            foreach (var memberId in ids)
+                db.Execute("UPDATE BoardMeetingAttendees SET IsAdjuster = 1 WHERE MeetingId = @0 AND MemberId = @1", id, memberId);
+
+            m.AdjusterMemberId = ids.Count > 0 ? ids[0] : (int?)null;
             m.JustifiedDate = DateTime.UtcNow;
             m.Status = "Justerat";
+            db.Update(m);
+            return true;
+        }
+
+        // ---- Digital justering (Phase 2) -----------------------------------
+        // Required signers = ordförande + sekreterare + justerare (attendees with a role flag). Each
+        // approves the protocol (on the spot via QR, or via an emailed link); when all have approved the
+        // protocol becomes Justerat + locked. Statuses: Genomfört → VantarJustering → Justerat.
+
+        public List<BoardMeetingAttendee> GetSigners(int meetingId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var rows = scope.Database.Fetch<BoardMeetingAttendee>(
+                "SELECT * FROM BoardMeetingAttendees WHERE MeetingId = @0 AND (IsChairman = 1 OR IsSecretary = 1 OR IsAdjuster = 1) ORDER BY IsChairman DESC, IsSecretary DESC, Id",
+                meetingId);
+            ResolveAttendeeNames(rows);
+            return rows;
+        }
+
+        /// <summary>Send the protocol for justering: locks edits, resets approvals, status → VantarJustering.</summary>
+        public bool SendForJustering(int meetingId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var m = db.SingleOrDefaultById<BoardMeeting>(meetingId);
+            if (m == null) return false;
+            db.Execute("UPDATE BoardMeetingAttendees SET ApprovedDate = NULL, ApprovedVia = NULL WHERE MeetingId = @0", meetingId);
+            m.Status = "VantarJustering";
+            m.JusteringRequestedDate = DateTime.UtcNow;
+            m.JustifiedDate = null;
+            db.Update(m);
+            return true;
+        }
+
+        /// <summary>
+        /// A required signer approves the protocol. When the last signer approves, the protocol locks
+        /// (Justerat). Returns whether it succeeded, whether it is now fully locked, and the tally.
+        /// </summary>
+        public (bool Ok, bool Locked, int Approved, int Total, string Message) ApproveByMember(int meetingId, int memberId, string via)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var m = db.SingleOrDefaultById<BoardMeeting>(meetingId);
+            if (m == null) return (false, false, 0, 0, "Mötet hittades inte");
+            if (m.Status == "Justerat") return (false, true, 0, 0, "Protokollet är redan justerat");
+            if (m.Status != "VantarJustering") return (false, false, 0, 0, "Protokollet är inte skickat för justering");
+
+            var att = db.FirstOrDefault<BoardMeetingAttendee>(
+                "SELECT * FROM BoardMeetingAttendees WHERE MeetingId = @0 AND MemberId = @1", meetingId, memberId);
+            if (att == null || !(att.IsChairman || att.IsSecretary || att.IsAdjuster))
+                return (false, false, 0, 0, "Du är inte vald att justera det här protokollet");
+
+            if (att.ApprovedDate == null)
+            {
+                att.ApprovedDate = DateTime.UtcNow;
+                att.ApprovedVia = via;
+                db.Update(att);
+            }
+
+            var signers = db.Fetch<BoardMeetingAttendee>(
+                "SELECT * FROM BoardMeetingAttendees WHERE MeetingId = @0 AND (IsChairman = 1 OR IsSecretary = 1 OR IsAdjuster = 1)", meetingId);
+            int total = signers.Count;
+            int approved = signers.Count(s => s.ApprovedDate != null);
+            bool locked = total > 0 && approved >= total;
+            if (locked)
+            {
+                m.Status = "Justerat";
+                m.JustifiedDate = DateTime.UtcNow;
+                db.Update(m);
+            }
+            return (true, locked, approved, total, "");
+        }
+
+        /// <summary>Reopen a sent/justerat protocol for editing — clears all approvals.</summary>
+        public bool ReopenForEditing(int meetingId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var m = db.SingleOrDefaultById<BoardMeeting>(meetingId);
+            if (m == null) return false;
+            db.Execute("UPDATE BoardMeetingAttendees SET ApprovedDate = NULL, ApprovedVia = NULL WHERE MeetingId = @0", meetingId);
+            m.Status = "Genomfört";
+            m.JustifiedDate = null;
+            m.JusteringRequestedDate = null;
             db.Update(m);
             return true;
         }
@@ -171,7 +277,8 @@ namespace HpskSite.Services
                 meetingId);
         }
 
-        public BoardMeetingAgendaItem AddAgendaItem(int meetingId, string heading)
+        public BoardMeetingAgendaItem AddAgendaItem(int meetingId, string heading,
+            string itemType = "text", string? electionRole = null, int electionCount = 1, string electionSource = "attendees")
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -182,10 +289,81 @@ namespace HpskSite.Services
                 MeetingId = meetingId,
                 SortOrder = nextSort + 1,
                 Heading = heading,
+                ItemType = itemType == "note" || itemType == "election" ? itemType : "text",
+                ElectionRole = string.IsNullOrEmpty(electionRole) ? null : electionRole,
+                ElectionCount = electionCount < 1 ? 1 : electionCount,
+                ElectionSource = electionSource == "members" ? "members" : "attendees",
                 IsActive = true
             };
             db.Insert(item);
             return item;
+        }
+
+        /// <summary>
+        /// Record the persons chosen in an election agenda item. For role-mapped elections
+        /// (chairman/secretary/adjuster) this also sets the matching attendee flag — which is what drives
+        /// the protokoll signatures and (Phase 2) the justering approver set. Clears the flag on others first.
+        /// </summary>
+        public bool SaveAgendaElection(int agendaItemId, IEnumerable<int> memberIds)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var item = db.SingleOrDefaultById<BoardMeetingAgendaItem>(agendaItemId);
+            if (item == null) return false;
+
+            var ids = (memberIds ?? Enumerable.Empty<int>()).Where(x => x > 0).Distinct().ToList();
+            item.ElectedMemberIds = ids.Count > 0 ? string.Join(",", ids) : null;
+            db.Update(item);
+
+            // Mirror to the attendee role flag so signatures/justering follow the election.
+            var col = item.ElectionRole switch
+            {
+                "chairman" => "IsChairman",
+                "secretary" => "IsSecretary",
+                "adjuster" => "IsAdjuster",
+                _ => null
+            };
+            if (col != null)
+            {
+                // A role-mapped electee must be on the attendee list (they're present + sign the protokoll).
+                // For "members" elections the chosen person may not be a board attendee yet — add them.
+                foreach (var mid in ids)
+                    if (db.ExecuteScalar<int>("SELECT COUNT(1) FROM BoardMeetingAttendees WHERE MeetingId = @0 AND MemberId = @1", item.MeetingId, mid) == 0)
+                        db.Insert(new BoardMeetingAttendee { MeetingId = item.MeetingId, MemberId = mid, AttendanceStatus = "Närvarande" });
+
+                db.Execute($"UPDATE BoardMeetingAttendees SET {col} = 0 WHERE MeetingId = @0", item.MeetingId);
+                foreach (var mid in ids)
+                    db.Execute($"UPDATE BoardMeetingAttendees SET {col} = 1 WHERE MeetingId = @0 AND MemberId = @1", item.MeetingId, mid);
+            }
+            return true;
+        }
+
+        /// <summary>Owner (club/region) members for a "members"-source election picker, optionally filtered by query.</summary>
+        public List<(int Id, string Name)> SearchOwnerMembers(int ownerType, int ownerId, string? query)
+        {
+            var all = _memberService.GetAll(0, int.MaxValue, out _)
+                .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved);
+
+            if (ownerType == DocumentOwnerType.Club)
+            {
+                var clubIdStr = ownerId.ToString();
+                all = all.Where(m =>
+                    m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
+                    (m.GetValue("memberClubIds")?.ToString()?.Split(',').Select(s => s.Trim()).Contains(clubIdStr) ?? false));
+            }
+
+            if (!string.IsNullOrWhiteSpace(query))
+                all = all.Where(m => m.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
+
+            return all.OrderBy(m => m.Name).Take(30)
+                .Select(m =>
+                {
+                    var first = m.GetValue<string>("firstName") ?? "";
+                    var last = m.GetValue<string>("lastName") ?? "";
+                    var name = $"{first} {last}".Trim();
+                    return (m.Id, string.IsNullOrEmpty(name) ? m.Name : name);
+                })
+                .ToList();
         }
 
         public bool UpdateAgendaItem(int id, string heading, string? discussion, string? decision)

@@ -107,7 +107,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetNominations(int ownerType, int ownerId, int year)
         {
-            if (!await CanAccessBoardWork(ownerType, ownerId))
+            if (!await CanAccessValberedning(ownerType, ownerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var noms = _gov.GetNominations(ownerType, ownerId, year);
             var posts = _gov.GetPostsUpForElection(ownerType, ownerId, year);
@@ -126,7 +126,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> AddNomination(int ownerType, int ownerId, int year, string? postKey,
             string postLabel, string candidateName, int? candidateMemberId, string? status, string? notes)
         {
-            if (!await CanAccessBoardWork(ownerType, ownerId))
+            if (!await CanAccessValberedning(ownerType, ownerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             if (string.IsNullOrWhiteSpace(postLabel) || string.IsNullOrWhiteSpace(candidateName))
                 return Json(new { success = false, message = "Post och namn krävs" });
@@ -140,7 +140,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> UpdateNomination(int nominationId, string postLabel, string candidateName, string status, string? notes)
         {
             var n = _gov.GetNomination(nominationId);
-            if (n == null || !await CanAccessBoardWork(n.OwnerType, n.OwnerId))
+            if (n == null || !await CanAccessValberedning(n.OwnerType, n.OwnerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             return Json(new { success = _gov.UpdateNomination(nominationId, postLabel, candidateName, status, notes) });
         }
@@ -150,7 +150,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> SetNominationStatus(int nominationId, string status)
         {
             var n = _gov.GetNomination(nominationId);
-            if (n == null || !await CanAccessBoardWork(n.OwnerType, n.OwnerId))
+            if (n == null || !await CanAccessValberedning(n.OwnerType, n.OwnerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             return Json(new { success = _gov.SetNominationStatus(nominationId, status) });
         }
@@ -160,7 +160,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> RemoveNomination(int nominationId)
         {
             var n = _gov.GetNomination(nominationId);
-            if (n == null || !await CanAccessBoardWork(n.OwnerType, n.OwnerId))
+            if (n == null || !await CanAccessValberedning(n.OwnerType, n.OwnerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             return Json(new { success = _gov.RemoveNomination(nominationId) });
         }
@@ -208,6 +208,17 @@ namespace HpskSite.Controllers
             }
             var meId = await GetCurrentMemberId();
             return meId > 0 && _boardRoleService.IsBoardMemberOf(ownerType, ownerId, meId);
+        }
+
+        /// <summary>
+        /// Looser gate for the Valberedning tab: full board access OR an active valberedning role.
+        /// Valberedning members manage nominations but never the årshjul or meetings.
+        /// </summary>
+        private async Task<bool> CanAccessValberedning(int ownerType, int ownerId)
+        {
+            if (await CanAccessBoardWork(ownerType, ownerId)) return true;
+            var meId = await GetCurrentMemberId();
+            return meId > 0 && _boardRoleService.IsValberedningOf(ownerType, ownerId, meId);
         }
 
         private async Task<int> GetCurrentMemberId()

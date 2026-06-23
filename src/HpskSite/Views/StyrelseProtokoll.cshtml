@@ -14,6 +14,15 @@
         "valforslag" => $"/styrelse/valforslag?type={m.OwnerType}&id={m.OwnerId}&year={l.RefId}",
         _ => l.Url ?? "#"
     };
+    // Names of the persons chosen in an election agenda item (resolved via the attendee list).
+    string ElectedNames(HpskSite.Models.BoardMeetingAgendaItem it)
+    {
+        if (string.IsNullOrEmpty(it.ElectedMemberIds)) return "";
+        var ids = it.ElectedMemberIds.Split(',', System.StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s, out var n) ? n : 0).Where(n => n > 0);
+        return string.Join(", ", ids.Select(id => Model.MemberNames.TryGetValue(id, out var nm) ? nm : "")
+            .Where(x => !string.IsNullOrEmpty(x)));
+    }
 }
 <!DOCTYPE html>
 <html lang="sv" data-bs-theme="light">
@@ -105,13 +114,24 @@
         var links = Model.Links.Where(l => l.AgendaItemId == it.Id).ToList();
         <div class="item">
             <div class="h">@(isProt ? $"§ {n}" : $"{n}.") @it.Heading</div>
-            @if (isProt && !string.IsNullOrWhiteSpace(it.Discussion))
+            @if (isProt && it.ItemType == "election")
             {
-                <div class="body">@it.Discussion</div>
+                var who = ElectedNames(it);
+                if (!string.IsNullOrEmpty(who))
+                {
+                    <div class="beslut"><b>Beslut:</b> @who valdes.</div>
+                }
             }
-            @if (isProt && !string.IsNullOrWhiteSpace(it.Decision))
+            else
             {
-                <div class="beslut"><b>Beslut:</b> @it.Decision</div>
+                @if (isProt && !string.IsNullOrWhiteSpace(it.Discussion))
+                {
+                    <div class="body">@it.Discussion</div>
+                }
+                @if (isProt && it.ItemType != "note" && !string.IsNullOrWhiteSpace(it.Decision))
+                {
+                    <div class="beslut"><b>Beslut:</b> @it.Decision</div>
+                }
             }
             @foreach (var l in links)
             {
@@ -129,9 +149,21 @@
             <div class="slot">
                 <div class="line">Ordförande@(string.IsNullOrEmpty(Model.ChairmanName) ? "" : $": {Model.ChairmanName}")</div>
             </div>
-            <div class="slot">
-                <div class="line">Justeras@(string.IsNullOrEmpty(Model.AdjusterName) ? "" : $": {Model.AdjusterName}")</div>
-            </div>
+            @if (Model.AdjusterNames.Any())
+            {
+                foreach (var adj in Model.AdjusterNames)
+                {
+                    <div class="slot">
+                        <div class="line">Justeras: @adj</div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="slot">
+                    <div class="line">Justeras</div>
+                </div>
+            }
         </div>
     }
     else

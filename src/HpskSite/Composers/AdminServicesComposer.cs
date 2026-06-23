@@ -46,6 +46,10 @@ namespace HpskSite.Composers
             // Run create-board-meeting-tables.sql. See BOARD_WORK_PHASE2_MEETINGS.md.
             builder.Services.AddScoped<BoardMeetingService>();
 
+            // Board work: club/region-editable agenda templates per meeting type (typed items).
+            // Run add-typed-agenda-items-and-templates.sql.
+            builder.Services.AddScoped<BoardMeetingTemplateService>();
+
             // Board work Phase 3: Årshjul (annual cycle checklist) + Valberedning (nominations).
             builder.Services.AddScoped<BoardGovernanceService>();
 

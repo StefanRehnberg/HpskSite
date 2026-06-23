@@ -8,6 +8,7 @@ namespace HpskSite.Models
         public string Name { get; set; } = "";
         public string Kind { get; set; } = "Klubb";   // "Klubb" / "Krets" (display)
         public bool CanManageRoles { get; set; }       // admin for this scope (role assignment)
+        public bool ValberedningOnly { get; set; }     // member reaches this scope only via the valberedning → Valberedning tab only
     }
 
     /// <summary>View data for the /styrelse page (passed via ViewData; layout Model stays the site root).</summary>
@@ -29,7 +30,8 @@ namespace HpskSite.Models
         public string OrgName { get; set; } = "";
         public string? ChairmanName { get; set; }
         public string? SecretaryName { get; set; }
-        public string? AdjusterName { get; set; }
+        public List<string> AdjusterNames { get; set; } = new();   // 0–2 justerare (varies per club/meeting type)
+        public Dictionary<int, string> MemberNames { get; set; } = new();   // elected-member id → name (incl. non-attendees)
     }
 
     /// <summary>Model for the formal "Valberedningens förslag" print. Chromeless, Layout=null.</summary>

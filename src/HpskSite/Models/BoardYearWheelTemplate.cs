@@ -11,6 +11,7 @@ namespace HpskSite.Models
         public static readonly (int Month, int Day, string Title)[] Items = new[]
         {
             (1, 31, "Bokslut och årsredovisning klar"),
+            (1, 31, "Årsredovisning i MAP"),
             (2, 15, "Verksamhetsberättelse klar"),
             (2, 28, "Revisorernas granskning klar"),
             (3, 15, "Kallelse till årsmöte utskickad"),

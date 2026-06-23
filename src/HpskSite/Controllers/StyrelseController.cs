@@ -65,27 +65,41 @@ namespace HpskSite.Controllers
 
             var model = new StyrelsePageModel { MemberName = currentMember.Name ?? "" };
 
-            // Scope list = boards the member actually sits on (the request: only board memberships).
+            // Scope list = boards the member sits on, plus any valberedning the member is part of
+            // (valberedning members get scoped access to the Valberedning tab only).
             var scopes = new List<StyrelseScope>();
             var seen = new HashSet<(int, int)>();
             bool isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
-            foreach (var (ot, oid) in _boardRoleService.GetBoardMembershipsForMember(memberId))
+            var candidates = _boardRoleService.GetBoardMembershipsForMember(memberId)
+                .Concat(_boardRoleService.GetValberedningMembershipsForMember(memberId));
+            foreach (var (ot, oid) in candidates)
             {
                 if (!seen.Add((ot, oid))) continue;
                 var s = await BuildScopeAsync(ot, oid, isSiteAdmin);
-                if (s != null) scopes.Add(s);
+                if (s == null) continue;
+                // Valberedning-only when the member's access to this scope is purely via the valberedning
+                // (not an admin and not a board member).
+                s.ValberedningOnly = !s.CanManageRoles && !_boardRoleService.IsBoardMemberOf(ot, oid, memberId);
+                scopes.Add(s);
             }
             model.Scopes = scopes.OrderBy(s => s.Kind).ThenBy(s => s.Name).ToList();
 
-            // Selected scope: a query scope the member can access (board member OR admin) wins, even if
-            // it's not a board membership (e.g. an admin arriving from the club/region panel link); in
+            // Selected scope: a query scope the member can access (full OR valberedning) wins, even if
+            // it's not in the list yet (e.g. an admin arriving from the club/region panel link); in
             // that case add it to the list so the picker stays consistent.
-            if (type.HasValue && id.HasValue && await CanAccessScopeAsync(type.Value, id.Value, isSiteAdmin))
+            if (type.HasValue && id.HasValue && await CanAccessValberedningAsync(type.Value, id.Value, isSiteAdmin))
             {
-                model.Selected = model.Scopes.FirstOrDefault(s => s.OwnerType == type.Value && s.OwnerId == id.Value)
-                                 ?? await BuildScopeAsync(type.Value, id.Value, isSiteAdmin);
-                if (model.Selected != null && !model.Scopes.Any(s => s.OwnerType == model.Selected.OwnerType && s.OwnerId == model.Selected.OwnerId))
-                    model.Scopes.Insert(0, model.Selected);
+                model.Selected = model.Scopes.FirstOrDefault(s => s.OwnerType == type.Value && s.OwnerId == id.Value);
+                if (model.Selected == null)
+                {
+                    model.Selected = await BuildScopeAsync(type.Value, id.Value, isSiteAdmin);
+                    if (model.Selected != null)
+                    {
+                        model.Selected.ValberedningOnly = !model.Selected.CanManageRoles
+                            && !_boardRoleService.IsBoardMemberOf(type.Value, id.Value, memberId);
+                        model.Scopes.Insert(0, model.Selected);
+                    }
+                }
             }
             model.Selected ??= model.Scopes.FirstOrDefault();
 
@@ -115,19 +129,38 @@ namespace HpskSite.Controllers
                 return Forbid();
 
             var attendees = _meetingService.GetAttendees(meetingId);
+            var agenda = _meetingService.GetAgenda(meetingId);
+
+            // Resolve names for elected persons (may be non-attendees in "members"-source elections).
+            var memberNames = attendees.Where(a => !string.IsNullOrEmpty(a.MemberName))
+                .GroupBy(a => a.MemberId).ToDictionary(g => g.Key, g => g.First().MemberName!);
+            var electedIds = agenda.Where(a => !string.IsNullOrEmpty(a.ElectedMemberIds))
+                .SelectMany(a => a.ElectedMemberIds!.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                .Select(s => int.TryParse(s, out var n) ? n : 0).Where(n => n > 0).Distinct();
+            foreach (var id in electedIds.Where(id => !memberNames.ContainsKey(id)))
+            {
+                var mem = _memberService.GetById(id);
+                if (mem == null) continue;
+                var nm = $"{mem.GetValue<string>("firstName")} {mem.GetValue<string>("lastName")}".Trim();
+                memberNames[id] = string.IsNullOrEmpty(nm) ? mem.Name : nm;
+            }
+
             var pm = new StyrelsePrintModel
             {
                 Mode = mode,
                 Meeting = meeting,
-                Agenda = _meetingService.GetAgenda(meetingId),
+                Agenda = agenda,
                 Attendees = attendees,
+                MemberNames = memberNames,
                 Links = _meetingService.GetLinksForMeeting(meetingId),
                 OrgName = ResolveOrgName(meeting.OwnerType, meeting.OwnerId),
                 ChairmanName = attendees.FirstOrDefault(a => a.IsChairman)?.MemberName,
                 SecretaryName = attendees.FirstOrDefault(a => a.IsSecretary)?.MemberName,
-                AdjusterName = meeting.AdjusterMemberId.HasValue
-                    ? attendees.FirstOrDefault(a => a.MemberId == meeting.AdjusterMemberId.Value)?.MemberName
-                    : attendees.FirstOrDefault(a => a.IsAdjuster)?.MemberName
+                // Justerare are the flagged attendees (0–2); fall back to the legacy single id for old data.
+                AdjusterNames = (attendees.Any(a => a.IsAdjuster)
+                        ? attendees.Where(a => a.IsAdjuster)
+                        : attendees.Where(a => meeting.AdjusterMemberId.HasValue && a.MemberId == meeting.AdjusterMemberId.Value))
+                    .Select(a => a.MemberName ?? "").Where(n => !string.IsNullOrEmpty(n)).ToList()
             };
             return View("StyrelseProtokoll", pm);
         }
@@ -139,7 +172,7 @@ namespace HpskSite.Controllers
             if (currentMember?.Email == null)
                 return Redirect($"/login-&-register/?tab=login&RedirectUrl=/styrelse/valforslag?type={type}%26id={id}%26year={year}");
             bool isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
-            if (!await CanAccessScopeAsync(type, id, isSiteAdmin)) return Forbid();
+            if (!await CanAccessValberedningAsync(type, id, isSiteAdmin)) return Forbid();
 
             return View("StyrelseValforslag", new StyrelseValforslagModel
             {
@@ -147,6 +180,22 @@ namespace HpskSite.Controllers
                 Year = year,
                 Nominations = _gov.GetNominations(type, id, year)
             });
+        }
+
+        /// <summary>
+        /// Chromeless on-site/phone justering page (opened from the QR code or the emailed link).
+        /// Login required; the page reads state + approves by token via BoardMeeting endpoints.
+        /// </summary>
+        [HttpGet("justera")]
+        public async Task<IActionResult> Justera(string t)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember?.Email == null)
+            {
+                var back = Uri.EscapeDataString($"/styrelse/justera?t={t}");
+                return Redirect($"/login-&-register/?tab=login&RedirectUrl={back}");
+            }
+            return View("StyrelseJustera");
         }
 
         // ---- Helpers --------------------------------------------------------
@@ -196,6 +245,19 @@ namespace HpskSite.Controllers
                 return !string.IsNullOrEmpty(code) && await _auth.IsRegionalAdminForRegion(code);
             }
             return false;
+        }
+
+        /// <summary>
+        /// Full board access OR an active valberedning role for the owner. Used to let the page load
+        /// and the valförslag print open for valberedning members (the UI then limits them to the
+        /// Valberedning tab). Note: protokoll/dagordning prints stay on the stricter CanAccessScopeAsync.
+        /// </summary>
+        private async Task<bool> CanAccessValberedningAsync(int ownerType, int ownerId, bool isSiteAdmin)
+        {
+            if (await CanAccessScopeAsync(ownerType, ownerId, isSiteAdmin)) return true;
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var memberId = currentMember?.Email != null ? (_memberService.GetByEmail(currentMember.Email)?.Id ?? 0) : 0;
+            return memberId > 0 && _boardRoleService.IsValberedningOf(ownerType, ownerId, memberId);
         }
 
         private string ResolveOrgName(int ownerType, int ownerId)

@@ -1,8 +1,9 @@
 namespace HpskSite.Models
 {
     /// <summary>
-    /// Meeting types + their default dagordning (agenda). Creating a meeting of a given type seeds
-    /// these headings as agenda items. Mirrors the static-definition pattern of BoardRoleDefinitions.
+    /// Meeting types + their default dagordning, expressed as ordered <see cref="BoardAgendaItemCatalog"/>
+    /// keys (so each seeded item carries its type: note / text / election). Creating a meeting seeds the
+    /// club/region's saved template for that type if it has one, otherwise these built-in defaults.
     /// Agendas follow common Swedish ideell-förening practice; they're a starting point, fully editable.
     /// </summary>
     public static class BoardMeetingTemplates
@@ -11,7 +12,7 @@ namespace HpskSite.Models
         {
             public string Key { get; set; } = "";
             public string Label { get; set; } = "";
-            public string[] Agenda { get; set; } = System.Array.Empty<string>();
+            public string[] AgendaKeys { get; set; } = System.Array.Empty<string>();
         }
 
         public static readonly MeetingTypeDef[] Types = new[]
@@ -20,92 +21,52 @@ namespace HpskSite.Models
             {
                 Key = "Konstituerande",
                 Label = "Konstituerande styrelsemöte",
-                Agenda = new[]
+                AgendaKeys = new[]
                 {
-                    "Mötets öppnande",
-                    "Val av mötesordförande och mötessekreterare",
-                    "Val av justerare",
-                    "Fastställande av dagordning",
-                    "Konstituering av styrelsen (fördelning av poster)",
-                    "Val av firmatecknare",
-                    "Beslut om attesträtt",
-                    "Fastställande av sammanträdesplan",
-                    "Övriga frågor",
-                    "Mötets avslutande",
+                    "motets-oppnande", "val-ordforande", "val-sekreterare", "val-justerare",
+                    "faststall-dagordning", "konstituering", "firmatecknare", "attestratt",
+                    "sammantradesplan", "ovriga-fragor", "motets-avslutande",
                 }
             },
             new MeetingTypeDef
             {
                 Key = "Styrelsemote",
                 Label = "Ordinarie styrelsemöte",
-                Agenda = new[]
+                AgendaKeys = new[]
                 {
-                    "Mötets öppnande",
-                    "Val av justerare",
-                    "Fastställande av dagordning",
-                    "Föregående mötesprotokoll",
-                    "Ekonomisk rapport",
-                    "Rapporter (kommittéer, sektioner, träning, tävling)",
-                    "Inkomna skrivelser",
-                    "Beslutsärenden",
-                    "Övriga frågor",
-                    "Nästa möte",
-                    "Mötets avslutande",
+                    "motets-oppnande", "val-justerare", "faststall-dagordning", "foregaende-protokoll",
+                    "ekonomisk-rapport", "rapporter", "skrivelser", "beslutsarenden", "ovriga-fragor",
+                    "nasta-mote", "motets-avslutande",
                 }
             },
             new MeetingTypeDef
             {
                 Key = "Arsmote",
                 Label = "Årsmöte",
-                Agenda = new[]
+                AgendaKeys = new[]
                 {
-                    "Mötets öppnande",
-                    "Fråga om mötet utlysts på rätt sätt",
-                    "Fastställande av röstlängd",
-                    "Val av mötesordförande och mötessekreterare",
-                    "Val av två justerare tillika rösträknare",
-                    "Fastställande av dagordning",
-                    "Styrelsens verksamhetsberättelse",
-                    "Styrelsens ekonomiska berättelse (resultat- och balansräkning)",
-                    "Revisorernas berättelse",
-                    "Fråga om ansvarsfrihet för styrelsen",
-                    "Fastställande av medlemsavgift",
-                    "Fastställande av verksamhetsplan och budget",
-                    "Behandling av motioner och propositioner",
-                    "Val av ordförande",
-                    "Val av styrelseledamöter och suppleanter",
-                    "Val av revisorer",
-                    "Val av valberedning",
-                    "Övriga frågor",
-                    "Mötets avslutande",
+                    "motets-oppnande", "kallelse-ok", "rostlangd", "val-ordforande", "val-sekreterare",
+                    "val-justerare-2", "faststall-dagordning", "verksamhetsberattelse", "ekonomisk-berattelse",
+                    "revisionsberattelse", "ansvarsfrihet", "medlemsavgift", "verksamhetsplan-budget",
+                    "motioner", "val-foreningsordforande", "val-ledamoter", "val-revisorer", "val-valberedning",
+                    "ovriga-fragor", "motets-avslutande",
                 }
             },
             new MeetingTypeDef
             {
                 Key = "ExtraArsmote",
                 Label = "Extra årsmöte",
-                Agenda = new[]
+                AgendaKeys = new[]
                 {
-                    "Mötets öppnande",
-                    "Fråga om mötet utlysts på rätt sätt",
-                    "Fastställande av röstlängd",
-                    "Val av mötesordförande och mötessekreterare",
-                    "Val av två justerare tillika rösträknare",
-                    "Fastställande av dagordning",
-                    "Ärende som föranlett det extra årsmötet",
-                    "Mötets avslutande",
+                    "motets-oppnande", "kallelse-ok", "rostlangd", "val-ordforande", "val-sekreterare",
+                    "val-justerare-2", "faststall-dagordning", "extra-arende", "motets-avslutande",
                 }
             },
             new MeetingTypeDef
             {
                 Key = "Custom",
                 Label = "Eget möte",
-                Agenda = new[]
-                {
-                    "Mötets öppnande",
-                    "Övriga frågor",
-                    "Mötets avslutande",
-                }
+                AgendaKeys = new[] { "motets-oppnande", "ovriga-fragor", "motets-avslutande" }
             },
         };
 
@@ -115,10 +76,18 @@ namespace HpskSite.Models
             return match?.Label ?? key;
         }
 
-        public static string[] GetAgenda(string key)
+        /// <summary>Resolve a meeting type's built-in default agenda to typed catalog item definitions.</summary>
+        public static List<BoardAgendaItemCatalog.AgendaItemDef> GetDefaultAgenda(string key)
         {
             var match = System.Array.Find(Types, t => t.Key == key);
-            return match?.Agenda ?? System.Array.Empty<string>();
+            var keys = match?.AgendaKeys ?? System.Array.Empty<string>();
+            var list = new List<BoardAgendaItemCatalog.AgendaItemDef>();
+            foreach (var k in keys)
+            {
+                var def = BoardAgendaItemCatalog.Get(k);
+                if (def != null) list.Add(def);
+            }
+            return list;
         }
     }
 }
