@@ -61,7 +61,10 @@ namespace HpskSite.Controllers
 
                 var response = await _chatService.GetResponseAsync(request.Message, history, roles);
 
-                LogChat(currentMember.Email ?? currentMember.UserName ?? "unknown", request.Message, response);
+                // GDPR data minimisation: the chat log is only used for feature-popularity
+                // analytics, so we do NOT record who asked — only the timestamp, question and
+                // answer. The identity is intentionally never passed to LogChat.
+                LogChat(request.Message, response);
 
                 return Json(new { success = true, response });
             }
@@ -85,7 +88,7 @@ namespace HpskSite.Controllers
             return Json(new { enabled, loggedIn });
         }
 
-        private void LogChat(string user, string question, string answer)
+        private void LogChat(string question, string answer)
         {
             try
             {
@@ -112,7 +115,7 @@ namespace HpskSite.Controllers
 
                 var logFile = Path.Combine(logDir, $"chat-{DateTime.UtcNow:yyyy-MM}.log");
                 var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-                var entry = $"[{timestamp}] {user}\nQ: {question}\nA: {answer}\n---\n";
+                var entry = $"[{timestamp}]\nQ: {question}\nA: {answer}\n---\n";
 
                 System.IO.File.AppendAllText(logFile, entry);
             }

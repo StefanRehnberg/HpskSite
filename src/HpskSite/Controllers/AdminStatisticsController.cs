@@ -1331,10 +1331,10 @@ namespace HpskSite.Controllers
             var now = DateTime.UtcNow;
             var thirtyDaysAgo = now.AddDays(-30);
 
+            // GDPR data minimisation: chat logs are anonymous (no asker identity is stored),
+            // so we report only volume + content — never "who" or "how many unique users".
             var totalMessages = entries.Count;
             var messages30d = entries.Count(e => e.Timestamp >= thirtyDaysAgo);
-            var uniqueUsers = entries.Select(e => e.User).Distinct().Count();
-            var uniqueUsers30d = entries.Where(e => e.Timestamp >= thirtyDaysAgo).Select(e => e.User).Distinct().Count();
 
             var perMonth = entries
                 .GroupBy(e => e.Timestamp.ToString("yyyy-MM"))
@@ -1342,20 +1342,13 @@ namespace HpskSite.Controllers
                 .Select(g => new { month = g.Key, count = g.Count() })
                 .ToList();
 
-            var topUsers = entries
-                .GroupBy(e => e.User)
-                .OrderByDescending(g => g.Count())
-                .Take(10)
-                .Select(g => new { user = g.Key, count = g.Count() })
-                .ToList();
-
             var recentEntries = entries
                 .OrderByDescending(e => e.Timestamp)
                 .Take(50)
-                .Select(e => new { timestamp = e.Timestamp.ToString("yyyy-MM-dd HH:mm"), user = e.User, question = e.Question, answer = Truncate(e.Answer, 200) })
+                .Select(e => new { timestamp = e.Timestamp.ToString("yyyy-MM-dd HH:mm"), question = e.Question, answer = Truncate(e.Answer, 200) })
                 .ToList();
 
-            return new { totalMessages, messages30d, uniqueUsers, uniqueUsers30d, perMonth, topUsers, recentEntries };
+            return new { totalMessages, messages30d, perMonth, recentEntries };
         }
 
         private List<ChatLogEntry> ParseChatLogs()
@@ -1382,19 +1375,20 @@ namespace HpskSite.Controllers
                         var lines = block.Trim().Split('\n');
                         if (lines.Length < 3) continue;
 
-                        // Parse: [2026-04-10 14:32:15] user@example.com
-                        var headerMatch = Regex.Match(lines[0], @"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+(.+)");
+                        // Header is "[2026-04-10 14:32:15]". We only read the timestamp; any
+                        // trailing text on legacy lines (older logs stored an email there) is
+                        // deliberately ignored so no identity reaches the app.
+                        var headerMatch = Regex.Match(lines[0], @"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]");
                         if (!headerMatch.Success) continue;
 
                         if (!DateTime.TryParseExact(headerMatch.Groups[1].Value, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var timestamp))
                             continue;
 
-                        var user = headerMatch.Groups[2].Value.Trim();
                         var question = lines.Length > 1 && lines[1].StartsWith("Q: ") ? lines[1].Substring(3) : "";
                         var answerLines = lines.Skip(2).Where(l => l.StartsWith("A: ") || !l.StartsWith("Q: ")).ToList();
                         var answer = string.Join(" ", answerLines).Replace("A: ", "");
 
-                        entries.Add(new ChatLogEntry { Timestamp = timestamp, User = user, Question = question, Answer = answer });
+                        entries.Add(new ChatLogEntry { Timestamp = timestamp, Question = question, Answer = answer });
                     }
                 }
                 catch { }
@@ -1412,7 +1406,6 @@ namespace HpskSite.Controllers
         private class ChatLogEntry
         {
             public DateTime Timestamp { get; set; }
-            public string User { get; set; } = "";
             public string Question { get; set; } = "";
             public string Answer { get; set; } = "";
         }

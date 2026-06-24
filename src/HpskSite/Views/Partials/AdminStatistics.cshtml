@@ -557,8 +557,9 @@
 
         <!-- Section H: AI Chat -->
         <h5 class="mt-4 mb-3"><i class="bi bi-chat-dots me-2"></i>AI-Chatt</h5>
+        <p class="text-muted small mb-2"><i class="bi bi-shield-check me-1"></i>AI-chattens loggar är anonyma — endast tidpunkt, fråga och svar sparas, aldrig vem som frågade.</p>
         <div class="row g-3 mb-3">
-            <div class="col-md-3">
+            <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-body text-center py-3">
                         <small class="text-muted">Meddelanden totalt</small>
@@ -566,7 +567,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-body text-center py-3">
                         <small class="text-muted">Senaste 30 dagarna</small>
@@ -574,42 +575,15 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <small class="text-muted">Unika användare</small>
-                        <h3 class="mb-0" id="statAiChatUsers">—</h3>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <small class="text-muted">Unika (30d)</small>
-                        <h3 class="mb-0" id="statAiChatUsers30d">—</h3>
-                    </div>
-                </div>
-            </div>
         </div>
         <div class="row g-3 mb-3">
-            <div class="col-md-6">
+            <div class="col-12">
                 <div class="card h-100">
                     <div class="card-body">
                         <h6 class="card-title">Meddelanden per månad</h6>
                         <div style="position:relative;height:220px">
                             <canvas id="chartAiChatPerMonth"></canvas>
                         </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <h6 class="card-title">Mest aktiva användare</h6>
-                        <table class="table table-sm mb-0">
-                            <thead><tr><th>Användare</th><th class="text-end">Frågor</th></tr></thead>
-                            <tbody id="aiChatTopUsersBody"></tbody>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -621,7 +595,7 @@
                         <h6 class="card-title">Senaste frågor</h6>
                         <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                             <table class="table table-sm table-hover mb-0">
-                                <thead><tr><th style="width:130px">Tid</th><th style="width:180px">Användare</th><th>Fråga</th><th>Svar (utdrag)</th></tr></thead>
+                                <thead><tr><th style="width:130px">Tid</th><th>Fråga</th><th>Svar (utdrag)</th></tr></thead>
                                 <tbody id="aiChatRecentBody"></tbody>
                             </table>
                         </div>
@@ -1338,8 +1312,6 @@
         if (d.aiChat) {
             document.getElementById('statAiChatTotal').textContent = d.aiChat.totalMessages;
             document.getElementById('statAiChat30d').textContent = d.aiChat.messages30d;
-            document.getElementById('statAiChatUsers').textContent = d.aiChat.uniqueUsers;
-            document.getElementById('statAiChatUsers30d').textContent = d.aiChat.uniqueUsers30d;
 
             // Messages per month chart
             if (d.aiChat.perMonth && d.aiChat.perMonth.length > 0) {
@@ -1368,27 +1340,15 @@
                 );
             }
 
-            // Top users table
-            var topBody = document.getElementById('aiChatTopUsersBody');
-            topBody.innerHTML = '';
-            if (d.aiChat.topUsers) {
-                d.aiChat.topUsers.forEach(function (u) {
-                    var tr = document.createElement('tr');
-                    tr.innerHTML = '<td>' + u.user + '</td><td class="text-end">' + u.count + '</td>';
-                    topBody.appendChild(tr);
-                });
-            }
-
-            // Recent questions table
+            // Recent questions table — anonymous (date, question, answer only)
             var recentBody = document.getElementById('aiChatRecentBody');
             recentBody.innerHTML = '';
             if (d.aiChat.recentEntries) {
                 d.aiChat.recentEntries.forEach(function (e) {
                     var tr = document.createElement('tr');
                     tr.innerHTML = '<td><small class="text-muted">' + e.timestamp + '</small></td>'
-                        + '<td><small>' + e.user + '</small></td>'
-                        + '<td>' + e.question + '</td>'
-                        + '<td><small class="text-muted">' + e.answer + '</small></td>';
+                        + '<td>' + escapeHtml(e.question) + '</td>'
+                        + '<td><small class="text-muted">' + escapeHtml(e.answer) + '</small></td>';
                     recentBody.appendChild(tr);
                 });
             }
