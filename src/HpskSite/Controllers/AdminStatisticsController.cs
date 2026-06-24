@@ -191,7 +191,47 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                var result = new { success = true, daily, weekly };
+                // Feature popularity over the last 30 days — bucket each logged path into a
+                // named feature and count engaged sessions + page views per feature. Same
+                // "engaged session" filter as the daily/weekly charts (≥ 2 distinct paths in
+                // the window) so cookie-blind scrapers don't inflate the public buckets.
+                // Members-only features (Styrelse, Fältkonfig) are login-gated, so their
+                // counts are genuine usage. Paths come from the route table / nav menu.
+                var featureRows = await db.FetchAsync<FeatureUsageRow>(
+                    @"SELECT Feature, COUNT(DISTINCT SessionHash) AS Sessions, COUNT(*) AS PageViews
+                      FROM (
+                          SELECT v.SessionHash,
+                              CASE
+                                  WHEN LOWER(v.[Path]) LIKE '/utbildning%'    THEN 'Utbildning'
+                                  WHEN LOWER(v.[Path]) LIKE '/styrelse%'      THEN 'Styrelse'
+                                  WHEN LOWER(v.[Path]) LIKE '/faltkonfig%'    THEN 'Fältkonfig'
+                                  WHEN LOWER(v.[Path]) LIKE '/siktbild%'      THEN 'Siktbild'
+                                  WHEN LOWER(v.[Path]) LIKE '/skjutban%'      THEN 'Skjutbanor'
+                                  WHEN LOWER(v.[Path]) LIKE '/skyttetrappan%' THEN 'Skyttetrappan'
+                                  WHEN LOWER(v.[Path]) LIKE '/traningsmatch%' THEN 'Träningsmatch'
+                                  WHEN LOWER(v.[Path]) LIKE '/competitions%'  THEN 'Tävlingar'
+                                  WHEN LOWER(v.[Path]) LIKE '/marken%'        THEN 'Märken'
+                                  WHEN LOWER(v.[Path]) LIKE '/live%'          THEN 'Live-resultat'
+                                  ELSE NULL
+                              END AS Feature
+                          FROM [VisitorLogs] v
+                          JOIN (
+                              SELECT SessionHash FROM [VisitorLogs]
+                              WHERE VisitedAt >= @0
+                              GROUP BY SessionHash HAVING COUNT(DISTINCT [Path]) >= 2
+                          ) e ON e.SessionHash = v.SessionHash
+                          WHERE v.VisitedAt >= @0
+                      ) t
+                      WHERE Feature IS NOT NULL
+                      GROUP BY Feature
+                      ORDER BY Sessions DESC",
+                    dailyStart);
+
+                var featureUsage = featureRows
+                    .Select(r => (object)new { feature = r.Feature, sessions = r.Sessions, pageViews = r.PageViews })
+                    .ToList();
+
+                var result = new { success = true, daily, weekly, featureUsage };
                 _memoryCache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
                 return Json(result);
             }
@@ -222,6 +262,78 @@ namespace HpskSite.Controllers
             public int Visitors { get; set; }
             public int PageViews { get; set; }
         }
+
+        private class FeatureUsageRow
+        {
+            public string Feature { get; set; } = "";
+            public int Sessions { get; set; }
+            public int PageViews { get; set; }
+        }
+
+        // Typed rows for the board-work (Styrelse) aggregates — POCOs rather than dynamic so
+        // the in-memory LINQ stays type-safe (dynamic in LINQ has bitten us before).
+        private class BoardMeetingRow
+        {
+            public int OwnerType { get; set; }
+            public int OwnerId { get; set; }
+            public DateTime MeetingDate { get; set; }
+            public string? Status { get; set; }
+            public DateTime? JusteringRequestedDate { get; set; }
+            public DateTime? KallelseSentDate { get; set; }
+        }
+
+        private class BoardActionRow
+        {
+            public int OwnerType { get; set; }
+            public int OwnerId { get; set; }
+            public string? Status { get; set; }
+            public DateTime? DueDate { get; set; }
+            public DateTime? CompletedDate { get; set; }
+        }
+
+        private class BoardWheelRow
+        {
+            public int OwnerType { get; set; }
+            public int OwnerId { get; set; }
+            public bool Done { get; set; }
+        }
+
+        private class ViaCountRow
+        {
+            public string? Via { get; set; }
+            public int Cnt { get; set; }
+        }
+
+        /// <summary>Zero-valued Styrelse (board work) stats — default and no-table fallback.</summary>
+        private static object ZeroStyrelseStats() => new
+        {
+            boardsActive = 0,
+            meetingsTotal = 0,
+            meetingsThisYear = 0,
+            meetingsJusteratThisYear = 0,
+            justeringDigital = new { requested = 0, qr = 0, web = 0, email = 0 },
+            actionsOpen = 0,
+            actionsOverdue = 0,
+            actionsCompletedThisYear = 0,
+            yearWheelDone = 0,
+            yearWheelTotal = 0,
+            kallelserThisYear = 0,
+            nominationsThisYear = 0,
+            byOwner = new List<object>()
+        };
+
+        /// <summary>Zero-valued Fältkonfig stats — default and no-table fallback.</summary>
+        private static object ZeroFaltkonfigStats() => new
+        {
+            total = 0,
+            creators = 0,
+            sharedConfigs = 0,
+            byVisibility = new List<object>(),
+            byApproval = new List<object>(),
+            projectsActive = 0,
+            projectsArchived = 0,
+            configsInProjects = 0
+        };
 
         /// <summary>Zero-valued Märken series stats — used as the default and the no-content fallback.</summary>
         private static object ZeroMarkenSeriesStats() => new
@@ -533,6 +645,8 @@ namespace HpskSite.Controllers
                     long totalUsedBytes = 0;
                     var storageByOwner = new List<dynamic>();
                     var storageQuotas = new List<DocumentStorageQuota>();
+                    object styrelseStats = ZeroStyrelseStats();
+                    object faltkonfigStats = ZeroFaltkonfigStats();
 
                     using (var db = _databaseFactory.CreateDatabase())
                     {
@@ -709,6 +823,166 @@ namespace HpskSite.Controllers
 
                         // Pre-load all quota overrides in one query (avoids N calls to GetStorageLimit)
                         storageQuotas = db.Fetch<DocumentStorageQuota>("SELECT * FROM DocumentStorageQuotas");
+
+                        // ── Styrelse (Board Work) usage — overall + per club/region ──
+                        // Board tables are small (a handful of meetings per club/year) so we
+                        // fetch the rows and aggregate in-memory. Wrapped in try/catch: a prod
+                        // that hasn't run the board migrations keeps the zero defaults.
+                        try
+                        {
+                            int curYear = now.Year;
+
+                            var meetingRows = db.Fetch<BoardMeetingRow>(
+                                @"SELECT OwnerType, OwnerId, MeetingDate, Status, JusteringRequestedDate, KallelseSentDate
+                                  FROM BoardMeetings WHERE IsActive = 1");
+                            var actionRows = db.Fetch<BoardActionRow>(
+                                @"SELECT OwnerType, OwnerId, Status, DueDate, CompletedDate
+                                  FROM BoardMeetingActions WHERE IsActive = 1");
+                            var wheelRows = db.Fetch<BoardWheelRow>(
+                                @"SELECT OwnerType, OwnerId, Done
+                                  FROM BoardYearWheelItems WHERE IsActive = 1 AND Year = @0", curYear);
+                            var approvalRows = db.Fetch<ViaCountRow>(
+                                @"SELECT ISNULL(a.ApprovedVia, 'web') AS Via, COUNT(*) AS Cnt
+                                  FROM BoardMeetingAttendees a
+                                  JOIN BoardMeetings m ON m.Id = a.MeetingId
+                                  WHERE m.IsActive = 1 AND a.ApprovedDate IS NOT NULL
+                                  GROUP BY a.ApprovedVia");
+                            int nominationsThisYear = db.Single<int>(
+                                "SELECT COUNT(*) FROM BoardNominations WHERE IsActive = 1 AND Year = @0", curYear);
+
+                            int approvalsQr = 0, approvalsWeb = 0, approvalsEmail = 0;
+                            foreach (var ar in approvalRows)
+                            {
+                                var via = (ar.Via ?? "web").ToLowerInvariant();
+                                if (via == "qr") approvalsQr += ar.Cnt;
+                                else if (via == "email") approvalsEmail += ar.Cnt;
+                                else approvalsWeb += ar.Cnt;
+                            }
+
+                            // Name lookup for the per-owner expander (clubNameLookup + region names).
+                            var ownerName = new Dictionary<(int, int), string>();
+                            foreach (var kvp in clubNameLookup) ownerName[(DocumentOwnerType.Club, kvp.Key)] = kvp.Value;
+                            foreach (var rp in regionalPages) ownerName[(DocumentOwnerType.Region, rp.Id)] = rp.Name ?? "";
+
+                            var openByOwner = actionRows
+                                .Where(r => r.Status == "Öppen")
+                                .GroupBy(r => (r.OwnerType, r.OwnerId))
+                                .ToDictionary(g => g.Key, g => g.Count());
+
+                            var byOwner = meetingRows
+                                .GroupBy(r => (r.OwnerType, r.OwnerId))
+                                .Select(g =>
+                                {
+                                    var key = g.Key;
+                                    var isRegion = key.OwnerType == DocumentOwnerType.Region;
+                                    return new
+                                    {
+                                        name = ownerName.TryGetValue(key, out var nm) && !string.IsNullOrEmpty(nm)
+                                            ? nm
+                                            : (isRegion ? "Krets" : "Klubb") + " #" + key.OwnerId,
+                                        type = isRegion ? "Krets" : "Klubb",
+                                        meetings = g.Count(),
+                                        meetingsThisYear = g.Count(r => r.MeetingDate.Year == curYear),
+                                        openActions = openByOwner.GetValueOrDefault(key, 0),
+                                        lastActivity = g.Max(r => r.MeetingDate).ToString("yyyy-MM-dd")
+                                    };
+                                })
+                                .OrderByDescending(x => x.meetingsThisYear)
+                                .ThenByDescending(x => x.meetings)
+                                .Cast<object>()
+                                .ToList();
+
+                            styrelseStats = new
+                            {
+                                boardsActive = byOwner.Count,
+                                meetingsTotal = meetingRows.Count,
+                                meetingsThisYear = meetingRows.Count(r => r.MeetingDate.Year == curYear),
+                                meetingsJusteratThisYear = meetingRows.Count(r => r.Status == "Justerat" && r.MeetingDate.Year == curYear),
+                                justeringDigital = new { requested = meetingRows.Count(r => r.JusteringRequestedDate != null), qr = approvalsQr, web = approvalsWeb, email = approvalsEmail },
+                                actionsOpen = actionRows.Count(r => r.Status == "Öppen"),
+                                actionsOverdue = actionRows.Count(r => r.Status == "Öppen" && r.DueDate != null && r.DueDate.Value < today),
+                                actionsCompletedThisYear = actionRows.Count(r => r.Status == "Klar" && r.CompletedDate != null && r.CompletedDate.Value.Year == curYear),
+                                yearWheelDone = wheelRows.Count(r => r.Done),
+                                yearWheelTotal = wheelRows.Count,
+                                kallelserThisYear = meetingRows.Count(r => r.KallelseSentDate != null && r.KallelseSentDate.Value.Year == curYear),
+                                nominationsThisYear,
+                                byOwner
+                            };
+                        }
+                        catch { /* board tables not present — keep zero defaults */ }
+
+                        // ── Fältkonfig (standalone Fältskytte configurations) usage ──
+                        // Independent try blocks: the visibility columns are oldest; approval +
+                        // ProjectId and the project/collaborator tables came in later migrations,
+                        // so a partially-migrated prod still yields whatever it can.
+                        try
+                        {
+                            var cfg = db.Single<dynamic>(
+                                @"SELECT
+                                      COUNT(*) AS Total,
+                                      COUNT(DISTINCT OwnerMemberId) AS Creators,
+                                      ISNULL(SUM(CASE WHEN Visibility = 'Private' THEN 1 ELSE 0 END), 0) AS VisPrivate,
+                                      ISNULL(SUM(CASE WHEN Visibility = 'Club'    THEN 1 ELSE 0 END), 0) AS VisClub,
+                                      ISNULL(SUM(CASE WHEN Visibility = 'Region'  THEN 1 ELSE 0 END), 0) AS VisRegion,
+                                      ISNULL(SUM(CASE WHEN Visibility = 'Public'  THEN 1 ELSE 0 END), 0) AS VisPublic
+                                  FROM FaltskytteConfiguration");
+
+                            var byVisibility = new List<object>
+                            {
+                                new { label = "Privat", count = Convert.ToInt32(cfg.VisPrivate) },
+                                new { label = "Klubb",  count = Convert.ToInt32(cfg.VisClub) },
+                                new { label = "Krets",  count = Convert.ToInt32(cfg.VisRegion) },
+                                new { label = "Publik", count = Convert.ToInt32(cfg.VisPublic) }
+                            };
+
+                            var byApproval = new List<object>();
+                            int configsInProjects = 0;
+                            try
+                            {
+                                var appr = db.Single<dynamic>(
+                                    @"SELECT
+                                          ISNULL(SUM(CASE WHEN ApprovalStatus = 'Approved'        THEN 1 ELSE 0 END), 0) AS Approved,
+                                          ISNULL(SUM(CASE WHEN ApprovalStatus = 'PendingApproval' THEN 1 ELSE 0 END), 0) AS Pending,
+                                          ISNULL(SUM(CASE WHEN ApprovalStatus IS NULL OR ApprovalStatus = 'Draft' THEN 1 ELSE 0 END), 0) AS Draft,
+                                          ISNULL(SUM(CASE WHEN ProjectId IS NOT NULL THEN 1 ELSE 0 END), 0) AS InProjects
+                                      FROM FaltskytteConfiguration");
+                                byApproval.Add(new { label = "Godkänd", count = Convert.ToInt32(appr.Approved) });
+                                byApproval.Add(new { label = "Väntar", count = Convert.ToInt32(appr.Pending) });
+                                byApproval.Add(new { label = "Utkast", count = Convert.ToInt32(appr.Draft) });
+                                configsInProjects = Convert.ToInt32(appr.InProjects);
+                            }
+                            catch { /* approval / ProjectId columns not present */ }
+
+                            int sharedConfigs = 0;
+                            try { sharedConfigs = db.Single<int>("SELECT COUNT(DISTINCT ConfigId) FROM FaltskytteConfigurationCollaborator"); }
+                            catch { /* collaborator table not present */ }
+
+                            int projectsActive = 0, projectsArchived = 0;
+                            try
+                            {
+                                var pr = db.Single<dynamic>(
+                                    @"SELECT
+                                          ISNULL(SUM(CASE WHEN Status = 'Archived' THEN 1 ELSE 0 END), 0) AS Archived,
+                                          ISNULL(SUM(CASE WHEN Status <> 'Archived' OR Status IS NULL THEN 1 ELSE 0 END), 0) AS Active
+                                      FROM FaltskytteProject");
+                                projectsArchived = Convert.ToInt32(pr.Archived);
+                                projectsActive = Convert.ToInt32(pr.Active);
+                            }
+                            catch { /* project table not present */ }
+
+                            faltkonfigStats = new
+                            {
+                                total = Convert.ToInt32(cfg.Total),
+                                creators = Convert.ToInt32(cfg.Creators),
+                                sharedConfigs,
+                                byVisibility,
+                                byApproval,
+                                projectsActive,
+                                projectsArchived,
+                                configsInProjects
+                            };
+                        }
+                        catch { /* FaltskytteConfiguration table not present — keep zero defaults */ }
                     }
 
                     // ── 5. Training stairs (Skyttetrappan) — in-memory ──────────
@@ -977,6 +1251,8 @@ namespace HpskSite.Controllers
                             clubStorage = clubStorageList,
                             regionStorage = regionStorageList
                         },
+                        styrelse = styrelseStats,
+                        faltkonfig = faltkonfigStats,
                         aiChat = BuildAiChatStats()
                     };
                 }
@@ -1043,6 +1319,8 @@ namespace HpskSite.Controllers
                     clubStorage = new List<object>(),
                     regionStorage = new List<object>()
                 },
+                styrelse = ZeroStyrelseStats(),
+                faltkonfig = ZeroFaltkonfigStats(),
                 aiChat = BuildAiChatStats()
             };
         }

@@ -111,6 +111,23 @@
             </div>
         </div>
 
+        <!-- Section A3: Funktionsanvändning (feature popularity) -->
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Funktionsanvändning (30d)
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Hur många unika sessioner som besökt varje funktionsområde de senaste 30 dagarna, härlett från sidvisningar. Inloggningsskyddade ytor (Styrelse, Fältkonfig) räknar verkliga användare. Samma filtrering som besökarstatistiken: en-sidiga sessioner (botar/scrapers) räknas inte, så funktioner man når via en enda djuplänk kan underskattas. 0 = ingen trafik under perioden."></i>
+                        </h6>
+                        <div id="featureUsageWrapper" style="position:relative;height:360px"><canvas id="chartFeatureUsage"></canvas></div>
+                        <p class="text-muted small mb-0 mt-2" id="featureUsageEmpty" style="display:none;">Ingen besöksdata ännu.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Section B: Medlemsstatistik -->
         <h5 class="mt-4 mb-3"><i class="bi bi-people me-2"></i>Medlemsstatistik</h5>
         <div class="row g-3 mb-4">
@@ -613,6 +630,167 @@
             </div>
         </div>
 
+        <!-- Section I: Styrelsearbete -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-clipboard-check me-2"></i>Styrelsearbete</h5>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Aktiva styrelser
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal klubbar/kretsar som har minst ett protokollfört möte i Styrelse-verktyget (någonsin). Visar hur många föreningar som faktiskt tagit verktyget i bruk."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statStyrelseBoards">—</h2>
+                        <small class="text-muted" id="statStyrelseBoardsSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Möten i år</h6>
+                        <h2 class="card-title mb-1" id="statStyrelseMeetings">—</h2>
+                        <small class="text-muted" id="statStyrelseMeetingsSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-info">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Protokoll justerade i år
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal möten i år med status Justerat. Siffran under visar hur många som skickats för digital justering och hur signeringen skedde (QR / webb / e-post)."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statStyrelseJusterat">—</h2>
+                        <small class="text-muted" id="statStyrelseJusteringSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Öppna åtgärder
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Åtgärder (att-göra-punkter) som ännu inte är klara. Röd siffra = förfallna (förbi sitt datum)."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statStyrelseActions">—</h2>
+                        <small class="text-danger" id="statStyrelseActionsSub"></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Årets aktivitet</h6>
+                        <ul class="list-unstyled mb-0 small">
+                            <li class="d-flex justify-content-between border-bottom py-1"><span>Årshjul avklarat</span><span class="fw-semibold" id="statStyrelseWheel">—</span></li>
+                            <li class="d-flex justify-content-between border-bottom py-1"><span>Kallelser utskickade</span><span class="fw-semibold" id="statStyrelseKallelser">—</span></li>
+                            <li class="d-flex justify-content-between border-bottom py-1"><span>Åtgärder avklarade</span><span class="fw-semibold" id="statStyrelseActionsDone">—</span></li>
+                            <li class="d-flex justify-content-between py-1"><span>Valberedningsförslag</span><span class="fw-semibold" id="statStyrelseNominations">—</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="card-title mb-0">
+                                Vilka klubbar &amp; kretsar använder Styrelse
+                                <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                                   title="Per förening: antal möten i år / totalt, öppna åtgärder och senaste mötesdatum. Sorterat på flest möten i år."></i>
+                            </h6>
+                            <button class="btn btn-sm btn-link text-decoration-none p-0 d-none" id="styrelseOwnersToggle" onclick="toggleStyrelseOwners()">Visa alla</button>
+                        </div>
+                        <div class="table-responsive mt-2" style="max-height:360px;overflow-y:auto">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr><th>Förening</th><th>Typ</th><th class="text-end">Möten i år</th><th class="text-end">Totalt</th><th class="text-end">Öppna åtg.</th><th class="text-end">Senaste möte</th></tr></thead>
+                                <tbody id="styrelseOwnersBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section J: Fältkonfigurator -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-bullseye me-2"></i>Fältkonfigurator</h5>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Konfigurationer
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Totalt antal sparade fristående stationskonfigurationer på /faltkonfig."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFkTotal">—</h2>
+                        <small class="text-muted" id="statFkInProjects"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Skapare</h6>
+                        <h2 class="card-title mb-1" id="statFkCreators">—</h2>
+                        <small class="text-muted">unika medlemmar</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-info">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Delade
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Konfigurationer med minst en medarbetare (collaborator) inbjuden."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFkShared">—</h2>
+                        <small class="text-muted">med medarbetare</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Projekt</h6>
+                        <h2 class="card-title mb-1" id="statFkProjects">—</h2>
+                        <small class="text-muted" id="statFkProjectsSub"></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Synlighet
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Fördelning av konfigurationer per synlighetsnivå: Privat, Klubb, Krets, Publik."></i>
+                        </h6>
+                        <div style="position:relative;height:220px"><canvas id="chartFkVisibility"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Godkännandestatus
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Banläggar-godkännande: Utkast (under arbete), Väntar (inskickad för granskning), Godkänd (låst för redigering)."></i>
+                        </h6>
+                        <div style="position:relative;height:220px"><canvas id="chartFkApproval"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -657,6 +835,7 @@
     }
 
     let regionChartExpanded = false;
+    let styrelseOwnersExpanded = false;
 
     function destroyChart(id) {
         if (chartInstances[id]) {
@@ -1215,9 +1394,114 @@
             }
         }
 
+        // Section I: Styrelsearbete
+        if (d.styrelse) {
+            const s = d.styrelse;
+            document.getElementById('statStyrelseBoards').textContent = s.boardsActive;
+            document.getElementById('statStyrelseBoardsSub').textContent = (s.byOwner ? s.byOwner.length : 0) + ' med möten';
+            document.getElementById('statStyrelseMeetings').textContent = s.meetingsThisYear;
+            document.getElementById('statStyrelseMeetingsSub').textContent = s.meetingsTotal + ' totalt';
+            document.getElementById('statStyrelseJusterat').textContent = s.meetingsJusteratThisYear;
+            const jd = s.justeringDigital || {};
+            const digTotal = (jd.qr || 0) + (jd.web || 0) + (jd.email || 0);
+            document.getElementById('statStyrelseJusteringSub').textContent = digTotal > 0
+                ? ('digital: ' + (jd.qr || 0) + ' QR · ' + (jd.web || 0) + ' webb · ' + (jd.email || 0) + ' e-post')
+                : (jd.requested > 0 ? jd.requested + ' skickade för justering' : '');
+            document.getElementById('statStyrelseActions').textContent = s.actionsOpen;
+            document.getElementById('statStyrelseActionsSub').textContent = s.actionsOverdue > 0 ? (s.actionsOverdue + ' förfallna') : '';
+            document.getElementById('statStyrelseWheel').textContent = s.yearWheelTotal > 0 ? (s.yearWheelDone + ' / ' + s.yearWheelTotal) : '–';
+            document.getElementById('statStyrelseKallelser').textContent = s.kallelserThisYear;
+            document.getElementById('statStyrelseActionsDone').textContent = s.actionsCompletedThisYear;
+            document.getElementById('statStyrelseNominations').textContent = s.nominationsThisYear;
+
+            window._styrelseOwners = s.byOwner || [];
+            styrelseOwnersExpanded = false;
+            renderStyrelseOwners();
+        }
+
+        // Section J: Fältkonfigurator
+        if (d.faltkonfig) {
+            const f = d.faltkonfig;
+            document.getElementById('statFkTotal').textContent = f.total;
+            document.getElementById('statFkInProjects').textContent = f.configsInProjects > 0 ? (f.configsInProjects + ' i projekt') : '';
+            document.getElementById('statFkCreators').textContent = f.creators;
+            document.getElementById('statFkShared').textContent = f.sharedConfigs;
+            document.getElementById('statFkProjects').textContent = f.projectsActive;
+            document.getElementById('statFkProjectsSub').textContent = f.projectsArchived > 0 ? (f.projectsArchived + ' arkiverade') : 'aktiva';
+
+            renderFkDoughnut('chartFkVisibility', f.byVisibility, colors);
+            renderFkDoughnut('chartFkApproval', f.byApproval, colors);
+        }
+
         // Initialize tooltips
         document.querySelectorAll('#statisticsContainer [data-bs-toggle="tooltip"]').forEach(function (el) {
             bootstrap.Tooltip.getOrCreateInstance(el);
+        });
+    }
+
+    const STYRELSE_OWNERS_COLLAPSED = 8;
+
+    function renderStyrelseOwners() {
+        const all = window._styrelseOwners || [];
+        const body = document.getElementById('styrelseOwnersBody');
+        const toggle = document.getElementById('styrelseOwnersToggle');
+        if (!body) return;
+
+        if (!all.length) {
+            body.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Inga styrelser har använt verktyget ännu</td></tr>';
+            if (toggle) toggle.classList.add('d-none');
+            return;
+        }
+
+        if (toggle) {
+            if (all.length > STYRELSE_OWNERS_COLLAPSED) {
+                toggle.classList.remove('d-none');
+                toggle.textContent = styrelseOwnersExpanded ? 'Visa färre' : ('Visa alla (' + all.length + ')');
+            } else {
+                toggle.classList.add('d-none');
+            }
+        }
+
+        const rows = styrelseOwnersExpanded ? all : all.slice(0, STYRELSE_OWNERS_COLLAPSED);
+        body.innerHTML = rows.map(function (o) {
+            return '<tr>' +
+                '<td>' + escapeHtml(o.name) + '</td>' +
+                '<td><span class="badge ' + (o.type === 'Krets' ? 'bg-primary' : 'bg-secondary') + '">' + o.type + '</span></td>' +
+                '<td class="text-end">' + o.meetingsThisYear + '</td>' +
+                '<td class="text-end">' + o.meetings + '</td>' +
+                '<td class="text-end">' + (o.openActions > 0 ? '<span class="text-warning fw-semibold">' + o.openActions + '</span>' : '0') + '</td>' +
+                '<td class="text-end"><small class="text-muted">' + (o.lastActivity || '') + '</small></td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    window.toggleStyrelseOwners = function () {
+        styrelseOwnersExpanded = !styrelseOwnersExpanded;
+        renderStyrelseOwners();
+    };
+
+    function renderFkDoughnut(canvasId, items, colors) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const data = (items || []).filter(function (x) { return x.count > 0; });
+        destroyChart(canvasId);
+        if (!data.length) {
+            canvas.parentElement.innerHTML = '<div class="d-flex align-items-center justify-content-center h-100 text-muted">Inga data ännu</div>';
+            return;
+        }
+        chartInstances[canvasId] = new Chart(canvas.getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: data.map(function (x) { return x.label; }),
+                datasets: [{
+                    data: data.map(function (x) { return x.count; }),
+                    backgroundColor: data.map(function (x, i) { return chartPalette[i % chartPalette.length]; })
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'right', labels: { color: colors.text } } }
+            }
         });
     }
 
@@ -1296,10 +1580,72 @@
                     return;
                 }
                 renderVisitorStats(resp.daily || [], resp.weekly || []);
+                renderFeatureUsage(resp.featureUsage || []);
             })
             .catch(err => {
                 console.warn('Visitor stats fetch failed:', err);
             });
+    }
+
+    // Known feature buckets — kept in sync with the CASE in AdminStatisticsController.GetVisitorStats.
+    // We render every one (filling 0 for any the server didn't return) so "this feature gets no
+    // traffic" is shown explicitly rather than silently dropping out.
+    const FEATURE_ORDER = ['Utbildning', 'Styrelse', 'Fältkonfig', 'Siktbild', 'Skjutbanor', 'Skyttetrappan', 'Träningsmatch', 'Tävlingar', 'Märken', 'Live-resultat'];
+
+    function renderFeatureUsage(featureUsage) {
+        const colors = getColors();
+        const wrapper = document.getElementById('featureUsageWrapper');
+        const empty = document.getElementById('featureUsageEmpty');
+        if (!wrapper) return;
+
+        const byName = {};
+        featureUsage.forEach(f => { byName[f.feature] = f; });
+        // Merge zeros for missing buckets, then sort by sessions desc.
+        const rows = FEATURE_ORDER
+            .map(name => ({ feature: name, sessions: (byName[name] ? byName[name].sessions : 0), pageViews: (byName[name] ? byName[name].pageViews : 0) }))
+            .sort((a, b) => b.sessions - a.sessions);
+
+        const anyData = rows.some(r => r.sessions > 0);
+        if (empty) empty.style.display = anyData ? 'none' : '';
+
+        wrapper.style.height = Math.max(220, rows.length * 32) + 'px';
+
+        destroyChart('chartFeatureUsage');
+        const ctx = document.getElementById('chartFeatureUsage').getContext('2d');
+        chartInstances['chartFeatureUsage'] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: rows.map(r => r.feature),
+                datasets: [{
+                    label: 'Unika sessioner (30d)',
+                    data: rows.map(r => r.sessions),
+                    backgroundColor: colors.primary + 'cc',
+                    borderColor: colors.primary,
+                    borderWidth: 1,
+                    barThickness: 18
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            afterBody: function (items) {
+                                const idx = items[0].dataIndex;
+                                return 'Sidvisningar: ' + rows[idx].pageViews;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    y: { ticks: { autoSkip: false, color: colors.text }, grid: { display: false } }
+                }
+            }
+        });
     }
 
     function renderVisitorStats(daily, weekly) {
