@@ -1264,7 +1264,8 @@ namespace HpskSite.Services
             string shootingClasses,
             string invoiceNumber,
             string swishNumber,
-            string invoiceMessage)
+            string invoiceMessage,
+            string? customMessage = null)
         {
             // If SMTP is not configured, log and return
             if (string.IsNullOrEmpty(_smtpHost))
@@ -1275,6 +1276,15 @@ namespace HpskSite.Services
 
             // Generate Swish redirect URL for mobile users (Gmail-compatible)
             var swishRedirectUrl = GenerateSwishRedirectUrl(swishNumber, amount, invoiceMessage);
+
+            // The intro line shown above the QR code. By default it's the standard payment
+            // instruction; a reminder send overrides it with the operator's own (editable)
+            // message. HTML-encoded since it's operator-entered, with newlines preserved.
+            // `invoiceMessage` is the separate Swish *payment reference* (matches the QR), so a
+            // long custom message never pollutes the Swish app's text.
+            var bodyIntroMessage = string.IsNullOrWhiteSpace(customMessage)
+                ? "För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan:"
+                : System.Net.WebUtility.HtmlEncode(customMessage).Replace("\n", "<br>");
 
             var subject = $"Swish-betalning för {competitionName} - Pistol.nu";
             var body = $@"
@@ -1305,7 +1315,7 @@ namespace HpskSite.Services
 
             <p>Tack för din anmälan till <strong>{competitionName}</strong>!</p>
 
-            <p>För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan:</p>
+            <p>{bodyIntroMessage}</p>
 
             <div class='qr-code' style='text-align: center; margin: 30px 0; padding: 20px; background-color: white; border: 2px solid #0d6efd; border-radius: 10px;'>
                 <img src='cid:swishQRCode' alt='Swish QR Code' width='200' height='200'

@@ -50,8 +50,8 @@
             <button type="button" class="btn btn-primary btn-sm" onclick="openWalkInRegistrationModal()" title="Anmäl en skytt vid registreringsbordet">
                 <i class="bi bi-person-plus me-1"></i>Anmäl och betala
             </button>
-            <button type="button" class="btn btn-warning btn-sm" onclick="openSendRemindersModal()" title="Maila påminnelse till alla obetalda">
-                <i class="bi bi-envelope-exclamation me-1"></i>Skicka påminnelser
+            <button type="button" class="btn btn-warning btn-sm" onclick="openSendRemindersModal()" title="Öppna påminnelser – välj mottagare innan du skickar">
+                <i class="bi bi-envelope-exclamation me-1"></i>Påminnelser
             </button>
             <button type="button" class="btn btn-outline-success btn-sm" onclick="openBokforingsUnderlag()" title="Öppna utskriftsvänligt bokföringsunderlag">
                 <i class="bi bi-file-earmark-text me-1"></i>Bokföringsunderlag
@@ -429,18 +429,46 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <p>Maila en Swish QR-påminnelse till alla skyttar med <strong>Väntande</strong> betalningsstatus.</p>
+                <p>Maila en Swish QR-påminnelse till valda skyttar med <strong>Väntande</strong> betalningsstatus.</p>
 
-                <div class="alert alert-info mb-3" id="sendRemindersInfo">
-                    <span id="sendRemindersCount" class="fw-bold">…</span> mottagare kommer att få ett mejl.
-                    <small class="text-muted d-block mt-1">Lagbetalningar och skyttar utan e-postadress hoppas över.</small>
+                <div class="mb-3" id="sendRemindersInfo">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-1 mb-1">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="reminderSelectAll(true)">Markera alla</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="reminderSelectAll(false)">Avmarkera alla</button>
+                            <button type="button" class="btn btn-outline-secondary" id="reminderDeselectRemindedBtn" onclick="reminderUncheckAlreadyReminded()">Avmarkera redan påminda</button>
+                        </div>
+                        <span id="sendRemindersSelectedInfo" class="small text-muted fw-bold">…</span>
+                    </div>
+                    <div id="sendRemindersRecipients" class="border rounded" style="max-height: 240px; overflow-y: auto;">
+                        <div class="text-center py-3 text-muted">
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>Laddar mottagare...
+                        </div>
+                    </div>
+                    <small class="text-muted d-block mt-1">Bocka ur de skyttar som inte ska få en påminnelse. Lagbetalningar och skyttar utan e-postadress visas inte.</small>
                 </div>
 
                 <div class="mb-3">
-                    <label for="sendRemindersMessage" class="form-label">Meddelande <small class="text-muted">(valfritt)</small></label>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <label for="sendRemindersMessage" class="form-label mb-0">Meddelande</label>
+                        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none"
+                                id="sendRemindersResetBtn" onclick="resetReminderMessage()">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>Återställ standardtext
+                        </button>
+                    </div>
                     <textarea class="form-control" id="sendRemindersMessage" rows="3"
                               placeholder="t.ex. ”Tre dagar kvar till tävlingen — vänligen betala för att behålla din plats.”"></textarea>
-                    <small class="form-text text-muted">Lämnas tomt för att använda standardmeddelandet.</small>
+                    <small class="form-text text-muted">Förifyllt med standardmeddelandet — ändra fritt. Lämnas fältet tomt används standardmeddelandet.</small>
+                </div>
+
+                <div class="border-top pt-3 mb-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="sendTestReminderBtn" onclick="sendTestReminder()">
+                        <i class="bi bi-envelope-check me-1"></i>Skicka testpåminnelse till mig
+                    </button>
+                    <small class="form-text text-muted d-block mt-1">
+                        Skickar ett exempelmejl till din egen e-postadress så du ser hur det ser ut — påverkar inga skyttar.
+                    </small>
+                    <div id="sendTestReminderResult" class="mt-2"></div>
                 </div>
 
                 <div id="sendRemindersResult" class="d-none"></div>
@@ -947,9 +975,7 @@ function renderCompetitionTeams() {
         const markBtn = (t.paymentStatus === 'Pending')
             ? `<button class="btn btn-sm btn-success" onclick="markTeamAsPaid(${t.id})" title="Markera som betald"><i class="bi bi-check-circle"></i></button>`
             : '';
-        const histBtn = (t.invoiceId)
-            ? `<button class="btn btn-sm btn-outline-secondary" onclick="showInvoiceHistory(${t.invoiceId}, ${nameArg})" title="Visa betalningshistorik"><i class="bi bi-clock-history"></i></button>`
-            : '';
+        const histBtn = renderHistoryButton(t.invoiceId, nameArg, t.lastReminderSentDate, t.reminderCount);
 
         return `<tr>
             <td><strong>${escapeHtmlSafe(t.teamName)}</strong></td>
@@ -974,6 +1000,26 @@ function escapeHtmlSafe(s) {
     const d = document.createElement('div');
     d.textContent = s == null ? '' : String(s);
     return d.innerHTML;
+}
+
+// Build the "Betalningshistorik" button. When a payment reminder has already gone out for
+// this invoice we tint the button (info instead of the neutral secondary) and spell out
+// when / how many times in the tooltip, so the operator can tell at a glance who has
+// already been chased before opening the full history. `nameArg` is the member/team name
+// pre-stringified + &quot;-escaped by the caller (passed straight into the onclick).
+function renderHistoryButton(invoiceId, nameArg, lastReminderSentDate, reminderCount) {
+    if (!invoiceId) return '';
+    let cls = 'btn-outline-secondary';
+    let title = 'Visa betalningshistorik';
+    if (lastReminderSentDate) {
+        cls = 'btn-outline-info';
+        const when = new Date(lastReminderSentDate).toLocaleString('sv-SE', {
+            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+        });
+        const n = reminderCount || 1;
+        title = `Påminnelse skickad ${when}${n > 1 ? ` (${n} st)` : ''} – visa betalningshistorik`;
+    }
+    return `<button class="btn btn-sm ${cls}" onclick="showInvoiceHistory(${invoiceId}, ${nameArg})" title="${title.replace(/"/g, '&quot;')}"><i class="bi bi-clock-history"></i></button>`;
 }
 
 // Edit a team from the desk = rename it. The full roster editor lives on the public
@@ -1439,13 +1485,7 @@ function displayCompetitionRegistrations() {
                                 <i class="bi bi-check-circle"></i>
                             </button>
                         ` : ''}
-                        ${reg.invoiceId ? `
-                            <button class="btn btn-sm btn-outline-secondary"
-                                    onclick="showInvoiceHistory(${reg.invoiceId}, ${JSON.stringify(reg.memberName).replace(/"/g, '&quot;')})"
-                                    title="Visa betalningshistorik">
-                                <i class="bi bi-clock-history"></i>
-                            </button>
-                        ` : ''}
+                        ${renderHistoryButton(reg.invoiceId, JSON.stringify(reg.memberName).replace(/"/g, '&quot;'), reg.lastReminderSentDate, reg.reminderCount)}
                     </div>
                     <button class="btn btn-sm btn-outline-danger"
                             onclick="confirmDeleteCompetitionRegistration(${reg.id})"
@@ -3356,9 +3396,15 @@ function renderInvoiceHistory(data) {
         // is just the *intended* channel (defaults to Swish) — showing it there makes an
         // unpaid invoice look paid, so suppress it everywhere except real payment/refund events.
         const showMethod = (e.eventType === 'MarkedPaid' || e.eventType === 'Refunded');
+        // An EmailSent row is either a bulk payment reminder or a one-off QR resend — the
+        // note tells them apart. Label reminders explicitly so the trail reads clearly.
+        let typeLabel = labelFor(e.eventType);
+        if (e.eventType === 'EmailSent' && (e.notes || '').toLowerCase().includes('påminnelse')) {
+            typeLabel = 'Påminnelse skickad';
+        }
         html += `<tr>
             <td class="small text-nowrap">${escapeHistory(when)}</td>
-            <td><span class="badge bg-${colorFor(e.eventType)}">${escapeHistory(labelFor(e.eventType))}</span></td>
+            <td><span class="badge bg-${colorFor(e.eventType)}">${escapeHistory(typeLabel)}</span></td>
             <td class="small">${escapeHistory(e.byMemberName || '—')}</td>
             <td class="small">${showMethod ? escapeHistory(e.paymentMethod || '') : ''}</td>
             <td class="small text-end">${escapeHistory(amount)}</td>
@@ -3380,6 +3426,8 @@ function escapeHistory(s) {
 // invoice on this competition. Each send produces one EmailSent audit event.
 // ──────────────────────────────────────────────────────────────────────
 let sendRemindersModalInstance = null;
+let reminderDefaultMessage = '';   // standard message, fetched from the server so it can't drift
+let reminderRecipients = [];       // eligible recipients for the current competition
 
 function openSendRemindersModal() {
     const competitionId = $('.competition-registration-management').data('competition-id');
@@ -3390,38 +3438,182 @@ function openSendRemindersModal() {
     }
 
     // Reset state
-    document.getElementById('sendRemindersMessage').value = '';
+    reminderRecipients = [];
+    document.getElementById('sendRemindersMessage').value = '';   // replaced by the default once the fetch returns
     document.getElementById('sendRemindersResult').classList.add('d-none');
     document.getElementById('sendRemindersResult').innerHTML = '';
+    document.getElementById('sendTestReminderResult').innerHTML = '';
     document.getElementById('sendRemindersConfirmBtn').disabled = true;
-    document.getElementById('sendRemindersCount').textContent = '…';
+    document.getElementById('sendRemindersSelectedInfo').textContent = '…';
+    document.getElementById('sendRemindersRecipients').innerHTML = `
+        <div class="text-center py-3 text-muted">
+            <span class="spinner-border spinner-border-sm me-2" role="status"></span>Laddar mottagare...
+        </div>`;
 
     sendRemindersModalInstance.show();
 
-    // Pre-flight: how many will actually be emailed?
-    fetch(`/umbraco/surface/InvoiceAdmin/CountReminderRecipients?competitionId=${competitionId}`)
+    // Load the eligible recipients (with reminder history) + the standard message to prefill.
+    fetch(`/umbraco/surface/InvoiceAdmin/GetReminderRecipients?competitionId=${competitionId}`)
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                document.getElementById('sendRemindersCount').textContent = data.count;
-                document.getElementById('sendRemindersConfirmBtn').disabled = data.count === 0;
-                if (data.count === 0) {
-                    document.getElementById('sendRemindersInfo').classList.remove('alert-info');
-                    document.getElementById('sendRemindersInfo').classList.add('alert-secondary');
-                }
+                reminderDefaultMessage = data.defaultMessage || '';
+                const ta = document.getElementById('sendRemindersMessage');
+                if (!ta.value) ta.value = reminderDefaultMessage;
+
+                reminderRecipients = (data.recipients || []).map(r => ({ ...r, selected: true }));
+                renderReminderRecipients();
             } else {
-                document.getElementById('sendRemindersCount').textContent = '?';
+                document.getElementById('sendRemindersRecipients').innerHTML =
+                    `<div class="alert alert-warning mb-0">${escapeHistory(data.message || 'Kunde inte ladda mottagare.')}</div>`;
+                document.getElementById('sendRemindersSelectedInfo').textContent = '';
             }
         })
         .catch(err => {
-            console.error('Failed to count reminder recipients:', err);
-            document.getElementById('sendRemindersCount').textContent = '?';
+            console.error('Failed to load reminder recipients:', err);
+            document.getElementById('sendRemindersRecipients').innerHTML =
+                `<div class="alert alert-danger mb-0">Kunde inte ladda mottagare: ${escapeHistory(err.message)}</div>`;
+            document.getElementById('sendRemindersSelectedInfo').textContent = '';
         });
+}
+
+// Draw the recipient checklist. Each row carries its invoiceId on the checkbox; the
+// "selected" flag lives on the in-memory model so re-renders preserve choices.
+function renderReminderRecipients() {
+    const box = document.getElementById('sendRemindersRecipients');
+    if (!reminderRecipients.length) {
+        box.innerHTML = '<div class="text-center py-3 text-muted">Inga obetalda skyttar med e-postadress.</div>';
+        updateReminderSelection();
+        return;
+    }
+
+    let html = '<ul class="list-group list-group-flush">';
+    reminderRecipients.forEach((r, i) => {
+        let reminded = '';
+        if (r.lastReminderSentDate) {
+            const when = new Date(r.lastReminderSentDate).toLocaleString('sv-SE', {
+                year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+            });
+            const n = r.reminderCount || 1;
+            reminded = `<span class="badge bg-info ms-2" title="Senaste: ${escapeHistory(when)}">Påmind${n > 1 ? ` ${n}×` : ''}</span>`;
+        }
+        const amount = (r.amount != null) ? `${Math.round(Number(r.amount))} kr` : '';
+        const sub = [r.club, r.email].filter(Boolean).map(escapeHistory).join(' · ');
+        html += `<li class="list-group-item py-1 px-2">
+            <div class="form-check mb-0 d-flex align-items-center">
+                <input class="form-check-input reminder-recipient-cb mt-0 me-2" type="checkbox"
+                       id="reminderCb_${i}" data-idx="${i}" ${r.selected ? 'checked' : ''}
+                       onchange="onReminderCbChange(${i}, this.checked)">
+                <label class="form-check-label flex-grow-1" for="reminderCb_${i}">
+                    <span class="fw-semibold">${escapeHistory(r.memberName || '(namnlös)')}</span>${reminded}
+                    <small class="text-muted d-block">${sub}</small>
+                </label>
+                <span class="small text-muted ms-2 text-nowrap">${escapeHistory(amount)}</span>
+            </div>
+        </li>`;
+    });
+    html += '</ul>';
+    box.innerHTML = html;
+    updateReminderSelection();
+}
+
+function onReminderCbChange(idx, checked) {
+    if (reminderRecipients[idx]) reminderRecipients[idx].selected = checked;
+    updateReminderSelection();
+}
+
+function reminderSelectAll(checked) {
+    reminderRecipients.forEach(r => r.selected = checked);
+    document.querySelectorAll('#sendRemindersRecipients .reminder-recipient-cb').forEach(cb => cb.checked = checked);
+    updateReminderSelection();
+}
+
+// Untick everyone who has already had at least one reminder — the common "chase only the
+// ones I haven't contacted yet" case.
+function reminderUncheckAlreadyReminded() {
+    reminderRecipients.forEach((r, i) => {
+        if (r.lastReminderSentDate) {
+            r.selected = false;
+            const cb = document.getElementById(`reminderCb_${i}`);
+            if (cb) cb.checked = false;
+        }
+    });
+    updateReminderSelection();
+}
+
+// Sync the selected count + confirm button label/disabled state with the current ticks.
+function updateReminderSelection() {
+    const total = reminderRecipients.length;
+    const selected = reminderRecipients.filter(r => r.selected).length;
+    document.getElementById('sendRemindersSelectedInfo').textContent =
+        total ? `${selected} av ${total} valda` : '';
+    const btn = document.getElementById('sendRemindersConfirmBtn');
+    btn.disabled = selected === 0;
+    btn.innerHTML = `<i class="bi bi-send me-1"></i>Skicka påminnelser${selected ? ` (${selected})` : ''}`;
+    const deselectBtn = document.getElementById('reminderDeselectRemindedBtn');
+    if (deselectBtn) deselectBtn.disabled = !reminderRecipients.some(r => r.lastReminderSentDate);
+}
+
+// Restore the standard message into the textarea (used by the "Återställ standardtext" link).
+function resetReminderMessage() {
+    document.getElementById('sendRemindersMessage').value = reminderDefaultMessage;
+}
+
+// Send a single preview reminder to the operator's own email. Uses whatever is currently
+// in the message box so the test reflects exactly what the shooters would receive.
+async function sendTestReminder() {
+    const competitionId = $('.competition-registration-management').data('competition-id');
+    if (!competitionId) return;
+
+    const message = document.getElementById('sendRemindersMessage').value.trim();
+    const btn = document.getElementById('sendTestReminderBtn');
+    const resultBox = document.getElementById('sendTestReminderResult');
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar test...';
+    resultBox.innerHTML = '';
+
+    try {
+        const token = $('input[name="__RequestVerificationToken"]').val();
+        const params = new URLSearchParams();
+        params.append('competitionId', competitionId);
+        if (message) params.append('reminderMessage', message);
+
+        const response = await fetch('/umbraco/surface/InvoiceAdmin/SendTestReminder', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'RequestVerificationToken': token
+            },
+            body: params.toString()
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            resultBox.innerHTML = `<div class="alert alert-success py-2 px-3 mb-0 small">
+                <i class="bi bi-check-circle me-1"></i>${escapeHistory(data.message || 'Testpåminnelse skickad.')}
+            </div>`;
+        } else {
+            resultBox.innerHTML = `<div class="alert alert-danger py-2 px-3 mb-0 small">
+                <i class="bi bi-exclamation-triangle me-1"></i>${escapeHistory(data.message || 'Kunde inte skicka testet.')}
+            </div>`;
+        }
+    } catch (err) {
+        resultBox.innerHTML = `<div class="alert alert-danger py-2 px-3 mb-0 small">Ett fel uppstod: ${escapeHistory(err.message)}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+    }
 }
 
 async function confirmSendReminders() {
     const competitionId = $('.competition-registration-management').data('competition-id');
     if (!competitionId) return;
+
+    // Only the ticked recipients. Empty selection is blocked by the disabled button, but
+    // guard anyway so we never fall through to the server's "send to everyone" default.
+    const selectedIds = reminderRecipients.filter(r => r.selected).map(r => r.invoiceId);
+    if (selectedIds.length === 0) return;
 
     const message = document.getElementById('sendRemindersMessage').value.trim();
     const btn = document.getElementById('sendRemindersConfirmBtn');
@@ -3435,6 +3627,7 @@ async function confirmSendReminders() {
         const params = new URLSearchParams();
         params.append('competitionId', competitionId);
         if (message) params.append('reminderMessage', message);
+        selectedIds.forEach(id => params.append('invoiceIds', id));
 
         const response = await fetch('/umbraco/surface/InvoiceAdmin/SendPaymentReminders', {
             method: 'POST',

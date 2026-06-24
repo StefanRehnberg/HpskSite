@@ -30,6 +30,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly DirektplaceringStartListService _dpStartListService;
+        private readonly InvoiceAuditService _auditService;
         // Used to create a fresh DI scope for deferred background work. The controller's
         // own scoped services (_contentService, _dpStartListService) get disposed when the
         // HTTP request ends — capturing them in a Task.Run lambda that fires later leaks
@@ -53,6 +54,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             AdminAuthorizationService authorizationService,
             DirektplaceringStartListService dpStartListService,
+            InvoiceAuditService auditService,
             IServiceScopeFactory scopeFactory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -64,6 +66,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _authorizationService = authorizationService;
             _dpStartListService = dpStartListService;
+            _auditService = auditService;
             _scopeFactory = scopeFactory;
         }
 
@@ -1366,6 +1369,7 @@ namespace HpskSite.Controllers
                 var pendingAmountMap = new Dictionary<int, decimal>();     // registrationId -> sum of all Pending invoices
                 var hasVarianceMap = new Dictionary<int, bool>();          // registrationId -> any paid invoice where actual != billed
                 var paymentSentMap = new Dictionary<int, (DateTime date, string by)>(); // registrationId -> payer "betalning anmäld" claim
+                var invoiceToRegIds = new Dictionary<int, List<int>>();    // invoiceId -> registrationId(s) it covers (for mapping audit events back)
                 if (invoicesHub != null)
                 {
                     var allInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
@@ -1391,6 +1395,8 @@ namespace HpskSite.Controllers
                         var invoiceRegistrationId = invoice.GetValue<int>("registrationId");
                         if (invoiceRegistrationId > 0)
                         {
+                            invoiceToRegIds[invoice.Id] = new List<int> { invoiceRegistrationId };
+
                             // Aggregate totals across ALL invoices for this registration
                             if (invoiceStatus == "Paid")
                             {
@@ -1420,6 +1426,8 @@ namespace HpskSite.Controllers
                         if (!string.IsNullOrEmpty(relatedIdsJson))
                         {
                             var registrationIds = ParseRegistrationIds(relatedIdsJson);
+                            if (registrationIds.Count > 0 && !invoiceToRegIds.ContainsKey(invoice.Id))
+                                invoiceToRegIds[invoice.Id] = registrationIds.ToList();
                             // For multi-registration invoices, split the amount evenly across the
                             // related registrations so the per-row totals don't double-count.
                             var perRegAmount = registrationIds.Count > 0
@@ -1450,6 +1458,33 @@ namespace HpskSite.Controllers
                             }
                         }
                     }
+                }
+
+                // Reminder activity: an EmailSent audit event means a payment reminder /
+                // Swish-QR mail went out for that invoice. Surface the latest one + a count
+                // per registration so the row can flag "påminnelse skickad" and tint its
+                // history button. One read for the whole competition, then map back via
+                // invoiceToRegIds (built above).
+                var reminderMap = new Dictionary<int, (DateTime last, int count)>(); // registrationId -> (latest reminder, total reminders)
+                try
+                {
+                    var auditEvents = await _auditService.GetForCompetitionAsync(competitionId.Value);
+                    foreach (var ev in auditEvents.Where(e => e.EventType == InvoicePaymentEventTypes.EmailSent))
+                    {
+                        if (!invoiceToRegIds.TryGetValue(ev.InvoiceId, out var regIds)) continue;
+                        foreach (var regId in regIds)
+                        {
+                            if (reminderMap.TryGetValue(regId, out var existing))
+                                reminderMap[regId] = (existing.last >= ev.OccurredAt ? existing.last : ev.OccurredAt, existing.count + 1);
+                            else
+                                reminderMap[regId] = (ev.OccurredAt, 1);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Reminder info is purely informational — never fail the list because of it.
+                    _logger.LogWarning(ex, "Failed to load reminder audit events for competition {CompetitionId}", competitionId.Value);
                 }
 
                 // PERFORMANCE FIX: Batch load club names - collect all unique club IDs first
@@ -1551,6 +1586,14 @@ namespace HpskSite.Controllers
                             paymentSentBy = psInfo.by;
                         }
 
+                        DateTime? lastReminderSentDate = null;
+                        int reminderCount = 0;
+                        if (reminderMap.TryGetValue(content.Id, out var remInfo))
+                        {
+                            lastReminderSentDate = remInfo.last;
+                            reminderCount = remInfo.count;
+                        }
+
                         // Get shooting classes (new JSON array format)
                         var shootingClassesJson = content.GetValue<string>("shootingClasses");
                         var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
@@ -1602,7 +1645,9 @@ namespace HpskSite.Controllers
                             isCheckedIn = content.GetValue<bool>("isCheckedIn"),
                             isSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition"),
                             paymentSentDate = paymentSentDate,
-                            paymentSentBy = paymentSentBy
+                            paymentSentBy = paymentSentBy,
+                            lastReminderSentDate = lastReminderSentDate,
+                            reminderCount = reminderCount
                         };
                     })
                     .OrderBy(r => r.memberName)

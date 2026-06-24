@@ -37,6 +37,15 @@ namespace HpskSite.Controllers
         private const string InvoicesListCacheKey = "admin_invoices_{0}_{1}_{2}_{3}_{4}_{5}"; // competitionId, clubId, excludePaid, activeOnly, page, viewType
         private static readonly TimeSpan InvoiceCacheDuration = TimeSpan.FromMinutes(5);
 
+        /// <summary>
+        /// The message used in a bulk payment reminder when the operator leaves the
+        /// "Meddelande" field empty. Single source of truth — the modal prefills the
+        /// textarea with this (via CountReminderRecipients) and SendPaymentReminders
+        /// falls back to it server-side, so the two can never drift apart.
+        /// </summary>
+        public const string DefaultReminderMessage =
+            "För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan:";
+
         public InvoiceAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -597,7 +606,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SendPaymentReminders(int competitionId, string? reminderMessage = null)
+        public async Task<IActionResult> SendPaymentReminders(int competitionId, string? reminderMessage = null, List<int>? invoiceIds = null)
         {
             if (competitionId <= 0)
                 return Json(new { success = false, message = "competitionId is required" });
@@ -634,6 +643,14 @@ namespace HpskSite.Controllers
                 .Where(x => x.ContentType.Alias == "registrationInvoice")
                 .Where(x => x.GetValue<string>("paymentStatus") == "Pending")
                 .ToList();
+
+            // When the operator picked a subset in the modal, honour it. An empty/absent
+            // list keeps the original "send to everyone pending" behaviour (back-compat).
+            if (invoiceIds != null && invoiceIds.Count > 0)
+            {
+                var selected = new HashSet<int>(invoiceIds);
+                pendingInvoices = pendingInvoices.Where(x => selected.Contains(x.Id)).ToList();
+            }
 
             var (actorId, actorName) = await GetCurrentActorAsync();
             var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
@@ -673,7 +690,7 @@ namespace HpskSite.Controllers
                     var qrBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, totalAmount.ToString("F2"), qrMessage);
 
                     var emailMessage = string.IsNullOrWhiteSpace(reminderMessage)
-                        ? "Påminnelse: din anmälan är inte betald. Använd QR-koden nedan för att betala via Swish."
+                        ? DefaultReminderMessage
                         : reminderMessage;
 
                     await _emailService.SendSwishQRCodeEmailAsync(
@@ -685,7 +702,8 @@ namespace HpskSite.Controllers
                         "",  // shootingClasses
                         invoiceNumber,
                         swishNumber,
-                        emailMessage);
+                        qrMessage,        // Swish payment reference (matches the QR code)
+                        emailMessage);    // visible reminder note in the body
 
                     await _auditService.LogAsync(
                         invoiceId: invoice.Id,
@@ -763,7 +781,215 @@ namespace HpskSite.Controllers
                 })
                 .Count();
 
-            return Json(new { success = true, count = pending });
+            return Json(new { success = true, count = pending, defaultMessage = DefaultReminderMessage });
+        }
+
+        /// <summary>
+        /// The actual eligible recipients of a bulk reminder (individual pending invoices
+        /// with a resolvable email), so the operator can tick/untick who gets one. Each
+        /// entry carries when/how many reminders already went out so "redan påminda" can be
+        /// deselected. This list is the source of truth for the selection UI — the chosen
+        /// invoiceIds are posted straight back to SendPaymentReminders.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetReminderRecipients(int competitionId)
+        {
+            if (competitionId <= 0)
+                return Json(new { success = false, message = "competitionId is required" });
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Competition not found" });
+
+            bool authorized = await _authService.IsCurrentUserAdminAsync()
+                || await _authService.IsCompetitionManager(competitionId);
+            if (!authorized)
+            {
+                var competitionClubId = competition.GetValue<int>("clubId");
+                if (competitionClubId > 0)
+                {
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
+                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                }
+            }
+            if (!authorized) return Json(new { success = false, message = "Access denied" });
+
+            var competitionChildren = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
+            var invoicesHub = competitionChildren
+                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (invoicesHub == null)
+                return Json(new { success = true, recipients = Array.Empty<object>(), defaultMessage = DefaultReminderMessage });
+
+            var pendingInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
+                .Where(x => x.ContentType.Alias == "registrationInvoice")
+                .Where(x => x.GetValue<string>("paymentStatus") == "Pending")
+                .ToList();
+
+            // Reminder history (EmailSent events) for the whole competition, grouped per invoice.
+            var reminderByInvoice = new Dictionary<int, (DateTime last, int count)>();
+            try
+            {
+                var auditEvents = await _auditService.GetForCompetitionAsync(competitionId);
+                foreach (var ev in auditEvents.Where(e => e.EventType == InvoicePaymentEventTypes.EmailSent))
+                {
+                    if (reminderByInvoice.TryGetValue(ev.InvoiceId, out var existing))
+                        reminderByInvoice[ev.InvoiceId] = (existing.last >= ev.OccurredAt ? existing.last : ev.OccurredAt, existing.count + 1);
+                    else
+                        reminderByInvoice[ev.InvoiceId] = (ev.OccurredAt, 1);
+                }
+            }
+            catch
+            {
+                // Reminder history is purely informational here — never fail the recipient
+                // list because the audit read hiccupped; just show no "redan påmind" markers.
+            }
+
+            var list = new List<(int invoiceId, string name, string email, string club, decimal amount, DateTime? last, int count)>();
+            foreach (var invoice in pendingInvoices)
+            {
+                var memberIdString = invoice.GetValue<string>("memberId");
+                if (memberIdString != null && memberIdString.StartsWith("team-")) continue;  // teams handled separately
+                if (!int.TryParse(memberIdString, out int memberId)) continue;
+
+                var member = _memberService.GetById(memberId);
+                if (member == null || string.IsNullOrEmpty(member.Email)) continue;  // no email = can't be a recipient
+
+                string club = "";
+                var regId = invoice.GetValue<int>("registrationId");
+                if (regId > 0)
+                {
+                    var reg = _contentService.GetById(regId);
+                    var clubId = reg?.GetValue<int>("clubId") ?? 0;
+                    if (clubId > 0) club = _clubService.GetClubNameById(clubId) ?? "";
+                }
+
+                DateTime? last = null;
+                int count = 0;
+                if (reminderByInvoice.TryGetValue(invoice.Id, out var r)) { last = r.last; count = r.count; }
+
+                list.Add((invoice.Id, member.Name ?? "", member.Email, club, invoice.GetValue<decimal>("totalAmount"), last, count));
+            }
+
+            var recipients = list
+                .OrderBy(r => r.name, StringComparer.OrdinalIgnoreCase)
+                .Select(r => new
+                {
+                    invoiceId = r.invoiceId,
+                    memberName = r.name,
+                    email = r.email,
+                    club = r.club,
+                    amount = r.amount,
+                    lastReminderSentDate = r.last,
+                    reminderCount = r.count
+                })
+                .ToList();
+
+            return Json(new { success = true, recipients, defaultMessage = DefaultReminderMessage });
+        }
+
+        /// <summary>
+        /// Send a single test reminder to the *current operator's own* email address so
+        /// they can preview exactly what the shooters will receive before doing the bulk
+        /// send. Reuses the same email template + a representative QR code (real amount
+        /// from the first pending invoice when available, otherwise the competition's base
+        /// fee). Writes NO audit row and touches no invoice — it is purely a preview.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendTestReminder(int competitionId, string? reminderMessage = null)
+        {
+            if (competitionId <= 0)
+                return Json(new { success = false, message = "competitionId is required" });
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Competition not found" });
+
+            // Same four-tier rule as the bulk send.
+            bool authorized = await _authService.IsCurrentUserAdminAsync()
+                || await _authService.IsCompetitionManager(competitionId);
+            if (!authorized)
+            {
+                var competitionClubId = competition.GetValue<int>("clubId");
+                if (competitionClubId > 0)
+                {
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
+                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                }
+            }
+            if (!authorized) return Json(new { success = false, message = "Access denied" });
+
+            var swishNumber = competition.GetValue<string>("swishNumber");
+            if (string.IsNullOrEmpty(swishNumber))
+                return Json(new { success = false, message = "Tävlingen saknar Swish-nummer." });
+
+            // Where does the test go? The logged-in operator's own email.
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var operatorEmail = currentMember?.Email;
+            var operatorName = currentMember?.Name ?? "";
+            if (string.IsNullOrEmpty(operatorEmail))
+                return Json(new { success = false, message = "Din inloggning saknar e-postadress att skicka testet till." });
+
+            // Pick a representative amount + invoice number: prefer a real pending invoice
+            // so the preview looks authentic; fall back to the competition's base fee.
+            decimal amount = 0m;
+            var invoiceNumber = "TEST";
+            var competitionChildren = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
+            var invoicesHub = competitionChildren
+                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (invoicesHub != null)
+            {
+                var firstPending = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
+                    .Where(x => x.ContentType.Alias == "registrationInvoice")
+                    .Where(x => x.GetValue<string>("paymentStatus") == "Pending")
+                    .OrderBy(x => x.Id)
+                    .FirstOrDefault();
+                if (firstPending != null)
+                {
+                    amount = firstPending.GetValue<decimal>("totalAmount");
+                    invoiceNumber = firstPending.GetValue<string>("invoiceNumber") ?? "TEST";
+                }
+            }
+            if (amount <= 0m)
+            {
+                decimal.TryParse(competition.GetValue<string>("registrationFee"), out amount);
+                if (amount <= 0m) amount = 1m;  // QR needs a positive amount
+            }
+
+            var emailMessage = string.IsNullOrWhiteSpace(reminderMessage)
+                ? DefaultReminderMessage
+                : reminderMessage;
+
+            try
+            {
+                var competitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+                var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
+                var qrMessage = $"Betalning: {invoiceNumber}";
+                var qrBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amount.ToString("F2"), qrMessage);
+
+                await _emailService.SendSwishQRCodeEmailAsync(
+                    operatorEmail,
+                    operatorName,
+                    competitionName,
+                    qrBytes,
+                    amount,
+                    "",  // shootingClasses
+                    invoiceNumber,
+                    swishNumber,
+                    qrMessage,        // Swish payment reference (matches the QR code)
+                    emailMessage);    // visible reminder note in the body
+
+                return Json(new
+                {
+                    success = true,
+                    email = operatorEmail,
+                    message = $"Testpåminnelse skickad till {operatorEmail}."
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Kunde inte skicka testet: " + ex.Message });
+            }
         }
 
         /// <summary>
