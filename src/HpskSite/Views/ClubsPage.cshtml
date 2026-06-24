@@ -173,17 +173,12 @@ function displayClubs(clubs) {
     let html = '<div class="row g-3">';
 
     clubs.forEach(club => {
-        // Determine navigation URL
-        let navigationUrl = '';
-        let linkTarget = '';
-
-        if (club.webSite && club.webSite.trim() !== '') {
-            navigationUrl = club.webSite;
-            linkTarget = ' target="_blank" rel="noopener noreferrer"';
-        } else {
-            const clubSlug = club.urlSegment || club.name.toLowerCase().replace(/\s+/g, '-');
-            navigationUrl = `${currentPageUrl}/${clubSlug}`;
-        }
+        // Always navigate to the club's page on pistol.nu, regardless of any
+        // external "Webbplats" (clubUrl) the club may have entered. The external
+        // URL is informational only and shown on the club page itself.
+        const clubSlug = club.urlSegment || club.name.toLowerCase().replace(/\s+/g, '-');
+        const navigationUrl = `${currentPageUrl}/${clubSlug}`;
+        const linkTarget = '';
 
         const logoHtml = club.logoUrl
             ? `<img src="${escapeHtml(club.logoUrl)}" alt="" class="club-card-logo">`
