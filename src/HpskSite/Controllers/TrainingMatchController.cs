@@ -12,6 +12,7 @@ using HpskSite.Models.ViewModels.TrainingScoring;
 using HpskSite.Hubs;
 using HpskSite.CompetitionTypes.Precision.Services;
 using HpskSite.Services;
+using HpskSite.Services.Notifications;
 using HpskSite.Shared.Services;
 using QRCoder;
 using SixLabors.ImageSharp;
@@ -38,6 +39,7 @@ namespace HpskSite.Controllers
         private readonly PushNotificationService _pushNotificationService;
         private readonly EmailService _emailService;
         private readonly ClubService _clubService;
+        private readonly WebPushService _webPushService;
 
         public TrainingMatchController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -54,7 +56,8 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             PushNotificationService pushNotificationService,
             EmailService emailService,
-            ClubService clubService)
+            ClubService clubService,
+            WebPushService webPushService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
@@ -67,6 +70,7 @@ namespace HpskSite.Controllers
             _pushNotificationService = pushNotificationService;
             _emailService = emailService;
             _clubService = clubService;
+            _webPushService = webPushService;
         }
 
         #region Helper Methods
@@ -87,6 +91,26 @@ namespace HpskSite.Controllers
         /// Safely get MaxSeriesCount from a dynamic match object.
         /// Returns null if the property doesn't exist (e.g., migration hasn't run yet).
         /// </summary>
+        // Default number of series counted toward the total when the match doesn't specify one.
+        // Replaces the old "use the fewest series any shooter shot" behaviour, which was confusing.
+        // 12 for the 12-series disciplines (Milsnabb, Nationell helmatch), 10 otherwise.
+        private const int DefaultMaxSeriesCount = 10;
+
+        private static int DefaultSeriesCountForDiscipline(string? discipline) =>
+            (discipline == "Milsnabb" || discipline == "NationellHelmatch") ? 12 : DefaultMaxSeriesCount;
+
+        private static string? GetMatchDiscipline(dynamic match)
+        {
+            try
+            {
+                if (match is IDictionary<string, object> dict)
+                    return dict.TryGetValue("Discipline", out var v) && v != null ? v.ToString() : null;
+                var d = match.Discipline;
+                return d != null ? (string?)d.ToString() : null;
+            }
+            catch { return null; }
+        }
+
         private static int? GetMaxSeriesCount(dynamic match)
         {
             try
@@ -97,16 +121,15 @@ namespace HpskSite.Controllers
                     {
                         return Convert.ToInt32(value);
                     }
-                    return null;
+                    return DefaultSeriesCountForDiscipline(GetMatchDiscipline(match));
                 }
                 // Fallback for other dynamic types
                 var maxSeriesCount = match.MaxSeriesCount;
-                return maxSeriesCount != null ? (int?)maxSeriesCount : null;
+                return maxSeriesCount != null ? (int?)maxSeriesCount : DefaultSeriesCountForDiscipline(GetMatchDiscipline(match));
             }
             catch
             {
-                // Property doesn't exist - migration hasn't run yet
-                return null;
+                return DefaultSeriesCountForDiscipline(GetMatchDiscipline(match));
             }
         }
 
@@ -379,6 +402,22 @@ namespace HpskSite.Controllers
                                 creatorName,
                                 weaponClass,
                                 request.IsOpen);
+                        }
+                        catch
+                        {
+                            // Don't fail the request if notification fails
+                        }
+
+                        // Web push (browser) — mirrors the FCM rule; skips the creator.
+                        try
+                        {
+                            await _webPushService.SendMatchCreatedAsync(
+                                matchCode,
+                                request.MatchName ?? $"Match {startDate:yyyy-MM-dd HH:mm}",
+                                creatorName,
+                                weaponClass,
+                                request.IsOpen,
+                                member.Id);
                         }
                         catch
                         {
@@ -2428,9 +2467,7 @@ namespace HpskSite.Controllers
                             }
                             else
                             {
-                                effectiveLimit = participantData.Any()
-                                    ? participantData.Min(p => p.SeriesCount)
-                                    : 0;
+                                effectiveLimit = DefaultSeriesCountForDiscipline(GetMatchDiscipline(m));
                             }
 
                             // Calculate equalized scores

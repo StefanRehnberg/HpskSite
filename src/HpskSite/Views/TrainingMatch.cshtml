@@ -276,6 +276,12 @@
 
                 <!-- Main View (tabs + content) -->
                 <div id="mainView" style="display: none;">
+                    @await Html.PartialAsync("_TrainingMatchSettings")
+                    <div class="d-flex justify-content-end mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#trainingSettingsModal" title="Mina inställningar">
+                            <i class="bi bi-gear"></i><span class="d-none d-sm-inline ms-1">Inställningar</span>
+                        </button>
+                    </div>
                     <!-- Scope selector — narrows the live match lists to your clubs/region (populated by JS) -->
                     <div id="matchScopeWrapper" class="d-flex align-items-center gap-2 mb-3" style="display: none !important;">
                         <label for="matchScopeSelect" class="form-label mb-0 small text-body-secondary">
@@ -309,6 +315,13 @@
                                 <i class="bi bi-clock-history me-1"></i><span class="d-none d-sm-inline">Historik</span><span class="d-sm-none">Hist.</span>
                             </button>
                         </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="ranking-tab" data-bs-toggle="tab" data-bs-target="#rankingTabContent"
+                                    type="button" role="tab" aria-controls="rankingTabContent" aria-selected="false"
+                                    onclick="if(window.loadRankingIfNeeded)loadRankingIfNeeded()">
+                                <i class="bi bi-bar-chart-line me-1"></i><span class="d-none d-sm-inline">Topplista</span><span class="d-sm-none">Topp</span>
+                            </button>
+                        </li>
                     </ul>
 
                     <!-- Tab Content -->
@@ -326,6 +339,11 @@
                         <!-- History Tab -->
                         <div class="tab-pane fade" id="historyTabContent" role="tabpanel" aria-labelledby="history-tab">
                             @await Html.PartialAsync("TrainingMatchHistory")
+                        </div>
+
+                        <!-- Ranking (Topplista) Tab -->
+                        <div class="tab-pane fade" id="rankingTabContent" role="tabpanel" aria-labelledby="ranking-tab">
+                            @await Html.PartialAsync("TrainingMatchRanking")
                         </div>
                     </div>
                 </div>

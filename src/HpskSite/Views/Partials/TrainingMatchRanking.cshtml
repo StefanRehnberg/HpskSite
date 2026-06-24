@@ -1,0 +1,280 @@
+@*
+    Träningsmatch ranking (Träningsform). Members-only, full-field, no opt-out.
+    Two boards: Topplista (handicap index, lower = better) and Störst förbättring (30 d / säsong).
+    Identity is resolved server-side per viewer; this partial only renders what it receives.
+    See Documentation/TRANINGSMATCH_RANKING_SYSTEM.md.
+*@
+@using Microsoft.Extensions.Configuration
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
+@{
+    // Read the live eligibility settings so the (i) text always matches behaviour.
+    var minSessions = Config.GetValue("RankingSettings:MinRecentSessions", 3);
+    var recencyDays = Config.GetValue("RankingSettings:RecencyDays", 120);
+    var requiredMatches = Config.GetValue("HandicapSettings:RequiredMatches", 5);
+    var matchWord = minSessions == 1 ? "träningsmatch" : "träningsmatcher";
+    string periodPhrase;
+    if (recencyDays >= 350 && recencyDays <= 380) periodPhrase = "det senaste året";
+    else if (recencyDays % 30 == 0) periodPhrase = $"de senaste {recencyDays / 30} månaderna";
+    else periodPhrase = $"de senaste {recencyDays} dagarna";
+}
+<div id="rankingPanel">
+    <div class="border rounded p-2 d-flex align-items-start gap-2 small mb-3 bg-body-tertiary text-body-secondary">
+        <i class="bi bi-info-circle text-primary mt-1"></i>
+        <div>
+            Detta är din <strong>träningsform</strong> från Träningsmatcher — inte en officiell skytteranking.
+            Index bygger på ditt handikapp (lägre&nbsp;=&nbsp;vassare form). Du kommer med på listan så snart du
+            skjutit minst <strong>@minSessions @matchWord</strong> @periodPhrase. Tills du har
+            <strong>@requiredMatches avslutade matcher</strong> är ditt index
+            <span class="badge bg-warning text-dark">Provisoriskt</span> (preliminärt) och du visas sist i listan.
+            Hela Sveriges ranking räknas om automatiskt varje natt.
+            <a href="#" data-bs-toggle="modal" data-bs-target="#trainingSettingsModal">Hur visas jag?</a>
+        </div>
+    </div>
+
+    <div class="border border-success-subtle rounded p-2 d-flex align-items-center gap-2 small mb-3 bg-success-subtle text-success-emphasis">
+        <i class="bi bi-shield-lock-fill"></i>
+        <div>Den här listan visas <strong>endast för inloggade medlemmar</strong> på pistol.nu — den är aldrig publik och syns inte utåt.</div>
+    </div>
+
+    <div class="row g-2 align-items-end mb-3">
+        <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">Gren</label>
+            <select id="rankDiscipline" class="form-select form-select-sm">
+                <option value="Precision">Precision</option>
+                <option value="Milsnabb">Milsnabb</option>
+                <option value="Duell">Duell</option>
+                <option value="NationellHelmatch">Nationell helmatch</option>
+                <option value="MagnumPrecision">Magnum precision</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1">Vapengrupp</label>
+            <select id="rankWeapon" class="form-select form-select-sm">
+                <option value="C" selected>C</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="R">R</option>
+                <option value="M">M</option>
+                <option value="L">L</option>
+            </select>
+        </div>
+        <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">Omfattning</label>
+            <select id="rankScope" class="form-select form-select-sm">
+                <option value="national">Hela landet</option>
+            </select>
+        </div>
+        <div class="col-12 col-md-3">
+            <label class="form-label small mb-1">Lista</label>
+            <div class="btn-group btn-group-sm w-100" role="group" id="rankBoardToggle">
+                <input type="radio" class="btn-check" name="rankBoard" id="rankBoardIndex" value="index" checked>
+                <label class="btn btn-outline-primary" for="rankBoardIndex">Topplista</label>
+                <input type="radio" class="btn-check" name="rankBoard" id="rankBoardImp30" value="improvement30">
+                <label class="btn btn-outline-primary" for="rankBoardImp30">Förbättring 30d</label>
+                <input type="radio" class="btn-check" name="rankBoard" id="rankBoardImpSeason" value="improvementSeason">
+                <label class="btn btn-outline-primary" for="rankBoardImpSeason">Säsong</label>
+            </div>
+        </div>
+    </div>
+
+    <div id="rankYouSummary" class="mb-2"></div>
+    <div id="rankBody"><div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div> Laddar…</div></div>
+</div>
+
+<script>
+(function () {
+    if (window.__rankingInit) return;
+    window.__rankingInit = true;
+
+    var loaded = false;
+    var scopesLoaded = false;
+    var availClasses = [];
+
+    function rebuildWeaponOptions() {
+        var d = document.getElementById('rankDiscipline').value;
+        var wSel = document.getElementById('rankWeapon');
+        var groups = availClasses.filter(function (a) { return a.discipline === d; }).map(function (a) { return a.weaponGroup; });
+        var order = ['C', 'A', 'B', 'R', 'M', 'L'];
+        var ordered = order.filter(function (g) { return groups.indexOf(g) !== -1; })
+            .concat(groups.filter(function (g) { return order.indexOf(g) === -1; }));
+        var prev = wSel.value;
+        wSel.innerHTML = '';
+        ordered.forEach(function (g) { var o = document.createElement('option'); o.value = g; o.textContent = g; wSel.appendChild(o); });
+        if (ordered.indexOf(prev) !== -1) wSel.value = prev;
+    }
+
+    function applyAvailableClasses() {
+        if (!availClasses.length) return;
+        var discSel = document.getElementById('rankDiscipline');
+        var present = {};
+        availClasses.forEach(function (a) { present[a.discipline] = true; });
+        var firstPresent = null;
+        Array.prototype.forEach.call(discSel.options, function (o) {
+            var has = !!present[o.value];
+            o.hidden = !has; o.disabled = !has;
+            if (has && !firstPresent) firstPresent = o.value;
+        });
+        if (firstPresent) discSel.value = firstPresent;
+        rebuildWeaponOptions();
+    }
+
+    function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+    function movementHtml(m) {
+        if (m == null) return '<span class="text-muted">–</span>';
+        if (m > 0) return '<span class="text-success">▲ ' + m + '</span>';
+        if (m < 0) return '<span class="text-danger">▼ ' + Math.abs(m) + '</span>';
+        return '<span class="text-muted">–</span>';
+    }
+
+    function avatarHtml(e) {
+        if (e.avatarUrl) return '<img src="' + esc(e.avatarUrl) + '" class="rounded-circle me-2" style="width:28px;height:28px;object-fit:cover;" alt="">';
+        return '<span class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center me-2" style="width:28px;height:28px;font-size:.7rem;">' + esc((e.displayName || '?').substring(0,2)) + '</span>';
+    }
+
+    function fmt(n) { return (n == null) ? '' : Number(n).toFixed(2); }
+
+    function currentBoard() {
+        var el = document.querySelector('input[name="rankBoard"]:checked');
+        return el ? el.value : 'index';
+    }
+    function isImprovement() { return currentBoard() !== 'index'; }
+
+    function render(result) {
+        var body = document.getElementById('rankBody');
+        var youWrap = document.getElementById('rankYouSummary');
+        youWrap.innerHTML = '';
+
+        if (!result || !result.hasData) {
+            body.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-trophy"></i><div class="mt-2">' +
+                esc(result && result.emptyReason ? result.emptyReason : 'Ingen data än.') + '</div></div>';
+            return;
+        }
+
+        if (result.you) {
+            var y = result.you;
+            var metric = isImprovement() ? ('förbättring ' + fmt(y.improvementDelta)) : ('index ' + fmt(y.handicapIndex));
+            youWrap.innerHTML = '<div class="alert alert-primary py-2 mb-2 small">Du: <strong>#' + y.rank +
+                '</strong> av ' + result.totalShooters + ' (' + metric + ') ' + movementHtml(y.movement) + '</div>';
+        }
+
+        var imp = isImprovement();
+        var rows = result.entries.map(function (e) {
+            var metricCell = imp
+                ? '<td class="text-end fw-semibold text-success">' + (e.improvementDelta > 0 ? '−' + fmt(e.improvementDelta) : fmt(e.improvementDelta)) + '</td>'
+                : '<td class="text-end fw-semibold">' + fmt(e.handicapIndex) + (e.isProvisional ? ' <span class="badge bg-warning text-dark">Provisoriskt</span>' : '') + '</td>';
+            var medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : e.rank;
+            return '<tr class="' + (e.isYou ? 'table-primary' : '') + '">' +
+                '<td class="text-center" style="width:42px;">' + medal + '</td>' +
+                '<td>' + avatarHtml(e) + esc(e.displayName) + (e.clubName ? ' <span class="small' + (e.isYou ? '' : ' text-muted') + '">' + esc(e.clubName) + '</span>' : '') + '</td>' +
+                metricCell +
+                '<td class="text-center small d-none d-md-table-cell' + (e.isYou ? '' : ' text-muted') + '">' + e.sessionCount + '</td>' +
+                '<td class="text-center small">' + movementHtml(e.movement) + '</td>' +
+                '</tr>';
+        }).join('');
+
+        body.innerHTML = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
+            '<thead><tr><th class="text-center">#</th><th>Skytt</th>' +
+            '<th class="text-end">' + (imp ? 'Förbättring' : 'Index') + '</th>' +
+            '<th class="text-center d-none d-md-table-cell">Pass</th><th class="text-center">Rörelse</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody></table></div>';
+    }
+
+    function load() {
+        var d = document.getElementById('rankDiscipline').value;
+        var w = document.getElementById('rankWeapon').value;
+        var scopeSel = document.getElementById('rankScope');
+        var opt = scopeSel.options[scopeSel.selectedIndex];
+        var scope = opt ? (opt.getAttribute('data-scope') || 'national') : 'national';
+        var scopeKey = opt ? (opt.getAttribute('data-key') || '') : '';
+        var board = currentBoard();
+
+        document.getElementById('rankBody').innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>';
+
+        var url = '/umbraco/surface/Ranking/GetRanking?discipline=' + encodeURIComponent(d) +
+            '&weaponGroup=' + encodeURIComponent(w) + '&scope=' + encodeURIComponent(scope) +
+            '&scopeKey=' + encodeURIComponent(scopeKey) + '&board=' + encodeURIComponent(board);
+
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) { if (j.success) render(j.result); else render(null); })
+            .catch(function () { render(null); });
+    }
+
+    function loadScopes() {
+        if (scopesLoaded) return Promise.resolve();
+        return fetch('/umbraco/surface/Ranking/GetRankingScopes', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j.success) return;
+                var sel = document.getElementById('rankScope');
+                sel.innerHTML = '';
+                (j.clubs || []).forEach(function (c) {
+                    var o = document.createElement('option');
+                    o.value = 'club:' + c.value; o.textContent = c.label;
+                    o.setAttribute('data-scope', 'club'); o.setAttribute('data-key', c.value);
+                    sel.appendChild(o);
+                });
+                (j.regions || []).forEach(function (rg) {
+                    var o = document.createElement('option');
+                    o.value = 'region:' + rg.value; o.textContent = rg.label;
+                    o.setAttribute('data-scope', 'region'); o.setAttribute('data-key', rg.value);
+                    sel.appendChild(o);
+                });
+                var nat = document.createElement('option');
+                nat.value = 'national'; nat.textContent = 'Hela landet';
+                nat.setAttribute('data-scope', 'national'); nat.setAttribute('data-key', '');
+                sel.appendChild(nat);
+                // default to primary club if present
+                if (j.clubs && j.clubs.length) sel.selectedIndex = 0;
+
+                // limit the gren/vapengrupp dropdowns to classes that actually have data
+                availClasses = j.availableClasses || [];
+                applyAvailableClasses();
+                scopesLoaded = true;
+            });
+    }
+
+    window.loadRankingIfNeeded = function () {
+        if (loaded) return;
+        loaded = true;
+        loadScopes().then(load);
+    };
+
+    // Let the global settings modal refresh the board after an identity change.
+    window.__rankingReload = function () { if (loaded) load(); };
+
+    document.addEventListener('change', function (ev) {
+        if (ev.target.id === 'rankDiscipline') { rebuildWeaponOptions(); load(); }
+        else if (ev.target.id === 'rankWeapon' || ev.target.id === 'rankScope') load();
+        if (ev.target.name === 'rankBoard') load();
+    });
+
+    // Avoid two scope dropdowns: hide the page's "Visa matcher från" control on the Topplista tab,
+    // restore it (if it has options) on the match tabs.
+    document.querySelectorAll('#matchTabs button[data-bs-toggle="tab"]').forEach(function (btn) {
+        btn.addEventListener('shown.bs.tab', function (e) {
+            var wrap = document.getElementById('matchScopeWrapper');
+            var sel = document.getElementById('matchScopeSelect');
+            if (!wrap) return;
+            if (e.target.id === 'ranking-tab') wrap.style.setProperty('display', 'none', 'important');
+            else if (sel && sel.options.length > 0) wrap.style.setProperty('display', 'flex', 'important');
+        });
+    });
+
+    // Deep link: /traningsmatch/#topplista (or ?tab=topplista) opens this tab directly.
+    function openTopplistaIfRequested() {
+        var hash = (location.hash || '').toLowerCase().replace('#', '');
+        var tabParam = '';
+        try { tabParam = (new URLSearchParams(location.search).get('tab') || '').toLowerCase(); } catch (e) { }
+        if (['topplista', 'ranking'].indexOf(hash) === -1 && ['topplista', 'ranking'].indexOf(tabParam) === -1) return;
+        var btn = document.getElementById('ranking-tab');
+        if (btn && window.bootstrap && bootstrap.Tab) {
+            bootstrap.Tab.getOrCreateInstance(btn).show();
+            if (window.loadRankingIfNeeded) window.loadRankingIfNeeded();
+        }
+    }
+    // Run after the page's own tab init has settled.
+    window.addEventListener('load', function () { setTimeout(openTopplistaIfRequested, 250); });
+})();
+</script>

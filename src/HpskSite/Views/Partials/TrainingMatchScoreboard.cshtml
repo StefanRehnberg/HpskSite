@@ -161,13 +161,13 @@
                     </label>
                     <div class="input-group">
                         <input type="number" class="form-control" id="maxSeriesCountInput"
-                               min="1" max="20" placeholder="Lämna tomt för automatiskt">
+                               min="1" max="20" value="10" placeholder="10">
                         <button type="button" class="btn btn-primary" onclick="saveMatchSettings()">
                             <i class="bi bi-check-lg me-1"></i>Spara
                         </button>
                     </div>
                     <div class="form-text">
-                        Begränsa totalsumman till detta antal serier. Lämna tomt för att använda minsta antal skjutna serier.
+                        Antal serier som räknas in i totalsumman. Standard är 10 (12 för Milsnabb och Nationell helmatch).
                     </div>
                 </div>
 
@@ -534,12 +534,12 @@ function calculateParticipantRankings(match) {
         const allScores = p.scores || [];
         const actualSeriesCount = allScores.length;
 
-        // Determine effective limit (same logic as total row)
+        // Determine effective limit (same logic as total row). Default to 10 series when unset.
         let effectiveLimit;
         if (match.maxSeriesCount) {
             effectiveLimit = Math.min(match.maxSeriesCount, actualSeriesCount);
         } else {
-            effectiveLimit = Math.min(minSeriesCount, actualSeriesCount);
+            effectiveLimit = Math.min((match.discipline === 'Milsnabb' || match.discipline === 'NationellHelmatch') ? 12 : 10, actualSeriesCount);
         }
 
         const effectiveScores = allScores
@@ -1054,14 +1054,14 @@ function renderScoreboard(match) {
         const allScores = participant.scores || [];
         const actualSeriesCount = allScores.length;
 
-        // If maxSeriesCount is set, use it as limit; otherwise use minimum among all participants
+        // If maxSeriesCount is set, use it as limit; otherwise default to 10 series.
         let effectiveLimit;
         if (match.maxSeriesCount) {
             // Max is set - each participant limited to max or their actual, whichever is less
             effectiveLimit = Math.min(match.maxSeriesCount, actualSeriesCount);
         } else {
-            // No max - use current minimum behavior
-            effectiveLimit = Math.min(minSeriesCount, actualSeriesCount);
+            // No max - default to 10 series (or their actual, whichever is less)
+            effectiveLimit = Math.min((match.discipline === 'Milsnabb' || match.discipline === 'NationellHelmatch') ? 12 : 10, actualSeriesCount);
         }
 
         const effectiveScores = allScores
@@ -1310,7 +1310,7 @@ function showMatchSettingsModal() {
     const matchLinkInput = document.getElementById('settingsMatchLink');
 
     if (maxSeriesInput) {
-        maxSeriesInput.value = match.maxSeriesCount || '';
+        maxSeriesInput.value = match.maxSeriesCount || ((match.discipline === 'Milsnabb' || match.discipline === 'NationellHelmatch') ? 12 : 10);
     }
     if (matchCodeDisplay) {
         matchCodeDisplay.textContent = match.matchCode || '';

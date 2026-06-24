@@ -1,0 +1,89 @@
+@*
+    "Mina inställningar" — one home for the account-level training-match/ranking preferences,
+    reachable from any tab via the gear button in the page header. Holds:
+      • Hur jag visas på topplistan (ranking identity visibility)
+      • Notiser (web push enable + per-category preferences)
+    Per-match settings (antal serier m.m.) stay on the match cogwheel — they're match-scoped.
+*@
+<div class="modal fade" id="trainingSettingsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Mina inställningar</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+
+                <h6 class="fw-bold"><i class="bi bi-person-badge me-1"></i>Hur jag visas på topplistan</h6>
+                <p class="small text-body-secondary mb-2">Dina klubbkamrater ser alltid ditt namn. Det här styr
+                    hur du visas för skyttar i <em>andra</em> klubbar.</p>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="tmVis" id="tmVisFull" value="Full">
+                    <label class="form-check-label" for="tmVisFull"><strong>Fullt namn</strong> – avatar, namn och klubb</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="tmVis" id="tmVisHalv" value="Halv">
+                    <label class="form-check-label" for="tmVisHalv"><strong>Initialer</strong> – avatar och initialer</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="tmVis" id="tmVisAnonym" value="Anonym">
+                    <label class="form-check-label" for="tmVisAnonym"><strong>Anonym</strong> – bara initialer</label>
+                </div>
+                <div class="form-check form-switch mt-2">
+                    <input class="form-check-input" type="checkbox" id="tmShowClub" checked>
+                    <label class="form-check-label" for="tmShowClub">Visa min klubb</label>
+                </div>
+                <div class="mt-2">
+                    <button type="button" class="btn btn-sm btn-primary" id="tmSaveIdentity">Spara visning</button>
+                    <span id="tmIdentityStatus" class="small text-success ms-2"></span>
+                </div>
+
+                <hr class="my-3">
+
+                <h6 class="fw-bold"><i class="bi bi-bell me-1"></i>Notiser</h6>
+                <p class="small text-body-secondary mb-2">Få en notis i webbläsaren när det skapas nya matcher
+                    eller när din träningsform förbättras.</p>
+                @await Html.PartialAsync("_WebPushSetup")
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__tmSettingsInit) return;
+    window.__tmSettingsInit = true;
+
+    var modalEl = document.getElementById('trainingSettingsModal');
+    if (!modalEl) return;
+
+    // Seed the identity radios from the server each time the modal opens.
+    modalEl.addEventListener('shown.bs.modal', function () {
+        fetch('/umbraco/surface/Ranking/GetRankingScopes', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j.success) return;
+                var el = document.getElementById('tmVis' + (j.visibility || 'Full'));
+                if (el) el.checked = true;
+                document.getElementById('tmShowClub').checked = j.showClub !== false;
+            }).catch(function () { });
+    });
+
+    document.getElementById('tmSaveIdentity').addEventListener('click', function () {
+        var vis = (document.querySelector('input[name="tmVis"]:checked') || {}).value || 'Full';
+        var showClub = document.getElementById('tmShowClub').checked;
+        var status = document.getElementById('tmIdentityStatus');
+        status.textContent = '';
+        fetch('/umbraco/surface/Ranking/SetIdentityVisibility', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visibility: vis, showClub: showClub })
+        }).then(function (r) { return r.json(); })
+          .then(function () {
+              status.textContent = 'Sparat';
+              if (window.__rankingReload) window.__rankingReload();
+          })
+          .catch(function () { status.textContent = ''; });
+    });
+})();
+</script>

@@ -1,0 +1,155 @@
+@*
+    Reusable "Aktivera notiser" control. Registers the service worker, requests permission,
+    subscribes via PushManager with the server's VAPID public key, and POSTs the subscription.
+    Self-contained; safe to include on multiple pages (guards against double-init).
+    Renders nothing if the browser doesn't support web push.
+*@
+<div id="webPushSetup" class="d-none">
+    <button type="button" id="webPushToggle" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-bell me-1"></i><span id="webPushToggleText">Aktivera notiser</span>
+    </button>
+    <span id="webPushStatus" class="small text-body-secondary ms-2"></span>
+
+    <div id="webPushPrefs" class="d-none mt-2 small">
+        <div class="mb-1 d-flex align-items-center gap-2">
+            <label for="wpMatchPref" class="mb-0">Nya matcher:</label>
+            <select id="wpMatchPref" class="form-select form-select-sm w-auto">
+                <option value="All">Alla matcher</option>
+                <option value="OpenMatchesOnly">Bara öppna matcher</option>
+                <option value="Off">Av</option>
+            </select>
+        </div>
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="wpRanking" checked>
+            <label class="form-check-label" for="wpRanking">Notis när min träningsform förbättras</label>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__webPushInit) return;
+    window.__webPushInit = true;
+
+    var supported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+    var wrap = document.getElementById('webPushSetup');
+    if (!supported || !wrap) return;
+    wrap.classList.remove('d-none');
+
+    var btn = document.getElementById('webPushToggle');
+    var txt = document.getElementById('webPushToggleText');
+    var status = document.getElementById('webPushStatus');
+
+    function urlB64ToUint8Array(base64String) {
+        var padding = '='.repeat((4 - base64String.length % 4) % 4);
+        var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        var raw = window.atob(base64);
+        var out = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+    }
+
+    function setState(subscribed) {
+        txt.textContent = subscribed ? 'Notiser på' : 'Aktivera notiser';
+        btn.classList.toggle('btn-outline-primary', !subscribed);
+        btn.classList.toggle('btn-success', subscribed);
+        btn.querySelector('i').className = subscribed ? 'bi bi-bell-fill me-1' : 'bi bi-bell me-1';
+        if (!subscribed) document.getElementById('webPushPrefs').classList.add('d-none');
+    }
+
+    function getReg() { return navigator.serviceWorker.register('/sw-push.js'); }
+
+    function loadPrefs() {
+        getReg().then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) {
+            if (!sub) { document.getElementById('webPushPrefs').classList.add('d-none'); return; }
+            fetch('/umbraco/surface/WebPush/GetPreferences', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint: sub.endpoint })
+            }).then(function (r) { return r.json(); }).then(function (j) {
+                if (!j.success) return;
+                document.getElementById('wpMatchPref').value = j.matchPref || 'OpenMatchesOnly';
+                document.getElementById('wpRanking').checked = j.rankingEnabled !== false;
+                document.getElementById('webPushPrefs').classList.remove('d-none');
+            }).catch(function () { });
+        });
+    }
+
+    function savePrefs() {
+        getReg().then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) {
+            if (!sub) return;
+            fetch('/umbraco/surface/WebPush/SavePreferences', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    endpoint: sub.endpoint,
+                    matchPref: document.getElementById('wpMatchPref').value,
+                    rankingEnabled: document.getElementById('wpRanking').checked
+                })
+            }).catch(function () { });
+        });
+    }
+
+    function refresh() {
+        getReg().then(function (reg) {
+            return reg.pushManager.getSubscription();
+        }).then(function (sub) { setState(!!sub); if (sub) loadPrefs(); }).catch(function () { });
+    }
+
+    function subscribe() {
+        status.textContent = '';
+        if (Notification.permission === 'denied') {
+            status.textContent = 'Notiser är blockerade i webbläsaren.';
+            return;
+        }
+        fetch('/umbraco/surface/WebPush/GetPublicKey', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j.success || !j.configured || !j.publicKey) { status.textContent = 'Notiser är inte aktiverade på servern än.'; throw 'no-key'; }
+                return Notification.requestPermission().then(function (perm) {
+                    if (perm !== 'granted') { status.textContent = 'Du måste tillåta notiser.'; throw 'denied'; }
+                    return getReg().then(function (reg) {
+                        return reg.pushManager.subscribe({
+                            userVisibleOnly: true,
+                            applicationServerKey: urlB64ToUint8Array(j.publicKey)
+                        });
+                    });
+                });
+            })
+            .then(function (sub) {
+                return fetch('/umbraco/surface/WebPush/Subscribe', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sub)
+                });
+            })
+            .then(function () { setState(true); status.textContent = 'Klart! Du får nu notiser.'; loadPrefs(); })
+            .catch(function (e) { if (e !== 'no-key' && e !== 'denied') status.textContent = 'Kunde inte aktivera notiser.'; });
+    }
+
+    function unsubscribe() {
+        getReg().then(function (reg) { return reg.pushManager.getSubscription(); })
+            .then(function (sub) {
+                if (!sub) { setState(false); return; }
+                var endpoint = sub.endpoint;
+                return sub.unsubscribe().then(function () {
+                    return fetch('/umbraco/surface/WebPush/Unsubscribe', {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ endpoint: endpoint })
+                    });
+                }).then(function () { setState(false); status.textContent = 'Notiser avstängda.'; });
+            }).catch(function () { });
+    }
+
+    btn.addEventListener('click', function () {
+        getReg().then(function (reg) { return reg.pushManager.getSubscription(); })
+            .then(function (sub) { if (sub) unsubscribe(); else subscribe(); });
+    });
+
+    document.getElementById('wpMatchPref').addEventListener('change', savePrefs);
+    document.getElementById('wpRanking').addEventListener('change', savePrefs);
+
+    refresh();
+})();
+</script>
