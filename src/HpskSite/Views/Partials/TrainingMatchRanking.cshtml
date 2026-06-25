@@ -153,16 +153,27 @@
 
         if (result.you) {
             var y = result.you;
-            var metric = isImprovement() ? ('förbättring ' + fmt(y.improvementDelta)) : ('index ' + fmt(y.handicapIndex));
+            var metric;
+            if (isImprovement()) {
+                var yd = y.improvementDelta;
+                metric = yd > 0 ? ('▼ ' + fmt(yd)) : (yd < 0 ? ('▲ ' + fmt(-yd)) : 'oförändrad');
+            } else { metric = 'index ' + fmt(y.handicapIndex); }
             youWrap.innerHTML = '<div class="alert alert-primary py-2 mb-2 small">Du: <strong>#' + y.rank +
                 '</strong> av ' + result.totalShooters + ' (' + metric + ') ' + movementHtml(y.movement) + '</div>';
         }
 
         var imp = isImprovement();
         var rows = result.entries.map(function (e) {
-            var metricCell = imp
-                ? '<td class="text-end fw-semibold text-success">' + (e.improvementDelta > 0 ? '−' + fmt(e.improvementDelta) : fmt(e.improvementDelta)) + '</td>'
-                : '<td class="text-end fw-semibold">' + fmt(e.handicapIndex) + (e.isProvisional ? ' <span class="badge bg-warning text-dark">Provisoriskt</span>' : '') + '</td>';
+            var metricCell;
+            if (imp) {
+                var dd = e.improvementDelta;
+                var inner = dd > 0 ? '<span class="text-success">▼ ' + fmt(dd) + '</span>'
+                          : dd < 0 ? '<span class="text-danger">▲ ' + fmt(-dd) + '</span>'
+                          : '<span class="text-muted">0.00</span>';
+                metricCell = '<td class="text-end fw-semibold">' + inner + '</td>';
+            } else {
+                metricCell = '<td class="text-end fw-semibold">' + fmt(e.handicapIndex) + (e.isProvisional ? ' <span class="badge bg-warning text-dark">Provisoriskt</span>' : '') + '</td>';
+            }
             var medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : e.rank;
             return '<tr class="' + (e.isYou ? 'table-primary' : '') + '">' +
                 '<td class="text-center" style="width:42px;">' + medal + '</td>' +
@@ -173,9 +184,15 @@
                 '</tr>';
         }).join('');
 
-        body.innerHTML = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
+        var impCaption = imp
+            ? '<div class="small text-body-secondary mb-2">Sorterat efter störst förbättring sedan ' +
+              (currentBoard() === 'improvementSeason' ? 'säsongens start' : '30 dagar tillbaka') +
+              '. <span class="text-success">▼ lägre index = bättre</span>, <span class="text-danger">▲ = sämre</span>. ' +
+              'Skyttar utan startvärde för perioden saknas.</div>'
+            : '';
+        body.innerHTML = impCaption + '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
             '<thead><tr><th class="text-center">#</th><th>Skytt</th>' +
-            '<th class="text-end">' + (imp ? 'Förbättring' : 'Index') + '</th>' +
+            '<th class="text-end">' + (imp ? 'Förändring' : 'Index') + '</th>' +
             '<th class="text-center d-none d-md-table-cell">Pass</th><th class="text-center">Rörelse</th></tr></thead>' +
             '<tbody>' + rows + '</tbody></table></div>';
     }

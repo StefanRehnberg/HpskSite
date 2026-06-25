@@ -45,6 +45,13 @@ namespace HpskSite.Services
         /// <param name="discipline">Discipline (e.g., "Precision", "Milsnabb")</param>
         /// <returns>List of statistics for each weapon class</returns>
         Task<List<ShooterStatistics>> GetAllStatisticsAsync(int memberId, string discipline = "Precision");
+
+        /// <summary>
+        /// Read-only: compute what a shooter's rolling-window statistics WERE as of a past date,
+        /// using only matches on or before that date. Does not persist. Used to backfill historical
+        /// ranking snapshots so the improvement boards have a real baseline.
+        /// </summary>
+        Task<ShooterStatistics?> ComputeAsOfAsync(int memberId, string weaponClass, DateTime asOf, string discipline = "Precision");
     }
 
     /// <summary>
@@ -342,6 +349,103 @@ namespace HpskSite.Services
                     _logger.LogError(ex, "Error recalculating statistics for member {MemberId}, weapon {WeaponClass}",
                         memberId, weaponClass);
                     throw;
+                }
+            });
+        }
+
+        /// <summary>
+        /// Read-only rolling-window stats as of a past date (matches on/before asOf only). No persistence.
+        /// Mirrors RecalculateFromHistoryAsync's source CTE with an added MatchDate &lt;= @4 bound.
+        /// </summary>
+        public async Task<ShooterStatistics?> ComputeAsOfAsync(int memberId, string weaponClass, DateTime asOf, string discipline = "Precision")
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    using var db = _databaseFactory.CreateDatabase();
+                    var effectiveDiscipline = string.IsNullOrEmpty(discipline) ? DISCIPLINE : discipline;
+                    int windowSize = _settings.RollingWindowMatchCount;
+                    var resultTable = effectiveDiscipline switch
+                    {
+                        "Milsnabb" => "MilsnabbResultEntry",
+                        "Duell" => "DuellResultEntry",
+                        "NationellHelmatch" => "NationellHelmatchResultEntry",
+                        "MagnumPrecision" => "MagnumPrecisionResultEntry",
+                        _ => "PrecisionResultEntry"
+                    };
+
+                    var result = db.SingleOrDefault<dynamic>(
+                        $@";WITH AllMatches AS (
+                            SELECT 'TrainingMatch' AS Source, ts.TrainingMatchId AS MatchId, tm.CompletedDate AS MatchDate,
+                                CASE WHEN ts.SeriesScores IS NOT NULL AND ISJSON(ts.SeriesScores) = 1
+                                     THEN (SELECT COUNT(*) FROM OPENJSON(ts.SeriesScores)) ELSE 0 END AS SeriesCount,
+                                ts.TotalScore AS TotalPoints
+                            FROM TrainingScores ts
+                            INNER JOIN TrainingMatches tm ON ts.TrainingMatchId = tm.Id
+                            WHERE ts.MemberId = @0 AND tm.WeaponClass = @1 AND tm.Status = 'Completed'
+                              AND ts.TrainingMatchId IS NOT NULL AND (ts.Discipline = @3 OR ts.Discipline IS NULL)
+                            UNION ALL
+                            SELECT 'SelfEntered' AS Source, ts.Id AS MatchId, ts.TrainingDate AS MatchDate,
+                                CASE WHEN ts.SeriesScores IS NOT NULL AND ISJSON(ts.SeriesScores) = 1
+                                     THEN CASE WHEN JSON_VALUE(ts.SeriesScores, '$[0].seriesCount') IS NOT NULL
+                                               THEN CAST(JSON_VALUE(ts.SeriesScores, '$[0].seriesCount') AS INT)
+                                               ELSE (SELECT COUNT(*) FROM OPENJSON(ts.SeriesScores)) END
+                                     ELSE 0 END AS SeriesCount,
+                                ts.TotalScore AS TotalPoints
+                            FROM TrainingScores ts
+                            WHERE ts.MemberId = @0 AND ts.WeaponClass = @1 AND ts.TrainingMatchId IS NULL
+                              AND ts.SeriesScores IS NOT NULL AND ISJSON(ts.SeriesScores) = 1
+                              AND (ts.Discipline = @3 OR ts.Discipline IS NULL)
+                        ),
+                        CompetitionSeriesScores AS (
+                            SELECT pre.CompetitionId, pre.EnteredAt, ShotScores.SeriesTotal
+                            FROM {resultTable} pre
+                            CROSS APPLY (
+                                SELECT SUM(CASE WHEN UPPER(value) = 'X' THEN 10
+                                                WHEN TRY_CAST(value AS INT) IS NOT NULL THEN CAST(value AS INT)
+                                                ELSE 0 END) AS SeriesTotal
+                                FROM OPENJSON(pre.Shots)) AS ShotScores
+                            WHERE pre.MemberId = @0 AND LEFT(pre.ShootingClass, 1) = @1
+                              AND pre.Shots IS NOT NULL AND ISJSON(pre.Shots) = 1
+                        ),
+                        CompetitionMatches AS (
+                            SELECT 'Competition' AS Source, CompetitionId AS MatchId, MIN(EnteredAt) AS MatchDate,
+                                   COUNT(*) AS SeriesCount, SUM(SeriesTotal) AS TotalPoints
+                            FROM CompetitionSeriesScores GROUP BY CompetitionId
+                        ),
+                        AllMatchesCombined AS (
+                            SELECT * FROM AllMatches UNION ALL SELECT * FROM CompetitionMatches
+                        ),
+                        RecentMatches AS (
+                            SELECT TOP (@2) * FROM AllMatchesCombined WHERE MatchDate <= @4 ORDER BY MatchDate DESC
+                        )
+                        SELECT COUNT(*) AS MatchCount, COALESCE(SUM(SeriesCount), 0) AS SeriesCount,
+                               COALESCE(SUM(TotalPoints), 0) AS TotalPoints
+                        FROM RecentMatches",
+                        memberId, weaponClass, windowSize, effectiveDiscipline, asOf);
+
+                    int totalMatches = result?.MatchCount ?? 0;
+                    int totalSeries = result?.SeriesCount ?? 0;
+                    decimal totalPoints = result?.TotalPoints ?? 0m;
+                    if (totalMatches == 0) return (ShooterStatistics?)null;
+
+                    return new ShooterStatistics
+                    {
+                        MemberId = memberId,
+                        Discipline = effectiveDiscipline,
+                        WeaponClass = weaponClass,
+                        CompletedMatches = totalMatches,
+                        TotalSeriesCount = totalSeries,
+                        TotalSeriesPoints = totalPoints,
+                        AveragePerSeries = totalSeries > 0 ? Math.Round(totalPoints / totalSeries, 2) : 0m,
+                        LastCalculated = asOf
+                    };
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "ComputeAsOf failed for member {MemberId}, weapon {WeaponClass}", memberId, weaponClass);
+                    return (ShooterStatistics?)null;
                 }
             });
         }

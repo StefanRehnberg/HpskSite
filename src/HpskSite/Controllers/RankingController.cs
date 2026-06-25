@@ -76,6 +76,26 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Admin-only: reconstruct baseline snapshots from historical match data (season start, ~30d, ~7d),
+        /// then rebuild today's so the improvement boards + movement get real baselines immediately.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> BackfillSnapshots()
+        {
+            var ctx = await GetViewerAsync();
+            if (ctx == null || !ctx.IsAdmin) return Json(new { success = false, message = "Endast administratörer." });
+            try
+            {
+                var result = await _snapshotService.BackfillAsync();
+                return Json(new { success = true, result });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetRanking(string discipline = "Precision", string weaponGroup = "C",
             string scope = "club", string? scopeKey = null, string board = "index")
@@ -157,6 +177,11 @@ namespace HpskSite.Controllers
             var member = _memberService.GetById(ctx.MemberId);
             if (member == null) return Json(new { success = false, message = "Medlem hittades inte." });
 
+            // Guard: SetValue silently no-ops if the property alias doesn't exist on the member type,
+            // which looks exactly like "saving doesn't update". Fail loudly instead.
+            if (!member.HasProperty("identityVisibility") || !member.HasProperty("showClubOnBoard"))
+                return Json(new { success = false, message = "Egenskaperna 'identityVisibility' och 'showClubOnBoard' saknas på medlemstypen i backoffice." });
+
             member.SetValue("identityVisibility", visibility);
             member.SetValue("showClubOnBoard", showClub);
             _memberService.Save(member);
@@ -172,6 +197,71 @@ namespace HpskSite.Controllers
             catch { /* snapshot may not exist yet — nightly run will pick up the member values */ }
 
             return Json(new { success = true, visibility, showClub });
+        }
+
+        /// <summary>Admin-only diagnostic: distribution of today's improvement deltas + samples.</summary>
+        [HttpGet]
+        public async Task<IActionResult> RankingDiag()
+        {
+            var ctx = await GetViewerAsync();
+            if (ctx == null || !ctx.IsAdmin) return Json(new { success = false, message = "Endast administratörer." });
+
+            using var db = _databaseFactory.CreateDatabase();
+            var today = DateTime.Today;
+            var seasonStart = new DateTime(today.Year, 1, 1);
+
+            var dist = db.SingleOrDefault<DiagDist>(
+                @"SELECT COUNT(*) AS Total,
+                    SUM(CASE WHEN ImprovementDeltaSeason IS NULL THEN 1 ELSE 0 END) AS SeasonNull,
+                    SUM(CASE WHEN ImprovementDeltaSeason > 0 THEN 1 ELSE 0 END) AS SeasonPos,
+                    SUM(CASE WHEN ImprovementDeltaSeason = 0 THEN 1 ELSE 0 END) AS SeasonZero,
+                    SUM(CASE WHEN ImprovementDeltaSeason < 0 THEN 1 ELSE 0 END) AS SeasonNeg,
+                    SUM(CASE WHEN ImprovementDelta30 > 0 THEN 1 ELSE 0 END) AS Delta30Pos
+                  FROM RankingSnapshot WHERE SnapshotDate = @0", today);
+
+            var baselineKeys = db.ExecuteScalar<int>(
+                @"SELECT COUNT(*) FROM (
+                    SELECT MemberId, Discipline, WeaponGroup FROM RankingSnapshot
+                    WHERE SnapshotDate >= @0 AND SnapshotDate < @1
+                    GROUP BY MemberId, Discipline, WeaponGroup) t", seasonStart, today);
+
+            var dates = db.Fetch<DateTime>(
+                "SELECT DISTINCT SnapshotDate FROM RankingSnapshot WHERE SnapshotDate < @0 AND SnapshotDate >= @1 ORDER BY SnapshotDate", today, seasonStart);
+
+            var samples = db.Fetch<DiagSample>(
+                @"SELECT TOP 8 MemberId, Discipline, WeaponGroup, HandicapIndex, ImprovementDelta30, ImprovementDeltaSeason
+                  FROM RankingSnapshot WHERE SnapshotDate = @0
+                  ORDER BY CASE WHEN ImprovementDeltaSeason IS NULL THEN 1 ELSE 0 END, ImprovementDeltaSeason DESC", today);
+
+            return Json(new
+            {
+                success = true,
+                today = today.ToString("yyyy-MM-dd"),
+                distribution = dist,
+                seasonBaselineKeys = baselineKeys,
+                snapshotDatesBeforeToday = dates.Select(d => d.ToString("yyyy-MM-dd")),
+                topSeasonSamples = samples
+            });
+        }
+
+        public class DiagDist
+        {
+            public int Total { get; set; }
+            public int SeasonNull { get; set; }
+            public int SeasonPos { get; set; }
+            public int SeasonZero { get; set; }
+            public int SeasonNeg { get; set; }
+            public int Delta30Pos { get; set; }
+        }
+
+        public class DiagSample
+        {
+            public int MemberId { get; set; }
+            public string Discipline { get; set; } = "";
+            public string WeaponGroup { get; set; } = "";
+            public decimal HandicapIndex { get; set; }
+            public decimal? ImprovementDelta30 { get; set; }
+            public decimal? ImprovementDeltaSeason { get; set; }
         }
 
         // ---- helpers ----

@@ -25,6 +25,7 @@ namespace HpskSite.Services.Ranking
         private readonly IContentService _contentService;
         private readonly ClubService _clubService;
         private readonly IHandicapCalculator _handicapCalculator;
+        private readonly IShooterStatisticsService _statsService;
         private readonly IConfiguration _config;
         private readonly WebPushService _webPush;
         private readonly ILogger<RankingSnapshotService> _logger;
@@ -44,6 +45,7 @@ namespace HpskSite.Services.Ranking
             IContentService contentService,
             ClubService clubService,
             IHandicapCalculator handicapCalculator,
+            IShooterStatisticsService statsService,
             IConfiguration config,
             WebPushService webPush,
             ILogger<RankingSnapshotService> logger)
@@ -53,6 +55,7 @@ namespace HpskSite.Services.Ranking
             _contentService = contentService;
             _clubService = clubService;
             _handicapCalculator = handicapCalculator;
+            _statsService = statsService;
             _config = config;
             _webPush = webPush;
             _logger = logger;
@@ -217,11 +220,12 @@ namespace HpskSite.Services.Ranking
 
             var baseline30Date = await db.ExecuteScalarAsync<DateTime?>(
                 "SELECT MAX(SnapshotDate) FROM RankingSnapshot WHERE SnapshotDate <= @0", cut30);
-            var baselineSeasonDate = await db.ExecuteScalarAsync<DateTime?>(
-                "SELECT MIN(SnapshotDate) FROM RankingSnapshot WHERE SnapshotDate >= @0 AND SnapshotDate < @1", seasonStart, today);
 
             var baseline30 = await LoadBaselineAsync(db, baseline30Date);
-            var baselineSeason = await LoadBaselineAsync(db, baselineSeasonDate);
+            // Season baseline is PER-MEMBER: each shooter's earliest snapshot this year, so shooters who
+            // started at different points in the season each get a real baseline (not just those active on
+            // a single global earliest date).
+            var baselineSeason = await LoadSeasonBaselineAsync(db, seasonStart, today);
 
             // Prior snapshot (most recent before today) — used to detect improvement for the push.
             var priorDate = await db.ExecuteScalarAsync<DateTime?>(
@@ -310,6 +314,165 @@ namespace HpskSite.Services.Ranking
             return inserts.Count;
         }
 
+        /// <summary>
+        /// Builds a snapshot AS OF a past date using reconstructed indices — used only as a baseline for
+        /// the improvement boards / movement. No notifications, no deltas. Skips (returns -1) if a snapshot
+        /// for that date already exists, so it never overwrites a live snapshot. Returns rows inserted.
+        /// </summary>
+        public async Task<int> BuildHistoricalSnapshotAsync(DateTime asOf, CancellationToken ct = default)
+        {
+            asOf = asOf.Date;
+            var recencyDays = _config.GetValue("RankingSettings:RecencyDays", RecencyDays);
+            var minSessions = _config.GetValue("RankingSettings:MinRecentSessions", MinRecentSessions);
+            var recencyStart = asOf.AddDays(-recencyDays);
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            var existing = await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM RankingSnapshot WHERE SnapshotDate = @0", asOf);
+            if (existing > 0) { scope.Complete(); return -1; }
+
+            var sessionRows = await db.FetchAsync<SessionCountRow>(
+                @"SELECT ts.MemberId, tm.WeaponClass AS WeaponClass, COALESCE(tm.Discipline, 'Precision') AS Discipline,
+                         COUNT(DISTINCT tm.Id) AS Sessions
+                  FROM TrainingScores ts INNER JOIN TrainingMatches tm ON ts.TrainingMatchId = tm.Id
+                  WHERE tm.Status = 'Completed' AND tm.CompletedDate <= @0 AND tm.CompletedDate >= @1 AND ts.TrainingMatchId IS NOT NULL
+                  GROUP BY ts.MemberId, tm.WeaponClass, COALESCE(tm.Discipline, 'Precision')",
+                asOf, recencyStart);
+
+            var candidates = sessionRows.Where(r => r.Sessions >= minSessions).ToList();
+            if (candidates.Count == 0) { scope.Complete(); return 0; }
+
+            var members = new Dictionary<int, Umbraco.Cms.Core.Models.IMember>();
+            foreach (var id in candidates.Select(c => c.MemberId).Distinct())
+            {
+                var m = _memberService.GetById(id);
+                if (m == null) continue;
+                if (m.HasProperty("rankingExcluded") && m.GetValue<bool>("rankingExcluded")) continue;
+                members[id] = m;
+            }
+
+            var regionByClub = new Dictionary<int, string>();
+            string? RegionForClub(int clubId)
+            {
+                if (regionByClub.TryGetValue(clubId, out var cached)) return string.IsNullOrEmpty(cached) ? null : cached;
+                var node = _contentService.GetById(clubId);
+                var rc = node?.ContentType.Alias == "club" ? (node.GetValue<string>("regionalFederation") ?? "") : "";
+                regionByClub[clubId] = rc;
+                return string.IsNullOrEmpty(rc) ? null : rc;
+            }
+
+            var acc = new Dictionary<(int, string, string), AccRow>();
+            foreach (var cand in candidates)
+            {
+                if (ct.IsCancellationRequested) break;
+                if (!members.TryGetValue(cand.MemberId, out var member)) continue;
+                var prop = ShooterClassProperty(cand.Discipline);
+                var competenceClass = member.HasProperty(prop) ? member.GetValue<string>(prop) : null;
+                if (string.IsNullOrEmpty(competenceClass)) continue;
+
+                var stats = await _statsService.ComputeAsOfAsync(cand.MemberId, cand.WeaponClass ?? "", asOf, cand.Discipline);
+                if (stats == null) continue;
+
+                HandicapProfile profile;
+                try { profile = _handicapCalculator.CalculateHandicap(stats, competenceClass); }
+                catch { continue; }
+
+                var group = NormalizeWeaponGroup(cand.WeaponClass);
+                if (string.IsNullOrEmpty(group)) continue;
+                var key = (cand.MemberId, cand.Discipline, group);
+                if (!acc.TryGetValue(key, out var row))
+                {
+                    row = new AccRow { Index = profile.HandicapPerSeries, IsProvisional = profile.IsProvisional, Sessions = 0 };
+                    acc[key] = row;
+                }
+                if (profile.HandicapPerSeries < row.Index) { row.Index = profile.HandicapPerSeries; row.IsProvisional = profile.IsProvisional; }
+                row.Sessions += cand.Sessions;
+            }
+
+            if (acc.Count == 0) { scope.Complete(); return 0; }
+
+            var inserts = new List<object>(acc.Count);
+            foreach (var kvp in acc)
+            {
+                var (memberId, discipline, group) = kvp.Key;
+                var row = kvp.Value;
+                if (!members.TryGetValue(memberId, out var member)) continue;
+                var (clubIds, regionCodes, primaryClubId) = ResolveMembership(member, RegionForClub);
+                var (fullName, initials) = ResolveNames(member);
+                var clubName = primaryClubId > 0 ? _clubService.GetClubNameById(primaryClubId) : null;
+                var avatar = member.HasProperty("profilePictureUrl") ? member.GetValue<string>("profilePictureUrl") : null;
+                var visibility = NormalizeVisibility(member.HasProperty("identityVisibility") ? member.GetValue<string>("identityVisibility") : null);
+                var showClub = ReadShowClubOnBoard(member);
+
+                inserts.Add(new
+                {
+                    SnapshotDate = asOf,
+                    MemberId = memberId,
+                    Discipline = discipline,
+                    WeaponGroup = group,
+                    HandicapIndex = row.Index,
+                    IsProvisional = row.IsProvisional,
+                    SessionCount = row.Sessions,
+                    ClubIds = clubIds,
+                    RegionCodes = regionCodes,
+                    ImprovementDelta30 = (decimal?)null,
+                    ImprovementDeltaSeason = (decimal?)null,
+                    FullName = fullName,
+                    Initials = initials,
+                    ClubName = clubName,
+                    AvatarUrl = avatar,
+                    IdentityVisibility = visibility,
+                    ShowClub = showClub,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            foreach (var ins in inserts) db.Insert("RankingSnapshot", "Id", true, ins);
+            scope.Complete();
+            _logger.LogInformation("RankingSnapshot historical build for {Date:yyyy-MM-dd}: {Count} rows.", asOf, inserts.Count);
+            return inserts.Count;
+        }
+
+        /// <summary>
+        /// One-off backfill: reconstruct baseline snapshots (season start, ~30 days ago, ~7 days ago) from
+        /// historical match data, then rebuild today's snapshot so the improvement boards + movement get real
+        /// baselines immediately instead of waiting for the season to accrue.
+        /// </summary>
+        public async Task<object> BackfillAsync(CancellationToken ct = default)
+        {
+            var today = DateTime.Today;
+            var seasonStart = new DateTime(today.Year, 1, 1);
+
+            DateTime? earliest;
+            using (var scope = _scopeProvider.CreateScope())
+            {
+                earliest = await scope.Database.ExecuteScalarAsync<DateTime?>(
+                    "SELECT MIN(tm.CompletedDate) FROM TrainingMatches tm WHERE tm.Status='Completed' AND tm.CompletedDate >= @0", seasonStart);
+                scope.Complete();
+            }
+            var seasonBaseline = (earliest.HasValue && earliest.Value.Date > seasonStart) ? earliest.Value.Date : seasonStart;
+
+            // Monthly points across the season + the ~30-day and ~7-day baselines, so per-member season
+            // baselines reach back to roughly when each shooter started.
+            var dates = new List<DateTime>();
+            for (var d = seasonBaseline; d <= today.AddDays(-7); d = d.AddDays(30)) dates.Add(d.Date);
+            dates.Add(today.AddDays(-30).Date);
+            dates.Add(today.AddDays(-7).Date);
+            dates = dates.Where(d => d < today && d >= seasonBaseline).Distinct().OrderBy(d => d).ToList();
+
+            var report = new List<object>();
+            foreach (var d in dates)
+            {
+                if (ct.IsCancellationRequested) break;
+                var n = await BuildHistoricalSnapshotAsync(d, ct);
+                report.Add(new { date = d.ToString("yyyy-MM-dd"), rows = n < 0 ? 0 : n, skipped = n < 0 });
+            }
+
+            var todayRows = await BuildSnapshotAsync(ct, sendNotifications: false);
+            return new { seasonBaseline = seasonBaseline.ToString("yyyy-MM-dd"), backfilled = report, todayRows };
+        }
+
         private static string DisciplineLabel(string discipline) => discipline switch
         {
             "Milsnabb" => "Milsnabb",
@@ -318,6 +481,26 @@ namespace HpskSite.Services.Ranking
             "MagnumPrecision" => "Magnum precision",
             _ => "Precision"
         };
+
+        /// <summary>Per-member season baseline: each (member, discipline, group)'s index at their EARLIEST
+        /// snapshot on/after Jan 1 (and before today). Handles shooters who joined the season at different times.</summary>
+        private static async Task<Dictionary<(int, string, string), decimal>> LoadSeasonBaselineAsync(NPoco.IDatabase db, DateTime seasonStart, DateTime today)
+        {
+            var map = new Dictionary<(int, string, string), decimal>();
+            var rows = await db.FetchAsync<RankingSnapshotRow>(
+                @"SELECT r.MemberId, r.Discipline, r.WeaponGroup, r.HandicapIndex
+                  FROM RankingSnapshot r
+                  INNER JOIN (
+                      SELECT MemberId, Discipline, WeaponGroup, MIN(SnapshotDate) AS FirstDate
+                      FROM RankingSnapshot
+                      WHERE SnapshotDate >= @0 AND SnapshotDate < @1
+                      GROUP BY MemberId, Discipline, WeaponGroup
+                  ) f ON r.MemberId = f.MemberId AND r.Discipline = f.Discipline
+                       AND r.WeaponGroup = f.WeaponGroup AND r.SnapshotDate = f.FirstDate",
+                seasonStart, today);
+            foreach (var r in rows) map[(r.MemberId, r.Discipline, r.WeaponGroup)] = r.HandicapIndex;
+            return map;
+        }
 
         private static async Task<Dictionary<(int, string, string), decimal>> LoadBaselineAsync(NPoco.IDatabase db, DateTime? date)
         {

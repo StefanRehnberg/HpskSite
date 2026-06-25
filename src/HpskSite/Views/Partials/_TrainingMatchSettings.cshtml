@@ -15,8 +15,9 @@
             <div class="modal-body">
 
                 <h6 class="fw-bold"><i class="bi bi-person-badge me-1"></i>Hur jag visas på topplistan</h6>
-                <p class="small text-body-secondary mb-2">Dina klubbkamrater ser alltid ditt namn. Det här styr
-                    hur du visas för skyttar i <em>andra</em> klubbar.</p>
+                <p class="small text-body-secondary mb-2">Inställningen ändrar bara hur skyttar i <em>andra klubbar</em>
+                    ser dig. <strong>Du ser alltid ditt eget namn</strong> på listan (även om du väljer Anonym), och dina
+                    klubbkamrater ser alltid ditt namn.</p>
                 <div class="form-check">
                     <input class="form-check-input" type="radio" name="tmVis" id="tmVisFull" value="Full">
                     <label class="form-check-label" for="tmVisFull"><strong>Fullt namn</strong> – avatar, namn och klubb</label>
@@ -58,11 +59,19 @@
     if (!modalEl) return;
 
     // Seed the identity radios from the server each time the modal opens.
+    // Don't let the async seed overwrite a selection the user already changed.
+    var userTouched = false;
+    modalEl.addEventListener('hidden.bs.modal', function () { userTouched = false; });
+    ['tmVisFull', 'tmVisHalv', 'tmVisAnonym', 'tmShowClub'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', function () { userTouched = true; });
+    });
+
     modalEl.addEventListener('shown.bs.modal', function () {
         fetch('/umbraco/surface/Ranking/GetRankingScopes', { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
             .then(function (j) {
-                if (!j.success) return;
+                if (!j.success || userTouched) return;
                 var el = document.getElementById('tmVis' + (j.visibility || 'Full'));
                 if (el) el.checked = true;
                 document.getElementById('tmShowClub').checked = j.showClub !== false;
@@ -73,17 +82,24 @@
         var vis = (document.querySelector('input[name="tmVis"]:checked') || {}).value || 'Full';
         var showClub = document.getElementById('tmShowClub').checked;
         var status = document.getElementById('tmIdentityStatus');
-        status.textContent = '';
+        var btn = this;
+        status.className = 'small ms-2'; status.textContent = ''; btn.disabled = true;
         fetch('/umbraco/surface/Ranking/SetIdentityVisibility', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ visibility: vis, showClub: showClub })
         }).then(function (r) { return r.json(); })
-          .then(function () {
-              status.textContent = 'Sparat';
-              if (window.__rankingReload) window.__rankingReload();
+          .then(function (j) {
+              btn.disabled = false;
+              if (j && j.success) {
+                  if (window.__rankingReload) window.__rankingReload();
+                  bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+              } else {
+                  status.className = 'small ms-2 text-danger';
+                  status.textContent = (j && j.message) ? j.message : 'Kunde inte spara';
+              }
           })
-          .catch(function () { status.textContent = ''; });
+          .catch(function () { btn.disabled = false; status.className = 'small ms-2 text-danger'; status.textContent = 'Kunde inte spara'; });
     });
 })();
 </script>

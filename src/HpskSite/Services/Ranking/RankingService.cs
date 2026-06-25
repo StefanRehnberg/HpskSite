@@ -64,8 +64,8 @@ namespace HpskSite.Services.Ranking
             if (ranked.Count < minField)
             {
                 scopeDb.Complete();
-                if (board != RankingBoard.Index && inScope.Count >= minField)
-                    result.EmptyReason = "Förbättringslistan visas så snart vi har några dagars historik att jämföra mot (uppdateras varje natt).";
+                if (board != RankingBoard.Index)
+                    result.EmptyReason = "Inga resultat för perioden i den här klassen/omfattningen än — prova en annan gren, vapengrupp eller Hela landet.";
                 else
                     result.EmptyReason = "För få deltagare i den här klassen än.";
                 return result;
@@ -220,14 +220,15 @@ namespace HpskSite.Services.Ranking
             switch (board)
             {
                 case RankingBoard.Improvement30:
+                    // Ranked purely by change — improvers (green) always above decliners (red).
+                    // Provisional is NOT a sort key here (it would wrongly put a non-provisional decliner
+                    // above a provisional improver); the "Provisoriskt" badge still flags them.
                     return rows.Where(r => r.ImprovementDelta30 != null)
-                               .OrderBy(r => r.IsProvisional)
-                               .ThenByDescending(r => r.ImprovementDelta30!.Value)
+                               .OrderByDescending(r => r.ImprovementDelta30!.Value)
                                .ThenBy(r => r.HandicapIndex);
                 case RankingBoard.ImprovementSeason:
                     return rows.Where(r => r.ImprovementDeltaSeason != null)
-                               .OrderBy(r => r.IsProvisional)
-                               .ThenByDescending(r => r.ImprovementDeltaSeason!.Value)
+                               .OrderByDescending(r => r.ImprovementDeltaSeason!.Value)
                                .ThenBy(r => r.HandicapIndex);
                 default: // Index — established shooters first (lower index = better), then provisional
                     return rows.OrderBy(r => r.IsProvisional)
