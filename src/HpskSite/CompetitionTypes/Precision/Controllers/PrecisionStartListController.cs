@@ -1768,7 +1768,48 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             request.MemberId, competitionId);
                     }
 
-                    return Json(new { success = true, message = message, registrationUpdated = registrationUpdated });
+                    // Migrate any already-entered result rows to the new class. Result rows are keyed by
+                    // (CompetitionId, MemberId, ShootingClass, SeriesNumber); without this step the scores
+                    // stay tagged with the OLD class and become invisible in result entry (which filters by
+                    // the shooter's current class) while still lingering under the old class in the result
+                    // list. This mirrors CompetitionResultsController.ChangeShooterClass.
+                    int resultRowsUpdated = 0;
+                    bool resultMigrationFailed = false;
+                    try
+                    {
+                        var competitionTypeId = competition?.GetValue<string>("competitionType") ?? "Precision";
+                        var resultTable = GetResultTableName(competitionTypeId);
+                        using var db = _databaseFactory.CreateDatabase();
+                        resultRowsUpdated = await db.ExecuteAsync(
+                            $"UPDATE [{resultTable}] SET ShootingClass = @0, LastModified = @1 WHERE CompetitionId = @2 AND MemberId = @3 AND ShootingClass = @4",
+                            request.NewWeaponClass, DateTime.Now, competitionId, request.MemberId, oldWeaponClass);
+
+                        if (resultRowsUpdated > 0)
+                        {
+                            _logger.LogInformation("Migrated {Rows} result rows '{OldClass}' -> '{NewClass}' for member {MemberId} in competition {CompetitionId}",
+                                resultRowsUpdated, oldWeaponClass, request.NewWeaponClass, request.MemberId, competitionId);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Most likely a unique-constraint collision because the member already has result
+                        // rows under the new class (a genuine multi-class shooter). Don't fail the class
+                        // change itself — surface a note so the admin can reconcile the scores manually.
+                        resultMigrationFailed = true;
+                        _logger.LogWarning(ex, "Failed to migrate result rows for class change member {MemberId} in competition {CompetitionId}",
+                            request.MemberId, competitionId);
+                    }
+
+                    if (resultRowsUpdated > 0)
+                    {
+                        message += $" {resultRowsUpdated} resultatrad(er) flyttades till {request.NewWeaponClass}.";
+                    }
+                    else if (resultMigrationFailed)
+                    {
+                        message += " OBS: Befintliga resultat kunde inte flyttas automatiskt – kontrollera resultatinmatningen.";
+                    }
+
+                    return Json(new { success = true, message = message, registrationUpdated = registrationUpdated, resultRowsUpdated = resultRowsUpdated });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
             }
@@ -1778,6 +1819,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 return Json(new { success = false, message = "Ett oväntat fel uppstod." });
             }
         }
+
+        /// <summary>
+        /// Get the result table name for a competition type. Canonical copy lives in
+        /// CompetitionResultsController.GetResultTableName — keep the two in sync.
+        /// </summary>
+        private static string GetResultTableName(string typeId) => typeId switch
+        {
+            "Milsnabb" => "MilsnabbResultEntry",
+            "Duell" => "DuellResultEntry",
+            "NationellHelmatch" => "NationellHelmatchResultEntry",
+            "MagnumPrecision" => "MagnumPrecisionResultEntry",
+            "Springskytte" => "SpringskytteResultEntry",
+            _ => "PrecisionResultEntry"
+        };
 
         /// <summary>
         /// Update the weapon class in the member's competition registration
