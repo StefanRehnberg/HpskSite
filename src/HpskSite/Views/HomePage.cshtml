@@ -38,8 +38,8 @@
     var minSidaUrl = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
     var traningsmatchUrl = Model.Children.FirstOrDefault(x => x.Name?.ToLower().Contains("träningsmatch") == true || x.UrlSegment?.Contains("traningsmatch") == true)?.Url() ?? "/traningsmatch/";
     var competitionsUrl = competitionsHub?.Url() ?? "/competitions/";
-    var loginUrl = "/login-&-register/?tab=login";
-    var registerUrl = "/login-&-register/?tab=register";
+    var loginUrl = "/login-register/?tab=login";
+    var registerUrl = "/login-register/?tab=register";
 
     // ---------- auth + member summary ----------
     var cm = await MemberManager.GetCurrentMemberAsync();
@@ -184,7 +184,7 @@ else
                     @if (hub?.HasForm == true)
                     {
                         <div class="home-hc-big">@hub.TopAveragePerSeries.ToString("0.0", sv)</div>
-                        <div class="text-muted small">snitt per serie · @hub.TopMatches matcher</div>
+                        <div class="text-muted small">snitt per serie · senaste 30 dagarna</div>
                         <a href="@(minSidaUrl)#dashboard" class="small d-inline-block mt-2 text-decoration-none">Se din utveckling →</a>
                     }
                     else
@@ -208,13 +208,33 @@ else
                 <i class="bi bi-calendar-check home-hc-ic text-success"></i>
             </div></div>
         </div>
-        <!-- topplista → ranking tab (no ranking computed on load) -->
+        <!-- topplista → ranking tab (placement read from the precomputed snapshot) -->
         <div class="col-md-4">
             <div class="card h-100"><div class="card-body home-hc">
                 <div class="home-hc-text d-flex flex-column h-100">
-                    <div class="home-hc-lab">Topplistan</div>
-                    <p class="text-muted small mt-2 mb-3">Se var du ligger – på din klubbs och kretsens träningsform.</p>
-                    <a href="@(traningsmatchUrl)?tab=topplista" class="small d-inline-block mt-auto text-decoration-none">Se din placering →</a>
+                    <div class="home-hc-lab">Topplistan@(hub?.HasRanking == true ? " · " + hub.Ranking!.WeaponGroup : "")</div>
+                    @if (hub?.HasRanking == true)
+                    {
+                        var rk = hub.Ranking!;
+                        <div class="home-hc-big">
+                            #@rk.PrimaryRank
+                            @if (rk.ShowClub && rk.ClubMovement is int m && m != 0)
+                            {
+                                <span class="@(m > 0 ? "text-success" : "text-danger")" style="font-size:1rem;"><i class="bi @(m > 0 ? "bi-arrow-up" : "bi-arrow-down")"></i>@Math.Abs(m)</span>
+                            }
+                        </div>
+                        <div class="text-muted small">av @rk.PrimaryTotal @(rk.ShowClub ? "i " + (rk.ClubName ?? "klubben") : "i landet")@(rk.IsProvisional ? " · provisorisk" : "")</div>
+                        @if (rk.ShowClub && rk.NationalRank != null)
+                        {
+                            <div class="text-muted small">#@rk.NationalRank av @rk.NationalTotal i landet</div>
+                        }
+                        <a href="@(traningsmatchUrl)?tab=topplista" class="small d-inline-block mt-auto text-decoration-none">Se hela topplistan →</a>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mt-2 mb-3">Se var du ligger – på din klubbs och kretsens träningsform.</p>
+                        <a href="@(traningsmatchUrl)?tab=topplista" class="small d-inline-block mt-auto text-decoration-none">Se din placering →</a>
+                    }
                 </div>
                 <i class="bi bi-trophy home-hc-ic text-warning"></i>
             </div></div>
