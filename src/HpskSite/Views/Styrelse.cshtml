@@ -203,6 +203,8 @@
                 <option value="ExtraArsmote">Extra årsmöte</option>
                 <option value="Custom">Eget möte</option>
             </select>
+            <label class="sv-label" for="svNewDate">Datum och tid</label>
+            <input type="text" id="svNewDate" class="form-control mb-3" style="max-width:420px;" placeholder="Välj datum och tid">
             <div class="d-flex gap-2 flex-wrap">
                 <button class="btn btn-success btn-xl" onclick="createMeeting()"><i class="bi bi-plus-lg me-2"></i>Skapa möte</button>
                 ${CAN_MANAGE ? `<button class="btn btn-outline-secondary btn-xl" onclick="openMallar()"><i class="bi bi-sliders me-2"></i>Anpassa mötesmallar</button>` : ''}
@@ -242,6 +244,15 @@
         </div>`;
 
         c.innerHTML = html;
+        // Pre-fill the new-meeting date with a sensible default (today 18:30) but let the user pick before creating.
+        if ($('svNewDate')) {
+            const def = new Date().toISOString().slice(0, 10) + ' 18:30';
+            if (typeof flatpickr !== 'undefined') {
+                flatpickr('#svNewDate', { locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i', defaultDate: def });
+            } else {
+                $('svNewDate').value = def;
+            }
+        }
         renderMeetingList();
     }
 
@@ -265,9 +276,10 @@
 
     window.createMeeting = function () {
         const type = $('svNewType').value;
-        const now = new Date();
-        const def = now.toISOString().slice(0, 10) + ' 18:30';
-        post('BoardMeeting', 'CreateMeeting', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingType: type, title: '', meetingDate: def, location: '' })
+        // Read the date the user picked in the create card; fall back to today 18:30 if left blank.
+        const def = new Date().toISOString().slice(0, 10) + ' 18:30';
+        const date = ($('svNewDate') && $('svNewDate').value.trim()) ? $('svNewDate').value.trim() : def;
+        post('BoardMeeting', 'CreateMeeting', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingType: type, title: '', meetingDate: date, location: '' })
             .then(r => { if (r.success) openMeeting(r.data.id, true); else alert(r.message || 'Kunde inte skapa mötet'); });
     };
 
@@ -409,6 +421,7 @@
             if ($('actDue')) flatpickr('#actDue', { locale: 'sv', dateFormat: 'Y-m-d' });
         }
         window._mId = m.id;
+        window._mType = m.meetingType || '';
         window._mAgenda = d.agenda || [];
         window._mYear = parseInt((m.meetingDate || '').slice(0, 4), 10) || new Date().getFullYear();
     }
@@ -560,7 +573,7 @@
 
     window.saveMeeting = function () {
         post('BoardMeeting', 'UpdateMeeting', {
-            meetingId: window._mId, meetingType: '', title: $('mTitle').value,
+            meetingId: window._mId, meetingType: window._mType || '', title: $('mTitle').value,
             meetingDate: $('mDate').value, location: $('mLoc').value, notes: ''
         }).then(r => { if (r.success) flash($('mSaved')); });
     };

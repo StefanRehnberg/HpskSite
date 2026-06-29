@@ -113,7 +113,8 @@ namespace HpskSite.Services
             var db = scope.Database;
             var m = db.SingleOrDefaultById<BoardMeeting>(id);
             if (m == null) return false;
-            m.MeetingType = meetingType;
+            // Never let a blank meetingType wipe the stored type (the date/title autosave omits it).
+            if (!string.IsNullOrWhiteSpace(meetingType)) m.MeetingType = meetingType;
             m.Title = title;
             m.MeetingDate = meetingDate;
             m.Location = location;
