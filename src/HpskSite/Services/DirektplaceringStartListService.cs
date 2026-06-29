@@ -68,6 +68,13 @@ namespace HpskSite.Services
             foreach (var team in dpConfig.Teams)
                 shootersByTeam[team.TeamNumber] = new List<ShooterRow>();
 
+            // Process registrations in the order they were created so that the position a
+            // shooter picked at registration is preserved (first-come, first-served within a
+            // team). Sorting by name here would re-shuffle everyone whenever a new shooter
+            // with an alphabetically-earlier name registers — the Egenbokning bug.
+            registrationDocs = registrationDocs.OrderBy(c => c.CreateDate).ThenBy(c => c.Id).ToList();
+            var sortSeq = 0;
+
             foreach (var reg in registrationDocs)
             {
                 var classesJson = reg.GetValue<string>("shootingClasses");
@@ -89,7 +96,8 @@ namespace HpskSite.Services
                         Name = memberName,
                         Club = clubName,
                         WeaponClass = entry.Class,
-                        MemberId = memberId
+                        MemberId = memberId,
+                        SortOrder = sortSeq++
                     });
                 }
             }
@@ -105,7 +113,7 @@ namespace HpskSite.Services
                     EndTime = team.EndTime,
                     ShooterCount = shooters.Count,
                     WeaponClasses = shooters.Select(sh => sh.WeaponClass).Distinct().OrderBy(c => c).ToList(),
-                    Shooters = shooters.OrderBy(sh => sh.WeaponClass).ThenBy(sh => sh.Name).Select(sh =>
+                    Shooters = shooters.OrderBy(sh => sh.SortOrder).Select(sh =>
                     {
                         pos++;
                         return new { Position = pos, sh.Name, sh.Club, sh.WeaponClass, sh.MemberId };
@@ -214,6 +222,7 @@ namespace HpskSite.Services
             public string Club { get; set; } = "";
             public string WeaponClass { get; set; } = "";
             public int MemberId { get; set; }
+            public int SortOrder { get; set; }
         }
 
         private static bool IsDocumentUrlTimeout(Exception ex)

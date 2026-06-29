@@ -5,6 +5,7 @@
       • Notiser (web push enable + per-category preferences)
     Per-match settings (antal serier m.m.) stay on the match cogwheel — they're match-scoped.
 *@
+@Html.AntiForgeryToken()
 <div class="modal fade" id="trainingSettingsModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
@@ -58,6 +59,11 @@
     var modalEl = document.getElementById('trainingSettingsModal');
     if (!modalEl) return;
 
+    function antiforgery() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
     // Seed the identity radios from the server each time the modal opens.
     // Don't let the async seed overwrite a selection the user already changed.
     var userTouched = false;
@@ -86,7 +92,7 @@
         status.className = 'small ms-2'; status.textContent = ''; btn.disabled = true;
         fetch('/umbraco/surface/Ranking/SetIdentityVisibility', {
             method: 'POST', credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': antiforgery() },
             body: JSON.stringify({ visibility: vis, showClub: showClub })
         }).then(function (r) { return r.json(); })
           .then(function (j) {

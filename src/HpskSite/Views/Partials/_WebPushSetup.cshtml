@@ -31,6 +31,11 @@
     if (window.__webPushInit) return;
     window.__webPushInit = true;
 
+    function afToken() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
     var supported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
     var wrap = document.getElementById('webPushSetup');
     if (!supported || !wrap) return;
@@ -64,7 +69,7 @@
             if (!sub) { document.getElementById('webPushPrefs').classList.add('d-none'); return; }
             fetch('/umbraco/surface/WebPush/GetPreferences', {
                 method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': afToken() },
                 body: JSON.stringify({ endpoint: sub.endpoint })
             }).then(function (r) { return r.json(); }).then(function (j) {
                 if (!j.success) return;
@@ -80,7 +85,7 @@
             if (!sub) return;
             fetch('/umbraco/surface/WebPush/SavePreferences', {
                 method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': afToken() },
                 body: JSON.stringify({
                     endpoint: sub.endpoint,
                     matchPref: document.getElementById('wpMatchPref').value,
@@ -119,7 +124,7 @@
             .then(function (sub) {
                 return fetch('/umbraco/surface/WebPush/Subscribe', {
                     method: 'POST', credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': afToken() },
                     body: JSON.stringify(sub)
                 });
             })
@@ -135,7 +140,7 @@
                 return sub.unsubscribe().then(function () {
                     return fetch('/umbraco/surface/WebPush/Unsubscribe', {
                         method: 'POST', credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': afToken() },
                         body: JSON.stringify({ endpoint: endpoint })
                     });
                 }).then(function () { setState(false); status.textContent = 'Notiser avstängda.'; });

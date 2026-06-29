@@ -1353,6 +1353,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (isClubAdmin) return true;
             }
 
+            // Region-hosted (clubless) competition: regional admin of its region can manage it.
+            var region = competition?.GetValue<string>("regionalFederation") ?? "";
+            if (!string.IsNullOrEmpty(region) && await _adminAuthorizationService.IsRegionalAdminForRegion(region)) return true;
+
             return false;
         }
 

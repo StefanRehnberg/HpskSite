@@ -2852,6 +2852,12 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
+                // Authorization — same three-tier check as the other start-list endpoints.
+                // (Previously this endpoint had NO authorization beyond "is logged in".)
+                var authMember = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (authMember == null || !await _validator.CanManageCompetition(authMember.Id, competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet att generera startlistor för denna tävling." });
+
                 var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
                 if (dpConfig == null)
                     return Json(new { success = false, message = "Direktplacering är inte aktiverat för denna tävling." });
@@ -2937,6 +2943,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             foreach (var team in dpConfig.Teams)
                 shootersByTeam[team.TeamNumber] = new List<StartListShooter>();
 
+            // Preserve the order shooters registered (first-come within a team) instead of
+            // sorting by name, which would re-shuffle existing positions on every regeneration.
+            registrationDocs = registrationDocs.OrderBy(c => c.CreateDate).ThenBy(c => c.Id).ToList();
+            var sortSeq = 0;
+
             foreach (var reg in registrationDocs)
             {
                 var classesJson = reg.GetValue<string>("shootingClasses");
@@ -2973,7 +2984,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                     shootersByTeam[teamNum].Add(new StartListShooter
                     {
-                        Position = 0, // Will be assigned below
+                        Position = sortSeq++, // registration order; re-numbered to 1..n below
                         Name = memberName,
                         Club = clubName,
                         WeaponClass = entry.Class,
@@ -2986,8 +2997,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             var teams = dpConfig.Teams.Select(team =>
             {
                 var shooters = shootersByTeam.TryGetValue(team.TeamNumber, out var s) ? s : new List<StartListShooter>();
+                shooters = shooters.OrderBy(sh => sh.Position).ToList();
                 var position = 1;
-                foreach (var shooter in shooters.OrderBy(sh => sh.WeaponClass).ThenBy(sh => sh.Name))
+                foreach (var shooter in shooters)
                     shooter.Position = position++;
 
                 return new StartListTeam

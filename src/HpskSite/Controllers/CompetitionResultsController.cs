@@ -3074,6 +3074,9 @@ namespace HpskSite.Controllers
             var competition = _contentService.GetById(competitionId);
             var clubId = competition?.GetValue<int>("clubId") ?? 0;
             if (clubId > 0 && await _adminAuthorizationService.IsClubAdminForClub(clubId)) return true;
+            // Region-hosted (clubless) competition: regional admin of its region can manage it.
+            var region = competition?.GetValue<string>("regionalFederation") ?? "";
+            if (!string.IsNullOrEmpty(region) && await _adminAuthorizationService.IsRegionalAdminForRegion(region)) return true;
             return false;
         }
 

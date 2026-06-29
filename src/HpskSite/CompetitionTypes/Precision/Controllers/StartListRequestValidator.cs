@@ -60,22 +60,29 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                // Site administrators can manage everything
-                var member = _memberService.GetById(memberId);
-                if (member == null) return false;
+                // Mirror the canonical three-tier competition check used everywhere else
+                // (e.g. CompetitionResultsController.CanManageCompetitionResults): site admin,
+                // competition manager, OR club admin for the competition's club. The club-admin
+                // check folds in regional admins (AdminAuthorizationService.IsClubAdminForClub
+                // also matches RegionalAdmin_{region} for the club's region). Previously this
+                // only accepted site admins + the competitionManagers list, so a club/regional
+                // admin who hosts the competition could not create or publish its start list.
+                if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
+                if (await _authorizationService.IsCompetitionManager(competitionId)) return true;
 
-                var memberGroups = _memberService.GetAllRoles(member.Username)?.ToArray() ?? new string[0];
-                if (memberGroups.Contains("Administrators"))
-                    return true;
-
-                // Competition managers can manage their competitions
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null) return false;
 
-                var json = competition.GetValue<string>("competitionManagers") ?? "[]";
-                var managerIds = JsonConvert.DeserializeObject<int[]>(json) ?? Array.Empty<int>();
+                var clubId = competition.GetValue<int>("clubId");
+                if (clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId)) return true;
 
-                return managerIds.Contains(memberId);
+                // Region-hosted (clubless) competition: the regional admin of the competition's
+                // region manages it. (Club-hosted comps already pass above — IsClubAdminForClub
+                // matches the regional admin of the club's region too.)
+                var region = competition.GetValue<string>("regionalFederation") ?? "";
+                if (!string.IsNullOrEmpty(region) && await _authorizationService.IsRegionalAdminForRegion(region)) return true;
+
+                return false;
             }
             catch (Exception ex)
             {
