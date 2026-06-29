@@ -688,6 +688,12 @@
                 // Check for active matches immediately
                 checkActiveMatches();
             }
+
+            // Deep-link to the Topplista tab (e.g. from the home hub: /traningsmatch?tab=topplista)
+            if (urlParams.get('tab') === 'topplista') {
+                const rankBtn = document.getElementById('ranking-tab');
+                if (rankBtn) rankBtn.click();
+            }
         });
 
         // Check if user has any active matches

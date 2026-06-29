@@ -1,6 +1,6 @@
 @*
     Träningsmatch ranking (Träningsform). Members-only, full-field, no opt-out.
-    Two boards: Topplista (handicap index, lower = better) and Störst förbättring (30 d / säsong).
+    Two boards: Topplista (handicap, lower = better) and Störst förbättring (30 d / säsong).
     Identity is resolved server-side per viewer; this partial only renders what it receives.
     See Documentation/TRANINGSMATCH_RANKING_SYSTEM.md.
 *@
@@ -22,9 +22,9 @@
         <i class="bi bi-info-circle text-primary mt-1"></i>
         <div>
             Detta är din <strong>träningsform</strong> från Träningsmatcher — inte en officiell skytteranking.
-            Index bygger på ditt handikapp (lägre&nbsp;=&nbsp;vassare form). Du kommer med på listan så snart du
+            Listan bygger på ditt handicap (lägre&nbsp;=&nbsp;vassare form). Du kommer med på listan så snart du
             skjutit minst <strong>@minSessions @matchWord</strong> @periodPhrase. Tills du har
-            <strong>@requiredMatches avslutade matcher</strong> är ditt index
+            <strong>@requiredMatches avslutade matcher</strong> är din handicap
             <span class="badge bg-warning text-dark">Provisoriskt</span> (preliminärt) och du visas sist i listan.
             Hela Sveriges ranking räknas om automatiskt varje natt.
             <a href="#" data-bs-toggle="modal" data-bs-target="#trainingSettingsModal">Hur visas jag?</a>
@@ -157,7 +157,7 @@
             if (isImprovement()) {
                 var yd = y.improvementDelta;
                 metric = yd > 0 ? ('▼ ' + fmt(yd)) : (yd < 0 ? ('▲ ' + fmt(-yd)) : 'oförändrad');
-            } else { metric = 'index ' + fmt(y.handicapIndex); }
+            } else { metric = 'handicap ' + fmt(y.handicapIndex); }
             youWrap.innerHTML = '<div class="alert alert-primary py-2 mb-2 small">Du: <strong>#' + y.rank +
                 '</strong> av ' + result.totalShooters + ' (' + metric + ') ' + movementHtml(y.movement) + '</div>';
         }
@@ -187,12 +187,12 @@
         var impCaption = imp
             ? '<div class="small text-body-secondary mb-2">Sorterat efter störst förbättring sedan ' +
               (currentBoard() === 'improvementSeason' ? 'säsongens start' : '30 dagar tillbaka') +
-              '. <span class="text-success">▼ lägre index = bättre</span>, <span class="text-danger">▲ = sämre</span>. ' +
+              '. <span class="text-success">▼ lägre handicap = bättre</span>, <span class="text-danger">▲ = sämre</span>. ' +
               'Skyttar utan startvärde för perioden saknas.</div>'
             : '';
         body.innerHTML = impCaption + '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
             '<thead><tr><th class="text-center">#</th><th>Skytt</th>' +
-            '<th class="text-end">' + (imp ? 'Förändring' : 'Index') + '</th>' +
+            '<th class="text-end">' + (imp ? 'Förändring' : 'Handicap') + '</th>' +
             '<th class="text-center d-none d-md-table-cell">Pass</th><th class="text-center">Rörelse</th></tr></thead>' +
             '<tbody>' + rows + '</tbody></table></div>';
     }

@@ -1,0 +1,312 @@
+@using System.Globalization
+@using System.Text.Json
+@using HpskSite.Models
+@inject HpskSite.Services.WhatsHappeningService WhatsHappening
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@model HpskSite.Models.WhatsHappeningScope
+@{
+    var sv = new CultureInfo("sv-SE");
+    var today = DateTime.Today;
+    var data = WhatsHappening.GetData();
+    var isLoggedIn = MemberManager.IsLoggedIn();
+
+    var lockedCode = Model?.LockedRegionCode;
+    var lockedName = Model?.LockedRegionName;
+    var isLocked = !string.IsNullOrWhiteSpace(lockedCode);
+    var scopeWord = isLocked ? $"i {lockedName}" : "i hela Sverige";
+
+    IEnumerable<FeedItem> items = data.Items;
+    if (isLocked)
+        items = items.Where(i => string.Equals(i.RegionCode, lockedCode, StringComparison.OrdinalIgnoreCase));
+    var itemList = items.ToList();
+
+    var ongoing = itemList.Where(i => i.IsOngoing).OrderBy(i => i.Start).ToList();
+    var upcoming = itemList.Where(i => !i.IsOngoing).OrderBy(i => i.Start).ToList();
+
+    // tab key, horizon-in-days (0 = the live "Pågår nu" tab), label
+    var tabs = new[] { ("now", 0, "Pågår nu"), ("d7", 7, "7 dagar"), ("d14", 14, "14 dagar"), ("d30", 30, "30 dagar") };
+    const string defaultTab = "d7";
+
+    var ongoingTotal = isLocked ? data.OngoingMatchCountByRegion.GetValueOrDefault(lockedCode!) : data.OngoingMatchTotal;
+    var countsJson = JsonSerializer.Serialize(data.OngoingMatchCountByRegion);
+    var regionsJson = JsonSerializer.Serialize(data.Regions.ToDictionary(r => r.Code, r => new { name = r.Name, url = r.Url }));
+
+    string RowLabel(FeedItem i, bool full) => full ? i.Title : (string.IsNullOrEmpty(i.RegionName) ? i.MaskedTypeLabel : $"{i.MaskedTypeLabel} i {i.RegionName}");
+    string BadgeClass(FeedSource s) => s switch { FeedSource.Competition => "text-bg-primary", FeedSource.ClubEvent => "text-bg-success", _ => "text-bg-warning" };
+    string EdgeClass(FeedSource s) => s switch { FeedSource.Competition => "wh-tav", FeedSource.ClubEvent => "wh-klubb", _ => "wh-tm" };
+}
+
+<div class="card mb-4 wh-feed" id="whFeed" data-anon="@(isLoggedIn ? "0" : "1")" data-locked="@(lockedCode ?? "")"
+     data-default="@defaultTab" data-default-region="@(Model?.DefaultRegionCode ?? "")" data-counts='@countsJson' data-regions='@regionsJson'>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0"><i class="bi bi-calendar-week me-2 text-primary"></i>Det här händer <span class="text-primary" id="whScope">@scopeWord</span></h5>
+        @if (!isLocked)
+        {
+            <div class="d-flex align-items-center gap-2">
+                <label for="whRegion" class="visually-hidden">Filtrera på krets</label>
+                <select id="whRegion" class="form-select form-select-sm w-auto">
+                    <option value="hela">Hela Sverige</option>
+                    @foreach (var r in data.Regions)
+                    {
+                        <option value="@r.Code">@r.Name</option>
+                    }
+                </select>
+                <a id="whKretsLink" class="small text-decoration-none text-nowrap" href="#" style="display:none;">Gå till kretsen →</a>
+            </div>
+        }
+    </div>
+
+    <div class="card-body">
+        @if (!isLoggedIn)
+        {
+            <p class="text-muted small mb-3"><i class="bi bi-info-circle me-1"></i>Tävlingar och klubbhändelser i hela landet. Logga in för att också se träningsmatcher.</p>
+        }
+
+        <ul class="nav nav-underline mb-3" role="tablist">
+            @foreach (var (key, days, label) in tabs)
+            {
+                <li class="nav-item">
+                    <button type="button" class="nav-link @(key == defaultTab ? "active" : "")" data-tab="@key" data-days="@days">
+                        @if (key == "now")
+                        {
+                            <span class="wh-live"></span>
+                        }
+                        @label<span class="badge rounded-pill text-bg-secondary ms-1" data-ct="@key">0</span>
+                    </button>
+                </li>
+            }
+        </ul>
+
+        @* "Pågår nu" panel — ongoing träningsmatcher *@
+        <div class="wh-panel" data-panel="now">
+            <div class="wh-grid" data-grid="now">
+                @if (!isLoggedIn)
+                {
+                    <div class="alert alert-warning d-flex align-items-center gap-2 mb-2 py-2 wh-span" id="whStrip">
+                        <span class="badge rounded-pill text-bg-warning" id="whStripNum">@ongoingTotal</span>
+                        <span class="small flex-grow-1"><strong><span id="whStripCount">@ongoingTotal</span> träningsmatcher pågår just nu.</strong> <a href="/login-register">Logga in</a> för att se vilka klubbar.</span>
+                    </div>
+                }
+                else
+                {
+                    foreach (var item in ongoing)
+                    {
+                        <div class="wh-ev @EdgeClass(item.Source)" data-region="@item.RegionCode">
+                            <div class="wh-when"><div class="d text-success">Nu</div><div class="m">Pågår</div></div>
+                            <div class="flex-grow-1 wh-min0">
+                                <span class="badge @BadgeClass(item.Source)">@item.SourceLabel · @item.TypeLabel</span>
+                                <div class="fw-semibold text-truncate">@item.Title</div>
+                                <div class="text-muted small">
+                                    @if (!string.IsNullOrEmpty(item.ClubName)) { <span class="text-body-secondary fw-medium">@item.ClubName</span> }
+                                    @if (item.ParticipantCount > 0) { <text> · @item.ParticipantCount deltagare</text> }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+            <div class="text-center text-muted small py-3 wh-span" data-empty="now" style="display:none;"></div>
+        </div>
+
+        @* Upcoming panel — shared by 7/14/30 dagar; JS shows rows where daysAhead ≤ selected horizon *@
+        <div class="wh-panel" data-panel="upcoming">
+            <div class="wh-grid" data-grid="upcoming">
+                @foreach (var item in upcoming)
+                {
+                    if (!isLoggedIn && item.Source == FeedSource.TrainingMatch) { continue; }
+                    var full = isLoggedIn || !item.Masked;
+                    var daysAhead = (item.Start.Date - today).Days;
+                    var label = RowLabel(item, full);
+                    <div class="wh-ev @EdgeClass(item.Source)" data-region="@item.RegionCode" data-days="@daysAhead" data-date="@item.Start.ToString("yyyy-MM-dd")" data-label="@label">
+                        <div class="wh-when">
+                            <div class="d">@item.Start.Day</div>
+                            <div class="m">@item.Start.ToString("MMM", sv)</div>
+                            @if (item.ShowTime) { <div class="t">@item.Start.ToString("HH:mm")</div> }
+                        </div>
+                        <div class="flex-grow-1 wh-min0">
+                            <span class="badge @BadgeClass(item.Source)">@item.SourceLabel · @(full ? item.TypeLabel : item.MaskedTypeLabel)</span>
+                            <div class="fw-semibold text-truncate">@label</div>
+                            @if (full)
+                            {
+                                <div class="text-muted small">
+                                    @if (!string.IsNullOrEmpty(item.ClubName)) { <span class="text-body-secondary fw-medium">@item.ClubName</span> }
+                                    @if (!string.IsNullOrEmpty(item.Venue)) { <text> · @item.Venue</text> }
+                                    @if (item.Source == FeedSource.TrainingMatch && item.ParticipantCount > 0) { <text> · @item.ParticipantCount deltagare</text> }
+                                </div>
+                            }
+                            else if (item.Source == FeedSource.Competition)
+                            {
+                                <div class="text-muted small">Klubbintern tävling</div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="text-center text-muted small py-3 wh-span" data-empty="upcoming" style="display:none;"></div>
+        </div>
+
+        @if (!isLoggedIn)
+        {
+            <p class="text-muted small mb-0 mt-2"><i class="bi bi-eye me-1"></i>Endast läsvy — klicka dig vidare till tävlings- eller klubbsidan för anmälan och detaljer.</p>
+        }
+        else if (!isLocked)
+        {
+            <p class="text-muted small mb-0 mt-2">Filtrera på krets ovan — ditt val sparas till nästa besök.</p>
+        }
+    </div>
+
+    @if (!isLocked && (Model?.ShowRegionNav ?? true) && data.Regions.Any())
+    {
+        <div class="card-footer bg-body-tertiary">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-1 mb-2">
+                <strong class="small text-muted text-uppercase">Kretsar</strong>
+                <span class="small text-muted">Bläddra till din krets och dina klubbar</span>
+            </div>
+            <div class="wh-region-grid">
+                @foreach (var r in data.Regions)
+                {
+                    <a class="wh-rcard" href="@r.Url"><span class="wh-n text-truncate">@r.Name</span><span class="badge rounded-pill text-bg-light">@r.ClubCount</span></a>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<script>
+(function () {
+    var root = document.getElementById('whFeed');
+    if (!root || root.dataset.whInit) { return; }
+    root.dataset.whInit = '1';
+
+    var anon = root.dataset.anon === '1';
+    var locked = root.dataset.locked || '';
+    var counts = {}, regions = {};
+    try { counts = JSON.parse(root.dataset.counts || '{}'); } catch (e) {}
+    try { regions = JSON.parse(root.dataset.regions || '{}'); } catch (e) {}
+
+    var sel = root.querySelector('#whRegion');
+    var STORE = 'hpsk_wh_region';
+    var activeTab = root.dataset.default || 'd7';
+    var horizon = 7;
+
+    function fmtDate(iso) {
+        var p = iso.split('-'); if (p.length !== 3) { return iso; }
+        var m = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+        return parseInt(p[2], 10) + ' ' + m[parseInt(p[1], 10) - 1];
+    }
+    function activeRegion() { return locked ? locked : (sel ? sel.value : 'hela'); }
+    function regionOk(row, region) { return region === 'hela' || (row.dataset.region || '') === region; }
+
+    function ongoingCount(region) {
+        if (anon) {
+            return region === 'hela'
+                ? Object.keys(counts).reduce(function (s, k) { return s + counts[k]; }, 0)
+                : (counts[region] || 0);
+        }
+        var rows = root.querySelectorAll('[data-grid="now"] .wh-ev');
+        var n = 0; rows.forEach(function (r) { if (regionOk(r, region)) n++; });
+        return n;
+    }
+
+    function update() {
+        var region = activeRegion();
+        var upRows = Array.prototype.slice.call(root.querySelectorAll('[data-grid="upcoming"] .wh-ev'));
+
+        // show/hide upcoming rows for the active horizon + region
+        var visibleUpcoming = 0;
+        upRows.forEach(function (r) {
+            var d = parseInt(r.dataset.days || '0', 10);
+            var show = regionOk(r, region) && d <= horizon;
+            r.style.display = show ? '' : 'none';
+            if (show) visibleUpcoming++;
+        });
+
+        // badges
+        var nowN = ongoingCount(region);
+        setBadge('now', nowN);
+        [7, 14, 30].forEach(function (h) {
+            var n = 0;
+            upRows.forEach(function (r) { if (regionOk(r, region) && parseInt(r.dataset.days || '0', 10) <= h) n++; });
+            setBadge('d' + h, n);
+        });
+
+        // anon "now" strip number
+        if (anon) {
+            var num = root.querySelector('#whStripNum'), cnt = root.querySelector('#whStripCount'), strip = root.querySelector('#whStrip');
+            if (num) num.textContent = nowN;
+            if (cnt) cnt.textContent = nowN;
+            if (strip) strip.style.display = nowN > 0 ? '' : 'none';
+        }
+
+        // which panel is visible
+        var showNow = activeTab === 'now';
+        panel('now').classList.toggle('on', showNow);
+        panel('upcoming').classList.toggle('on', !showNow);
+
+        // columns: ≤3 → single column
+        var upGrid = root.querySelector('[data-grid="upcoming"]');
+        if (upGrid) upGrid.classList.toggle('wh-few', visibleUpcoming <= 3);
+        var nowGrid = root.querySelector('[data-grid="now"]');
+        if (nowGrid) nowGrid.classList.toggle('wh-few', nowN <= 3);
+
+        // empty states
+        var emptyNow = root.querySelector('[data-empty="now"]');
+        if (emptyNow) {
+            if (showNow && nowN === 0) { emptyNow.textContent = 'Inga träningsmatcher pågår just nu.'; emptyNow.style.display = ''; }
+            else emptyNow.style.display = 'none';
+        }
+        var emptyUp = root.querySelector('[data-empty="upcoming"]');
+        if (emptyUp) {
+            if (!showNow && visibleUpcoming === 0) {
+                var within30 = 0;
+                upRows.forEach(function (r) { if (regionOk(r, region) && parseInt(r.dataset.days || '0', 10) <= 30) within30++; });
+                if (within30 > 0) {
+                    emptyUp.innerHTML = 'Inget planerat de närmaste ' + horizon + ' dagarna. <strong>' + within30 + '</strong> händelser inom 30 dagar — vidga vyn ovan.';
+                } else {
+                    emptyUp.textContent = 'Inget planerat de närmaste 30 dagarna.';
+                }
+                emptyUp.style.display = '';
+            } else emptyUp.style.display = 'none';
+        }
+
+        // contextual krets link + scope word
+        var link = root.querySelector('#whKretsLink'), scope = root.querySelector('#whScope');
+        if (link) {
+            if (region === 'hela') link.style.display = 'none';
+            else {
+                var r = regions[region];
+                link.style.display = '';
+                link.textContent = 'Gå till ' + (r ? r.name : region) + ' →';
+                if (r && r.url) link.href = r.url;
+            }
+        }
+        if (scope && !locked) scope.textContent = region === 'hela' ? 'i hela Sverige' : ('i ' + (regions[region] ? regions[region].name : region));
+    }
+
+    function setBadge(key, n) { var b = root.querySelector('[data-ct="' + key + '"]'); if (b) b.textContent = n; }
+    function panel(name) { return root.querySelector('[data-panel="' + name + '"]'); }
+
+    root.querySelectorAll('.nav-link[data-tab]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            activeTab = btn.dataset.tab;
+            horizon = parseInt(btn.dataset.days || '7', 10) || horizon;
+            root.querySelectorAll('.nav-link[data-tab]').forEach(function (b) { b.classList.toggle('active', b === btn); });
+            update();
+        });
+    });
+
+    if (sel) {
+        var saved = null;
+        try { saved = localStorage.getItem(STORE); } catch (e) {}
+        var defReg = root.dataset.defaultRegion || '';
+        if (saved && (saved === 'hela' || regions[saved])) sel.value = saved;
+        else if (defReg && regions[defReg]) sel.value = defReg;
+        sel.addEventListener('change', function () {
+            try { localStorage.setItem(STORE, sel.value); } catch (e) {}
+            update();
+        });
+    }
+
+    update();
+})();
+</script>

@@ -147,6 +147,8 @@
 <div class="tab-content" id="regionPageTabContent">
     <!-- Home Tab -->
     <div class="tab-pane fade show active" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
+        @* "Det här händer" feed, locked to this krets (no krets selector, no region nav) *@
+        @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedRegionCode = regionCode, LockedRegionName = regionName })
         @await Html.PartialAsync("_RegionPublicContent", Model, new ViewDataDictionary(ViewData)
         {
             { "clubsPage", clubsPage },

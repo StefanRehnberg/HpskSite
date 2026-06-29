@@ -1,479 +1,325 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @using System.Globalization
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject Umbraco.Cms.Core.Services.IMemberService MemberService
+@inject HpskSite.Services.ClubService ClubService
+@inject HpskSite.Services.HomeHubService HomeHub
+@inject HpskSite.Services.BoardHubService BoardHub
+@inject HpskSite.Services.RangeHubService RangeHub
 @{
     Layout = "Master.cshtml";
+    var sv = new CultureInfo("sv-SE");
 
-    // Swedish culture for proper alphabetical sorting (Å, Ä, Ö at the end)
-    var swedishCulture = new CultureInfo("sv-SE");
-
-    // Get page properties
-    var welcomeTitle = Model.Value<string>("welcomeTitle") ?? "Svenska Pistolskyttekretsar";
-    var welcomeText = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("welcomeText"));
-    var aboutText = Model.Value<string>("aboutText");
-    var bannerImage = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("bannerImage");
-    var logo = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("logo");
-
-    // Get all regional pages (children of home with regionalPage document type)
+    // ---------- shared content lookups (cheap, published cache) ----------
     var regionalPages = Model.Children
         .Where(c => c.ContentType.Alias == "regionalPage")
-        .OrderBy(r => r.Value<string>("regionName") ?? r.Name, swedishCulture.CompareInfo.GetStringComparer(CompareOptions.None))
+        .OrderBy(r => r.Value<string>("regionName") ?? r.Name, sv.CompareInfo.GetStringComparer(CompareOptions.None))
         .ToList();
 
-    // Count total clubs across all regions
     var totalClubs = 0;
     foreach (var region in regionalPages)
     {
-        var clubsPage = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-        if (clubsPage != null)
-        {
-            totalClubs += clubsPage.Children.Count(c => c.ContentType.Alias == "club");
-        }
+        var cp = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+        if (cp != null) totalClubs += cp.Children.Count(c => c.ContentType.Alias == "club");
     }
 
-    // Count upcoming competitions
     var competitionsHub = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
-    var upcomingCompetitionsCount = 0;
+    var thisYear = DateTime.Today.Year;
+    var compsThisYear = 0;
+    var upcomingComps = 0;
     if (competitionsHub != null)
     {
-        upcomingCompetitionsCount = competitionsHub.Descendants()
-            .Where(c => c.ContentType.Alias == "competition")
-            .Count(c => c.Value<DateTime>("competitionDate") >= DateTime.Today);
+        var comps = competitionsHub.Descendants().Where(c => c.ContentType.Alias == "competition").ToList();
+        compsThisYear = comps.Count(c => c.Value<DateTime>("competitionDate").Year == thisYear);
+        upcomingComps = comps.Count(c => c.Value<DateTime>("competitionDate") >= DateTime.Today);
     }
 
-    // Get featured items - handle both single item and collection (competitions and series)
-    var featuredItemsRaw = Model.Value("featuredItems");
-    var featuredItems = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+    var omUrl = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "aboutPage")?.Url() ?? "/om-pistol-nu/";
+    var minSidaUrl = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
+    var traningsmatchUrl = Model.Children.FirstOrDefault(x => x.Name?.ToLower().Contains("träningsmatch") == true || x.UrlSegment?.Contains("traningsmatch") == true)?.Url() ?? "/traningsmatch/";
+    var competitionsUrl = competitionsHub?.Url() ?? "/competitions/";
+    var loginUrl = "/login-&-register/?tab=login";
+    var registerUrl = "/login-&-register/?tab=register";
 
-    if (featuredItemsRaw is IEnumerable<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent> multipleItems)
+    // ---------- auth + member summary ----------
+    var cm = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = cm != null;
+    var firstName = "";
+    var clubName = "";
+    var memberRegionCode = "";
+    HpskSite.Services.HomeHubSummary? hub = null;
+    HpskSite.Services.BoardHubSummary? board = null;
+    HpskSite.Services.RangeHubSummary? range = null;
+    if (isLoggedIn)
     {
-        featuredItems = multipleItems
-            .Where(c => c.ContentType.Alias == "competition" || c.ContentType.Alias == "competitionSeries")
-            .ToList();
-    }
-    else if (featuredItemsRaw is Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent singleItem)
-    {
-        if (singleItem.ContentType.Alias == "competition" || singleItem.ContentType.Alias == "competitionSeries")
+        var member = MemberService.GetByEmail(cm!.Email ?? "");
+        if (member != null)
         {
-            featuredItems.Add(singleItem);
+            firstName = (member.HasProperty("firstName") ? member.GetValue("firstName")?.ToString() : null) ?? member.Name ?? "";
+            var pcStr = member.HasProperty("primaryClubId") ? member.GetValue("primaryClubId")?.ToString() : null;
+            if (int.TryParse(pcStr, out var pcId) && pcId > 0)
+            {
+                clubName = ClubService.GetClubNameById(pcId) ?? "";
+                memberRegionCode = Umbraco.Content(pcId)?.Value<string>("regionalFederation") ?? "";
+            }
+            hub = await HomeHub.GetSummaryAsync(member.Id);
+            board = BoardHub.GetSummary(member.Id);
+            range = await RangeHub.GetSummaryAsync(member.Id);
         }
     }
 
-    ViewBag.Title = welcomeTitle;
-
-    // OpenGraph meta tags - use logo for social sharing preview
-    // Fallback: home logo → site default
-    var siteDefaultLogo = "/images/HPSK_Logo.png";
-
+    var welcomeTitle = "pistol.nu – allt för pistolskytten";
+    ViewBag.Title = isLoggedIn ? "Min startsida" : welcomeTitle;
     ViewBag.OgTitle = welcomeTitle;
-    ViewBag.OgDescription = !string.IsNullOrEmpty(welcomeText) ? welcomeText : "Svenska Pistolskyttekretsar - Hitta din krets och upptäck skytteföreningar i din region.";
-    ViewBag.OgImage = logo?.Url() ?? siteDefaultLogo;
+    ViewBag.OgDescription = "Träning, tävling, utbildning och klubbliv för Sveriges pistolskyttar, klubbar och kretsar.";
+    ViewBag.OgImage = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("logo")?.Url() ?? "/images/HPSK_Logo.png";
 }
 
-<!-- Hero Banner Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        @if (bannerImage != null)
-        {
-            <div class="position-relative rounded overflow-hidden" style="height: 300px;">
-                <img src="@bannerImage.Url()" alt="@welcomeTitle" class="w-100 h-100" style="object-fit: cover;">
-                <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-                     style="background: linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%);">
-                    <div class="text-center text-white p-4">
-                        @if (logo != null)
-                        {
-                            <img src="@logo.Url()" alt="Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
-                        }
-                        <h1 class="display-4 fw-bold">@welcomeTitle</h1>
-                        @if (!string.IsNullOrEmpty(welcomeText))
-                        {
-                            <div class="lead mt-3 prose-wide">@Html.Raw(welcomeText)</div>
-                        }
-                        else
-                        {
-                            <p class="lead mt-3 prose-wide">Hitta din krets och upptäck skytteföreningar i din region.</p>
-                        }
+@if (!isLoggedIn)
+{
+    <!-- ============================ LOGGED OUT: LANDING ============================ -->
+
+    <!-- HERO -->
+    <div class="home-hero text-white text-center rounded-4 p-5 mb-4">
+        <div class="home-eyebrow">Sveriges plattform för pistolskytte</div>
+        <h1 class="display-5 fw-bold mt-2 mb-0">Allt för pistolskytten – på ett ställe</h1>
+        <p class="lead mx-auto mt-3" style="max-width:54ch;">Träning, tävling, utbildning och klubbliv för Sveriges skyttar, klubbar och kretsar. Byggt av skyttar, för skyttar.</p>
+        <div class="d-flex gap-2 justify-content-center flex-wrap mt-4">
+            <a href="@registerUrl" class="btn btn-light btn-lg fw-semibold">Skapa konto – gratis för skyttar</a>
+            <a href="@omUrl" class="btn btn-outline-light btn-lg">Vad är pistol.nu?</a>
+        </div>
+        <div class="d-flex gap-4 justify-content-center flex-wrap mt-3 small home-hero-trust">
+            <span><i class="bi bi-check2-circle me-1"></i>Gratis för skyttar, alltid</span>
+            <span><i class="bi bi-check2-circle me-1"></i>Källkodsöppen</span>
+            <span><i class="bi bi-check2-circle me-1"></i>Drivs ideellt</span>
+        </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="row text-center g-3 mb-4">
+        <div class="col-6 col-md-3"><div class="home-stat"><div class="n">@regionalPages.Count</div><div class="l">Kretsar</div></div></div>
+        <div class="col-6 col-md-3"><div class="home-stat"><div class="n">@totalClubs</div><div class="l">Klubbar</div></div></div>
+        <div class="col-6 col-md-3"><div class="home-stat"><div class="n">@compsThisYear</div><div class="l">Tävlingar i år</div></div></div>
+        <div class="col-6 col-md-3"><div class="home-stat"><div class="n">@upcomingComps</div><div class="l">Kommande tävlingar</div></div></div>
+    </div>
+
+    <!-- FEED: living proof -->
+    <div class="text-center"><span class="home-eyebrow text-primary">Just nu i hela skyttesverige</span></div>
+    <div class="text-center mb-3 mt-1"><h2 class="fw-bold mb-1">Det här händer</h2><p class="text-muted mb-0">Tävlingar och klubbhändelser i realtid – logga in för att se allt och delta.</p></div>
+    @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { ShowRegionNav = false })
+
+    <!-- VALUE PROPS -->
+    <div class="text-center mt-5 mb-3"><h2 class="fw-bold mb-1">Vad du får</h2><p class="text-muted mb-0">Ett verktyg för varje del av skyttet.</p></div>
+    <div class="row g-4 mb-4">
+        <div class="col-md-6">
+            <h3 class="home-vp-head">För skyttar</h3>
+            <div class="home-vp"><span class="ic"><i class="bi bi-bullseye"></i></span><div><div class="t">Träningsmatch &amp; din topplista</div><div class="d">Tävla med handikapp och följ din utveckling över tid.</div></div></div>
+            <div class="home-vp"><span class="ic"><i class="bi bi-mortarboard"></i></span><div><div class="t">Skyttekort &amp; utbildning</div><div class="d">Kurser och prov online – i din egen takt.</div></div></div>
+            <div class="home-vp"><span class="ic"><i class="bi bi-award"></i></span><div><div class="t">Märken &amp; medaljer</div><div class="d">Håll koll på dina valörer och årtalsmärken.</div></div></div>
+            <div class="home-vp"><span class="ic"><i class="bi bi-graph-up"></i></span><div><div class="t">Dina resultat samlade</div><div class="d">All din skyttehistorik – träning och tävling – på ett ställe.</div></div></div>
+        </div>
+        <div class="col-md-6">
+            <h3 class="home-vp-head">För klubbar &amp; kretsar</h3>
+            <div class="home-vp green"><span class="ic"><i class="bi bi-trophy"></i></span><div><div class="t">Tävlingar från anmälan till resultat</div><div class="d">Startlistor, resultat, finaler och rekord – alla grenar.</div></div></div>
+            <div class="home-vp green"><span class="ic"><i class="bi bi-cash-coin"></i></span><div><div class="t">Anmälningar &amp; betalning</div><div class="d">Swish, fakturor och kassörsflöde på tävlingsdagen.</div></div></div>
+            <div class="home-vp green"><span class="ic"><i class="bi bi-people"></i></span><div><div class="t">Styrelsearbete</div><div class="d">Möten, protokoll, årshjul och valberedning.</div></div></div>
+            <div class="home-vp green"><span class="ic"><i class="bi bi-geo-alt"></i></span><div><div class="t">Banor, certifikat &amp; medlemmar</div><div class="d">Skjutbanedatabas, behörigheter och medlemsregister.</div></div></div>
+        </div>
+    </div>
+    <div class="text-center mt-2 mb-4"><a href="@omUrl" class="btn btn-outline-primary">Se allt pistol.nu erbjuder →</a></div>
+
+    <!-- FIND CLUB -->
+    <div id="kretsar" class="card mb-4">
+        <div class="card-body">
+            <div class="text-center mb-3"><h2 class="fw-bold mb-1">Din klubb finns redan här</h2><p class="text-muted mb-0">@totalClubs klubbar är redan med. Hitta din krets, ta över din klubb och kom igång.</p></div>
+            <div class="row row-cols-2 row-cols-md-4 g-2">
+                @foreach (var region in regionalPages)
+                {
+                    var rn = region.Value<string>("regionName") ?? region.Name;
+                    var cp = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    var cc = cp?.Children.Count(c => c.ContentType.Alias == "club") ?? 0;
+                    <div class="col">
+                        <a href="@region.Url()" class="home-rcard"><span class="n text-truncate">@rn</span><span class="badge rounded-pill text-bg-light">@cc</span></a>
                     </div>
-                </div>
+                }
             </div>
-        }
-        else
+            <div class="text-center mt-3"><a class="btn btn-outline-primary" href="@registerUrl">Saknas din klubb? Skapa konto och lägg till den</a></div>
+        </div>
+    </div>
+
+    <!-- TRUST -->
+    <div class="row text-center g-3 mt-4">
+        <div class="col-6 col-md-3"><div class="home-trust-ic"><i class="bi bi-heart"></i></div><div class="fw-semibold">Gratis för skyttar</div><div class="text-muted small">Alltid – inga avgifter för den enskilde.</div></div>
+        <div class="col-6 col-md-3"><div class="home-trust-ic"><i class="bi bi-code-slash"></i></div><div class="fw-semibold">Källkodsöppen</div><div class="text-muted small">Insyn i hur plattformen fungerar.</div></div>
+        <div class="col-6 col-md-3"><div class="home-trust-ic"><i class="bi bi-shield-check"></i></div><div class="fw-semibold">GDPR på riktigt</div><div class="text-muted small">Personuppgiftsbiträdesavtal med varje klubb.</div></div>
+        <div class="col-6 col-md-3"><div class="home-trust-ic"><i class="bi bi-people-fill"></i></div><div class="fw-semibold">Drivs ideellt</div><div class="text-muted small">Sponsras av HPSK.</div></div>
+    </div>
+    <div class="text-center mt-3 mb-4"><a href="@omUrl" class="fw-semibold text-decoration-none">Läs mer om pistol.nu och vårt löfte →</a></div>
+
+    <!-- CLOSING CTA -->
+    <div class="home-cta text-white text-center rounded-4 p-5 mb-2">
+        <h2 class="fw-bold mb-1">Redo att komma igång?</h2>
+        <p class="mb-3">Skapa ett konto på en minut – och se allt som händer i din krets.</p>
+        <a href="@registerUrl" class="btn btn-light btn-lg fw-semibold">Skapa konto – gratis</a>
+    </div>
+}
+else
+{
+    <!-- ============================ LOGGED IN: HUB ============================ -->
+
+    <div class="mb-3">
+        <h1 class="fw-bold mb-0">Hej @firstName! 👋</h1>
+        @if (!string.IsNullOrEmpty(clubName))
         {
-            <div class="jumbotron bg-primary text-white p-5 rounded">
-                <div class="d-flex align-items-center justify-content-center flex-column">
-                    @if (logo != null)
+            <div class="text-muted">@clubName</div>
+        }
+    </div>
+
+    <div class="row g-3 mb-3">
+        <!-- form / handicap → Min Sida Handikapp -->
+        <div class="col-md-4">
+            <div class="card h-100"><div class="card-body home-hc">
+                <div class="home-hc-text">
+                    <div class="home-hc-lab">Din form@(hub?.HasForm == true ? " · " + hub.TopWeaponClass : "")</div>
+                    @if (hub?.HasForm == true)
                     {
-                        <img src="@logo.Url()" alt="Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
-                    }
-                    <h1 class="display-4 fw-bold text-center">@welcomeTitle</h1>
-                    @if (!string.IsNullOrEmpty(welcomeText))
-                    {
-                        <div class="lead mt-3 text-center">@Html.Raw(welcomeText)</div>
+                        <div class="home-hc-big">@hub.TopAveragePerSeries.ToString("0.0", sv)</div>
+                        <div class="text-muted small">snitt per serie · @hub.TopMatches matcher</div>
+                        <a href="@(minSidaUrl)#dashboard" class="small d-inline-block mt-2 text-decoration-none">Se din utveckling →</a>
                     }
                     else
                     {
-                        <p class="lead mt-3 text-center">Hitta din krets och upptäck skytteföreningar i din region.</p>
+                        <p class="text-muted small mt-2 mb-2">Spela en träningsmatch så börjar vi följa din utveckling.</p>
+                        <a href="@traningsmatchUrl" class="btn btn-sm btn-primary">Träningsmatcher</a>
                     }
                 </div>
-            </div>
-        }
-    </div>
-</div>
-
-<div class="row">
-    <!-- Main Content Column -->
-    <div class="col-lg-8">
-        <!-- Quick Stats Card -->
-        <div class="card mb-4">
-            <div class="card-body">
-                <div class="row text-center">
-                    <div class="col-md-4 mb-3 mb-md-0">
-                        <div class="d-flex flex-column align-items-center">
-                            <i class="bi bi-geo-alt fs-1 text-primary mb-2"></i>
-                            <h3 class="mb-0">@regionalPages.Count</h3>
-                            <small class="text-muted">Kretsar</small>
-                        </div>
-                    </div>
-                    <div class="col-md-4 mb-3 mb-md-0">
-                        <div class="d-flex flex-column align-items-center">
-                            <i class="bi bi-building fs-1 text-primary mb-2"></i>
-                            <h3 class="mb-0">@totalClubs</h3>
-                            <small class="text-muted">Klubbar</small>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="d-flex flex-column align-items-center">
-                            <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
-                            <h3 class="mb-0">@upcomingCompetitionsCount</h3>
-                            <small class="text-muted">Kommande tävlingar</small>
-                        </div>
-                    </div>
+                <i class="bi bi-graph-up-arrow home-hc-ic text-primary"></i>
+            </div></div>
+        </div>
+        <!-- activity → Min Sida Resultat -->
+        <div class="col-md-4">
+            <div class="card h-100"><div class="card-body home-hc">
+                <div class="home-hc-text">
+                    <div class="home-hc-lab">Aktivitet</div>
+                    <div class="home-hc-big">@(hub?.SessionsThisMonth ?? 0)</div>
+                    <div class="text-muted small">pass den här månaden@(hub?.LastActivity != null ? " · senast " + hub.LastActivity.Value.ToString("d MMM", sv) : "")</div>
+                    <a href="@(minSidaUrl)#resultat" class="small d-inline-block mt-2 text-decoration-none">Dina resultat →</a>
                 </div>
+                <i class="bi bi-calendar-check home-hc-ic text-success"></i>
+            </div></div>
+        </div>
+        <!-- topplista → ranking tab (no ranking computed on load) -->
+        <div class="col-md-4">
+            <div class="card h-100"><div class="card-body home-hc">
+                <div class="home-hc-text d-flex flex-column h-100">
+                    <div class="home-hc-lab">Topplistan</div>
+                    <p class="text-muted small mt-2 mb-3">Se var du ligger – på din klubbs och kretsens träningsform.</p>
+                    <a href="@(traningsmatchUrl)?tab=topplista" class="small d-inline-block mt-auto text-decoration-none">Se din placering →</a>
+                </div>
+                <i class="bi bi-trophy home-hc-ic text-warning"></i>
+            </div></div>
+        </div>
+    </div>
+
+    <!-- quick actions: create/go verbs (cards already cover the Min Sida deep-links; navbar has full Min Sida) -->
+    <div class="d-flex gap-2 flex-wrap align-items-center mb-4">
+        <a class="btn btn-lg btn-primary" href="@(minSidaUrl)#logga"><i class="bi bi-plus-lg me-1"></i>Logga pass</a>
+        <a class="btn btn-lg btn-warning fw-bold" href="@(minSidaUrl)#marken"><i class="bi bi-bullseye"></i> Jag har skjutit en GULDSERIE!</a>
+        <a class="btn btn-lg btn-outline-secondary" href="@traningsmatchUrl"><i class="bi bi-bullseye me-1"></i>Träningsmatcher</a>
+        <a class="btn btn-lg btn-outline-secondary" href="@competitionsUrl"><i class="bi bi-trophy me-1"></i>Tävlingar</a>
+    </div>
+
+    @* Board-member section — only for members who sit on a board (any club/krets). Spans all their boards. *@
+    @if (board?.HasBoards == true)
+    {
+        <div class="card mb-4 border-primary-subtle">
+            <div class="card-header bg-primary-subtle d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span class="fw-semibold"><i class="bi bi-people-fill me-2 text-primary"></i>Ditt styrelsearbete</span>
+                <a href="/styrelse" class="small text-decoration-none">Öppna styrelsearbetet →</a>
+            </div>
+            <div class="card-body">
+                @if (!board.HasAny)
+                {
+                    <p class="text-muted small mb-0">Inget aktuellt just nu i dina styrelser. <a href="/styrelse" class="text-decoration-none">Öppna styrelsearbetet →</a></p>
+                }
+                else
+                {
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="home-hc-lab mb-2"><i class="bi bi-calendar-event me-1"></i>Kommande möten</div>
+                            @if (board.Meetings.Any())
+                            {
+                                foreach (var m in board.Meetings)
+                                {
+                                    <a href="@m.Url" class="d-block small text-decoration-none py-1 border-bottom">
+                                        <span class="text-muted">@(m.Date?.ToString("d MMM", sv))</span> @m.Title <span class="text-body-secondary">· @m.OwnerName</span>
+                                    </a>
+                                }
+                            }
+                            else { <div class="text-muted small">Inga inplanerade möten.</div> }
+                        </div>
+                        <div class="col-md-4">
+                            <div class="home-hc-lab mb-2"><i class="bi bi-check2-square me-1"></i>Dina åtgärder</div>
+                            @if (board.Actions.Any())
+                            {
+                                foreach (var a in board.Actions)
+                                {
+                                    <a href="@a.Url" class="d-block small text-decoration-none py-1 border-bottom">
+                                        @if (a.Overdue) { <span class="badge text-bg-danger me-1">Försenad</span> }
+                                        else if (a.Date != null) { <span class="text-muted">@a.Date.Value.ToString("d MMM", sv) </span> }
+                                        @a.Title <span class="text-body-secondary">· @a.OwnerName</span>
+                                    </a>
+                                }
+                            }
+                            else { <div class="text-muted small">Inga öppna åtgärder.</div> }
+                        </div>
+                        <div class="col-md-4">
+                            <div class="home-hc-lab mb-2"><i class="bi bi-arrow-repeat me-1"></i>Årshjul</div>
+                            @if (board.WheelItems.Any())
+                            {
+                                foreach (var w in board.WheelItems)
+                                {
+                                    <a href="@w.Url" class="d-block small text-decoration-none py-1 border-bottom">
+                                        @if (w.Overdue) { <span class="badge text-bg-danger me-1">Försenad</span> }
+                                        else if (w.Date != null) { <span class="text-muted">@w.Date.Value.ToString("d MMM", sv) </span> }
+                                        @w.Title <span class="text-body-secondary">· @w.OwnerName</span>
+                                    </a>
+                                }
+                            }
+                            else { <div class="text-muted small">Inget på gång i årshjulet.</div> }
+                        </div>
+                    </div>
+                }
             </div>
         </div>
+    }
 
-        <!-- About Section -->
-        @if (!string.IsNullOrEmpty(aboutText))
-        {
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om oss</h5>
-                </div>
-                <div class="card-body">
-                    <div class="prose">
-                        @Html.Raw(aboutText)
-                    </div>
-                </div>
+    @* Shooting-range compliance reminders — only when something's due, for range admins/stewards *@
+    @if (range?.HasAny == true)
+    {
+        <div class="card mb-4 border-warning-subtle">
+            <div class="card-header bg-warning-subtle">
+                <span class="fw-semibold"><i class="bi bi-exclamation-triangle me-2 text-warning"></i>Skjutbana – påminnelser</span>
             </div>
-        }
-
-        <!-- Region Selection -->
-        @if (regionalPages.Any())
-        {
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-map me-2"></i>Välj din krets</h5>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-3">Klicka på din krets för att se klubbar och kontaktinformation.</p>
-                    <div class="row row-cols-2 row-cols-md-3 g-3">
-                        @foreach (var region in regionalPages)
+            <div class="card-body">
+                @foreach (var rem in range.Reminders)
+                {
+                    <a href="@rem.Url" class="d-block small text-decoration-none py-1 border-bottom">
+                        @if (rem.Overdue)
                         {
-                            var regionName = region.Value<string>("regionName") ?? region.Name;
-                            var clubsPage = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-                            var clubCount = clubsPage?.Children.Count(c => c.ContentType.Alias == "club") ?? 0;
-
-                            <div class="col">
-                                <a href="@region.Url()" class="text-decoration-none">
-                                    <div class="card h-100 region-card">
-                                        <div class="card-body text-center py-3">
-                                            <h6 class="card-title mb-1">@regionName</h6>
-                                            <small class="text-muted">@clubCount klubbar</small>
-                                        </div>
-                                    </div>
-                                </a>
-                            </div>
-                        }
-                    </div>
-                </div>
-            </div>
-        }
-        else
-        {
-            <div class="alert alert-info">
-                <p class="mb-0">Regionala sidor kommer snart.</p>
-            </div>
-        }
-    </div>
-
-    <!-- Sidebar Column -->
-    <div class="col-lg-4">
-        <!-- Featured Items (Competitions and Series) -->
-        @if (featuredItems.Any())
-        {
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-star-fill me-2 text-warning"></i>Utvalda Tävlingar</h5>
-                </div>
-                <div class="list-group list-group-flush">
-                    @foreach (var item in featuredItems)
-                    {
-                        var isSeries = item.ContentType.Alias == "competitionSeries";
-
-                        if (isSeries)
-                        {
-                            // Series display
-                            var seriesName = item.Value<string>("seriesName") ?? item.Name;
-                            var seriesDescription = item.Value<string>("shortDescription") ?? "";
-                            var competitionCount = item.Children.Count(c => c.ContentType.Alias == "competition");
-
-                            <a href="@item.Url()" class="list-group-item list-group-item-action">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
-                                        <strong class="d-block">@seriesName</strong>
-                                        @if (!string.IsNullOrEmpty(seriesDescription))
-                                        {
-                                            <small class="text-muted d-block">@seriesDescription</small>
-                                        }
-                                        <small class="text-muted">
-                                            <i class="bi bi-collection me-1"></i>@competitionCount tävlingar
-                                        </small>
-                                    </div>
-                                    <span class="badge bg-purple" style="background-color: #6f42c1;">Serie</span>
-                                </div>
-                            </a>
+                            <span class="badge text-bg-danger me-1">Försenad</span>
                         }
                         else
                         {
-                            // Competition display
-                            var compName = item.Value<string>("competitionName") ?? item.Name;
-                            var compDate = item.Value<DateTime>("competitionDate");
-                            var compEndDate = item.Value<DateTime?>("competitionEndDate");
-                            var venue = item.Value<string>("venue") ?? "";
-                            var isActive = item.Value<bool>("isActive");
-                            var registrationOpenDate = item.Value<DateTime>("registrationOpenDate");
-                            var registrationCloseDate = item.Value<DateTime>("registrationCloseDate");
-
-                            // Determine status
-                            var now = DateTime.Now;
-                            string statusText;
-                            string statusBadgeClass;
-
-                            if (!isActive)
-                            {
-                                statusText = "Inaktiv";
-                                statusBadgeClass = "bg-secondary";
-                            }
-                            else if (now < registrationOpenDate)
-                            {
-                                statusText = "Anmälan öppnar snart";
-                                statusBadgeClass = "bg-info";
-                            }
-                            else if (now >= registrationOpenDate && now <= registrationCloseDate)
-                            {
-                                statusText = "Anmälan öppen";
-                                statusBadgeClass = "bg-success";
-                            }
-                            else if (now > registrationCloseDate && now.Date < compDate.Date)
-                            {
-                                statusText = "Anmälan stängd";
-                                statusBadgeClass = "bg-warning text-dark";
-                            }
-                            else
-                            {
-                                var hasValidEnd = compEndDate.HasValue && compEndDate.Value.Year > 1900 && compEndDate.Value.Date >= compDate.Date;
-                                var effectiveEnd = hasValidEnd ? compEndDate!.Value.Date : compDate.Date;
-
-                                if (now.Date >= compDate.Date && now.Date <= effectiveEnd)
-                                {
-                                    statusText = "Pågår";
-                                    statusBadgeClass = "bg-primary";
-                                }
-                                else if (now.Date > effectiveEnd)
-                                {
-                                    statusText = "Avslutad";
-                                    statusBadgeClass = "bg-secondary";
-                                }
-                                else
-                                {
-                                    statusText = "Kommande";
-                                    statusBadgeClass = "bg-info";
-                                }
-                            }
-
-                            // Check if multi-day
-                            var hasValidEndDate = compEndDate.HasValue &&
-                                                  compEndDate.Value > DateTime.MinValue &&
-                                                  compEndDate.Value.Year > 1900 &&
-                                                  compEndDate.Value.Date > compDate.Date;
-
-                            <a href="@item.Url()" class="list-group-item list-group-item-action">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
-                                        <strong class="d-block">@compName</strong>
-                                        <small class="text-muted">
-                                            <i class="bi bi-calendar3 me-1"></i>
-                                            @if (hasValidEndDate)
-                                            {
-                                                @compDate.ToString("d MMM", CultureInfo.GetCultureInfo("sv-SE"))
-                                                <text> - </text>
-                                                @compEndDate!.Value.ToString("d MMM", CultureInfo.GetCultureInfo("sv-SE"))
-                                            }
-                                            else
-                                            {
-                                                @compDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
-                                            }
-                                        </small>
-                                        @if (!string.IsNullOrEmpty(venue))
-                                        {
-                                            <small class="text-muted d-block">
-                                                <i class="bi bi-geo-alt me-1"></i>@venue
-                                            </small>
-                                        }
-                                    </div>
-                                    <span class="badge @statusBadgeClass">@statusText</span>
-                                </div>
-                            </a>
+                            <span class="badge text-bg-warning me-1">Snart</span>
                         }
-                    }
-                </div>
-            </div>
-        }
-
-        <!-- Quick Links Card -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Snabblänkar</h5>
-            </div>
-            <div class="list-group list-group-flush">
-                @{
-                    var competitionsPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
-                    var trainingMatchPage = Model.Children.FirstOrDefault(x => x.Name?.ToLower().Contains("träningsmatch") == true || x.UrlSegment?.Contains("traningsmatch") == true);
-                    var trainingPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "trainingStairs" || x.Name?.ToLower().Contains("skyttetrappa") == true);
-                    var tutorialPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
-                }
-                @if (competitionsPage != null)
-                {
-                    <a href="@competitionsPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
-                        <i class="bi bi-trophy me-3 text-primary"></i>
-                        <div>
-                            <strong>Tävlingar</strong>
-                            <small class="d-block text-muted">Se kommande tävlingar</small>
-                        </div>
+                        <strong>@rem.RangeName</strong> · @rem.Label @(rem.Overdue ? "gick ut" : "förnyas") <span class="text-muted">@rem.Due.ToString("d MMM yyyy", sv)</span>
                     </a>
                 }
-                @if (trainingMatchPage != null)
-                {
-                    <a href="@trainingMatchPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
-                        <i class="bi bi-bullseye me-3 text-primary"></i>
-                        <div>
-                            <strong>Träningsmatch</strong>
-                            <small class="d-block text-muted">Delta i live-matcher</small>
-                        </div>
-                    </a>
-                }
-                @if (trainingPage != null)
-                {
-                    <a href="@trainingPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
-                        <i class="bi bi-mortarboard me-3 text-primary"></i>
-                        <div>
-                            <strong>Skyttetrappan</strong>
-                            <small class="d-block text-muted">Träningsprogram för alla nivåer</small>
-                        </div>
-                    </a>
-                }
-                @if (tutorialPage != null)
-                {
-                    <a href="@tutorialPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
-                        <i class="bi bi-camera-video me-3 text-primary"></i>
-                        <div>
-                            <strong>Videoguider</strong>
-                            <small class="d-block text-muted">Lär dig använda pistol.nu</small>
-                        </div>
-                    </a>
-                }
-                <a href="/login-register" class="list-group-item list-group-item-action d-flex align-items-center">
-                    <i class="bi bi-person-plus me-3 text-primary"></i>
-                    <div>
-                        <strong>Bli medlem</strong>
-                        <small class="d-block text-muted">Registrera dig eller logga in</small>
-                    </div>
-                </a>
             </div>
         </div>
-
-        <!-- News/Updates Card (placeholder for future content) -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-megaphone me-2"></i>Aktuellt</h5>
-            </div>
-            <div class="card-body">
-                <p class="text-muted mb-0">
-                    <i class="bi bi-info-circle me-2"></i>
-                    Välj din krets i listan för att se lokala nyheter och händelser.
-                </p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<style>
-.jumbotron {
-    background: linear-gradient(135deg, var(--bs-primary) 0%, #0056b3 100%);
-}
-
-.region-card {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    cursor: pointer;
-}
-
-.region-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.region-card .card-title {
-    color: var(--bs-body-color);
-    font-size: 0.95rem;
-}
-
-.region-card:hover .card-title {
-    color: var(--bs-primary);
-}
-
-/* Featured competition cards */
-.featured-competition-card {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    border-left: 4px solid var(--bs-primary);
-}
-
-.featured-competition-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.featured-competition-card .card-title {
-    color: var(--bs-body-color);
-    font-size: 1rem;
-}
-
-.featured-competition-card:hover .card-title {
-    color: var(--bs-primary);
-}
-
-/* Responsive adjustments */
-@@media (max-width: 991.98px) {
-    .display-4 {
-        font-size: 2rem;
-    }
-}
-
-@@media (max-width: 575.98px) {
-    .region-card .card-body {
-        padding: 0.5rem;
     }
 
-    .region-card .card-title {
-        font-size: 0.85rem;
-    }
+    <!-- feed scoped to the member's krets (preselected, switchable; no region-nav) -->
+    @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { ShowRegionNav = false, DefaultRegionCode = memberRegionCode })
 }
-</style>

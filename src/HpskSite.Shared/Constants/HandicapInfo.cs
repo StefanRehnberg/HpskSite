@@ -18,7 +18,7 @@ public static class HandicapInfo
         "• Lägre snitt = positivt handicap (bonus)\n" +
         "• Högre snitt = negativt handicap (avdrag)";
 
-    public const string StartingIndexTitle = "Startindex per skytteklass:";
+    public const string StartingIndexTitle = "Starthandicap per skytteklass:";
 
     public const string StartingIndexPoints =
         "• Klass 1: 44 poäng (Nybörjare)\n" +
@@ -29,7 +29,7 @@ public static class HandicapInfo
 
     public const string ProvisionalPoints =
         "• Handicap baseras på snitt från senaste 5 matcher\n" +
-        "• Nya skyttar: startindex ersätter saknade resultat\n" +
+        "• Nya skyttar: starthandicap ersätter saknade resultat\n" +
         "• Visas med (P) tills 5 riktiga resultat finns";
 
     public const string ProvisionalExampleTitle = "Exempel för Klass 1-skytt:";
