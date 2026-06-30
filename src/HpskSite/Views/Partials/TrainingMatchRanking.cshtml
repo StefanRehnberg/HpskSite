@@ -187,12 +187,14 @@
         var impCaption = imp
             ? '<div class="small text-body-secondary mb-2">Sorterat efter störst förbättring sedan ' +
               (currentBoard() === 'improvementSeason' ? 'säsongens start' : '30 dagar tillbaka') +
-              '. <span class="text-success">▼ lägre handicap = bättre</span>, <span class="text-danger">▲ = sämre</span>. ' +
+              '. Siffran visar hur mycket handicapet ändrats: ' +
+              '<span class="text-success">▼ grön = sänkt handicap (bättre form), högre siffra = större förbättring</span>, ' +
+              '<span class="text-danger">▲ röd = höjt handicap (sämre)</span>. ' +
               'Skyttar utan startvärde för perioden saknas.</div>'
             : '';
         body.innerHTML = impCaption + '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
             '<thead><tr><th class="text-center">#</th><th>Skytt</th>' +
-            '<th class="text-end">' + (imp ? 'Förändring' : 'Handicap') + '</th>' +
+            '<th class="text-end">' + (imp ? 'Förändring (handicap)' : 'Handicap') + '</th>' +
             '<th class="text-center d-none d-md-table-cell">Pass</th><th class="text-center">Rörelse</th></tr></thead>' +
             '<tbody>' + rows + '</tbody></table></div>';
     }
