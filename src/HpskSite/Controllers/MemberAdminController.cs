@@ -980,7 +980,9 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteMember(int memberId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Club admins and regional admins can delete members of their club(s),
+            // not just site admins. CanEditMemberAsync covers all three tiers.
+            if (!await _authService.CanEditMemberAsync(memberId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
