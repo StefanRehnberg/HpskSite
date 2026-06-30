@@ -602,10 +602,14 @@ let clubLookup = {};
 
 // Shorten club name for compact display
 function shortenClubName(name) {
+    if (!name) return name;
+    if (name.toLowerCase() === 'göteborgs pistol-och sportskk pistolsektionen') return 'GPSSK';
     return name
         .replace(/Pistolskytteförening/gi, 'PSF')
         .replace(/Pistolskytteklubb/gi, 'PSK')
+        .replace(/Pistolskyttar/gi, 'PS')
         .replace(/Pistolklubb/gi, 'PK')
+        .replace(/Handeldvapenförening/gi, 'HF')
         .replace(/Sportskytteklubb/gi, 'SSK')
         .replace(/Skytteklubb/gi, 'SK')
         .replace(/Skytteförening/gi, 'SF');

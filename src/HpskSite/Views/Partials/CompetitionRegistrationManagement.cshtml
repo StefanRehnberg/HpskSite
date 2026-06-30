@@ -227,12 +227,12 @@
                     <table class="table table-striped table-hover" id="competitionRegistrationsTable">
                         <thead>
                             <tr>
-                                <th>Medlem</th>
-                                <th>Klubb</th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('memberName')">Medlem <span class="sort-ind" data-sort="memberName"></span></th>
+                                <th class="sortable-col" style="cursor:pointer; width:130px;" onclick="sortCompetitionRegistrations('memberClub')">Klubb <span class="sort-ind" data-sort="memberClub"></span></th>
                                 <th>Klass</th>
-                                <th id="subCompColHeader" style="display:none;">Deltävling</th>
-                                <th>Anmälningsdatum</th>
-                                <th>Status</th>
+                                <th id="subCompColHeader" class="sortable-col" style="display:none; cursor:pointer;" onclick="sortCompetitionRegistrations('isSubCompetition')">Deltävling <span class="sort-ind" data-sort="isSubCompetition"></span></th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('registrationDate')">Anmälningsdatum <span class="sort-ind" data-sort="registrationDate"></span></th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('paymentStatus')">Status <span class="sort-ind" data-sort="paymentStatus"></span></th>
                                 <th>Närvaro</th>
                                 <th>Åtgärder</th>
                             </tr>
@@ -273,12 +273,12 @@
                     <table class="table table-striped table-hover">
                         <thead>
                             <tr>
-                                <th>Lagnamn</th>
-                                <th>Typ</th>
-                                <th>Klass</th>
-                                <th>Förening</th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('teamName')">Lagnamn <span class="team-sort-ind" data-sort="teamName"></span></th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('type')">Typ <span class="team-sort-ind" data-sort="type"></span></th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('teamClass')">Klass <span class="team-sort-ind" data-sort="teamClass"></span></th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('clubName')">Klubb <span class="team-sort-ind" data-sort="clubName"></span></th>
                                 <th>Deltagare</th>
-                                <th>Betalning</th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('paymentStatus')">Status <span class="team-sort-ind" data-sort="paymentStatus"></span></th>
                                 <th>Åtgärder</th>
                             </tr>
                         </thead>
@@ -839,6 +839,74 @@ const competitionPageSize = 20;
 // Drives the conditional "Deltävling" column on the individuals table.
 let competitionSubCompetitionName = '';
 
+// Sort state for the individuals table. Empty key = original (load) order.
+let competitionSortKey = '';
+let competitionSortDir = 1; // 1 = ascending, -1 = descending
+
+// Mirror of HpskSite.Helpers.ClubNameHelper.Shorten — abbreviates the long
+// suffix words so the Klubb column stays narrow. Display only; the full name is
+// kept on the row (search/filter/dropdown) and shown via the cell's title.
+function shortenClubName(name) {
+    if (!name) return name;
+    // Special cases first — well-known clubs with an established acronym.
+    if (name.toLowerCase() === 'göteborgs pistol-och sportskk pistolsektionen') return 'GPSSK';
+    return name
+        .replace(/Pistolskytteförening/gi, 'PSF')
+        .replace(/Pistolskytteklubb/gi, 'PSK')
+        .replace(/Pistolskyttar/gi, 'PS')
+        .replace(/Pistolklubb/gi, 'PK')
+        .replace(/Handeldvapenförening/gi, 'HF')
+        .replace(/Sportskytteklubb/gi, 'SSK')
+        .replace(/Skytteklubb/gi, 'SK')
+        .replace(/Skytteförening/gi, 'SF');
+}
+
+// Toggle/choose sort column for the individuals table.
+function sortCompetitionRegistrations(key) {
+    if (competitionSortKey === key) {
+        competitionSortDir = -competitionSortDir;
+    } else {
+        competitionSortKey = key;
+        competitionSortDir = 1;
+    }
+    applyCompetitionSort();
+    currentCompetitionPage = 1;
+    displayCompetitionRegistrations();
+    updateCompetitionSortIndicators();
+}
+
+// Sort filteredCompetitionRegistrations in place by the active key. No-op when no
+// key is selected, so the natural load order is preserved until the user clicks.
+function applyCompetitionSort() {
+    if (!competitionSortKey) return;
+    const key = competitionSortKey;
+    const dir = competitionSortDir;
+    filteredCompetitionRegistrations.sort((a, b) => {
+        switch (key) {
+            case 'memberName':
+                return (a.memberName || '').localeCompare(b.memberName || '', 'sv') * dir;
+            case 'memberClub':
+                return (a.memberClub || '').localeCompare(b.memberClub || '', 'sv') * dir;
+            case 'isSubCompetition':
+                return ((a.isSubCompetition ? 1 : 0) - (b.isSubCompetition ? 1 : 0)) * dir;
+            case 'registrationDate':
+                return ((new Date(a.registrationDate).getTime() || 0) - (new Date(b.registrationDate).getTime() || 0)) * dir;
+            case 'paymentStatus':
+                return (a.paymentStatus || '').localeCompare(b.paymentStatus || '', 'sv') * dir;
+            default:
+                return 0;
+        }
+    });
+}
+
+// Paint the ▲/▼ arrow on the active sort column header.
+function updateCompetitionSortIndicators() {
+    document.querySelectorAll('#competitionRegistrationsTable .sort-ind').forEach(el => {
+        const k = el.getAttribute('data-sort');
+        el.textContent = (k === competitionSortKey) ? (competitionSortDir === 1 ? ' ▲' : ' ▼') : '';
+    });
+}
+
 // Helper function to get payment status badge class
 function getPaymentStatusBadgeClass(status) {
     switch(status) {
@@ -921,6 +989,29 @@ function loadCompetitionRegistrations() {
 // ==================== Lag (teams + stafett) ====================
 let competitionTeams = [];
 
+// Sort state for the teams table. Empty key = original (load) order.
+let teamSortKey = '';
+let teamSortDir = 1; // 1 = ascending, -1 = descending
+
+function sortCompetitionTeams(key) {
+    if (teamSortKey === key) {
+        teamSortDir = -teamSortDir;
+    } else {
+        teamSortKey = key;
+        teamSortDir = 1;
+    }
+    renderCompetitionTeams();
+    updateTeamSortIndicators();
+}
+
+// Paint the ▲/▼ arrow on the active teams sort column header.
+function updateTeamSortIndicators() {
+    document.querySelectorAll('#competitionTeamsSection .team-sort-ind').forEach(el => {
+        const k = el.getAttribute('data-sort');
+        el.textContent = (k === teamSortKey) ? (teamSortDir === 1 ? ' ▲' : ' ▼') : '';
+    });
+}
+
 function loadCompetitionTeams() {
     const cid = $('.competition-registration-management').data('competition-id');
     fetch(`/umbraco/surface/RegistrationAdmin/GetCompetitionTeams?competitionId=${cid}`)
@@ -955,7 +1046,29 @@ function renderCompetitionTeams() {
     }
     section.classList.remove('d-none');
 
-    tbody.innerHTML = competitionTeams.map(t => {
+    // Sort a copy by the active key (the natural load order is preserved until a header click).
+    let teamRows = competitionTeams.slice();
+    if (teamSortKey) {
+        const dir = teamSortDir;
+        teamRows.sort((a, b) => {
+            switch (teamSortKey) {
+                case 'teamName':
+                    return (a.teamName || '').localeCompare(b.teamName || '', 'sv') * dir;
+                case 'type':
+                    return ((a.isRelay ? 1 : 0) - (b.isRelay ? 1 : 0)) * dir;
+                case 'teamClass':
+                    return (a.teamClass || '').localeCompare(b.teamClass || '', 'sv') * dir;
+                case 'clubName':
+                    return (a.clubName || '').localeCompare(b.clubName || '', 'sv') * dir;
+                case 'paymentStatus':
+                    return (a.paymentStatus || '').localeCompare(b.paymentStatus || '', 'sv') * dir;
+                default:
+                    return 0;
+            }
+        });
+    }
+
+    tbody.innerHTML = teamRows.map(t => {
         const typeBadge = t.isRelay
             ? '<span class="badge bg-primary">Stafett</span>'
             : '<span class="badge bg-info">Lag</span>';
@@ -981,7 +1094,7 @@ function renderCompetitionTeams() {
             <td><strong>${escapeHtmlSafe(t.teamName)}</strong></td>
             <td>${typeBadge}</td>
             <td>${escapeHtmlSafe(t.teamClass)}</td>
-            <td>${escapeHtmlSafe(t.clubName)}</td>
+            <td style="font-size:0.85em; max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtmlSafe(t.clubName || '')}">${escapeHtmlSafe(shortenClubName(t.clubName || ''))}</td>
             <td class="small">${members}</td>
             <td>${statusBadge}</td>
             <td>
@@ -1227,6 +1340,7 @@ function filterCompetitionRegistrations() {
         return matchesClass && matchesClub && matchesPreference && matchesPayment && matchesCheckedIn && matchesSearch;
     });
 
+    applyCompetitionSort();
     currentCompetitionPage = 1;
     displayCompetitionRegistrations();
 }
@@ -1407,18 +1521,15 @@ function displayCompetitionRegistrations() {
         }
 
         const row = document.createElement('tr');
-        // Show the invoice number under the status badge so the cashier can match against
-        // a Swish notification at a glance. Empty for rows that don't have an invoice yet.
-        const invoiceRef = reg.invoiceNumber
-            ? `<div class="small text-muted mt-1" title="Referens (Swish)">
-                   <i class="bi bi-hash"></i>${reg.invoiceNumber}
-               </div>`
-            : '';
+        // Club name shortened for a narrow column; full name kept in the title for hover
+        // and still used for search/filter (reg.memberClub is untouched).
+        const fullClub = reg.memberClub || '';
+        const shortClub = shortenClubName(fullClub);
         row.innerHTML = `
             <td>
                 <strong>${reg.memberName}</strong>
             </td>
-            <td>${reg.memberClub}</td>
+            <td style="font-size:0.85em; max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtmlSafe(fullClub)}">${escapeHtmlSafe(shortClub)}</td>
             <td>
                 ${classBadges}
             </td>
@@ -1444,7 +1555,6 @@ function displayCompetitionRegistrations() {
                         <i class="bi bi-cash-coin me-1"></i>Betalning anmäld
                     </span>
                 ` : ''}
-                ${invoiceRef}
             </td>
             <td>
                 <!-- Item #9: at-the-desk attendance toggle. Saves on change; reflects state
