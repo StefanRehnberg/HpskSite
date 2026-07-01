@@ -216,47 +216,84 @@ const springRegConfig = {
     clubs: @Html.Raw(allClubsJson)
 };
 let springRegSelectedTargetMemberId = springRegConfig.memberId || null;
-let springRegExistingRegistrations = null; // cached: { memberId -> [class1, class2, ...] }
+let springRegExistingClasses = [];    // classes for the currently-inspected member, e.g. ["A-H 60","C-H 60"]
+let springRegExistingSubComp = false; // whether that member's existing registration opted into the deltävling
 
-// --- Load existing registrations for duplicate detection ---
-async function springRegLoadExistingRegistrations() {
-    if (springRegExistingRegistrations !== null) return; // already loaded
-    try {
-        const response = await fetch(`/umbraco/surface/Competition/GetCompetitionRegistrations?competitionId=${@competitionId}`, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-        const data = await response.json();
-        if (data.success && data.registrations) {
-            springRegExistingRegistrations = {};
-            for (const reg of data.registrations) {
-                const mid = reg.memberId;
-                if (!springRegExistingRegistrations[mid]) springRegExistingRegistrations[mid] = [];
-                if (reg.shootingClasses) {
-                    for (const sc of reg.shootingClasses) {
-                        springRegExistingRegistrations[mid].push(sc.class || sc.className || '');
+// Load + apply the selected member's existing registration for this competition.
+// Uses the member-scoped GetMemberRegistrationsForCompetition (authorizes self OR admin-of-target),
+// so it works for regular members too. The old GetCompetitionRegistrations call was admin-only,
+// so members never saw their existing registration and could silently drop it on re-registration.
+async function springRegCheckExisting(memberId) {
+    springRegExistingClasses = [];
+    springRegExistingSubComp = false;
+
+    if (memberId) {
+        try {
+            const response = await fetch(`/umbraco/surface/Competition/GetMemberRegistrationsForCompetition?competitionId=${@competitionId}&memberId=${memberId}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            const data = await response.json();
+            if (data.success && data.registrations) {
+                for (const reg of data.registrations) {
+                    if (reg.shootingClasses) {
+                        for (const sc of reg.shootingClasses) {
+                            const cls = sc.class || sc.className || '';
+                            if (cls) springRegExistingClasses.push(cls);
+                        }
                     }
+                    if (reg.isSubCompetition === true) springRegExistingSubComp = true;
                 }
             }
+        } catch (err) {
+            console.error('Error loading member registrations:', err);
         }
-    } catch (err) {
-        console.error('Error loading existing registrations:', err);
     }
+
+    springRegApplyExisting();
 }
 
-function springRegCheckExisting(memberId) {
+// Reflect the loaded existing registration in the form: the "Redan anmäld" notice, the weapon
+// groups, the age class, and the deltävling checkbox — so reopening shows the persisted state
+// instead of a blank form (previously only the notice was updated, and only for admins).
+function springRegApplyExisting() {
+    // Deltävling opt-in
+    const subCb = document.getElementById('springRegSubCompetition');
+    if (subCb) subCb.checked = springRegExistingSubComp;
+
+    // Weapon groups + age class, parsed from the class ids ("A-H 60" -> weapon "A", age "H 60")
+    let hasA = false, hasC = false, ageClass = '';
+    for (const cls of springRegExistingClasses) {
+        const dash = cls.indexOf('-');
+        if (dash < 0) continue;
+        const weapon = cls.substring(0, dash);
+        const age = cls.substring(dash + 1);
+        if (weapon === 'A') hasA = true;
+        else if (weapon === 'C') hasC = true;
+        if (age) ageClass = age;
+    }
+    const weaponA = document.getElementById('springRegWeaponA');
+    const weaponC = document.getElementById('springRegWeaponC');
+    if (weaponA) weaponA.checked = hasA;
+    if (weaponC) weaponC.checked = hasC;
+    // Always set the age class (to '' when there is no existing registration) so switching to a
+    // member without a registration clears a previously-shown member's age class.
+    const ageSelect = document.getElementById('springRegAgeClass');
+    if (ageSelect) ageSelect.value = ageClass;
+
+    // "Redan anmäld i…" notice
     const notice = document.getElementById('springRegExistingNotice');
     const text = document.getElementById('springRegExistingText');
-    if (!notice || !text) return;
-
-    if (!memberId || !springRegExistingRegistrations || !springRegExistingRegistrations[memberId]) {
-        notice.style.display = 'none';
-        return;
+    if (notice && text) {
+        if (springRegExistingClasses.length) {
+            const badges = springRegExistingClasses.map(c => `<span class="badge bg-warning text-dark me-1">${window.formatAgeSpan ? formatAgeSpan(c) : c}</span>`).join('');
+            text.innerHTML = `Redan anmäld i: ${badges} — ny anmälan uppdaterar befintlig.`;
+            notice.style.display = 'block';
+        } else {
+            notice.style.display = 'none';
+        }
     }
 
-    const classes = springRegExistingRegistrations[memberId];
-    const badges = classes.map(c => `<span class="badge bg-warning text-dark me-1">${window.formatAgeSpan ? formatAgeSpan(c) : c}</span>`).join('');
-    text.innerHTML = `Redan anmäld i: ${badges} — ny anmälan uppdaterar befintlig.`;
-    notice.style.display = 'block';
+    springRegUpdateSummary();
 }
 
 // --- Init: populate club dropdown for admins ---
@@ -593,12 +630,10 @@ function springRegShowSwish(competitionId, targetMemberId) {
         });
 }
 
-// Load existing registrations when modal opens and check for current member
+// Load + apply the current member's existing registration when the modal opens
 document.getElementById('registrationModal')?.addEventListener('shown.bs.modal', async () => {
-    await springRegLoadExistingRegistrations();
-    // For regular members (no club dropdown), check immediately
     const memberId = springRegSelectedTargetMemberId || springRegConfig.memberId;
-    if (memberId) springRegCheckExisting(memberId);
+    if (memberId) await springRegCheckExisting(memberId);
 });
 
 // Reset form when modal is closed
@@ -607,6 +642,8 @@ document.getElementById('registrationModal')?.addEventListener('hidden.bs.modal'
     const weaponC = document.getElementById('springRegWeaponC');
     if (weaponA) weaponA.checked = false;
     if (weaponC) weaponC.checked = false;
+    const subCbReset = document.getElementById('springRegSubCompetition');
+    if (subCbReset) subCbReset.checked = false;
     document.getElementById('springRegAgeClass').value = '';
     document.getElementById('springRegError').style.display = 'none';
     document.getElementById('springRegSuccess').style.display = 'none';

@@ -2314,30 +2314,43 @@ namespace HpskSite.Controllers
                 int targetMemberId;
                 if (memberId.HasValue && memberId.Value > 0)
                 {
-                    // Check if current user has permission to view this member's registrations
-                    bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                    bool canViewMember = false;
+                    // Check if current user has permission to view this member's registrations.
+                    // Site admins, and anyone who manages THIS competition (competition manager,
+                    // or admin/skjutledare of the hosting club/region), may view any member's
+                    // registration in it — same tier as GetCompetitionRegistrations. Otherwise a
+                    // club admin may view members of their own club, and members may view their own.
+                    bool canViewMember = await _authorizationService.IsCurrentUserAdminAsync();
 
-                    if (isSiteAdmin)
+                    if (!canViewMember)
+                        canViewMember = await _authorizationService.IsCompetitionManager(competitionId);
+
+                    if (!canViewMember)
                     {
-                        canViewMember = true;
+                        var hostingClubId = _contentService.GetById(competitionId)?.GetValue<int>("clubId") ?? 0;
+                        if (hostingClubId > 0)
+                        {
+                            canViewMember = await _authorizationService.IsClubAdminForClub(hostingClubId)
+                                || await _authorizationService.IsSkjutledareForClub(hostingClubId);
+                        }
                     }
-                    else
+
+                    if (!canViewMember)
                     {
-                        // Club admin can view members from their clubs
+                        // Club admin of the target member's own club, or the member themselves.
                         var targetMember = _memberService.GetById(memberId.Value);
                         if (targetMember != null)
                         {
-                            var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
-                            if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
-                            {
-                                canViewMember = await _authorizationService.IsClubAdminForClub(targetClubId);
-                            }
-
-                            // Users can view their own registrations
                             if (targetMember.Id == currentMemberData.Id)
                             {
                                 canViewMember = true;
+                            }
+                            else
+                            {
+                                var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
+                                if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
+                                {
+                                    canViewMember = await _authorizationService.IsClubAdminForClub(targetClubId);
+                                }
                             }
                         }
                     }
