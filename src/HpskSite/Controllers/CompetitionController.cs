@@ -388,7 +388,6 @@ namespace HpskSite.Controllers
 
                 IContent registration;
                 bool isUpdate = false;
-                int? oldInvoiceId = null;
                 decimal oldFee = 0;
                 decimal newFee = 0;
 
@@ -443,14 +442,8 @@ namespace HpskSite.Controllers
                                 TempData["Error"] = errorMsg;
                                 return RedirectToCurrentUmbracoPage();
                             }
-
-                            // Mark invoice for cancellation if fee changed
-                            if (oldFee != newFee && paymentStatus == "Pending")
-                            {
-                                oldInvoiceId = existingInvoiceId;
-                                _logger.LogInformation("Will cancel old invoice {InvoiceId} due to fee change from {OldFee} to {NewFee}",
-                                    existingInvoiceId, oldFee, newFee);
-                            }
+                            // Fee changes are reconciled after save via
+                            // PaymentService.ReconcileRegistrationInvoiceAsync (below).
                         }
                     }
 
@@ -615,28 +608,21 @@ namespace HpskSite.Controllers
                             .GetAwaiter().GetResult();
                     }, $"ensure invoice for registration {registrationId_forPublish}");
                 }
-
-                // Cancel old invoice in background if fee changed
-                if (isUpdate && oldInvoiceId.HasValue && oldFee != newFee)
+                else if (oldFee != newFee)
                 {
-                    var invoiceIdToCancel = oldInvoiceId.Value;
-                    var feeInfo = $"{oldFee:F2} to {newFee:F2}";
-                    // Cancel old invoice in background — fresh DI scope to avoid the
-                    // disposed-scope content-service capture that was leaking locks.
-                    EnqueueBackground(TimeSpan.FromSeconds(10), sp =>
+                    // Reconcile the invoice to the new fee whenever the registration changes
+                    // (class added/removed, or deltävling toggled). Uses the shared delta/top-up
+                    // model so an unpaid invoice is patched/created/cancelled to match — replacing
+                    // the old cancel-only logic that left the registration without a correct invoice.
+                    var compIdForInvoice = competitionId;
+                    EnqueueBackground(TimeSpan.FromSeconds(12), sp =>
                     {
-                        var contentService = sp.GetRequiredService<IContentService>();
-                        var oldInvoice = contentService.GetById(invoiceIdToCancel);
-                        if (oldInvoice != null)
-                        {
-                            oldInvoice.SetValue("paymentStatus", "Cancelled");
-                            var notes = oldInvoice.GetValue<string>("notes") ?? "";
-                            notes += $"\n[{DateTime.Now:yyyy-MM-dd HH:mm}] Cancelled - Fee change from {feeInfo} SEK";
-                            oldInvoice.SetValue("notes", notes);
-                            contentService.Save(oldInvoice);
-                            contentService.Publish(oldInvoice, new[] { "*" }, -1);
-                        }
-                    }, $"cancel old invoice {invoiceIdToCancel}");
+                        var contextFactory = sp.GetRequiredService<IUmbracoContextFactory>();
+                        using var contextRef = contextFactory.EnsureUmbracoContext();
+                        var paymentService = sp.GetRequiredService<PaymentService>();
+                        paymentService.ReconcileRegistrationInvoiceAsync(compIdForInvoice, registrationId_forPublish)
+                            .GetAwaiter().GetResult();
+                    }, $"reconcile invoice for registration {registrationId_forPublish}");
                 }
 
                 int registrationId = registration.Id;

@@ -524,6 +524,129 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Reconcile a registration's invoice(s) to its CURRENT fee (derived from its stored
+        /// shooting classes + deltävling opt-in), so ANY change — class added/removed, or the
+        /// deltävling toggled — is reflected on the invoice. Mirrors the cashier edit path's
+        /// delta/top-up model:
+        ///   sumPaid         = total of every Paid invoice
+        ///   existingPending = the (single) Pending invoice, if any
+        ///   delta           = newFee - sumPaid   (what the shooter still owes)
+        /// delta &gt; 0 → patch the Pending invoice to <c>delta</c> (or create one if missing);
+        /// delta == 0 → cancel a leftover Pending invoice (fully covered / now free);
+        /// delta &lt; 0 → already paid more than the new fee: a refund the organizer handles
+        ///               manually — Paid invoices are never modified, we just cancel any Pending.
+        /// Idempotent and best-effort.
+        /// </summary>
+        public async Task<bool> ReconcileRegistrationInvoiceAsync(int competitionId, int registrationId)
+        {
+            try
+            {
+                var registration = _contentService.GetById(registrationId);
+                if (registration == null || registration.ContentType.Alias != "competitionRegistration")
+                    return false;
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || competition.GetValue<bool>("isExternal"))
+                    return false;
+
+                var memberId = registration.GetValue<int>("memberId");
+                if (memberId <= 0) return false;
+
+                // Fee owed by the registration as it now stands.
+                var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
+                    registration.GetValue<string>("shootingClasses") ?? "");
+                var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
+                var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
+                var classesForCalc = classCodes.Count > 0
+                    ? (IReadOnlyCollection<string>)classCodes
+                    : new[] { string.Empty };
+                var newFee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+
+                var allInvoices = GetAllNonCancelledInvoicesForRegistration(competition, registrationId);
+
+                decimal sumPaid = 0m;
+                IContent? existingPending = null;
+                foreach (var inv in allInvoices)
+                {
+                    var s = (inv.GetValue<string>("paymentStatus") ?? "Pending").Trim().Trim('[', ']').Trim('"');
+                    var amt = inv.GetValue<decimal>("totalAmount");
+                    if (s == "Paid") sumPaid += amt;
+                    else if (s == "Pending" && existingPending == null) existingPending = inv;
+                }
+
+                var delta = newFee - sumPaid;
+
+                if (delta > 0)
+                {
+                    if (existingPending != null)
+                    {
+                        // Adjust the outstanding Pending invoice up or down to match.
+                        if (existingPending.GetValue<decimal>("totalAmount") != delta)
+                        {
+                            existingPending.SetValue("totalAmount", delta);
+                            if (_contentService.Save(existingPending).Success)
+                                _contentService.Publish(existingPending, new[] { "*" }, -1);
+                        }
+                    }
+                    else
+                    {
+                        // No outstanding invoice — create one for what's owed. Paid invoices (if
+                        // any) stay as the historical record; the new one is a top-up for the rest.
+                        var memberName = registration.GetValue<string>("memberName") ?? "";
+                        var created = await CreateInvoiceAsync(competitionId, memberId.ToString(), memberName, registrationId, delta, "Swish");
+                        if (created != null && sumPaid == 0m)
+                        {
+                            registration.SetValue("invoiceId", created.Id);
+                            if (_contentService.Save(registration).Success)
+                                _contentService.Publish(registration, new[] { "*" }, -1);
+                        }
+                    }
+                }
+                else
+                {
+                    // delta <= 0: nothing (more) to collect. Cancel a leftover Pending invoice so
+                    // the registration stops showing an amount due (e.g. a class was removed, or the
+                    // deltävling was unticked, bringing the fee to what's already paid / to zero).
+                    if (existingPending != null)
+                    {
+                        existingPending.SetValue("paymentStatus", "Cancelled");
+                        var notes = existingPending.GetValue<string>("notes") ?? "";
+                        notes += $"\n[{DateTime.Now:yyyy-MM-dd HH:mm}] Makulerad – avgiften är nu {newFee:0} kr (redan betalt: {sumPaid:0} kr).";
+                        existingPending.SetValue("notes", notes);
+                        if (_contentService.Save(existingPending).Success)
+                            _contentService.Publish(existingPending, new[] { "*" }, -1);
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ReconcileRegistrationInvoiceAsync failed for registration {RegistrationId}", registrationId);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// All non-cancelled invoices for a registration (matched by <c>registrationId</c> or the
+        /// legacy <c>relatedRegistrationIds</c> JSON array), newest first.
+        /// </summary>
+        private List<IContent> GetAllNonCancelledInvoicesForRegistration(IContent competition, int registrationId)
+        {
+            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (hub == null) return new List<IContent>();
+
+            return _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
+                .Where(c => c.ContentType.Alias == "registrationInvoice")
+                .Where(c => (c.GetValue<string>("paymentStatus") ?? "").Trim().Trim('[', ']').Trim('"') != "Cancelled")
+                .Where(c => c.GetValue<int>("registrationId") == registrationId
+                            || (c.GetValue<string>("relatedRegistrationIds") ?? "").Contains(registrationId.ToString()))
+                .OrderByDescending(c => c.Id)
+                .ToList();
+        }
+
+        /// <summary>
         /// Find a non-cancelled registrationInvoice for a registration via the writable
         /// content service (current data, not the published cache). Matches the invoice's
         /// single <c>registrationId</c>, the legacy <c>relatedRegistrationIds</c> JSON array,
