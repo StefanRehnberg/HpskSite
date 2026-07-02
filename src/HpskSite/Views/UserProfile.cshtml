@@ -2367,6 +2367,11 @@ function renderDashboard(data, selectedYears = null) {
         </div>
     `;
 
+    // Remember the year-filtered monthly data so the progress-chart filter buttons
+    // (Alla / Träning / Tävling) stay within the selected year instead of reverting
+    // to the full unfiltered dataset.
+    window.currentMonthlyData = filteredData.monthlyData;
+
     // Render charts after DOM update
     setTimeout(() => {
         renderProgressChart(filteredData.monthlyData, 'all');
@@ -2638,9 +2643,12 @@ function filterProgressChart(filter, button) {
     document.querySelectorAll('[data-filter]').forEach(btn => btn.classList.remove('active'));
     button.classList.add('active');
 
-    // Re-render chart with filter
-    if (dashboardData && dashboardData.monthlyData) {
-        renderProgressChart(dashboardData.monthlyData, filter);
+    // Re-render chart with filter, using the currently selected year's data
+    // (set in renderDashboard) so the filter buttons don't revert to all years.
+    const monthlyData = window.currentMonthlyData
+        || (dashboardData && dashboardData.monthlyData);
+    if (monthlyData) {
+        renderProgressChart(monthlyData, filter);
     }
 }
 
