@@ -383,6 +383,22 @@ function roundToQuarter(value) {
     return Math.round(value * 4) / 4;
 }
 
+// Single source of truth for how a discipline's series are grouped in the scoreboard.
+// Milsnabb and Nationell helmatch are shot in 3 parts of 4 series (4+4+4, sum after 12);
+// everything else uses the precision cumulative points (6, 7, 10, 12).
+// Both scoreboard renderers (the live board here and the read-only history modal in
+// TrainingMatch.cshtml) MUST use this so the grouping rule can never drift between them.
+function trainingMatchSeriesGrouping(discipline) {
+    const isGrouped = (discipline === 'Milsnabb' || discipline === 'NationellHelmatch');
+    return {
+        isGrouped: isGrouped,
+        summaryAfter: isGrouped ? [4, 8, 12] : [6, 7, 10, 12],
+        groupLabels: discipline === 'NationellHelmatch'
+            ? ['Precision', 'Duell', 'Fält']
+            : ['10 sek.', '8 sek.', '6 sek.']
+    };
+}
+
 // Calculate adjusted total with per-series handicap clamping
 // Each series is adjusted and clamped between 0-50 individually (as decimals), then summed.
 // Only the final total is rounded, so fractional handicaps accumulate correctly.
@@ -903,7 +919,8 @@ function renderScoreboard(match) {
     });
 
     // Always show at least 6 rows (or 12 for Milsnabb/NationellHelmatch), or more if there are more series
-    const defaultRows = (match.discipline === 'Milsnabb' || match.discipline === 'NationellHelmatch') ? 12 : 6;
+    const grouping = trainingMatchSeriesGrouping(match.discipline);
+    const defaultRows = grouping.isGrouped ? 12 : 6;
     const displayRows = Math.max(defaultRows, maxSeries);
 
     // Build score rows
@@ -987,21 +1004,15 @@ function renderScoreboard(match) {
 
         tbody.appendChild(tr);
 
-        // Add summary row at group boundaries
-        // Milsnabb/NationellHelmatch: groups of 4 (after 4, 8, 12)
-        // Precision/Duell: after 6, 7, 10, 12
-        const isGrouped = (match.discipline === 'Milsnabb' || match.discipline === 'NationellHelmatch');
-        const showSummary = isGrouped
-            ? (seriesNum % 4 === 0)
-            : (seriesNum === 6 || seriesNum === 7 || seriesNum === 10 || seriesNum === 12);
-
-        if (showSummary) {
+        // Add summary row at group boundaries (see trainingMatchSeriesGrouping):
+        // grouped disciplines sum 4+4+4; others show cumulative at 6, 7, 10, 12.
+        if (grouping.summaryAfter.includes(seriesNum)) {
             const summaryRow = document.createElement('tr');
             summaryRow.className = 'summary-row';
 
-            // For grouped disciplines, show group subtotal (just this group of 4)
-            // For others, show cumulative total
-            const groupStart = isGrouped ? seriesNum - 3 : 1;
+            // For grouped disciplines, show group subtotal (just this block of 4);
+            // for others, show the cumulative total.
+            const groupStart = grouping.isGrouped ? seriesNum - 3 : 1;
 
             match.participants.forEach((participant, pIndex) => {
                 const td = document.createElement('td');
@@ -1013,12 +1024,9 @@ function renderScoreboard(match) {
                     if (score) groupTotal += Math.min(score.total, 50);
                 }
 
-                if (isGrouped) {
+                if (grouping.isGrouped) {
                     const groupNum = seriesNum / 4;
-                    const groupLabels = match.discipline === 'NationellHelmatch'
-                        ? ['Precision', 'Duell', 'Fält']
-                        : ['10 sek.', '8 sek.', '6 sek.'];
-                    const label = groupLabels[groupNum - 1] || `Grupp ${groupNum}`;
+                    const label = grouping.groupLabels[groupNum - 1] || `Grupp ${groupNum}`;
                     td.innerHTML = `<strong>${groupTotal}</strong> <small class="text-muted">(${label})</small>`;
                 } else {
                     td.innerHTML = `<strong>${groupTotal}</strong> <small class="text-muted">(${seriesNum})</small>`;

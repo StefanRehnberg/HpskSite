@@ -1682,8 +1682,10 @@
             const tbody = document.getElementById('historyScoreboardBody');
             tbody.innerHTML = '';
 
-            // Summary row insertion points (after these series numbers)
-            const summaryAfter = [6, 7, 10, 12];
+            // Series grouping (4+4+4 for Milsnabb / Nationell helmatch, else 6/7/10/12).
+            // Shared with the live board's renderScoreboard via trainingMatchSeriesGrouping
+            // (defined in TrainingMatchScoreboard.cshtml) so the rule can't drift.
+            const grouping = trainingMatchSeriesGrouping(match.discipline);
 
             for (let seriesNum = 1; seriesNum <= maxSeries; seriesNum++) {
                 const tr = document.createElement('tr');
@@ -1731,25 +1733,35 @@
 
                 tbody.appendChild(tr);
 
-                // Add summary row after series 6, 7, 10, 12
-                if (summaryAfter.includes(seriesNum) && seriesNum <= maxSeries) {
+                // Add summary row at group boundaries (4+4+4 grouped, else 6/7/10/12).
+                if (grouping.summaryAfter.includes(seriesNum) && seriesNum <= maxSeries) {
                     const summaryRow = document.createElement('tr');
                     summaryRow.className = 'summary-row';
+
+                    // For grouped disciplines, show this group's subtotal (just the block of 4);
+                    // otherwise show the cumulative total up to this series.
+                    const groupStart = grouping.isGrouped ? seriesNum - 3 : 1;
 
                     match.participants.forEach((participant) => {
                         const td = document.createElement('td');
                         td.className = 'summary-cell';
 
-                        // Calculate sum up to this series (using equalized approach - only count actual scores)
-                        const scoresUpToSeries = (participant.scores || [])
-                            .filter(s => s.seriesNumber <= seriesNum)
+                        const summarizedScores = (participant.scores || [])
+                            .filter(s => s.seriesNumber >= groupStart && s.seriesNumber <= seriesNum)
                             .sort((a, b) => a.seriesNumber - b.seriesNumber);
-                        const sumTotal = scoresUpToSeries.reduce((sum, s) => sum + s.total, 0);
-                        const sumX = scoresUpToSeries.reduce((sum, s) => sum + (s.xCount || 0), 0);
+                        const sumTotal = summarizedScores.reduce((sum, s) => sum + s.total, 0);
+                        const sumX = summarizedScores.reduce((sum, s) => sum + (s.xCount || 0), 0);
+
+                        let labelHtml = '';
+                        if (grouping.isGrouped) {
+                            const groupNum = seriesNum / 4;
+                            const label = grouping.groupLabels[groupNum - 1] || `Grupp ${groupNum}`;
+                            labelHtml = ` <small class="text-muted">(${label})</small>`;
+                        }
 
                         td.innerHTML = `
                             <span class="summary-total">${sumTotal}</span>
-                            ${sumX > 0 ? `<span class="summary-x">(${sumX}x)</span>` : ''}
+                            ${sumX > 0 ? `<span class="summary-x">(${sumX}x)</span>` : ''}${labelHtml}
                         `;
                         summaryRow.appendChild(td);
                     });
