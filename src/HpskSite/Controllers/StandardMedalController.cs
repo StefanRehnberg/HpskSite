@@ -127,6 +127,63 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// The current member's medals that are NOT yet verified by their club (Status = Reported),
+        /// for one discipline and an optional set of years. Drives the "ej verifierade" modal on the
+        /// dashboard Standardmedaljer card. Years is a CSV (e.g. "2026" or "2025,2026"); empty = all.
+        /// GET /umbraco/surface/StandardMedal/GetMyUnverifiedMedals?competitionType=Precision&years=2026
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyUnverifiedMedals(string competitionType = "Precision", string? years = null)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Inte inloggad." });
+
+            var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (member == null)
+                return Json(new { success = false, message = "Medlem hittades inte." });
+
+            var yearSet = (years ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var y) ? y : (int?)null)
+                .Where(y => y.HasValue).Select(y => y!.Value)
+                .ToHashSet();
+
+            var awards = await _ledger.GetAwardsForMemberAsync(member.Id, null, includeRejected: false);
+
+            var unverified = awards
+                .Where(a => string.Equals(a.Discipline, competitionType, StringComparison.OrdinalIgnoreCase)
+                            && a.Status == Models.StandardMedals.StatusReported
+                            && (yearSet.Count == 0 || yearSet.Contains(a.Year)))
+                .OrderByDescending(a => a.CompetitionDate ?? DateTime.MinValue)
+                .ThenByDescending(a => a.Year)
+                .Select(a => new
+                {
+                    id = a.Id,
+                    year = a.Year,
+                    medalType = a.MedalType,
+                    medalName = Models.StandardMedals.MedalDisplayName(a.MedalType),
+                    points = a.Points,
+                    competitionName = a.CompetitionName,
+                    competitionDate = a.CompetitionDate,
+                    shootingClass = a.ShootingClass,
+                    source = a.Source,
+                    hasProof = a.ProofType == Models.StandardMedals.ProofFile && !string.IsNullOrEmpty(a.ProofFileRef),
+                    trainingScoreId = a.TrainingScoreId
+                })
+                .ToList();
+
+            return Json(new
+            {
+                success = true,
+                discipline = competitionType,
+                disciplineName = Models.StandardMedals.DisciplineDisplayName(competitionType),
+                totalPoints = unverified.Sum(m => m.points),
+                medals = unverified
+            });
+        }
+
+        /// <summary>
         /// The linked Standardmedalj award for one of the current member's self-entered results —
         /// so the edit modal can show current proof status and offer to add/replace it.
         /// GET /umbraco/surface/StandardMedal/GetMedalForTrainingScore?trainingScoreId=123

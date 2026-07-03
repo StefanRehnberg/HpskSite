@@ -799,23 +799,28 @@ namespace HpskSite.Controllers
                     // Won standard medals at our OWN competitions (materialized ledger), keyed by
                     // competition + class so each result row can show its StM (S/B).
                     var onSiteMedalLookup = new Dictionary<string, string>();
+                    var onSiteStatusLookup = new Dictionary<string, string>();
                     foreach (var m in db.Fetch<dynamic>(
-                        "SELECT CompetitionId, ShootingClass, MedalType FROM StandardMedalAward WHERE MemberId = @0 AND Source = 'OnSite'",
+                        "SELECT CompetitionId, ShootingClass, MedalType, Status FROM StandardMedalAward WHERE MemberId = @0 AND Source = 'OnSite'",
                         memberId))
                     {
-                        onSiteMedalLookup[(int)m.CompetitionId + "|" + ((string)m.ShootingClass ?? "")] = (string)m.MedalType;
+                        var key = (int)m.CompetitionId + "|" + ((string)m.ShootingClass ?? "");
+                        onSiteMedalLookup[key] = (string)m.MedalType;
+                        onSiteStatusLookup[key] = (string)m.Status;
                     }
 
-                    // Whether each self-entered medal has an uploaded proof file (keyed by TrainingScoreId),
-                    // so each row can show a proof cue (has proof / missing).
+                    // Whether each self-entered medal has an uploaded proof file (keyed by TrainingScoreId)
+                    // + its verification status, so each row can show a proof cue + approval cue.
                     var selfProofByScore = new Dictionary<int, bool>();
+                    var selfStatusByScore = new Dictionary<int, string>();
                     foreach (var a in db.Fetch<dynamic>(
-                        "SELECT TrainingScoreId, ProofType, ProofFileRef FROM StandardMedalAward WHERE MemberId = @0 AND TrainingScoreId IS NOT NULL",
+                        "SELECT TrainingScoreId, ProofType, ProofFileRef, Status FROM StandardMedalAward WHERE MemberId = @0 AND TrainingScoreId IS NOT NULL",
                         memberId))
                     {
                         if (a.TrainingScoreId == null) continue;
                         bool hasFile = ((string)a.ProofType == "File") && !string.IsNullOrEmpty((string)a.ProofFileRef);
                         selfProofByScore[(int)a.TrainingScoreId] = hasFile;
+                        selfStatusByScore[(int)a.TrainingScoreId] = (string)a.Status;
                     }
 
                     // Query 1: Get competition results from the correct table based on type
@@ -896,7 +901,8 @@ namespace HpskSite.Controllers
                             shootingClass = group.Key.ShootingClass,
                             stdMedal = onSiteMedalLookup.GetValueOrDefault(group.Key.CompetitionId + "|" + group.Key.ShootingClass),
                             // pistol.nu-medaljer är belagda av tävlingens egen resultatlista.
-                            proofStatus = onSiteMedalLookup.ContainsKey(group.Key.CompetitionId + "|" + group.Key.ShootingClass) ? "has" : (string)null
+                            proofStatus = onSiteMedalLookup.ContainsKey(group.Key.CompetitionId + "|" + group.Key.ShootingClass) ? "has" : (string)null,
+                            verifyStatus = onSiteStatusLookup.GetValueOrDefault(group.Key.CompetitionId + "|" + group.Key.ShootingClass)
                         });
                     }
 
@@ -986,6 +992,11 @@ namespace HpskSite.Controllers
                             // Only medal rows carry a proof cue: has uploaded proof vs missing.
                             proofStatus = (isCompetition && (((string)score.CompetitionStdMedal) == "S" || ((string)score.CompetitionStdMedal) == "B"))
                                 ? (selfProofByScore.TryGetValue((int)score.Id, out var hasFile) && hasFile ? "has" : "missing")
+                                : (string)null,
+                            // Club approval status of the medal (Reported/Verified/Rejected). Default Reported
+                            // if the award row is missing, so a self-reported medal never looks "verified".
+                            verifyStatus = (isCompetition && (((string)score.CompetitionStdMedal) == "S" || ((string)score.CompetitionStdMedal) == "B"))
+                                ? (selfStatusByScore.TryGetValue((int)score.Id, out var vs) ? vs : "Reported")
                                 : (string)null
                         });
                     }

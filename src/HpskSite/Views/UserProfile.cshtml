@@ -867,6 +867,26 @@
     </div>
 </div>
 
+@* ── Ej verifierade standardmedaljer (dashboard "ej verifierade" link) ── *@
+<div class="modal fade" id="unverifiedMedalsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-hourglass-split text-warning"></i> Ej verifierade standardmedaljer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="unverifiedMedalsContent">
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @* ── Guldserie entry modal (5-shot keypad) ── *@
 <div class="modal fade" id="guldserieModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
@@ -2102,6 +2122,8 @@ function renderDashboard(data, selectedYears = null) {
 
     // Store data globally for theme updates
     window.dashboardData = data;
+    // Remember the active year scope so the "ej verifierade" modal can match the card's numbers.
+    window.dashboardSelectedYears = selectedYears;
 
     // Determine year filter state
     // selectedYears = null means "Alla" (all years)
@@ -2308,7 +2330,7 @@ function renderDashboard(data, selectedYears = null) {
                             <div>
                                 <strong>${filteredData.medalStats.verifiedPoints != null ? filteredData.medalStats.verifiedPoints : filteredData.medalStats.totalPoints}</strong>
                                 <span class="text-muted small">poäng verifierade</span>
-                                ${filteredData.medalStats.unverifiedPoints > 0 ? `<div class="text-muted small">(+${filteredData.medalStats.unverifiedPoints} ej verifierade)</div>` : ''}
+                                ${filteredData.medalStats.unverifiedPoints > 0 ? `<div class="small"><a href="#" onclick="openUnverifiedMedalsModal(); return false;" class="link-warning text-decoration-underline" title="Visa vilka medaljer som väntar på godkännande">(+${filteredData.medalStats.unverifiedPoints} ej verifierade)</a></div>` : ''}
                             </div>
                         ` : `
                             <div class="text-muted py-3">
@@ -2664,6 +2686,83 @@ function onDashboardYearChange(select) {
         const year = parseInt(value);
         renderDashboard(dashboardData, [year]);
     }
+}
+
+// Dashboard → Standardmedaljer → "(+N ej verifierade)" opens this modal, listing the medals
+// that are still waiting for the club to approve them, plus an explanation of how it works.
+function openUnverifiedMedalsModal() {
+    const modalEl = document.getElementById('unverifiedMedalsModal');
+    const content = document.getElementById('unverifiedMedalsContent');
+    const modal = new bootstrap.Modal(modalEl);
+    content.innerHTML = `<div class="text-center py-3"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div></div>`;
+    modal.show();
+
+    const discipline = getDashboardDiscipline();
+    // Match the card's year scope: explicit selection → those years; "Alla"/null → all available years.
+    const sel = window.dashboardSelectedYears;
+    const years = Array.isArray(sel) && sel.length > 0
+        ? sel
+        : ((window.dashboardData && window.dashboardData.availableYears) || []);
+    const qs = `competitionType=${encodeURIComponent(discipline)}&years=${encodeURIComponent(years.join(','))}`;
+
+    const explainer = `
+        <div class="alert alert-light border small mb-3">
+            <i class="bi bi-info-circle text-primary"></i>
+            En standardmedalj måste <strong>godkännas av din klubb</strong> innan den räknas som verifierad.
+            Medaljer du vunnit på en tävling <strong>som körs på pistol.nu</strong> godkänns automatiskt (resultatlistan är beviset).
+            Medaljer du <strong>själv registrerat</strong> (t.ex. från en extern tävling) måste en funktionär i klubben granska och godkänna –
+            <strong>även om du laddat upp ett bevis</strong>. Öppna resultatet i fliken <strong>Resultat</strong> för att ladda upp bevis om det saknas,
+            och be sedan klubbens sekreterare/styrelse att godkänna medaljen (Klubbadmin → Standardmedaljer).
+            Poäng: Silver = 2, Brons = 1.
+        </div>`;
+
+    fetch(`/umbraco/surface/StandardMedal/GetMyUnverifiedMedals?${qs}`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) {
+                content.innerHTML = explainer + `<div class="alert alert-danger mb-0">${d.message || 'Kunde inte hämta medaljer.'}</div>`;
+                return;
+            }
+            if (!d.medals || d.medals.length === 0) {
+                content.innerHTML = explainer + `<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> Inga ej verifierade medaljer för ${escapeHtml(d.disciplineName || discipline)}.</div>`;
+                return;
+            }
+            const rows = d.medals.map(m => {
+                const badge = m.medalType === 'S'
+                    ? '<span class="badge" style="background-color:#9ca3af;" title="Silver">S</span>'
+                    : '<span class="badge" style="background-color:#cd7f32;" title="Brons">B</span>';
+                const proof = m.hasProof
+                    ? '<span class="text-success"><i class="bi bi-paperclip"></i> Bevis finns</span>'
+                    : '<span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> Saknar bevis</span>';
+                const srcNote = m.source === 'SelfReported' ? 'Självrapporterad'
+                    : (m.source === 'AdminEntered' ? 'Inlagd av admin' : m.source);
+                return `
+                    <tr>
+                        <td>${badge} <span class="ms-1">${escapeHtml(m.medalName)}</span> <small class="text-muted">(${m.points} p)</small></td>
+                        <td class="d-none d-md-table-cell">${m.competitionName ? escapeHtml(m.competitionName) : '<span class="text-muted">–</span>'}</td>
+                        <td>${m.shootingClass ? `<span class="badge bg-secondary">${escapeHtml(m.shootingClass)}</span>` : ''}</td>
+                        <td class="d-none d-sm-table-cell">${m.competitionDate ? formatDateShort(m.competitionDate) : m.year}</td>
+                        <td>${proof}<div class="small text-muted">${escapeHtml(srcNote || '')}</div></td>
+                    </tr>`;
+            }).join('');
+            content.innerHTML = explainer + `
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2">
+                        <thead><tr>
+                            <th>Medalj</th>
+                            <th class="d-none d-md-table-cell">Tävling</th>
+                            <th>Klass</th>
+                            <th class="d-none d-sm-table-cell">Datum</th>
+                            <th>Status</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                <div class="text-muted small">Totalt ${d.medals.length} medalj(er) · ${d.totalPoints} poäng väntar på godkännande.</div>`;
+        })
+        .catch(() => {
+            content.innerHTML = explainer + `<div class="alert alert-danger mb-0">Fel vid inläsning.</div>`;
+        });
 }
 
 function switchToTab(tabId) {
@@ -3512,17 +3611,24 @@ function loadResults() {
         });
 }
 
-// Standard-medal cell: the S/B badge plus a proof cue (only meaningful when a medal was won).
+// Standard-medal cell: the S/B badge plus an approval cue (only meaningful when a medal was won).
+// The cue reflects the club's verification of the medal — see the legend above the table.
 function renderStmCell(r) {
     if (r.stdMedal !== 'S' && r.stdMedal !== 'B') return '';
     const badge = r.stdMedal === 'S'
         ? '<span class="badge" style="background-color:#9ca3af;" title="Silver">S</span>'
         : '<span class="badge" style="background-color:#cd7f32;" title="Brons">B</span>';
     let cue = '';
-    if (r.proofStatus === 'has') {
-        cue = ' <i class="bi bi-paperclip text-success" title="Bevis finns"></i>';
+    if (r.verifyStatus === 'Verified') {
+        cue = ' <i class="bi bi-patch-check-fill text-success" title="Godkänd av klubben"></i>';
+    } else if (r.verifyStatus === 'Rejected') {
+        cue = ' <i class="bi bi-x-circle-fill text-danger" title="Avvisad av klubben – öppna resultatet för mer info"></i>';
     } else if (r.proofStatus === 'missing') {
-        cue = ' <i class="bi bi-exclamation-triangle-fill text-warning" title="Saknar bevis – öppna resultatet och ladda upp"></i>';
+        // Reported but no proof file — the actionable state: upload proof so the club can approve.
+        cue = ' <i class="bi bi-exclamation-triangle-fill text-warning" title="Ej godkänd än – saknar bevis. Öppna resultatet och ladda upp."></i>';
+    } else {
+        // Reported, proof present — waiting for a club functionary to approve.
+        cue = ' <i class="bi bi-hourglass-split text-warning" title="Väntar på godkännande av klubben"></i>';
     }
     return badge + cue;
 }
@@ -3548,8 +3654,10 @@ function renderResultsTable(results) {
             <i class="bi bi-trophy text-primary"></i> = tävling.
             <i class="bi bi-people text-warning ms-2"></i> = träningsmatch.
             <i class="bi bi-pencil-square text-success ms-2"></i> = egen träning.
-            <span class="ms-2">StM: <i class="bi bi-paperclip text-success"></i> = bevis finns,
-            <i class="bi bi-exclamation-triangle-fill text-warning"></i> = saknar bevis.</span>
+            <span class="ms-2">StM (Standardmedalj): <i class="bi bi-patch-check-fill text-success"></i> = godkänd av klubben,
+            <i class="bi bi-hourglass-split text-warning"></i> = väntar på godkännande,
+            <i class="bi bi-exclamation-triangle-fill text-warning"></i> = saknar bevis (öppna resultatet och ladda upp),
+            <i class="bi bi-x-circle-fill text-danger"></i> = avvisad.</span>
         </p>
         <div class="table-responsive">
             <table class="table table-striped table-hover">
