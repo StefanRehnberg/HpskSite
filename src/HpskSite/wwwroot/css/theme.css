@@ -106,6 +106,15 @@
 .wh-ev.wh-tav { border-left-color: var(--bs-primary); }
 .wh-ev.wh-klubb { border-left-color: var(--bs-success); }
 .wh-ev.wh-tm { border-left-color: var(--bs-warning); }
+/* time-proximity cue (orthogonal to the source left-edge): today shouts, tomorrow whispers.
+   The ring is a box-shadow so it doesn't overwrite the source-coloured left border. */
+.wh-ev.wh-today {
+    background: rgba(var(--bs-danger-rgb), .06);
+}
+.wh-ev.wh-today .wh-when .d { color: var(--bs-danger); font-size: 1.15rem; }
+.wh-ev.wh-tomorrow {
+    background: rgba(var(--bs-warning-rgb), .07);
+}
 .wh-when {
     flex: 0 0 42px; text-align: center; line-height: 1.15;
     border-right: 1px solid var(--bs-border-color); padding-right: .6rem;

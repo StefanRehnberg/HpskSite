@@ -117,13 +117,16 @@
                     var full = isLoggedIn || !item.Masked;
                     var daysAhead = (item.Start.Date - today).Days;
                     var label = RowLabel(item, full);
-                    <div class="wh-ev @EdgeClass(item.Source)" data-region="@item.RegionCode" data-days="@daysAhead" data-date="@item.Start.ToString("yyyy-MM-dd")" data-label="@label">
+                    var whenClass = daysAhead == 0 ? "wh-today" : daysAhead == 1 ? "wh-tomorrow" : "";
+                    <div class="wh-ev @EdgeClass(item.Source) @whenClass" data-region="@item.RegionCode" data-days="@daysAhead" data-date="@item.Start.ToString("yyyy-MM-dd")" data-label="@label">
                         <div class="wh-when">
                             <div class="d">@item.Start.Day</div>
                             <div class="m">@item.Start.ToString("MMM", sv)</div>
                             @if (item.ShowTime) { <div class="t">@item.Start.ToString("HH:mm")</div> }
                         </div>
                         <div class="flex-grow-1 wh-min0">
+                            @if (daysAhead == 0) { <span class="badge text-bg-danger me-1">Idag</span> }
+                            else if (daysAhead == 1) { <span class="badge text-bg-warning me-1">Imorgon</span> }
                             <span class="badge @BadgeClass(item.Source)">@item.SourceLabel · @(full ? item.TypeLabel : item.MaskedTypeLabel)</span>
                             <div class="fw-semibold text-truncate">@label</div>
                             @if (full)
