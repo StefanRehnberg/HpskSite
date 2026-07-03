@@ -46,6 +46,19 @@
                 <p class="small text-body-secondary mb-2">Få en notis i webbläsaren när det skapas nya matcher
                     eller när din träningsform förbättras.</p>
                 @await Html.PartialAsync("_WebPushSetup")
+
+                <hr class="my-3">
+
+                <h6 class="fw-bold"><i class="bi bi-graph-up-arrow me-1"></i>Så funkar handicap &amp; Provisoriskt</h6>
+                <p class="small text-body-secondary mb-2">Topplistan rankar på ditt handicap (lägre&nbsp;=&nbsp;vassare form).
+                    Handicapet räknas på dina <strong>~10 senaste resultat</strong> och räknar ihop <strong>alla källor</strong> —
+                    träningsmatcher, egna träningsresultat och tävlingar.</p>
+                <p class="small text-body-secondary mb-2">Tills du har <strong>5 loggade resultat totalt</strong> är ditt handicap
+                    <span class="badge bg-warning text-dark">Provisoriskt</span> (preliminärt) och du visas sist i listan.</p>
+                <p class="small text-body-secondary mb-0"><strong>Pass</strong>-kolumnen visar antalet träningsmatch-pass de senaste
+                    120 dagarna — ett mått på aktivitet, inte samma sak som gränsen för Provisoriskt. Därför kan en skytt ha
+                    t.ex. Pass&nbsp;=&nbsp;4 men ändå ett färdigt handicap (övriga resultat kommer från egna träningsresultat,
+                    tävlingar eller äldre matcher).</p>
             </div>
         </div>
     </div>

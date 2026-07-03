@@ -24,7 +24,8 @@
             Detta är din <strong>träningsform</strong> från Träningsmatcher — inte en officiell skytteranking.
             Listan bygger på ditt handicap (lägre&nbsp;=&nbsp;vassare form). Du kommer med på listan så snart du
             skjutit minst <strong>@minSessions @matchWord</strong> @periodPhrase. Tills du har
-            <strong>@requiredMatches avslutade matcher</strong> är din handicap
+            <strong>@requiredMatches loggade resultat totalt</strong> — träningsmatcher, egna träningsresultat
+            och tävlingar räknas ihop, inte bara Pass-kolumnen — är din handicap
             <span class="badge bg-warning text-dark">Provisoriskt</span> (preliminärt) och du visas sist i listan.
             Hela Sveriges ranking räknas om automatiskt varje natt.
             <a href="#" data-bs-toggle="modal" data-bs-target="#trainingSettingsModal">Hur visas jag?</a>
@@ -195,7 +196,7 @@
         body.innerHTML = impCaption + '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
             '<thead><tr><th class="text-center">#</th><th>Skytt</th>' +
             '<th class="text-end">' + (imp ? 'Förändring (handicap)' : 'Handicap') + '</th>' +
-            '<th class="text-center d-none d-md-table-cell">Pass</th><th class="text-center">Rörelse</th></tr></thead>' +
+            '<th class="text-center d-none d-md-table-cell" title="Antal träningsmatch-pass @periodPhrase. Obs: handicapet blir officiellt (inte längre Provisoriskt) när du har @requiredMatches loggade resultat totalt — träningsmatcher, egna träningsresultat och tävlingar tillsammans — inte enbart passen här.">Pass&nbsp;<i class="bi bi-info-circle small text-muted"></i></th><th class="text-center">Rörelse</th></tr></thead>' +
             '<tbody>' + rows + '</tbody></table></div>';
     }
 
