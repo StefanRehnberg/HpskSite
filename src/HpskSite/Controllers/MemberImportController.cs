@@ -281,6 +281,11 @@ namespace HpskSite.Controllers
                     {
                         member = existing;
                         isNew = false;
+                        // The person may already be a member of ANOTHER club. Make sure they're
+                        // affiliated with THIS club too, so they show in its roster — their new
+                        // ClubMembership row alone isn't enough (the roster filters on
+                        // primaryClubId / memberClubIds).
+                        EnsureClubAffiliation(member, clubId);
                     }
                     else
                     {
@@ -447,9 +452,11 @@ namespace HpskSite.Controllers
             string email, string? firstName, string? lastName, string? birthDate,
             bool pnrIncomplete, bool isNew)
         {
-            // Native / core fields
-            if (!string.IsNullOrWhiteSpace(firstName)) member.SetValue("firstName", firstName);
-            if (!string.IsNullOrWhiteSpace(lastName)) member.SetValue("lastName", lastName);
+            // Native / core fields. For an EXISTING member these are fill-empty-only — a second
+            // club's import must never overwrite the person's shared profile (they/their original
+            // club own it). See SetPersonField + the default case below.
+            if (!string.IsNullOrWhiteSpace(firstName)) SetPersonField(member, "firstName", firstName, isNew);
+            if (!string.IsNullOrWhiteSpace(lastName)) SetPersonField(member, "lastName", lastName, isNew);
             // Never overwrite an existing member's email with a blank; only set when creating
             // (email is set at CreateMember) — leave alone on update to avoid login breakage.
 
@@ -479,19 +486,53 @@ namespace HpskSite.Controllers
                         break;
 
                     default:
-                        SetIfPresent(member, alias, value);
+                        SetPersonField(member, alias, value, isNew);
                         break;
                 }
             }
 
-            // pnrIncomplete flag (only set true; don't clear an existing flag needlessly).
-            if (pnrIncomplete)
+            // pnrIncomplete reflects the member's ACTUAL stored personnummer after this import
+            // (for an existing member the pnr may have been kept rather than overwritten).
+            var storedPnr = member.HasProperty("personNumber") ? (member.GetValue("personNumber")?.ToString() ?? "") : "";
+            SetIfPresent(member, "pnrIncomplete", !IsPnrComplete(storedPnr));
+        }
+
+        // Writes a person-level field. For a NEW member: set it. For an EXISTING member:
+        // fill-empty-only — never overwrite a value the person / their original club already has.
+        private static void SetPersonField(IMember member, string alias, string value, bool isNew)
+        {
+            if (!member.HasProperty(alias)) return;
+            if (isNew)
             {
-                SetIfPresent(member, "pnrIncomplete", true);
+                member.SetValue(alias, value);
+                return;
+            }
+            var current = member.GetValue(alias)?.ToString();
+            if (string.IsNullOrWhiteSpace(current)) member.SetValue(alias, value);
+        }
+
+        // Ensures the member is affiliated with clubId (so the importing club's roster shows them).
+        // No primary club yet → make this it; otherwise add to the memberClubIds CSV if missing.
+        private static void EnsureClubAffiliation(IMember member, int clubId)
+        {
+            var primary = member.GetValue("primaryClubId")?.ToString();
+            if (int.TryParse(primary, out var pid))
+            {
+                if (pid == clubId) return; // already the primary club
             }
             else
             {
-                SetIfPresent(member, "pnrIncomplete", false);
+                // No usable primary club → set this one and stop.
+                member.SetValue("primaryClubId", clubId);
+                return;
+            }
+
+            var csv = member.GetValue("memberClubIds")?.ToString() ?? "";
+            var ids = csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            if (!ids.Contains(clubId.ToString()))
+            {
+                ids.Add(clubId.ToString());
+                member.SetValue("memberClubIds", string.Join(",", ids));
             }
         }
 
