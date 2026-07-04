@@ -169,7 +169,12 @@ namespace HpskSite.Controllers
             string milsnabbShooterClass = null,
             string duellShooterClass = null,
             string nationellHelmatchShooterClass = null,
-            string magnumPrecisionShooterClass = null)
+            string magnumPrecisionShooterClass = null,
+            // Member-database expansion — self-service editable fields (see Documentation/MEMBER_DATABASE.md)
+            string birthDate = null, string landlinePhone = null, string gender = null, string coAddress = null,
+            string guardian1Name = null, string guardian1Mobile = null, string guardian1Email = null,
+            string guardian2Name = null, string guardian2Mobile = null, string guardian2Email = null,
+            string emergencyContactName = null, string emergencyContactPhone = null)
         {
             try
             {
@@ -222,6 +227,21 @@ namespace HpskSite.Controllers
                 {
                     member.SetValue("magnumPrecisionShooterClass", magnumPrecisionShooterClass);
                 }
+                // Member-database expansion fields — null = not submitted (preserve); guarded so a
+                // not-yet-created backoffice property is a safe no-op (see MEMBER_DATABASE_BACKOFFICE_SETUP.md)
+                if (birthDate != null) SetIfPresent(member, "birthDate", birthDate);
+                if (landlinePhone != null) SetIfPresent(member, "landlinePhone", landlinePhone);
+                if (gender != null) SetIfPresent(member, "gender", gender);
+                if (coAddress != null) SetIfPresent(member, "coAddress", coAddress);
+                if (guardian1Name != null) SetIfPresent(member, "guardian1Name", guardian1Name);
+                if (guardian1Mobile != null) SetIfPresent(member, "guardian1Mobile", guardian1Mobile);
+                if (guardian1Email != null) SetIfPresent(member, "guardian1Email", guardian1Email);
+                if (guardian2Name != null) SetIfPresent(member, "guardian2Name", guardian2Name);
+                if (guardian2Mobile != null) SetIfPresent(member, "guardian2Mobile", guardian2Mobile);
+                if (guardian2Email != null) SetIfPresent(member, "guardian2Email", guardian2Email);
+                if (emergencyContactName != null) SetIfPresent(member, "emergencyContactName", emergencyContactName);
+                if (emergencyContactPhone != null) SetIfPresent(member, "emergencyContactPhone", emergencyContactPhone);
+
                 member.Email = email;
                 member.Name = $"{firstName} {lastName}";
 
@@ -261,6 +281,17 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        // Writes a member property only if the alias exists on the member type, so the
+        // member-database expansion code is safe to deploy before the backoffice
+        // properties are created (missing ones become a no-op). See MEMBER_DATABASE.md.
+        private static void SetIfPresent(IMember member, string alias, object value)
+        {
+            if (member.HasProperty(alias))
+            {
+                member.SetValue(alias, value);
             }
         }
 

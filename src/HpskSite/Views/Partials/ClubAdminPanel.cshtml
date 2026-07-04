@@ -247,6 +247,12 @@
                     <button class="btn btn-success" onclick="showAddClubMemberModal()">
                         <i class="bi bi-person-plus-fill me-2"></i>Lägg till ny klubbmedlem
                     </button>
+                    <button class="btn btn-outline-primary" onclick="new bootstrap.Modal(document.getElementById('clubFeeModal')).show()">
+                        <i class="bi bi-cash-coin me-2"></i>Medlemsavgifter
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="openMemberImportModal(@clubId, @Html.Raw(System.Text.Json.JsonSerializer.Serialize(clubName)))">
+                        <i class="bi bi-upload me-2"></i>Importera medlemmar
+                    </button>
                 </div>
             </div>
 
@@ -848,6 +854,105 @@
                             </div>
                         </div>
                     </div>
+
+                    <details class="mb-2 mt-2">
+                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Utökade uppgifter (valfritt)</summary>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Födelsedatum</label>
+                                <input type="text" class="form-control" name="birthDate" placeholder="ÅÅÅÅ-MM-DD">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Kön</label>
+                                <select class="form-select" name="gender">
+                                    <option value="">–</option><option>Kvinna</option><option>Man</option><option>Annat</option>
+                                </select>
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Telefon (fast)</label>
+                                <input type="tel" class="form-control" name="landlinePhone">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Medlemstyp</label>
+                                <select class="form-select" name="membershipType">
+                                    <option value="">–</option><option>Senior</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                                </select>
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Medlemsstatus</label>
+                                <select class="form-select" name="membershipStatus">
+                                    <option value="Aktiv">Aktiv</option><option>Vilande</option><option>Utträdd</option><option>Avliden</option>
+                                </select>
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">C/O</label>
+                                <input type="text" class="form-control" name="coAddress">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Godkänd kontroll belastningsreg. (datum)</label>
+                                <input type="text" class="form-control" name="backgroundCheckDate" placeholder="ÅÅÅÅ-MM-DD">
+                                <div class="form-check mt-1">
+                                    <input class="form-check-input" type="checkbox" name="backgroundCheckApproved" id="newMemberBgApproved">
+                                    <label class="form-check-label" for="newMemberBgApproved">Godkänd</label>
+                                </div>
+                            </div></div>
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Aktiv i förbund</label>
+                                <input type="text" class="form-control" name="federations" placeholder="SPSF, SvSF">
+                                <div class="form-check mt-1">
+                                    <input class="form-check-input" type="checkbox" name="registeredInMap" id="newMemberInMap">
+                                    <label class="form-check-label" for="newMemberInMap">Finns i MAP</label>
+                                </div>
+                            </div></div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 1 – namn</label>
+                                <input type="text" class="form-control" name="guardian1Name">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 1 – mobil</label>
+                                <input type="tel" class="form-control" name="guardian1Mobile">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 1 – e-post</label>
+                                <input type="email" class="form-control" name="guardian1Email">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 2 – namn</label>
+                                <input type="text" class="form-control" name="guardian2Name">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 2 – mobil</label>
+                                <input type="tel" class="form-control" name="guardian2Mobile">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 2 – e-post</label>
+                                <input type="email" class="form-control" name="guardian2Email">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Närmast anhörig – namn</label>
+                                <input type="text" class="form-control" name="emergencyContactName">
+                            </div></div>
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Närmast anhörig – telefon</label>
+                                <input type="tel" class="form-control" name="emergencyContactPhone">
+                            </div></div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Anteckningar</label>
+                            <textarea class="form-control" name="memberNotes" rows="2"></textarea>
+                        </div>
+                    </details>
                 </form>
             </div>
             <div class="modal-footer">
@@ -869,6 +974,9 @@
 }
 @await Html.PartialAsync("ClubEmailModal")
 @await Html.PartialAsync("BrevoSetupGuide")
+@* Member-database expansion (see Documentation/MEMBER_DATABASE.md) *@
+@await Html.PartialAsync("ClubFeeManagement")
+@await Html.PartialAsync("MemberImportModal")
 
 @* Member Security modal (lockout / password reset / invitation) — shared with Admin Page → Användare *@
 @await Html.PartialAsync("~/Views/Partials/_MemberSecurityModal.cshtml")
@@ -1048,6 +1156,164 @@
                             </div>
                         </div>
                     </div>
+
+                    <details class="mb-2 mt-2">
+                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Utökade uppgifter</summary>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Födelsedatum</label>
+                                <input type="text" class="form-control" id="editMemberBirthDate" placeholder="ÅÅÅÅ-MM-DD">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Kön</label>
+                                <select class="form-select" id="editMemberGender">
+                                    <option value="">–</option><option>Kvinna</option><option>Man</option><option>Annat</option>
+                                </select>
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Telefon (fast)</label>
+                                <input type="tel" class="form-control" id="editMemberLandlinePhone">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Medlemstyp</label>
+                                <select class="form-select" id="editMemberMembershipType">
+                                    <option value="">–</option><option>Senior</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                                </select>
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Medlemsstatus</label>
+                                <select class="form-select" id="editMemberMembershipStatus">
+                                    <option value="Aktiv">Aktiv</option><option>Vilande</option><option>Utträdd</option><option>Avliden</option>
+                                </select>
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">C/O</label>
+                                <input type="text" class="form-control" id="editMemberCoAddress">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Utträdesdatum</label>
+                                <input type="text" class="form-control" id="editMemberMemberUntil" placeholder="ÅÅÅÅ-MM-DD">
+                            </div></div>
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Anledning till utträde</label>
+                                <input type="text" class="form-control" id="editMemberEndReason">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-8"><div class="mb-3">
+                                <label class="form-label">Hushålls-ID <span class="text-muted small">(familjemedlemskap – samma värde på alla i familjen)</span></label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="editMemberHouseholdId" placeholder="delas av familjemedlemmar">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('editMemberHouseholdId').value = (crypto.randomUUID ? crypto.randomUUID() : ('' + Date.now() + Math.random()))" title="Skapa nytt hushålls-ID">Nytt</button>
+                                </div>
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label d-block">&nbsp;</label>
+                                <div class="form-check mt-1">
+                                    <input class="form-check-input" type="checkbox" id="editMemberHouseholdPrimary">
+                                    <label class="form-check-label" for="editMemberHouseholdPrimary">Betalande huvudmedlem</label>
+                                </div>
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Godkänd kontroll belastningsreg. (datum)</label>
+                                <input type="text" class="form-control" id="editMemberBackgroundCheckDate" placeholder="ÅÅÅÅ-MM-DD">
+                                <div class="form-check mt-1">
+                                    <input class="form-check-input" type="checkbox" id="editMemberBackgroundCheckApproved">
+                                    <label class="form-check-label" for="editMemberBackgroundCheckApproved">Godkänd</label>
+                                </div>
+                            </div></div>
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Aktiv i förbund</label>
+                                <input type="text" class="form-control" id="editMemberFederations" placeholder="SPSF, SvSF">
+                                <div class="form-check mt-1">
+                                    <input class="form-check-input" type="checkbox" id="editMemberRegisteredInMap">
+                                    <label class="form-check-label" for="editMemberRegisteredInMap">Finns i MAP</label>
+                                </div>
+                            </div></div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 1 – namn</label>
+                                <input type="text" class="form-control" id="editMemberGuardian1Name">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 1 – mobil</label>
+                                <input type="tel" class="form-control" id="editMemberGuardian1Mobile">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 1 – e-post</label>
+                                <input type="email" class="form-control" id="editMemberGuardian1Email">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 2 – namn</label>
+                                <input type="text" class="form-control" id="editMemberGuardian2Name">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 2 – mobil</label>
+                                <input type="tel" class="form-control" id="editMemberGuardian2Mobile">
+                            </div></div>
+                            <div class="col-md-4"><div class="mb-3">
+                                <label class="form-label">Målsman 2 – e-post</label>
+                                <input type="email" class="form-control" id="editMemberGuardian2Email">
+                            </div></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Närmast anhörig – namn</label>
+                                <input type="text" class="form-control" id="editMemberEmergencyContactName">
+                            </div></div>
+                            <div class="col-md-6"><div class="mb-3">
+                                <label class="form-label">Närmast anhörig – telefon</label>
+                                <input type="tel" class="form-control" id="editMemberEmergencyContactPhone">
+                            </div></div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Anteckningar</label>
+                            <textarea class="form-control" id="editMemberNotes" rows="2"></textarea>
+                        </div>
+                        <div id="editMemberPnrIncompleteFlag" class="alert alert-warning py-1 px-2 small" style="display:none;">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Personnummer ofullständigt – komplettera för att kunna skriva föreningsintyg.
+                        </div>
+                    </details>
+
+                    <details class="mb-2">
+                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Nycklar &amp; passerkoder</summary>
+                        <div id="memberKeysList" class="mb-2 small text-muted">Öppna för att ladda…</div>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3"><label class="form-label small mb-0">Typ</label>
+                                <select id="newKeyType" class="form-select form-select-sm"><option>Nyckel</option><option>Bricka</option><option>Kod</option></select></div>
+                            <div class="col-md-3"><label class="form-label small mb-0">Identifierare</label>
+                                <input id="newKeyIdentifier" class="form-control form-control-sm" placeholder="t.ex. B32"></div>
+                            <div class="col-md-2"><label class="form-label small mb-0">Deposition</label>
+                                <input id="newKeyDeposit" type="number" step="1" class="form-control form-control-sm"></div>
+                            <div class="col-md-2"><label class="form-label small mb-0">Utlämnad</label>
+                                <input id="newKeyIssued" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD"></div>
+                            <div class="col-md-2"><button type="button" class="btn btn-success btn-sm w-100" onclick="addMemberKey()">Lägg till</button></div>
+                        </div>
+                    </details>
+
+                    <details class="mb-2">
+                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Föreningsintyg (utfärdade)</summary>
+                        <div id="memberIntygList" class="mb-2 small text-muted">Öppna för att ladda…</div>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3"><label class="form-label small mb-0">Datum</label>
+                                <input id="newIntygDate" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD"></div>
+                            <div class="col-md-3"><label class="form-label small mb-0">Ändamål</label>
+                                <input id="newIntygPurpose" class="form-control form-control-sm" placeholder="Vapenlicens"></div>
+                            <div class="col-md-4"><label class="form-label small mb-0">Beskrivning</label>
+                                <input id="newIntygDescription" class="form-control form-control-sm" placeholder="t.ex. enhandsvapen .22"></div>
+                            <div class="col-md-2"><button type="button" class="btn btn-success btn-sm w-100" onclick="addMemberIntyg()">Lägg till</button></div>
+                        </div>
+                    </details>
 
                     <!-- Primary Club -->
                     <div class="row">
@@ -3790,6 +4056,37 @@ function populateEditMemberForm(member) {
     document.getElementById('editMemberMemberSince').value = member.memberSince || '';
     document.getElementById('editMemberIsApproved').checked = member.isApproved;
 
+    // Member-database expansion fields
+    document.getElementById('editMemberBirthDate').value = member.birthDate || '';
+    document.getElementById('editMemberGender').value = member.gender || '';
+    document.getElementById('editMemberLandlinePhone').value = member.landlinePhone || '';
+    document.getElementById('editMemberMembershipType').value = member.membershipType || '';
+    document.getElementById('editMemberMembershipStatus').value = member.membershipStatus || 'Aktiv';
+    document.getElementById('editMemberCoAddress').value = member.coAddress || '';
+    document.getElementById('editMemberMemberUntil').value = member.memberUntil || '';
+    document.getElementById('editMemberEndReason').value = member.endReason || '';
+    document.getElementById('editMemberBackgroundCheckDate').value = member.backgroundCheckDate || '';
+    document.getElementById('editMemberBackgroundCheckApproved').checked = (member.backgroundCheckApproved === 'true' || member.backgroundCheckApproved === '1' || member.backgroundCheckApproved === 'True');
+    document.getElementById('editMemberFederations').value = member.federations || '';
+    document.getElementById('editMemberRegisteredInMap').checked = (member.registeredInMap === 'true' || member.registeredInMap === '1' || member.registeredInMap === 'True');
+    document.getElementById('editMemberGuardian1Name').value = member.guardian1Name || '';
+    document.getElementById('editMemberGuardian1Mobile').value = member.guardian1Mobile || '';
+    document.getElementById('editMemberGuardian1Email').value = member.guardian1Email || '';
+    document.getElementById('editMemberGuardian2Name').value = member.guardian2Name || '';
+    document.getElementById('editMemberGuardian2Mobile').value = member.guardian2Mobile || '';
+    document.getElementById('editMemberGuardian2Email').value = member.guardian2Email || '';
+    document.getElementById('editMemberEmergencyContactName').value = member.emergencyContactName || '';
+    document.getElementById('editMemberEmergencyContactPhone').value = member.emergencyContactPhone || '';
+    document.getElementById('editMemberNotes').value = member.memberNotes || '';
+    document.getElementById('editMemberHouseholdId').value = member.householdId || '';
+    document.getElementById('editMemberHouseholdPrimary').checked = (member.householdPrimary === 'true' || member.householdPrimary === '1' || member.householdPrimary === 'True');
+    document.getElementById('editMemberPnrIncompleteFlag').style.display =
+        (member.pnrIncomplete === 'true' || member.pnrIncomplete === '1' || member.pnrIncomplete === 'True') ? '' : 'none';
+
+    // Keys + föreningsintyg (member-database expansion)
+    window._editMemberId = member.id;
+    if (typeof loadMemberKeys === 'function') { loadMemberKeys(member.id); loadMemberIntyg(member.id); }
+
     // Profile picture
     updateEditMemberProfilePicture(member.profilePictureUrl, member.firstName, member.lastName);
 
@@ -4135,6 +4432,31 @@ async function saveEditClubMember() {
     formData.append('memberSince', document.getElementById('editMemberMemberSince').value);
     formData.append('primaryClubId', document.getElementById('editMemberPrimaryClub').value);
     formData.append('isApproved', document.getElementById('editMemberIsApproved').checked);
+
+    // Member-database expansion fields
+    formData.append('birthDate', document.getElementById('editMemberBirthDate').value);
+    formData.append('gender', document.getElementById('editMemberGender').value);
+    formData.append('landlinePhone', document.getElementById('editMemberLandlinePhone').value);
+    formData.append('membershipType', document.getElementById('editMemberMembershipType').value);
+    formData.append('membershipStatus', document.getElementById('editMemberMembershipStatus').value);
+    formData.append('coAddress', document.getElementById('editMemberCoAddress').value);
+    formData.append('memberUntil', document.getElementById('editMemberMemberUntil').value);
+    formData.append('endReason', document.getElementById('editMemberEndReason').value);
+    formData.append('backgroundCheckDate', document.getElementById('editMemberBackgroundCheckDate').value);
+    formData.append('backgroundCheckApproved', document.getElementById('editMemberBackgroundCheckApproved').checked);
+    formData.append('federations', document.getElementById('editMemberFederations').value);
+    formData.append('registeredInMap', document.getElementById('editMemberRegisteredInMap').checked);
+    formData.append('guardian1Name', document.getElementById('editMemberGuardian1Name').value);
+    formData.append('guardian1Mobile', document.getElementById('editMemberGuardian1Mobile').value);
+    formData.append('guardian1Email', document.getElementById('editMemberGuardian1Email').value);
+    formData.append('guardian2Name', document.getElementById('editMemberGuardian2Name').value);
+    formData.append('guardian2Mobile', document.getElementById('editMemberGuardian2Mobile').value);
+    formData.append('guardian2Email', document.getElementById('editMemberGuardian2Email').value);
+    formData.append('emergencyContactName', document.getElementById('editMemberEmergencyContactName').value);
+    formData.append('emergencyContactPhone', document.getElementById('editMemberEmergencyContactPhone').value);
+    formData.append('memberNotes', document.getElementById('editMemberNotes').value);
+    formData.append('householdId', document.getElementById('editMemberHouseholdId').value);
+    formData.append('householdPrimary', document.getElementById('editMemberHouseholdPrimary').checked);
 
     // Additional clubs
     const additionalClubs = Array.from(document.querySelectorAll('input[name="editMemberAdditionalClubs"]:checked'))
@@ -5175,3 +5497,111 @@ document.addEventListener('DOMContentLoaded', loadDpaGate);
     border-color: var(--bs-primary);
 }
 </style>
+
+<script>
+// ---- Member keys + föreningsintyg (member-database expansion) ----
+function meToken() {
+    var el = document.querySelector('input[name="__RequestVerificationToken"]');
+    return el ? el.value : '';
+}
+function meEsc(s) {
+    return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+
+function loadMemberKeys(memberId) {
+    var box = document.getElementById('memberKeysList');
+    if (!box) return;
+    box.textContent = 'Laddar…';
+    fetch('/umbraco/surface/MemberAccessKey/ListForMember?memberId=' + memberId)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { box.textContent = d.message || 'Kunde inte ladda'; return; }
+            if (!d.data || !d.data.length) { box.innerHTML = '<span class="text-muted">Inga nycklar registrerade.</span>'; return; }
+            box.innerHTML = d.data.map(function (k) {
+                var dep = (k.deposit != null && k.deposit !== '') ? (' · ' + meEsc(k.deposit) + ' kr') : '';
+                var issued = k.issuedDate ? (' · ' + meEsc(k.issuedDate)) : '';
+                var ret = k.returnedDate ? (' · återlämnad ' + meEsc(k.returnedDate)) : '';
+                return '<div class="d-flex justify-content-between align-items-center border-bottom py-1">' +
+                    '<span><span class="badge bg-secondary me-1">' + meEsc(k.keyType) + '</span>' + meEsc(k.identifier) + dep + issued + ret + '</span>' +
+                    '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteMemberKey(' + k.id + ')"><i class="bi bi-trash"></i></button></div>';
+            }).join('');
+        });
+}
+function addMemberKey() {
+    var memberId = window._editMemberId;
+    var fd = new FormData();
+    fd.append('__RequestVerificationToken', meToken());
+    fd.append('id', 0);
+    fd.append('memberId', memberId);
+    fd.append('keyType', document.getElementById('newKeyType').value);
+    fd.append('identifier', document.getElementById('newKeyIdentifier').value);
+    fd.append('deposit', document.getElementById('newKeyDeposit').value);
+    fd.append('issuedDate', document.getElementById('newKeyIssued').value);
+    fd.append('returnedDate', '');
+    fd.append('notes', '');
+    fetch('/umbraco/surface/MemberAccessKey/SaveKey', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { alert(d.message || 'Kunde inte spara'); return; }
+            document.getElementById('newKeyIdentifier').value = '';
+            document.getElementById('newKeyDeposit').value = '';
+            document.getElementById('newKeyIssued').value = '';
+            loadMemberKeys(memberId);
+        });
+}
+function deleteMemberKey(id) {
+    if (!confirm('Ta bort nyckeln?')) return;
+    var fd = new FormData();
+    fd.append('__RequestVerificationToken', meToken());
+    fd.append('id', id);
+    fetch('/umbraco/surface/MemberAccessKey/DeleteKey', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); }).then(function () { loadMemberKeys(window._editMemberId); });
+}
+
+function loadMemberIntyg(memberId) {
+    var box = document.getElementById('memberIntygList');
+    if (!box) return;
+    box.textContent = 'Laddar…';
+    fetch('/umbraco/surface/Foreningsintyg/ListForMember?memberId=' + memberId)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { box.textContent = d.message || 'Kunde inte ladda'; return; }
+            if (!d.data || !d.data.length) { box.innerHTML = '<span class="text-muted">Inga utfärdade föreningsintyg.</span>'; return; }
+            box.innerHTML = d.data.map(function (i) {
+                var desc = i.description ? (' – ' + meEsc(i.description)) : '';
+                var by = i.issuedByName ? (' · ' + meEsc(i.issuedByName)) : '';
+                return '<div class="d-flex justify-content-between align-items-center border-bottom py-1">' +
+                    '<span><strong>' + meEsc(i.issuedDate) + '</strong> · ' + meEsc(i.purpose) + desc + by + '</span>' +
+                    '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteMemberIntyg(' + i.id + ')"><i class="bi bi-trash"></i></button></div>';
+            }).join('');
+        });
+}
+function addMemberIntyg() {
+    var memberId = window._editMemberId;
+    var fd = new FormData();
+    fd.append('__RequestVerificationToken', meToken());
+    fd.append('memberId', memberId);
+    fd.append('issuedDate', document.getElementById('newIntygDate').value);
+    fd.append('purpose', document.getElementById('newIntygPurpose').value);
+    fd.append('description', document.getElementById('newIntygDescription').value);
+    fd.append('notes', '');
+    fetch('/umbraco/surface/Foreningsintyg/AddIntyg', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { alert(d.message || 'Kunde inte spara'); return; }
+            document.getElementById('newIntygPurpose').value = '';
+            document.getElementById('newIntygDescription').value = '';
+            loadMemberIntyg(memberId);
+        });
+}
+function deleteMemberIntyg(id) {
+    if (!confirm('Ta bort intyget ur loggen?')) return;
+    var fd = new FormData();
+    fd.append('__RequestVerificationToken', meToken());
+    fd.append('id', id);
+    fetch('/umbraco/surface/Foreningsintyg/DeleteIntyg', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); }).then(function () { loadMemberIntyg(window._editMemberId); });
+}
+</script>

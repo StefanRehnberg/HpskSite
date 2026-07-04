@@ -1,0 +1,304 @@
+@*
+ * Member Import Modal (Svenska Lag → pistol.nu)
+ * Two-step: upload+preview (column mapping) → import (commit).
+ * Self-contained Bootstrap modal + vanilla JS. Uses the club id set via
+ * openMemberImportModal(clubId, clubName). @Html.Partial this into a club-admin page,
+ * and ensure @Html.AntiForgeryToken() is rendered somewhere on that page.
+ *@
+
+<div class="modal fade" id="memberImportModal" tabindex="-1" aria-labelledby="memberImportModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="memberImportModalLabel">
+                    <i class="bi bi-upload me-2"></i>Importera medlemmar (Svenska Lag)
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mi_clubId" value="0">
+
+                <!-- Step 1: Upload -->
+                <div id="mi_step_upload">
+                    <p class="mb-3">
+                        Ladda upp en export från Svenska Lag (<strong>.xlsx</strong> eller <strong>.csv</strong>) för
+                        <strong id="mi_clubName"></strong>. Kolumnerna matchas automatiskt — du kan justera innan import.
+                    </p>
+                    <div class="mb-3">
+                        <label for="mi_file" class="form-label">Välj fil</label>
+                        <input type="file" class="form-control" id="mi_file" accept=".xlsx,.csv">
+                        <small class="form-text text-muted">Max 15 MB. Tips: bocka i "Personnummer" som Ordinarie fält i Svenska Lag-exporten.</small>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="mi_previewBtn" onclick="miPreview()">
+                        <i class="bi bi-search me-1"></i>Ladda upp &amp; förhandsgranska
+                    </button>
+                </div>
+
+                <!-- Step 2: Mapping -->
+                <div id="mi_step_mapping" style="display:none;">
+                    <div class="alert alert-info d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-info-circle me-1"></i><strong id="mi_totalRows">0</strong> rader hittades. Kontrollera kolumnmatchningen nedan.</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="miResetToUpload()">
+                            <i class="bi bi-arrow-left me-1"></i>Välj annan fil
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th style="min-width:180px;">Kolumn i filen</th>
+                                    <th>Exempelvärde</th>
+                                    <th style="min-width:220px;">Importera till fält</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mi_mappingBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Step 3: Result -->
+                <div id="mi_step_result" style="display:none;">
+                    <div id="mi_resultSummary"></div>
+                    <div id="mi_resultErrors"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Stäng
+                </button>
+                <button type="button" class="btn btn-success" id="mi_importBtn" style="display:none;" onclick="miCommit()">
+                    <i class="bi bi-download me-1"></i>Importera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // Parsed-file state kept between Preview and Commit.
+    var miState = {
+        headers: [],
+        rows: [],
+        sampleRows: [],
+        suggestedMapping: {},
+        targetFields: []
+    };
+
+    function miToken() {
+        if (typeof getAntiForgeryToken === 'function') {
+            try { return getAntiForgeryToken(); } catch (e) { /* fall through */ }
+        }
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
+    function miEl(id) { return document.getElementById(id); }
+
+    function miEscape(s) {
+        if (s === null || s === undefined) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    window.openMemberImportModal = function (clubId, clubName) {
+        miEl('mi_clubId').value = clubId;
+        miEl('mi_clubName').textContent = clubName || '';
+        miEl('mi_file').value = '';
+        miResetToUpload();
+        var modal = new bootstrap.Modal(miEl('memberImportModal'));
+        modal.show();
+    };
+
+    window.miResetToUpload = function () {
+        miEl('mi_step_upload').style.display = '';
+        miEl('mi_step_mapping').style.display = 'none';
+        miEl('mi_step_result').style.display = 'none';
+        miEl('mi_importBtn').style.display = 'none';
+        miEl('mi_mappingBody').innerHTML = '';
+    };
+
+    window.miPreview = function () {
+        var fileInput = miEl('mi_file');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            alert('Välj en fil att ladda upp.');
+            return;
+        }
+        var file = fileInput.files[0];
+        if (file.size > 15 * 1024 * 1024) {
+            alert('Filen är för stor. Max 15 MB.');
+            return;
+        }
+
+        var fd = new FormData();
+        fd.append('clubId', miEl('mi_clubId').value);
+        fd.append('file', file);
+
+        var btn = miEl('mi_previewBtn');
+        var orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Läser in...';
+
+        fetch('/umbraco/surface/MemberImport/Preview', {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': miToken() },
+            body: fd
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            if (!data.success) {
+                alert('Fel: ' + (data.message || 'Okänt fel'));
+                return;
+            }
+            miState.headers = data.headers || [];
+            miState.rows = data.rows || [];
+            miState.sampleRows = data.sampleRows || [];
+            miState.suggestedMapping = data.suggestedMapping || {};
+            miState.targetFields = data.targetFields || [];
+            miRenderMapping(data.totalRows || miState.rows.length);
+        })
+        .catch(function (err) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            console.error('Preview error:', err);
+            alert('Fel vid inläsning: ' + err.message);
+        });
+    };
+
+    function miSampleValue(header) {
+        for (var r = 0; r < miState.sampleRows.length; r++) {
+            var v = miState.sampleRows[r][header];
+            if (v !== undefined && v !== null && String(v).trim() !== '') {
+                return String(v);
+            }
+        }
+        return '';
+    }
+
+    function miBuildSelect(header) {
+        var selected = miState.suggestedMapping[header] || '';
+        var html = '<select class="form-select form-select-sm mi-map-select" data-header="' + miEscape(header) + '">';
+        for (var i = 0; i < miState.targetFields.length; i++) {
+            var tf = miState.targetFields[i];
+            var isSel = (tf.alias === selected) ? ' selected' : '';
+            html += '<option value="' + miEscape(tf.alias) + '"' + isSel + '>' + miEscape(tf.label) + '</option>';
+        }
+        html += '</select>';
+        return html;
+    }
+
+    function miRenderMapping(totalRows) {
+        miEl('mi_totalRows').textContent = totalRows;
+
+        var body = miEl('mi_mappingBody');
+        var rowsHtml = '';
+        for (var i = 0; i < miState.headers.length; i++) {
+            var header = miState.headers[i];
+            var sample = miSampleValue(header);
+            rowsHtml += '<tr>' +
+                '<td><strong>' + miEscape(header) + '</strong></td>' +
+                '<td class="text-muted"><small>' + miEscape(sample) + '</small></td>' +
+                '<td>' + miBuildSelect(header) + '</td>' +
+                '</tr>';
+        }
+        body.innerHTML = rowsHtml;
+
+        miEl('mi_step_upload').style.display = 'none';
+        miEl('mi_step_mapping').style.display = '';
+        miEl('mi_step_result').style.display = 'none';
+        miEl('mi_importBtn').style.display = '';
+    }
+
+    function miCollectMapping() {
+        var mapping = {};
+        var selects = document.querySelectorAll('#mi_mappingBody .mi-map-select');
+        selects.forEach(function (sel) {
+            var header = sel.getAttribute('data-header');
+            mapping[header] = sel.value || '';
+        });
+        return mapping;
+    }
+
+    window.miCommit = function () {
+        var mapping = miCollectMapping();
+
+        // Sanity: require at least an email OR personnummer target so rows can be resolved.
+        var aliases = Object.keys(mapping).map(function (k) { return mapping[k]; });
+        if (aliases.indexOf('email') === -1 && aliases.indexOf('personNumber') === -1) {
+            if (!confirm('Ingen kolumn är mappad till E-post eller Personnummer. Nya medlemmar kan då inte skapas. Fortsätt ändå?')) {
+                return;
+            }
+        }
+
+        var btn = miEl('mi_importBtn');
+        var orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Importerar...';
+
+        var fd = new FormData();
+        fd.append('clubId', miEl('mi_clubId').value);
+        fd.append('mappingJson', JSON.stringify(mapping));
+        fd.append('rowsJson', JSON.stringify(miState.rows));
+
+        fetch('/umbraco/surface/MemberImport/Commit', {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': miToken() },
+            body: fd
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            if (!data.success) {
+                alert('Fel vid import: ' + (data.message || 'Okänt fel'));
+                return;
+            }
+            miRenderResult(data);
+        })
+        .catch(function (err) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            console.error('Commit error:', err);
+            alert('Fel vid import: ' + err.message);
+        });
+    };
+
+    function miRenderResult(data) {
+        var summary =
+            '<div class="alert alert-success">' +
+            '<h6 class="mb-2"><i class="bi bi-check-circle me-1"></i>Import klar</h6>' +
+            '<ul class="mb-0">' +
+            '<li><strong>' + data.created + '</strong> nya medlemmar skapade</li>' +
+            '<li><strong>' + data.updated + '</strong> befintliga medlemmar uppdaterade</li>' +
+            '<li><strong>' + data.skipped + '</strong> rader överhoppade</li>' +
+            '<li><strong>' + data.pnrIncompleteCount + '</strong> med ofullständigt personnummer (flaggade)</li>' +
+            '</ul></div>';
+        miEl('mi_resultSummary').innerHTML = summary;
+
+        var errorsHtml = '';
+        if (data.errors && data.errors.length > 0) {
+            errorsHtml = '<div class="alert alert-warning"><strong>Meddelanden:</strong><ul class="mb-0">';
+            for (var i = 0; i < data.errors.length; i++) {
+                errorsHtml += '<li>' + miEscape(data.errors[i]) + '</li>';
+            }
+            errorsHtml += '</ul></div>';
+        }
+        miEl('mi_resultErrors').innerHTML = errorsHtml;
+
+        miEl('mi_step_upload').style.display = 'none';
+        miEl('mi_step_mapping').style.display = 'none';
+        miEl('mi_step_result').style.display = '';
+        miEl('mi_importBtn').style.display = 'none';
+
+        // Refresh the club member list if the host page exposes a loader.
+        if (typeof loadClubMembers === 'function') {
+            try { loadClubMembers(); } catch (e) { /* ignore */ }
+        }
+    }
+})();
+</script>

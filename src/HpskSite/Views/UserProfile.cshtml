@@ -711,6 +711,74 @@
                                     </div>
                                 </div>
 
+                                <div class="row">
+                                    <div class="col-md-4"><div class="mb-3">
+                                        <label for="birthDate" class="form-label">Födelsedatum</label>
+                                        <input type="text" class="form-control" id="birthDate" name="birthDate" value="@(memberData != null && memberData.HasProperty("birthDate") ? memberData.GetValue("birthDate")?.ToString() ?? "" : "")" placeholder="ÅÅÅÅ-MM-DD">
+                                    </div></div>
+                                    <div class="col-md-4"><div class="mb-3">
+                                        <label for="gender" class="form-label">Kön</label>
+                                        <select class="form-select" id="gender" name="gender">
+                                            @{ var g = memberData != null && memberData.HasProperty("gender") ? memberData.GetValue("gender")?.ToString() ?? "" : ""; }
+                                            <option value="" selected="@(g == "")">–</option>
+                                            <option selected="@(g == "Kvinna")">Kvinna</option>
+                                            <option selected="@(g == "Man")">Man</option>
+                                            <option selected="@(g == "Annat")">Annat</option>
+                                        </select>
+                                    </div></div>
+                                    <div class="col-md-4"><div class="mb-3">
+                                        <label for="landlinePhone" class="form-label">Telefon (fast)</label>
+                                        <input type="tel" class="form-control" id="landlinePhone" name="landlinePhone" value="@(memberData != null && memberData.HasProperty("landlinePhone") ? memberData.GetValue("landlinePhone")?.ToString() ?? "" : "")">
+                                    </div></div>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="coAddress" class="form-label">C/O</label>
+                                    <input type="text" class="form-control" id="coAddress" name="coAddress" value="@(memberData != null && memberData.HasProperty("coAddress") ? memberData.GetValue("coAddress")?.ToString() ?? "" : "")">
+                                </div>
+
+                                <!-- Guardians (for junior members) + emergency contact -->
+                                <div class="mb-4">
+                                    <h6 class="text-muted mb-3"><i class="bi bi-people me-1"></i>Målsman &amp; närmast anhörig</h6>
+                                    <div class="row">
+                                        <div class="col-md-4"><div class="mb-3">
+                                            <label for="guardian1Name" class="form-label">Målsman 1 – namn</label>
+                                            <input type="text" class="form-control" id="guardian1Name" name="guardian1Name" value="@(memberData != null && memberData.HasProperty("guardian1Name") ? memberData.GetValue("guardian1Name")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                        <div class="col-md-4"><div class="mb-3">
+                                            <label for="guardian1Mobile" class="form-label">Målsman 1 – mobil</label>
+                                            <input type="tel" class="form-control" id="guardian1Mobile" name="guardian1Mobile" value="@(memberData != null && memberData.HasProperty("guardian1Mobile") ? memberData.GetValue("guardian1Mobile")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                        <div class="col-md-4"><div class="mb-3">
+                                            <label for="guardian1Email" class="form-label">Målsman 1 – e-post</label>
+                                            <input type="email" class="form-control" id="guardian1Email" name="guardian1Email" value="@(memberData != null && memberData.HasProperty("guardian1Email") ? memberData.GetValue("guardian1Email")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-4"><div class="mb-3">
+                                            <label for="guardian2Name" class="form-label">Målsman 2 – namn</label>
+                                            <input type="text" class="form-control" id="guardian2Name" name="guardian2Name" value="@(memberData != null && memberData.HasProperty("guardian2Name") ? memberData.GetValue("guardian2Name")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                        <div class="col-md-4"><div class="mb-3">
+                                            <label for="guardian2Mobile" class="form-label">Målsman 2 – mobil</label>
+                                            <input type="tel" class="form-control" id="guardian2Mobile" name="guardian2Mobile" value="@(memberData != null && memberData.HasProperty("guardian2Mobile") ? memberData.GetValue("guardian2Mobile")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                        <div class="col-md-4"><div class="mb-3">
+                                            <label for="guardian2Email" class="form-label">Målsman 2 – e-post</label>
+                                            <input type="email" class="form-control" id="guardian2Email" name="guardian2Email" value="@(memberData != null && memberData.HasProperty("guardian2Email") ? memberData.GetValue("guardian2Email")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6"><div class="mb-3">
+                                            <label for="emergencyContactName" class="form-label">Närmast anhörig – namn</label>
+                                            <input type="text" class="form-control" id="emergencyContactName" name="emergencyContactName" value="@(memberData != null && memberData.HasProperty("emergencyContactName") ? memberData.GetValue("emergencyContactName")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                        <div class="col-md-6"><div class="mb-3">
+                                            <label for="emergencyContactPhone" class="form-label">Närmast anhörig – telefon</label>
+                                            <input type="tel" class="form-control" id="emergencyContactPhone" name="emergencyContactPhone" value="@(memberData != null && memberData.HasProperty("emergencyContactPhone") ? memberData.GetValue("emergencyContactPhone")?.ToString() ?? "" : "")">
+                                        </div></div>
+                                    </div>
+                                </div>
+
                                 <!-- Club Information Section -->
                                 <div class="mb-4">
                                     <h6 class="text-muted mb-3">
@@ -1508,6 +1576,14 @@ function saveProfile() {
     formData.append('postalCode', document.getElementById('postalCode').value);
     formData.append('city', document.getElementById('city').value);
     formData.append('personNumber', document.getElementById('personNumber').value);
+
+    // Member-database expansion — self-service editable fields
+    ['birthDate','gender','landlinePhone','coAddress','guardian1Name','guardian1Mobile','guardian1Email',
+     'guardian2Name','guardian2Mobile','guardian2Email','emergencyContactName','emergencyContactPhone']
+        .forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) formData.append(id, el.value);
+        });
 
     // Include shooter classes (per discipline)
     const shooterClassRadio = document.querySelector('input[name="shooterClass"]:checked');

@@ -41,6 +41,10 @@ namespace HpskSite.Composers
 
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
+            // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
+            builder.Services.AddScoped<MemberAccessKeyService>();
+            builder.Services.AddScoped<ForeningsintygService>();
+            builder.Services.AddScoped<MembershipFeeService>();
 
             // Board work: meeting lifecycle (meetings + agenda + attendance/quorum + protokoll + actions).
             // Run create-board-meeting-tables.sql. See BOARD_WORK_PHASE2_MEETINGS.md.

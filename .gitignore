@@ -65,4 +65,6 @@ appsettings.Development.json
 /Pokalen 2 tidutrakning.xls
 /*.xls
 /*.xlsx
+# Prospect club member export — contains real personnummer/PII, keep out of git
+/MemberData/
 /src/HpskSite/wwwroot/assets/skjuthandboken/

@@ -899,7 +899,16 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> AddClubMember(int clubId, string firstName, string lastName, string email,
             string phoneNumber = "", string shooterIdNumber = "", string address = "", string postalCode = "",
-            string city = "", string personNumber = "", string memberSince = "")
+            string city = "", string personNumber = "", string memberSince = "",
+            // Member-database expansion fields (see Documentation/MEMBER_DATABASE.md)
+            string birthDate = "", string landlinePhone = "", string gender = "", string coAddress = "",
+            string membershipType = "", string membershipStatus = "", string memberUntil = "", string endReason = "",
+            string backgroundCheckApproved = "", string backgroundCheckDate = "",
+            string registeredInMap = "", string federations = "", string memberNotes = "",
+            string householdId = "", string householdPrimary = "", string pnrIncomplete = "",
+            string guardian1Name = "", string guardian1Mobile = "", string guardian1Email = "",
+            string guardian2Name = "", string guardian2Mobile = "", string guardian2Email = "",
+            string emergencyContactName = "", string emergencyContactPhone = "")
         {
             _logger.LogInformation($"[AddClubMember] Starting for clubId: {clubId}, email: {email}");
 
@@ -950,6 +959,31 @@ namespace HpskSite.Controllers
                 member.SetValue("city", city ?? "");
                 member.SetValue("personNumber", personNumber ?? "");
                 member.SetValue("memberSince", memberSince ?? "");
+                // Member-database expansion fields (guarded — safe before backoffice props exist)
+                SetIfPresent(member, "birthDate", birthDate ?? "");
+                SetIfPresent(member, "landlinePhone", landlinePhone ?? "");
+                SetIfPresent(member, "gender", gender ?? "");
+                SetIfPresent(member, "coAddress", coAddress ?? "");
+                SetIfPresent(member, "membershipType", membershipType ?? "");
+                SetIfPresent(member, "membershipStatus", membershipStatus ?? "");
+                SetIfPresent(member, "memberUntil", memberUntil ?? "");
+                SetIfPresent(member, "endReason", endReason ?? "");
+                SetIfPresent(member, "backgroundCheckApproved", ToBool(backgroundCheckApproved));
+                SetIfPresent(member, "backgroundCheckDate", backgroundCheckDate ?? "");
+                SetIfPresent(member, "registeredInMap", ToBool(registeredInMap));
+                SetIfPresent(member, "federations", federations ?? "");
+                SetIfPresent(member, "memberNotes", memberNotes ?? "");
+                SetIfPresent(member, "householdId", householdId ?? "");
+                SetIfPresent(member, "householdPrimary", ToBool(householdPrimary));
+                SetIfPresent(member, "pnrIncomplete", ToBool(pnrIncomplete));
+                SetIfPresent(member, "guardian1Name", guardian1Name ?? "");
+                SetIfPresent(member, "guardian1Mobile", guardian1Mobile ?? "");
+                SetIfPresent(member, "guardian1Email", guardian1Email ?? "");
+                SetIfPresent(member, "guardian2Name", guardian2Name ?? "");
+                SetIfPresent(member, "guardian2Mobile", guardian2Mobile ?? "");
+                SetIfPresent(member, "guardian2Email", guardian2Email ?? "");
+                SetIfPresent(member, "emergencyContactName", emergencyContactName ?? "");
+                SetIfPresent(member, "emergencyContactPhone", emergencyContactPhone ?? "");
 
                 // Auto-approve member
                 member.IsApproved = true;
@@ -975,6 +1009,21 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Fel vid tillägg av medlem: " + ex.Message });
             }
         }
+
+        // ---- Member-database expansion helpers (see Documentation/MEMBER_DATABASE.md) ----
+        // Writes a member property only if the alias exists on the member type, so this is
+        // safe to deploy before the backoffice properties are created (missing = no-op).
+        private static void SetIfPresent(Umbraco.Cms.Core.Models.IMember member, string alias, object value)
+        {
+            if (member.HasProperty(alias))
+            {
+                member.SetValue(alias, value);
+            }
+        }
+
+        // Boolean member properties (True/false editor); forms POST "true"/"on"/"" strings.
+        private static bool ToBool(string value)
+            => value == "true" || value == "True" || value == "on" || value == "1";
 
         #endregion
 

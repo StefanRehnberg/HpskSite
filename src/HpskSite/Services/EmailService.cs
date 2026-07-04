@@ -1863,5 +1863,63 @@ namespace HpskSite.Services
 
             await SendEmailAsync(memberEmail, subject, body);
         }
+
+        /// <summary>
+        /// Send a membership-fee (medlemsavgift) payment request to a member with a link to
+        /// the public token-addressed pay page (/medlemsavgift/{token}). Mirrors
+        /// <see cref="SendPaymentConfirmationAsync"/>: the shooter opens the link, sees the
+        /// Swish QR + amount, and — if they've already paid — the "Betald" state.
+        /// </summary>
+        public async Task SendMembershipFeeRequestAsync(
+            string memberEmail,
+            string memberName,
+            string clubName,
+            int year,
+            decimal amount,
+            string payUrl)
+        {
+            if (string.IsNullOrEmpty(_smtpHost))
+            {
+                _logger.LogWarning("SMTP host not configured. Membership fee request not sent to {Email}", memberEmail);
+                return;
+            }
+
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            var amountLabel = Math.Round(amount).ToString("N0", sv) + " kr";
+            var subject = $"Medlemsavgift {year} – {clubName}";
+
+            var body = $@"<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.5; color: #333; }}
+        .container {{ max-width: 560px; margin: 0 auto; padding: 16px; }}
+        .header {{ background:#0d6efd; color:#fff; padding:18px; border-radius:5px 5px 0 0; }}
+        .header h2 {{ margin:0; font-size:20px; }}
+        .content {{ background:#f8f9fa; border:1px solid #dee2e6; padding:24px; border-radius:0 0 5px 5px; }}
+        .amount {{ font-size:26px; font-weight:700; color:#0d6efd; margin:8px 0 16px; }}
+        .btn {{ display:inline-block; background:#0d6efd; color:#fff !important; text-decoration:none; padding:12px 22px; border-radius:6px; font-size:16px; margin-top:6px; }}
+        .footer {{ margin-top:18px; font-size:12px; color:#6c757d; text-align:center; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'><h2>Medlemsavgift {year}</h2></div>
+        <div class='content'>
+            <p>Hej {System.Net.WebUtility.HtmlEncode(memberName)}!</p>
+            <p>Det är dags att betala medlemsavgiften till
+               <strong>{System.Net.WebUtility.HtmlEncode(clubName)}</strong> för {year}.</p>
+            <div class='amount'>{amountLabel}</div>
+            <p>Klicka på knappen nedan för att öppna betalsidan. Där kan du betala med
+               Swish direkt via QR-kod eller app.</p>
+            <p><a class='btn' href='{payUrl}'>Betala medlemsavgift</a></p>
+            <p style='font-size:13px;color:#6c757d;'>Har du redan betalat ser du det på sidan.</p>
+        </div>
+        <div class='footer'>Pistol.nu — automatiskt utskick. Svara ej på detta mejl.</div>
+    </div>
+</body>
+</html>";
+
+            await SendEmailAsync(memberEmail, subject, body);
+        }
     }
 }

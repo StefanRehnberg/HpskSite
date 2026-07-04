@@ -1,0 +1,238 @@
+@{
+    var feeClubId = ViewBag.clubId;
+}
+@* Membership-fee management modal (Medlemsavgifter). See Documentation/MEMBER_DATABASE.md §4.
+   Endpoints: /umbraco/surface/MembershipFeeAdmin/... Reuses the club's Swish number. *@
+<div class="modal fade" id="clubFeeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-cash-coin me-2"></i>Medlemsavgifter</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex align-items-center gap-2 mb-3">
+                    <label class="form-label mb-0 fw-bold">År</label>
+                    <select id="feeYear" class="form-select" style="width:auto;"></select>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="feeLoadOverview()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                </div>
+
+                <h6 class="text-primary">Avgiftskategorier</h6>
+                <p class="text-muted small">Sätts av klubben (årsmötet). En kategori per medlemstyp och år.</p>
+                <div class="table-responsive mb-2">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Medlemstyp</th><th>Etikett</th><th>Belopp (kr)</th><th></th></tr></thead>
+                        <tbody id="feeCategoryRows"></tbody>
+                    </table>
+                </div>
+                <div class="row g-2 align-items-end mb-4">
+                    <div class="col-md-3">
+                        <label class="form-label small mb-0">Medlemstyp</label>
+                        <select id="feeCatType" class="form-select form-select-sm">
+                            <option>Senior</option><option>Junior</option><option>Familj</option>
+                            <option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-0">Etikett (valfri)</label>
+                        <input id="feeCatLabel" class="form-control form-control-sm" placeholder="t.ex. Seniormedlem">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-0">Belopp (kr)</label>
+                        <input id="feeCatAmount" type="number" min="0" step="1" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-success btn-sm w-100" onclick="feeSaveCategory()">Lägg till</button>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="feeGenerate()">
+                        <i class="bi bi-people me-1"></i>Generera avgifter för alla medlemmar
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="feeSendRequests()">
+                        <i class="bi bi-envelope me-1"></i>Skicka betalningsbegäran (e-post)
+                    </button>
+                    <span id="feeActionMsg" class="align-self-center small text-muted"></span>
+                </div>
+
+                <h6 class="text-danger">Ej betalda <span id="feeUnpaidCount" class="badge bg-danger"></span></h6>
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Medlem</th><th>Belopp</th><th>Status</th><th>Åtgärder</th></tr></thead>
+                        <tbody id="feeUnpaidRows"></tbody>
+                    </table>
+                </div>
+
+                <h6 class="text-success">Betalda <span id="feePaidCount" class="badge bg-success"></span></h6>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Medlem</th><th>Belopp</th><th>Betald</th><th></th></tr></thead>
+                        <tbody id="feePaidRows"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var FEE_CLUB_ID = @feeClubId;
+
+    function feeToken() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    function feeYearVal() { return document.getElementById('feeYear').value; }
+    function feeEsc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    window.feeInitYears = function () {
+        var sel = document.getElementById('feeYear');
+        if (sel.options.length) return;
+        // Fixed range; current year highlighted server-independently (Date is fine in the browser).
+        var now = new Date().getFullYear();
+        for (var y = now + 1; y >= now - 3; y--) {
+            var o = document.createElement('option');
+            o.value = y; o.textContent = y;
+            if (y === now) o.selected = true;
+            sel.appendChild(o);
+        }
+    };
+
+    window.feeLoadOverview = function () {
+        fetch('/umbraco/surface/MembershipFeeAdmin/GetOverview?clubId=' + FEE_CLUB_ID + '&year=' + feeYearVal())
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) { document.getElementById('feeActionMsg').textContent = d.message || 'Fel'; return; }
+                feeRenderCategories(d.categories || []);
+                feeRenderCharges('feeUnpaidRows', d.unpaid || [], false);
+                feeRenderCharges('feePaidRows', d.paid || [], true);
+                document.getElementById('feeUnpaidCount').textContent = (d.unpaid || []).length;
+                document.getElementById('feePaidCount').textContent = (d.paid || []).length;
+            });
+    };
+
+    function feeRenderCategories(cats) {
+        var html = cats.map(function (c) {
+            return '<tr><td>' + feeEsc(c.membershipType) + '</td><td>' + feeEsc(c.label) + '</td><td>' +
+                feeEsc(c.amount) + '</td><td><button class="btn btn-outline-danger btn-sm" onclick="feeDeleteCategory(' +
+                c.id + ')"><i class="bi bi-trash"></i></button></td></tr>';
+        }).join('');
+        document.getElementById('feeCategoryRows').innerHTML = html || '<tr><td colspan="4" class="text-muted small">Inga kategorier ännu.</td></tr>';
+    }
+
+    function feeRenderCharges(targetId, charges, paid) {
+        var html = charges.map(function (c) {
+            var actions;
+            if (paid) {
+                actions = '<button class="btn btn-outline-secondary btn-sm" onclick="feeMarkUnpaid(' + c.id + ')">Ångra betald</button>';
+                return '<tr><td>' + feeEsc(c.memberName) + '</td><td>' + feeEsc(c.amount) + ' kr</td><td>' +
+                    feeEsc(c.paidDate || '') + '</td><td>' + actions + '</td></tr>';
+            }
+            if (c.covered) {
+                // Familjeavgift: covered by the household's primary member — no separate fee.
+                return '<tr class="text-muted"><td>' + feeEsc(c.memberName) + '</td><td>0 kr</td>' +
+                    '<td><span class="badge bg-info text-dark">Ingår i familj</span></td><td></td></tr>';
+            }
+            var claim = c.paymentSentDate ? '<span class="badge bg-warning text-dark" title="Medlem har uppgett betalning ' +
+                feeEsc(c.paymentSentDate) + '">Uppgett betald</span> ' : '';
+            actions = '<button class="btn btn-success btn-sm me-1" onclick="feeMarkPaid(' + c.id + ')">Markera betald</button>' +
+                '<button class="btn btn-outline-primary btn-sm" onclick="feeCopyLink(' + c.id + ')">Kopiera länk</button>';
+            return '<tr><td>' + feeEsc(c.memberName) + (c.hasEmail ? '' : ' <i class="bi bi-envelope-slash text-muted" title="Saknar e-post"></i>') +
+                '</td><td>' + feeEsc(c.amount) + ' kr</td><td>' + claim + '</td><td>' + actions + '</td></tr>';
+        }).join('');
+        document.getElementById(targetId).innerHTML = html || '<tr><td colspan="4" class="text-muted small">Inga poster.</td></tr>';
+    }
+
+    window.feeSaveCategory = function () {
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', feeToken());
+        fd.append('id', 0);
+        fd.append('clubId', FEE_CLUB_ID);
+        fd.append('year', feeYearVal());
+        fd.append('membershipType', document.getElementById('feeCatType').value);
+        fd.append('label', document.getElementById('feeCatLabel').value);
+        fd.append('amount', document.getElementById('feeCatAmount').value || '0');
+        fetch('/umbraco/surface/MembershipFeeAdmin/SaveCategory', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.success) { document.getElementById('feeCatAmount').value = ''; document.getElementById('feeCatLabel').value = ''; feeLoadOverview(); }
+                else { alert(d.message || 'Kunde inte spara kategori'); }
+            });
+    };
+
+    window.feeDeleteCategory = function (id) {
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', feeToken());
+        fd.append('id', id);
+        fd.append('clubId', FEE_CLUB_ID);
+        fetch('/umbraco/surface/MembershipFeeAdmin/DeleteCategory', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); }).then(function () { feeLoadOverview(); });
+    };
+
+    window.feeGenerate = function () {
+        var msg = document.getElementById('feeActionMsg');
+        msg.textContent = 'Genererar…';
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', feeToken());
+        fd.append('clubId', FEE_CLUB_ID);
+        fd.append('year', feeYearVal());
+        fetch('/umbraco/surface/MembershipFeeAdmin/GenerateCharges', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                msg.textContent = d.success ? (d.created + ' nya avgifter skapade.') : (d.message || 'Fel');
+                feeLoadOverview();
+            });
+    };
+
+    window.feeSendRequests = function () {
+        if (!confirm('Skicka betalningsbegäran via e-post till alla med obetald avgift?')) return;
+        var msg = document.getElementById('feeActionMsg');
+        msg.textContent = 'Skickar…';
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', feeToken());
+        fd.append('clubId', FEE_CLUB_ID);
+        fd.append('year', feeYearVal());
+        fetch('/umbraco/surface/MembershipFeeAdmin/SendPaymentRequests', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (d) { msg.textContent = d.success ? (d.sent + ' e-post skickade.') : (d.message || 'Fel'); });
+    };
+
+    window.feeMarkPaid = function (chargeId) { feePost('MarkPaid', chargeId); };
+    window.feeMarkUnpaid = function (chargeId) { feePost('MarkUnpaid', chargeId); };
+    function feePost(action, chargeId) {
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', feeToken());
+        fd.append('chargeId', chargeId);
+        fetch('/umbraco/surface/MembershipFeeAdmin/' + action, { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); }).then(function () { feeLoadOverview(); });
+    }
+
+    window.feeCopyLink = function (chargeId) {
+        fetch('/umbraco/surface/MembershipFeeAdmin/GetPaymentLink?chargeId=' + chargeId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) { alert(d.message || 'Fel'); return; }
+                if (navigator.clipboard) { navigator.clipboard.writeText(d.url); }
+                window.prompt('Betalningslänk (kopiera):', d.url);
+            });
+    };
+
+    var feeModalEl = document.getElementById('clubFeeModal');
+    if (feeModalEl) {
+        feeModalEl.addEventListener('shown.bs.modal', function () {
+            window.feeInitYears();
+            window.feeLoadOverview();
+        });
+    }
+})();
+</script>

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
+using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
@@ -717,6 +718,31 @@ namespace HpskSite.Controllers
                     additionalClubIds = additionalClubIds.ToArray(),
                     precisionShooterClass = member.GetValue("precisionShooterClass")?.ToString() ?? "",
                     isApproved = member.IsApproved,
+                    // Member-database expansion fields (guarded reads — safe before backoffice props exist)
+                    birthDate = GetVal(member, "birthDate"),
+                    landlinePhone = GetVal(member, "landlinePhone"),
+                    gender = GetVal(member, "gender"),
+                    coAddress = GetVal(member, "coAddress"),
+                    membershipType = GetVal(member, "membershipType"),
+                    membershipStatus = GetVal(member, "membershipStatus"),
+                    memberUntil = GetVal(member, "memberUntil"),
+                    endReason = GetVal(member, "endReason"),
+                    backgroundCheckApproved = GetVal(member, "backgroundCheckApproved"),
+                    backgroundCheckDate = GetVal(member, "backgroundCheckDate"),
+                    registeredInMap = GetVal(member, "registeredInMap"),
+                    federations = GetVal(member, "federations"),
+                    memberNotes = GetVal(member, "memberNotes"),
+                    householdId = GetVal(member, "householdId"),
+                    householdPrimary = GetVal(member, "householdPrimary"),
+                    pnrIncomplete = GetVal(member, "pnrIncomplete"),
+                    guardian1Name = GetVal(member, "guardian1Name"),
+                    guardian1Mobile = GetVal(member, "guardian1Mobile"),
+                    guardian1Email = GetVal(member, "guardian1Email"),
+                    guardian2Name = GetVal(member, "guardian2Name"),
+                    guardian2Mobile = GetVal(member, "guardian2Mobile"),
+                    guardian2Email = GetVal(member, "guardian2Email"),
+                    emergencyContactName = GetVal(member, "emergencyContactName"),
+                    emergencyContactPhone = GetVal(member, "emergencyContactPhone"),
                     // Filter out ClubAdmin_* groups (managed separately via club admin assignment)
                     groups = _memberService.GetAllRoles(member.Id)
                         .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
@@ -752,7 +778,19 @@ namespace HpskSite.Controllers
             string additionalClubIds = "",
             string precisionShooterClass = "",
             bool isApproved = false,
-            string[] groups = null)
+            string[] groups = null,
+            // Member-database expansion fields (see Documentation/MEMBER_DATABASE.md).
+            // Default null = "not submitted by this form" → field is preserved (the site-admin
+            // UserManagement modal doesn't send these; the club-admin modal does). An empty
+            // string IS a submitted value and will clear the field.
+            string birthDate = null, string landlinePhone = null, string gender = null, string coAddress = null,
+            string membershipType = null, string membershipStatus = null, string memberUntil = null, string endReason = null,
+            string backgroundCheckApproved = null, string backgroundCheckDate = null,
+            string registeredInMap = null, string federations = null, string memberNotes = null,
+            string householdId = null, string householdPrimary = null, string pnrIncomplete = null,
+            string guardian1Name = null, string guardian1Mobile = null, string guardian1Email = null,
+            string guardian2Name = null, string guardian2Mobile = null, string guardian2Email = null,
+            string emergencyContactName = null, string emergencyContactPhone = null)
         {
             try
             {
@@ -858,6 +896,11 @@ namespace HpskSite.Controllers
                     {
                         member.SetValue("precisionShooterClass", precisionShooterClass);
                     }
+                    ApplyExpansionFields(member, birthDate, landlinePhone, gender, coAddress, membershipType,
+                        membershipStatus, memberUntil, endReason, backgroundCheckApproved, backgroundCheckDate,
+                        registeredInMap, federations, memberNotes, householdId, householdPrimary, pnrIncomplete,
+                        guardian1Name, guardian1Mobile, guardian1Email, guardian2Name, guardian2Mobile, guardian2Email,
+                        emergencyContactName, emergencyContactPhone);
                     member.IsApproved = isApproved;
                     member.Name = $"{firstName} {lastName}";
 
@@ -945,6 +988,11 @@ namespace HpskSite.Controllers
                     newMember.SetValue("primaryClubId", primaryClubId);
                     newMember.SetValue("memberClubIds", string.Join(",", additionalClubIdList));
                     newMember.SetValue("precisionShooterClass", precisionShooterClass ?? "");
+                    ApplyExpansionFields(newMember, birthDate, landlinePhone, gender, coAddress, membershipType,
+                        membershipStatus, memberUntil, endReason, backgroundCheckApproved, backgroundCheckDate,
+                        registeredInMap, federations, memberNotes, householdId, householdPrimary, pnrIncomplete,
+                        guardian1Name, guardian1Mobile, guardian1Email, guardian2Name, guardian2Mobile, guardian2Email,
+                        emergencyContactName, emergencyContactPhone);
                     newMember.IsApproved = isApproved;
 
                     _memberService.Save(newMember);
@@ -972,6 +1020,74 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Error saving member: " + ex.Message });
             }
         }
+
+        // ---- Member-database expansion helpers (see Documentation/MEMBER_DATABASE.md) ----
+        // Reads a member property, returning "" if the alias doesn't exist yet (guarded so
+        // GetMember is safe before the backoffice properties have been created).
+        private static string GetVal(IMember member, string alias)
+            => member.HasProperty(alias) ? (member.GetValue(alias)?.ToString() ?? "") : "";
+
+        // Writes a member property only if the alias exists on the member type (no-op otherwise).
+        private static void SetIfPresent(IMember member, string alias, object value)
+        {
+            if (member.HasProperty(alias))
+            {
+                member.SetValue(alias, value);
+            }
+        }
+
+        // Applies expansion fields to a member. A null value means "not submitted by this
+        // form" and is skipped so the field is preserved (the site-admin UserManagement modal
+        // doesn't post these). An empty string is a submitted value and clears the field.
+        private static void ApplyExpansionFields(IMember member,
+            string birthDate, string landlinePhone, string gender, string coAddress, string membershipType,
+            string membershipStatus, string memberUntil, string endReason, string backgroundCheckApproved,
+            string backgroundCheckDate, string registeredInMap, string federations, string memberNotes,
+            string householdId, string householdPrimary, string pnrIncomplete,
+            string guardian1Name, string guardian1Mobile, string guardian1Email,
+            string guardian2Name, string guardian2Mobile, string guardian2Email,
+            string emergencyContactName, string emergencyContactPhone)
+        {
+            SetStrIfProvided(member, "birthDate", birthDate);
+            SetStrIfProvided(member, "landlinePhone", landlinePhone);
+            SetStrIfProvided(member, "gender", gender);
+            SetStrIfProvided(member, "coAddress", coAddress);
+            SetStrIfProvided(member, "membershipType", membershipType);
+            SetStrIfProvided(member, "membershipStatus", membershipStatus);
+            SetStrIfProvided(member, "memberUntil", memberUntil);
+            SetStrIfProvided(member, "endReason", endReason);
+            SetBoolIfProvided(member, "backgroundCheckApproved", backgroundCheckApproved);
+            SetStrIfProvided(member, "backgroundCheckDate", backgroundCheckDate);
+            SetBoolIfProvided(member, "registeredInMap", registeredInMap);
+            SetStrIfProvided(member, "federations", federations);
+            SetStrIfProvided(member, "memberNotes", memberNotes);
+            SetStrIfProvided(member, "householdId", householdId);
+            SetBoolIfProvided(member, "householdPrimary", householdPrimary);
+            SetBoolIfProvided(member, "pnrIncomplete", pnrIncomplete);
+            SetStrIfProvided(member, "guardian1Name", guardian1Name);
+            SetStrIfProvided(member, "guardian1Mobile", guardian1Mobile);
+            SetStrIfProvided(member, "guardian1Email", guardian1Email);
+            SetStrIfProvided(member, "guardian2Name", guardian2Name);
+            SetStrIfProvided(member, "guardian2Mobile", guardian2Mobile);
+            SetStrIfProvided(member, "guardian2Email", guardian2Email);
+            SetStrIfProvided(member, "emergencyContactName", emergencyContactName);
+            SetStrIfProvided(member, "emergencyContactPhone", emergencyContactPhone);
+        }
+
+        // Writes only when the form actually submitted the field (value != null).
+        private static void SetStrIfProvided(IMember member, string alias, string value)
+        {
+            if (value != null) SetIfPresent(member, alias, value);
+        }
+        private static void SetBoolIfProvided(IMember member, string alias, string value)
+        {
+            if (value != null) SetIfPresent(member, alias, ToBool(value));
+        }
+
+        // Boolean member properties (True/false editor) store a bool; the forms POST
+        // "true"/"false"/"on" strings, so normalise here.
+        private static bool ToBool(string value)
+            => value == "true" || value == "True" || value == "on" || value == "1";
 
         /// <summary>
         /// Deletes a member
