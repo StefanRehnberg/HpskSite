@@ -250,7 +250,7 @@
                     <button class="btn btn-outline-primary" onclick="new bootstrap.Modal(document.getElementById('clubFeeModal')).show()">
                         <i class="bi bi-cash-coin me-2"></i>Medlemsavgifter
                     </button>
-                    <button class="btn btn-outline-secondary" onclick="openMemberImportModal(@clubId, @Html.Raw(System.Text.Json.JsonSerializer.Serialize(clubName)))">
+                    <button class="btn btn-outline-secondary" onclick="openMemberImportModal(@clubId, @(System.Text.Json.JsonSerializer.Serialize(clubName)))">
                         <i class="bi bi-upload me-2"></i>Importera medlemmar
                     </button>
                 </div>
@@ -862,7 +862,7 @@
                             <div class="col-md-6"><div class="mb-3">
                                 <label class="form-label">Medlemstyp</label>
                                 <select class="form-select" name="membershipType">
-                                    <option value="">–</option><option>Senior</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                                    <option value="">–</option><option>Senior</option><option>Pensionär</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
                                 </select>
                             </div></div>
                             <div class="col-md-6"><div class="mb-3">
@@ -890,23 +890,11 @@
                                 </div>
                             </div></div>
                         </div>
-                        <div class="row">
-                            <div class="col-md-8"><div class="mb-3">
-                                <label class="form-label">Hushålls-ID <span class="text-muted small">(familjeavgift)</span></label>
-                                <input type="text" class="form-control" name="householdId" placeholder="delas av familjemedlemmar">
-                            </div></div>
-                            <div class="col-md-4"><div class="mb-3">
-                                <label class="form-label d-block">&nbsp;</label>
-                                <div class="form-check mt-1">
-                                    <input class="form-check-input" type="checkbox" name="householdPrimary" id="newMemberHouseholdPrimary">
-                                    <label class="form-check-label" for="newMemberHouseholdPrimary">Betalande huvudmedlem</label>
-                                </div>
-                            </div></div>
-                        </div>
                         <div class="mb-3">
                             <label class="form-label">Anteckningar (klubbintern)</label>
                             <textarea class="form-control" name="memberNotes" rows="2"></textarea>
                         </div>
+                        <p class="text-muted small mb-0"><i class="bi bi-info-circle me-1"></i>Familjemedlemskap kopplas via <em>Redigera medlem</em> efter att medlemmen skapats – huvudmedlemmen väljer sina familjemedlemmar där.</p>
                     </details>
                 </form>
             </div>
@@ -921,6 +909,45 @@
 </div>
 
 <!-- Board work (roles + meetings) moved to the dedicated /styrelse page (linked from the Members tab). -->
+
+<!-- Permanent member-delete confirmation (type RADERA) -->
+<div class="modal fade" id="deleteMemberConfirmModal" tabindex="-1" data-bs-backdrop="static" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-octagon-fill me-2"></i>Radera medlem permanent</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger mb-3">
+                    <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>Detta går inte att ångra.</strong>
+                </div>
+                <p>Du är på väg att <strong>permanent radera</strong> <span id="deleteMemberNameLabel" class="fw-bold"></span> och <strong>ALL</strong> data som är kopplad till medlemmen:</p>
+                <ul class="small mb-2">
+                    <li>Klubbmedlemskap, nycklar/passerkoder och föreningsintyg</li>
+                    <li>Medlemsavgifter och betalningshistorik</li>
+                    <li>All träningsdata (Skyttetrappan, egna träningsresultat)</li>
+                    <li><strong>Alla tävlingsresultat och placeringar</strong></li>
+                    <li>Alla träningsmatcher och matchdata</li>
+                    <li>Märken (inkl. Guldmärke), standardmedaljer och certifieringar</li>
+                    <li>Ev. styrelseuppdrag, banaktivitet, ranking och statistik</li>
+                </ul>
+                <p class="text-danger small mb-3">
+                    Medlemmens inloggning tas bort och hen förlorar åtkomst omedelbart. Raderingen
+                    påverkar även resultatlistor i tävlingar där hen har deltagit.
+                </p>
+                <label for="deleteMemberConfirmInput" class="form-label fw-bold">Skriv <code>RADERA</code> för att bekräfta:</label>
+                <input type="text" class="form-control" id="deleteMemberConfirmInput" autocomplete="off" placeholder="RADERA" oninput="onDeleteConfirmInput()">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-danger" id="deleteMemberConfirmBtn" disabled onclick="confirmDeleteMemberPermanently()">
+                    <i class="bi bi-trash me-1"></i>Ja, radera permanent
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 
 <!-- Club Email Modal -->
@@ -1123,7 +1150,7 @@
                             <div class="col-md-4"><div class="mb-3">
                                 <label class="form-label">Medlemstyp</label>
                                 <select class="form-select" id="editMembershipType">
-                                    <option value="">–</option><option>Senior</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                                    <option value="">–</option><option>Senior</option><option>Pensionär</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
                                 </select>
                             </div></div>
                             <div class="col-md-4"><div class="mb-3">
@@ -1165,29 +1192,23 @@
                                 </div>
                             </div></div>
                         </div>
-                        <div class="row">
-                            <div class="col-md-8"><div class="mb-3">
-                                <label class="form-label">Hushålls-ID <span class="text-muted small">(familjeavgift – samma värde på alla i familjen)</span></label>
-                                <div class="input-group">
-                                    <input type="text" class="form-control" id="editMembershipHouseholdId" placeholder="delas av familjemedlemmar">
-                                    <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('editMembershipHouseholdId').value = (crypto.randomUUID ? crypto.randomUUID() : ('' + Date.now() + Math.random()))" title="Skapa nytt hushålls-ID">Nytt</button>
-                                </div>
-                            </div></div>
-                            <div class="col-md-4"><div class="mb-3">
-                                <label class="form-label d-block">&nbsp;</label>
-                                <div class="form-check mt-1">
-                                    <input class="form-check-input" type="checkbox" id="editMembershipHouseholdPrimary">
-                                    <label class="form-check-label" for="editMembershipHouseholdPrimary">Betalande huvudmedlem</label>
-                                </div>
-                            </div></div>
-                        </div>
                         <div class="mb-3">
                             <label class="form-label">Anteckningar (klubbintern)</label>
                             <textarea class="form-control" id="editMembershipNotes" rows="2"></textarea>
                         </div>
-                        <div class="text-end">
-                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="saveClubMembership()">Spara klubbmedlemskap</button>
-                            <span id="editMembershipMsg" class="small text-muted ms-2"></span>
+
+                        <!-- Familjemedlemskap (familjeavgift) -->
+                        <div class="border rounded p-2 mb-2 bg-light-subtle">
+                            <label class="form-label fw-semibold mb-1"><i class="bi bi-people me-1"></i>Familjemedlemskap</label>
+                            <div id="editFamilyCoveredBlock" class="alert alert-info py-2 px-2 small mb-0" style="display:none;">
+                                Ingår i familjemedlemskap – huvudmedlem: <strong id="editFamilyMainName"></strong>.
+                                Familjeavgiften betalas av huvudmedlemmen.
+                            </div>
+                            <div id="editFamilyPrimaryBlock">
+                                <p class="text-muted small mb-1">Välj övriga familjemedlemmar – denna medlem blir <strong>huvudmedlem</strong> och betalar familjeavgiften. Valda medlemmar sätts automatiskt till medlemstyp <em>Familj</em>.</p>
+                                <select id="editFamilyMembers" class="form-select" multiple size="5"></select>
+                                <div class="form-text">Håll in Ctrl/Cmd för att välja flera. Töm valet för att upplösa familjen.</div>
+                            </div>
                         </div>
                     </details>
 
@@ -1330,8 +1351,11 @@
                 </form>
             </div>
             <div class="modal-footer">
+                <button type="button" class="btn btn-outline-warning" id="editMemberEndMembershipBtn" onclick="endClubMembership()">
+                    <i class="bi bi-box-arrow-right me-1"></i>Avsluta medlemskap
+                </button>
                 <button type="button" class="btn btn-danger" id="editMemberDeleteBtn" onclick="deleteEditMember()" style="display: none;">
-                    <i class="bi bi-trash"></i> Ta bort medlem
+                    <i class="bi bi-trash"></i> Radera permanent
                 </button>
                 <div class="ms-auto">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -3691,8 +3715,11 @@ function showAddClubMemberModal() {
     const modal = new bootstrap.Modal(document.getElementById('addClubMemberModal'));
     modal.show();
 
-    // Reset form
-    document.getElementById('addClubMemberForm').reset();
+    // Reset form, then default membership type to Senior.
+    const addForm = document.getElementById('addClubMemberForm');
+    addForm.reset();
+    const typeSel = addForm.querySelector('select[name="membershipType"]');
+    if (typeSel) typeSel.value = 'Senior';
 }
 
 function saveClubMember() {
@@ -4351,6 +4378,17 @@ async function saveEditClubMember() {
         const result = await response.json();
 
         if (result.success) {
+            // Also persist the per-club membership fields + family linking (same Save button).
+            try {
+                const memResult = await saveClubMembership();
+                if (memResult && memResult.success === false) {
+                    alert('Personuppgifter sparade, men klubbmedlemskap kunde inte sparas: ' + (memResult.message || ''));
+                }
+                await saveClubHousehold();
+            } catch (e) {
+                console.error('Membership save error:', e);
+                alert('Personuppgifter sparade, men klubbmedlemskap kunde inte sparas.');
+            }
             bootstrap.Modal.getInstance(document.getElementById('editClubMemberModal')).hide();
             loadClubMembers();
             alert('Medlem sparad!');
@@ -4363,20 +4401,38 @@ async function saveEditClubMember() {
     }
 }
 
-// Delete member
-async function deleteEditMember() {
+// Delete member — opens the permanent-delete confirmation (requires typing RADERA).
+function deleteEditMember() {
     const memberId = document.getElementById('editMemberId').value;
     if (!memberId) return;
+    const memberName = `${document.getElementById('editMemberFirstName').value} ${document.getElementById('editMemberLastName').value}`.trim();
+    document.getElementById('deleteMemberNameLabel').textContent = memberName || 'denna medlem';
+    const input = document.getElementById('deleteMemberConfirmInput');
+    input.value = '';
+    document.getElementById('deleteMemberConfirmBtn').disabled = true;
+    new bootstrap.Modal(document.getElementById('deleteMemberConfirmModal')).show();
+}
 
-    const memberName = `${document.getElementById('editMemberFirstName').value} ${document.getElementById('editMemberLastName').value}`;
+// Enable the delete button only when the admin has typed exactly RADERA.
+function onDeleteConfirmInput() {
+    const val = document.getElementById('deleteMemberConfirmInput').value.trim();
+    document.getElementById('deleteMemberConfirmBtn').disabled = (val !== 'RADERA');
+}
 
-    if (!confirm(`Är du säker på att du vill ta bort ${memberName}? Detta kan inte ångras.`)) {
-        return;
-    }
+// Actually perform the irreversible delete (member + all related data).
+async function confirmDeleteMemberPermanently() {
+    const memberId = document.getElementById('editMemberId').value;
+    if (!memberId) return;
+    if (document.getElementById('deleteMemberConfirmInput').value.trim() !== 'RADERA') return;
+
+    const btn = document.getElementById('deleteMemberConfirmBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Raderar...';
 
     try {
         const formData = new FormData();
-        formData.append('id', memberId);
+        formData.append('memberId', memberId); // MemberAdmin/DeleteMember binds "memberId", not "id"
         const token = getAntiForgeryToken();
         if (token) {
             formData.append('__RequestVerificationToken', token);
@@ -4389,13 +4445,18 @@ async function deleteEditMember() {
         const result = await response.json();
 
         if (result.success) {
-            bootstrap.Modal.getInstance(document.getElementById('editClubMemberModal')).hide();
+            bootstrap.Modal.getInstance(document.getElementById('deleteMemberConfirmModal'))?.hide();
+            bootstrap.Modal.getInstance(document.getElementById('editClubMemberModal'))?.hide();
             loadClubMembers();
-            alert('Medlem borttagen.');
+            alert('Medlem och all kopplad data raderad.');
         } else {
+            btn.disabled = false;
+            btn.innerHTML = orig;
             alert('Fel: ' + result.message);
         }
     } catch (error) {
+        btn.disabled = false;
+        btn.innerHTML = orig;
         console.error('Delete error:', error);
         alert('Kunde inte ta bort medlem: ' + error.message);
     }
@@ -5360,6 +5421,32 @@ document.addEventListener('DOMContentLoaded', loadDpaGate);
 </style>
 
 <script>
+// Club admin's "remove from club": sets this club's membership to Utträdd (person + data kept).
+async function endClubMembership() {
+    var memberId = window._editMemberId;
+    if (!memberId) return;
+    if (!confirm('Avsluta medlemskapet i klubben?\n\nMedlemmen sätts som "Utträdd" och försvinner från aktiva listor. Personen, inloggningen och all data finns kvar (och ev. medlemskap i andra klubbar) — det går att återaktivera senare.')) return;
+    var fd = new FormData();
+    fd.append('__RequestVerificationToken', meToken());
+    fd.append('memberId', memberId);
+    fd.append('clubId', @clubId);
+    try {
+        var r = await fetch('/umbraco/surface/ClubMembership/EndMembership', { method: 'POST', body: fd });
+        var d = await r.json();
+        if (d.success) {
+            var statusSel = document.getElementById('editMembershipStatus');
+            if (statusSel) statusSel.value = 'Utträdd';
+            if (d.memberUntil) { var mu = document.getElementById('editMembershipMemberUntil'); if (mu) mu.value = d.memberUntil; }
+            if (typeof loadClubMembers === 'function') loadClubMembers();
+            alert('Medlemskapet i klubben har avslutats.');
+        } else {
+            alert('Fel: ' + (d.message || 'Kunde inte avsluta medlemskap'));
+        }
+    } catch (e) {
+        alert('Kunde inte avsluta medlemskap: ' + e.message);
+    }
+}
+
 // ---- Member keys + föreningsintyg (member-database expansion) ----
 function meToken() {
     var el = document.querySelector('input[name="__RequestVerificationToken"]');
@@ -5372,12 +5459,28 @@ function meEsc(s) {
 }
 
 // ---- Per-club membership (ClubMembership) ----
+// Cached club-member list for the family multi-select [{id, name}].
+var _clubMemberOptions = null;
+function ensureClubMemberOptions() {
+    if (_clubMemberOptions) return Promise.resolve(_clubMemberOptions);
+    return fetch('/umbraco/surface/ClubAdmin/GetClubMembersForClubAdmin?clubId=' + @clubId)
+        .then(function (r) { return r.json(); })
+        .then(function (resp) {
+            _clubMemberOptions = (resp && resp.success ? resp.data : []).map(function (m) {
+                return { id: m.id, name: ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || m.email || ('#' + m.id) };
+            });
+            return _clubMemberOptions;
+        })
+        .catch(function () { _clubMemberOptions = []; return _clubMemberOptions; });
+}
+
 function loadClubMembership(memberId) {
     fetch('/umbraco/surface/ClubMembership/GetMembership?memberId=' + memberId + '&clubId=' + @clubId)
         .then(function (r) { return r.json(); })
         .then(function (resp) {
             var d = (resp && resp.success) ? resp.data : {};
-            document.getElementById('editMembershipType').value = d.membershipType || '';
+            // Default membership type = Senior when none set yet.
+            document.getElementById('editMembershipType').value = d.membershipType || 'Senior';
             document.getElementById('editMembershipStatus').value = d.membershipStatus || 'Aktiv';
             document.getElementById('editMembershipMemberSince').value = d.memberSince || '';
             document.getElementById('editMembershipMemberUntil').value = d.memberUntil || '';
@@ -5386,18 +5489,40 @@ function loadClubMembership(memberId) {
             document.getElementById('editMembershipBgApproved').checked = !!d.backgroundCheckApproved;
             document.getElementById('editMembershipFederations').value = d.federations || '';
             document.getElementById('editMembershipInMap').checked = !!d.registeredInMap;
-            document.getElementById('editMembershipHouseholdId').value = d.householdId || '';
-            document.getElementById('editMembershipHouseholdPrimary').checked = !!d.householdPrimary;
             document.getElementById('editMembershipNotes').value = d.memberNotes || '';
+            renderFamilyBlock(memberId, d);
         });
 }
+
+function renderFamilyBlock(memberId, d) {
+    var coveredBlock = document.getElementById('editFamilyCoveredBlock');
+    var primaryBlock = document.getElementById('editFamilyPrimaryBlock');
+    // A covered (non-primary) family member: show read-only note, hide the picker.
+    if (d.inHousehold && !d.isHouseholdPrimary && d.householdMainMemberId) {
+        document.getElementById('editFamilyMainName').textContent = d.householdMainMemberName || 'okänd';
+        coveredBlock.style.display = '';
+        primaryBlock.style.display = 'none';
+        return;
+    }
+    coveredBlock.style.display = 'none';
+    primaryBlock.style.display = '';
+    var selectedIds = (d.householdMemberIds || []).map(Number);
+    ensureClubMemberOptions().then(function (opts) {
+        var sel = document.getElementById('editFamilyMembers');
+        sel.innerHTML = opts
+            .filter(function (o) { return o.id !== memberId; })
+            .map(function (o) {
+                var chosen = selectedIds.indexOf(o.id) !== -1 ? ' selected' : '';
+                return '<option value="' + o.id + '"' + chosen + '>' + meEsc(o.name) + '</option>';
+            }).join('');
+    });
+}
+
+// Saves the membership scalar fields; returns the fetch promise. Called by the main modal Save.
 function saveClubMembership() {
-    var memberId = window._editMemberId;
-    var msg = document.getElementById('editMembershipMsg');
-    msg.textContent = 'Sparar…';
     var fd = new FormData();
     fd.append('__RequestVerificationToken', meToken());
-    fd.append('memberId', memberId);
+    fd.append('memberId', window._editMemberId);
     fd.append('clubId', @clubId);
     fd.append('membershipType', document.getElementById('editMembershipType').value);
     fd.append('membershipStatus', document.getElementById('editMembershipStatus').value);
@@ -5409,11 +5534,22 @@ function saveClubMembership() {
     fd.append('registeredInMap', document.getElementById('editMembershipInMap').checked);
     fd.append('federations', document.getElementById('editMembershipFederations').value);
     fd.append('memberNotes', document.getElementById('editMembershipNotes').value);
-    fd.append('householdId', document.getElementById('editMembershipHouseholdId').value);
-    fd.append('householdPrimary', document.getElementById('editMembershipHouseholdPrimary').checked);
-    fetch('/umbraco/surface/ClubMembership/SaveMembership', { method: 'POST', body: fd })
-        .then(function (r) { return r.json(); })
-        .then(function (d) { msg.textContent = d.success ? 'Sparat ✓' : (d.message || 'Fel'); });
+    return fetch('/umbraco/surface/ClubMembership/SaveMembership', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); });
+}
+
+// Applies the family multi-select (this member becomes Huvudmedlem). Skipped for covered members.
+function saveClubHousehold() {
+    var primaryBlock = document.getElementById('editFamilyPrimaryBlock');
+    if (!primaryBlock || primaryBlock.style.display === 'none') return Promise.resolve({ success: true });
+    var sel = document.getElementById('editFamilyMembers');
+    var fd = new FormData();
+    fd.append('__RequestVerificationToken', meToken());
+    fd.append('primaryMemberId', window._editMemberId);
+    fd.append('clubId', @clubId);
+    Array.from(sel.selectedOptions).forEach(function (o) { fd.append('memberIds', o.value); });
+    return fetch('/umbraco/surface/ClubMembership/SetHousehold', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); });
 }
 
 function loadMemberKeys(memberId) {

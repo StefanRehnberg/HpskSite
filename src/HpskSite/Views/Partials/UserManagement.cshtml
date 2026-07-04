@@ -1,7 +1,9 @@
 @using Umbraco.Cms.Web.Website.Controllers
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @{
     // This partial handles user management UI
     // Redesigned with Club Management pattern and Swedish translation
+    var siteAdminEmail = Configuration["Email:AdminEmail"] ?? "";
 }
 
 <!-- Flatpickr Date/Time Picker -->
@@ -451,8 +453,15 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-danger" id="deleteMemberBtn" onclick="deleteMemberFromModal()" style="display: none;">
-                    <i class="bi bi-trash"></i> Ta bort medlem
+                    <i class="bi bi-trash"></i> Radera permanent
                 </button>
+                <div id="deleteContactSiteAdmin" class="small text-muted me-auto" style="display: none;">
+                    <i class="bi bi-info-circle me-1"></i>Radering av en medlem görs av systemadministratören.
+                    @if (!string.IsNullOrWhiteSpace(siteAdminEmail))
+                    {
+                        <a href="mailto:@siteAdminEmail?subject=Begäran%20om%20borttagning%20av%20medlem">Kontakta systemadministratör</a>
+                    }
+                </div>
                 <div class="ms-auto">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                     <button type="button" class="btn btn-primary" onclick="saveMember()">Spara medlem</button>
@@ -1223,6 +1232,7 @@ function showAddUserModal() {
 
     // Hide delete button for new members
     document.getElementById('deleteMemberBtn').style.display = 'none';
+    var _contactEl = document.getElementById('deleteContactSiteAdmin'); if (_contactEl) _contactEl.style.display = 'none';
 
     // Hide profile picture section for new members
     document.getElementById('profilePictureSection').style.display = 'none';
@@ -1297,6 +1307,7 @@ function editUser(userId) {
 
     // Hide sections that will be populated later
     document.getElementById('deleteMemberBtn').style.display = 'none';
+    var _contactEl = document.getElementById('deleteContactSiteAdmin'); if (_contactEl) _contactEl.style.display = 'none';
     document.getElementById('profilePictureSection').style.display = 'none';
     document.getElementById('adminPrecisionSection').style.display = 'none';
     document.getElementById('adminMarkenSection').style.display = 'none';
@@ -1327,8 +1338,11 @@ function editUser(userId) {
                 document.getElementById('memberSince').value = member.memberSince || '';
                 document.getElementById('isApproved').checked = member.isApproved;
 
-                // Show delete button for existing members
-                document.getElementById('deleteMemberBtn').style.display = 'block';
+                // Hard delete is site-admin only (it purges the person + all data across every
+                // club/competition). Others see a "contact site admin" note instead.
+                var canHardDelete = document.getElementById('users')?.dataset.isSiteAdmin === 'true';
+                document.getElementById('deleteMemberBtn').style.display = canHardDelete ? 'block' : 'none';
+                document.getElementById('deleteContactSiteAdmin').style.display = canHardDelete ? 'none' : 'block';
 
                 // Show and populate profile picture section
                 document.getElementById('profilePictureSection').style.display = 'block';
@@ -1664,7 +1678,17 @@ function deleteMemberFromModal() {
         return;
     }
 
-    if (confirm('Är du säker på att du vill ta bort denna medlem? Denna åtgärd kan inte ångras.')) {
+    // Hard delete purges the person + ALL their data across every club and competition.
+    // Require the admin to type RADERA to confirm (same seriousness as the club-admin flow).
+    const warning = 'RADERA MEDLEM PERMANENT\n\n'
+        + 'Detta tar bort personen, inloggningen och ALL kopplad data:\n'
+        + '• klubbmedlemskap, nycklar, föreningsintyg, medlemsavgifter\n'
+        + '• all tränings-, tävlings- och matchdata\n'
+        + '• märken (inkl. Guldmärke), medaljer och certifieringar\n\n'
+        + 'Åtgärden kan INTE ångras och påverkar tävlingars resultatlistor.\n\n'
+        + 'Skriv RADERA för att bekräfta:';
+    const answer = prompt(warning);
+    if (answer !== null && answer.trim() === 'RADERA') {
         const formData = new FormData();
 
         // Add anti-forgery token

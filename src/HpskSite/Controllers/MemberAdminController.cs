@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly EmailService _emailService;
         private readonly IWebHostEnvironment _webHostEnvironment;
         private readonly IMemberManager _memberManager;
+        private readonly MemberDataPurgeService _purgeService;
         private readonly string _adminEmail;
 
         private const string ClubMemberTypeAlias = "hpskClub";
@@ -48,6 +49,7 @@ namespace HpskSite.Controllers
             EmailService emailService,
             IWebHostEnvironment webHostEnvironment,
             IMemberManager memberManager,
+            MemberDataPurgeService purgeService,
             IConfiguration configuration)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -58,6 +60,7 @@ namespace HpskSite.Controllers
             _emailService = emailService;
             _webHostEnvironment = webHostEnvironment;
             _memberManager = memberManager;
+            _purgeService = purgeService;
             _adminEmail = configuration["Email:AdminEmail"] ?? "";
         }
 
@@ -1065,11 +1068,13 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteMember(int memberId)
         {
-            // Club admins and regional admins can delete members of their club(s),
-            // not just site admins. CanEditMemberAsync covers all three tiers.
-            if (!await _authService.CanEditMemberAsync(memberId))
+            // Hard delete purges the person + ALL their data across every club and competition,
+            // so it's SITE-ADMIN ONLY. A club admin "removes" a member by ending that club's
+            // membership (ClubMembership → Utträdd via ClubMembershipController.EndMembership),
+            // which is club-scoped and reversible.
+            if (!await _authService.IsCurrentUserAdminAsync())
             {
-                return Json(new { success = false, message = "Access denied" });
+                return Json(new { success = false, message = "Endast systemadministratör kan radera en medlem permanent. Använd \"Avsluta medlemskap\" för att ta bort medlemmen ur klubben." });
             }
 
             try
@@ -1077,8 +1082,16 @@ namespace HpskSite.Controllers
                 var member = _memberService.GetById(memberId);
                 if (member != null)
                 {
+                    // Purge the member's subject-owned rows across all custom tables FIRST, so a
+                    // hard delete doesn't leave orphaned training/competition/match/märken/etc. data.
+                    var purge = _purgeService.PurgeMemberData(memberId);
+                    if (purge.Errors.Count > 0)
+                    {
+                        Console.WriteLine($"[DeleteMember] Purge for {memberId} had {purge.Errors.Count} error(s): {string.Join("; ", purge.Errors)}");
+                    }
+
                     _memberService.Delete(member);
-                    return Json(new { success = true, message = "Member deleted successfully" });
+                    return Json(new { success = true, message = $"Member deleted successfully ({purge.TotalRowsDeleted} kopplade rader raderade)" });
                 }
                 return Json(new { success = false, message = "Member not found" });
             }

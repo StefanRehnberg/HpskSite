@@ -40,6 +40,15 @@ namespace HpskSite.Services
                 "SELECT * FROM ClubMembership WHERE MemberId = @0", memberId);
         }
 
+        /// <summary>All membership rows in one household within a club (familjeavgift).</summary>
+        public List<ClubMembership> GetByHousehold(string householdId, int clubId)
+        {
+            if (string.IsNullOrWhiteSpace(householdId)) return new List<ClubMembership>();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<ClubMembership>(
+                "SELECT * FROM ClubMembership WHERE HouseholdId = @0 AND ClubId = @1", householdId.Trim(), clubId);
+        }
+
         /// <summary>
         /// Upsert on (MemberId, ClubId). Returns the saved row. CreatedDate is set on insert.
         /// </summary>
