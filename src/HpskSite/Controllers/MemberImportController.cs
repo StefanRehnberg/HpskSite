@@ -29,6 +29,8 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authService;
         private readonly IMemberManager _memberManager;
         private readonly ClubMembershipService _clubMembershipService;
+        private readonly MemberAccessKeyService _accessKeyService;
+        private readonly MarkenLedgerService _markenLedger;
         private readonly ILogger<MemberImportController> _logger;
 
         private const string ClubMemberTypeAlias = "hpskClub";
@@ -44,6 +46,18 @@ namespace HpskSite.Controllers
             "memberNotes", "householdId", "householdPrimary"
         };
 
+        /// <summary>
+        /// Aliases that are ACTIONS, not scalar fields — they map to other tables/systems
+        /// (Märken ledger, MemberAccessKey, member roles) and are handled explicitly in
+        /// <see cref="Commit"/>. They must never be written as a member property or a
+        /// ClubMembership column, so both <see cref="ApplyValues"/> and
+        /// <see cref="UpsertClubMembership"/> skip them.
+        /// </summary>
+        private static readonly HashSet<string> ActionAliases = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "guldmarkeNumber", "guldmarkeAwarded", "nyckel", "skjutledare"
+        };
+
         public MemberImportController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -55,6 +69,8 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             IMemberManager memberManager,
             ClubMembershipService clubMembershipService,
+            MemberAccessKeyService accessKeyService,
+            MarkenLedgerService markenLedger,
             ILogger<MemberImportController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -62,6 +78,8 @@ namespace HpskSite.Controllers
             _authService = authService;
             _memberManager = memberManager;
             _clubMembershipService = clubMembershipService;
+            _accessKeyService = accessKeyService;
+            _markenLedger = markenLedger;
             _logger = logger;
         }
 
@@ -159,6 +177,15 @@ namespace HpskSite.Controllers
 
             int created = 0, updated = 0, skipped = 0, pnrIncompleteCount = 0;
             var errors = new List<string>();
+
+            // The acting admin — recorded as the "entered/created by" on any action rows
+            // (Märken badge, access key) materialized from this import.
+            int actingMemberId = 0;
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember != null && !string.IsNullOrWhiteSpace(currentMember.Email))
+            {
+                actingMemberId = _memberService.GetByEmail(currentMember.Email)?.Id ?? 0;
+            }
 
             // Pre-load all members once (performance rule: no per-row lookups).
             var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
@@ -282,8 +309,88 @@ namespace HpskSite.Controllers
 
                     _memberService.Save(member);
 
-                    // Club-scoped facts go on the per-club ClubMembership record, not the member.
+                    // ---- Club-specific action columns (map to other tables/systems) ----
+                    values.TryGetValue("skjutledare", out var skjutledareValue);
+                    values.TryGetValue("nyckel", out var nyckelValue);
+                    values.TryGetValue("guldmarkeNumber", out var guldmarkeNumber);
+                    values.TryGetValue("guldmarkeAwarded", out var guldmarkeAwarded);
+
+                    // Resolve a usable Guldmärke award year/date — used both for the note decision
+                    // in (a) and the badge import in (c). Full date wins; else a bare 4-digit year.
+                    int guldYear = 0;
+                    DateTime? guldDate = null;
+                    if (!string.IsNullOrWhiteSpace(guldmarkeNumber))
+                    {
+                        var awardDate = ParseDate(guldmarkeAwarded);
+                        if (awardDate.HasValue)
+                        {
+                            guldYear = awardDate.Value.Year;
+                            guldDate = awardDate.Value;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(guldmarkeAwarded)
+                                 && System.Text.RegularExpressions.Regex.IsMatch(guldmarkeAwarded.Trim(), @"^\d{4}$"))
+                        {
+                            guldYear = int.Parse(guldmarkeAwarded.Trim());
+                            guldDate = null;
+                        }
+                    }
+
+                    // (a) Merge note additions into memberNotes BEFORE UpsertClubMembership so they
+                    //     land in ClubMembership.MemberNotes.
+                    var noteAdditions = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(skjutledareValue))
+                    {
+                        noteAdditions.Add($"Skjutledare: {skjutledareValue.Trim()}");
+                    }
+                    if (!string.IsNullOrWhiteSpace(guldmarkeNumber) && guldYear == 0)
+                    {
+                        // Number present but no usable award year — keep it as a note.
+                        noteAdditions.Add($"Guldmärke: {guldmarkeNumber.Trim()}");
+                    }
+                    if (noteAdditions.Count > 0)
+                    {
+                        values.TryGetValue("memberNotes", out var existingNotes);
+                        values["memberNotes"] = string.IsNullOrWhiteSpace(existingNotes)
+                            ? string.Join(" | ", noteAdditions)
+                            : existingNotes + " | " + string.Join(" | ", noteAdditions);
+                    }
+
+                    // (b) Club-scoped facts go on the per-club ClubMembership record, not the member.
                     UpsertClubMembership(member.Id, clubId, values);
+
+                    // (c) Guldmärke → Märken ledger (Pistolskyttemärket Guld).
+                    if (!string.IsNullOrWhiteSpace(guldmarkeNumber) && guldYear > 0)
+                    {
+                        await _markenLedger.ImportGuldBadgeAsync(member.Id, guldmarkeNumber.Trim(), guldYear, guldDate, actingMemberId);
+                    }
+
+                    // (d) Nyckel → MemberAccessKey. Preserve the RAW value; don't parse deposit/date.
+                    if (!string.IsNullOrWhiteSpace(nyckelValue))
+                    {
+                        var rawKey = nyckelValue.Trim();
+                        var identifier = rawKey.Length > 100 ? rawKey.Substring(0, 100) : rawKey;
+                        var existingKeys = _accessKeyService.GetForMember(member.Id);
+                        bool dup = existingKeys.Any(k => string.Equals(k.Identifier, identifier, StringComparison.Ordinal));
+                        if (!dup)
+                        {
+                            _accessKeyService.Add(new MemberAccessKey
+                            {
+                                MemberId = member.Id,
+                                ClubId = clubId,
+                                KeyType = "Nyckel",
+                                Identifier = identifier,
+                                Notes = rawKey.Length > 100 ? rawKey : null,
+                                CreatedByMemberId = actingMemberId
+                            });
+                        }
+                    }
+
+                    // (e) Skjutledare → club role (only for a truthy value).
+                    if (IsActionTruthy(skjutledareValue))
+                    {
+                        await _authService.EnsureSkjutledareGroup(clubId);
+                        _memberService.AssignRole(member.Id, $"Skjutledare_{clubId}");
+                    }
 
                     if (isNew)
                     {
@@ -353,6 +460,12 @@ namespace HpskSite.Controllers
 
                 // Club-scoped fields live on ClubMembership (written in Commit), never on the member.
                 if (ClubScopedAliases.Contains(alias))
+                {
+                    continue;
+                }
+
+                // Action aliases map to other tables/systems, handled explicitly in Commit.
+                if (ActionAliases.Contains(alias))
                 {
                     continue;
                 }
@@ -485,6 +598,17 @@ namespace HpskSite.Controllers
             {
                 member.SetValue(alias, value);
             }
+        }
+
+        /// <summary>
+        /// A club-column action value counts as "on" when it's non-empty and not an explicit
+        /// negative (nej/no/0/false/-). Used to gate the Skjutledare role assignment.
+        /// </summary>
+        private static bool IsActionTruthy(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            var v = value.Trim().ToLowerInvariant();
+            return v != "nej" && v != "no" && v != "0" && v != "false" && v != "-";
         }
 
         private static bool ToBool(string value)

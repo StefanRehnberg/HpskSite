@@ -326,12 +326,12 @@ namespace HpskSite.Services
                 ["Finns i MAP"] = "registeredInMap",
                 ["Aktiv i förbund"] = "federations",
                 ["Medlemsavgift betald"] = "memberNotes",
-                ["Nyckel"] = "memberNotes",
-                ["Skjutledare"] = "memberNotes",
+                ["Nyckel"] = "nyckel",
+                ["Skjutledare"] = "skjutledare",
                 ["Anteckningar"] = "memberNotes",
+                ["Guldmärke"] = "guldmarkeNumber",
                 // Informational / skipped by default
                 ["Huvudmedlemsskap"] = "",
-                ["Guldmärke"] = "",
                 ["WAID"] = "",
                 ["IPSC"] = ""
             };
@@ -371,7 +371,12 @@ namespace HpskSite.Services
             ("guardian2Email", "Målsman 2 – E-post"),
             ("emergencyContactName", "Närmast anhörig – Namn"),
             ("emergencyContactPhone", "Närmast anhörig – Telefon"),
-            ("memberNotes", "Anteckningar")
+            ("memberNotes", "Anteckningar"),
+            // Club-specific actions that map to OTHER tables/systems, not member/ClubMembership fields.
+            ("guldmarkeNumber", "Guldmärkesnr"),
+            ("guldmarkeAwarded", "Guldmärke tilldelad (år/datum)"),
+            ("nyckel", "Nyckel/bricka → skapar nyckelpost"),
+            ("skjutledare", "Skjutledare → roll")
         };
 
         /// <summary>

@@ -411,6 +411,33 @@ namespace HpskSite.Services
             });
         }
 
+        /// <summary>
+        /// Import a member's pre-existing Pistolskyttemärket Guld from a club's previous register
+        /// (e.g. Svenska Lag). Idempotent: skips if the member already holds a Guld in the family
+        /// (incl. rejected). Returns true when a badge was inserted, false when one already existed.
+        /// </summary>
+        public async Task<bool> ImportGuldBadgeAsync(int memberId, string uniqueNumber, int achievedYear, DateTime? achievedDate, int enteredByMemberId)
+        {
+            var existing = await GetBadgesForMemberAsync(memberId, Marken.FamilyPistolskytte, includeRejected: true);
+            if (existing.Any(b => b.Level == Marken.LevelGuld)) return false;
+
+            await InsertBadgeAsync(new MemberBadge
+            {
+                MemberId = memberId,
+                BadgeFamily = Marken.FamilyPistolskytte,
+                Level = Marken.LevelGuld,
+                LevelOrdinal = Marken.LevelOrdinal(Marken.LevelGuld),
+                AchievedYear = achievedYear,
+                AchievedDate = achievedDate,
+                UniqueNumber = string.IsNullOrWhiteSpace(uniqueNumber) ? null : uniqueNumber.Trim(),
+                Source = Marken.SourceAdmin,
+                Status = Marken.StatusVerified,
+                EnteredByMemberId = enteredByMemberId,
+                Notes = "Importerad från klubbens tidigare register"
+            });
+            return true;
+        }
+
         /// <summary>Idempotently materialize a Fulfilled + Verified årtalsmärke year for a family.</summary>
         public async Task EnsureFulfilledYearAsync(int memberId, string family, int year)
         {
