@@ -718,22 +718,12 @@ namespace HpskSite.Controllers
                     additionalClubIds = additionalClubIds.ToArray(),
                     precisionShooterClass = member.GetValue("precisionShooterClass")?.ToString() ?? "",
                     isApproved = member.IsApproved,
-                    // Member-database expansion fields (guarded reads — safe before backoffice props exist)
+                    // Member-database expansion — PERSON-LEVEL fields only (club-scoped facts
+                    // come from ClubMembership via ClubMembershipController). Guarded reads.
                     birthDate = GetVal(member, "birthDate"),
                     landlinePhone = GetVal(member, "landlinePhone"),
                     gender = GetVal(member, "gender"),
                     coAddress = GetVal(member, "coAddress"),
-                    membershipType = GetVal(member, "membershipType"),
-                    membershipStatus = GetVal(member, "membershipStatus"),
-                    memberUntil = GetVal(member, "memberUntil"),
-                    endReason = GetVal(member, "endReason"),
-                    backgroundCheckApproved = GetVal(member, "backgroundCheckApproved"),
-                    backgroundCheckDate = GetVal(member, "backgroundCheckDate"),
-                    registeredInMap = GetVal(member, "registeredInMap"),
-                    federations = GetVal(member, "federations"),
-                    memberNotes = GetVal(member, "memberNotes"),
-                    householdId = GetVal(member, "householdId"),
-                    householdPrimary = GetVal(member, "householdPrimary"),
                     pnrIncomplete = GetVal(member, "pnrIncomplete"),
                     guardian1Name = GetVal(member, "guardian1Name"),
                     guardian1Mobile = GetVal(member, "guardian1Mobile"),
@@ -779,15 +769,11 @@ namespace HpskSite.Controllers
             string precisionShooterClass = "",
             bool isApproved = false,
             string[] groups = null,
-            // Member-database expansion fields (see Documentation/MEMBER_DATABASE.md).
-            // Default null = "not submitted by this form" → field is preserved (the site-admin
-            // UserManagement modal doesn't send these; the club-admin modal does). An empty
-            // string IS a submitted value and will clear the field.
+            // Member-database expansion — PERSON-LEVEL fields only (see Documentation/MEMBER_DATABASE.md).
+            // Club-scoped membership facts live in the ClubMembership table (ClubMembershipController),
+            // NOT on the shared member/login. Default null = "not submitted" → field is preserved.
             string birthDate = null, string landlinePhone = null, string gender = null, string coAddress = null,
-            string membershipType = null, string membershipStatus = null, string memberUntil = null, string endReason = null,
-            string backgroundCheckApproved = null, string backgroundCheckDate = null,
-            string registeredInMap = null, string federations = null, string memberNotes = null,
-            string householdId = null, string householdPrimary = null, string pnrIncomplete = null,
+            string pnrIncomplete = null,
             string guardian1Name = null, string guardian1Mobile = null, string guardian1Email = null,
             string guardian2Name = null, string guardian2Mobile = null, string guardian2Email = null,
             string emergencyContactName = null, string emergencyContactPhone = null)
@@ -896,9 +882,7 @@ namespace HpskSite.Controllers
                     {
                         member.SetValue("precisionShooterClass", precisionShooterClass);
                     }
-                    ApplyExpansionFields(member, birthDate, landlinePhone, gender, coAddress, membershipType,
-                        membershipStatus, memberUntil, endReason, backgroundCheckApproved, backgroundCheckDate,
-                        registeredInMap, federations, memberNotes, householdId, householdPrimary, pnrIncomplete,
+                    ApplyPersonFields(member, birthDate, landlinePhone, gender, coAddress, pnrIncomplete,
                         guardian1Name, guardian1Mobile, guardian1Email, guardian2Name, guardian2Mobile, guardian2Email,
                         emergencyContactName, emergencyContactPhone);
                     member.IsApproved = isApproved;
@@ -988,9 +972,7 @@ namespace HpskSite.Controllers
                     newMember.SetValue("primaryClubId", primaryClubId);
                     newMember.SetValue("memberClubIds", string.Join(",", additionalClubIdList));
                     newMember.SetValue("precisionShooterClass", precisionShooterClass ?? "");
-                    ApplyExpansionFields(newMember, birthDate, landlinePhone, gender, coAddress, membershipType,
-                        membershipStatus, memberUntil, endReason, backgroundCheckApproved, backgroundCheckDate,
-                        registeredInMap, federations, memberNotes, householdId, householdPrimary, pnrIncomplete,
+                    ApplyPersonFields(newMember, birthDate, landlinePhone, gender, coAddress, pnrIncomplete,
                         guardian1Name, guardian1Mobile, guardian1Email, guardian2Name, guardian2Mobile, guardian2Email,
                         emergencyContactName, emergencyContactPhone);
                     newMember.IsApproved = isApproved;
@@ -1036,14 +1018,12 @@ namespace HpskSite.Controllers
             }
         }
 
-        // Applies expansion fields to a member. A null value means "not submitted by this
-        // form" and is skipped so the field is preserved (the site-admin UserManagement modal
-        // doesn't post these). An empty string is a submitted value and clears the field.
-        private static void ApplyExpansionFields(IMember member,
-            string birthDate, string landlinePhone, string gender, string coAddress, string membershipType,
-            string membershipStatus, string memberUntil, string endReason, string backgroundCheckApproved,
-            string backgroundCheckDate, string registeredInMap, string federations, string memberNotes,
-            string householdId, string householdPrimary, string pnrIncomplete,
+        // Applies PERSON-LEVEL expansion fields to a member (shared across all the person's
+        // clubs). Club-scoped facts belong in ClubMembership, not here. A null value means
+        // "not submitted by this form" and is skipped so the field is preserved; an empty
+        // string is a submitted value and clears the field.
+        private static void ApplyPersonFields(IMember member,
+            string birthDate, string landlinePhone, string gender, string coAddress, string pnrIncomplete,
             string guardian1Name, string guardian1Mobile, string guardian1Email,
             string guardian2Name, string guardian2Mobile, string guardian2Email,
             string emergencyContactName, string emergencyContactPhone)
@@ -1052,17 +1032,6 @@ namespace HpskSite.Controllers
             SetStrIfProvided(member, "landlinePhone", landlinePhone);
             SetStrIfProvided(member, "gender", gender);
             SetStrIfProvided(member, "coAddress", coAddress);
-            SetStrIfProvided(member, "membershipType", membershipType);
-            SetStrIfProvided(member, "membershipStatus", membershipStatus);
-            SetStrIfProvided(member, "memberUntil", memberUntil);
-            SetStrIfProvided(member, "endReason", endReason);
-            SetBoolIfProvided(member, "backgroundCheckApproved", backgroundCheckApproved);
-            SetStrIfProvided(member, "backgroundCheckDate", backgroundCheckDate);
-            SetBoolIfProvided(member, "registeredInMap", registeredInMap);
-            SetStrIfProvided(member, "federations", federations);
-            SetStrIfProvided(member, "memberNotes", memberNotes);
-            SetStrIfProvided(member, "householdId", householdId);
-            SetBoolIfProvided(member, "householdPrimary", householdPrimary);
             SetBoolIfProvided(member, "pnrIncomplete", pnrIncomplete);
             SetStrIfProvided(member, "guardian1Name", guardian1Name);
             SetStrIfProvided(member, "guardian1Mobile", guardian1Mobile);

@@ -28,6 +28,7 @@ namespace HpskSite.Controllers
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ILogger<ClubAdminController> _logger;
         private readonly EmailService _emailService;
+        private readonly ClubMembershipService _clubMembershipService;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -43,7 +44,8 @@ namespace HpskSite.Controllers
             IContentService contentService,
             AdminAuthorizationService authService,
             ILogger<ClubAdminController> logger,
-            EmailService emailService)
+            EmailService emailService,
+            ClubMembershipService clubMembershipService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -53,6 +55,7 @@ namespace HpskSite.Controllers
             _umbracoContextAccessor = umbracoContextAccessor;
             _logger = logger;
             _emailService = emailService;
+            _clubMembershipService = clubMembershipService;
         }
 
         #region Club CRUD Operations
@@ -899,16 +902,13 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> AddClubMember(int clubId, string firstName, string lastName, string email,
             string phoneNumber = "", string shooterIdNumber = "", string address = "", string postalCode = "",
-            string city = "", string personNumber = "", string memberSince = "",
-            // Member-database expansion fields (see Documentation/MEMBER_DATABASE.md)
-            string birthDate = "", string landlinePhone = "", string gender = "", string coAddress = "",
-            string membershipType = "", string membershipStatus = "", string memberUntil = "", string endReason = "",
+            string city = "", string personNumber = "",
+            // Club-membership fields → ClubMembership row for (member, club). Person-level facts
+            // (birthDate, guardians, etc.) are set by the member at Min sida, not here.
+            string memberSince = "", string membershipType = "", string membershipStatus = "Aktiv",
             string backgroundCheckApproved = "", string backgroundCheckDate = "",
             string registeredInMap = "", string federations = "", string memberNotes = "",
-            string householdId = "", string householdPrimary = "", string pnrIncomplete = "",
-            string guardian1Name = "", string guardian1Mobile = "", string guardian1Email = "",
-            string guardian2Name = "", string guardian2Mobile = "", string guardian2Email = "",
-            string emergencyContactName = "", string emergencyContactPhone = "")
+            string householdId = "", string householdPrimary = "")
         {
             _logger.LogInformation($"[AddClubMember] Starting for clubId: {clubId}, email: {email}");
 
@@ -958,41 +958,32 @@ namespace HpskSite.Controllers
                 member.SetValue("postalCode", postalCode ?? "");
                 member.SetValue("city", city ?? "");
                 member.SetValue("personNumber", personNumber ?? "");
-                member.SetValue("memberSince", memberSince ?? "");
-                // Member-database expansion fields (guarded — safe before backoffice props exist)
-                SetIfPresent(member, "birthDate", birthDate ?? "");
-                SetIfPresent(member, "landlinePhone", landlinePhone ?? "");
-                SetIfPresent(member, "gender", gender ?? "");
-                SetIfPresent(member, "coAddress", coAddress ?? "");
-                SetIfPresent(member, "membershipType", membershipType ?? "");
-                SetIfPresent(member, "membershipStatus", membershipStatus ?? "");
-                SetIfPresent(member, "memberUntil", memberUntil ?? "");
-                SetIfPresent(member, "endReason", endReason ?? "");
-                SetIfPresent(member, "backgroundCheckApproved", ToBool(backgroundCheckApproved));
-                SetIfPresent(member, "backgroundCheckDate", backgroundCheckDate ?? "");
-                SetIfPresent(member, "registeredInMap", ToBool(registeredInMap));
-                SetIfPresent(member, "federations", federations ?? "");
-                SetIfPresent(member, "memberNotes", memberNotes ?? "");
-                SetIfPresent(member, "householdId", householdId ?? "");
-                SetIfPresent(member, "householdPrimary", ToBool(householdPrimary));
-                SetIfPresent(member, "pnrIncomplete", ToBool(pnrIncomplete));
-                SetIfPresent(member, "guardian1Name", guardian1Name ?? "");
-                SetIfPresent(member, "guardian1Mobile", guardian1Mobile ?? "");
-                SetIfPresent(member, "guardian1Email", guardian1Email ?? "");
-                SetIfPresent(member, "guardian2Name", guardian2Name ?? "");
-                SetIfPresent(member, "guardian2Mobile", guardian2Mobile ?? "");
-                SetIfPresent(member, "guardian2Email", guardian2Email ?? "");
-                SetIfPresent(member, "emergencyContactName", emergencyContactName ?? "");
-                SetIfPresent(member, "emergencyContactPhone", emergencyContactPhone ?? "");
 
                 // Auto-approve member
                 member.IsApproved = true;
 
-                // Save member
+                // Save member (person-level)
                 _memberService.Save(member);
 
                 // Assign to Users group
                 _memberService.AssignRole(member.Id, "Users");
+
+                // Create the per-club membership record (ClubMembership) with the club-scoped fields.
+                _clubMembershipService.Save(new HpskSite.Models.ClubMembership
+                {
+                    MemberId = member.Id,
+                    ClubId = clubId,
+                    MembershipType = string.IsNullOrWhiteSpace(membershipType) ? null : membershipType.Trim(),
+                    MembershipStatus = string.IsNullOrWhiteSpace(membershipStatus) ? "Aktiv" : membershipStatus.Trim(),
+                    MemberSince = ParseDateOrNull(memberSince),
+                    BackgroundCheckApproved = ToBool(backgroundCheckApproved),
+                    BackgroundCheckDate = ParseDateOrNull(backgroundCheckDate),
+                    RegisteredInMap = ToBool(registeredInMap),
+                    Federations = string.IsNullOrWhiteSpace(federations) ? null : federations.Trim(),
+                    MemberNotes = string.IsNullOrWhiteSpace(memberNotes) ? null : memberNotes.Trim(),
+                    HouseholdId = string.IsNullOrWhiteSpace(householdId) ? null : householdId.Trim(),
+                    HouseholdPrimary = ToBool(householdPrimary)
+                });
 
                 _logger.LogInformation($"[AddClubMember] Successfully added member {member.Id} to club {clubId}");
 
@@ -1011,19 +1002,17 @@ namespace HpskSite.Controllers
         }
 
         // ---- Member-database expansion helpers (see Documentation/MEMBER_DATABASE.md) ----
-        // Writes a member property only if the alias exists on the member type, so this is
-        // safe to deploy before the backoffice properties are created (missing = no-op).
-        private static void SetIfPresent(Umbraco.Cms.Core.Models.IMember member, string alias, object value)
-        {
-            if (member.HasProperty(alias))
-            {
-                member.SetValue(alias, value);
-            }
-        }
-
-        // Boolean member properties (True/false editor); forms POST "true"/"on"/"" strings.
+        // Boolean form fields POST "true"/"on"/"" strings.
         private static bool ToBool(string value)
             => value == "true" || value == "True" || value == "on" || value == "1";
+
+        // Parse a "yyyy-MM-dd" (or parseable) date string to DateTime?, null when blank/invalid.
+        private static DateTime? ParseDateOrNull(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            return DateTime.TryParse(value.Trim(), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d) ? d : (DateTime?)null;
+        }
 
         #endregion
 

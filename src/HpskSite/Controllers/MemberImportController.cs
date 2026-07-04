@@ -10,6 +10,7 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
+using HpskSite.Models;
 using HpskSite.Services;
 
 namespace HpskSite.Controllers
@@ -27,9 +28,21 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _authService;
         private readonly IMemberManager _memberManager;
+        private readonly ClubMembershipService _clubMembershipService;
         private readonly ILogger<MemberImportController> _logger;
 
         private const string ClubMemberTypeAlias = "hpskClub";
+
+        /// <summary>
+        /// Aliases that describe a person's relationship to a SPECIFIC club. These are written
+        /// to the per-club <see cref="ClubMembership"/> record, never to the shared member/login.
+        /// </summary>
+        private static readonly HashSet<string> ClubScopedAliases = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "membershipType", "membershipStatus", "memberSince", "memberUntil", "endReason",
+            "backgroundCheckApproved", "backgroundCheckDate", "registeredInMap", "federations",
+            "memberNotes", "householdId", "householdPrimary"
+        };
 
         public MemberImportController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -41,12 +54,14 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             AdminAuthorizationService authService,
             IMemberManager memberManager,
+            ClubMembershipService clubMembershipService,
             ILogger<MemberImportController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
             _authService = authService;
             _memberManager = memberManager;
+            _clubMembershipService = clubMembershipService;
             _logger = logger;
         }
 
@@ -267,6 +282,9 @@ namespace HpskSite.Controllers
 
                     _memberService.Save(member);
 
+                    // Club-scoped facts go on the per-club ClubMembership record, not the member.
+                    UpsertClubMembership(member.Id, clubId, values);
+
                     if (isNew)
                     {
                         _memberService.AssignRole(member.Id, "Users");
@@ -333,29 +351,18 @@ namespace HpskSite.Controllers
                 var alias = kvp.Key;
                 var value = kvp.Value ?? "";
 
+                // Club-scoped fields live on ClubMembership (written in Commit), never on the member.
+                if (ClubScopedAliases.Contains(alias))
+                {
+                    continue;
+                }
+
                 switch (alias)
                 {
                     case "email":
                     case "firstName":
                     case "lastName":
                         // handled above / at create time
-                        break;
-
-                    case "registeredInMap":
-                        SetIfPresent(member, "registeredInMap", ToBool(value));
-                        break;
-
-                    case "backgroundCheckApproved":
-                        SetIfPresent(member, "backgroundCheckApproved", ToBool(value));
-                        break;
-
-                    case "backgroundCheckDate":
-                        SetIfPresent(member, "backgroundCheckDate", value);
-                        // A non-empty verification date implies the check was approved.
-                        if (!string.IsNullOrWhiteSpace(value))
-                        {
-                            SetIfPresent(member, "backgroundCheckApproved", true);
-                        }
                         break;
 
                     default:
@@ -373,6 +380,90 @@ namespace HpskSite.Controllers
             {
                 SetIfPresent(member, "pnrIncomplete", false);
             }
+        }
+
+        /// <summary>
+        /// Build/update the per-club <see cref="ClubMembership"/> record from the row's mapped
+        /// values. Only fields whose alias is actually present in <paramref name="values"/> are
+        /// overwritten — re-importing a subset of columns never blanks out existing membership data.
+        /// A brand-new membership takes model defaults for any field the import didn't provide.
+        /// </summary>
+        private void UpsertClubMembership(int memberId, int clubId, Dictionary<string, string> values)
+        {
+            var membership = _clubMembershipService.Get(memberId, clubId)
+                             ?? new ClubMembership { MemberId = memberId, ClubId = clubId };
+
+            if (values.TryGetValue("membershipType", out var membershipType))
+            {
+                membership.MembershipType = string.IsNullOrWhiteSpace(membershipType) ? null : membershipType.Trim();
+            }
+
+            if (values.TryGetValue("membershipStatus", out var membershipStatus)
+                && !string.IsNullOrWhiteSpace(membershipStatus))
+            {
+                membership.MembershipStatus = membershipStatus.Trim();
+            }
+
+            if (values.TryGetValue("memberSince", out var memberSince))
+            {
+                membership.MemberSince = ParseDate(memberSince);
+            }
+
+            if (values.TryGetValue("memberUntil", out var memberUntil))
+            {
+                membership.MemberUntil = ParseDate(memberUntil);
+            }
+
+            if (values.TryGetValue("endReason", out var endReason))
+            {
+                membership.EndReason = string.IsNullOrWhiteSpace(endReason) ? null : endReason.Trim();
+            }
+
+            // BackgroundCheckDate + BackgroundCheckApproved (a non-empty date implies approved).
+            DateTime? bgDate = null;
+            bool bgDateProvided = values.TryGetValue("backgroundCheckDate", out var bgDateRaw);
+            if (bgDateProvided)
+            {
+                bgDate = ParseDate(bgDateRaw);
+                membership.BackgroundCheckDate = bgDate;
+            }
+
+            if (values.ContainsKey("backgroundCheckApproved") || bgDateProvided)
+            {
+                bool approved = false;
+                if (values.TryGetValue("backgroundCheckApproved", out var bgApproved))
+                {
+                    approved = ToBool(bgApproved);
+                }
+                membership.BackgroundCheckApproved = approved || bgDate.HasValue;
+            }
+
+            if (values.TryGetValue("registeredInMap", out var registeredInMap))
+            {
+                membership.RegisteredInMap = ToBool(registeredInMap);
+            }
+
+            if (values.TryGetValue("federations", out var federations))
+            {
+                membership.Federations = string.IsNullOrWhiteSpace(federations) ? null : federations.Trim();
+            }
+
+            if (values.TryGetValue("memberNotes", out var memberNotes))
+            {
+                membership.MemberNotes = string.IsNullOrWhiteSpace(memberNotes) ? null : memberNotes;
+            }
+
+            if (values.TryGetValue("householdId", out var householdId))
+            {
+                membership.HouseholdId = string.IsNullOrWhiteSpace(householdId) ? null : householdId.Trim();
+            }
+
+            if (values.TryGetValue("householdPrimary", out var householdPrimary))
+            {
+                membership.HouseholdPrimary = ToBool(householdPrimary);
+            }
+
+            _clubMembershipService.Save(membership);
         }
 
         // ---------------------------------------------------------------
@@ -401,6 +492,19 @@ namespace HpskSite.Controllers
             if (string.IsNullOrWhiteSpace(value)) return false;
             var v = value.Trim().ToLowerInvariant();
             return v == "ja" || v == "yes" || v == "true" || v == "1" || v == "on" || v == "x";
+        }
+
+        /// <summary>Parse an imported "yyyy-MM-dd" date; null on blank/invalid.</summary>
+        private static DateTime? ParseDate(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            if (DateTime.TryParseExact(value.Trim(), "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var d))
+            {
+                return d;
+            }
+            return null;
         }
 
         /// <summary>Digits only; keyed on the last 10 digits so 10- and 12-digit forms match.</summary>

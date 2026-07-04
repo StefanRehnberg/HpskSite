@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
     public class MembershipFeeAdminController : SurfaceController
     {
         private readonly MembershipFeeService _feeService;
+        private readonly ClubMembershipService _clubMembershipService;
         private readonly AdminAuthorizationService _auth;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
@@ -34,7 +35,6 @@ namespace HpskSite.Controllers
 
         // Same purpose string as the public MembershipFeeController — tokens must round-trip.
         private const string ProtectorPurpose = "Membership.FeeCharge.v1";
-        private const string ClubMemberTypeAlias = "hpskClub";
 
         public MembershipFeeAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -44,6 +44,7 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             MembershipFeeService feeService,
+            ClubMembershipService clubMembershipService,
             AdminAuthorizationService auth,
             IMemberService memberService,
             IMemberManager memberManager,
@@ -54,6 +55,7 @@ namespace HpskSite.Controllers
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _feeService = feeService;
+            _clubMembershipService = clubMembershipService;
             _auth = auth;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -150,20 +152,16 @@ namespace HpskSite.Controllers
             if (!await _auth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
-            // Mirror ClubAdminController.GetClubMembersForClubAdmin filtering: members whose
-            // primaryClubId == clubId or whose memberClubIds CSV contains clubId.
-            var clubIdStr = clubId.ToString();
-            var members = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                .Where(m => m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
-                            (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',')
-                                .Any(cid => cid.Trim() == clubIdStr))
-                .Select(m => new MemberFeeInput
+            // Bill from the per-club membership records (ClubMembership). Exclude members who
+            // have left or are deceased; membership type drives which fee category applies.
+            var members = _clubMembershipService.GetForClub(clubId)
+                .Where(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden")
+                .Select(cm => new MemberFeeInput
                 {
-                    MemberId = m.Id,
-                    MembershipType = m.HasProperty("membershipType") ? (m.GetValue<string>("membershipType") ?? "") : "",
-                    HouseholdId = m.HasProperty("householdId") ? (m.GetValue<string>("householdId") ?? "") : "",
-                    HouseholdPrimary = m.HasProperty("householdPrimary") && ReadBool(m, "householdPrimary")
+                    MemberId = cm.MemberId,
+                    MembershipType = cm.MembershipType ?? "",
+                    HouseholdId = cm.HouseholdId ?? "",
+                    HouseholdPrimary = cm.HouseholdPrimary
                 })
                 .ToList();
 
@@ -263,11 +261,5 @@ namespace HpskSite.Controllers
             return data?.Id ?? 0;
         }
 
-        // Reads a True/false member property defensively (stored as bool or "1"/"true").
-        private static bool ReadBool(Umbraco.Cms.Core.Models.IMember member, string alias)
-        {
-            var raw = member.GetValue(alias)?.ToString();
-            return raw == "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
-        }
     }
 }

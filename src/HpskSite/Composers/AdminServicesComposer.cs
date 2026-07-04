@@ -42,6 +42,7 @@ namespace HpskSite.Composers
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
+            builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();
             builder.Services.AddScoped<ForeningsintygService>();
             builder.Services.AddScoped<MembershipFeeService>();
