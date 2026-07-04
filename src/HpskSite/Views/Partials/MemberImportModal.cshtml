@@ -11,7 +11,7 @@
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title" id="memberImportModalLabel">
-                    <i class="bi bi-upload me-2"></i>Importera medlemmar (Svenska Lag)
+                    <i class="bi bi-upload me-2"></i>Importera medlemmar
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
@@ -21,7 +21,7 @@
                 <!-- Step 1: Upload -->
                 <div id="mi_step_upload">
                     <p class="mb-3">
-                        Ladda upp en export från Svenska Lag (<strong>.xlsx</strong> eller <strong>.csv</strong>) för
+                        Ladda upp en export från exempelvis Svenska Lag (<strong>.xlsx</strong> eller <strong>.csv</strong>) för
                         <strong id="mi_clubName"></strong>. Kolumnerna matchas automatiskt — du kan justera innan import.
                     </p>
                     <div class="mb-3">
@@ -42,6 +42,7 @@
                             <i class="bi bi-arrow-left me-1"></i>Välj annan fil
                         </button>
                     </div>
+                    <div id="mi_targetHint" class="alert alert-info small" style="display:none;"></div>
                     <div class="table-responsive">
                         <table class="table table-sm table-hover align-middle">
                             <thead>
@@ -182,7 +183,7 @@
 
     function miBuildSelect(header) {
         var selected = miState.suggestedMapping[header] || '';
-        var html = '<select class="form-select form-select-sm mi-map-select" data-header="' + miEscape(header) + '">';
+        var html = '<select class="form-select form-select-sm mi-map-select" onchange="miOnMappingChange()" data-header="' + miEscape(header) + '">';
         for (var i = 0; i < miState.targetFields.length; i++) {
             var tf = miState.targetFields[i];
             var isSel = (tf.alias === selected) ? ' selected' : '';
@@ -212,7 +213,34 @@
         miEl('mi_step_mapping').style.display = '';
         miEl('mi_step_result').style.display = 'none';
         miEl('mi_importBtn').style.display = '';
+        miOnMappingChange(); // reflect any auto-suggested Guldmärke mapping in the hint
     }
+
+    // Contextual explanation of the two-part Guldmärke mapping (number vs award date/year).
+    window.miOnMappingChange = function () {
+        var hint = miEl('mi_targetHint');
+        if (!hint) return;
+        var selects = document.querySelectorAll('#mi_mappingBody .mi-map-select');
+        var hasNumber = false, hasDate = false;
+        selects.forEach(function (s) {
+            if (s.value === 'guldmarkeNumber') hasNumber = true;
+            if (s.value === 'guldmarkeAwarded') hasDate = true;
+        });
+        var msg = '';
+        if (hasNumber && hasDate) {
+            msg = '<strong>Guldmärke:</strong> både numret och tilldelningsår/datum är mappade — ett riktigt Guldmärke skapas i medlemmens märkesregister (med guldnummer och år).';
+        } else if (hasNumber) {
+            msg = '<strong>Guldmärke:</strong> bara numret är mappat — det sparas som en <em>anteckning</em> på klubbmedlemskapet. Inget märke skapas, eftersom systemet behöver ett tilldelningsår (för Guldfodring/årtalsmärke). Mappa även en kolumn med år eller datum för att skapa ett riktigt Guldmärke.';
+        } else if (hasDate) {
+            msg = '<strong>Guldmärke tilldelad (år/datum):</strong> mappa även kolumnen med guldmärkesnumret — datum utan nummer gör ingenting.';
+        }
+        if (msg) {
+            hint.innerHTML = '<i class="bi bi-info-circle me-1"></i>' + msg;
+            hint.style.display = '';
+        } else {
+            hint.style.display = 'none';
+        }
+    };
 
     function miCollectMapping() {
         var mapping = {};

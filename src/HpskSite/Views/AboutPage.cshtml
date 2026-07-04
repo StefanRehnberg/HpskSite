@@ -113,7 +113,7 @@
             Image = "/images/about/admin-hemsida.png",
             Title = "Gratis klubbhemsida",
             Teaser = "Ersätt Svenska Lag eller WordPress med något som är byggt för pistolskytteklubbar.",
-            Detail = "Klubbsidan har färdiga sektioner för kalender, nyheter, dokument, klubbrekord, träningstider, styrelse, medlemslista och kontaktuppgifter. Varje evenemang får sin egen landningssida med bild, beskrivning, plats och anmälan — perfekt för städdagar, klubbmästerskap, kurser och samlingar. Anmälningsavgifter och andra inbetalningar tas emot via Swish direkt på sidan, med automatiska kvitton och bokföringsunderlag. Hantering av medlemsavgifter är planerad som nästa steg. Tävlingar, resultat och klubbrekord som klubben hanterar i pistol.nu visas direkt på sidan — ingen dubbel inmatning på en separat webbplats. Mindre att underhålla, mer tid till skytte.",
+            Detail = "Klubbsidan har färdiga sektioner för kalender, nyheter, dokument, klubbrekord, träningstider, styrelse, medlemslista och kontaktuppgifter. Varje evenemang får sin egen landningssida med bild, beskrivning, plats och anmälan — perfekt för städdagar, klubbmästerskap, kurser och samlingar. Anmälningsavgifter och andra inbetalningar tas emot via Swish direkt på sidan, med automatiska kvitton och bokföringsunderlag. Även medlemsavgiften tas in via Swish — klubben sätter avgifter per medlemstyp (inkl. familjeavgift) och medlemmen betalar via en egen betalsida och ser direkt om året redan är betalt. Tävlingar, resultat och klubbrekord som klubben hanterar i pistol.nu visas direkt på sidan — ingen dubbel inmatning på en separat webbplats. Mindre att underhålla, mer tid till skytte.",
             Tutorial = ""
         },
         new {
@@ -592,10 +592,22 @@
             </div>
         </div>
         <div class="col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
+            <div class="card h-100 border-0 shadow-sm position-relative" style="opacity: 0.85;">
+                <div class="position-absolute top-0 end-0 m-2">
+                    <span class="badge rounded-pill bg-success">
+                        <i class="bi bi-check-circle-fill me-1"></i>Klart
+                    </span>
+                </div>
                 <div class="card-body">
-                    <h6 class="card-title"><i class="bi bi-cash-stack text-primary me-2"></i>Hantering av medlemsavgifter</h6>
-                    <p class="card-text small mb-0">Klubbar ska kunna ta in årsavgifter via samma Swish-flöde som tävlingsavgifter — med automatiska kvitton och bokföringsunderlag.</p>
+                    <h6 class="card-title text-decoration-line-through">
+                        <i class="bi bi-cash-stack text-success me-2"></i>Hantering av medlemsavgifter
+                    </h6>
+                    <p class="card-text small mb-0">
+                        Klubbar tar in årsavgifter via samma Swish-flöde som tävlingsavgifter.
+                        <span class="d-block mt-1 text-success small fw-semibold">
+                            <i class="bi bi-arrow-right me-1"></i>Levererat juli 2026 — klubben sätter avgiftskategorier per år kopplade till medlemstyp (inkl. familjeavgift där huvudmedlemmen betalar för hela familjen), genererar avgifter för alla medlemmar och skickar betalningsbegäran via e-post. Medlemmen betalar på en egen sida med Swish-QR och ser direkt om året redan är betalt — och klubbadmin markerar betalt och följer betalda/obetalda per år.
+                        </span>
+                    </p>
                 </div>
             </div>
         </div>
