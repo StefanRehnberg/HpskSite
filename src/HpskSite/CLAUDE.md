@@ -180,7 +180,7 @@ All endpoints require club admin authorization (user must be club admin for the 
 ### Medlemmar tab — Åtgärder menu + keys register (2026-07-05)
 The Medlemmar tab's action buttons (formerly a flat 8-button row) are consolidated into a
 single **"Åtgärder"** Bootstrap dropdown on the heading row (grouped: Medlemmar /
-Kommunikation & avgifter / Listor / Register / Behörigheter & styrelse). No permanent
+Kommunikation & avgifter / Listor / Register / Behörigheter). No permanent
 primary button — members self-register, so *Lägg till klubbmedlem* is just a menu item.
 The audience is low-computer-literacy club admins, so everything stays visible behind a
 *labelled* menu (never a bare hamburger).
@@ -207,6 +207,10 @@ a **grouped vertical rail** (`ClubAdminPanel.cshtml`). Layout is a `.row`: a `co
 tävlingar* / *Medlemmar* / *Utmärkelser* / *Klubben* — plus a `col-lg-9` content column holding
 the unchanged `#adminTabContent`. **All tab-button ids + `data-bs-target`s are unchanged**, so
 the many `shown.bs.tab` lazy-loaders (events/members/marken/settings/…) keep working.
+- **Styrelsearbete** is in the rail's *Klubben* group (moved out of the Medlemmar Åtgärder
+  menu 2026-07-05) — but as a navigate-away `<a href="/styrelse…">` link (external-arrow icon),
+  not a tab. The mobile picker handles it via a URL-valued `<option>`: the sync IIFE does
+  `window.location` when the selected value doesn't start with `#`.
 - **Responsive:** rail shows at **≥ lg**; below lg (phones + portrait tablets) it's hidden
   (`d-none d-lg-block`) and replaced by a full-width native `<select>` picker
   (`#adminTabMobileSelect`, `d-lg-none`) with the four groups as `<optgroup>`s. A small IIFE at

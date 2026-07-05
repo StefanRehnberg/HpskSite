@@ -82,6 +82,7 @@
                     <option value="#markenTab">Märken</option>
                 </optgroup>
                 <optgroup label="Klubben">
+                    <option value="/styrelse?type=0&id=@clubId">Styrelsearbete ↗</option>
                     <option value="#invoicesTab">Fakturor</option>
                     <option value="#settingsTab">Inställningar</option>
                     <option value="#documentsTab">Dokument</option>
@@ -127,6 +128,10 @@
                 </button>
 
                 <div class="admin-rail-group">Klubben</div>
+                <a class="nav-link d-flex align-items-center" href="/styrelse?type=0&id=@clubId">
+                    <i class="bi bi-clipboard-check me-2"></i>Styrelsearbete
+                    <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar styrelsesidan"></i>
+                </a>
                 <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button" role="tab" aria-controls="invoicesTab" aria-selected="false">
                     <i class="bi bi-receipt me-2"></i>Fakturor
                 </button>
@@ -307,7 +312,7 @@
                             </button>
                         </li>
                         <li><hr class="dropdown-divider"></li>
-                        <li><h6 class="dropdown-header">Behörigheter &amp; styrelse</h6></li>
+                        <li><h6 class="dropdown-header">Behörigheter</h6></li>
                         <li>
                             <button class="dropdown-item" type="button" onclick="showSkjutledareModal()">
                                 <i class="bi bi-shield-check me-2 text-success"></i>Skjutledare
@@ -317,11 +322,6 @@
                             <button class="dropdown-item" type="button" onclick="showClubAdminsModal()">
                                 <i class="bi bi-person-gear me-2 text-warning"></i>Klubbadmins
                             </button>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="/styrelse?type=0&id=@clubId">
-                                <i class="bi bi-clipboard-check me-2 text-primary"></i>Styrelsearbete
-                            </a>
                         </li>
                         <!-- DPA status — revealed by loadDpaGate() only once the avtal is godkänt -->
                         <li class="dpa-menu-el" style="display:none;"><hr class="dropdown-divider"></li>
@@ -5525,6 +5525,8 @@ function showDpaStatusModal() {
     var sel = document.getElementById('adminTabMobileSelect');
     if (!sel) return;
     sel.addEventListener('change', function () {
+        // A URL-valued option (e.g. Styrelsearbete) navigates away instead of switching a pane.
+        if (sel.value && sel.value.charAt(0) !== '#') { window.location.href = sel.value; return; }
         var btn = document.querySelector('#adminTabs [data-bs-target="' + sel.value + '"]');
         if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
     });
