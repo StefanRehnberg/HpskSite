@@ -405,6 +405,10 @@ function switchView(view) {
         calendarBtn.classList.add('active');
         listBtn.classList.remove('active');
         currentView = 'calendar';
+        // Render the grid on switch — otherwise #calendarDays keeps its initial
+        // loading spinner forever when the user arrives from list view (the spinner
+        // is only replaced by loadCalendarData()'s one-time render on first load).
+        renderCalendar();
     } else {
         calendarGrid.style.display = 'none';
         listView.style.display = 'block';
