@@ -24,6 +24,11 @@
                         Ladda upp en export från exempelvis Svenska Lag (<strong>.xlsx</strong> eller <strong>.csv</strong>) för
                         <strong id="mi_clubName"></strong>. Kolumnerna matchas automatiskt — du kan justera innan import.
                     </p>
+                    <p class="text-muted small mb-3">
+                        <i class="bi bi-envelope me-1"></i><strong>E-post krävs för varje medlem</strong> — det är medlemmens inloggning.
+                        Rader utan giltig e-post kan bara uppdatera befintliga medlemmar (matchade via personnummer), inte skapa nya.
+                        Se till att exporten innehåller kolumnen "E-post".
+                    </p>
                     <div class="mb-3">
                         <label for="mi_file" class="form-label">Välj fil</label>
                         <input type="file" class="form-control" id="mi_file" accept=".xlsx,.csv">
@@ -42,6 +47,7 @@
                             <i class="bi bi-arrow-left me-1"></i>Välj annan fil
                         </button>
                     </div>
+                    <div id="mi_emailReport" class="alert small" style="display:none;"></div>
                     <div id="mi_targetHint" class="alert alert-info small" style="display:none;"></div>
                     <div class="table-responsive">
                         <table class="table table-sm table-hover align-middle">
@@ -240,6 +246,71 @@
         } else {
             hint.style.display = 'none';
         }
+
+        miUpdateEmailReport();
+    };
+
+    // Keep in sync with IsValidEmail() in MemberImportController.cs.
+    function miIsValidEmail(s) {
+        return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s).trim());
+    }
+
+    // First non-blank value across the email-mapped column(s) for a row.
+    function miEmailForRow(row, headers) {
+        for (var i = 0; i < headers.length; i++) {
+            var v = row[headers[i]];
+            if (v !== undefined && v !== null && String(v).trim() !== '') {
+                return String(v).trim();
+            }
+        }
+        return '';
+    }
+
+    // Banner summarising how many rows lack a valid email (= login) before import.
+    window.miUpdateEmailReport = function () {
+        var el = miEl('mi_emailReport');
+        if (!el) return;
+
+        var emailHeaders = [];
+        var selects = document.querySelectorAll('#mi_mappingBody .mi-map-select');
+        selects.forEach(function (s) {
+            if (s.value === 'email') emailHeaders.push(s.getAttribute('data-header'));
+        });
+
+        if (emailHeaders.length === 0) {
+            el.className = 'alert alert-warning small';
+            el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                '<strong>Ingen kolumn är mappad till E-post.</strong> E-post är medlemmens inloggning och krävs för att ' +
+                'skapa nya medlemmar. Utan e-post kan bara befintliga medlemmar (matchade via personnummer) uppdateras.';
+            el.style.display = '';
+            return;
+        }
+
+        var total = miState.rows.length;
+        var missing = 0, invalid = 0;
+        for (var i = 0; i < miState.rows.length; i++) {
+            var val = miEmailForRow(miState.rows[i], emailHeaders);
+            if (val === '') { missing++; }
+            else if (!miIsValidEmail(val)) { invalid++; }
+        }
+
+        var bad = missing + invalid;
+        if (bad === 0) {
+            el.className = 'alert alert-success small';
+            el.innerHTML = '<i class="bi bi-check-circle me-1"></i>Alla <strong>' + total + '</strong> rader har en giltig e-postadress.';
+            el.style.display = '';
+            return;
+        }
+
+        var parts = [];
+        if (missing > 0) parts.push('<strong>' + missing + '</strong> saknar e-post');
+        if (invalid > 0) parts.push('<strong>' + invalid + '</strong> har ogiltig e-post');
+        el.className = 'alert alert-warning small';
+        el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>' +
+            parts.join(' och ') + ' (av <strong>' + total + '</strong> rader). ' +
+            'E-post är inloggningen — dessa rader kan <strong>inte skapas som nya medlemmar</strong> och hoppas över. ' +
+            'Rader som matchar en befintlig medlem via personnummer uppdateras ändå.';
+        el.style.display = '';
     };
 
     function miCollectMapping() {

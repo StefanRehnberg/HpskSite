@@ -289,11 +289,19 @@ namespace HpskSite.Controllers
                     }
                     else
                     {
-                        // Creating requires an email (Umbraco username/login).
+                        // Creating requires a valid email (Umbraco username/login).
                         if (string.IsNullOrWhiteSpace(email))
                         {
                             skipped++;
                             errors.Add($"Rad {rowIndex}: saknar e-post och matchar ingen befintlig medlem – hoppar över.");
+                            continue;
+                        }
+                        // A non-empty but malformed value would create a member with a broken,
+                        // un-loginable account. Skip + report it the same as a blank email.
+                        if (!IsValidEmail(email))
+                        {
+                            skipped++;
+                            errors.Add($"Rad {rowIndex}: ogiltig e-postadress \"{email}\" – hoppar över (e-post krävs som inloggning).");
                             continue;
                         }
 
@@ -682,6 +690,17 @@ namespace HpskSite.Controllers
                 return digits.Substring(digits.Length - 10);
             }
             return digits;
+        }
+
+        /// <summary>
+        /// Pragmatic email check — non-empty and shaped like local@domain.tld with no spaces.
+        /// Keep in sync with miIsValidEmail() in MemberImportModal.cshtml (preview-time report).
+        /// </summary>
+        private static bool IsValidEmail(string? email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                email.Trim(), @"^[^@\s]+@[^@\s]+\.[^@\s]+$");
         }
 
         /// <summary>A complete personnummer normalizes to 12 digits (ÅÅÅÅMMDD-XXXX).</summary>
