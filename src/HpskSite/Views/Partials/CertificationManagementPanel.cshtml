@@ -88,6 +88,17 @@
         }
         else
         {
+            <!-- Kretsens kretsinstruktörer — who to contact for training toward Föreningsinstruktör /
+                 Vapenkontrollant / Banläggare. Populated from Certification/KretsinstruktorerForClub;
+                 stays hidden until the club's region + at least the note is resolved. -->
+            <div class="card mb-3 border-info cert-krets-note" style="display:none;">
+                <div class="card-body">
+                    <h6 class="mb-1"><i class="bi bi-info-circle me-1 text-info"></i>Utbildning till instruktör, vapenkontrollant &amp; banläggare</h6>
+                    <small class="text-muted d-block mb-2">Utbildning till <strong>Föreningsinstruktör</strong>, <strong>Vapenkontrollant</strong> och <strong>Banläggare</strong> anordnas av kretsen. Kontakta kretsens kretsinstruktör(er):</small>
+                    <ul class="list-group list-group-flush cert-krets-note-list"></ul>
+                </div>
+            </div>
+
             <!-- Föreningsinstruktörer (appointed for THIS club) -->
             <div class="card mb-3">
                 <div class="card-body">
@@ -98,7 +109,7 @@
                             <i class="bi bi-plus-circle"></i> Tilldela
                         </button>
                     </div>
-                    <small class="text-muted d-block mb-2">SPSF kräver minst en Föreningsinstruktör per klubb. Hör med kretsens kretsinstruktör om utbildning.</small>
+                    <small class="text-muted d-block mb-2">SPSF kräver minst en Föreningsinstruktör per klubb.</small>
                     <ul class="list-group list-group-flush cert-list" data-cert-type="Foreningsinstruktor"></ul>
                 </div>
             </div>
@@ -808,7 +819,36 @@
         submitGrant();
     });
 
+    // Club scope only: show who the region's kretsinstruktörer are and that they run the
+    // training toward Föreningsinstruktör / Vapenkontrollant / Banläggare.
+    function loadKretsNote() {
+        if (scopeType !== 'Club') return;
+        var card = root.querySelector('.cert-krets-note');
+        var list = root.querySelector('.cert-krets-note-list');
+        if (!card || !list) return;
+        fetch('/umbraco/surface/Certification/KretsinstruktorerForClub?clubId=' + encodeURIComponent(scopeId))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.success || !d.regionKnown) return; // no region resolved → keep hidden
+                var rows = d.kretsinstruktorer || [];
+                if (!rows.length) {
+                    list.innerHTML = '<li class="list-group-item px-0 text-muted small">Kretsen har ännu ingen registrerad kretsinstruktör. Hör med kretsstyrelsen om utbildning.</li>';
+                } else {
+                    list.innerHTML = rows.map(function (m) {
+                        var contact = [];
+                        if (m.email) contact.push('<a href="mailto:' + escapeHtml(m.email) + '">' + escapeHtml(m.email) + '</a>');
+                        if (m.phone) contact.push('<a href="tel:' + escapeHtml(String(m.phone).replace(/\s/g, '')) + '">' + escapeHtml(m.phone) + '</a>');
+                        var c = contact.length ? ' <span class="text-muted small">· ' + contact.join(' · ') + '</span>' : '';
+                        return '<li class="list-group-item px-0"><i class="bi bi-person-badge me-1 text-info"></i>' + escapeHtml(m.name) + c + '</li>';
+                    }).join('');
+                }
+                card.style.display = '';
+            })
+            .catch(function () { /* non-critical note — leave hidden on error */ });
+    }
+
     loadCerts();
     loadRequests();
+    loadKretsNote();
 })();
 </script>

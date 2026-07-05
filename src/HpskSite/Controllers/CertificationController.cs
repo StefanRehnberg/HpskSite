@@ -377,6 +377,52 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// Kretsinstruktörer for the region a club belongs to. Powers the note on the club
+        /// admin Certifieringar tab that tells admins who to contact for training toward
+        /// Föreningsinstruktör / Vapenkontrollant / Banläggare. Login required; contact
+        /// details (email/phone) are included only for the club's own admins (and site/
+        /// regional admins), matching the club-scoped contact-exposure pattern elsewhere.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> KretsinstruktorerForClub(int clubId)
+        {
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current == null) return Json(new { success = false, message = "Login required." });
+
+            var regionCode = GetRegionForClub(clubId);
+            if (string.IsNullOrWhiteSpace(regionCode))
+                return Json(new { success = true, regionKnown = false, kretsinstruktorer = new object[0] });
+
+            bool canSeeContact = await _authService.IsClubAdminForClub(clubId)
+                || await _authService.IsCurrentUserAdminAsync()
+                || await _authService.IsRegionalAdminForRegion(regionCode);
+
+            var role = $"Kretsinstruktor_{regionCode}";
+            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
+            var rows = new List<object>();
+            foreach (var m in allMembers)
+            {
+                var roles = _memberService.GetAllRoles(m.Id);
+                if (roles == null || !roles.Contains(role)) continue;
+                rows.Add(new
+                {
+                    memberId = m.Id,
+                    name = MemberDisplayName(m),
+                    email = canSeeContact ? (m.Email ?? "") : null,
+                    phone = canSeeContact ? (m.GetValue<string>("phoneNumber") ?? "") : null
+                });
+            }
+
+            return Json(new
+            {
+                success = true,
+                regionKnown = true,
+                regionCode,
+                kretsinstruktorer = rows.OrderBy(o => ((dynamic)o).name).ToList()
+            });
+        }
+
         [HttpGet]
         public async Task<IActionResult> ListForArea(string areaCode)
         {
