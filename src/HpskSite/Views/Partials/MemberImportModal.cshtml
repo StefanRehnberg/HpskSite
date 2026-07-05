@@ -251,8 +251,10 @@
     };
 
     // Keep in sync with IsValidEmail() in MemberImportController.cs.
+    // NB: in this .cshtml the literal at-sign must be doubled (@@) so Razor does not
+    // read it as a code transition; it renders to a single at-sign in the output JS.
     function miIsValidEmail(s) {
-        return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s).trim());
+        return /^[^@@\s]+@@[^@@\s]+\.[^@@\s]+$/.test(String(s).trim());
     }
 
     // First non-blank value across the email-mapped column(s) for a row.
