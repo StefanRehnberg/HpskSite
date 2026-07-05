@@ -38,6 +38,29 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// All access keys registered for a club (across every member). Outstanding keys first
+        /// (not yet returned), then by member name, then most-recently issued. Member names are
+        /// resolved via a single batched lookup (no N+1).
+        /// </summary>
+        public List<MemberAccessKey> GetForClub(int clubId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+
+            var keys = db.Fetch<MemberAccessKey>(
+                "SELECT * FROM MemberAccessKey WHERE ClubId = @0", clubId);
+
+            ResolveMemberNames(keys);
+
+            return keys
+                .OrderBy(k => k.ReturnedDate == null ? 0 : 1)
+                .ThenBy(k => k.MemberName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenByDescending(k => k.IssuedDate ?? DateTime.MinValue)
+                .ThenByDescending(k => k.Id)
+                .ToList();
+        }
+
+        /// <summary>
         /// Resolve display names for a set of keys, batching distinct member lookups to avoid
         /// an N+1 cascade.
         /// </summary>

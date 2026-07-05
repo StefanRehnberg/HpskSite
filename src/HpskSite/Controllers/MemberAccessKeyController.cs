@@ -73,6 +73,25 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// List every access key registered for a club (across all its members) for the club-wide
+        /// overview. Site admins see any club; a club admin only the club they administer.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ListForClub(int clubId)
+        {
+            var current = await GetCurrentMemberDataAsync();
+            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            bool isClubAdmin = clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId);
+            if (!isSiteAdmin && !isClubAdmin)
+                return Json(new { success = false, message = "Access denied" });
+
+            var keys = _keyService.GetForClub(clubId);
+            return Json(new { success = true, data = keys.Select(ProjectKey) });
+        }
+
+        /// <summary>
         /// Create or update an access key. Keys are club-managed — only a club admin for the
         /// member's club (or a site admin) may write; the member themself may NOT.
         /// </summary>

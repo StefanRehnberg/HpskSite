@@ -177,6 +177,29 @@ All endpoints require club admin authorization (user must be club admin for the 
 - Views/Partials/ClubAdminPanel.cshtml
 - Club event management modals
 
+### Medlemmar tab — Åtgärder menu + keys register (2026-07-05)
+The Medlemmar tab's action buttons (formerly a flat 8-button row) are consolidated into a
+single **"Åtgärder"** Bootstrap dropdown on the heading row (grouped: Medlemmar /
+Kommunikation & avgifter / Listor / Register / Behörigheter & styrelse). No permanent
+primary button — members self-register, so *Lägg till klubbmedlem* is just a menu item.
+The audience is low-computer-literacy club admins, so everything stays visible behind a
+*labelled* menu (never a bare hamburger).
+
+Other changes shipped together:
+- Removed the top "Klubbadministration – Du kan hantera…" info banner.
+- **DPA acceptance:** while unaccepted, the warning gate (`#dpaGate`, `loadDpaGate()`)
+  still shows as a prominent banner. Once accepted it no longer renders a banner — the
+  status moves into a **"Personuppgiftsbiträdesavtal"** item in the Åtgärder menu that
+  opens `#dpaStatusModal` (version/date/who + link to the avtal).
+- Removed the *Medlem sedan* field from the **create-member** modal (it belongs to club
+  membership data, not member personal data; the edit-member modal keeps it).
+- **Club-wide keys/codes register:** Åtgärder → "Nycklar & koder" opens `#clubKeysModal`
+  (overview + CRUD over all the club's `MemberAccessKey` rows). New read endpoint
+  `MemberAccessKeyController.ListForClub(clubId)` + `MemberAccessKeyService.GetForClub`
+  (site/club-admin gated); add/edit/delete reuse the existing `SaveKey`/`DeleteKey`.
+  View-only change except the two backend methods → full rebuild to deploy those; the
+  `.cshtml` also changed.
+
 ### Club Lookup Service ✅ (2025-10-30)
 
 **CRITICAL: Never use `IMemberService` to look up clubs!**
