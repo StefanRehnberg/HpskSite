@@ -57,77 +57,94 @@
         </div>
     </div>
 
-    <!-- Admin Tabs -->
-    <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="events-tab" data-bs-toggle="tab" data-bs-target="#eventsTab" type="button">
-                <i class="bi bi-calendar-event me-2"></i>Händelser
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitionsTab" type="button">
-                <i class="bi bi-trophy me-2"></i>Tävlingar
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="clubseries-tab" data-bs-toggle="tab" data-bs-target="#clubSeriesTab" type="button">
-                <i class="bi bi-collection me-2"></i>Serier
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#membersTab" type="button">
-                <i class="bi bi-people me-2"></i>Medlemmar
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button">
-                <i class="bi bi-receipt me-2"></i>Fakturor
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="traininggroups-tab" data-bs-toggle="tab" data-bs-target="#trainingGroupsTab" type="button">
-                <i class="bi bi-people-fill me-2"></i>Träningsgrupper
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settingsTab" type="button">
-                <i class="bi bi-gear me-2"></i>Inställningar
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="documents-tab" data-bs-toggle="tab" data-bs-target="#documentsTab" type="button">
-                <i class="bi bi-file-earmark-text me-2"></i>Dokument
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="certifications-tab" data-bs-toggle="tab" data-bs-target="#certificationsTab" type="button">
-                <i class="bi bi-mortarboard me-2"></i>Certifieringar
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="clubChampions-tab" data-bs-toggle="tab" data-bs-target="#clubChampionsTab" type="button">
-                <i class="bi bi-trophy-fill me-2"></i>Mästare
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="standardMedals-tab" data-bs-toggle="tab" data-bs-target="#standardMedalsTab" type="button">
-                <i class="bi bi-award me-2"></i>Standardmedaljer
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="marken-tab" data-bs-toggle="tab" data-bs-target="#markenTab" type="button">
-                <i class="bi bi-patch-check me-2"></i>Märken
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="clubstats-tab" data-bs-toggle="tab" data-bs-target="#clubStatsTab" type="button">
-                <i class="bi bi-graph-up me-2"></i>Statistik
-            </button>
-        </li>
-    </ul>
+    <!-- Admin navigation — grouped vertical rail (≥lg) / grouped section picker (phones + tablets).
+         Both drive the SAME Bootstrap tabs below; ids + data-bs-target are unchanged so all the
+         existing shown.bs.tab lazy-loaders keep working. -->
+    <div class="row g-3 admin-nav-layout">
 
-    <!-- Tab Content -->
-    <div class="tab-content" id="adminTabContent">
+        <!-- Small screens (< lg): full-width grouped section picker -->
+        <div class="col-12 d-lg-none">
+            <label for="adminTabMobileSelect" class="form-label small text-muted mb-1">Välj sektion</label>
+            <select class="form-select" id="adminTabMobileSelect" aria-label="Välj adminsektion">
+                <optgroup label="Kalender &amp; tävlingar">
+                    <option value="#eventsTab" selected>Händelser</option>
+                    <option value="#competitionsTab">Tävlingar</option>
+                    <option value="#clubSeriesTab">Serier</option>
+                </optgroup>
+                <optgroup label="Medlemmar">
+                    <option value="#membersTab">Medlemmar</option>
+                    <option value="#trainingGroupsTab">Träningsgrupper</option>
+                    <option value="#certificationsTab">Certifieringar</option>
+                </optgroup>
+                <optgroup label="Utmärkelser">
+                    <option value="#clubChampionsTab">Mästare</option>
+                    <option value="#standardMedalsTab">Standardmedaljer</option>
+                    <option value="#markenTab">Märken</option>
+                </optgroup>
+                <optgroup label="Klubben">
+                    <option value="#invoicesTab">Fakturor</option>
+                    <option value="#settingsTab">Inställningar</option>
+                    <option value="#documentsTab">Dokument</option>
+                    <option value="#clubStatsTab">Statistik</option>
+                </optgroup>
+            </select>
+        </div>
+
+        <!-- Large screens (≥ lg): grouped vertical rail -->
+        <div class="col-lg-3 d-none d-lg-block">
+            <nav class="nav nav-pills flex-column admin-rail" id="adminTabs" role="tablist" aria-orientation="vertical">
+                <div class="admin-rail-group">Kalender &amp; tävlingar</div>
+                <button class="nav-link active" id="events-tab" data-bs-toggle="tab" data-bs-target="#eventsTab" type="button" role="tab" aria-controls="eventsTab" aria-selected="true">
+                    <i class="bi bi-calendar-event me-2"></i>Händelser
+                </button>
+                <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitionsTab" type="button" role="tab" aria-controls="competitionsTab" aria-selected="false">
+                    <i class="bi bi-trophy me-2"></i>Tävlingar
+                </button>
+                <button class="nav-link" id="clubseries-tab" data-bs-toggle="tab" data-bs-target="#clubSeriesTab" type="button" role="tab" aria-controls="clubSeriesTab" aria-selected="false">
+                    <i class="bi bi-collection me-2"></i>Serier
+                </button>
+
+                <div class="admin-rail-group">Medlemmar</div>
+                <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#membersTab" type="button" role="tab" aria-controls="membersTab" aria-selected="false">
+                    <i class="bi bi-people me-2"></i>Medlemmar
+                </button>
+                <button class="nav-link" id="traininggroups-tab" data-bs-toggle="tab" data-bs-target="#trainingGroupsTab" type="button" role="tab" aria-controls="trainingGroupsTab" aria-selected="false">
+                    <i class="bi bi-people-fill me-2"></i>Träningsgrupper
+                </button>
+                <button class="nav-link" id="certifications-tab" data-bs-toggle="tab" data-bs-target="#certificationsTab" type="button" role="tab" aria-controls="certificationsTab" aria-selected="false">
+                    <i class="bi bi-mortarboard me-2"></i>Certifieringar
+                </button>
+
+                <div class="admin-rail-group">Utmärkelser</div>
+                <button class="nav-link" id="clubChampions-tab" data-bs-toggle="tab" data-bs-target="#clubChampionsTab" type="button" role="tab" aria-controls="clubChampionsTab" aria-selected="false">
+                    <i class="bi bi-trophy-fill me-2"></i>Mästare
+                </button>
+                <button class="nav-link" id="standardMedals-tab" data-bs-toggle="tab" data-bs-target="#standardMedalsTab" type="button" role="tab" aria-controls="standardMedalsTab" aria-selected="false">
+                    <i class="bi bi-award me-2"></i>Standardmedaljer
+                </button>
+                <button class="nav-link" id="marken-tab" data-bs-toggle="tab" data-bs-target="#markenTab" type="button" role="tab" aria-controls="markenTab" aria-selected="false">
+                    <i class="bi bi-patch-check me-2"></i>Märken
+                </button>
+
+                <div class="admin-rail-group">Klubben</div>
+                <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button" role="tab" aria-controls="invoicesTab" aria-selected="false">
+                    <i class="bi bi-receipt me-2"></i>Fakturor
+                </button>
+                <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settingsTab" type="button" role="tab" aria-controls="settingsTab" aria-selected="false">
+                    <i class="bi bi-gear me-2"></i>Inställningar
+                </button>
+                <button class="nav-link" id="documents-tab" data-bs-toggle="tab" data-bs-target="#documentsTab" type="button" role="tab" aria-controls="documentsTab" aria-selected="false">
+                    <i class="bi bi-file-earmark-text me-2"></i>Dokument
+                </button>
+                <button class="nav-link" id="clubstats-tab" data-bs-toggle="tab" data-bs-target="#clubStatsTab" type="button" role="tab" aria-controls="clubStatsTab" aria-selected="false">
+                    <i class="bi bi-graph-up me-2"></i>Statistik
+                </button>
+            </nav>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="col-lg-9">
+            <div class="tab-content" id="adminTabContent">
         <!-- Events Tab -->
         <div class="tab-pane fade show active" id="eventsTab">
             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -651,7 +668,9 @@
         <div class="tab-pane fade" id="clubStatsTab">
             @await Html.PartialAsync("ClubStatistics")
         </div>
-    </div>
+            </div><!-- /#adminTabContent -->
+        </div><!-- /.col-lg-9 -->
+    </div><!-- /.admin-nav-layout row -->
 </div>
 
 <!-- Member märken detail modal -->
@@ -5501,6 +5520,23 @@ function showDpaStatusModal() {
     new bootstrap.Modal(document.getElementById('dpaStatusModal')).show();
 }
 
+// Small-screen section picker <-> Bootstrap tabs (rail is hidden < lg).
+(function () {
+    var sel = document.getElementById('adminTabMobileSelect');
+    if (!sel) return;
+    sel.addEventListener('change', function () {
+        var btn = document.querySelector('#adminTabs [data-bs-target="' + sel.value + '"]');
+        if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
+    });
+    // Keep the picker's value in sync when a tab is shown any other way.
+    document.querySelectorAll('#adminTabs [data-bs-toggle="tab"]').forEach(function (b) {
+        b.addEventListener('shown.bs.tab', function (e) {
+            var target = e.target.getAttribute('data-bs-target');
+            if (target && sel.value !== target) sel.value = target;
+        });
+    });
+})();
+
 document.addEventListener('DOMContentLoaded', loadDpaGate);
 </script>
 
@@ -5517,6 +5553,49 @@ document.addEventListener('DOMContentLoaded', loadDpaGate);
     color: var(--bs-primary);
     border-bottom: 3px solid var(--bs-primary);
     background-color: transparent;
+}
+
+/* Grouped vertical admin navigation rail (≥ lg) */
+.club-admin-panel .admin-rail {
+    position: sticky;
+    top: 1rem;
+    gap: 2px;
+    /* Give the rail its own surface so it reads as a panel, not floating text.
+       Tertiary bg + border adapt to light/dark and separate it from the content. */
+    background-color: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.5rem;
+    padding: 8px;
+}
+.club-admin-panel .admin-rail-group {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    padding: 14px 12px 4px;
+}
+.club-admin-panel .admin-rail-group:first-child {
+    padding-top: 2px;
+}
+.club-admin-panel .admin-rail .nav-link {
+    text-align: left;
+    color: var(--bs-body-color);
+    border-radius: 8px;
+    padding: 8px 12px;
+    border-left: 3px solid transparent;
+}
+.club-admin-panel .admin-rail .nav-link:hover {
+    /* One step up from the rail's own tertiary surface so hover stays visible. */
+    background-color: var(--bs-secondary-bg);
+}
+.club-admin-panel .admin-rail .nav-link.active {
+    /* -text-emphasis on -bg-subtle is Bootstrap's contrast-safe pairing in BOTH themes
+       (dark-navy text on pale blue in light; light-blue text on dark navy in dark). */
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
+    font-weight: 600;
+    border-left-color: var(--bs-primary);
 }
 
 .club-admin-panel .table {

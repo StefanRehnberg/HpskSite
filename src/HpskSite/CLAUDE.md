@@ -200,6 +200,23 @@ Other changes shipped together:
   View-only change except the two backend methods → full rebuild to deploy those; the
   `.cshtml` also changed.
 
+### Club admin panel navigation — grouped vertical rail (2026-07-05)
+The 13 admin sub-tabs (formerly a horizontal `nav-tabs` bar that wrapped to 2–3 rows) are now
+a **grouped vertical rail** (`ClubAdminPanel.cshtml`). Layout is a `.row`: a `col-lg-3` rail
+(`.admin-rail`, `nav nav-pills flex-column`, sticky) grouped under four headings — *Kalender &
+tävlingar* / *Medlemmar* / *Utmärkelser* / *Klubben* — plus a `col-lg-9` content column holding
+the unchanged `#adminTabContent`. **All tab-button ids + `data-bs-target`s are unchanged**, so
+the many `shown.bs.tab` lazy-loaders (events/members/marken/settings/…) keep working.
+- **Responsive:** rail shows at **≥ lg**; below lg (phones + portrait tablets) it's hidden
+  (`d-none d-lg-block`) and replaced by a full-width native `<select>` picker
+  (`#adminTabMobileSelect`, `d-lg-none`) with the four groups as `<optgroup>`s. A small IIFE at
+  the end of the panel wires the select ↔ tabs both ways (change → `bootstrap.Tab…show()`;
+  `shown.bs.tab` → sync select value). Chose lg (not md) so data-dense tables get full tablet width.
+- Member-facing club page tabs (`ClubNavigation.cshtml`, 8 tabs) were intentionally left as a
+  horizontal top nav — top-nav suits a public browse page; the rail signals "admin console".
+- View-only change (no rebuild). Rail CSS lives in the panel's `<style>` block (`.admin-rail*`).
+  See memory [[member-actions-menu]] for the low-literacy-admin UX rules driving both changes.
+
 ### Club Lookup Service ✅ (2025-10-30)
 
 **CRITICAL: Never use `IMemberService` to look up clubs!**
