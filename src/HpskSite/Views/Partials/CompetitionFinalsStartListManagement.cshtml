@@ -50,12 +50,18 @@
 
 <div class="competition-finals-start-list-management mt-4" data-competition-id="@competitionId">
 
-    <!-- Top action button — opens the wizard modal -->
-    <div class="mb-3">
-        <button type="button" class="btn btn-success" id="btnOpenFinalsWizard">
-            <i class="bi bi-trophy me-1"></i>Skapa ny finalsstartlista
-        </button>
+    <!-- What this is -->
+    <div class="alert alert-secondary d-flex align-items-start gap-2 mb-3">
+        <i class="bi bi-info-circle mt-1"></i>
+        <div class="small mb-0">
+            <strong>Finalsstartlistan bestämmer i vilken ordning skyttarna står när ni matar in finalens resultat</strong>
+            (serie F1 och framåt). Välj hur finalen ska ställas upp nedan — för de flesta tävlingar räcker de två
+            första valen.
+        </div>
     </div>
+
+    <!-- Readiness ladder — always visible; rows injected by JS -->
+    <div id="finalsReadiness" class="mb-3"></div>
 
     <!-- Loading -->
     <div id="finalsStartListLoading" class="text-center py-3 d-none">
@@ -63,10 +69,52 @@
         <small class="ms-2 text-muted">Laddar finalsstartlista...</small>
     </div>
 
-    <!-- No-list state -->
-    <div id="noFinalsStartListYet" class="alert alert-info d-none">
-        <h6><i class="bi bi-info-circle me-2"></i>Ingen finalsstartlista ännu</h6>
-        <p class="mb-0">Klicka "Skapa ny finalsstartlista" ovan för att starta guiden.</p>
+    <!-- Mode chooser -->
+    <div id="finalsModeChooser" class="mb-3 d-none">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="card h-100 border-success">
+                    <div class="card-body d-flex flex-column">
+                        <h6 class="card-title"><i class="bi bi-arrow-right-circle me-1 text-success"></i>Fortsätt i samma ordning</h6>
+                        <p class="card-text small text-muted flex-grow-1">
+                            Alla skyttar fortsätter i <strong>samma skjutlag och ordning som i kvalet</strong>.
+                            Enklast — inget behöver gallras eller frysas.
+                        </p>
+                        <button type="button" class="btn btn-success btn-sm mt-2" id="btnFinalsModeClone">
+                            <i class="bi bi-check2 me-1"></i>Skapa final – samma ordning
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 border-primary">
+                    <div class="card-body d-flex flex-column">
+                        <h6 class="card-title"><i class="bi bi-sort-numeric-down me-1 text-primary"></i>Placera om efter resultat</h6>
+                        <p class="card-text small text-muted flex-grow-1">
+                            Skyttarna placeras om efter kvalresultatet — <strong>en final per vapengrupp</strong>
+                            (A, B, C … var för sig, bäst poäng först).
+                        </p>
+                        <button type="button" class="btn btn-primary btn-sm mt-2" id="btnFinalsModeRerank">
+                            <i class="bi bi-check2 me-1"></i>Skapa final – efter resultat
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body d-flex flex-column">
+                        <h6 class="card-title"><i class="bi bi-trophy me-1 text-warning"></i>Mästerskapsfinal (avancerad)</h6>
+                        <p class="card-text small text-muted flex-grow-1">
+                            Gallra till final (topp 1/6, minst 10) med <strong>frysning per klass</strong> och egna
+                            skjutlag. För mästerskap där bara de bästa går vidare.
+                        </p>
+                        <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="btnOpenFinalsWizard">
+                            <i class="bi bi-sliders me-1"></i>Öppna guiden
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Official finals start list card -->
@@ -95,8 +143,8 @@
             <div class="alert alert-info mb-3">
                 <div class="row">
                     <div class="col-md-6">
-                        <small class="text-muted">Format:</small>
-                        <strong>Championship Finals</strong>
+                        <small class="text-muted">Metod:</small>
+                        <strong id="finalsStartListFormatLabel">Final</strong>
                     </div>
                     <div class="col-md-3">
                         <small class="text-muted">Genererad:</small>
@@ -109,6 +157,9 @@
                 </div>
             </div>
             <div class="d-flex justify-content-end mb-3 flex-wrap gap-2">
+                <button class="btn btn-outline-secondary" id="btnFinalsRedo">
+                    <i class="bi bi-arrow-repeat me-1"></i>Skapa om / byt metod
+                </button>
                 <button class="btn btn-outline-info" id="btnEditFinalsStartList">
                     <i class="bi bi-pencil-square me-1"></i>Redigera
                 </button>
@@ -127,13 +178,13 @@
         <div class="modal-dialog modal-xl modal-fullscreen-md-down">
             <div class="modal-content" id="finalsWizardRoot">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-trophy me-2 text-warning"></i>Skapa finalsstartlista</h5>
+                    <h5 class="modal-title"><i class="bi bi-trophy me-2 text-warning"></i>Mästerskapsfinal – guide</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
                 </div>
                 <div class="modal-body">
 
                     <div class="wizard-progress">
-                        <div class="step active" data-step="1">1. Lås grupper</div>
+                        <div class="step active" data-step="1">1. Lås kvalresultat</div>
                         <div class="step" data-step="2">2. Konfigurera grupper</div>
                         <div class="step" data-step="3">3. Generera</div>
                     </div>
@@ -201,6 +252,10 @@
                         <p class="text-muted small mb-3">
                             Generera finalsstartlistan från de låsta grupperna och din konfiguration.
                         </p>
+                        <div class="alert alert-warning small d-none" id="wizardGateMsg">
+                            <i class="bi bi-lock me-1"></i>
+                            Lås minst en grupp i <strong>Steg 1</strong> innan du kan generera.
+                        </div>
                         <div class="row g-2 align-items-end mb-3">
                             <div class="col-auto">
                                 <label class="form-label small mb-0">Första starttid</label>
@@ -285,31 +340,64 @@
     let editorOpenForFinalsId = null;  // tracks when the shared editor is being used for finals
 
     // ---- card load + render ----
-    async function loadFinalsStartList() {
+    // Single source of truth: pull the finals list + qualifying readiness together, then
+    // render the ladder, the mode chooser (when no list yet) or the official card.
+    async function refreshAll() {
         showLoading();
-        const d = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`);
-        const exists = d && (d.Exists || d.exists);
+        const [finals, readiness] = await Promise.all([
+            jget(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`),
+            jget(`/umbraco/surface/PrecisionStartList/GetQualifyingSnapshot?competitionId=${competitionId}`)
+        ]);
+
+        hasResultList = !!(readiness && readiness.hasResultList);
+        perClassState = (readiness && readiness.perClass) || [];
+
+        const exists = finals && (finals.Exists || finals.exists);
+        document.getElementById('finalsStartListLoading').classList.add('d-none');
         if (exists) {
-            finalsListInfo = d;
+            finalsListInfo = finals;
             renderOfficialCard();
+            hideChooser();
         } else {
             finalsListInfo = null;
-            renderEmpty();
+            document.getElementById('officialFinalsStartListSection').classList.add('d-none');
+            showChooser();
         }
+        renderReadiness();
     }
+
+    // Back-compat alias — the wizard + editor-close hook call loadFinalsStartList().
+    async function loadFinalsStartList() { await refreshAll(); }
+
     function showLoading() {
         document.getElementById('finalsStartListLoading').classList.remove('d-none');
-        document.getElementById('noFinalsStartListYet').classList.add('d-none');
-        document.getElementById('officialFinalsStartListSection').classList.add('d-none');
     }
-    function renderEmpty() {
-        document.getElementById('finalsStartListLoading').classList.add('d-none');
-        document.getElementById('noFinalsStartListYet').classList.remove('d-none');
-        document.getElementById('officialFinalsStartListSection').classList.add('d-none');
+    function showChooser() { document.getElementById('finalsModeChooser').classList.remove('d-none'); }
+    function hideChooser() { document.getElementById('finalsModeChooser').classList.add('d-none'); }
+
+    // ---- readiness ladder ----
+    function readinessRow(done, label, hint) {
+        const icon = done
+            ? '<i class="bi bi-check-circle-fill text-success"></i>'
+            : '<i class="bi bi-circle text-muted"></i>';
+        const hintHtml = hint ? ` <span class="text-muted">— ${hint}</span>` : '';
+        return `<div class="d-flex align-items-center gap-2 py-1 small">${icon}<span>${label}${hintHtml}</span></div>`;
     }
+    function renderReadiness() {
+        const el = document.getElementById('finalsReadiness');
+        if (!el) return;
+        const exists = !!finalsListInfo;
+        const isOfficial = exists && (finalsListInfo.IsOfficial || finalsListInfo.isOfficial);
+        el.innerHTML =
+            readinessRow(hasResultList, 'Resultat registrerade',
+                hasResultList ? '' : 'mata in kvalresultat på fliken Resultat först') +
+            readinessRow(exists, 'Finalsstartlista skapad',
+                exists ? '' : 'välj en metod nedan') +
+            readinessRow(isOfficial, 'Publicerad',
+                (exists && !isOfficial) ? 'klicka Publicera när listan är klar' : '');
+    }
+
     function renderOfficialCard() {
-        document.getElementById('finalsStartListLoading').classList.add('d-none');
-        document.getElementById('noFinalsStartListYet').classList.add('d-none');
         const card = document.getElementById('officialFinalsStartListSection');
         card.classList.remove('d-none');
 
@@ -317,9 +405,12 @@
         const isOfficial = finalsListInfo.IsOfficial || finalsListInfo.isOfficial;
         const total = finalsListInfo.TotalFinalists || finalsListInfo.totalFinalists || 0;
         const gen = finalsListInfo.GeneratedDate || finalsListInfo.generatedDate;
+        const fmt = finalsListInfo.TeamFormat || finalsListInfo.teamFormat || '';
         const sl = finalsListInfo.StartList || finalsListInfo.startList;
         const teams = (sl && (sl.Teams || sl.teams)) || [];
 
+        const fmtLabel = fmt === 'Final' ? 'Samma ordning som kvalet' : 'Rangordnad efter kvalresultat';
+        document.getElementById('finalsStartListFormatLabel').textContent = fmtLabel;
         document.getElementById('finalsStartListFinalistCount').textContent = total;
         document.getElementById('finalsStartListTeamCount').textContent = teams.length;
         document.getElementById('finalsStartListGeneratedDate').textContent = gen ? new Date(gen).toLocaleString('sv-SE') : '';
@@ -370,6 +461,23 @@
         window.openStartListEditor(id);
     }
 
+    // ---- one-click modes (no freeze / no cut) ----
+    async function generateSimple(mode) {
+        const label = mode === 'clone' ? 'samma ordning som kvalet' : 'omplacering efter kvalresultat';
+        if (finalsListInfo && !confirm('En finalsstartlista finns redan. Skapa om med ' + label + '?\n\nManuella ändringar i listan skrivs över.')) return;
+        showLoading();
+        const d = await jpost('/umbraco/surface/PrecisionStartList/GenerateSimpleFinalsStartList', {
+            CompetitionId: competitionId,
+            Mode: mode,
+            FirstStartTime: '10:00',
+            StartInterval: '1:45',
+            MaxShootersPerTeam: 20
+        });
+        const ok = d.Success ?? d.success;
+        if (!ok) { alert((d.Message ?? d.message) || 'Kunde inte skapa finalen.'); await refreshAll(); return; }
+        await refreshAll();
+    }
+
     // Refresh the finals card after the shared editor closes — only if it was opened for finals.
     function attachEditorCloseHook() {
         const editorEl = document.getElementById('startListEditorModal');
@@ -411,9 +519,14 @@
         if (step === 3) {
             nextBtn.classList.add('d-none');
             genBtn.classList.remove('d-none');
+            // Explicit gate: can't generate until at least one group is frozen.
+            const frozenCount = perClassState.filter(s => s.frozen).length;
+            genBtn.disabled = frozenCount === 0;
+            document.getElementById('wizardGateMsg').classList.toggle('d-none', frozenCount > 0);
         } else {
             nextBtn.classList.remove('d-none');
             genBtn.classList.add('d-none');
+            genBtn.disabled = false;
         }
     }
 
@@ -577,6 +690,9 @@
 
     // ---- wiring ----
     document.getElementById('btnOpenFinalsWizard').addEventListener('click', openWizard);
+    document.getElementById('btnFinalsModeClone').addEventListener('click', () => generateSimple('clone'));
+    document.getElementById('btnFinalsModeRerank').addEventListener('click', () => generateSimple('rerank'));
+    document.getElementById('btnFinalsRedo').addEventListener('click', showChooser);
     document.getElementById('btnPublishFinalsStartList').addEventListener('click', () => togglePublish(true));
     document.getElementById('btnUnpublishFinalsStartList').addEventListener('click', () => togglePublish(false));
     document.getElementById('btnEditFinalsStartList').addEventListener('click', openFinalsEditor);
@@ -602,6 +718,6 @@
     setTimeout(attachEditorCloseHook, 500);
 
     // ---- init ----
-    loadFinalsStartList();
+    refreshAll();
 })();
 </script>

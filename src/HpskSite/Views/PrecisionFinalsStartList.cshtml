@@ -152,6 +152,20 @@
                     {
                         var teams = (IEnumerable<dynamic>)config.Teams;
 
+                        // Rang/Kvalresultat columns only make sense when shooters carry qualification
+                        // scores (cut/rerank finals). A "same order" clone has none — hide the columns.
+                        bool showKval = false;
+                        foreach (var t in teams)
+                        {
+                            if (t.Shooters == null) continue;
+                            foreach (var s in (IEnumerable<dynamic>)t.Shooters)
+                            {
+                                int? sv = null; try { sv = (int?)s.QualificationScore; } catch { }
+                                if (sv.HasValue) { showKval = true; break; }
+                            }
+                            if (showKval) break;
+                        }
+
                         foreach (var team in teams)
                         {
                             string teamLabel = "";
@@ -164,11 +178,17 @@
                                     <thead>
                                         <tr>
                                             <th>Plats</th>
-                                            <th>Rang</th>
+                                            @if (showKval)
+                                            {
+                                                <th>Rang</th>
+                                            }
                                             <th>Namn</th>
                                             <th>Förening</th>
                                             <th>Klass</th>
-                                            <th>Kvalresultat</th>
+                                            @if (showKval)
+                                            {
+                                                <th>Kvalresultat</th>
+                                            }
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -205,11 +225,17 @@
 
                                                 <tr class="@rowClass">
                                                     <td class="text-center">@shooter.Position</td>
-                                                    <td class="text-center">@(rankVal.HasValue ? rankVal.Value.ToString() : "")</td>
+                                                    @if (showKval)
+                                                    {
+                                                        <td class="text-center">@(rankVal.HasValue ? rankVal.Value.ToString() : "")</td>
+                                                    }
                                                     <td>@shooter.Name</td>
                                                     <td>@HpskSite.Helpers.ClubNameHelper.Shorten((string)shooter.Club)</td>
                                                     <td class="text-center">@weaponClassName</td>
-                                                    <td class="text-center">@scoreCell</td>
+                                                    @if (showKval)
+                                                    {
+                                                        <td class="text-center">@scoreCell</td>
+                                                    }
                                                 </tr>
                                             }
                                         }

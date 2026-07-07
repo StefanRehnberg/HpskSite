@@ -2146,71 +2146,17 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (!build.Ok || build.Configuration == null)
                     return Json(new { Success = false, Message = build.Message });
 
-                IContent finalsStartList;
-                if (existingFinalsStartList != null)
-                {
-                    finalsStartList = existingFinalsStartList;
-                    _logger.LogInformation("Updating existing finals start list {StartListId} for competition {CompetitionId}",
-                        finalsStartList.Id, request.CompetitionId);
-                }
-                else
-                {
-                    finalsStartList = _contentService.Create("Finalstartlista", competition.Id, "finalsStartList");
-                    _logger.LogInformation("Creating new finals start list for competition {CompetitionId}", request.CompetitionId);
-                }
-
-                var totalFinalists = build.Configuration.Teams?.Sum(t => t.Shooters?.Count ?? 0) ?? 0;
-                finalsStartList.SetValue("competitionId", request.CompetitionId);
-                finalsStartList.SetValue("generatedDate", DateTime.Now);
-                finalsStartList.SetValue("generatedBy", generatedBy);
-                finalsStartList.SetValue("isOfficialFinalsStartList", false);
-                finalsStartList.SetValue("teamFormat", "Championship Finals");
-                finalsStartList.SetValue("totalFinalists", totalFinalists);
-                finalsStartList.SetValue("maxShootersPerTeam", settings.MaxShootersPerTeam);
-
-                var qualStartLists = _repository.GetStartListsForCompetition(request.CompetitionId);
-                var officialQualStartList = qualStartLists.FirstOrDefault(sl =>
-                    sl.GetValue<bool>("isOfficialStartList") &&
-                    sl.ContentType.Alias == "precisionStartList");
-                if (officialQualStartList != null)
-                    finalsStartList.SetValue("qualificationStartListId", officialQualStartList.Id);
-
-                finalsStartList.SetValue("configurationData", JsonConvert.SerializeObject(build.Configuration));
-
-                // Cached HTML — used by admin preview / print. Renderer auto-detects finals
-                // format and emits the Rang/Kvalresultat columns. Isolate failures here so a
-                // renderer bug doesn't take the whole generation down — the public view reads
-                // configurationData directly anyway.
-                try
-                {
-                    var finalsHtml = await _renderer.GenerateStartListHtml(build.Configuration, competition.Name ?? "");
-                    finalsStartList.SetValue("startListContent", finalsHtml);
-                }
-                catch (Exception renderEx)
-                {
-                    _logger.LogWarning(renderEx, "Finals start list HTML render failed for competition {CompetitionId} — continuing without cached HTML", request.CompetitionId);
-                }
-
-                // Matches the standard GenerateStartList flow: Save + Publish here. The
-                // PublishFinalsStartList endpoint (the card's Publicera button) only flips
-                // the isOfficialFinalsStartList flag with a Save — the Umbraco node is
-                // already Published from this point on.
-                var saveResult = _contentService.Save(finalsStartList);
-                if (!saveResult.Success)
-                {
-                    _logger.LogError("Failed to save finals start list. Messages: {Messages}",
-                        string.Join(", ", saveResult.EventMessages?.GetAll().Select(m => m.Message) ?? Array.Empty<string>()));
-                    return Json(new { Success = false, Message = "Kunde inte spara finalstartlistan." });
-                }
-                _contentService.Publish(finalsStartList, new[] { "*" }, -1);
+                var persist = await PersistFinalsStartListAsync(competition, build.Configuration, generatedBy, settings.MaxShootersPerTeam);
+                if (!persist.ok)
+                    return Json(new { Success = false, Message = persist.message });
 
                 return Json(new
                 {
                     Success = true,
                     Message = build.Message,
-                    FinalsStartListId = finalsStartList.Id,
-                    TotalFinalists = totalFinalists,
-                    Teams = build.Configuration.Teams?.Count ?? 0
+                    FinalsStartListId = persist.id,
+                    TotalFinalists = persist.totalFinalists,
+                    Teams = persist.teams
                 });
             }
             catch (Exception ex)
@@ -2218,6 +2164,281 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 _logger.LogError(ex, "Error generating finals start list for competition {CompetitionId}", request?.CompetitionId);
                 return Json(new { Success = false, Message = "Ett fel uppstod vid skapande av finalstartlista: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Simplified finals generation for the common case — no freeze, no cut, no per-group config.
+        /// Two modes:
+        ///   "clone"  — the finals use the SAME order as the qualifying start list (everyone continues
+        ///              in their existing skjutlag/position). Reads the official qualifying start list.
+        ///   "rerank" — everyone is re-seeded into a single list ordered by their qualifying total
+        ///              (highest first, X-count then name as tiebreak). Reads live results.
+        /// Both produce a finalsStartList node so results entry has the correct order.
+        /// The freeze/cut wizard (GenerateFinalsStartList) remains for championship finals with a cut.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> GenerateSimpleFinalsStartList([FromBody] GenerateSimpleFinalsRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0)
+                    return Json(new { Success = false, Message = "Ogiltig förfrågan." });
+
+                var mode = (request.Mode ?? "").Trim().ToLowerInvariant();
+                if (mode != "clone" && mode != "rerank")
+                    return Json(new { Success = false, Message = "Okänt finalläge." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { Success = false, Message = "Tävlingen hittades inte." });
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { Success = false, Message = "Du måste vara inloggad." });
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera denna tävling." });
+
+                if (competition.GetValue<int>("numberOfFinalSeries") <= 0)
+                    return Json(new { Success = false, Message = "Denna tävling har inga finalserier konfigurerade." });
+
+                var generatedBy = request.GeneratedBy ?? currentMember.Name ?? "Unknown";
+                var maxPerTeam = request.MaxShootersPerTeam > 0 ? request.MaxShootersPerTeam : 20;
+
+                StartListConfiguration config;
+                if (mode == "clone")
+                {
+                    config = BuildCloneFinalsConfig(request.CompetitionId, maxPerTeam);
+                    if (config.Teams == null || config.Teams.Count == 0)
+                        return Json(new { Success = false, Message = "Ingen kvalstartlista att kopiera. Skapa och publicera kvalstartlistan först." });
+                }
+                else // rerank
+                {
+                    var firstStart = string.IsNullOrWhiteSpace(request.FirstStartTime) ? "10:00" : request.FirstStartTime;
+                    var interval = string.IsNullOrWhiteSpace(request.StartInterval) ? "1:45" : request.StartInterval;
+                    config = await BuildRerankFinalsConfigAsync(request.CompetitionId, maxPerTeam, firstStart, interval);
+                    if (config.Teams == null || config.Teams.Count == 0)
+                        return Json(new { Success = false, Message = "Inga kvalresultat att placera om. Registrera resultat först." });
+                }
+
+                var persist = await PersistFinalsStartListAsync(competition, config, generatedBy, maxPerTeam);
+                if (!persist.ok)
+                    return Json(new { Success = false, Message = persist.message });
+
+                var msg = mode == "clone"
+                    ? $"Finalen använder samma ordning som kvalet — {persist.totalFinalists} skyttar i {persist.teams} skjutlag."
+                    : $"Finalen placerad efter kvalresultat — {persist.totalFinalists} skyttar i {persist.teams} skjutlag.";
+
+                return Json(new
+                {
+                    Success = true,
+                    Message = msg,
+                    FinalsStartListId = persist.id,
+                    TotalFinalists = persist.totalFinalists,
+                    Teams = persist.teams
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating simple finals start list for competition {CompetitionId}", request?.CompetitionId);
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Shared save/publish tail for all finals-generation paths. Creates or updates the
+        /// finalsStartList node, serializes the config, renders cached HTML, saves + publishes.
+        /// </summary>
+        private async Task<(bool ok, string message, int id, int totalFinalists, int teams)> PersistFinalsStartListAsync(
+            IContent competition, StartListConfiguration config, string generatedBy, int maxShootersPerTeam)
+        {
+            var existingFinalsStartList = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+
+            IContent finalsStartList = existingFinalsStartList
+                ?? _contentService.Create("Finalstartlista", competition.Id, "finalsStartList");
+
+            var totalFinalists = config.Teams?.Sum(t => t.Shooters?.Count ?? 0) ?? 0;
+            finalsStartList.SetValue("competitionId", competition.Id);
+            finalsStartList.SetValue("generatedDate", DateTime.Now);
+            finalsStartList.SetValue("generatedBy", generatedBy);
+            finalsStartList.SetValue("isOfficialFinalsStartList", false);
+            finalsStartList.SetValue("teamFormat", config.Settings?.Format ?? "Championship Finals");
+            finalsStartList.SetValue("totalFinalists", totalFinalists);
+            finalsStartList.SetValue("maxShootersPerTeam", maxShootersPerTeam);
+
+            var qualStartLists = _repository.GetStartListsForCompetition(competition.Id);
+            var officialQualStartList = qualStartLists.FirstOrDefault(sl =>
+                sl.GetValue<bool>("isOfficialStartList") &&
+                sl.ContentType.Alias == "precisionStartList");
+            if (officialQualStartList != null)
+                finalsStartList.SetValue("qualificationStartListId", officialQualStartList.Id);
+
+            finalsStartList.SetValue("configurationData", JsonConvert.SerializeObject(config));
+
+            // Cached HTML — used by admin preview / print. Renderer auto-detects finals format
+            // and emits the Rang/Kvalresultat columns. Isolate failures here so a renderer bug
+            // doesn't take the whole generation down — the public view reads configurationData directly.
+            try
+            {
+                var finalsHtml = await _renderer.GenerateStartListHtml(config, competition.Name ?? "");
+                finalsStartList.SetValue("startListContent", finalsHtml);
+            }
+            catch (Exception renderEx)
+            {
+                _logger.LogWarning(renderEx, "Finals start list HTML render failed for competition {CompetitionId} — continuing without cached HTML", competition.Id);
+            }
+
+            // Matches the standard GenerateStartList flow: Save + Publish here. The
+            // PublishFinalsStartList endpoint (the card's Publicera button) only flips the
+            // isOfficialFinalsStartList flag with a Save — the node is already Published from here.
+            var saveResult = _contentService.Save(finalsStartList);
+            if (!saveResult.Success)
+            {
+                _logger.LogError("Failed to save finals start list. Messages: {Messages}",
+                    string.Join(", ", saveResult.EventMessages?.GetAll().Select(m => m.Message) ?? Array.Empty<string>()));
+                return (false, "Kunde inte spara finalstartlistan.", 0, 0, 0);
+            }
+            _contentService.Publish(finalsStartList, new[] { "*" }, -1);
+
+            return (true, "", finalsStartList.Id, totalFinalists, config.Teams?.Count ?? 0);
+        }
+
+        /// <summary>
+        /// "Same order" finals: deep-copy the official qualifying start list's teams/positions,
+        /// relabel the format so the finals label ("Final") applies. No Rang/Kval columns render
+        /// because these shooters carry no qualification rank/score.
+        /// </summary>
+        private StartListConfiguration BuildCloneFinalsConfig(int competitionId, int maxPerTeam)
+        {
+            var empty = new StartListConfiguration { Teams = new List<StartListTeam>() };
+
+            var startLists = _repository.GetStartListsForCompetition(competitionId);
+            var qual = startLists.FirstOrDefault(sl =>
+                    sl.GetValue<bool>("isOfficialStartList") && sl.ContentType.Alias == "precisionStartList")
+                ?? startLists.FirstOrDefault(sl => sl.ContentType.Alias == "precisionStartList");
+            if (qual == null) return empty;
+
+            var configData = qual.GetValue<string>("configurationData");
+            if (string.IsNullOrWhiteSpace(configData)) return empty;
+
+            var qualConfig = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
+            if (qualConfig?.Teams == null || qualConfig.Teams.Count == 0) return empty;
+
+            qualConfig.Settings ??= new StartListSettings();
+            qualConfig.Settings.Format = "Final";
+            qualConfig.Settings.MaxShootersPerTeam = maxPerTeam;
+            qualConfig.Settings.Generated = DateTime.Now;
+            return qualConfig;
+        }
+
+        /// <summary>
+        /// "By result" finals: everyone with qualifying results, ranked by qualifying total, but
+        /// SEPARATED BY WEAPON GROUP — all A shooters form the A final, all B the B final, all C
+        /// the C final, etc. (A_Opt / AM / AP / AG are their own groups per ShootingClasses).
+        /// Within each group: score desc, X-count desc, name; rank restarts per group. Each group
+        /// is its own skjutlag (split into more if it exceeds maxPerTeam). Weapon groups follow the
+        /// canonical WeaponClass enum order.
+        /// </summary>
+        private async Task<StartListConfiguration> BuildRerankFinalsConfigAsync(int competitionId, int maxPerTeam, string firstStart, string interval)
+        {
+            var empty = new StartListConfiguration { Teams = new List<StartListTeam>() };
+
+            var rankings = await _qualifyingResultsService.GetAvailableClassRankingsAsync(competitionId);
+            var all = rankings.SelectMany(r => r.QualifiedShooters).ToList();
+            if (all.Count == 0) return empty;
+
+            if (maxPerTeam < 1) maxPerTeam = 20;
+
+            // Group by weapon group (A / A_Opt / A_M / A_P / A_G / B / C / R / M / L). Unknown → own
+            // trailing bucket keyed "" so nobody is silently dropped.
+            static int GroupOrder(string code) =>
+                Enum.TryParse<HpskSite.Models.WeaponClass>(code, out var wc) ? (int)wc : 999;
+
+            var groups = all
+                .GroupBy(s => HpskSite.Models.ShootingClasses.GetWeaponClassCode(s.ShootingClass))
+                .OrderBy(g => GroupOrder(g.Key))
+                .ThenBy(g => g.Key);
+
+            var teams = new List<StartListTeam>();
+            string currentStart = string.IsNullOrWhiteSpace(firstStart) ? "10:00" : firstStart;
+            int teamNumber = 1;
+
+            foreach (var g in groups)
+            {
+                var ranked = g
+                    .OrderByDescending(s => s.QualificationScore)
+                    .ThenByDescending(s => s.XCount)
+                    .ThenBy(s => s.Name)
+                    .ToList();
+
+                var groupLabel = string.IsNullOrEmpty(g.Key) ? "Övriga" : g.Key;
+                int rankInGroup = 1;
+
+                for (int i = 0; i < ranked.Count; i += maxPerTeam)
+                {
+                    var chunk = ranked.Skip(i).Take(maxPerTeam).ToList();
+                    var shooters = new List<StartListShooter>();
+                    int position = 1;
+                    foreach (var qs in chunk)
+                    {
+                        shooters.Add(new StartListShooter
+                        {
+                            Position = position++,
+                            Name = qs.Name,
+                            Club = qs.Club,
+                            WeaponClass = qs.ShootingClass,
+                            MemberId = qs.MemberId,
+                            QualificationRank = rankInGroup++,
+                            QualificationScore = qs.QualificationScore,
+                            QualificationXCount = qs.XCount,
+                            ChampionshipClass = qs.ChampionshipClass
+                        });
+                    }
+                    var endTime = AddTimeInterval(currentStart, interval);
+                    teams.Add(new StartListTeam
+                    {
+                        TeamNumber = teamNumber++,
+                        StartTime = currentStart,
+                        EndTime = endTime,
+                        Label = groupLabel,
+                        WeaponClasses = shooters.Select(s => s.WeaponClass).Distinct().OrderBy(c => c).ToList(),
+                        ShooterCount = shooters.Count,
+                        Shooters = shooters,
+                        ChampionshipClasses = groupLabel
+                    });
+                    currentStart = endTime;
+                }
+            }
+
+            return new StartListConfiguration
+            {
+                Settings = new StartListSettings
+                {
+                    Format = "Championship Finals",
+                    MaxShootersPerTeam = maxPerTeam,
+                    StartInterval = interval,
+                    FirstStartTime = firstStart,
+                    Generated = DateTime.Now
+                },
+                Teams = teams
+            };
+        }
+
+        private static string AddTimeInterval(string startTime, string interval)
+        {
+            // Interval is hours:minutes (h:mm) — same convention as StartListGenerator.
+            if (!TimeSpan.TryParse(startTime, out var ts)) return startTime;
+            var parts = (interval ?? "").Split(':');
+            int hours = 0, minutes = 0;
+            if (parts.Length == 2 && int.TryParse(parts[0], out var h) && int.TryParse(parts[1], out var m))
+            {
+                hours = h;
+                minutes = m;
+            }
+            ts = ts.Add(new TimeSpan(hours, minutes, 0));
+            return $"{ts.Hours:D2}:{ts.Minutes:D2}";
         }
 
         // ====================================================================
@@ -2692,6 +2913,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     IsOfficial = finalsStartList.GetValue<bool>("isOfficialFinalsStartList"),
                     GeneratedDate = finalsStartList.GetValue<DateTime>("generatedDate"),
                     TotalFinalists = finalsStartList.GetValue<int>("totalFinalists"),
+                    TeamFormat = finalsStartList.GetValue<string>("teamFormat"),
                     StartList = startListData
                 });
             }
@@ -3043,6 +3265,16 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
     public class GenerateFinalsStartListRequest
     {
         public int CompetitionId { get; set; }
+        public int MaxShootersPerTeam { get; set; } = 20;
+        public string? GeneratedBy { get; set; }
+        public string? FirstStartTime { get; set; }
+        public string? StartInterval { get; set; }
+    }
+
+    public class GenerateSimpleFinalsRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? Mode { get; set; } // "clone" | "rerank"
         public int MaxShootersPerTeam { get; set; } = 20;
         public string? GeneratedBy { get; set; }
         public string? FirstStartTime { get; set; }

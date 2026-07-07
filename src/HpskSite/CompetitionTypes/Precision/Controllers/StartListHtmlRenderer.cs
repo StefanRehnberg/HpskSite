@@ -43,9 +43,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 }
             }
 
-            // Finals start lists ride the same renderer but emit extra Rang/Kvalresultat
-            // columns so audience can see the leaderboard-derived lane order.
-            var isFinals = config.Settings?.Format == "Championship Finals";
+            // Finals start lists ride the same renderer. "Championship Finals" (cut/rerank) and
+            // "Final" (same-order clone) both use the "Final" heading. The extra Rang/Kvalresultat
+            // columns only render when shooters actually carry qualification scores — a same-order
+            // clone has none, so those columns are omitted to avoid empty placeholder columns.
+            var fmt = config.Settings?.Format;
+            var isFinals = fmt == "Championship Finals" || fmt == "Final";
+            var showKval = isFinals && (config.Teams?.Any(t => t.Shooters?.Any(s => s.QualificationScore.HasValue) == true) ?? false);
 
             html.AppendLine("<div class='start-list-content'>");
             html.AppendLine($"<h3 class='competition-title'>{competitionName}</h3>");
@@ -78,7 +82,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     html.AppendLine($" ({team.ShooterCount} st)</h3>");
 
                     html.AppendLine("<table class='table table-striped'>");
-                    if (isFinals)
+                    if (showKval)
                     {
                         html.AppendLine("<thead><tr><th>Plats</th><th>Rang</th><th>Namn</th><th>Förening</th><th>Klass</th><th>Kvalresultat</th></tr></thead>");
                     }
@@ -115,14 +119,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                             html.AppendLine($"<tr{rowClass}>");
                             html.AppendLine($"<td>{shooter.Position}</td>");
-                            if (isFinals)
+                            if (showKval)
                             {
                                 html.AppendLine($"<td>{(shooter.QualificationRank.HasValue ? shooter.QualificationRank.Value.ToString() : "")}</td>");
                             }
                             html.AppendLine($"<td>{shooter.Name}</td>");
                             html.AppendLine($"<td>{shooter.Club}</td>");
                             html.AppendLine($"<td>{GetShootingClassName(shooter.WeaponClass)}</td>");
-                            if (isFinals)
+                            if (showKval)
                             {
                                 var scoreCell = shooter.QualificationScore.HasValue
                                     ? (shooter.QualificationXCount.HasValue && shooter.QualificationXCount.Value > 0
