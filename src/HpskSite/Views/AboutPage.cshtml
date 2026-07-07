@@ -104,6 +104,20 @@
             Teaser = "Patrullchefen skjuter, mobilen räknar.",
             Detail = "Vid varje station scannar patrullchefen en QR-kod, väljer skytt och knappar in träffar. Inga papperslappar, inga räknefel, inga sena resultatlistor. Patrullen och alla andra på tävlingen ser preliminära resultat i realtid när stationerna avslutas.",
             Tutorial = "tutorial-08"
+        },
+        new {
+            Image = "/images/about/live.png",
+            Title = "Live resultattavla — följ tävlingen i realtid",
+            Teaser = "Ställningen live på storbild i klubbhuset, på egen telefon eller castad till en TV.",
+            Detail = "Öppna resultattavlan på valfri skärm — mobilen, en surfplatta eller en TV i klubbhuset — och ställningen uppdateras automatiskt medan tävlingen pågår. Du kan visa flera vapengrupper samtidigt i rutor eller låta tavlan växla mellan klasserna, och en delbar länk gör att vem som helst kan följa med på distans. Fungerar för precision, fältskytte och springskytte.",
+            Tutorial = ""
+        },
+        new {
+            Image = "/images/about/patrullista.png",
+            Title = "Patrullista — vem går härnäst",
+            Teaser = "En väggskärm som visar startordningen och vilken patrull som är näst på tur.",
+            Detail = "Sätt upp patrullistan på en skärm vid starten eller i klubbhuset. Den visar alla fältskyttepatruller i startordning, markerar vilken som är näst på tur och räknar tiden sedan senaste utsläpp. Startpersonalen bockar av varje patrull med ett tryck när den skickas iväg, så både skyttar och funktionärer alltid vet vem som står på tur — utan rop och papperslistor.",
+            Tutorial = ""
         }
     };
 
@@ -149,6 +163,20 @@
             Title = "Fältskyttekonfigurator",
             Teaser = "Designa stationer grafiskt — utan papper och kalkylark.",
             Detail = "Designa varje station: välj mål från målkatalogen, justera figurer och tider per vapenklass och kopiera proportionellt mellan klasserna. Markera enskilda stationer som dedikerade särskjutnings-stationer — de göms från det vanliga tävlingsflödet men finns kvar att välja när medaljplatserna ska avgöras. Utskriftsklara stations- och målblad, QR-koder för mobilrapportering vid banan — allt från samma verktyg.",
+            Tutorial = ""
+        },
+        new {
+            Image = "/images/about/stationoverview.png",
+            Title = "Stationsöversikt på tävlingsdagen",
+            Teaser = "Alla stationer, stationschefer och hur långt patrullerna kommit — på ett ställe.",
+            Detail = "Stationer-vyn ger tävlingsledningen överblick under hela dagen: varje station visas med sina figurer, tilldelad stationschef med telefonnummer, senaste patrull som gått igenom och hur många som är klara. Härifrån tilldelar du stationschefer, skriver ut stationskorten med QR-koder och öppnar konfiguratorn för snabba justeringar — allt uppdateras automatiskt medan tävlingen rullar.",
+            Tutorial = ""
+        },
+        new {
+            Image = "/images/about/flowstats.png",
+            Title = "Flödesstatistik för fältskytte",
+            Teaser = "Se var det köar — hitta flaskhalsen medan tävlingen pågår.",
+            Detail = "Flödesstatistiken visar hur patrullerna rör sig genom banan: genomsnittlig tid per station, vilken station som är flaskhalsen och hur patrullerna ligger i tid mot varandra. Diagrammen bygger på de incheckningar som redan sker vid resultatinmatningen, så du får överblicken utan extra arbete — och kan lätta på en kö innan den växer.",
             Tutorial = ""
         },
         new {
@@ -355,7 +383,14 @@
         <div class="about-slab">
             <div class="row align-items-center g-4">
                 <div class="col-lg-6 @(imageRight ? "order-lg-2" : "")">
-                    <img src="@slab.Image" alt="@slab.Title" class="about-shot" loading="lazy">
+                    <img src="@slab.Image" alt="@slab.Title" class="about-shot" loading="lazy"
+                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                    <div class="about-shot-placeholder" style="display:none;">
+                        <div class="text-muted p-4">
+                            <i class="bi bi-image" style="font-size:2.5rem;"></i>
+                            <div class="mt-2 small">Skärmbild kommer<br><code>@slab.Image</code></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="col-lg-6 @(imageRight ? "order-lg-1" : "")">
                     <div class="prose">
@@ -443,7 +478,14 @@
         <div class="about-slab">
             <div class="row align-items-center g-4">
                 <div class="col-lg-6 @(imageRight ? "order-lg-2" : "")">
-                    <img src="@slab.Image" alt="@slab.Title" class="about-shot" loading="lazy">
+                    <img src="@slab.Image" alt="@slab.Title" class="about-shot" loading="lazy"
+                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                    <div class="about-shot-placeholder" style="display:none;">
+                        <div class="text-muted p-4">
+                            <i class="bi bi-image" style="font-size:2.5rem;"></i>
+                            <div class="mt-2 small">Skärmbild kommer<br><code>@slab.Image</code></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="col-lg-6 @(imageRight ? "order-lg-1" : "")">
                     <div class="prose">
@@ -551,6 +593,72 @@
                             Klubben får en samlad valideringskö, manuell tilldelning med guldnummer på medlemskortet,
                             och underlag att rapportera vidare till SPSF:s MAP. Allt utan papperslistor och
                             efterregistrering.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* ============================================================
+   3c. UTBILDNING — spotlight on the interactive course platform
+   Screenshot: drop /images/about/utbildning.png in later; the placeholder
+   below swaps to it automatically (img onerror), no view change needed.
+============================================================ *@
+<section class="container-fluid">
+    <header class="about-section-heading text-center">
+        <h2 class="mb-3"><i class="bi bi-mortarboard me-2"></i>Utbildning</h2>
+        <p class="text-muted prose-wide mx-auto">
+            Interaktiva kurser och stödmaterial — från Pistolskyttekortet till instruktörsutbildningarna.
+        </p>
+    </header>
+
+    <div class="about-slab">
+        <div class="row align-items-center g-4">
+            <div class="col-lg-6">
+                <img src="/images/about/utbildning.png" alt="Utbildningsplattformen" class="about-shot" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                <div class="about-shot-placeholder" style="display:none;">
+                    <div class="text-muted p-4">
+                        <i class="bi bi-image" style="font-size:2.5rem;"></i>
+                        <div class="mt-2 small">Skärmbild kommer<br><code>/images/about/utbildning.png</code></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="prose">
+                    <h3 class="mb-2">Utbildningsplattformen — kurser byggda för pistolskyttet</h3>
+                    <p class="lead mb-2">
+                        Moderna, interaktiva lektioner som följer SPSF:s anvisningar — med presentationsläge
+                        för lärgruppen och kunskapsprov.
+                    </p>
+                    <div class="d-flex flex-wrap gap-3 align-items-center">
+                        <button class="btn btn-link read-more-btn" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#utbildningSlab0"
+                                aria-expanded="false" aria-controls="utbildningSlab0">
+                            Läs mer <i class="bi bi-chevron-down ms-1"></i>
+                        </button>
+                        <a class="btn btn-primary btn-sm" href="/utbildning">
+                            <i class="bi bi-mortarboard me-1"></i> Öppna utbildningssidan
+                        </a>
+                    </div>
+                    <div class="collapse mt-2" id="utbildningSlab0">
+                        <p class="mb-2">
+                            Kurserna är uppbyggda som interaktiva, tvålagers lektioner — en tydlig nivå för den
+                            som lär sig och en fördjupande nivå för den som vill mer. Ett <strong>presentationsläge</strong>
+                            gör att en instruktör kan köra materialet framför lärgruppen, och åtkomsten är
+                            behörighetsstyrd så att rätt material når rätt roll.
+                        </p>
+                        <p class="mb-2">
+                            Idag finns stödkurser för <strong>Pistolskyttekortet</strong>, <strong>vapenkontrollant</strong>
+                            och <strong>banläggare</strong>, samt de moderniserade instruktörsutbildningarna för
+                            <strong>förenings- och kretsinstruktör</strong>. Fler är på väg in.
+                        </p>
+                        <p class="mb-0">
+                            Kurserna vävs ihop med pistol.nu:s egna verktyg och kan avslutas med ett kunskapsprov —
+                            med utskrivbart underlag. Så kan klubbar ta emot nya skyttar och driva utbildningar
+                            tillsammans utan att uppfinna hjulet på nytt.
                         </p>
                     </div>
                 </div>
@@ -796,26 +904,6 @@
                 <div class="card-body">
                     <h6 class="card-title"><i class="bi bi-chat-square-text text-primary me-2"></i>Förslagslåda</h6>
                     <p class="card-text small mb-0">En öppen kanal där användare lämnar förslag och röstar på vad som ska byggas härnäst.</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm position-relative" style="opacity: 0.85;">
-                <div class="position-absolute top-0 end-0 m-2">
-                    <span class="badge rounded-pill bg-success">
-                        <i class="bi bi-check-circle-fill me-1"></i>Klart
-                    </span>
-                </div>
-                <div class="card-body">
-                    <h6 class="card-title text-decoration-line-through">
-                        <i class="bi bi-mortarboard text-success me-2"></i>Stöd för Pistolskyttekortet och andra utbildningar
-                    </h6>
-                    <p class="card-text small mb-0">
-                        Material och samarbetsytor för Pistolskyttekortet och andra utbildningar — så att klubbar kan ta emot nya skyttar och driva utbildningar tillsammans utan att uppfinna hjulet på nytt.
-                        <span class="d-block mt-1 text-success small fw-semibold">
-                            <i class="bi bi-arrow-right me-1"></i>Levererat juni 2026 — interaktiva, tvålagers lektioner som följer SPSF:s anvisningar och vävs ihop med pistol.nu:s egna verktyg. Stödkurser för Pistolskyttekortet, vapenkontrollant och banläggare, plus de moderniserade instruktörsutbildningarna (förenings- och kretsinstruktör) — med presentationsläge för lärgruppen och behörighetsstyrd åtkomst. Allt samlat på <a href="https://pistol.nu/utbildning" class="fw-semibold">utbildningssidan</a>.
-                        </span>
-                    </p>
                 </div>
             </div>
         </div>
