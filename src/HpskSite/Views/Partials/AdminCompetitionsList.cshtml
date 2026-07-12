@@ -884,6 +884,32 @@ window.openAdminCopyModal = function(competitionId) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            // Discipline-specific comps carry data the classic copy modal can't represent and would
+            // silently drop: Springskytte's composite classes (weapon group + age class, e.g. "A-D 21"),
+            // and Fältskytte/MagnumFält's station config. Clone these server-side instead —
+            // CopyCompetition preserves competitionType + shootingClassIds + every other property
+            // (dates +1 year), exactly like the club/region copy buttons already do.
+            var _copyType = (data.data.competitionType || '').toLowerCase();
+            if (_copyType === 'springskytte' || _copyType === 'faltskytte' || _copyType === 'magnumfalt') {
+                fetch('/umbraco/surface/CompetitionAdmin/CopyCompetition', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ sourceCompetitionId: competitionId })
+                })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.success) {
+                        alert('✅ Tävlingen kopierades med klasser och inställningar (datum flyttades fram ett år). Öppna kopian för att ändra namn, datum och arrangör.');
+                        loadCompetitionsList();
+                    } else {
+                        alert('❌ Kunde inte kopiera: ' + (res.message || 'Okänt fel'));
+                    }
+                })
+                .catch(err => { console.error('Competition copy error:', err); alert('❌ Fel vid kopiering av tävling'); });
+                return;
+            }
+
             // Store the data for population after modal is shown
             window.currentCompetitionData = data.data;
 
