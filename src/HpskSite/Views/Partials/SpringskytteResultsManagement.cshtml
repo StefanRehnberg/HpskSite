@@ -411,7 +411,7 @@ function springRenderEntry() {
                     <h5 class="mb-0">${shooter.memberName}</h5>
                     <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${formatAgeSpan(shooter.ageGenderClass)}${shooter.startOrder ? ' | #' + shooter.startOrder : ''}</small>
                 </div>
-                ${shooter.hasResult ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Har resultat</span>' : '<span class="badge bg-secondary">Inget resultat</span>'}
+                ${springStatusBadge(shooter)}
             </div>
 
             <!-- Time Entry -->
@@ -467,11 +467,19 @@ function springRenderEntry() {
             <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Skjutresultat</h6>
             ${isClassC ? springRenderClassCShots() : springRenderClassAShots()}
 
-            <!-- Save / Delete -->
-            <div class="d-flex justify-content-between mt-3">
-                <button class="btn btn-outline-danger btn-sm" onclick="springClearResult()">
-                    <i class="bi bi-x-circle me-1"></i>Rensa resultaten
-                </button>
+            <!-- Save / Delete / Status -->
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-danger btn-sm" onclick="springClearResult()">
+                        <i class="bi bi-x-circle me-1"></i>Rensa
+                    </button>
+                    <button class="btn btn-outline-dark btn-sm" onclick="springASetStatus('DNS')" title="Ej start">
+                        Ej start (DNS)
+                    </button>
+                    <button class="btn btn-outline-dark btn-sm" onclick="springASetStatus('DNF')" title="Bröt">
+                        Bröt (DNF)
+                    </button>
+                </div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-outline-secondary" onclick="springANavigate(springNextShooter)">
                         Hoppa över <i class="bi bi-skip-forward ms-1"></i>
@@ -1043,6 +1051,16 @@ function springCRenderActiveCard(shooter) {
                 <div class="time-display text-primary fs-3" id="cTotalTime">-</div>
             </div>
 
+            <!-- DNS / DNF -->
+            <div class="d-flex gap-2 mb-2">
+                <button type="button" class="btn btn-outline-dark w-50" onclick="springCSetStatus('DNS')">
+                    Ej start (DNS)
+                </button>
+                <button type="button" class="btn btn-outline-dark w-50" onclick="springCSetStatus('DNF')">
+                    Bröt (DNF)
+                </button>
+            </div>
+
             <!-- Save button -->
             <button class="btn btn-success btn-lg w-100 py-3" onclick="springCSave()" id="cSaveBtn">
                 <i class="bi bi-check-circle me-1"></i>Spara resultat
@@ -1465,6 +1483,114 @@ function showSpringCToast(msg, type) {
     alertDiv.innerHTML = `${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
     container.prepend(alertDiv);
     setTimeout(() => alertDiv.remove(), 3000);
+}
+
+// ===== DNS / DNF (Ej start / Bröt) =====
+// Springskytte stores Status = 'DNS'/'DNF'; the server nulls time+score for those rows and the
+// tiebreaker sorts them last. A DNS/DNF save carries empty shots + no time (verification-safe).
+
+function springStatusLabel(status) {
+    return status === 'DNS' ? 'Ej start (DNS)' : 'Bröt (DNF)';
+}
+
+function springStatusBadge(shooter) {
+    const st = shooter.existingResult?.status;
+    if (st === 'DNS' || st === 'DNF')
+        return `<span class="badge bg-dark">${springStatusLabel(st)}</span>`;
+    return shooter.hasResult
+        ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Har resultat</span>'
+        : '<span class="badge bg-secondary">Inget resultat</span>';
+}
+
+async function springPostStatus(shooter, status) {
+    const requestData = {
+        competitionId: springCompetitionId,
+        memberId: shooter.memberId,
+        weaponClass: shooter.weaponClass,
+        ageGenderClass: shooter.ageGenderClass,
+        finishTimeInput: null,
+        shotSeries: [],
+        penaltyMultiplier: 1,
+        status: status
+    };
+    return await springFetchWithRetry('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+        },
+        body: JSON.stringify(requestData)
+    });
+}
+
+function springApplyStatusToShooter(shooter, status) {
+    shooter.hasResult = true;
+    shooter.existingResult = {
+        status: status,
+        shootingScore: null,
+        sprintTimeSeconds: null,
+        totalTimeSeconds: null,
+        totalTimeDisplay: springStatusLabel(status),
+        penaltyMultiplier: 1,
+        shots: []
+    };
+}
+
+// Class A entry (single-shooter navigator)
+async function springASetStatus(status) {
+    const shooter = springFilteredShooters[springCurrentIndex];
+    if (!shooter) return;
+    if (!confirm(`Markera ${shooter.memberName} som "${springStatusLabel(status)}"? Tid och skjutresultat sparas tomt.`)) return;
+    try {
+        const data = await springPostStatus(shooter, status);
+        if (data.success) {
+            springApplyStatusToShooter(shooter, status);
+            showSpringMessage(`${shooter.memberName} markerad som ${springStatusLabel(status)}.`, 'success');
+            springRenderEntry();
+            springASnapshot = springATakeSnapshot();
+            if (springCurrentIndex < springFilteredShooters.length - 1) {
+                setTimeout(() => { springNextShooter(); }, 500);
+            }
+        } else {
+            showSpringMessage(data.message || 'Fel vid sparning.', 'danger');
+        }
+    } catch (err) {
+        console.error('Error setting DNS/DNF status:', err);
+        showSpringMessage('Ett fel uppstod.', 'danger');
+    }
+}
+
+// Class C entry (range-officer card)
+async function springCSetStatus(status) {
+    const shooter = springCActiveShooter;
+    if (!shooter) return;
+    if (!confirm(`Markera ${shooter.memberName} som "${springStatusLabel(status)}"?`)) return;
+    try {
+        const data = await springPostStatus(shooter, status);
+        if (data.success) {
+            springApplyStatusToShooter(shooter, status);
+            springCRecentEntries.unshift({
+                startOrder: shooter.startOrder,
+                name: shooter.memberName,
+                registeredClass: shooter.registeredClass,
+                totalTimeDisplay: springStatusLabel(status),
+                shootingScore: '-'
+            });
+            if (springCRecentEntries.length > 5) springCRecentEntries.pop();
+            springCRenderRecentList();
+            showSpringCToast(`${shooter.memberName} markerad som ${springStatusLabel(status)}.`, 'success');
+            springCSnapshot = null;
+            document.getElementById('springCActiveCard').style.display = 'none';
+            springCActiveShooter = null;
+            const input = document.getElementById('springCStartNumber');
+            if (input) { input.value = ''; input.focus(); }
+        } else {
+            showSpringCToast(data.message || 'Fel vid sparning.', 'danger');
+        }
+    } catch (err) {
+        console.error('Error setting DNS/DNF status:', err);
+        showSpringCToast('Ett fel uppstod.', 'danger');
+    }
 }
 
 // ===== RESULTS LIST =====
