@@ -341,7 +341,7 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                return Json(new { success = true, message = "Övningspass sparat." });
+                return Json(new { success = true, message = "0-poäng träning sparad." });
             }
             catch (Exception ex)
             {

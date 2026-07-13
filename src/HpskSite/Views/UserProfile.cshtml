@@ -156,7 +156,7 @@
                                         <i class="bi bi-plus-circle"></i> Lägg in Resultat
                                     </button>
                                     <button class="btn btn-outline-primary" onclick="openPracticeLogModal()" title="Logga träning utan poäng (vittavla / fri övning)">
-                                        <i class="bi bi-clipboard-plus"></i> Logga övningspass
+                                        <i class="bi bi-clipboard-plus"></i> Logga 0-poäng träning
                                     </button>
                                 </div>
                                 <div class="d-flex gap-2 flex-wrap">
@@ -861,12 +861,12 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-clipboard-plus text-primary"></i> Logga övningspass (utan poäng)</h5>
+        <h5 class="modal-title"><i class="bi bi-clipboard-plus text-primary"></i> Logga 0-poäng träning</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
       </div>
       <div class="modal-body">
         <div id="plError" class="alert alert-danger d-none"></div>
-        <p class="small text-muted">Övningspass räknas som träning men påverkar inte snitt, trend eller personbästa.</p>
+        <p class="small text-muted">0-poäng träning räknas som träning men påverkar inte snitt, trend eller personbästa.</p>
         <div class="mb-3">
           <label class="form-label">Gren</label>
           <input type="text" class="form-control" id="plDisciplineLabel" readonly>
@@ -906,7 +906,7 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
         <button type="button" class="btn btn-primary" id="plSaveBtn" onclick="submitPracticeLog()">
-          <i class="bi bi-save"></i> Spara övningspass
+          <i class="bi bi-save"></i> Spara
         </button>
       </div>
     </div>
@@ -915,6 +915,7 @@
 
 <script>
 let plFlatpickr = null;
+let plGroupChartInstance = null;
 
 function openPracticeLogModal() {
     const discipline = document.getElementById('competitionTypeFilter')?.value || 'Precision';
@@ -930,9 +931,9 @@ function openPracticeLogModal() {
         modeSel.innerHTML = `
             <option value="femskott">Vittavla – femskottsgrupper</option>
             <option value="frishots">Vittavla – fritt antal skott</option>
-            <option value="fri">Fri övning (utan poäng)</option>`;
+            <option value="fri">Fri övning</option>`;
     } else {
-        modeSel.innerHTML = `<option value="fri">Fri övning (utan poäng)</option>`;
+        modeSel.innerHTML = `<option value="fri">Fri övning</option>`;
     }
     plRenderModeFields();
 
@@ -1060,9 +1061,17 @@ function submitPracticeLog() {
         .catch(() => { btn.disabled = false; plShowError('Fel vid sparande.'); });
 }
 
+function plWcColor(wc) {
+    const map = { A: '#0d6efd', A_Opt: '#6610f2', A_M: '#6f42c1', A_P: '#d63384', A_G: '#20c997',
+                  B: '#fd7e14', C: '#198754', R: '#dc3545', M: '#795548', L: '#0dcaf0' };
+    return map[wc] || '#6c757d';
+}
+
 function renderPracticeResults(list) {
     const c = document.getElementById('practiceResultsContent');
     if (!c) return;
+    // Tear down any previous group-size chart before the container is replaced.
+    if (plGroupChartInstance) { plGroupChartInstance.destroy(); plGroupChartInstance = null; }
     if (!list || list.length === 0) { c.innerHTML = ''; return; }
     const typeLabel = t => t === 'Vittavla' ? 'Vittavla' : 'Fri övning';
     const rows = list.map(p => {
@@ -1083,10 +1092,34 @@ function renderPracticeResults(list) {
                 </td>
             </tr>`;
     }).join('');
+
+    // Group-size trend (vittavla): flatten every measured group into a chronological point set.
+    // list is date-descending; reverse to ascending so the trend reads left→right over time.
+    const points = [];
+    [...list].reverse().forEach(p => {
+        (p.groupSizes || []).forEach(mm => points.push({ date: p.date, mm, wc: p.weaponClass || '' }));
+    });
+    const best = points.length ? points.reduce((a, b) => (b.mm < a.mm ? b : a)) : null;
+
+    let trendSection = '';
+    if (best) {
+        const canvas = points.length >= 2
+            ? `<div style="position:relative;height:220px;"><canvas id="plGroupChartCanvas"></canvas></div>`
+            : `<p class="small text-muted mb-0">Logga fler mätta grupper för att se en trend över tid.</p>`;
+        trendSection = `
+            <div class="card-body border-top">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <h6 class="mb-0"><i class="bi bi-graph-down-arrow text-success"></i> Gruppstorlek över tid</h6>
+                    <span class="small text-muted">Bästa grupp: <strong>${best.mm} mm</strong>${best.wc ? ' (' + best.wc + ')' : ''} · ${formatDateShort(best.date)} · lägre är bättre</span>
+                </div>
+                ${canvas}
+            </div>`;
+    }
+
     c.innerHTML = `
         <div class="card">
             <div class="card-header d-flex align-items-center justify-content-between">
-                <span><i class="bi bi-clipboard-check text-primary"></i> Övningspass (utan poäng)</span>
+                <span><i class="bi bi-clipboard-check text-primary"></i> 0-poäng träning</span>
                 <span class="badge bg-primary rounded-pill">${list.length}</span>
             </div>
             <div class="card-body p-0">
@@ -1102,12 +1135,51 @@ function renderPracticeResults(list) {
                     </table>
                 </div>
             </div>
+            ${trendSection}
             <div class="card-footer small text-muted">Räknas som träning men påverkar inte snitt, trend eller personbästa.</div>
         </div>`;
+
+    // Build the trend chart after the canvas exists in the DOM.
+    if (points.length >= 2 && typeof Chart !== 'undefined') {
+        const ctx = document.getElementById('plGroupChartCanvas');
+        if (ctx) {
+            plGroupChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: points.map(p => formatDateShort(p.date)),
+                    datasets: [{
+                        label: 'Gruppstorlek (mm)',
+                        data: points.map(p => p.mm),
+                        borderColor: '#0d6efd',
+                        backgroundColor: 'rgba(13,110,253,0.10)',
+                        pointBackgroundColor: points.map(p => plWcColor(p.wc)),
+                        pointRadius: 4,
+                        tension: 0.2,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: item => `${points[item.dataIndex].mm} mm${points[item.dataIndex].wc ? ' · ' + points[item.dataIndex].wc : ''}`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: { title: { display: true, text: 'mm' }, beginAtZero: false }
+                    }
+                }
+            });
+        }
+    }
 }
 
 function deletePracticeRow(id) {
-    if (!confirm('Ta bort detta övningspass?')) return;
+    if (!confirm('Ta bort denna 0-poäng träning?')) return;
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
     fetch(`/umbraco/surface/TrainingScoring/DeleteTrainingScore?id=${id}`, {
         method: 'DELETE',

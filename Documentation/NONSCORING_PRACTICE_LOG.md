@@ -1,8 +1,13 @@
 # Non-Scoring Practice Log (Träningslogg utan poäng) — incl. Vittavla
 
-**Status:** Phase 1 BUILT 2026-07-13 (compiles green; migration + e2e verification pending). Phase 2
-(group-size trend) is a fast-follow. Backlog item "vittavla" (Inbox, 2026-07-11) generalized.
+**Status:** Phase 1 + Phase 2 BUILT 2026-07-13, verified working locally (Phase 1 committed
+`8e15b1c`; the rename + Phase 2 trend chart follow). User-facing name is **"0-poäng träning"**
+(renamed from the working title "övningspass"). Backlog item "vittavla" (Inbox, 2026-07-11) generalized.
 **Author of design:** Stefan + Claude, 2026-07-13.
+
+**Naming:** feature/section = **"0-poäng träning"**; the two flavors are **Vittavla** (Precision
+white-target, optional per-group size) and **Fri övning** (any discipline, shots only). Internal
+`PracticeType` values stay `'Vittavla'`/`'Fri'` — the rename is display-only.
 
 **Deploy before use:** run `Migrations/add-practicetype-to-trainingscores.sql` in SSMS, then full
 rebuild. Without the column, every `PracticeType IS NULL` filter + the insert throw at runtime.
@@ -165,11 +170,22 @@ the client fetch MUST send a `RequestVerificationToken` header read from the pag
 
 ### 4.6 Resultat-tab UI (`UserProfile.cshtml`)
 
-A dedicated **"Övningspass (utan poäng)"** card (`#practiceResultsContent`, `renderPracticeResults`)
-below the scored results table, fed by `data.practiceResults`, for every discipline. Each row shows
-date · type badge (Vittavla/Fri övning) · weapon class · "N skott [· grupper: a, b mm]" · notes ·
-delete. The card count doubles as the visible volume metric; a footer states it doesn't affect
-snitt/trend/personbästa. Cleared at the top of `loadResults()` so it can't linger on switch/error.
+A dedicated **"0-poäng träning"** card (`#practiceResultsContent`, `renderPracticeResults`) below the
+scored results table, fed by `data.practiceResults`, for every discipline. Each row shows date · type
+badge (Vittavla/Fri övning) · weapon class · "N skott [· grupper: a, b mm]" · notes · delete. The card
+count doubles as the visible volume metric; a footer states it doesn't affect snitt/trend/personbästa.
+Cleared at the top of `loadResults()` so it can't linger on switch/error. Entry via the **"Logga
+0-poäng träning"** toolbar button → `#practiceLogModal`.
+
+### 4.7 Group-size trend chart (Phase 2 — BUILT)
+
+Inside the same card, when the visible practice rows carry ≥1 measured `GroupSizeMm`, a
+**"Gruppstorlek över tid"** section renders: a **Bästa grupp** stat (smallest measured mm + class +
+date) and — when ≥2 measured groups exist — a Chart.js line chart of every measured group in
+chronological order (points coloured per weapon class via `plWcColor`, tooltip = "NN mm · class",
+"lägre är bättre"). Built entirely client-side from `practiceResults[].groupSizes` — **no new
+endpoint**. The chart instance (`plGroupChartInstance`) is destroyed before each re-render. Only
+Vittavla rows carry group sizes, so this section only appears for Precision practice.
 
 ## 5. Left alone on purpose
 
@@ -187,11 +203,14 @@ DNF item then reuses the same exclusion plumbing.
 
 ## 7. Phasing
 
-- **Phase 1 (core):** `PracticeType` column + `"Practice"` entry method + the two modal toggles +
-  the §4 stat touch-points + Resultat-list flagging. Ship logging + correct stat exclusion first.
-- **Phase 2 (fast follow, Precision/vittavla only):** a **separate** vittavla view over Practice
-  rows with a non-null `GroupSizeMm` — **Gruppstorlek över tid** (lower = better) + **Bästa grupp**
-  (smallest measured). Never mixed with score. This is the drill's real feedback loop.
+- **Phase 1 (core) — DONE:** `PracticeType` column + `"Practice"` entry method + the dedicated modal +
+  the §4 stat touch-points + the "0-poäng träning" card. Committed `8e15b1c`.
+- **Phase 2 (Precision/vittavla group-size trend) — DONE:** the **Gruppstorlek över tid** chart +
+  **Bästa grupp** stat over Practice rows with a non-null `GroupSizeMm` (§4.7). Lower = better; never
+  mixed with score.
+- **Follow-up (backlog, not started):** functionary **verification of trainings** (board member /
+  Skjutledare confirms a logged training/0-poäng-pass), mirroring the Guldserie validation queue —
+  matters because training feeds "aktiv skytt" evidence for licence applications. See backlog.md.
 
 ## 8. Deploy
 
