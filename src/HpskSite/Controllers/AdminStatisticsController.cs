@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
+using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
@@ -30,6 +31,19 @@ namespace HpskSite.Controllers
 
         private const string CacheKey = "admin_statistics";
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
+
+        // ── Demo / test-data exclusion ─────────────────────────────────────────────
+        // "Ankeborg" (region "Ankeland") is the permanent demo/marketing club shown on
+        // /om-pistol-nu, and the SM-rehearsal Springskytte seeder (SpringskytteSimulation
+        // Controller) fills it with dummy shooters + a hidden practice competition. None
+        // of that should ever count in the real site statistics. We exclude the demo club,
+        // its region, its members (matched by primaryClubId — NOT by the @ankeborg.invalid
+        // email, since hand-added demo members don't use that domain) and any simulation-
+        // seeded competition. Matching is by name/URL segment so re-seeding can't reintroduce
+        // the data and no node IDs are hard-coded.
+        private static readonly string[] DemoClubNeedles = { "ankeborg" };
+        private static readonly string[] DemoRegionNeedles = { "ankeland" };
+        private const string SimulationSeedTag = "Simulering (seed)";
 
         public AdminStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -357,6 +371,37 @@ namespace HpskSite.Controllers
             var allMembers = _memberService.GetAll(0, int.MaxValue, out _).ToList();
             var approvedMembers = allMembers.Where(m => m.IsApproved).ToList();
 
+            // Resolve the demo/test club + region node IDs up front so every member,
+            // club, region and competition aggregate below is already clean.
+            var excludedClubIds = new HashSet<int>();
+            var excludedRegionIds = new HashSet<int>();
+            if (_umbracoContextAccessor.TryGetUmbracoContext(out var exCtx) && exCtx.Content != null)
+            {
+                var exRoot = exCtx.Content.GetAtRoot().FirstOrDefault();
+                if (exRoot != null)
+                    ComputeDemoExclusions(exRoot, excludedClubIds, excludedRegionIds);
+            }
+
+            // Drop demo/test members by club membership (primaryClubId), regardless of email.
+            approvedMembers = approvedMembers
+                .Where(m =>
+                {
+                    var clubIdStr = m.GetValue<string>("primaryClubId");
+                    return !(int.TryParse(clubIdStr, out var cid) && excludedClubIds.Contains(cid));
+                })
+                .ToList();
+
+            // A competition is excluded when it is hosted by the demo club OR carries any
+            // simulation-seeded registration (the seeder tags them registeredBy="Simulering (seed)").
+            bool IsExcludedCompetition(IPublishedContent c)
+            {
+                var cid = c.Value<int>("clubId");
+                if (cid > 0 && excludedClubIds.Contains(cid)) return true;
+                return c.Descendants().Any(d =>
+                    d.ContentType.Alias == "competitionRegistration"
+                    && string.Equals(d.Value<string>("registeredBy"), SimulationSeedTag, StringComparison.Ordinal));
+            }
+
             int totalMembers = approvedMembers.Count;
             int newMembers30d = approvedMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
 
@@ -384,7 +429,7 @@ namespace HpskSite.Controllers
                 if (root != null)
                 {
                     // Build club → region lookup
-                    var regionalPages = root.Children.Where(c => c.ContentType.Alias == "regionalPage").ToList();
+                    var regionalPages = root.Children.Where(c => c.ContentType.Alias == "regionalPage" && !excludedRegionIds.Contains(c.Id)).ToList();
                     foreach (var rp in regionalPages)
                     {
                         var clubsPage = rp.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
@@ -430,10 +475,10 @@ namespace HpskSite.Controllers
                     {
                         var clubsPage = rp.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
                         if (clubsPage != null)
-                            allClubNodes.AddRange(clubsPage.Children.Where(c => c.ContentType.Alias == "club"));
+                            allClubNodes.AddRange(clubsPage.Children.Where(c => c.ContentType.Alias == "club" && !excludedClubIds.Contains(c.Id)));
                     }
                     if (rootClubsHub != null)
-                        allClubNodes.AddRange(rootClubsHub.Children.Where(c => c.ContentType.Alias == "club"));
+                        allClubNodes.AddRange(rootClubsHub.Children.Where(c => c.ContentType.Alias == "club" && !excludedClubIds.Contains(c.Id)));
 
                     int totalClubs = allClubNodes.Count;
 
@@ -463,7 +508,7 @@ namespace HpskSite.Controllers
                     var clubIdsWithRecentComp = (root.Children
                             .FirstOrDefault(c => c.ContentType.Alias == "competitionsHub")
                             ?.Descendants()
-                            .Where(c => c.ContentType.Alias == "competition")
+                            .Where(c => c.ContentType.Alias == "competition" && !IsExcludedCompetition(c))
                             ?? Enumerable.Empty<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>())
                         .Where(c =>
                         {
@@ -506,7 +551,7 @@ namespace HpskSite.Controllers
                     // ── 3. Competitions ─────────────────────────────────
                     var competitionsHub = root.Children.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
                     var allCompetitions = competitionsHub?.Descendants()
-                        .Where(c => c.ContentType.Alias == "competition")
+                        .Where(c => c.ContentType.Alias == "competition" && !IsExcludedCompetition(c))
                         .ToList() ?? new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
 
                     var competitionsThisYear = allCompetitions
@@ -1323,6 +1368,49 @@ namespace HpskSite.Controllers
                 faltkonfig = ZeroFaltkonfigStats(),
                 aiChat = BuildAiChatStats()
             };
+        }
+
+        /// <summary>
+        /// Walk the content tree and collect the demo/test club + region node IDs (Ankeborg /
+        /// Ankeland) so they can be excluded from the admin statistics. Matches on name and URL
+        /// segment (case-insensitive) rather than hard-coded IDs. A club counts as demo when it
+        /// lives under a demo region OR its own name/segment matches; a region counts as demo by
+        /// name/segment.
+        /// </summary>
+        private static void ComputeDemoExclusions(
+            IPublishedContent root, HashSet<int> excludedClubIds, HashSet<int> excludedRegionIds)
+        {
+            bool Matches(string? value, string[] needles) =>
+                !string.IsNullOrEmpty(value) && needles.Any(n => value.Contains(n, StringComparison.OrdinalIgnoreCase));
+
+            bool IsDemoRegion(IPublishedContent rp) =>
+                Matches(rp.UrlSegment, DemoRegionNeedles) || Matches(rp.Name, DemoRegionNeedles);
+
+            bool IsDemoClub(IPublishedContent club) =>
+                Matches(club.Name, DemoClubNeedles) || Matches(club.UrlSegment, DemoClubNeedles);
+
+            foreach (var rp in root.Children.Where(c => c.ContentType.Alias == "regionalPage"))
+            {
+                var demoRegion = IsDemoRegion(rp);
+                if (demoRegion) excludedRegionIds.Add(rp.Id);
+
+                var clubsPage = rp.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (clubsPage == null) continue;
+                foreach (var club in clubsPage.Children.Where(c => c.ContentType.Alias == "club"))
+                {
+                    if (demoRegion || IsDemoClub(club)) excludedClubIds.Add(club.Id);
+                }
+            }
+
+            // Legacy root-level clubsPage (clubs not nested under a region node).
+            var rootClubsHub = root.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+            if (rootClubsHub != null)
+            {
+                foreach (var club in rootClubsHub.Children.Where(c => c.ContentType.Alias == "club"))
+                {
+                    if (IsDemoClub(club)) excludedClubIds.Add(club.Id);
+                }
+            }
         }
 
         private object BuildAiChatStats()
