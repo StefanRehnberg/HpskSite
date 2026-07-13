@@ -263,13 +263,33 @@ namespace HpskSite.Controllers
                         .OrderByDescending(o => ((dynamic)o).count)
                         .ToList();
 
+                    // Count registration nodes via the DB, NOT the published cache: public
+                    // registrations are Save()d but never Publish()ed, so IPublishedContent
+                    // .Descendants() silently undercounts (same fix as AdminStatisticsController).
+                    // Scoped to this club's comps via IN; recycled/deleted regs excluded (their
+                    // parent becomes the recycle bin, not the reg hub).
+                    var compIds = clubCompsThisYear.Select(c => c.Id).ToList();
+                    var regCountByCompetition = new Dictionary<int, int>();
+                    if (compIds.Count > 0)
+                    {
+                        using var db = _databaseFactory.CreateDatabase();
+                        var regRows = db.Fetch<RegCountRow>(@"
+                            SELECT hub.parentId AS CompetitionId, COUNT(*) AS Cnt
+                            FROM umbracoNode reg
+                            JOIN umbracoContent c ON c.nodeId = reg.id
+                            JOIN umbracoNode hub ON hub.id = reg.parentId
+                            WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
+                              AND hub.parentId IN (@0)
+                            GROUP BY hub.parentId", compIds);
+                        foreach (var r in regRows) regCountByCompetition[r.CompetitionId] = r.Cnt;
+                    }
+
                     topCompetitions = clubCompsThisYear
                         .Select(c => new
                         {
                             name = c.Name ?? "",
                             discipline = c.Value<string>("competitionType") ?? "",
-                            registrations = c.Descendants()
-                                .Count(ch => ch.ContentType.Alias == "competitionRegistration" || ch.ContentType.Alias == "registration")
+                            registrations = regCountByCompetition.GetValueOrDefault(c.Id, 0)
                         })
                         .OrderByDescending(c => c.registrations)
                         .Take(5)
@@ -475,6 +495,7 @@ namespace HpskSite.Controllers
             return parts[0] + " " + parts[^1][0] + ".";
         }
 
+        private class RegCountRow { public int CompetitionId { get; set; } public int Cnt { get; set; } }
         private class MatchByMonthRow { public int Y { get; set; } public int M { get; set; } public int C { get; set; } }
         private class DisciplineCountRow { public string Discipline { get; set; } = ""; public int C { get; set; } }
         private class MemberCountRow { public int MemberId { get; set; } public int C { get; set; } }

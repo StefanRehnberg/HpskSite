@@ -318,6 +318,12 @@ namespace HpskSite.Controllers
             public int Cnt { get; set; }
         }
 
+        private class RegistrationCountRow
+        {
+            public int CompetitionId { get; set; }
+            public int Cnt { get; set; }
+        }
+
         /// <summary>Zero-valued Styrelse (board work) stats — default and no-table fallback.</summary>
         private static object ZeroStyrelseStats() => new
         {
@@ -571,27 +577,33 @@ namespace HpskSite.Controllers
                         .Cast<object>()
                         .ToList();
 
-                    // Top 5 competitions by registration count
+                    // Top 5 competitions by registration count (this year). Counts registration
+                    // nodes via the DB, NOT the published cache: public registrations are Save()d
+                    // but never Publish()ed (see CompetitionController.RegisterForCompetition), so
+                    // IPublishedContent.Descendants() silently undercounts — the admin registration
+                    // list reads them the same unpublished-inclusive way. Recycled/deleted regs are
+                    // excluded automatically (their parent becomes the recycle bin, not the reg hub).
+                    // Grouping by hub.parentId keys the count to the owning competition; only this
+                    // year's (and non-excluded — see IsExcludedCompetition) comps consume the counts.
+                    var regCountByCompetition = new Dictionary<int, int>();
+                    using (var db = _databaseFactory.CreateDatabase())
+                    {
+                        var regRows = db.Fetch<RegistrationCountRow>(@"
+                            SELECT hub.parentId AS CompetitionId, COUNT(*) AS Cnt
+                            FROM umbracoNode reg
+                            JOIN umbracoContent c ON c.nodeId = reg.id
+                            JOIN umbracoNode hub ON hub.id = reg.parentId
+                            WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
+                            GROUP BY hub.parentId");
+                        foreach (var r in regRows) regCountByCompetition[r.CompetitionId] = r.Cnt;
+                    }
+
                     var topCompetitions = competitionsThisYear
-                        .Select(c =>
+                        .Select(c => new
                         {
-                            var registrations = c.Children
-                                .Where(ch => ch.ContentType.Alias == "competitionRegistration" || ch.ContentType.Alias == "registration")
-                                .Count();
-                            // Also count from registrationInvoicesHub children would be separate,
-                            // but registration nodes are what we want
-                            if (registrations == 0)
-                            {
-                                // Try counting descendants that look like registrations
-                                registrations = c.Descendants()
-                                    .Count(ch => ch.ContentType.Alias == "competitionRegistration" || ch.ContentType.Alias == "registration");
-                            }
-                            return new
-                            {
-                                name = c.Name ?? "",
-                                discipline = c.Value<string>("competitionType") ?? "",
-                                registrations
-                            };
+                            name = c.Name ?? "",
+                            discipline = c.Value<string>("competitionType") ?? "",
+                            registrations = regCountByCompetition.GetValueOrDefault(c.Id, 0)
                         })
                         .OrderByDescending(c => c.registrations)
                         .Take(5)
