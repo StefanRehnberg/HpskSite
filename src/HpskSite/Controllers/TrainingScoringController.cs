@@ -268,6 +268,88 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Record a non-scoring practice session (vittavla white-target drill or fri övning).
+        /// Stored in TrainingScores with a non-null PracticeType, TotalScore 0, and the per-group
+        /// shot counts (+ optional group size in mm) packed into the SeriesScores JSON. Kept visible
+        /// on Min sida but excluded from every scoring aggregate (average/trend/PB/handicap), so it
+        /// deliberately does NOT touch the handicap statistics or the Standardmedalj ledger.
+        /// POST /umbraco/surface/TrainingScoring/RecordPracticeLog
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> RecordPracticeLog([FromBody] PracticeLogRequest request)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            try
+            {
+                var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (member == null) return Json(new { success = false, message = "Medlem hittades inte." });
+
+                if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan." });
+                if (request.Date == default || request.Date.Date > DateTime.Now.Date)
+                    return Json(new { success = false, message = "Datum måste vara i dåtid." });
+                if (string.IsNullOrWhiteSpace(request.WeaponClass))
+                    return Json(new { success = false, message = "Vapenklass krävs." });
+                if (request.Groups == null || request.Groups.Count == 0)
+                    return Json(new { success = false, message = "Ange minst en grupp/skottserie." });
+                if (request.Groups.Count > 100)
+                    return Json(new { success = false, message = "För många grupper." });
+
+                // Normalize the practice type; only Vittavla carries group sizes (Precision family).
+                var practiceType = request.PracticeType == "Vittavla" ? "Vittavla" : "Fri";
+                var discipline = string.IsNullOrWhiteSpace(request.Discipline) ? "Precision" : request.Discipline;
+
+                var series = new List<TrainingSeries>();
+                int n = 1;
+                foreach (var g in request.Groups)
+                {
+                    if (g.ShotCount <= 0)
+                        return Json(new { success = false, message = "Varje grupp måste ha minst ett skott." });
+                    if (g.GroupSizeMm is not null && (g.GroupSizeMm <= 0 || g.GroupSizeMm > 1000))
+                        return Json(new { success = false, message = "Gruppstorlek måste vara 1–1000 mm." });
+                    series.Add(new TrainingSeries
+                    {
+                        SeriesNumber = n++,
+                        EntryMethod = "Practice",
+                        ShotCount = g.ShotCount,
+                        GroupSizeMm = practiceType == "Vittavla" ? g.GroupSizeMm : null,
+                        Total = 0,
+                        XCount = 0
+                    });
+                }
+
+                var seriesJson = JsonSerializer.Serialize(series);
+
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    db.Insert("TrainingScores", "Id", true, new
+                    {
+                        MemberId = member.Id,
+                        TrainingDate = request.Date,
+                        WeaponClass = request.WeaponClass,
+                        Discipline = discipline,
+                        PracticeType = practiceType,
+                        IsCompetition = false,
+                        SeriesScores = seriesJson,
+                        TotalScore = 0,
+                        XCount = 0,
+                        Notes = request.Notes ?? string.Empty,
+                        CreatedAt = DateTime.Now,
+                        UpdatedAt = DateTime.Now
+                    });
+                }
+
+                return Json(new { success = true, message = "Övningspass sparat." });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Kunde inte spara: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Get current member's training scores
         /// GET /umbraco/surface/TrainingScoring/GetMyTrainingScores
         /// </summary>
@@ -416,7 +498,9 @@ namespace HpskSite.Controllers
                     var sql = db.SqlContext.Sql()
                         .Select("*")
                         .From("TrainingScores")
-                        .Where("MemberId = @0", member.Id);
+                        .Where("MemberId = @0", member.Id)
+                        // Non-scoring practice rows (vittavla / fri övning) never count toward personal bests.
+                        .Where("PracticeType IS NULL");
 
                     if (!string.IsNullOrWhiteSpace(weaponClass))
                     {
@@ -959,7 +1043,7 @@ namespace HpskSite.Controllers
                 var trainingScores = db.Fetch<dynamic>(@"
                     SELECT Id, TrainingDate, WeaponClass, SeriesScores, TotalScore, XCount, IsCompetition, TrainingMatchId
                     FROM TrainingScores
-                    WHERE MemberId = @0 AND Discipline = @1
+                    WHERE MemberId = @0 AND Discipline = @1 AND PracticeType IS NULL
                     ORDER BY TrainingDate DESC",
                     memberId, discipline);
 
@@ -1321,6 +1405,24 @@ namespace HpskSite.Controllers
             public string? StandardMedal { get; set; } // "S" | "B" | null
             public string? MedalProofFileRef { get; set; } // opaque ref from StandardMedal/UploadProof (or reused)
             public string? Notes { get; set; }
+        }
+
+        /// <summary>Payload for a non-scoring practice session (vittavla / fri övning).</summary>
+        public class PracticeLogRequest
+        {
+            public DateTime Date { get; set; }
+            public string Discipline { get; set; } = "Precision";
+            public string WeaponClass { get; set; } = string.Empty;
+            public string PracticeType { get; set; } = "Fri"; // "Vittavla" | "Fri"
+            public List<PracticeGroupDto> Groups { get; set; } = new();
+            public string? Notes { get; set; }
+        }
+
+        /// <summary>One practice group: a shot count and an optional measured group size (mm).</summary>
+        public class PracticeGroupDto
+        {
+            public int ShotCount { get; set; }
+            public int? GroupSizeMm { get; set; }
         }
 
         #endregion

@@ -69,6 +69,20 @@ namespace HpskSite.Shared.Models
         public int? SeriesCount { get; set; }
 
         /// <summary>
+        /// Number of shots in this group. Only used for the "Practice" entry method
+        /// (non-scoring training log — vittavla / fri övning). Null otherwise.
+        /// </summary>
+        [JsonPropertyName("shotCount")]
+        public int? ShotCount { get; set; }
+
+        /// <summary>
+        /// Optional measured group size in millimetres for a "Practice" group
+        /// (white-target trigger drill). Null when the shooter didn't measure.
+        /// </summary>
+        [JsonPropertyName("groupSizeMm")]
+        public int? GroupSizeMm { get; set; }
+
+        /// <summary>
         /// URL to the target photo for this series (optional).
         /// Relative URL format: /media/target-photos/{filename}
         /// </summary>
@@ -110,8 +124,20 @@ namespace HpskSite.Shared.Models
                 "ShotByShot" => ValidateShotByShot(),
                 "SeriesTotal" => ValidateSeriesTotal(),
                 "TotalOnly" => ValidateTotalOnly(),
+                "Practice" => ValidatePractice(),
                 _ => false
             };
+        }
+
+        /// <summary>
+        /// Validate a non-scoring practice group (vittavla / fri övning): requires a
+        /// positive shot count, no score, and an optional sane group size (1–1000 mm).
+        /// </summary>
+        private bool ValidatePractice()
+        {
+            if (ShotCount is null || ShotCount <= 0) return false;
+            if (GroupSizeMm is not null && (GroupSizeMm <= 0 || GroupSizeMm > 1000)) return false;
+            return true;
         }
 
         /// <summary>

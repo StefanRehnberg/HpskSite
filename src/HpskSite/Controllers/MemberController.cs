@@ -821,7 +821,8 @@ namespace HpskSite.Controllers
                     {
                         success = true,
                         competitionType = "Faltskytte",
-                        results = faltSeason
+                        results = faltSeason,
+                        practiceResults = BuildPracticeResults(memberId, "Faltskytte", filterYear, weaponClass)
                     });
                 }
 
@@ -940,9 +941,11 @@ namespace HpskSite.Controllers
                     // Query 2: Get training scores from TrainingScores, filtered by discipline
                     // For Precision: include entries with Discipline = 'Precision' or NULL (backward compat)
                     // For other types: include only entries with matching Discipline
+                    // Non-scoring practice rows (vittavla / fri övning) are excluded here; they surface
+                    // separately in practiceResults (see below).
                     var disciplineFilter = competitionType == "Precision"
-                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL)"
-                        : $"AND Discipline = @2";
+                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL) AND PracticeType IS NULL"
+                        : $"AND Discipline = @2 AND PracticeType IS NULL";
                     var trainingScoreParams = competitionType == "Precision"
                         ? new object[] { memberId, filterYear }
                         : new object[] { memberId, filterYear, competitionType };
@@ -1036,12 +1039,82 @@ namespace HpskSite.Controllers
                 // Sort by date descending
                 results = results.OrderByDescending(r => ((dynamic)r).date).ToList();
 
-                return Json(new { success = true, results = results });
+                return Json(new { success = true, results = results, practiceResults = BuildPracticeResults(memberId, competitionType, filterYear, weaponClass) });
             }
             catch (Exception ex)
             {
                 return Json(new { success = false, message = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Non-scoring practice rows (vittavla / fri övning) for the discipline + year, shaped for the
+        /// "Övningspass (utan poäng)" card on Min sida. Deliberately separate from the scored results so
+        /// these never touch any average/trend/PB aggregate.
+        /// </summary>
+        private List<object> BuildPracticeResults(int memberId, string competitionType, int filterYear, string weaponClass)
+        {
+            var practice = new List<object>();
+            using (var db = _databaseFactory.CreateDatabase())
+            {
+                var disciplineWhere = competitionType == "Precision"
+                    ? "(Discipline = 'Precision' OR Discipline IS NULL)"
+                    : "Discipline = @2";
+                var sqlParams = competitionType == "Precision"
+                    ? new object[] { memberId, filterYear }
+                    : new object[] { memberId, filterYear, competitionType };
+
+                var rows = db.Fetch<dynamic>($@"
+                    SELECT Id, TrainingDate, WeaponClass, SeriesScores, Notes, PracticeType
+                    FROM TrainingScores
+                    WHERE MemberId = @0
+                      AND YEAR(TrainingDate) = @1
+                      AND {disciplineWhere}
+                      AND PracticeType IS NOT NULL
+                    ORDER BY TrainingDate DESC",
+                    sqlParams);
+
+                foreach (var row in rows)
+                {
+                    var weaponClassStr = (string)row.WeaponClass ?? "";
+                    if (weaponClass != "Alla" && weaponClassStr != weaponClass) continue;
+
+                    int totalShots = 0;
+                    int groupCount = 0;
+                    var groupSizes = new List<int>();
+                    try
+                    {
+                        var seriesJson = (string)row.SeriesScores;
+                        if (!string.IsNullOrEmpty(seriesJson))
+                        {
+                            var groups = JsonSerializer.Deserialize<List<TrainingSeries>>(seriesJson);
+                            if (groups != null)
+                            {
+                                foreach (var g in groups)
+                                {
+                                    groupCount++;
+                                    totalShots += g.ShotCount ?? 0;
+                                    if (g.GroupSizeMm.HasValue) groupSizes.Add(g.GroupSizeMm.Value);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+
+                    practice.Add(new
+                    {
+                        trainingScoreId = (int)row.Id,
+                        date = (DateTime)row.TrainingDate,
+                        weaponClass = weaponClassStr,
+                        practiceType = (string?)row.PracticeType,
+                        shotCount = totalShots,
+                        groupCount,
+                        groupSizes,
+                        notes = (string?)row.Notes
+                    });
+                }
+            }
+            return practice.OrderByDescending(p => ((dynamic)p).date).ToList();
         }
 
         /// <summary>
@@ -2949,7 +3022,7 @@ namespace HpskSite.Controllers
                     SELECT Id, MemberId, TrainingDate, WeaponClass, SeriesScores,
                            TotalScore, XCount, Notes, IsCompetition, TrainingMatchId
                     FROM TrainingScores
-                    WHERE MemberId = @0 AND Discipline = @1
+                    WHERE MemberId = @0 AND Discipline = @1 AND PracticeType IS NULL
                     ORDER BY TrainingDate DESC",
                     memberId, discipline);
 

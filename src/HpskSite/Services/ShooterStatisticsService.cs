@@ -253,6 +253,7 @@ namespace HpskSite.Services
                               AND ts.TrainingMatchId IS NULL
                               AND ts.SeriesScores IS NOT NULL
                               AND ISJSON(ts.SeriesScores) = 1
+                              AND ts.PracticeType IS NULL
                               AND (ts.Discipline = @3 OR ts.Discipline IS NULL)
                         ),
                         -- Competition results: first calculate per-series scores using CROSS APPLY

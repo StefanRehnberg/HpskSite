@@ -231,11 +231,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         {
             using var db = _databaseFactory.CreateDatabase();
 
+            // PracticeType IS NULL: exclude non-scoring practice rows (fri övning) — their
+            // SeriesScores hold practice groups, not a FaltskytteExternalPayload, so they must
+            // never reach the season/scoring aggregates. They surface in the practice card instead.
             var sql = year.HasValue
                 ? "SELECT Id, TrainingDate, WeaponClass, CompetitionShootingClass, CompetitionStdMedal, SeriesScores, Notes " +
-                  "FROM TrainingScores WHERE MemberId = @0 AND Discipline = 'Faltskytte' AND YEAR(TrainingDate) = @1"
+                  "FROM TrainingScores WHERE MemberId = @0 AND Discipline = 'Faltskytte' AND PracticeType IS NULL AND YEAR(TrainingDate) = @1"
                 : "SELECT Id, TrainingDate, WeaponClass, CompetitionShootingClass, CompetitionStdMedal, SeriesScores, Notes " +
-                  "FROM TrainingScores WHERE MemberId = @0 AND Discipline = 'Faltskytte'";
+                  "FROM TrainingScores WHERE MemberId = @0 AND Discipline = 'Faltskytte' AND PracticeType IS NULL";
 
             var rows = year.HasValue
                 ? db.Fetch<dynamic>(sql, memberId, year.Value)

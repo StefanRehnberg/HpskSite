@@ -91,6 +91,7 @@ namespace HpskSite.Services
                     FROM TrainingScores
                     WHERE MemberId = @0
                       AND (Discipline = 'Precision' OR Discipline IS NULL)
+                      AND PracticeType IS NULL
                     ORDER BY TrainingDate DESC";
 
                 var scores = db.Fetch<dynamic>(query, memberId);

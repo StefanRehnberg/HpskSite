@@ -151,9 +151,14 @@
                         <div class="tab-pane fade" id="results-pane" role="tabpanel">
                             @* Action Bar + Filters *@
                             <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-                                <button class="btn btn-primary" onclick="openTrainingScoreModal()">
-                                    <i class="bi bi-plus-circle"></i> Lägg in Resultat
-                                </button>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button class="btn btn-primary" onclick="openTrainingScoreModal()">
+                                        <i class="bi bi-plus-circle"></i> Lägg in Resultat
+                                    </button>
+                                    <button class="btn btn-outline-primary" onclick="openPracticeLogModal()" title="Logga träning utan poäng (vittavla / fri övning)">
+                                        <i class="bi bi-clipboard-plus"></i> Logga övningspass
+                                    </button>
+                                </div>
                                 <div class="d-flex gap-2 flex-wrap">
                                     <select id="competitionTypeFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
                                         <option value="Precision" selected>Precision</option>
@@ -190,6 +195,9 @@
                                     </div>
                                 </div>
                             </div>
+
+                            @* Non-scoring practice log (vittavla / fri övning) — kept separate from scored results *@
+                            <div id="practiceResultsContent" class="mt-4"></div>
                         </div>
 
                         @* Medaljer & Märken Tab *@
@@ -847,6 +855,269 @@
 @await Html.PartialAsync("~/Views/Partials/FaltskytteScoreEntry.cshtml")
 @* Märken: quick "Spara som Guldserie/Snabbserie" submit + QR validation (used by the Resultat-entry modal) *@
 @await Html.PartialAsync("~/Views/Partials/_MarkenSerieQuickSubmit.cshtml")
+
+@* ───────── Non-scoring practice log (vittavla / fri övning) ───────── *@
+<div class="modal fade" id="practiceLogModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-clipboard-plus text-primary"></i> Logga övningspass (utan poäng)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+      </div>
+      <div class="modal-body">
+        <div id="plError" class="alert alert-danger d-none"></div>
+        <p class="small text-muted">Övningspass räknas som träning men påverkar inte snitt, trend eller personbästa.</p>
+        <div class="mb-3">
+          <label class="form-label">Gren</label>
+          <input type="text" class="form-control" id="plDisciplineLabel" readonly>
+          <input type="hidden" id="plDiscipline">
+        </div>
+        <div class="row g-2">
+          <div class="col-6 mb-3">
+            <label class="form-label" for="plDate">Datum</label>
+            <input type="text" class="form-control" id="plDate" autocomplete="off">
+          </div>
+          <div class="col-6 mb-3">
+            <label class="form-label" for="plWeaponClass">Vapenklass</label>
+            <select class="form-select" id="plWeaponClass">
+              <option value="A">A</option>
+              <option value="A_Opt">A Opt</option>
+              <option value="A_M">AM</option>
+              <option value="A_P">AP</option>
+              <option value="A_G">AG</option>
+              <option value="B">B</option>
+              <option value="C" selected>C</option>
+              <option value="R">R</option>
+              <option value="M">M</option>
+              <option value="L">L</option>
+            </select>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="plMode">Typ av övning</label>
+          <select class="form-select" id="plMode" onchange="plRenderModeFields()"></select>
+        </div>
+        <div id="plModeFields"></div>
+        <div class="mb-3">
+          <label class="form-label" for="plNotes">Anteckningar (valfritt)</label>
+          <textarea class="form-control" id="plNotes" rows="2" placeholder="t.ex. avtrycksträning, hemmabana"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button type="button" class="btn btn-primary" id="plSaveBtn" onclick="submitPracticeLog()">
+          <i class="bi bi-save"></i> Spara övningspass
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let plFlatpickr = null;
+
+function openPracticeLogModal() {
+    const discipline = document.getElementById('competitionTypeFilter')?.value || 'Precision';
+    document.getElementById('plDiscipline').value = discipline;
+    const labels = { Precision: 'Precision', Milsnabb: 'Milsnabb', Duell: 'Duell', NationellHelmatch: 'Nationell Helmatch', MagnumPrecision: 'Magnum Precision', Faltskytte: 'Fältskytte' };
+    document.getElementById('plDisciplineLabel').value = labels[discipline] || discipline;
+    document.getElementById('plError').classList.add('d-none');
+    document.getElementById('plNotes').value = '';
+
+    // Only Precision offers the vittavla group modes; other disciplines log plain "fri övning".
+    const modeSel = document.getElementById('plMode');
+    if (discipline === 'Precision') {
+        modeSel.innerHTML = `
+            <option value="femskott">Vittavla – femskottsgrupper</option>
+            <option value="frishots">Vittavla – fritt antal skott</option>
+            <option value="fri">Fri övning (utan poäng)</option>`;
+    } else {
+        modeSel.innerHTML = `<option value="fri">Fri övning (utan poäng)</option>`;
+    }
+    plRenderModeFields();
+
+    const dateEl = document.getElementById('plDate');
+    if (window.flatpickr) {
+        if (!plFlatpickr) {
+            plFlatpickr = flatpickr(dateEl, { locale: 'sv', dateFormat: 'Y-m-d', maxDate: 'today', defaultDate: 'today' });
+        } else {
+            plFlatpickr.setDate(new Date());
+        }
+    } else {
+        dateEl.value = new Date().toISOString().slice(0, 10);
+    }
+
+    new bootstrap.Modal(document.getElementById('practiceLogModal')).show();
+}
+
+function plRenderModeFields() {
+    const mode = document.getElementById('plMode').value;
+    const wrap = document.getElementById('plModeFields');
+    if (mode === 'femskott') {
+        wrap.innerHTML = `
+            <div class="mb-2">
+                <label class="form-label" for="plGroupCount">Antal femskottsgrupper</label>
+                <input type="number" class="form-control" id="plGroupCount" min="1" max="20" value="3" oninput="plRenderGroupRows()">
+            </div>
+            <div id="plGroupRows" class="mb-2"></div>
+            <p class="small text-muted mb-0">Varje grupp = 5 skott. Gruppstorlek i mm är valfri.</p>`;
+        plRenderGroupRows();
+    } else if (mode === 'frishots') {
+        wrap.innerHTML = `
+            <div class="row g-2 mb-2">
+                <div class="col-6">
+                    <label class="form-label" for="plShotCount">Antal skott</label>
+                    <input type="number" class="form-control" id="plShotCount" min="1" max="1000" value="30">
+                </div>
+                <div class="col-6">
+                    <label class="form-label" for="plSingleGroupMm">Gruppstorlek (mm)</label>
+                    <input type="number" class="form-control" id="plSingleGroupMm" min="1" max="1000" placeholder="valfritt">
+                </div>
+            </div>`;
+    } else {
+        wrap.innerHTML = `
+            <div class="mb-2">
+                <label class="form-label" for="plShotCount">Antal skott</label>
+                <input type="number" class="form-control" id="plShotCount" min="1" max="1000" value="30">
+            </div>`;
+    }
+}
+
+function plRenderGroupRows() {
+    const n = Math.max(1, Math.min(20, parseInt(document.getElementById('plGroupCount').value) || 1));
+    const rows = document.getElementById('plGroupRows');
+    const existing = {};
+    rows.querySelectorAll('input[data-grp]').forEach(inp => { existing[inp.getAttribute('data-grp')] = inp.value; });
+    let html = '';
+    for (let i = 0; i < n; i++) {
+        html += `
+            <div class="row g-2 align-items-center mb-1">
+                <div class="col-6"><span class="small text-muted">Grupp ${i + 1} · 5 skott</span></div>
+                <div class="col-6">
+                    <input type="number" class="form-control form-control-sm" data-grp="${i}" min="1" max="1000" placeholder="mm (valfritt)" value="${existing[i] || ''}">
+                </div>
+            </div>`;
+    }
+    rows.innerHTML = html;
+}
+
+function plShowError(msg) {
+    const err = document.getElementById('plError');
+    err.textContent = msg;
+    err.classList.remove('d-none');
+}
+
+function submitPracticeLog() {
+    document.getElementById('plError').classList.add('d-none');
+    const discipline = document.getElementById('plDiscipline').value;
+    const weaponClass = document.getElementById('plWeaponClass').value;
+    const date = document.getElementById('plDate').value;
+    const notes = document.getElementById('plNotes').value;
+    const mode = document.getElementById('plMode').value;
+
+    if (!date) { plShowError('Ange datum.'); return; }
+
+    let practiceType = 'Fri';
+    const groups = [];
+    if (mode === 'femskott') {
+        practiceType = 'Vittavla';
+        document.querySelectorAll('#plGroupRows input[data-grp]').forEach(inp => {
+            const mm = parseInt(inp.value);
+            groups.push({ shotCount: 5, groupSizeMm: (mm > 0 ? mm : null) });
+        });
+        if (groups.length === 0) { plShowError('Ange minst en grupp.'); return; }
+    } else if (mode === 'frishots') {
+        practiceType = 'Vittavla';
+        const n = parseInt(document.getElementById('plShotCount').value);
+        if (!(n > 0)) { plShowError('Ange antal skott.'); return; }
+        const mm = parseInt(document.getElementById('plSingleGroupMm').value);
+        groups.push({ shotCount: n, groupSizeMm: (mm > 0 ? mm : null) });
+    } else {
+        practiceType = 'Fri';
+        const n = parseInt(document.getElementById('plShotCount').value);
+        if (!(n > 0)) { plShowError('Ange antal skott.'); return; }
+        groups.push({ shotCount: n });
+    }
+
+    const btn = document.getElementById('plSaveBtn');
+    btn.disabled = true;
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    fetch('/umbraco/surface/TrainingScoring/RecordPracticeLog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+        body: JSON.stringify({ date, discipline, weaponClass, practiceType, groups, notes })
+    })
+        .then(r => r.json())
+        .then(d => {
+            btn.disabled = false;
+            if (d.success) {
+                bootstrap.Modal.getInstance(document.getElementById('practiceLogModal')).hide();
+                loadResults();
+            } else {
+                plShowError(d.message || 'Kunde inte spara.');
+            }
+        })
+        .catch(() => { btn.disabled = false; plShowError('Fel vid sparande.'); });
+}
+
+function renderPracticeResults(list) {
+    const c = document.getElementById('practiceResultsContent');
+    if (!c) return;
+    if (!list || list.length === 0) { c.innerHTML = ''; return; }
+    const typeLabel = t => t === 'Vittavla' ? 'Vittavla' : 'Fri övning';
+    const rows = list.map(p => {
+        const groupInfo = (p.groupSizes && p.groupSizes.length)
+            ? ` · grupper: ${p.groupSizes.join(', ')} mm`
+            : (p.groupCount > 1 ? ` · ${p.groupCount} grupper` : '');
+        return `
+            <tr>
+                <td>${formatDateShort(p.date)}</td>
+                <td><span class="badge bg-info text-dark">${typeLabel(p.practiceType)}</span></td>
+                <td><span class="badge bg-secondary">${p.weaponClass || ''}</span></td>
+                <td>${p.shotCount} skott${groupInfo}</td>
+                <td class="d-none d-md-table-cell">${p.notes ? escapeHtml(p.notes) : ''}</td>
+                <td class="text-end">
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="deletePracticeRow(${p.trainingScoreId})" title="Ta bort">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>`;
+    }).join('');
+    c.innerHTML = `
+        <div class="card">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-clipboard-check text-primary"></i> Övningspass (utan poäng)</span>
+                <span class="badge bg-primary rounded-pill">${list.length}</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th>Datum</th><th>Typ</th><th>Klass</th><th>Omfattning</th>
+                                <th class="d-none d-md-table-cell">Anteckningar</th><th></th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer small text-muted">Räknas som träning men påverkar inte snitt, trend eller personbästa.</div>
+        </div>`;
+}
+
+function deletePracticeRow(id) {
+    if (!confirm('Ta bort detta övningspass?')) return;
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    fetch(`/umbraco/surface/TrainingScoring/DeleteTrainingScore?id=${id}`, {
+        method: 'DELETE',
+        headers: { 'RequestVerificationToken': token }
+    })
+        .then(r => r.json())
+        .then(d => { if (d.success) loadResults(); else alert(d.message || 'Kunde inte ta bort.'); })
+        .catch(() => alert('Fel vid borttagning.'));
+}
+</script>
 
 @* Share Dashboard Modal *@
 <div class="modal fade" id="shareDashboardModal" tabindex="-1" aria-labelledby="shareDashboardModalLabel" aria-hidden="true">
@@ -3645,6 +3916,10 @@ function loadResults() {
     const content = document.getElementById('resultsContent');
     if (!content) return;
 
+    // Clear any previous discipline's practice card so it can't linger on switch/error.
+    const practiceEl = document.getElementById('practiceResultsContent');
+    if (practiceEl) practiceEl.innerHTML = '';
+
     // Show loading state
     content.innerHTML = `
         <div class="text-center py-3">
@@ -3669,6 +3944,7 @@ function loadResults() {
                 } else {
                     renderResultsTable(data.results);
                 }
+                renderPracticeResults(data.practiceResults || []);
             } else {
                 content.innerHTML = `
                     <div class="alert alert-danger">

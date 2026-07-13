@@ -41,6 +41,15 @@ namespace HpskSite.Models.ViewModels.TrainingScoring
         public string Discipline { get; set; } = "Precision";
 
         /// <summary>
+        /// Non-scoring practice classification. Null = normal scored training/competition
+        /// (every existing row). "Vittavla" = white-target trigger drill (Precision family,
+        /// optional per-group size). "Fri" = generic non-scoring practice (any discipline).
+        /// Rows with a non-null PracticeType are kept visible but excluded from every scoring
+        /// aggregate (average/trend/personal bests/handicap).
+        /// </summary>
+        public string? PracticeType { get; set; }
+
+        /// <summary>
         /// Indicates if this is a result from an external competition
         /// (competitions in other regions/countries not tracked in main system)
         /// </summary>
