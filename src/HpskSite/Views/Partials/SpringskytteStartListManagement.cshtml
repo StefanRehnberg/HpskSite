@@ -72,6 +72,17 @@
     .spring-status-badge {
         font-size: 0.75rem;
     }
+    @@keyframes springCardFlash {
+        0%   { box-shadow: 0 0 0 0 rgba(13,110,253,0.55); }
+        100% { box-shadow: 0 0 0 8px rgba(13,110,253,0); }
+    }
+    .spring-card-flash {
+        animation: springCardFlash 1.3s ease-out;
+        border-color: var(--bs-primary) !important;
+    }
+    @@media (prefers-reduced-motion: reduce) {
+        .spring-card-flash { animation: none; }
+    }
 </style>
 
 <script>
@@ -334,6 +345,7 @@ let springTempIdCounter = 0;
 
 function springAddNewList() {
     if (!confirmIfResultsExist('L\u00e4gg till startlista')) return;
+    springSyncAllCardInputs(); // don't wipe unsaved edits on existing cards
     const tempId = 'new_' + (++springTempIdCounter);
     springLocalCards.push({
         tempId,
@@ -348,6 +360,18 @@ function springAddNewList() {
         generatedDate: ''
     });
     springRenderCards();
+
+    // The new card is appended at the bottom \u2014 bring it into view so it's obvious something
+    // happened (otherwise it looks like nothing did when a list already exists), and focus its
+    // name for immediate renaming.
+    const el = document.getElementById(`springCard_${tempId}`);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('spring-card-flash');
+        setTimeout(() => el.classList.remove('spring-card-flash'), 1500);
+        const nameInput = el.querySelector('input[type="text"]');
+        if (nameInput) { nameInput.focus(); nameInput.select(); }
+    }
 }
 
 function springUpdateCardName(tempId, name) {
@@ -355,7 +379,27 @@ function springUpdateCardName(tempId, name) {
     if (card) card.listName = name;
 }
 
+// Read the live input values (name + the 4 time/pause fields) of EVERY card back into
+// springLocalCards. Must run before any user-triggered springRenderCards(), otherwise the
+// re-render rebuilds the inputs from stale state and wipes unsaved edits (e.g. a changed
+// first start time is reset to 10:00 when a class checkbox is toggled).
+function springSyncAllCardInputs() {
+    for (const card of springLocalCards) {
+        const nameEl = document.querySelector(`#springCard_${card.tempId} input[type="text"]`);
+        if (nameEl) card.listName = nameEl.value;
+        const fs = document.getElementById(`springFirstStart_${card.tempId}`);
+        if (fs && fs.value) card.firstStartTime = fs.value;
+        const iv = document.getElementById(`springInterval_${card.tempId}`);
+        if (iv && iv.value) card.defaultInterval = iv.value;
+        const ba = document.getElementById(`springBreakAfter_${card.tempId}`);
+        if (ba && ba.value) card.breakAfterEvery = parseInt(ba.value) || card.breakAfterEvery;
+        const bd = document.getElementById(`springBreakDur_${card.tempId}`);
+        if (bd && bd.value) card.breakDuration = bd.value;
+    }
+}
+
 function springToggleClass(tempId, classId, checked) {
+    springSyncAllCardInputs(); // preserve unsaved time/name edits across the re-render
     const card = springLocalCards.find(c => c.tempId === tempId);
     if (!card) return;
     if (checked) {
@@ -466,6 +510,7 @@ async function springDeleteList(tempId) {
     }
 
     // Remove from local state
+    springSyncAllCardInputs(); // preserve unsaved edits on the surviving cards
     springLocalCards = springLocalCards.filter(c => c.tempId !== tempId);
     springRenderCards();
 }
