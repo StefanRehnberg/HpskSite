@@ -368,6 +368,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return result;
                 }).ToList();
 
+                // Fold manual penalties/reductions into totals BEFORE ranking.
+                await ApplyTimeAdjustmentsAsync(shooterResults, competitionId);
+
                 // Sort using tiebreaker
                 var tieBreaker = new SpringskytteTieBreaker();
                 shooterResults.Sort(tieBreaker);
@@ -395,6 +398,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                                 s.SprintTimeDisplay,
                                 s.ShootingScore,
                                 s.PenaltyTimeDisplay,
+                                s.PenaltyPoints,
+                                s.PenaltyMinutesDisplay,
+                                s.ReductionSeconds,
+                                s.ReductionDisplay,
                                 s.TotalTimeDisplay,
                                 s.TotalTimeSeconds,
                                 s.StandardMedal,
@@ -460,6 +467,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // Calculate medals on the Deltävling subset (1/9 silver, 1/3 bronze within
                 // the subset). Gated on the competition's isAwardingStandardMedals flag AND
                 // !isClubOnly per BR-PS.1.3 — club competitions never award standard medals.
+                // Fold manual penalties/reductions before medal ranking on the subset.
+                await ApplyTimeAdjustmentsAsync(shooterResults, competitionId);
+
                 var isAwardingMedals = competition?.GetValue<bool>("isAwardingStandardMedals") ?? false;
                 var isClubOnlyForMedals = competition?.GetValue<bool>("isClubOnly") ?? false;
                 if (isAwardingMedals && !isClubOnlyForMedals)
@@ -538,6 +548,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     var medalService = new SpringskytteMedalService();
                     medalService.CalculateStandardMedals(shooterResults);
                 }
+
+                // Fold manual penalties/reductions into totals BEFORE ranking.
+                await ApplyTimeAdjustmentsAsync(shooterResults, competitionId);
 
                 // Sort using tiebreaker
                 var tieBreaker = new SpringskytteTieBreaker();
@@ -931,7 +944,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         breakDuration = config?.BreakDuration ?? "05:00",
                         starters = config?.Starters ?? new List<SpringskytteStartListEntry>(),
                         starterCount = config?.Starters?.Count ?? 0,
-                        generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? ""
+                        generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
+                        isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList")
                     };
                 }).ToList();
 
@@ -1280,6 +1294,740 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error resetting Springskytte start numbers");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Edit ONE starter's start number and/or start time in place, preserving every other
+        /// starter's number and time (unlike Generate/Regenerate which reshuffles the whole list).
+        /// Keeps the Starters array in start-time order and mirrors the change to the DB row.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateSpringskytteStarter([FromBody] SpringskytteUpdateStarterRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.NodeId <= 0
+                    || request.MemberId <= 0 || string.IsNullOrEmpty(request.WeaponClass))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var node = _contentService.GetById(request.NodeId);
+                if (node == null || node.ContentType.Alias != "precisionStartList" || node.ParentId != request.CompetitionId)
+                    return Json(new { success = false, message = "Startlistan hittades inte." });
+
+                var cfgJson = node.GetValue<string>("configurationData");
+                if (string.IsNullOrEmpty(cfgJson))
+                    return Json(new { success = false, message = "Startlistan saknar data." });
+                var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
+                if (config?.Starters == null || !config.Starters.Any())
+                    return Json(new { success = false, message = "Startlistan saknar startande." });
+
+                var starter = config.Starters.FirstOrDefault(s =>
+                    s.MemberId == request.MemberId && s.WeaponClass == request.WeaponClass);
+                if (starter == null)
+                    return Json(new { success = false, message = "Skytten hittades inte i startlistan." });
+
+                var currentSec = ParseStartTimeSeconds(starter.StartTime);
+
+                // Guard: no duplicate start number within the same weapon class in this list.
+                if (request.StartOrder.HasValue && request.StartOrder.Value != starter.StartOrder)
+                {
+                    if (request.StartOrder.Value < 0)
+                        return Json(new { success = false, message = "Ogiltigt startnummer." });
+                    bool numTaken = config.Starters.Any(s =>
+                        !(s.MemberId == request.MemberId && s.WeaponClass == request.WeaponClass)
+                        && s.WeaponClass == starter.WeaponClass && s.StartOrder == request.StartOrder.Value);
+                    if (numTaken)
+                        return Json(new { success = false, message = $"Startnummer {request.StartOrder.Value} används redan i vapengrupp {starter.WeaponClass}." });
+                }
+
+                // Guard: don't move onto a time already reserved by another (non-DNS) shooter.
+                if (!string.IsNullOrWhiteSpace(request.StartTime))
+                {
+                    if (!TimeSpan.TryParse(request.StartTime.Trim(), out var ts)
+                        || ts < TimeSpan.Zero || ts >= TimeSpan.FromDays(1))
+                        return Json(new { success = false, message = "Ogiltig starttid. Använd formatet HH:MM eller HH:MM:SS." });
+                    int newSec = (int)ts.TotalSeconds;
+                    if (newSec != currentSec)
+                    {
+                        // Scope the collision check to the shooter's own weapon class — classes never mix.
+                        var timeline = await BuildTimelineAsync(request.CompetitionId);
+                        if (timeline.OccupiedFor(starter.WeaponClass).Contains(newSec))
+                            return Json(new { success = false, message = "Starttiden är upptagen av en annan skytt. Välj en ledig lucka." });
+                    }
+                    starter.StartTime = ts.ToString(@"hh\:mm\:ss");
+                }
+                if (request.StartOrder.HasValue)
+                {
+                    if (request.StartOrder.Value < 0)
+                        return Json(new { success = false, message = "Ogiltigt startnummer." });
+                    starter.StartOrder = request.StartOrder.Value;
+                }
+
+                // Keep the array in start-time order so the public list, paus detection and
+                // generated HTML stay correct after the edit.
+                config.Starters = config.Starters
+                    .OrderBy(s => ParseStartTimeSeconds(s.StartTime))
+                    .ThenBy(s => s.StartOrder)
+                    .ToList();
+
+                // Critical writes first: the saved config is the authoritative source that the
+                // public start-list route and GetSpringskytteStartLists read, and the DB row keeps
+                // result entry (sprint = finish − start) consistent. Publish is best-effort — those
+                // consumers read the saved content, so a publish hiccup must not fail the edit.
+                node.SetValue("configurationData", JsonConvert.SerializeObject(config));
+                node.SetValue("startListContent", BuildStartListHtml(config.Starters));
+                _contentService.Save(node);
+
+                // Mirror to the DB result row if one exists — the result save reads the DB start
+                // time first (then config), so they must stay consistent for sprint = finish − start.
+                // Best-effort: the saved config is authoritative for the start-list page, so a
+                // transient DB hiccup must not fail the edit (it's logged for follow-up).
+                try
+                {
+                    using var db = _umbracoDatabaseFactory.CreateDatabase();
+                    await db.ExecuteAsync(
+                        @"UPDATE SpringskytteResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
+                          WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                        starter.StartOrder, starter.StartTime, DateTime.Now,
+                        request.CompetitionId, request.MemberId, request.WeaponClass);
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogWarning(dbEx, "DB mirror of start-list edit failed (config saved); comp={Comp} member={Member}", request.CompetitionId, request.MemberId);
+                }
+
+                try
+                {
+                    var publishResult = _contentService.Publish(node, new[] { "*" });
+                    if (!publishResult.Success)
+                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
+                }
+                catch (Exception pubEx)
+                {
+                    // Saved config is authoritative for the routed start-list page; log and continue.
+                    _logger.LogWarning(pubEx, "Publish of start list node {NodeId} failed after save; saved config is authoritative", node.Id);
+                }
+
+                _logger.LogInformation("Updated Springskytte starter comp={Comp} member={Member} wc={Wc} -> #{Order} @ {Time}",
+                    request.CompetitionId, request.MemberId, request.WeaponClass, starter.StartOrder, starter.StartTime);
+
+                return Json(new
+                {
+                    success = true,
+                    message = "Startande uppdaterad.",
+                    starters = config.Starters.Select(s => new
+                    {
+                        startOrder = s.StartOrder,
+                        startTime = s.StartTime,
+                        memberId = s.MemberId,
+                        name = s.Name,
+                        club = s.Club,
+                        weaponClass = s.WeaponClass,
+                        ageGenderClass = s.AgeGenderClass
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating Springskytte starter");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Toggle a Springskytte start list preliminary ⇄ official (published). Independent per list.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetSpringskytteStartListOfficial([FromBody] SpringskytteSetOfficialRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.NodeId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var node = _contentService.GetById(request.NodeId);
+                if (node == null || node.ContentType.Alias != "precisionStartList" || node.ParentId != request.CompetitionId)
+                    return Json(new { success = false, message = "Startlistan hittades inte." });
+                if (!node.HasProperty("isOfficialStartList"))
+                    return Json(new { success = false, message = "Egenskapen 'isOfficialStartList' saknas på dokumenttypen precisionStartList." });
+
+                node.SetValue("isOfficialStartList", request.IsOfficial);
+                _contentService.Save(node);
+                try { _contentService.Publish(node, new[] { "*" }); }
+                catch (Exception pubEx) { _logger.LogWarning(pubEx, "Publish of official toggle failed for {NodeId} (saved value is authoritative)", node.Id); }
+
+                return Json(new
+                {
+                    success = true,
+                    isOfficial = request.IsOfficial,
+                    message = request.IsOfficial ? "Startlistan publicerad som officiell." : "Startlistan satt till preliminär."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error toggling Springskytte start list official");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        // Time-of-day "HH:mm:ss" → seconds; empty/invalid sorts last.
+        private static int ParseStartTimeSeconds(string? t)
+        {
+            if (string.IsNullOrEmpty(t)) return int.MaxValue;
+            return TimeSpan.TryParse(t, out var ts) ? (int)ts.TotalSeconds : int.MaxValue;
+        }
+
+        // ===== TIME ADJUSTMENTS (items 6 & 9: manual penalties + reductions) =====
+
+        [HttpGet]
+        public async Task<IActionResult> GetSpringskytteAdjustments(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var rows = await db.FetchAsync<SpringskytteTimeAdjustment>(
+                    "SELECT * FROM SpringskytteTimeAdjustment WHERE CompetitionId = @0 ORDER BY EnteredAt", competitionId);
+                return Json(new
+                {
+                    success = true,
+                    adjustments = rows.Select(a => new
+                    {
+                        a.Id, a.MemberId, a.WeaponClass, a.AdjustmentType, a.Points, a.Seconds, a.Reason, a.EnteredAt
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading Springskytte adjustments");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddSpringskytteAdjustment([FromBody] SpringskytteAddAdjustmentRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 || string.IsNullOrEmpty(request.WeaponClass))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(request.CompetitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var type = request.AdjustmentType == "Reduction" ? "Reduction" : "Penalty";
+                int? points = null;
+                int seconds;
+                if (type == "Penalty")
+                {
+                    points = request.Points ?? 0;
+                    if (points <= 0) return Json(new { success = false, message = "Ange antal straffpoäng (minst 1)." });
+                    seconds = points.Value * 60;   // 1 penalty point = 1 minute
+                }
+                else
+                {
+                    var secs = _scoringService.ParseSprintTime(request.TimeInput);
+                    if (secs == null || secs.Value <= 0)
+                        return Json(new { success = false, message = "Ange en tid att dra av (MM:SS)." });
+                    seconds = -(int)Math.Round(secs.Value);
+                }
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                int enteredBy = currentMember != null && int.TryParse(currentMember.Id, out var mid) ? mid : 0;
+
+                var adj = new SpringskytteTimeAdjustment
+                {
+                    CompetitionId = request.CompetitionId,
+                    MemberId = request.MemberId,
+                    WeaponClass = request.WeaponClass,
+                    AdjustmentType = type,
+                    Points = points,
+                    Seconds = seconds,
+                    Reason = (request.Reason ?? "").Trim(),
+                    EnteredBy = enteredBy,
+                    EnteredAt = DateTime.Now
+                };
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                await db.InsertAsync(adj);
+
+                _logger.LogInformation("Added Springskytte {Type} comp={Comp} member={Member} wc={Wc} seconds={Sec}",
+                    type, request.CompetitionId, request.MemberId, request.WeaponClass, seconds);
+
+                return Json(new { success = true, message = type == "Penalty" ? "Straff tillagt." : "Tidsavdrag tillagt.", id = adj.Id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error adding Springskytte adjustment");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteSpringskytteAdjustment([FromBody] SpringskytteDeleteAdjustmentRequest request)
+        {
+            try
+            {
+                if (request == null || request.Id <= 0 || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(request.CompetitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                await db.ExecuteAsync("DELETE FROM SpringskytteTimeAdjustment WHERE Id = @0 AND CompetitionId = @1",
+                    request.Id, request.CompetitionId);
+                return Json(new { success = true, message = "Borttaget." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting Springskytte adjustment");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Field-scoped finish-time save (timing role, item 5): computes sprint = finish − start and
+        /// updates ONLY the time fields, preserving the shots/score the scoring role entered. Creates
+        /// the result row (from the start-list starter) if none exists yet.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveSpringskytteFinishTime([FromBody] SpringskytteFinishTimeRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 || string.IsNullOrEmpty(request.WeaponClass))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(request.CompetitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var status = (request.Status == "DNS" || request.Status == "DNF") ? request.Status : null;
+
+                // Find the start-list starter (start time + age class, needed for compute / insert).
+                SpringskytteStartListEntry? starter = null;
+                var comp = _contentService.GetById(request.CompetitionId);
+                if (comp != null)
+                {
+                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
+                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    {
+                        var cfgJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cfgJson)) continue;
+                        SpringskytteStartListConfig? cfg = null;
+                        try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                        var st = cfg?.Starters?.FirstOrDefault(s => s.MemberId == request.MemberId && s.WeaponClass == request.WeaponClass);
+                        if (st != null) { starter = st; break; }
+                    }
+                }
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var existing = await db.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                    "WHERE CompetitionId=@0 AND MemberId=@1 AND WeaponClass=@2",
+                    request.CompetitionId, request.MemberId, request.WeaponClass);
+
+                decimal? sprint = null, total = null;
+                if (status == null)
+                {
+                    if (string.IsNullOrWhiteSpace(request.FinishTimeInput))
+                        return Json(new { success = false, message = "Ange måltid (HH:MM:SS)." });
+                    var finish = _scoringService.ParseSprintTime(request.FinishTimeInput);
+                    if (finish == null) return Json(new { success = false, message = "Ogiltig måltid. Använd HH:MM:SS." });
+
+                    var startStr = !string.IsNullOrWhiteSpace(existing?.StartTime) ? existing!.StartTime : starter?.StartTime;
+                    if (string.IsNullOrWhiteSpace(startStr))
+                        return Json(new { success = false, message = "Starttid saknas — generera startlista först." });
+                    var start = _scoringService.ParseSprintTime(startStr);
+                    if (start == null) return Json(new { success = false, message = "Kunde inte tolka starttid." });
+
+                    sprint = finish.Value - start.Value;
+                    if (sprint < 0) return Json(new { success = false, message = "Måltid är före starttid — kontrollera tiderna." });
+
+                    var score = existing?.ShootingScore ?? 0;
+                    var mult = (existing?.PenaltyMultiplier ?? 1) == 0 ? 1 : (existing?.PenaltyMultiplier ?? 1);
+                    total = _scoringService.CalculateTotalTime(sprint, score, mult);
+                }
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                int enteredBy = currentMember != null && int.TryParse(currentMember.Id, out var mid) ? mid : 0;
+                var now = DateTime.Now;
+
+                if (existing != null)
+                {
+                    // Preserve shots/score/multiplier — update only the time + status.
+                    await db.ExecuteAsync(
+                        @"UPDATE SpringskytteResultEntry SET SprintTimeSeconds=@0, TotalTimeSeconds=@1, Status=@2, LastModified=@3
+                          WHERE CompetitionId=@4 AND MemberId=@5 AND WeaponClass=@6",
+                        sprint, total, status, now, request.CompetitionId, request.MemberId, request.WeaponClass);
+                }
+                else
+                {
+                    if (starter == null)
+                        return Json(new { success = false, message = "Skytten finns inte i startlistan." });
+                    await db.InsertAsync(new SpringskytteResultEntry
+                    {
+                        CompetitionId = request.CompetitionId,
+                        MemberId = request.MemberId,
+                        WeaponClass = request.WeaponClass,
+                        AgeGenderClass = starter.AgeGenderClass,
+                        StartOrder = starter.StartOrder,
+                        StartTime = starter.StartTime,
+                        SprintTimeSeconds = sprint,
+                        ShootingScore = 0,
+                        PenaltyMultiplier = 1,
+                        TotalTimeSeconds = total,
+                        Shots = "[]",
+                        Status = status,
+                        EnteredBy = enteredBy,
+                        EnteredAt = now,
+                        LastModified = now
+                    });
+                }
+
+                return Json(new { success = true, message = status ?? "Tid sparad." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving Springskytte finish time");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Folds the manual time-adjustment ledger into shooter results: sets PenaltyPoints /
+        /// ReductionSeconds for display and bakes the net delta into TotalTimeSeconds so ranking
+        /// reflects it. Best-effort: a ledger read failure leaves base results untouched.
+        /// </summary>
+        private async Task ApplyTimeAdjustmentsAsync(List<SpringskytteShooterResult> results, int competitionId)
+        {
+            if (results == null || results.Count == 0) return;
+            List<SpringskytteTimeAdjustment> adjustments;
+            try
+            {
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                adjustments = await db.FetchAsync<SpringskytteTimeAdjustment>(
+                    "SELECT * FROM SpringskytteTimeAdjustment WHERE CompetitionId = @0", competitionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load time adjustments for comp {Comp}", competitionId);
+                return;
+            }
+            if (adjustments.Count == 0) return;
+
+            var byKey = adjustments
+                .GroupBy(a => $"{a.MemberId}|{a.WeaponClass}")
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var r in results)
+            {
+                if (!byKey.TryGetValue($"{r.MemberId}|{r.WeaponClass}", out var list)) continue;
+                r.PenaltyPoints = list.Where(a => a.AdjustmentType == "Penalty").Sum(a => a.Points ?? 0);
+                r.ReductionSeconds = list.Where(a => a.AdjustmentType == "Reduction").Sum(a => -a.Seconds); // stored negative → positive magnitude
+                var net = list.Sum(a => a.Seconds);  // penalties (+) and reductions (−)
+                if (r.TotalTimeSeconds.HasValue && r.Status == null)
+                    r.TotalTimeSeconds = r.TotalTimeSeconds.Value + net;
+            }
+        }
+
+        // ===== STARTER SCREEN + FREE-SLOT / DNS MODEL (items 7 & 8) =====
+
+        private static string SecondsToHms(int s)
+        {
+            if (s < 0) s = 0;
+            return TimeSpan.FromSeconds(s).ToString(@"hh\:mm\:ss");
+        }
+
+        private class SpringTimelineRow
+        {
+            public int Sec;
+            public int StartOrder;
+            public string StartTime = "";
+            public int MemberId;
+            public string Name = "";
+            public string Club = "";
+            public string WeaponClass = "";
+            public string AgeGenderClass = "";
+            public string ListName = "";
+            public int NodeId;
+            public string? Status;   // null / "DNS" / "DNF"
+        }
+
+        private class SpringTimeline
+        {
+            public List<SpringTimelineRow> Rows = new();
+            public List<object> FreeSlots = new();      // { time, nodeId, kind, weaponClass, freedFrom? }
+            // Reserved times PER weapon class. Weapon classes are never mixed (separate sequences,
+            // often on different days; start times are time-of-day only), so occupancy + free slots
+            // are always scoped to a single weapon class.
+            public Dictionary<string, HashSet<int>> OccupiedByWc = new();
+
+            public HashSet<int> OccupiedFor(string wc)
+                => OccupiedByWc.TryGetValue(wc ?? "", out var set) ? set : new HashSet<int>();
+        }
+
+        /// <summary>
+        /// Shared timeline for the competition, scoped per weapon class. A slot is free ONLY if it was
+        /// never assigned (pause gap / after the last start of THAT weapon class) or belongs to a DNS'd
+        /// shooter of that class. Weapon classes are never mixed. Närvaro (check-in) never frees a slot.
+        /// </summary>
+        private async Task<SpringTimeline> BuildTimelineAsync(int competitionId)
+        {
+            var tl = new SpringTimeline();
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return tl;
+
+            var statusByKey = new Dictionary<string, string?>();
+            try
+            {
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var resultRows = await db.FetchAsync<SpringskytteResultEntry>("WHERE CompetitionId = @0", competitionId);
+                foreach (var r in resultRows) statusByKey[$"{r.MemberId}|{r.WeaponClass}"] = r.Status;
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Timeline: status load failed for {Comp}", competitionId); }
+
+            var gapSlots = new List<(int sec, string wc, object row)>();
+            var slNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                .Where(c => c.ContentType.Alias == "precisionStartList").ToList();
+            foreach (var node in slNodes)
+            {
+                var cfgJson = node.GetValue<string>("configurationData");
+                if (string.IsNullOrEmpty(cfgJson)) continue;
+                SpringskytteStartListConfig? cfg = null;
+                try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                if (cfg?.Starters == null || cfg.Starters.Count == 0) continue;
+
+                int intervalSec = 60;
+                var iv = cfg.DefaultInterval?.Split(':');
+                if (iv != null && iv.Length == 2 && int.TryParse(iv[0], out var mm) && int.TryParse(iv[1], out var ss))
+                    intervalSec = Math.Max(1, mm * 60 + ss);
+
+                // Record every starter (for Rows).
+                foreach (var s in cfg.Starters)
+                {
+                    var t = ParseStartTimeSeconds(s.StartTime);
+                    statusByKey.TryGetValue($"{s.MemberId}|{s.WeaponClass}", out var st);
+                    tl.Rows.Add(new SpringTimelineRow
+                    {
+                        Sec = t, StartOrder = s.StartOrder, StartTime = s.StartTime, MemberId = s.MemberId,
+                        Name = s.Name, Club = s.Club, WeaponClass = s.WeaponClass, AgeGenderClass = s.AgeGenderClass,
+                        ListName = cfg.ListName ?? "", NodeId = node.Id, Status = st
+                    });
+                }
+
+                // Compute gaps + trailing slots PER weapon class within the list (never mix classes).
+                foreach (var grp in cfg.Starters.GroupBy(s => s.WeaponClass ?? ""))
+                {
+                    var wcKey = grp.Key;
+                    var sorted = grp.OrderBy(s => ParseStartTimeSeconds(s.StartTime)).ToList();
+                    int? prev = null;
+                    foreach (var s in sorted)
+                    {
+                        var t = ParseStartTimeSeconds(s.StartTime);
+                        if (prev.HasValue && t != int.MaxValue && (t - prev.Value) > intervalSec)
+                            for (int slot = prev.Value + intervalSec; slot < t; slot += intervalSec)
+                                gapSlots.Add((slot, wcKey, new { time = SecondsToHms(slot), nodeId = node.Id, kind = "paus", weaponClass = wcKey }));
+                        if (t != int.MaxValue) prev = t;
+                    }
+                    if (prev.HasValue)
+                        for (int k = 1; k <= 3; k++)
+                            gapSlots.Add((prev.Value + k * intervalSec, wcKey, new { time = SecondsToHms(prev.Value + k * intervalSec), nodeId = node.Id, kind = "efter", weaponClass = wcKey }));
+                }
+            }
+
+            // Reserved times per weapon class = that class's non-DNS starters.
+            foreach (var r in tl.Rows)
+                if (r.Sec != int.MaxValue && r.Status != "DNS")
+                {
+                    if (!tl.OccupiedByWc.TryGetValue(r.WeaponClass, out var set)) { set = new HashSet<int>(); tl.OccupiedByWc[r.WeaponClass] = set; }
+                    set.Add(r.Sec);
+                }
+
+            // Candidate free slots: gaps + DNS'd times, each tagged with its weapon class.
+            var allSlots = new List<(int sec, string wc, object row)>(gapSlots);
+            foreach (var r in tl.Rows)
+                if (r.Status == "DNS" && r.Sec != int.MaxValue)
+                    allSlots.Add((r.Sec, r.WeaponClass, new { time = r.StartTime, nodeId = r.NodeId, kind = "dns", weaponClass = r.WeaponClass, freedFrom = r.Name }));
+
+            // Free only if not reserved by a non-DNS shooter of the SAME weapon class; dedup per (wc, sec).
+            var seen = new HashSet<string>();
+            tl.FreeSlots = allSlots
+                .Where(x => !tl.OccupiedFor(x.wc).Contains(x.sec))
+                .OrderBy(x => x.wc).ThenBy(x => x.sec)
+                .Where(x => seen.Add(x.wc + "|" + x.sec))
+                .Select(x => x.row)
+                .ToList();
+            return tl;
+        }
+
+        /// <summary>
+        /// Live feed for the start-line screen: all starters (globally time-ordered) with DNS + check-in
+        /// status, plus the free slots a late shooter can be moved into. Polled by /startlinje.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSpringskytteStarterState(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+                if ((competition.GetValue<string>("competitionType") ?? "") != "Springskytte")
+                    return Json(new { success = false, message = "Fel tävlingstyp." });
+
+                // Check-in map — informational only (never frees a slot).
+                var checkedIn = new Dictionary<int, bool>();
+                var regHub = _contentService.GetPagedChildren(competition.Id, 0, 200, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+                if (regHub != null)
+                    foreach (var reg in _contentService.GetPagedChildren(regHub.Id, 0, 5000, out _)
+                                 .Where(c => c.ContentType.Alias == "competitionRegistration"))
+                    {
+                        var midRaw = reg.GetValue<string>("memberId");
+                        if (!int.TryParse(midRaw, out var mid) || mid <= 0) continue;
+                        checkedIn[mid] = reg.HasProperty("isCheckedIn") && reg.GetValue<bool>("isCheckedIn");
+                    }
+
+                var tl = await BuildTimelineAsync(competitionId);
+                var starters = tl.Rows.OrderBy(r => r.Sec).Select(r => new
+                {
+                    startOrder = r.StartOrder,
+                    startTime = r.StartTime,
+                    name = r.Name,
+                    club = r.Club,
+                    weaponClass = r.WeaponClass,
+                    ageGenderClass = r.AgeGenderClass,
+                    memberId = r.MemberId,
+                    listName = r.ListName,
+                    nodeId = r.NodeId,
+                    status = r.Status,
+                    isDns = r.Status == "DNS",
+                    checkedIn = !checkedIn.TryGetValue(r.MemberId, out var ci) || ci
+                }).ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    competitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "Tävling",
+                    starters,
+                    freeSlots = tl.FreeSlots
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building Springskytte starter state for {Comp}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>Free start slots for the whole competition (pause gaps + DNS'd times) — for the move pickers.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSpringskytteFreeSlots(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+                var tl = await BuildTimelineAsync(competitionId);
+                return Json(new { success = true, freeSlots = tl.FreeSlots });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building free slots for {Comp}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Mark/unmark a shooter DNS. DNS frees the start slot (distinct from Närvaro/arrival) and
+        /// ranks the shooter last; un-DNS restores them as scheduled (RM re-assigns a slot if taken).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetSpringskytteDns([FromBody] SpringskytteDnsRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 || string.IsNullOrEmpty(request.WeaponClass))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(request.CompetitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                SpringskytteStartListEntry? starter = null;
+                var comp = _contentService.GetById(request.CompetitionId);
+                if (comp != null)
+                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
+                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    {
+                        var cfgJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cfgJson)) continue;
+                        SpringskytteStartListConfig? cfg = null;
+                        try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                        var st = cfg?.Starters?.FirstOrDefault(s => s.MemberId == request.MemberId && s.WeaponClass == request.WeaponClass);
+                        if (st != null) { starter = st; break; }
+                    }
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                int enteredBy = currentMember != null && int.TryParse(currentMember.Id, out var mid) ? mid : 0;
+                var now = DateTime.Now;
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var existing = await db.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                    "WHERE CompetitionId=@0 AND MemberId=@1 AND WeaponClass=@2",
+                    request.CompetitionId, request.MemberId, request.WeaponClass);
+
+                if (existing != null)
+                {
+                    if (request.IsDns)
+                        await db.ExecuteAsync(
+                            @"UPDATE SpringskytteResultEntry SET Status='DNS', SprintTimeSeconds=NULL, TotalTimeSeconds=NULL, LastModified=@0
+                              WHERE CompetitionId=@1 AND MemberId=@2 AND WeaponClass=@3",
+                            now, request.CompetitionId, request.MemberId, request.WeaponClass);
+                    else
+                        await db.ExecuteAsync(
+                            @"UPDATE SpringskytteResultEntry SET Status=NULL, LastModified=@0
+                              WHERE CompetitionId=@1 AND MemberId=@2 AND WeaponClass=@3",
+                            now, request.CompetitionId, request.MemberId, request.WeaponClass);
+                }
+                else
+                {
+                    if (starter == null) return Json(new { success = false, message = "Skytten finns inte i startlistan." });
+                    await db.InsertAsync(new SpringskytteResultEntry
+                    {
+                        CompetitionId = request.CompetitionId,
+                        MemberId = request.MemberId,
+                        WeaponClass = request.WeaponClass,
+                        AgeGenderClass = starter.AgeGenderClass,
+                        StartOrder = starter.StartOrder,
+                        StartTime = starter.StartTime,
+                        SprintTimeSeconds = null,
+                        ShootingScore = 0,
+                        PenaltyMultiplier = 1,
+                        TotalTimeSeconds = null,
+                        Shots = "[]",
+                        Status = request.IsDns ? "DNS" : null,
+                        EnteredBy = enteredBy,
+                        EnteredAt = now,
+                        LastModified = now
+                    });
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    isDns = request.IsDns,
+                    message = request.IsDns ? "Markerad som DNS – starttiden är nu ledig." : "DNS borttagen."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error setting Springskytte DNS");
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }

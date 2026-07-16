@@ -36,6 +36,45 @@
     </div>
 </div>
 
+<!-- Edit starter modal (items 3 & 4: change start number + start time without regenerating) -->
+<div class="modal fade" id="springEditStarterModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Redigera startande</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3"><strong id="springEditStarterName">–</strong>
+                    <span class="text-muted" id="springEditStarterClass"></span></p>
+                <div class="row g-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold">Startnummer</label>
+                        <input type="number" class="form-control" id="springEditStarterOrder" min="0">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-bold">Starttid (ledig lucka)</label>
+                        <select class="form-select" id="springEditStarterSlot"></select>
+                    </div>
+                </div>
+                <div class="form-text">Endast lediga tider går att välja. Övriga skyttars startnummer och tider påverkas inte.</div>
+                <hr>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="springEditStarterDns">
+                    <label class="form-check-label" for="springEditStarterDns">DNS – skytten startar inte (frigör starttiden)</label>
+                </div>
+                <div class="alert alert-danger mt-3 mb-0 py-2 d-none" id="springEditStarterError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="springEditStarterSaveBtn" onclick="springSaveStarterEdit()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Flatpickr for time picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -148,7 +187,8 @@ async function springLoadAll() {
                     breakAfterEvery: list.breakAfterEvery,
                     breakDuration: list.breakDuration,
                     starters: list.starters || [],
-                    generatedDate: list.generatedDate
+                    generatedDate: list.generatedDate,
+                    isOfficial: list.isOfficial === true
                 });
             }
         }
@@ -253,10 +293,18 @@ function springRenderOneCard(card, assignedMap) {
                     onchange="springUpdateCardName('${card.tempId}', this.value)"
                     placeholder="Listnamn...">
                 ${statusBadge}
+                ${card.nodeId ? (card.isOfficial
+                    ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Officiell</span>'
+                    : '<span class="badge bg-secondary"><i class="bi bi-hourglass-split me-1"></i>Preliminär</span>') : ''}
             </div>
-            <button class="btn btn-outline-danger btn-sm" onclick="springDeleteList('${card.tempId}')" title="Ta bort startlista">
-                <i class="bi bi-trash"></i>
-            </button>
+            <div class="d-flex align-items-center gap-2">
+                ${card.nodeId ? (card.isOfficial
+                    ? `<button class="btn btn-outline-secondary btn-sm" onclick="springToggleOfficial('${card.tempId}', false)" title="Gör startlistan preliminär igen"><i class="bi bi-arrow-counterclockwise me-1"></i>Gör preliminär</button>`
+                    : `<button class="btn btn-success btn-sm" onclick="springToggleOfficial('${card.tempId}', true)" title="Publicera som officiell startlista"><i class="bi bi-check-circle me-1"></i>Publicera officiell</button>`) : ''}
+                <button class="btn btn-outline-danger btn-sm" onclick="springDeleteList('${card.tempId}')" title="Ta bort startlista">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
         </div>
         <div class="card-body">
             <!-- Class checkboxes -->
@@ -306,11 +354,13 @@ function springBuildStartersTable(card) {
     if (!card.starters || card.starters.length === 0) return '';
 
     const interval = card.defaultInterval || '01:00';
+    const canEdit = !!card.nodeId; // only persisted lists can be edited per-shooter
+    const colCount = canEdit ? 7 : 6;
     let html = `
         <div class="table-responsive" style="max-height:400px;overflow-y:auto">
             <table class="table table-sm table-striped table-hover spring-starters-table mb-0">
                 <thead class="table-light" style="position:sticky;top:0;z-index:1">
-                    <tr><th>#</th><th>Starttid</th><th>Namn</th><th>Klubb</th><th>Vapen</th><th>Klass</th></tr>
+                    <tr><th>#</th><th>Starttid</th><th>Namn</th><th>Klubb</th><th>Vapen</th><th>Klass</th>${canEdit ? '<th></th>' : ''}</tr>
                 </thead>
                 <tbody>`;
 
@@ -320,10 +370,15 @@ function springBuildStartersTable(card) {
             const gap = springParseTimeDiff(prevTime, s.startTime);
             const normalInterval = springParseTimeMM(interval);
             if (gap > normalInterval * 1.5) {
-                html += `<tr class="table-warning"><td colspan="6" class="text-center small fw-bold py-1">
+                html += `<tr class="table-warning"><td colspan="${colCount}" class="text-center small fw-bold py-1">
                     <i class="bi bi-pause-circle me-1"></i>Paus</td></tr>`;
             }
         }
+        const editCell = canEdit
+            ? `<td class="text-end"><button class="btn btn-outline-primary btn-sm py-0 px-1"
+                   onclick="springEditStarter('${card.tempId}', ${s.memberId}, '${s.weaponClass}')"
+                   title="Redigera startnummer och starttid"><i class="bi bi-pencil"></i></button></td>`
+            : '';
         html += `<tr>
             <td>${s.startOrder}</td>
             <td class="fw-bold" style="font-family:monospace">${s.startTime}</td>
@@ -331,12 +386,119 @@ function springBuildStartersTable(card) {
             <td>${escapeHtml(s.club)}</td>
             <td><span class="badge bg-secondary">${s.weaponClass}</span></td>
             <td>${formatAgeSpan(s.ageGenderClass)}</td>
+            ${editCell}
         </tr>`;
         prevTime = s.startTime;
     }
 
     html += '</tbody></table></div>';
     return html;
+}
+
+// ===== Publish toggle: preliminary <-> official (per list, independent) =====
+async function springToggleOfficial(tempId, makeOfficial) {
+    const card = springLocalCards.find(c => c.tempId === tempId);
+    if (!card || !card.nodeId) return;
+    try {
+        const r = await fetch('/umbraco/surface/Springskytte/SetSpringskytteStartListOfficial', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify({ competitionId: parseInt(springCompId, 10), nodeId: card.nodeId, isOfficial: makeOfficial })
+        });
+        const d = await r.json();
+        if (d.success) { card.isOfficial = makeOfficial; springRenderCards(); }
+        else alert(d.message || 'Kunde inte ändra status.');
+    } catch (e) { alert('Ett fel uppstod.'); }
+}
+
+// ===== Per-shooter edit (items 3 & 4): move to a FREE slot (no collisions) + DNS =====
+let springEditCtx = null;
+
+const springTokenEl = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+async function springEditStarter(tempId, memberId, weaponClass) {
+    const card = springLocalCards.find(c => c.tempId === tempId);
+    if (!card || !card.nodeId) return;
+    const s = (card.starters || []).find(x => x.memberId === memberId && x.weaponClass === weaponClass);
+    if (!s) return;
+
+    springEditCtx = { tempId, nodeId: card.nodeId, memberId, weaponClass, currentTime: s.startTime || '', currentOrder: s.startOrder, wasDns: false };
+    document.getElementById('springEditStarterName').textContent = s.name || ('#' + s.startOrder);
+    document.getElementById('springEditStarterClass').textContent = `${s.weaponClass} · ${formatAgeSpan(s.ageGenderClass)}`;
+    document.getElementById('springEditStarterOrder').value = s.startOrder;
+    const errEl = document.getElementById('springEditStarterError');
+    errEl.classList.add('d-none'); errEl.textContent = '';
+
+    // Fetch competition-wide free slots + this shooter's DNS state in one call.
+    const slotSel = document.getElementById('springEditStarterSlot');
+    slotSel.innerHTML = `<option value="${s.startTime || ''}">Behåll ${((s.startTime||'').substring(0,8)) || '—'}</option>`;
+    try {
+        const st = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStarterState?competitionId=${springCompId}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json());
+        if (st.success) {
+            // Only offer free slots of the SAME weapon class — classes are never mixed.
+            (st.freeSlots || []).filter(f => f.weaponClass === weaponClass).forEach(f => {
+                const kind = f.kind === 'dns' ? ('ledig – ' + (f.freedFrom || 'DNS')) : (f.kind === 'efter' ? 'efter sista' : 'paus');
+                const opt = document.createElement('option');
+                opt.value = f.time; opt.textContent = `${(f.time||'').substring(0,5)} – ${kind}`;
+                slotSel.appendChild(opt);
+            });
+            const me = (st.starters || []).find(x => x.memberId === memberId && x.weaponClass === weaponClass);
+            springEditCtx.wasDns = !!(me && me.isDns);
+        }
+    } catch (e) { /* keep the "behåll" option only */ }
+    document.getElementById('springEditStarterDns').checked = springEditCtx.wasDns;
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('springEditStarterModal')).show();
+}
+
+async function springSaveStarterEdit() {
+    if (!springEditCtx) return;
+    const btn = document.getElementById('springEditStarterSaveBtn');
+    const errEl = document.getElementById('springEditStarterError');
+    const fail = (m) => { errEl.textContent = m; errEl.classList.remove('d-none'); btn.disabled = false; };
+    errEl.classList.add('d-none'); errEl.textContent = '';
+
+    const startOrder = parseInt(document.getElementById('springEditStarterOrder').value, 10);
+    const startTime = document.getElementById('springEditStarterSlot').value || springEditCtx.currentTime;
+    const makeDns = document.getElementById('springEditStarterDns').checked;
+    if (isNaN(startOrder) || startOrder < 0) { fail('Ogiltigt startnummer.'); return; }
+
+    // Client-side duplicate-number guard (server also enforces).
+    const card = springLocalCards.find(c => c.tempId === springEditCtx.tempId);
+    if (startOrder !== springEditCtx.currentOrder && card) {
+        const dup = (card.starters || []).some(x => !(x.memberId === springEditCtx.memberId && x.weaponClass === springEditCtx.weaponClass)
+            && x.weaponClass === springEditCtx.weaponClass && x.startOrder === startOrder);
+        if (dup) { fail(`Startnummer ${startOrder} används redan i vapengrupp ${springEditCtx.weaponClass}.`); return; }
+    }
+
+    btn.disabled = true;
+    try {
+        // DNS change first (if any).
+        if (makeDns !== springEditCtx.wasDns) {
+            const dnsResp = await fetch('/umbraco/surface/Springskytte/SetSpringskytteDns', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': springTokenEl() },
+                body: JSON.stringify({ competitionId: parseInt(springCompId, 10), memberId: springEditCtx.memberId, weaponClass: springEditCtx.weaponClass, isDns: makeDns })
+            }).then(r => r.json());
+            if (!dnsResp.success) { fail(dnsResp.message || 'Kunde inte ändra DNS.'); return; }
+        }
+        // Number/time update — skip when marking DNS (their slot is being freed anyway).
+        if (!makeDns) {
+            const resp = await fetch('/umbraco/surface/Springskytte/UpdateSpringskytteStarter', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': springTokenEl() },
+                body: JSON.stringify({ competitionId: parseInt(springCompId, 10), nodeId: springEditCtx.nodeId, memberId: springEditCtx.memberId, weaponClass: springEditCtx.weaponClass, startOrder, startTime })
+            }).then(r => r.json());
+            if (!resp.success) { fail(resp.message || 'Kunde inte spara.'); return; }
+        }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('springEditStarterModal')).hide();
+        await springLoadAll(); // refresh cards (status + times)
+    } catch (e) {
+        fail('Ett fel uppstod.');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 // ===== Card state management =====

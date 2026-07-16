@@ -1,0 +1,248 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    Layout = null;
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "0";
+    var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Tävling";
+    var tokens = Antiforgery.GetAndStoreTokens(Context);
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tidtagning &amp; straff – @competitionName</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <style>
+        body { padding:1rem; background:#f8f9fa; }
+        .wrap { max-width:1100px; margin:0 auto; }
+        .finish-input { width:110px; font-family:monospace; }
+        .adj-badge { font-size:.75rem; }
+        td { vertical-align:middle; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="d-flex justify-content-between align-items-center mb-1">
+        <h1 class="h4 mb-0"><i class="bi bi-stopwatch me-2"></i>Tidtagning &amp; straff</h1>
+        <a href="/startlinje/@competitionId" class="btn btn-outline-secondary btn-sm" target="_blank"><i class="bi bi-flag me-1"></i>Startlinje</a>
+    </div>
+    <div class="text-muted mb-3">@competitionName</div>
+
+    <div class="mb-2">
+        <input type="text" id="search" class="form-control form-control-sm" style="max-width:280px" placeholder="Sök namn eller startnummer…">
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle bg-white">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:44px">#</th>
+                    <th style="width:90px">Starttid</th>
+                    <th>Namn</th>
+                    <th style="width:90px">Klass</th>
+                    <th style="width:230px">Måltid</th>
+                    <th>Straff / avdrag</th>
+                </tr>
+            </thead>
+            <tbody id="rows"><tr><td colspan="6" class="text-center text-muted py-4">Laddar…</td></tr></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Adjustment modal -->
+<div class="modal fade" id="adjModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Straff / tidsavdrag</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3"><strong id="adjName">–</strong> <span class="text-muted" id="adjClass"></span></p>
+                <div class="btn-group w-100 mb-3" role="group">
+                    <input type="radio" class="btn-check" name="adjType" id="adjTypePenalty" value="Penalty" checked>
+                    <label class="btn btn-outline-danger" for="adjTypePenalty">Straff (+ min)</label>
+                    <input type="radio" class="btn-check" name="adjType" id="adjTypeReduction" value="Reduction">
+                    <label class="btn btn-outline-success" for="adjTypeReduction">Tidsavdrag (− tid)</label>
+                </div>
+                <div id="penaltyFields">
+                    <label class="form-label small fw-bold">Antal straffpoäng (1 poäng = 1 minut)</label>
+                    <input type="number" class="form-control mb-2" id="adjPoints" value="1" min="1" max="60">
+                </div>
+                <div id="reductionFields" style="display:none">
+                    <label class="form-label small fw-bold">Tid att dra av (MM:SS)</label>
+                    <input type="text" class="form-control mb-2" id="adjTime" placeholder="MM:SS">
+                </div>
+                <label class="form-label small fw-bold">Anledning</label>
+                <select class="form-select mb-2" id="adjReasonSelect"></select>
+                <input type="text" class="form-control" id="adjReasonText" placeholder="Egen anledning (valfritt)">
+                <div class="alert alert-danger mt-3 mb-0 py-2 d-none" id="adjError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="adjSave"><i class="bi bi-check-lg me-1"></i>Lägg till</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<input type="hidden" id="afToken" value="@tokens.RequestToken" />
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script>
+const COMP = @competitionId;
+const TOKEN = document.getElementById('afToken').value;
+const PENALTY_REASONS = ['Vapenhantering utanför skjutområde', 'Oproppat vapen efter skjutning', 'För tidig start', 'Otillåten utrustning', 'Ordningsförseelse', 'Annat'];
+const REDUCTION_REASONS = ['Bana blockerad – väntan', 'Avbrott/incident', 'Tekniskt fel på bana', 'Väntan pga föregående skytt', 'Funktionärsfel', 'Annat'];
+let starters = [];
+let adjByKey = {}; // memberId|wc -> [adjustments]
+let adjCtx = null;
+
+function key(m, w) { return m + '|' + w; }
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+function hmsToSec(t){ if(!t) return 1e9; const p=String(t).split(':').map(Number); return p.length===3?p[0]*3600+p[1]*60+p[2]:(p.length===2?p[0]*3600+p[1]*60:1e9); }
+
+async function loadAll() {
+    const [stateR, adjR] = await Promise.all([
+        fetch(`/umbraco/surface/Springskytte/GetSpringskytteStarterState?competitionId=${COMP}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()),
+        fetch(`/umbraco/surface/Springskytte/GetSpringskytteAdjustments?competitionId=${COMP}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json())
+    ]);
+    starters = (stateR.success ? stateR.starters : []).slice().sort((a,b)=>hmsToSec(a.startTime)-hmsToSec(b.startTime));
+    adjByKey = {};
+    if (adjR.success) for (const a of adjR.adjustments) { (adjByKey[key(a.memberId, a.weaponClass)] ||= []).push(a); }
+    render();
+}
+
+function adjBadges(m, w) {
+    const list = adjByKey[key(m, w)] || [];
+    if (!list.length) return '<span class="text-muted small">–</span>';
+    return list.map(a => {
+        const isPen = a.adjustmentType === 'Penalty';
+        let label;
+        if (isPen) { label = '+' + a.points + ' min'; }
+        else { const mag = Math.abs(a.seconds); label = '−' + (mag % 60 === 0 ? (mag / 60) + ' min' : mag + ' s'); }
+        const cls = isPen ? 'bg-danger' : 'bg-success';
+        return `<span class="badge ${cls} adj-badge me-1" title="${esc(a.reason||'')}">${label}
+            <a href="#" class="text-white ms-1" onclick="delAdj(${a.id});return false;" title="Ta bort">&times;</a></span>`;
+    }).join('');
+}
+
+function render() {
+    const q = (document.getElementById('search').value || '').toLowerCase().trim();
+    const rows = starters.filter(s => !q || (s.name||'').toLowerCase().includes(q) || String(s.startOrder).includes(q));
+    document.getElementById('rows').innerHTML = rows.map(s => `
+        <tr data-key="${key(s.memberId, s.weaponClass)}">
+            <td>${s.startOrder}</td>
+            <td style="font-family:monospace">${(s.startTime||'').substring(0,8)}</td>
+            <td>${esc(s.name)}${s.isDns?' <span class="badge bg-dark">DNS</span>':''}${s.checkedIn===false?' <span class="badge bg-warning text-dark">ej incheckad</span>':''}</td>
+            <td>${s.weaponClass} ${esc(s.ageGenderClass)}</td>
+            <td>
+                <div class="d-flex gap-1 align-items-center">
+                    <input type="text" class="form-control form-control-sm finish-input" placeholder="Måltid" id="ft_${s.memberId}_${s.weaponClass}" ${s.isDns?'disabled':''}>
+                    <button class="btn btn-primary btn-sm" onclick="saveFinish(${s.memberId},'${s.weaponClass}')" title="Spara måltid" ${s.isDns?'disabled':''}><i class="bi bi-check-lg"></i></button>
+                    <button class="btn btn-sm ${s.isDns?'btn-secondary':'btn-outline-warning'}" onclick="tkToggleDns(${s.memberId},'${s.weaponClass}',${s.isDns?'false':'true'})" title="${s.isDns?'Ångra DNS':'Markera DNS (startar inte)'}">${s.isDns?'Ångra DNS':'DNS'}</button>
+                    <span class="small" id="ftmsg_${s.memberId}_${s.weaponClass}"></span>
+                </div>
+            </td>
+            <td>
+                ${adjBadges(s.memberId, s.weaponClass)}
+                <button class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1" onclick="openAdj(${s.memberId},'${s.weaponClass}')" title="Lägg till straff/avdrag"><i class="bi bi-plus-lg"></i></button>
+            </td>
+        </tr>`).join('') || '<tr><td colspan="6" class="text-center text-muted py-4">Inga startande. Generera startlista först.</td></tr>';
+
+    rows.forEach(s => {
+        const el = document.getElementById(`ft_${s.memberId}_${s.weaponClass}`);
+        if (el) flatpickr(el, { locale:'sv', enableTime:true, noCalendar:true, enableSeconds:true, dateFormat:'H:i:S', time_24hr:true, allowInput:true });
+    });
+}
+
+async function saveFinish(memberId, wc) {
+    const msg = document.getElementById(`ftmsg_${memberId}_${wc}`);
+    const val = (document.getElementById(`ft_${memberId}_${wc}`).value || '').trim();
+    if (!val) { msg.innerHTML = '<span class="text-warning">Ange måltid</span>'; return; }
+    msg.textContent = '…';
+    try {
+        const r = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteFinishTime', {
+            method:'POST', headers:{'Content-Type':'application/json','RequestVerificationToken':TOKEN},
+            body: JSON.stringify({ competitionId: COMP, memberId, weaponClass: wc, finishTimeInput: val })
+        });
+        const d = await r.json();
+        msg.innerHTML = d.success ? '<span class="text-success"><i class="bi bi-check-circle"></i></span>' : `<span class="text-danger">${esc(d.message||'Fel')}</span>`;
+    } catch (e) { msg.innerHTML = '<span class="text-danger">Fel</span>'; }
+}
+
+async function tkToggleDns(memberId, wc, makeDns) {
+    if (makeDns && !confirm('Markera skytten som DNS? Starttiden frigörs och kan ges till en annan skytt.')) return;
+    try {
+        const d = await fetch('/umbraco/surface/Springskytte/SetSpringskytteDns', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+            body: JSON.stringify({ competitionId: COMP, memberId, weaponClass: wc, isDns: makeDns })
+        }).then(r => r.json());
+        if (d.success) await loadAll();
+        else alert(d.message || 'Kunde inte ändra DNS.');
+    } catch (e) { alert('Ett fel uppstod.'); }
+}
+
+function openAdj(memberId, wc) {
+    const s = starters.find(x => x.memberId === memberId && x.weaponClass === wc);
+    adjCtx = { memberId, wc };
+    document.getElementById('adjName').textContent = s ? s.name : ('#' + memberId);
+    document.getElementById('adjClass').textContent = s ? (s.weaponClass + ' ' + s.ageGenderClass) : '';
+    document.getElementById('adjTypePenalty').checked = true;
+    document.getElementById('adjPoints').value = 1;
+    document.getElementById('adjTime').value = '';
+    document.getElementById('adjReasonText').value = '';
+    syncAdjType();
+    const err = document.getElementById('adjError'); err.classList.add('d-none'); err.textContent = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('adjModal')).show();
+}
+
+function syncAdjType() {
+    const isPen = document.getElementById('adjTypePenalty').checked;
+    document.getElementById('penaltyFields').style.display = isPen ? '' : 'none';
+    document.getElementById('reductionFields').style.display = isPen ? 'none' : '';
+    const sel = document.getElementById('adjReasonSelect');
+    sel.innerHTML = (isPen ? PENALTY_REASONS : REDUCTION_REASONS).map(r => `<option>${esc(r)}</option>`).join('');
+}
+document.getElementById('adjTypePenalty').addEventListener('change', syncAdjType);
+document.getElementById('adjTypeReduction').addEventListener('change', syncAdjType);
+
+document.getElementById('adjSave').addEventListener('click', async () => {
+    if (!adjCtx) return;
+    const err = document.getElementById('adjError'); err.classList.add('d-none');
+    const isPen = document.getElementById('adjTypePenalty').checked;
+    const selReason = document.getElementById('adjReasonSelect').value;
+    const freeReason = (document.getElementById('adjReasonText').value || '').trim();
+    const reason = freeReason ? (selReason === 'Annat' ? freeReason : selReason + ' – ' + freeReason) : selReason;
+    const body = { competitionId: COMP, memberId: adjCtx.memberId, weaponClass: adjCtx.wc,
+        adjustmentType: isPen ? 'Penalty' : 'Reduction', reason };
+    if (isPen) body.points = parseInt(document.getElementById('adjPoints').value, 10);
+    else body.timeInput = (document.getElementById('adjTime').value || '').trim();
+    try {
+        const r = await fetch('/umbraco/surface/Springskytte/AddSpringskytteAdjustment', {
+            method:'POST', headers:{'Content-Type':'application/json','RequestVerificationToken':TOKEN}, body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (d.success) { bootstrap.Modal.getOrCreateInstance(document.getElementById('adjModal')).hide(); await loadAll(); }
+        else { err.textContent = d.message || 'Kunde inte spara.'; err.classList.remove('d-none'); }
+    } catch (e) { err.textContent = 'Ett fel uppstod.'; err.classList.remove('d-none'); }
+});
+
+async function delAdj(id) {
+    if (!confirm('Ta bort denna post?')) return;
+    try {
+        await fetch('/umbraco/surface/Springskytte/DeleteSpringskytteAdjustment', {
+            method:'POST', headers:{'Content-Type':'application/json','RequestVerificationToken':TOKEN},
+            body: JSON.stringify({ id, competitionId: COMP })
+        });
+        await loadAll();
+    } catch (e) { /* ignore */ }
+}
+
+document.getElementById('search').addEventListener('input', render);
+loadAll();
+</script>
+</body>
+</html>

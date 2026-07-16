@@ -842,6 +842,8 @@
                 }
 
                 const springAwardingMedals = data.isAwardingStandardMedals === true;
+                // Only show the manual Straff/Avdrag columns when the competition actually has any.
+                const springAnyAdjust = data.classGroups.some(g => g.shooters.some(s => (s.penaltyPoints || 0) > 0 || (s.reductionSeconds || 0) > 0));
                 let html = '';
                 data.classGroups.forEach(group => {
                     html += `
@@ -858,6 +860,7 @@
                                         <th>Löptid</th>
                                         <th>Skjutp.</th>
                                         <th>Tillägg</th>
+                                        ${springAnyAdjust ? '<th>Straff</th><th>Avdrag</th>' : ''}
                                         <th>Sluttid</th>
                                         ${springAwardingMedals ? '<th>Medalj</th>' : ''}
                                     </tr>
@@ -880,6 +883,7 @@
                                         <td class="text-center">${s.sprintTimeDisplay || '-'}</td>
                                         <td class="text-center">${s.shootingScore ?? '-'}</td>
                                         <td class="text-center">${s.penaltyTimeDisplay || '-'}</td>
+                                        ${springAnyAdjust ? `<td class="text-center">${s.penaltyPoints ? s.penaltyMinutesDisplay : '-'}</td><td class="text-center">${s.reductionSeconds ? s.reductionDisplay : '-'}</td>` : ''}
                                         <td class="text-center"><strong>${s.totalTimeDisplay || '-'}</strong></td>
                                         ${springAwardingMedals ? `<td class="text-center">${medal}</td>` : ''}
                                     </tr>`;

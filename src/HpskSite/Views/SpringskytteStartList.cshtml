@@ -1,0 +1,165 @@
+@using HpskSite.CompetitionTypes.Springskytte.Models
+@model SpringskytteStartListPageModel
+@{
+    // Standalone Springskytte start-list page (routed /startlista/{compId}[/{slug}]).
+    // Chromeless. Replaces the fragile name-derived Umbraco child-node URL that 404'd.
+    Layout = null;
+    var selected = string.IsNullOrEmpty(Model.SelectedSlug)
+        ? null
+        : Model.Lists.FirstOrDefault(l => string.Equals(l.Slug, Model.SelectedSlug, StringComparison.OrdinalIgnoreCase));
+    var pageTitle = selected != null
+        ? $"{selected.ListName} – {Model.CompetitionName}"
+        : $"Startlistor – {Model.CompetitionName}";
+    var intervalSec = selected != null ? IntervalSeconds(selected.Config.DefaultInterval) : 60;
+}
+@functions {
+    static int ParseTimeToSeconds(string? time)
+    {
+        if (string.IsNullOrEmpty(time)) return 0;
+        var parts = time.Split(':');
+        if (parts.Length == 3 && int.TryParse(parts[0], out var h) && int.TryParse(parts[1], out var m) && int.TryParse(parts[2], out var s))
+            return h * 3600 + m * 60 + s;
+        if (parts.Length == 2 && int.TryParse(parts[0], out var h2) && int.TryParse(parts[1], out var m2))
+            return h2 * 3600 + m2 * 60;
+        return 0;
+    }
+
+    static int IntervalSeconds(string? interval)
+    {
+        if (string.IsNullOrEmpty(interval)) return 60;
+        var parts = interval.Split(':');
+        if (parts.Length == 2 && int.TryParse(parts[0], out var m) && int.TryParse(parts[1], out var s))
+            return Math.Max(1, m * 60 + s);
+        return 60;
+    }
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@pageTitle</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body { background:#f8f9fa; padding:1rem; }
+        .sl-wrap { max-width: 1000px; margin: 0 auto; }
+        table.start-list-table { width:100%; border-collapse:collapse; background:#fff; }
+        table.start-list-table th, table.start-list-table td { border:1px solid #dee2e6; padding:4px 8px; font-size:14px; }
+        table.start-list-table th { background:#f1f3f5; text-align:left; }
+        .start-list-table td.time { font-family:monospace; font-weight:bold; }
+        .start-list-table tr.current-user { background:#d1e7dd; }
+        .start-list-table tr.same-club { background:#e7f1ff; }
+        .paus-row td { background:#fff3cd; text-align:center; font-weight:bold; font-size:12px; }
+        .list-header { border-left:4px solid #0d6efd; background:#eef2f7; padding:8px 12px; font-weight:600; margin-bottom:0; }
+        @@media print {
+            body { background:#fff; padding:0; }
+            .no-print { display:none !important; }
+            a { text-decoration:none; color:#000; }
+        }
+    </style>
+</head>
+<body>
+<div class="sl-wrap">
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h1 class="h3 mb-1"><i class="bi bi-list-ol me-2"></i>@(selected != null ? "Startlista" : "Startlistor")</h1>
+            <div class="text-muted">@Model.CompetitionName</div>
+        </div>
+        <div class="no-print d-flex gap-2">
+            @if (selected != null)
+            {
+                <a href="/startlista/@Model.CompetitionId" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-arrow-left me-1"></i>Alla startlistor
+                </a>
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="window.print()">
+                    <i class="bi bi-printer me-1"></i>Skriv ut
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (!Model.Lists.Any())
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-hourglass-split me-1"></i>Ingen startlista har skapats för den här tävlingen än.
+        </div>
+    }
+    else if (selected == null)
+    {
+        <div class="row g-3">
+            @foreach (var l in Model.Lists)
+            {
+                var first = l.Config.Starters.FirstOrDefault()?.StartTime ?? "";
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body d-flex justify-content-between align-items-center">
+                            <div>
+                                <h2 class="h5 mb-1">@l.ListName</h2>
+                                <div class="text-muted small">
+                                    @l.Config.Starters.Count starter
+                                    @if (!string.IsNullOrEmpty(first)) { <span>· första start @first</span> }
+                                    @if (!l.IsOfficial) { <span class="badge bg-secondary ms-1">Preliminär</span> }
+                                </div>
+                            </div>
+                            <a href="/startlista/@Model.CompetitionId/@l.Slug" class="btn btn-info">
+                                <i class="bi bi-list-ol me-1"></i>Visa
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="list-header mb-0">@selected.ListName</div>
+        <table class="start-list-table mb-3">
+            <thead>
+                <tr>
+                    <th style="width:48px" class="text-center">#</th>
+                    <th style="width:110px">Starttid</th>
+                    <th>Namn</th>
+                    <th>Förening</th>
+                    <th style="width:70px" class="text-center">Vapen</th>
+                    <th style="width:90px">Klass</th>
+                </tr>
+            </thead>
+            <tbody>
+                @{ string? prevTime = null; }
+                @foreach (var s in selected.Config.Starters)
+                {
+                    if (prevTime != null && !string.IsNullOrEmpty(s.StartTime)
+                        && (ParseTimeToSeconds(s.StartTime) - ParseTimeToSeconds(prevTime)) > intervalSec * 1.5)
+                    {
+                        <tr class="paus-row"><td colspan="6">Paus</td></tr>
+                    }
+                    var rowClass = "";
+                    if (!string.IsNullOrEmpty(Model.CurrentMemberName) && s.Name == Model.CurrentMemberName)
+                        rowClass = "current-user";
+                    else if (!string.IsNullOrEmpty(Model.CurrentMemberClub) && s.Club == Model.CurrentMemberClub)
+                        rowClass = "same-club";
+                    <tr class="@rowClass">
+                        <td class="text-center">@s.StartOrder</td>
+                        <td class="time">@s.StartTime</td>
+                        <td>@s.Name</td>
+                        <td>@HpskSite.Helpers.ClubNameHelper.Shorten(s.Club)</td>
+                        <td class="text-center">@s.WeaponClass</td>
+                        <td>@s.AgeGenderClass</td>
+                    </tr>
+                    prevTime = s.StartTime;
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (selected != null && !selected.IsOfficial)
+    {
+        <div class="text-muted small mt-4 no-print">
+            <i class="bi bi-info-circle me-1"></i>Preliminär startlista – kan komma att ändras.
+        </div>
+    }
+</div>
+</body>
+</html>

@@ -1360,7 +1360,11 @@
 										}
 										var hasCustomName = !string.IsNullOrEmpty(slName) && slName != "Startlista";
 										var buttonText = hasCustomName ? $"Startlista: {slName}" : "Visa startlista";
-										<a href="@sl.Url()" class="btn btn-info w-100 mb-1" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
+										// Stable routed URL (/startlista/{compId}/{slug}) instead of the fragile
+										// name-derived node URL that 404'd for nested/club-hosted competitions.
+										var slSlug = HpskSite.Helpers.SlugHelper.Slugify(slName);
+										var slUrl = string.IsNullOrEmpty(slSlug) ? $"/startlista/{Model.Id}" : $"/startlista/{Model.Id}/{slSlug}";
+										<a href="@slUrl" class="btn btn-info w-100 mb-1" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
 											<i class="bi bi-list-ol me-1"></i> @buttonText
 										</a>
 									}

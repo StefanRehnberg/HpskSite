@@ -84,7 +84,7 @@ if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin)
 - ~10 endpoints for competition registration management (cashier desk + admin)
 - GET: GetCompetitionRegistrations, GetActiveCompetitions, GetWalkInStartListTeams
 - POST: UpdateCompetitionRegistration, DeleteCompetitionRegistration, ExportCompetitionRegistrations, AddLateRegistration, TransferRegistration, SetCheckedIn, AssignWalkInToStartListTeam
-- Used by: Views/Partials/RegistrationManagement.cshtml, Views/Partials/CompetitionRegistrationManagement.cshtml, Views/Partials/CompetitionExportManagement.cshtml, Views/CompetitionManagement.cshtml
+- Used by: Views/Partials/CompetitionRegistrationManagement.cshtml, Views/Partials/CompetitionExportManagement.cshtml, Views/CompetitionManagement.cshtml
 
 **Benefits of Refactoring:**
 - Clear separation of concerns

@@ -86,6 +86,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public int PenaltyMultiplier { get; set; } = 1;
         public decimal? TotalTimeSeconds { get; set; }
 
+        // Manual range-master time adjustments (SpringskytteTimeAdjustment ledger).
+        // Folded into TotalTimeSeconds by ApplyTimeAdjustments so ranking reflects them.
+        public int PenaltyPoints { get; set; }      // rule-offence penalty points (each = 60 s)
+        public int ReductionSeconds { get; set; }   // compensation subtracted (stored positive)
+
         // Shot details per stop/series
         public List<List<string>> ShotSeries { get; set; } = new();
 
@@ -100,6 +105,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string PenaltyTimeDisplay => ShootingScore > 0
             ? FormatTime(ShootingScore * PenaltyMultiplier * 60m)
             : "0:00";
+        // Manual penalty minutes (rule offences) and reductions, shown separately from Skjutpoäng.
+        public string PenaltyMinutesDisplay => PenaltyPoints > 0 ? FormatTime(PenaltyPoints * 60m) : "0:00";
+        public string ReductionDisplay => ReductionSeconds > 0 ? "-" + FormatTime(ReductionSeconds) : "0:00";
         public string TotalTimeDisplay => FormatTime(TotalTimeSeconds);
 
         // For tiebreaker: hits per stop from last to first
@@ -218,6 +226,98 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
     {
         public int CompetitionId { get; set; }
         public int NodeId { get; set; }
+    }
+
+    /// <summary>
+    /// Edit a single starter's start number and/or start time within an existing start list,
+    /// without regenerating (which would reshuffle everyone). Identity = (MemberId, WeaponClass).
+    /// </summary>
+    public class SpringskytteUpdateStarterRequest
+    {
+        public int CompetitionId { get; set; }
+        public int NodeId { get; set; }
+        public int MemberId { get; set; }
+        public string WeaponClass { get; set; } = "";
+        public int? StartOrder { get; set; }      // new start number (null = leave unchanged)
+        public string? StartTime { get; set; }    // "HH:mm" or "HH:mm:ss" (null/empty = leave unchanged)
+    }
+
+    /// <summary>
+    /// Mark a shooter DNS (will not start) or clear it. DNS is what frees a start slot — distinct
+    /// from Närvaro (arrival). Un-DNS restores the shooter as scheduled (RM re-assigns a slot if the
+    /// old one was taken). Settable from the starter screen, timekeeper, and start-list edit modal.
+    /// </summary>
+    public class SpringskytteDnsRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string WeaponClass { get; set; } = "";
+        public bool IsDns { get; set; }
+    }
+
+    /// <summary>
+    /// Toggle a Springskytte start list between preliminary and official (published). Each list
+    /// (Seniorer, Juniorer, …) is toggled independently — unlike Precision's single official list.
+    /// </summary>
+    public class SpringskytteSetOfficialRequest
+    {
+        public int CompetitionId { get; set; }
+        public int NodeId { get; set; }
+        public bool IsOfficial { get; set; }
+    }
+
+    /// <summary>
+    /// Time-adjustment ledger: manual range-master penalties (rule offences, +1 min each) and
+    /// reductions (compensation, −time), kept separate from the automatic Skjutpoäng (miss) penalty.
+    /// Each row is one adjustment with its own reason, folded into the shooter's total time.
+    /// </summary>
+    [TableName("SpringskytteTimeAdjustment")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class SpringskytteTimeAdjustment
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        [MaxLength(10)]
+        public string WeaponClass { get; set; } = "";
+        [MaxLength(20)]
+        public string AdjustmentType { get; set; } = "";  // "Penalty" | "Reduction"
+        public int? Points { get; set; }                   // penalty points (each 60 s); null for reduction
+        public int Seconds { get; set; }                   // signed applied delta (penalty +, reduction −)
+        [MaxLength(500)]
+        public string? Reason { get; set; }
+        public int EnteredBy { get; set; }
+        public DateTime EnteredAt { get; set; }
+    }
+
+    public class SpringskytteAddAdjustmentRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string WeaponClass { get; set; } = "";
+        public string AdjustmentType { get; set; } = "";  // "Penalty" | "Reduction"
+        public int? Points { get; set; }                   // penalties: number of points (each 60 s)
+        public string? TimeInput { get; set; }             // reductions: "MM:SS" or "M:SS"
+        public string? Reason { get; set; }
+    }
+
+    public class SpringskytteDeleteAdjustmentRequest
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+    }
+
+    /// <summary>
+    /// Field-scoped finish-time save for the timing role (item 5): updates only sprint/total time
+    /// (sprint = finish − start) and preserves the shots/score the scoring role entered.
+    /// </summary>
+    public class SpringskytteFinishTimeRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string WeaponClass { get; set; } = "";
+        public string? FinishTimeInput { get; set; }  // "HH:MM:SS"
+        public string? Status { get; set; }           // null, "DNS", "DNF"
     }
 
     /// <summary>

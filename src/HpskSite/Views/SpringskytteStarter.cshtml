@@ -1,0 +1,329 @@
+@using Microsoft.AspNetCore.Mvc.ViewFeatures
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    Layout = null;
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "0";
+    var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Tävling";
+    var tokens = Antiforgery.GetAndStoreTokens(Context);
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Startlinje – @competitionName</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body { background:#0b0f14; color:#e9edf1; font-family:system-ui,sans-serif; margin:0; padding:1rem; }
+        .wrap { max-width:1100px; margin:0 auto; }
+        .clock { font-variant-numeric:tabular-nums; font-weight:800; font-size:6rem; line-height:1; text-align:center; letter-spacing:2px; }
+        .clock-label { text-align:center; color:#8b98a5; text-transform:uppercase; letter-spacing:3px; font-size:.8rem; }
+        .next-card { border-radius:1rem; padding:1.5rem; text-align:center; transition:background .2s; background:#16202b; }
+        .next-card.warn { background:#3a3420; }
+        .next-card.hot  { background:#4a2a12; }
+        .next-card.go   { background:#123a1c; }
+        .countdown { font-variant-numeric:tabular-nums; font-weight:800; font-size:5rem; line-height:1; }
+        .bib { font-size:1.4rem; color:#8b98a5; }
+        .shooter-name { font-size:2.2rem; font-weight:700; }
+        .after { color:#8b98a5; }
+        .go-flash { animation:flash .5s ease-in-out 3; }
+        @@keyframes flash { 0%,100%{background:#123a1c} 50%{background:#1f8f3a} }
+        .rm-panel { background:#16202b; border-radius:.75rem; }
+        .table-dark-2 { --bs-table-bg:#111922; color:#e9edf1; }
+        .noshow { color:#ffb020; }
+        select, .form-control { background:#0b0f14; color:#e9edf1; border-color:#33414f; }
+        select:focus, .form-control:focus { background:#0b0f14; color:#e9edf1; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div><i class="bi bi-flag me-2"></i><span class="h5">@competitionName</span> <span class="text-secondary">— Startlinje</span></div>
+        <div>
+            <button id="soundBtn" class="btn btn-outline-warning btn-sm"><i class="bi bi-volume-up me-1"></i>Aktivera ljud</button>
+            <button id="rmBtn" class="btn btn-outline-info btn-sm"><i class="bi bi-tools me-1"></i>Startledare</button>
+        </div>
+    </div>
+
+    <div class="clock-label">Klockan är</div>
+    <div id="clock" class="clock mb-3">--:--:--</div>
+
+    <div class="row g-3 align-items-stretch">
+        <div class="col-md-7">
+            <div id="nextCard" class="next-card h-100">
+                <div class="bib">Nästa start <span id="nextTime"></span></div>
+                <div id="nextName" class="shooter-name">–</div>
+                <div id="nextClass" class="mb-2 text-secondary"></div>
+                <div id="countdown" class="countdown">--</div>
+                <div id="cueText" class="mt-2" style="height:1.6rem;font-weight:700"></div>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div class="next-card h-100">
+                <div class="bib">Därefter</div>
+                <div id="afterName" class="after" style="font-size:1.4rem;font-weight:600">–</div>
+                <div id="afterMeta" class="after"></div>
+                <hr style="border-color:#33414f">
+                <div class="bib">Kommande</div>
+                <div id="upcoming" class="after small text-start" style="max-height:150px;overflow:auto"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Range-master move tool (item 8) -->
+    <div id="rmPanel" class="rm-panel p-3 mt-3" style="display:none">
+        <h6 class="mb-3"><i class="bi bi-arrow-left-right me-1"></i>Flytta skytt / markera DNS</h6>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small">Skytt</label>
+                <select id="moveShooter" class="form-select form-select-sm"></select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Ledig lucka</label>
+                <select id="moveSlot" class="form-select form-select-sm"></select>
+            </div>
+            <div class="col-md-2">
+                <button id="moveApply" class="btn btn-primary btn-sm w-100"><i class="bi bi-arrow-left-right me-1"></i>Flytta</button>
+            </div>
+            <div class="col-md-3">
+                <button id="dnsToggle" class="btn btn-outline-warning btn-sm w-100"><i class="bi bi-x-octagon me-1"></i>Markera DNS</button>
+            </div>
+        </div>
+        <div class="form-text">En lucka är ledig bara om den är en paus, efter sista start, eller frigjord av en DNS. Ej incheckad betyder inte ledig.</div>
+        <div id="moveMsg" class="small mt-2"></div>
+    </div>
+</div>
+
+<input type="hidden" id="afToken" value="@tokens.RequestToken" />
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const COMP = @competitionId;
+let state = { starters: [], freeSlots: [] };
+
+// ---------- audio ----------
+let audioCtx = null;
+function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; } }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function beep(freq, durMs) {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = freq; o.type = 'square'; o.connect(g); g.connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + durMs / 1000);
+    o.start(t); o.stop(t + durMs / 1000 + 0.03);
+}
+document.getElementById('soundBtn').addEventListener('click', () => {
+    ensureAudio(); beep(880, 120);
+    document.getElementById('soundBtn').innerHTML = '<i class="bi bi-volume-up me-1"></i>Ljud på';
+    document.getElementById('soundBtn').classList.replace('btn-outline-warning', 'btn-warning');
+});
+document.getElementById('rmBtn').addEventListener('click', () => {
+    const el = document.getElementById('rmPanel');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    if (el.style.display === 'block') buildMovePickers();
+});
+
+// ---------- time helpers ----------
+function hmsToSec(t) {
+    if (!t) return null;
+    const p = String(t).split(':').map(Number);
+    if (p.length === 3) return p[0] * 3600 + p[1] * 60 + p[2];
+    if (p.length === 2) return p[0] * 3600 + p[1] * 60;
+    return null;
+}
+function nowSec() { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); }
+function fmtClock(d) { return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0'); }
+
+// ---------- data ----------
+async function loadState() {
+    try {
+        const r = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStarterState?competitionId=${COMP}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const d = await r.json();
+        if (d.success) { state.starters = d.starters || []; state.freeSlots = d.freeSlots || []; }
+    } catch (e) { /* keep last */ }
+}
+
+// ---------- cues ----------
+const CUES = [30, 10, 3, 2, 1, 0];
+let firedCues = {}; // key `${startTime}:${threshold}` -> true
+
+function fireCue(threshold) {
+    ensureAudio();
+    const cue = document.getElementById('cueText');
+    if (threshold === 30) { beep(880, 140); cue.textContent = '30 sekunder'; }
+    else if (threshold === 10) { beep(880, 140); cue.textContent = '10 sekunder'; }
+    else if (threshold === 3 || threshold === 2 || threshold === 1) { beep(660, 130); cue.textContent = String(threshold); }
+    else if (threshold === 0) {
+        beep(1320, 550); cue.textContent = 'START!';
+        const c = document.getElementById('nextCard'); c.classList.add('go-flash');
+        setTimeout(() => c.classList.remove('go-flash'), 1600);
+    }
+}
+
+// ---------- render ----------
+function upcomingStarters() {
+    const n = nowSec();
+    // upcoming = start time >= now-5s (keep the one just started visible briefly), ordered by time
+    return state.starters
+        .filter(s => { const t = hmsToSec(s.startTime); return t != null && t >= n - 5; })
+        .sort((a, b) => hmsToSec(a.startTime) - hmsToSec(b.startTime));
+}
+
+function tick() {
+    const d = new Date();
+    document.getElementById('clock').textContent = fmtClock(d);
+    const n = nowSec();
+    const up = upcomingStarters();
+    const next = up[0], after = up[1];
+
+    const card = document.getElementById('nextCard');
+    card.classList.remove('warn', 'hot', 'go');
+
+    if (next) {
+        const t = hmsToSec(next.startTime);
+        const rem = t - n;
+        document.getElementById('nextTime').textContent = '(' + next.startTime.substring(0,5) + ')';
+        document.getElementById('nextName').innerHTML = '<span class="bib">#' + next.startOrder + '</span> ' + escapeHtml(next.name)
+            + (next.checkedIn === false ? ' <span class="noshow">⚠ ej incheckad</span>' : '');
+        document.getElementById('nextClass').textContent = next.weaponClass + ' · ' + next.ageGenderClass + (next.listName ? ' · ' + next.listName : '');
+        document.getElementById('countdown').textContent = rem >= 0 ? fmtCountdown(rem) : 'GÅTT';
+        if (rem <= 3) card.classList.add('go'); else if (rem <= 10) card.classList.add('hot'); else if (rem <= 30) card.classList.add('warn');
+
+        // fire cues on crossing
+        for (const thr of CUES) {
+            const key = next.startTime + ':' + thr;
+            if (rem <= thr && rem >= thr - 1 && !firedCues[key]) { firedCues[key] = true; fireCue(thr); }
+        }
+    } else {
+        document.getElementById('nextTime').textContent = '';
+        document.getElementById('nextName').textContent = 'Inga fler starter';
+        document.getElementById('nextClass').textContent = '';
+        document.getElementById('countdown').textContent = '--';
+        document.getElementById('cueText').textContent = '';
+    }
+
+    if (after) {
+        document.getElementById('afterName').innerHTML = '#' + after.startOrder + ' ' + escapeHtml(after.name);
+        document.getElementById('afterMeta').textContent = after.startTime.substring(0,5) + ' · ' + after.weaponClass + ' ' + after.ageGenderClass;
+    } else {
+        document.getElementById('afterName').textContent = '–';
+        document.getElementById('afterMeta').textContent = '';
+    }
+
+    // upcoming list (next 6 after the "after")
+    const list = up.slice(2, 8).map(s =>
+        `<div>${s.startTime.substring(0,5)} · #${s.startOrder} ${escapeHtml(s.name)}${s.checkedIn === false ? ' <span class="noshow">⚠</span>' : ''}</div>`).join('');
+    document.getElementById('upcoming').innerHTML = list || '<span class="text-secondary">–</span>';
+}
+
+function fmtCountdown(sec) {
+    if (sec < 60) return String(sec);
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return m + ':' + String(s).padStart(2, '0');
+}
+function escapeHtml(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+
+// ---------- RM move tool ----------
+function buildMovePickers() {
+    const n = nowSec();
+    const shooterSel = document.getElementById('moveShooter');
+    const slotSel = document.getElementById('moveSlot');
+    // candidate shooters: everyone with a time, ordered by time; DNS + not-checked-in flagged
+    const cand = state.starters
+        .filter(s => hmsToSec(s.startTime) != null)
+        .sort((a, b) => hmsToSec(a.startTime) - hmsToSec(b.startTime));
+    shooterSel.innerHTML = cand.map(s => {
+        const flags = (s.isDns ? ' [DNS]' : '') + (s.checkedIn === false ? ' (ej incheckad)' : '');
+        return `<option value="${s.nodeId}|${s.memberId}|${s.weaponClass}|${s.startOrder}">${s.startTime.substring(0,5)} #${s.startOrder} ${escapeHtml(s.name)}${flags}</option>`;
+    }).join('');
+
+    buildSlotOptions();
+    updateDnsToggleLabel();
+}
+
+// Slots are restricted to the selected shooter's weapon class — classes are never mixed
+// (separate sequences, often different days).
+function buildSlotOptions() {
+    const n = nowSec();
+    const slotSel = document.getElementById('moveSlot');
+    const sel = selectedMoveShooter();
+    const wc = sel ? sel.weaponClass : null;
+    const slotList = (state.freeSlots || [])
+        .filter(f => !wc || f.weaponClass === wc)
+        .filter(f => hmsToSec(f.time) >= n - 5)
+        .sort((a, b) => hmsToSec(a.time) - hmsToSec(b.time));
+    slotSel.innerHTML = slotList.map(f => {
+        const label = f.kind === 'dns' ? ('ledig – ' + (f.freedFrom || 'DNS')) : (f.kind === 'efter' ? 'efter sista' : 'paus');
+        return `<option value="${f.time}">${f.time.substring(0,5)} – ${label}</option>`;
+    }).join('') || '<option value="">Inga lediga luckor</option>';
+}
+
+function selectedMoveShooter() {
+    const v = document.getElementById('moveShooter').value;
+    if (!v) return null;
+    const [nodeId, memberId, weaponClass, startOrder] = v.split('|');
+    return { nodeId: +nodeId, memberId: +memberId, weaponClass, startOrder: +startOrder };
+}
+function updateDnsToggleLabel() {
+    const sel = selectedMoveShooter();
+    const btn = document.getElementById('dnsToggle');
+    if (!sel) { btn.innerHTML = '<i class="bi bi-x-octagon me-1"></i>Markera DNS'; return; }
+    const s = state.starters.find(x => x.memberId === sel.memberId && x.weaponClass === sel.weaponClass);
+    if (s && s.isDns) { btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-1"></i>Ångra DNS'; btn.classList.remove('btn-outline-warning'); btn.classList.add('btn-outline-secondary'); }
+    else { btn.innerHTML = '<i class="bi bi-x-octagon me-1"></i>Markera DNS'; btn.classList.add('btn-outline-warning'); btn.classList.remove('btn-outline-secondary'); }
+}
+document.getElementById('moveShooter').addEventListener('change', () => { buildSlotOptions(); updateDnsToggleLabel(); });
+
+document.getElementById('dnsToggle').addEventListener('click', async () => {
+    const sel = selectedMoveShooter();
+    const msg = document.getElementById('moveMsg');
+    if (!sel) { msg.innerHTML = '<span class="text-warning">Välj en skytt.</span>'; return; }
+    const s = state.starters.find(x => x.memberId === sel.memberId && x.weaponClass === sel.weaponClass);
+    const makeDns = !(s && s.isDns);
+    msg.textContent = makeDns ? 'Markerar DNS…' : 'Ångrar DNS…';
+    try {
+        const d = await fetch('/umbraco/surface/Springskytte/SetSpringskytteDns', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.getElementById('afToken').value },
+            body: JSON.stringify({ competitionId: COMP, memberId: sel.memberId, weaponClass: sel.weaponClass, isDns: makeDns })
+        }).then(r => r.json());
+        if (d.success) { msg.innerHTML = '<span class="text-success">' + (d.message || 'OK') + '</span>'; await loadState(); buildMovePickers(); }
+        else msg.innerHTML = '<span class="text-danger">' + (d.message || 'Fel') + '</span>';
+    } catch (e) { msg.innerHTML = '<span class="text-danger">Ett fel uppstod.</span>'; }
+});
+
+document.getElementById('moveApply').addEventListener('click', async () => {
+    const msg = document.getElementById('moveMsg');
+    const shooterVal = document.getElementById('moveShooter').value;
+    const slot = document.getElementById('moveSlot').value;
+    if (!shooterVal || !slot) { msg.innerHTML = '<span class="text-warning">Välj skytt och lucka.</span>'; return; }
+    const [nodeId, memberId, weaponClass, startOrder] = shooterVal.split('|');
+    msg.textContent = 'Flyttar…';
+    try {
+        const r = await fetch('/umbraco/surface/Springskytte/UpdateSpringskytteStarter', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.getElementById('afToken').value },
+            body: JSON.stringify({ competitionId: COMP, nodeId: parseInt(nodeId), memberId: parseInt(memberId), weaponClass: weaponClass, startOrder: parseInt(startOrder), startTime: slot })
+        });
+        const d = await r.json();
+        if (d.success) {
+            msg.innerHTML = '<span class="text-success">Flyttad till ' + slot.substring(0,5) + '.</span>';
+            await loadState(); buildMovePickers();
+        } else {
+            msg.innerHTML = '<span class="text-danger">' + (d.message || 'Kunde inte flytta.') + '</span>';
+        }
+    } catch (e) { msg.innerHTML = '<span class="text-danger">Ett fel uppstod.</span>'; }
+});
+
+// ---------- loop ----------
+loadState().then(() => { tick(); });
+setInterval(tick, 250);
+setInterval(loadState, 5000);
+</script>
+</body>
+</html>

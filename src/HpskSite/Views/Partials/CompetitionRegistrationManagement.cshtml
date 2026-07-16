@@ -150,11 +150,23 @@
                            oninput="filterCompetitionRegistrations()" autocomplete="off">
                 </div>
                 <div class="col-xl-2 col-lg-4 col-md-6">
-                    <label for="competitionClassFilter" class="form-label">Klass</label>
-                    <select class="form-select" id="competitionClassFilter" onchange="filterCompetitionRegistrations()">
-                        <option value="">Alla klasser</option>
-                        <!-- Options populated dynamically by populateShootingClassFilter() -->
-                    </select>
+                    <label for="competitionClassFilterBtn" class="form-label">Klass</label>
+                    <!-- Multi-select class filter. Rendered as a Bootstrap dropdown of checkboxes
+                         (senior-friendly, no ctrl-click) rather than a native multi-select. Options
+                         are populated from the actual registrations by populateShootingClassFilter(),
+                         so the list is discipline-agnostic: standard comps show standard classes,
+                         Springskytte comps show their composite weapon-ageclasses (e.g. "A-D 21"). -->
+                    <div class="dropdown">
+                        <button type="button" class="form-select text-start" id="competitionClassFilterBtn"
+                                data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                                title="Filtrera på en eller flera klasser">
+                            <span id="competitionClassFilterLabel">Alla klasser</span>
+                        </button>
+                        <div class="dropdown-menu p-2" id="competitionClassFilterMenu"
+                             style="max-height: 320px; overflow-y: auto; min-width: 220px;">
+                            <div class="text-muted small px-2 py-1">Inga klasser</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="col-xl-2 col-lg-4 col-md-6">
                     <label for="competitionClubFilter" class="form-label">Klubb</label>
@@ -970,6 +982,7 @@ function loadCompetitionRegistrations() {
             const ic = document.getElementById('individualsCount');
             if (ic) ic.textContent = competitionRegistrations.length;
             populateCompetitionClubFilter();
+            populateShootingClassFilter();
             updatePaymentSummary();
             filterCompetitionRegistrations();
         } else {
@@ -1307,7 +1320,7 @@ async function openMarkAsPaidForTeam(team) {
 }
 
 function filterCompetitionRegistrations() {
-    const classFilter = document.getElementById('competitionClassFilter').value;
+    const selectedClasses = getSelectedCompetitionClasses();
     const clubFilter = document.getElementById('competitionClubFilter').value;
     const preferenceFilter = document.getElementById('competitionPreferenceFilter').value;
     const paymentFilter = document.getElementById('competitionPaymentFilter')?.value || '';
@@ -1315,8 +1328,10 @@ function filterCompetitionRegistrations() {
     const searchTerm = (document.getElementById('competitionRegistrationSearch')?.value || '').trim().toLowerCase();
 
     filteredCompetitionRegistrations = competitionRegistrations.filter(reg => {
-        // Check if any class in the shootingClasses array matches
-        const matchesClass = !classFilter || (reg.shootingClasses && reg.shootingClasses.some(sc => sc.class === classFilter));
+        // Multi-select: match when no class is selected, or any of the registration's
+        // classes is among the selected ones.
+        const matchesClass = selectedClasses.length === 0
+            || (reg.shootingClasses && reg.shootingClasses.some(sc => selectedClasses.includes(sc.class)));
         const matchesClub = !clubFilter || reg.memberClub === clubFilter;
         // Check if any class has the matching start preference
         const matchesPreference = !preferenceFilter || (reg.shootingClasses && reg.shootingClasses.some(sc => sc.startPreference === preferenceFilter));
@@ -1339,6 +1354,10 @@ function filterCompetitionRegistrations() {
 
         return matchesClass && matchesClub && matchesPreference && matchesPayment && matchesCheckedIn && matchesSearch;
     });
+
+    // Header badge reflects the filtered view, not the full total.
+    const ic = document.getElementById('individualsCount');
+    if (ic) ic.textContent = filteredCompetitionRegistrations.length;
 
     applyCompetitionSort();
     currentCompetitionPage = 1;
@@ -1418,71 +1437,107 @@ function populateCompetitionClubFilter() {
     }
 }
 
+// Canonical ordering for the 39 standard shooting classes. Anything not in this
+// list (e.g. Springskytte composite classes like "A-D 21") sorts after these,
+// alphabetically/numerically.
+const STANDARD_CLASS_ORDER = [
+    "A1", "A2", "A3",
+    "B1", "B2", "B3",
+    "C1", "C2", "C3", "C_Vet_Y", "C_Vet_A", "C_Jun", "C1_Dam", "C2_Dam", "C3_Dam",
+    "R1", "R2", "R3",
+    "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9",
+    "L1", "L2", "L3", "L_Vet_Y", "L_Vet_A", "L_Jun", "L1_Dam", "L2_Dam", "L3_Dam"
+];
+
+function compareShootingClassIds(a, b) {
+    const ia = STANDARD_CLASS_ORDER.indexOf(a);
+    const ib = STANDARD_CLASS_ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b, 'sv', { numeric: true });
+}
+
+// The class ids currently ticked in the multi-select dropdown.
+function getSelectedCompetitionClasses() {
+    return Array.from(document.querySelectorAll('.competition-class-filter-cb:checked')).map(cb => cb.value);
+}
+
+// Keep the collapsed button label in sync with the current selection.
+function updateCompetitionClassFilterLabel() {
+    const label = document.getElementById('competitionClassFilterLabel');
+    if (!label) return;
+    const checked = document.querySelectorAll('.competition-class-filter-cb:checked');
+    if (checked.length === 0) {
+        label.textContent = 'Alla klasser';
+    } else if (checked.length === 1) {
+        const lbl = document.querySelector('label[for="' + checked[0].id + '"]');
+        label.textContent = lbl ? lbl.textContent : checked[0].value;
+    } else {
+        label.textContent = checked.length + ' klasser valda';
+    }
+}
+
+function onCompetitionClassFilterChange() {
+    updateCompetitionClassFilterLabel();
+    filterCompetitionRegistrations();
+}
+
+function clearCompetitionClassFilter() {
+    document.querySelectorAll('.competition-class-filter-cb:checked').forEach(cb => cb.checked = false);
+    onCompetitionClassFilterChange();
+}
+
+// Build the multi-select class filter from the classes actually present in the
+// registrations. This keeps it discipline-agnostic — standard comps show the
+// standard classes registered, Springskytte comps show their composite
+// weapon-ageclasses (e.g. "A-D 21") — and guarantees every option matches the
+// exact value the filter compares against (reg.shootingClasses[].class).
 function populateShootingClassFilter() {
-    const select = document.getElementById('competitionClassFilter');
-    if (!select) return;
+    const menu = document.getElementById('competitionClassFilterMenu');
+    if (!menu) return;
 
-    // All 39 shooting classes from ShootingClasses.All
-    const shootingClasses = [
-        // A Classes
-        { id: "A1", name: "A1" },
-        { id: "A2", name: "A2" },
-        { id: "A3", name: "A3" },
+    // Preserve the current selection across re-populations (e.g. after data load).
+    const previouslySelected = getSelectedCompetitionClasses();
 
-        // B Classes
-        { id: "B1", name: "B1" },
-        { id: "B2", name: "B2" },
-        { id: "B3", name: "B3" },
-
-        // C Classes
-        { id: "C1", name: "C1" },
-        { id: "C2", name: "C2" },
-        { id: "C3", name: "C3" },
-        { id: "C_Vet_Y", name: "C Vet Y" },
-        { id: "C_Vet_A", name: "C Vet Ä" },
-        { id: "C_Jun", name: "C Jun" },
-        { id: "C1_Dam", name: "C1 Dam" },
-        { id: "C2_Dam", name: "C2 Dam" },
-        { id: "C3_Dam", name: "C3 Dam" },
-
-        // R Classes
-        { id: "R1", name: "R1" },
-        { id: "R2", name: "R2" },
-        { id: "R3", name: "R3" },
-
-        // M Classes
-        { id: "M1", name: "M1" },
-        { id: "M2", name: "M2" },
-        { id: "M3", name: "M3" },
-        { id: "M4", name: "M4" },
-        { id: "M5", name: "M5" },
-        { id: "M6", name: "M6" },
-        { id: "M7", name: "M7" },
-        { id: "M8", name: "M8" },
-        { id: "M9", name: "M9" },
-
-        // L Classes
-        { id: "L1", name: "L1" },
-        { id: "L2", name: "L2" },
-        { id: "L3", name: "L3" },
-        { id: "L_Vet_Y", name: "L Vet Y" },
-        { id: "L_Vet_A", name: "L Vet Ä" },
-        { id: "L_Jun", name: "L Jun" },
-        { id: "L1_Dam", name: "L1 Dam" },
-        { id: "L2_Dam", name: "L2 Dam" },
-        { id: "L3_Dam", name: "L3 Dam" }
-    ];
-
-    // Keep first option ("Alla klasser") and add all shooting classes
-    select.innerHTML = '<option value="">Alla klasser</option>';
-
-    // Add all shooting classes
-    shootingClasses.forEach(sc => {
-        const option = document.createElement('option');
-        option.value = sc.id;        // Use ID for filtering (e.g., "C_Vet_A")
-        option.textContent = sc.name; // Display name for user (e.g., "C Vet Ä")
-        select.appendChild(option);
+    // id -> display label. Display uses the same transform as the class badges in
+    // the table so the filter and the rows read identically.
+    const seen = new Map();
+    (competitionRegistrations || []).forEach(reg => {
+        (reg.shootingClasses || []).forEach(sc => {
+            const id = sc.class || sc.className || '';
+            if (!id || seen.has(id)) return;
+            const normalized = normalizeShootingClass(id);
+            const label = window.formatAgeSpan ? window.formatAgeSpan(normalized) : normalized;
+            seen.set(id, label);
+        });
     });
+
+    if (seen.size === 0) {
+        menu.innerHTML = '<div class="text-muted small px-2 py-1">Inga klasser</div>';
+        updateCompetitionClassFilterLabel();
+        return;
+    }
+
+    const ids = Array.from(seen.keys()).sort(compareShootingClassIds);
+
+    let html = '<div class="d-flex justify-content-between align-items-center px-2 pb-1 mb-1 border-bottom">'
+        + '<span class="small text-muted">Välj klasser</span>'
+        + '<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="clearCompetitionClassFilter()">Rensa</button>'
+        + '</div>';
+    ids.forEach((id, idx) => {
+        const checked = previouslySelected.includes(id) ? 'checked' : '';
+        // Index suffix guarantees a unique DOM id even if two class ids slugify the same.
+        const cbId = 'ccf_' + idx + '_' + id.replace(/[^A-Za-z0-9_-]/g, '_');
+        html += '<div class="form-check">'
+            + '<input class="form-check-input competition-class-filter-cb" type="checkbox"'
+            + ' value="' + escapeHtmlSafe(id) + '" id="' + cbId + '" ' + checked
+            + ' onchange="onCompetitionClassFilterChange()">'
+            + '<label class="form-check-label" for="' + cbId + '">' + escapeHtmlSafe(seen.get(id)) + '</label>'
+            + '</div>';
+    });
+    menu.innerHTML = html;
+    updateCompetitionClassFilterLabel();
 }
 
 function displayCompetitionRegistrations() {

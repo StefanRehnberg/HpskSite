@@ -483,21 +483,30 @@ namespace HpskSite.Controllers
                 if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
                     return Json(new { success = true, data = new List<object>() });
 
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords)
+                var matches = _memberService.GetAll(0, int.MaxValue, out var totalRecords)
                     .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
                     .Where(m => (m.Name ?? "").Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                (m.Email ?? "").Contains(query, StringComparison.OrdinalIgnoreCase))
-                    .Take(20)
-                    .ToList();
+                                (m.Email ?? "").Contains(query, StringComparison.OrdinalIgnoreCase));
 
                 if (clubId.HasValue)
                 {
-                    allMembers = allMembers.Where(m =>
+                    var clubIdStr = clubId.Value.ToString();
+                    // Match members affiliated with the club — primary club OR additional clubs.
+                    // Applied before Take(20) so club members aren't dropped when a common query
+                    // returns 20+ name matches from other clubs first.
+                    matches = matches.Where(m =>
                     {
                         var pcid = m.GetValue("primaryClubId")?.ToString();
-                        return pcid == clubId.Value.ToString();
-                    }).ToList();
+                        if (pcid == clubIdStr)
+                            return true;
+
+                        return (m.GetValue("memberClubIds")?.ToString()?.Split(',')
+                            .Select(s => s.Trim())
+                            .Contains(clubIdStr) ?? false);
+                    });
                 }
+
+                var allMembers = matches.Take(20).ToList();
 
                 var results = allMembers.Select(m =>
                 {
