@@ -46,7 +46,7 @@ namespace HpskSite.Services
                 Location = location,
                 Status = "Planerat",
                 CreatedByMemberId = createdByMemberId,
-                CreatedDate = DateTime.UtcNow,
+                CreatedDate = DateTime.Now,
                 IsActive = true
             };
             db.Insert(meeting);
@@ -141,7 +141,7 @@ namespace HpskSite.Services
             var db = scope.Database;
             var m = db.SingleOrDefaultById<BoardMeeting>(id);
             if (m == null) return false;
-            m.KallelseSentDate = DateTime.UtcNow;
+            m.KallelseSentDate = DateTime.Now;
             m.KallelseSentByMemberId = byMemberId;
             m.KallelseRecipientCount = recipientCount;
             db.Update(m);
@@ -167,7 +167,7 @@ namespace HpskSite.Services
                 db.Execute("UPDATE BoardMeetingAttendees SET IsAdjuster = 1 WHERE MeetingId = @0 AND MemberId = @1", id, memberId);
 
             m.AdjusterMemberId = ids.Count > 0 ? ids[0] : (int?)null;
-            m.JustifiedDate = DateTime.UtcNow;
+            m.JustifiedDate = DateTime.Now;
             m.Status = "Justerat";
             db.Update(m);
             return true;
@@ -197,7 +197,7 @@ namespace HpskSite.Services
             if (m == null) return false;
             db.Execute("UPDATE BoardMeetingAttendees SET ApprovedDate = NULL, ApprovedVia = NULL WHERE MeetingId = @0", meetingId);
             m.Status = "VantarJustering";
-            m.JusteringRequestedDate = DateTime.UtcNow;
+            m.JusteringRequestedDate = DateTime.Now;
             m.JustifiedDate = null;
             db.Update(m);
             return true;
@@ -223,7 +223,7 @@ namespace HpskSite.Services
 
             if (att.ApprovedDate == null)
             {
-                att.ApprovedDate = DateTime.UtcNow;
+                att.ApprovedDate = DateTime.Now;
                 att.ApprovedVia = via;
                 db.Update(att);
             }
@@ -236,7 +236,7 @@ namespace HpskSite.Services
             if (locked)
             {
                 m.Status = "Justerat";
-                m.JustifiedDate = DateTime.UtcNow;
+                m.JustifiedDate = DateTime.Now;
                 db.Update(m);
             }
             return (true, locked, approved, total, "");
@@ -613,7 +613,7 @@ namespace HpskSite.Services
                 DueDate = dueDate,
                 Status = "Öppen",
                 CreatedByMemberId = createdByMemberId,
-                CreatedDate = DateTime.UtcNow,
+                CreatedDate = DateTime.Now,
                 IsActive = true
             };
             db.Insert(action);
@@ -640,7 +640,7 @@ namespace HpskSite.Services
             var a = db.SingleOrDefaultById<BoardMeetingAction>(id);
             if (a == null) return false;
             a.Status = done ? "Klar" : "Öppen";
-            a.CompletedDate = done ? DateTime.UtcNow : null;
+            a.CompletedDate = done ? DateTime.Now : null;
             db.Update(a);
             return true;
         }

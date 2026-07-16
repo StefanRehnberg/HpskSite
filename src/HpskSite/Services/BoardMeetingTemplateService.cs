@@ -70,7 +70,7 @@ namespace HpskSite.Services
                 MeetingTypeKey = meetingTypeKey,
                 ItemsJson = JsonSerializer.Serialize(items, JsonOpts),
                 UpdatedByMemberId = byMemberId,
-                UpdatedDate = DateTime.UtcNow,
+                UpdatedDate = DateTime.Now,
                 IsActive = true
             });
         }

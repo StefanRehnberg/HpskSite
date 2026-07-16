@@ -125,7 +125,7 @@ namespace HpskSite.Services
                 existing.IsBoardMember = isBoardMember;
                 existing.CustomTitle = customTitle;
                 existing.SortOrder = BoardRoleDefinitions.GetDefaultSort(roleKey);
-                existing.AssignedDate = DateTime.UtcNow;
+                existing.AssignedDate = DateTime.Now;
                 existing.AssignedByMemberId = assignedByMemberId;
                 existing.ElectedDate = electedDate;
                 existing.TermEndsDate = termEndsDate;
@@ -143,7 +143,7 @@ namespace HpskSite.Services
                 CustomTitle = roleKey == "Custom" ? customTitle : null,
                 IsBoardMember = isBoardMember,
                 SortOrder = BoardRoleDefinitions.GetDefaultSort(roleKey),
-                AssignedDate = DateTime.UtcNow,
+                AssignedDate = DateTime.Now,
                 AssignedByMemberId = assignedByMemberId,
                 ElectedDate = electedDate,
                 TermEndsDate = termEndsDate,

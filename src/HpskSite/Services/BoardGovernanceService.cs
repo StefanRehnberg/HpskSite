@@ -64,7 +64,7 @@ namespace HpskSite.Services
             var it = db.SingleOrDefaultById<BoardYearWheelItem>(id);
             if (it == null) return false;
             it.Done = done;
-            it.DoneDate = done ? DateTime.UtcNow : null;
+            it.DoneDate = done ? DateTime.Now : null;
             db.Update(it);
             return true;
         }
@@ -145,7 +145,7 @@ namespace HpskSite.Services
                 OwnerType = ownerType, OwnerId = ownerId, Year = year, PostKey = postKey, PostLabel = postLabel,
                 CandidateName = candidateName, CandidateMemberId = candidateMemberId,
                 Status = string.IsNullOrWhiteSpace(status) ? "Föreslagen" : status, Notes = notes,
-                CreatedByMemberId = createdByMemberId, CreatedDate = DateTime.UtcNow, IsActive = true
+                CreatedByMemberId = createdByMemberId, CreatedDate = DateTime.Now, IsActive = true
             };
             db.Insert(n);
             return n;
