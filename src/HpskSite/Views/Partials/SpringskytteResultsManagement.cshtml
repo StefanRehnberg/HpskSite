@@ -18,6 +18,7 @@
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Springskytte";
     var isStationPage = ViewData["IsStationPage"] != null && (bool)ViewData["IsStationPage"];
     var presetWeaponClass = ViewData["PresetWeaponClass"]?.ToString() ?? "";
+    var isTimingMode = ViewData["IsTimingMode"] != null && (bool)ViewData["IsTimingMode"];
     var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
 }
 
@@ -45,8 +46,11 @@
                 </a>
                 <span class="vr mx-1"></span>
                 <span class="text-muted small me-1">Tid &amp; straff:</span>
-                <a href="/tidtagning/@competitionId" class="btn btn-outline-success btn-sm" target="_blank">
-                    <i class="bi bi-stopwatch me-1"></i>Tidtagning &amp; straff
+                <a href="/station?c=@competitionId&s=A&mode=tid" class="btn btn-outline-success btn-sm" target="_blank">
+                    <i class="bi bi-stopwatch me-1"></i>Vapengrupp A
+                </a>
+                <a href="/station?c=@competitionId&s=C&mode=tid" class="btn btn-outline-success btn-sm" target="_blank">
+                    <i class="bi bi-stopwatch me-1"></i>Vapengrupp C
                 </a>
                 <span class="vr mx-1"></span>
                 <a href="/startlinje/@competitionId" class="btn btn-outline-dark btn-sm" target="_blank">
@@ -62,10 +66,20 @@
         @if (isStationPage)
         {
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Registrera Resultat — @competitionName
-                    @if (presetWeaponClass == "A") { <span class="badge bg-primary ms-2">Vapengrupp A</span> }
-                    else if (presetWeaponClass == "C") { <span class="badge bg-primary ms-2">Vapengrupp C</span> }
-                </h5>
+                @if (isTimingMode)
+                {
+                    <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Tidtagning &amp; straff — @competitionName
+                        @if (presetWeaponClass == "A") { <span class="badge bg-primary ms-2">Vapengrupp A</span> }
+                        else if (presetWeaponClass == "C") { <span class="badge bg-primary ms-2">Vapengrupp C</span> }
+                    </h5>
+                }
+                else
+                {
+                    <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Registrera Resultat — @competitionName
+                        @if (presetWeaponClass == "A") { <span class="badge bg-primary ms-2">Vapengrupp A</span> }
+                        else if (presetWeaponClass == "C") { <span class="badge bg-primary ms-2">Vapengrupp C</span> }
+                    </h5>
+                }
             </div>
         }
         else
@@ -83,8 +97,9 @@
             </div>
         }
         <div class="card-body" id="springEntryBody">
-            <!-- Tabs for Class A / Class C (hidden on station page where only one class is shown) -->
-            @if (!isStationPage || string.IsNullOrEmpty(presetWeaponClass))
+            <!-- Tabs for Class A / Class C (hidden on station page where only one class is shown,
+                 and hidden entirely in timing mode which has its own single pane) -->
+            @if (!isTimingMode && (!isStationPage || string.IsNullOrEmpty(presetWeaponClass)))
             {
             <ul class="nav nav-tabs mb-3" id="springEntryTabs" role="tablist">
                 <li class="nav-item" role="presentation">
@@ -103,6 +118,35 @@
             }
 
             <div class="tab-content" id="springEntryTabContent">
+                @if (isTimingMode)
+                {
+                <!-- ===== TIMING & PENALTIES pane — same look as the range-officer station,
+                     but for the timing role: finish time + manual penalties/reductions + DNS ===== -->
+                <div class="tab-pane fade show active" id="springTabTime" role="tabpanel">
+                    <div class="d-flex justify-content-between align-items-center mb-3 sticky-top bg-body py-2" style="z-index: 10;">
+                        <small class="text-muted">@competitionName</small>
+                        <button class="btn btn-sm" id="springLockBtn" onclick="springToggleLock()">
+                            <i class="bi bi-unlock me-1"></i>Lås skärm
+                        </button>
+                    </div>
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <label class="form-label fw-bold fs-5">Startnummer</label>
+                            <div class="d-flex gap-2">
+                                <input type="number" class="form-control form-control-lg" id="springTimeStartNumber"
+                                    placeholder="Ange startnummer" inputmode="numeric" min="1"
+                                    onkeydown="if(event.key==='Enter'){springTimeLookup(); event.preventDefault();}">
+                                <button class="btn btn-primary btn-lg px-4" onclick="springTimeLookup()">Hämta</button>
+                            </div>
+                            <div id="springTimeLookupMsg" class="small mt-2"></div>
+                        </div>
+                    </div>
+                    <div id="springTimeActiveCard" style="display:none;"></div>
+                    <div id="springTimeRecentList" class="mt-3"></div>
+                </div>
+                }
+                else
+                {
                 <!-- ===== TAB 1: CLASS A — Sequential Entry ===== -->
                 @if (!(isStationPage && presetWeaponClass == "C"))
                 {
@@ -172,6 +216,7 @@
                     <div id="springCRecentList" class="mt-3"></div>
                 </div>
                 } @* end if not preset A *@
+                } @* end else (not timing mode) *@
             </div>
         </div>
     </div>
@@ -222,6 +267,45 @@
     }
     }
 </div>
+
+@if (isTimingMode)
+{
+<div class="modal fade" id="springTimeAdjModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Straff / tidsavdrag</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3"><strong id="springTimeAdjName">–</strong> <span class="text-muted" id="springTimeAdjClass"></span></p>
+                <div class="btn-group w-100 mb-3" role="group">
+                    <input type="radio" class="btn-check" name="springTimeAdjType" id="springTimeAdjPenalty" value="Penalty" checked onchange="springTimeSyncAdjType()">
+                    <label class="btn btn-outline-danger" for="springTimeAdjPenalty">Straff (+ min)</label>
+                    <input type="radio" class="btn-check" name="springTimeAdjType" id="springTimeAdjReduction" value="Reduction" onchange="springTimeSyncAdjType()">
+                    <label class="btn btn-outline-success" for="springTimeAdjReduction">Tidsavdrag (− tid)</label>
+                </div>
+                <div id="springTimePenaltyFields">
+                    <label class="form-label small fw-bold">Antal straffpoäng (1 poäng = 1 minut)</label>
+                    <input type="number" class="form-control mb-2" id="springTimeAdjPoints" value="1" min="1" max="60">
+                </div>
+                <div id="springTimeReductionFields" style="display:none">
+                    <label class="form-label small fw-bold">Tid att dra av (MM:SS)</label>
+                    <input type="text" class="form-control mb-2" id="springTimeAdjTime" placeholder="MM:SS">
+                </div>
+                <label class="form-label small fw-bold">Anledning</label>
+                <select class="form-select mb-2" id="springTimeAdjReasonSelect"></select>
+                <input type="text" class="form-control" id="springTimeAdjReasonText" placeholder="Egen anledning (valfritt)">
+                <div class="alert alert-danger mt-3 mb-0 py-2 d-none" id="springTimeAdjError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="springTimeSaveAdj()"><i class="bi bi-check-lg me-1"></i>Lägg till</button>
+            </div>
+        </div>
+    </div>
+</div>
+}
 
 <style>
     .shot-btn { width: 42px; height: 36px; font-size: 0.85rem; font-weight: 600; padding: 0; }
@@ -290,6 +374,8 @@ let springFilteredShooters = [];
 let springCurrentIndex = 0;
 const springCompetitionId = parseInt('@competitionId');
 const springNumberOfSeries = parseInt('@numberOfSeries') || 6;
+const springTimingMode = @(isTimingMode ? "true" : "false");
+const springPresetWeaponClass = '@presetWeaponClass';   // 'A' | 'C' | '' — scopes the timing lookup
 
 // Class C state
 let springCRecentEntries = [];  // last 5 saved entries
@@ -297,6 +383,7 @@ let springCActiveShooter = null;
 let springScreenLocked = false;
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (springTimingMode) { springTimeInit(); return; }   // timing role has its own pane + data
     springLoadShooters();
     springLoadResultsList();
     // Auto-load Deltävling results when the section is present (subCompetitionName configured)
@@ -304,6 +391,217 @@ document.addEventListener('DOMContentLoaded', () => {
         springLoadSubResultsList();
     }
 });
+
+// ===== TIMING & PENALTIES pane (timing role) — same look as the range-officer station =====
+let springTimeStarters = [];
+let springTimeAdjByKey = {};
+let springTimeActive = null;
+let springTimeRecent = [];
+let springTimeFinishPicker = null;
+const SPRING_TIME_PEN_REASONS = ['Vapenhantering utanför skjutområde','Oproppat vapen efter skjutning','För tidig start','Otillåten utrustning','Ordningsförseelse','Annat'];
+const SPRING_TIME_RED_REASONS = ['Bana blockerad – väntan','Avbrott/incident','Tekniskt fel på bana','Väntan pga föregående skytt','Funktionärsfel','Annat'];
+
+function springTimeToken(){ return document.querySelector('input[name="__RequestVerificationToken"]')?.value; }
+function springTimeKey(m,w){ return m+'|'+w; }
+function springTimeEsc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function springTimeHmsToSec(t){ if(!t) return null; const p=String(t).split(':').map(Number); return p.length===3?p[0]*3600+p[1]*60+p[2]:(p.length===2?p[0]*3600+p[1]*60:null); }
+function springTimeFmtDur(sec){ if(sec==null||sec<0) return '–'; const m=Math.floor(sec/60),s=sec%60; return m+':'+String(s).padStart(2,'0'); }
+
+async function springTimeInit(){
+    await springTimeLoad();
+    const el = document.getElementById('springTimeStartNumber');
+    if (el) el.focus();
+}
+async function springTimeLoad(){
+    try {
+        const [st, adj] = await Promise.all([
+            fetch(`/umbraco/surface/Springskytte/GetSpringskytteStarterState?competitionId=${springCompetitionId}`,{headers:{'X-Requested-With':'XMLHttpRequest'}}).then(r=>r.json()),
+            fetch(`/umbraco/surface/Springskytte/GetSpringskytteAdjustments?competitionId=${springCompetitionId}`,{headers:{'X-Requested-With':'XMLHttpRequest'}}).then(r=>r.json())
+        ]);
+        springTimeStarters = st.success ? (st.starters||[]) : [];
+        // Scope to the chosen weapon group so start-number lookup is unambiguous (numbers repeat across groups).
+        if (springPresetWeaponClass) springTimeStarters = springTimeStarters.filter(s => s.weaponClass === springPresetWeaponClass);
+        springTimeAdjByKey = {};
+        if (adj.success) for (const a of adj.adjustments){ (springTimeAdjByKey[springTimeKey(a.memberId,a.weaponClass)] ||= []).push(a); }
+        if (springTimeActive){ const s = springTimeStarters.find(x=>x.memberId===springTimeActive.memberId && x.weaponClass===springTimeActive.weaponClass); if(s){ springTimeActive=s; springTimeRenderActive(); } }
+    } catch(e){ /* keep last */ }
+}
+function springTimeLookup(){
+    const msg = document.getElementById('springTimeLookupMsg');
+    const n = parseInt(document.getElementById('springTimeStartNumber').value,10);
+    if (isNaN(n)){ msg.innerHTML='<span class="text-warning">Ange ett startnummer.</span>'; return; }
+    msg.textContent='';
+    const matches = springTimeStarters.filter(s=>s.startOrder===n);
+    if (!matches.length){ msg.innerHTML=`<span class="text-danger">Ingen startande med nummer ${n}.</span>`; return; }
+    if (matches.length===1){ springTimeActive=matches[0]; springTimeRenderActive(); return; }
+    const card=document.getElementById('springTimeActiveCard'); card.style.display='block';
+    card.innerHTML=`<div class="card border-warning"><div class="card-body"><div class="fw-bold mb-2">Flera skyttar med nr ${n} – välj vapengrupp:</div>`+
+        matches.map((s,i)=>`<button class="btn btn-outline-primary w-100 mb-2" onclick="springTimePick(${i})">${s.weaponClass} · ${springTimeEsc(s.name)} (${springTimeEsc(s.ageGenderClass)})</button>`).join('')+`</div></div>`;
+    window._springTimeMatches=matches;
+}
+function springTimePick(i){ springTimeActive=window._springTimeMatches[i]; springTimeRenderActive(); }
+function springTimeRenderActive(){
+    const s=springTimeActive, card=document.getElementById('springTimeActiveCard');
+    if(!s){ card.style.display='none'; card.innerHTML=''; return; }
+    const startSec=springTimeHmsToSec(s.startTime), dns=s.isDns===true;
+    // Restore an already-saved måltid so a re-render (e.g. after adding straff) never blanks it.
+    const savedFinishStr=(s.sprintTimeSeconds!=null && startSec!=null) ? formatSecondsToHMS(startSec + Number(s.sprintTimeSeconds)) : '';
+    card.style.display='block';
+    card.innerHTML=`
+    <div class="card border-primary">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <span class="fw-bold">#${s.startOrder} — ${springTimeEsc(s.name)}</span>
+            <span>${s.weaponClass} · ${springTimeEsc(s.ageGenderClass)}</span>
+        </div>
+        <div class="card-body">
+            ${dns?'<div class="alert alert-dark py-2"><i class="bi bi-x-octagon me-1"></i>Markerad som <strong>DNS</strong> – startar inte.</div>':''}
+            <div class="d-flex justify-content-between mb-2"><span class="text-muted">Starttid</span><span class="time-display">${(s.startTime||'–').substring(0,8)}</span></div>
+            <label class="form-label fw-bold mb-1 fs-5">Måltid</label>
+            <div class="d-flex gap-2 mb-2">
+                <input type="text" class="form-control form-control-lg time-display" id="springTimeFinish" placeholder="HH:MM:SS" value="${savedFinishStr}" ${dns?'disabled':''}>
+                <button class="btn btn-outline-secondary btn-lg" onclick="springTimeNow()" ${dns?'disabled':''}>Nu</button>
+            </div>
+            <div id="springTimeFinishMsg" class="small mb-2">${savedFinishStr?'<span class="text-success"><i class="bi bi-check-circle-fill"></i> Måltid sparad</span>':''}</div>
+            <div class="d-flex justify-content-between align-items-center mb-3"><span class="text-muted">Löptid</span><span class="time-display fs-3" id="springTimeSprint">–</span></div>
+            <div class="border rounded p-2 mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-bold">Straff &amp; tidsavdrag</span>
+                    <button class="btn btn-outline-primary btn-sm" onclick="springTimeOpenAdj()"><i class="bi bi-plus-lg"></i> Lägg till</button>
+                </div>
+                <div id="springTimeAdjList">${springTimeAdjBadges(s.memberId,s.weaponClass)}</div>
+            </div>
+            <div class="d-flex gap-2 mb-3">
+                <button class="btn btn-outline-dark w-50 ${dns?'active':''}" onclick="springTimeSetDns(${dns?'false':'true'})"><i class="bi bi-x-octagon me-1"></i>${dns?'Ångra DNS':'Ej start (DNS)'}</button>
+                <button class="btn btn-outline-dark w-50" onclick="springTimeSetDnf()" ${dns?'disabled':''}><i class="bi bi-flag me-1"></i>Bröt (DNF)</button>
+            </div>
+            <button class="btn btn-success btn-lg w-100 py-3" id="springTimeSaveBtn" onclick="springTimeSave()" ${dns?'disabled':''}><i class="bi bi-check-lg me-1"></i>Spara tid</button>
+            <div id="springTimeSaveMsg" class="small text-center mt-2"></div>
+        </div>
+    </div>`;
+    const fEl=document.getElementById('springTimeFinish');
+    if(fEl && !dns){
+        springTimeFinishPicker=flatpickr(fEl,{locale:'sv',enableTime:true,noCalendar:true,enableSeconds:true,dateFormat:'H:i:S',time_24hr:true,allowInput:true});
+        if(savedFinishStr) springTimeFinishPicker.setDate(savedFinishStr,false);
+        fEl.addEventListener('input',()=>springTimeRecalc(startSec));
+        // Persist the måltid the moment it's committed — a saved time can never be lost by a later re-render.
+        fEl.addEventListener('change',()=>{ springTimeRecalc(startSec); springTimeAutoSaveFinish(); });
+    }
+    springTimeRecalc(startSec);
+}
+function springTimeRecalc(startSec){
+    const v=(document.getElementById('springTimeFinish')?.value||'').trim(), fin=springTimeHmsToSec(v), el=document.getElementById('springTimeSprint');
+    if(el) el.textContent=(fin!=null&&startSec!=null&&fin>=startSec)?springTimeFmtDur(fin-startSec):'–';
+}
+function springTimeNow(){
+    const d=new Date(), t=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
+    if(springTimeFinishPicker) springTimeFinishPicker.setDate(t,true); else document.getElementById('springTimeFinish').value=t;
+    springTimeRecalc(springTimeHmsToSec(springTimeActive?.startTime));
+    springTimeAutoSaveFinish();  // "Nu" persists immediately — never held only in the input
+}
+// Persist the current måltid without leaving the shooter. Only fires for a complete, valid
+// HH:MM:SS so partial typing can't hit the server. Caches the returned sprint on the active
+// shooter so re-renders (after straff/tidsavdrag) restore the exact saved time.
+async function springTimeAutoSaveFinish(){
+    if(!springTimeActive) return;
+    const val=(document.getElementById('springTimeFinish')?.value||'').trim();
+    if(!val || springTimeHmsToSec(val)==null) return;
+    const msg=document.getElementById('springTimeFinishMsg');
+    if(msg) msg.innerHTML='<span class="text-muted"><i class="bi bi-arrow-repeat"></i> Sparar…</span>';
+    const shooter=springTimeActive;
+    try{
+        const d=await fetch('/umbraco/surface/Springskytte/SaveSpringskytteFinishTime',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:shooter.memberId,weaponClass:shooter.weaponClass,finishTimeInput:val})}).then(r=>r.json());
+        const stillActive=springTimeActive && springTimeActive.memberId===shooter.memberId && springTimeActive.weaponClass===shooter.weaponClass;
+        if(d.success){ shooter.sprintTimeSeconds=d.sprintTimeSeconds; if(stillActive && msg) msg.innerHTML='<span class="text-success"><i class="bi bi-check-circle-fill"></i> Måltid sparad</span>'; }
+        else if(stillActive && msg){ msg.innerHTML=`<span class="text-danger">${springTimeEsc(d.message||'Kunde inte spara.')}</span>`; }
+    }catch(e){ if(msg) msg.innerHTML='<span class="text-danger">Kunde inte spara – försök igen.</span>'; }
+}
+function springTimeAdjBadges(m,w){
+    const list=springTimeAdjByKey[springTimeKey(m,w)]||[];
+    if(!list.length) return '<span class="text-muted small">Inga</span>';
+    return list.map(a=>{ const isPen=a.adjustmentType==='Penalty'; let label; if(isPen) label='+'+a.points+' min'; else {const mag=Math.abs(a.seconds); label='−'+(mag%60===0?(mag/60)+' min':mag+' s');}
+        return `<span class="badge ${isPen?'bg-danger':'bg-success'} me-1 mb-1" title="${springTimeEsc(a.reason||'')}">${label} <a href="#" class="text-white ms-1" onclick="springTimeDelAdj(${a.id});return false;">&times;</a></span>`; }).join('');
+}
+async function springTimeSave(){
+    if(!springTimeActive) return;
+    const btn=document.getElementById('springTimeSaveBtn'), msg=document.getElementById('springTimeSaveMsg');
+    const val=(document.getElementById('springTimeFinish').value||'').trim();
+    if(!val){ msg.innerHTML='<span class="text-warning">Ange måltid.</span>'; return; }
+    btn.disabled=true; msg.textContent='Sparar…';
+    try{
+        const d=await fetch('/umbraco/surface/Springskytte/SaveSpringskytteFinishTime',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:springTimeActive.memberId,weaponClass:springTimeActive.weaponClass,finishTimeInput:val})}).then(r=>r.json());
+        if(d.success){
+            const startSec=springTimeHmsToSec(springTimeActive.startTime), fin=springTimeHmsToSec(val);
+            springTimeRecent.unshift({n:springTimeActive.startOrder,name:springTimeActive.name,wc:springTimeActive.weaponClass,sprint:(fin!=null&&startSec!=null)?springTimeFmtDur(fin-startSec):'–'});
+            springTimeRecent=springTimeRecent.slice(0,6);
+            springTimeActive=null; const c=document.getElementById('springTimeActiveCard'); c.style.display='none'; c.innerHTML='';
+            springTimeRenderRecent();
+            const sn=document.getElementById('springTimeStartNumber'); sn.value=''; sn.focus();
+        } else { msg.innerHTML=`<span class="text-danger">${springTimeEsc(d.message||'Kunde inte spara.')}</span>`; }
+    } catch(e){ msg.innerHTML='<span class="text-danger">Ett fel uppstod.</span>'; }
+    finally{ btn.disabled=false; }
+}
+async function springTimeSetDns(makeDns){
+    if(!springTimeActive) return;
+    if(makeDns && !confirm('Markera som DNS? Starttiden frigörs.')) return;
+    await fetch('/umbraco/surface/Springskytte/SetSpringskytteDns',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:springTimeActive.memberId,weaponClass:springTimeActive.weaponClass,isDns:makeDns})});
+    await springTimeLoad();
+}
+async function springTimeSetDnf(){
+    if(!springTimeActive) return;
+    if(!confirm('Markera som DNF (bröt)?')) return;
+    await fetch('/umbraco/surface/Springskytte/SaveSpringskytteFinishTime',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:springTimeActive.memberId,weaponClass:springTimeActive.weaponClass,status:'DNF'})});
+    springTimeActive=null; const c=document.getElementById('springTimeActiveCard'); c.style.display='none'; c.innerHTML='';
+    const sn=document.getElementById('springTimeStartNumber'); sn.value=''; sn.focus();
+}
+function springTimeOpenAdj(){
+    if(!springTimeActive) return;
+    document.getElementById('springTimeAdjName').textContent=springTimeActive.name;
+    document.getElementById('springTimeAdjClass').textContent=springTimeActive.weaponClass+' · '+springTimeActive.ageGenderClass;
+    document.getElementById('springTimeAdjPenalty').checked=true;
+    document.getElementById('springTimeAdjPoints').value=1;
+    document.getElementById('springTimeAdjTime').value='';
+    document.getElementById('springTimeAdjReasonText').value='';
+    springTimeSyncAdjType();
+    const err=document.getElementById('springTimeAdjError'); err.classList.add('d-none'); err.textContent='';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('springTimeAdjModal')).show();
+}
+function springTimeSyncAdjType(){
+    const isPen=document.getElementById('springTimeAdjPenalty').checked;
+    document.getElementById('springTimePenaltyFields').style.display=isPen?'':'none';
+    document.getElementById('springTimeReductionFields').style.display=isPen?'none':'';
+    document.getElementById('springTimeAdjReasonSelect').innerHTML=(isPen?SPRING_TIME_PEN_REASONS:SPRING_TIME_RED_REASONS).map(r=>`<option>${springTimeEsc(r)}</option>`).join('');
+}
+async function springTimeSaveAdj(){
+    if(!springTimeActive) return;
+    // Persist any entered måltid first so the reload below re-renders with it intact.
+    await springTimeAutoSaveFinish();
+    const err=document.getElementById('springTimeAdjError'); err.classList.add('d-none');
+    const isPen=document.getElementById('springTimeAdjPenalty').checked;
+    const sel=document.getElementById('springTimeAdjReasonSelect').value;
+    const free=(document.getElementById('springTimeAdjReasonText').value||'').trim();
+    const reason=free?(sel==='Annat'?free:sel+' – '+free):sel;
+    const body={competitionId:springCompetitionId,memberId:springTimeActive.memberId,weaponClass:springTimeActive.weaponClass,adjustmentType:isPen?'Penalty':'Reduction',reason};
+    if(isPen) body.points=parseInt(document.getElementById('springTimeAdjPoints').value,10);
+    else body.timeInput=(document.getElementById('springTimeAdjTime').value||'').trim();
+    try{
+        const d=await fetch('/umbraco/surface/Springskytte/AddSpringskytteAdjustment',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify(body)}).then(r=>r.json());
+        if(d.success){ bootstrap.Modal.getOrCreateInstance(document.getElementById('springTimeAdjModal')).hide(); await springTimeLoad(); }
+        else { err.textContent=d.message||'Kunde inte spara.'; err.classList.remove('d-none'); }
+    } catch(e){ err.textContent='Ett fel uppstod.'; err.classList.remove('d-none'); }
+}
+async function springTimeDelAdj(id){
+    if(!confirm('Ta bort denna post?')) return;
+    // Persist any entered måltid first so the reload below re-renders with it intact.
+    await springTimeAutoSaveFinish();
+    await fetch('/umbraco/surface/Springskytte/DeleteSpringskytteAdjustment',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({id,competitionId:springCompetitionId})});
+    await springTimeLoad();
+}
+function springTimeRenderRecent(){
+    const el=document.getElementById('springTimeRecentList');
+    if(!springTimeRecent.length){ el.innerHTML=''; return; }
+    el.innerHTML=`<div class="fw-bold small text-muted mb-1">Nyss sparade</div><div class="list-group">`+
+        springTimeRecent.map(r=>`<div class="list-group-item d-flex justify-content-between py-2"><span>#${r.n} ${springTimeEsc(r.name)} <span class="text-muted">(${r.wc})</span></span><span class="time-display">${r.sprint}</span></div>`).join('')+`</div>`;
+}
 
 // ===== DATA LOADING =====
 
@@ -386,6 +684,7 @@ function springLastShooter() { springCurrentIndex = springFilteredShooters.lengt
 
 function springUpdateNav() {
     const el = document.getElementById('springCurrentShooterInfo');
+    if (!el) return; // nav isn't on the chromeless /station scoring page
     if (!springFilteredShooters.length) { el.textContent = 'Inga skyttar'; return; }
     const s = springFilteredShooters[springCurrentIndex];
     el.textContent = `${springCurrentIndex + 1}/${springFilteredShooters.length}: ${s.memberName} (${s.weaponClass} - ${formatAgeSpan(s.ageGenderClass)})`;
@@ -406,6 +705,7 @@ function calculateSprintTime(startTimeStr, finishTimeStr) {
 
 function springRenderEntry() {
     const container = document.getElementById('springEntryContainer');
+    if (!container) return; // Tab A entry form isn't on the chromeless /station scoring page
     const shooter = springFilteredShooters[springCurrentIndex];
     if (!shooter) { container.innerHTML = ''; return; }
 
@@ -425,32 +725,8 @@ function springRenderEntry() {
                 ${springStatusBadge(shooter)}
             </div>
 
-            <!-- Time Entry -->
-            <div class="row g-3 mb-3">
-                <div class="col-md-3">
-                    <label class="form-label fw-bold"><i class="bi bi-play-circle me-1"></i>Starttid</label>
-                    <div class="form-control-plaintext time-display">${hasStartTime ? startTimeDisplay : '<span class="text-warning small">Saknas</span>'}</div>
-                    ${!hasStartTime ? '<div class="form-text text-warning">Generera startlista först</div>' : ''}
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-bold"><i class="bi bi-flag me-1"></i>Måltid</label>
-                    <input type="text" class="form-control" id="springFinishTime" placeholder="HH:MM:SS"
-                        ${!hasStartTime ? 'disabled' : ''}>
-                    <div class="form-text">Klockan vid mål</div>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-bold"><i class="bi bi-stopwatch me-1"></i>Löptid</label>
-                    <div class="time-display text-success" id="springSprintTimeDisplay">
-                        ${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : '-'}
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-bold"><i class="bi bi-clock me-1"></i>Sluttid</label>
-                    <div class="time-display text-primary" id="springTotalTime">
-                        ${existing?.totalTimeDisplay || '-'}
-                    </div>
-                </div>
-            </div>
+            <!-- Timekeeping (Måltid/Löptid/Sluttid) + DNS/DNF live in the separate
+                 "Tidtagning & straff" view — this scoring view is shots only. -->
 
             <!-- Shooting Score display -->
             <div class="row g-3 mb-3">
@@ -483,12 +759,6 @@ function springRenderEntry() {
                 <div class="d-flex gap-2">
                     <button class="btn btn-outline-danger btn-sm" onclick="springClearResult()">
                         <i class="bi bi-x-circle me-1"></i>Rensa
-                    </button>
-                    <button class="btn btn-outline-dark btn-sm" onclick="springASetStatus('DNS')" title="Ej start">
-                        Ej start (DNS)
-                    </button>
-                    <button class="btn btn-outline-dark btn-sm" onclick="springASetStatus('DNF')" title="Bröt">
-                        Bröt (DNF)
                     </button>
                 </div>
                 <div class="d-flex gap-2">
@@ -942,7 +1212,7 @@ function springCHasUnsavedChanges() {
     return springCTakeSnapshot() !== springCSnapshot;
 }
 
-function springCLookup() {
+async function springCLookup() {
     const input = document.getElementById('springCStartNumber');
     const startNumber = parseInt(input?.value);
     if (!startNumber || isNaN(startNumber)) {
@@ -951,12 +1221,13 @@ function springCLookup() {
         return;
     }
 
-    // Check for unsaved changes on currently loaded shooter
-    if (springCHasUnsavedChanges()) {
-        if (!confirm(`Skytt #${springCActiveShooter.startOrder} har osparade ändringar. Vill du fortsätta utan att spara?`)) {
-            input?.select();
-            input?.focus();
-            return;
+    // Each shot toggle auto-saves, so there's no manual-save prompt — just flush any pending
+    // auto-save for the current shooter before switching, so nothing in flight is lost.
+    if (springCActiveShooter) {
+        clearTimeout(springCAutoSaveTimer);
+        if (springCHasUnsavedChanges() || springCAutoSaveInFlight || springCAutoSavePending) {
+            await springCAutoSave();
+            while (springCAutoSavePending || springCAutoSaveInFlight) { await new Promise(r => setTimeout(r, 100)); }
         }
     }
 
@@ -993,13 +1264,7 @@ function springCRenderActiveCard(shooter) {
             <div class="spring-c-station" id="cStation${stop}">
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="spring-c-station-header">Station ${stop}</span>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="fw-bold" id="cStop${stop}Count">0/5</span>
-                        <button type="button" class="btn btn-sm btn-outline-success" id="cStationSave${stop}"
-                            onclick="springCStationSave(${stop})" title="Spara station ${stop}">
-                            <i class="bi bi-floppy"></i>
-                        </button>
-                    </div>
+                    <span class="fw-bold" id="cStop${stop}Count">0/5</span>
                 </div>
                 <div class="d-flex gap-2 flex-wrap" id="cStationShots${stop}">`;
         for (let shot = 1; shot <= 5; shot++) {
@@ -1016,9 +1281,10 @@ function springCRenderActiveCard(shooter) {
     }
 
     html += `
-            <!-- Shooting score summary -->
+            <!-- Shooting score summary + auto-save status (each toggle saves automatically) -->
             <div class="d-flex align-items-center gap-3 my-3 p-2 rounded" style="background: var(--bs-tertiary-bg);">
                 <span class="fw-bold">Skjutpoäng: <span id="cTotalMisses" class="text-danger fs-5">0</span></span>
+                <span class="ms-auto small" id="cSaveStatus"></span>
             </div>
 
             <!-- Penalty multiplier -->
@@ -1032,55 +1298,23 @@ function springCRenderActiveCard(shooter) {
                 </div>
             </div>
 
-            <!-- Time entry -->
-            <div class="row g-3 mb-3">
-                <div class="col-6">
-                    <label class="form-label fw-bold">Starttid</label>
-                    <div class="form-control-plaintext time-display fs-5">${hasStartTime ? shooter.startTime : '<span class="text-warning">Saknas</span>'}</div>
-                </div>
-                <div class="col-6">
-                    <label class="form-label fw-bold">Löptid</label>
-                    <div class="time-display text-success fs-5" id="cSprintTime">-</div>
-                </div>
-            </div>
-            <div class="row g-3 mb-3">
-                <div class="col-8">
-                    <label class="form-label fw-bold">Måltid</label>
-                    <input type="text" class="form-control form-control-lg" id="cFinishTime" placeholder="HH:MM:SS"
-                        ${!hasStartTime ? 'disabled' : ''}>
-                </div>
-                <div class="col-4 d-flex align-items-end">
-                    <button class="btn btn-outline-secondary btn-lg w-100" onclick="springCNow()" ${!hasStartTime ? 'disabled' : ''}>
-                        <i class="bi bi-clock me-1"></i>Nu
-                    </button>
-                </div>
-            </div>
-
-            <!-- Total time -->
-            <div class="text-center p-3 rounded mb-3" style="background: var(--bs-tertiary-bg);">
-                <div class="small text-muted">Sluttid</div>
-                <div class="time-display text-primary fs-3" id="cTotalTime">-</div>
-            </div>
-
-            <!-- DNS / DNF -->
-            <div class="d-flex gap-2 mb-2">
-                <button type="button" class="btn btn-outline-dark w-50" onclick="springCSetStatus('DNS')">
-                    Ej start (DNS)
-                </button>
-                <button type="button" class="btn btn-outline-dark w-50" onclick="springCSetStatus('DNF')">
-                    Bröt (DNF)
-                </button>
-            </div>
-
-            <!-- Save button -->
-            <button class="btn btn-success btn-lg w-100 py-3" onclick="springCSave()" id="cSaveBtn">
-                <i class="bi bi-check-circle me-1"></i>Spara resultat
+            <!-- Timekeeping (Måltid/Löptid/Sluttid) and DNS/DNF live in the separate
+                 "Tidtagning & straff" view — this scoring view is shots only.
+                 Each shot toggle auto-saves; this button just moves on to the next shooter. -->
+            <button class="btn btn-primary btn-lg w-100 py-3" onclick="springCNext()" id="cNextBtn">
+                <i class="bi bi-check-circle me-1"></i>Klar — nästa skytt
             </button>
         </div>
     </div>`;
 
     card.innerHTML = html;
     card.style.display = 'block';
+
+    // Reset auto-save state for the freshly loaded shooter
+    clearTimeout(springCAutoSaveTimer);
+    springCAutoSaveInFlight = false;
+    springCAutoSavePending = false;
+    springCSetSaveStatus('');
 
     // Init Flatpickr for finish time
     if (hasStartTime) {
@@ -1100,11 +1334,12 @@ function springCRenderActiveCard(shooter) {
 
     // Restore existing data if shooter has result
     if (existing && shooter.hasResult) {
-        // Restore shots and lock stations that have data
+        // Restore previously saved shots. Stations stay editable — every toggle auto-saves,
+        // so there's no manual save + lock step any more (re-opening a scored shooter must
+        // still allow corrections).
         if (existing.shots && existing.shots.length) {
             for (let stop = 0; stop < existing.shots.length && stop < 6; stop++) {
                 const stopShots = existing.shots[stop];
-                let stationHasData = false;
                 for (let shot = 0; shot < stopShots.length && shot < 5; shot++) {
                     const btn = document.getElementById(`cShot_${stop + 1}_${shot + 1}`);
                     if (!btn) continue;
@@ -1114,18 +1349,12 @@ function springCRenderActiveCard(shooter) {
                         btn.textContent = 'T';
                         btn.classList.remove('btn-outline-secondary');
                         btn.classList.add('active-hit');
-                        stationHasData = true;
                     } else if (val === 'B') {
                         btn.dataset.value = 'B';
                         btn.textContent = 'B';
                         btn.classList.remove('btn-outline-secondary');
                         btn.classList.add('active-miss');
-                        stationHasData = true;
                     }
-                }
-                // Auto-lock stations that have saved data
-                if (stationHasData) {
-                    springCLockStation(stop + 1);
                 }
             }
         }
@@ -1153,132 +1382,16 @@ function springCRenderActiveCard(shooter) {
 }
 
 let springCMultiplier = 1;
-let springCLockedStations = new Set(); // stations that have been saved and are locked
-
-function springCStationSave(stop) {
-    // All 5 shots must be entered (H or B)
-    let enteredCount = 0;
-    for (let shot = 1; shot <= 5; shot++) {
-        const btn = document.getElementById(`cShot_${stop}_${shot}`);
-        if (btn?.dataset.value === 'H' || btn?.dataset.value === 'B') enteredCount++;
-    }
-    if (enteredCount < 5) {
-        showSpringCToast(`Station ${stop}: alla 5 skott måste registreras (${enteredCount}/5 ifyllda).`, 'warning');
-        return;
-    }
-
-    // Save full result to server (reuses existing endpoint)
-    springCSavePartial(() => {
-        // On success: lock the station
-        springCLockStation(stop);
-    });
-}
-
-async function springCSavePartial(onSuccess) {
-    const shooter = springCActiveShooter;
-    if (!shooter) return;
-
-    const finishInput = document.getElementById('cFinishTime')?.value?.trim() || null;
-    const shotSeries = springCCollectShots();
-
-    const requestData = {
-        competitionId: springCompetitionId,
-        memberId: shooter.memberId,
-        weaponClass: shooter.weaponClass,
-        ageGenderClass: shooter.ageGenderClass,
-        finishTimeInput: finishInput,
-        shotSeries: shotSeries,
-        penaltyMultiplier: springCMultiplier,
-        status: null
-    };
-
-    try {
-        const data = await springFetchWithRetry('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
-            },
-            body: JSON.stringify(requestData)
-        });
-
-        if (data.success) {
-            // Use server-verified data (read-back from DB)
-            shooter.hasResult = true;
-            shooter.existingResult = {
-                shootingScore: data.shootingScore,
-                totalTimeSeconds: data.totalTimeSeconds,
-                totalTimeDisplay: data.totalTimeDisplay,
-                sprintTimeSeconds: data.sprintTimeSeconds,
-                status: null,
-                penaltyMultiplier: data.penaltyMultiplier,
-                shots: data.verificationShots || shotSeries
-            };
-
-            // Client-side verification
-            if (data.verificationShots) {
-                const sentJson = JSON.stringify(shotSeries);
-                const storedJson = JSON.stringify(data.verificationShots);
-                if (sentJson !== storedJson) {
-                    showSpringCToast('⚠ VARNING: Skottdata verifieringsfel! Kontrollera resultatet.', 'danger');
-                    console.error('Shot verification mismatch!', { sent: shotSeries, stored: data.verificationShots });
-                }
-            }
-
-            springCSnapshot = springCTakeSnapshot();
-            if (onSuccess) onSuccess();
-        } else {
-            showSpringCToast(data.message || 'Fel vid sparning.', 'danger');
-        }
-    } catch (err) {
-        console.error('Error saving partial result:', err);
-        showSpringCToast('Ett fel uppstod vid sparning.', 'danger');
-    }
-}
-
-function springCLockStation(stop) {
-    springCLockedStations.add(stop);
-    const shotsContainer = document.getElementById(`cStationShots${stop}`);
-    if (shotsContainer) {
-        shotsContainer.style.opacity = '0.6';
-        shotsContainer.style.pointerEvents = 'none';
-    }
-    const saveBtn = document.getElementById(`cStationSave${stop}`);
-    if (saveBtn) {
-        saveBtn.className = 'btn btn-sm btn-secondary';
-        saveBtn.innerHTML = '<i class="bi bi-lock-fill"></i>';
-        saveBtn.onclick = function() { springCUnlockStation(stop); };
-        saveBtn.title = `Lås upp station ${stop}`;
-    }
-}
-
-function springCUnlockStation(stop) {
-    if (!confirm(`Vill du låsa upp station ${stop} för redigering?`)) return;
-    springCLockedStations.delete(stop);
-    const shotsContainer = document.getElementById(`cStationShots${stop}`);
-    if (shotsContainer) {
-        shotsContainer.style.opacity = '1';
-        shotsContainer.style.pointerEvents = 'auto';
-    }
-    const saveBtn = document.getElementById(`cStationSave${stop}`);
-    if (saveBtn) {
-        saveBtn.className = 'btn btn-sm btn-outline-success';
-        saveBtn.innerHTML = '<i class="bi bi-floppy"></i>';
-        saveBtn.onclick = function() { springCStationSave(stop); };
-        saveBtn.title = `Spara station ${stop}`;
-    }
-}
 
 function springCSetMultiplier(val) {
     springCMultiplier = val;
     document.getElementById('cMult1').className = `btn btn-lg ${val === 1 ? 'btn-primary' : 'btn-outline-secondary'}`;
     document.getElementById('cMult2').className = `btn btn-lg ${val === 2 ? 'btn-warning' : 'btn-outline-secondary'}`;
     springCRecalc();
+    springCScheduleAutoSave();
 }
 
 function springCToggleShot(btn) {
-    const stop = parseInt(btn.dataset.stop);
-    if (springCLockedStations.has(stop)) return;
     const current = btn.dataset.value;
     if (current === '' || current === undefined) {
         btn.dataset.value = 'H';
@@ -1297,6 +1410,106 @@ function springCToggleShot(btn) {
         btn.classList.add('btn-outline-secondary');
     }
     springCRecalc();
+    springCScheduleAutoSave();
+}
+
+// ===== Auto-save (Class C scoring) — each shot/multiplier change saves the current grid.
+// Sends shots only (no finish/status) so it never clobbers the timing role's finish time;
+// SaveSpringskytteResult preserves the stored sprint. Debounced + coalesced so rapid taps
+// collapse into the latest state. Safe for parallel scoring + timing on several devices. =====
+let springCAutoSaveTimer = null;
+let springCAutoSaveInFlight = false;
+let springCAutoSavePending = false;
+
+function springCSetSaveStatus(state) {
+    const el = document.getElementById('cSaveStatus');
+    if (!el) return;
+    if (state === 'pending') el.innerHTML = '<span class="text-muted"><i class="bi bi-pencil"></i> ändrat…</span>';
+    else if (state === 'saving') el.innerHTML = '<span class="text-muted"><i class="bi bi-arrow-repeat"></i> sparar…</span>';
+    else if (state === 'saved') el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> sparat</span>';
+    else if (state === 'error') el.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> ej sparat – försök igen</span>';
+    else el.innerHTML = '';
+}
+
+function springCScheduleAutoSave() {
+    springCSetSaveStatus('pending');
+    clearTimeout(springCAutoSaveTimer);
+    springCAutoSaveTimer = setTimeout(springCAutoSave, 400);
+}
+
+async function springCAutoSave() {
+    const shooter = springCActiveShooter;
+    if (!shooter) return;
+    if (springCAutoSaveInFlight) { springCAutoSavePending = true; return; }  // coalesce
+    springCAutoSaveInFlight = true;
+    springCSetSaveStatus('saving');
+    const shotSeries = springCCollectShots();
+    const requestData = {
+        competitionId: springCompetitionId,
+        memberId: shooter.memberId,
+        weaponClass: shooter.weaponClass,
+        ageGenderClass: shooter.ageGenderClass,
+        finishTimeInput: null,   // scoring never touches time — server preserves the timing role's finish
+        shotSeries: shotSeries,
+        penaltyMultiplier: springCMultiplier,
+        status: null
+    };
+    try {
+        const data = await springFetchWithRetry('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value },
+            body: JSON.stringify(requestData)
+        });
+        const stillActive = springCActiveShooter && springCActiveShooter.memberId === shooter.memberId && springCActiveShooter.weaponClass === shooter.weaponClass;
+        if (data.success) {
+            shooter.hasResult = true;
+            shooter.existingResult = {
+                shootingScore: data.shootingScore, totalTimeSeconds: data.totalTimeSeconds,
+                totalTimeDisplay: data.totalTimeDisplay, sprintTimeSeconds: data.sprintTimeSeconds,
+                status: null, penaltyMultiplier: data.penaltyMultiplier, shots: data.verificationShots || shotSeries
+            };
+            let ok = true;
+            if (data.verificationShots && JSON.stringify(shotSeries) !== JSON.stringify(data.verificationShots)) {
+                ok = false; console.error('Auto-save shot verification mismatch', { sent: shotSeries, stored: data.verificationShots });
+            }
+            // Mark the current grid as saved so we don't later prompt about "unsaved changes".
+            if (stillActive && ok) springCSnapshot = springCTakeSnapshot();
+            if (stillActive) springCSetSaveStatus(ok ? 'saved' : 'error');
+        } else if (stillActive) {
+            springCSetSaveStatus('error');
+        }
+    } catch (err) {
+        console.error('Auto-save error:', err);
+        springCSetSaveStatus('error');
+    } finally {
+        springCAutoSaveInFlight = false;
+        if (springCAutoSavePending) { springCAutoSavePending = false; springCAutoSave(); }  // flush latest state
+    }
+}
+
+// "Klar — nästa skytt": flush the latest save, log it in the recent list, reset for the next lookup.
+async function springCNext() {
+    const shooter = springCActiveShooter;
+    if (!shooter) return;
+    const btn = document.getElementById('cNextBtn');
+    if (btn) btn.disabled = true;
+    clearTimeout(springCAutoSaveTimer);
+    await springCAutoSave();
+    while (springCAutoSavePending || springCAutoSaveInFlight) { await new Promise(r => setTimeout(r, 100)); }
+    if (shooter.hasResult) {
+        springCRecentEntries.unshift({
+            startOrder: shooter.startOrder, name: shooter.memberName, registeredClass: shooter.registeredClass,
+            totalTimeDisplay: shooter.existingResult?.totalTimeDisplay, shootingScore: shooter.existingResult?.shootingScore
+        });
+        if (springCRecentEntries.length > 5) springCRecentEntries.pop();
+        springCRenderRecentList();
+    }
+    springCSnapshot = null;
+    document.getElementById('springCActiveCard').style.display = 'none';
+    springCActiveShooter = null;
+    const input = document.getElementById('springCStartNumber');
+    if (input) { input.value = ''; input.focus(); }
+    if (btn) btn.disabled = false;
 }
 
 function springCRecalc() {
@@ -1644,6 +1857,7 @@ async function springLoadResultsList() {
 
         const body = document.getElementById('springResultsBody');
         const content = document.getElementById('springResultsContent');
+        if (!content) return; // results list isn't on the chromeless /station scoring page
 
         if (data.success && data.classGroups?.length > 0) {
             if (body) body.style.display = 'block';

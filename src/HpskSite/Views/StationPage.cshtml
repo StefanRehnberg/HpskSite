@@ -16,6 +16,9 @@
     // Read query params: c = competitionId, s = stationNumber
     var cStr = Context.Request.Query["c"].FirstOrDefault();
     var sStr = Context.Request.Query["s"].FirstOrDefault();
+    // mode=tid → Springskytte timing/penalty role (same page, same look, no shot grid)
+    var modeStr = Context.Request.Query["mode"].FirstOrDefault();
+    bool isTimingMode = string.Equals(modeStr, "tid", StringComparison.OrdinalIgnoreCase);
     int competitionId = 0;
     int stationNumber = 0;
     int.TryParse(cStr, out competitionId);
@@ -321,6 +324,7 @@
             entryViewData["CompetitionType"] = competitionType;
             entryViewData["IsStationPage"] = true;
             entryViewData["PresetWeaponClass"] = sStr ?? "";
+            entryViewData["IsTimingMode"] = isTimingMode;
             @await Html.PartialAsync("SpringskytteResultsManagement", entryViewData)
         }
         else

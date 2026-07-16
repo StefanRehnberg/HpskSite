@@ -148,6 +148,22 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         return Json(new SpringskytteResultResponse { Success = false, Message = "Måltid är före starttid — kontrollera tiderna." });
                 }
 
+                // Scoring-only save (shots, no finish/sprint/status): preserve the sprint the TIMING
+                // role set on its own screen so entering shots never wipes the finish time.
+                if (sprintTimeSeconds == null
+                    && string.IsNullOrWhiteSpace(request.FinishTimeInput)
+                    && string.IsNullOrWhiteSpace(request.SprintTimeInput)
+                    && request.SprintTimeSeconds == null
+                    && request.Status == null)
+                {
+                    using var existDb = _umbracoDatabaseFactory.CreateDatabase();
+                    var existing = await existDb.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                        "WHERE CompetitionId = @0 AND MemberId = @1 AND WeaponClass = @2",
+                        request.CompetitionId, request.MemberId, request.WeaponClass);
+                    if (existing?.SprintTimeSeconds != null)
+                        sprintTimeSeconds = existing.SprintTimeSeconds;
+                }
+
                 // Serialize shots
                 var shotsJson = request.ShotSeries != null
                     ? JsonConvert.SerializeObject(request.ShotSeries)
@@ -1694,7 +1710,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     });
                 }
 
-                return Json(new { success = true, message = status ?? "Tid sparad." });
+                return Json(new { success = true, message = status ?? "Tid sparad.", sprintTimeSeconds = sprint });
             }
             catch (Exception ex)
             {
@@ -1898,21 +1914,38 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         checkedIn[mid] = reg.HasProperty("isCheckedIn") && reg.GetValue<bool>("isCheckedIn");
                     }
 
-                var tl = await BuildTimelineAsync(competitionId);
-                var starters = tl.Rows.OrderBy(r => r.Sec).Select(r => new
+                // Saved results (keyed member|weaponClass) so the timing view can restore an
+                // already-entered måltid/löptid on every re-render — never silently blanking a
+                // saved finish time (which could otherwise be overwritten by accident).
+                var resultLookup = new Dictionary<string, SpringskytteResultEntry>();
+                using (var resDb = _umbracoDatabaseFactory.CreateDatabase())
                 {
-                    startOrder = r.StartOrder,
-                    startTime = r.StartTime,
-                    name = r.Name,
-                    club = r.Club,
-                    weaponClass = r.WeaponClass,
-                    ageGenderClass = r.AgeGenderClass,
-                    memberId = r.MemberId,
-                    listName = r.ListName,
-                    nodeId = r.NodeId,
-                    status = r.Status,
-                    isDns = r.Status == "DNS",
-                    checkedIn = !checkedIn.TryGetValue(r.MemberId, out var ci) || ci
+                    var resultRows = await resDb.FetchAsync<SpringskytteResultEntry>(
+                        "WHERE CompetitionId = @0", competitionId);
+                    foreach (var r in resultRows)
+                        resultLookup[$"{r.MemberId}|{r.WeaponClass}"] = r;
+                }
+
+                var tl = await BuildTimelineAsync(competitionId);
+                var starters = tl.Rows.OrderBy(r => r.Sec).Select(r =>
+                {
+                    resultLookup.TryGetValue($"{r.MemberId}|{r.WeaponClass}", out var res);
+                    return new
+                    {
+                        startOrder = r.StartOrder,
+                        startTime = r.StartTime,
+                        name = r.Name,
+                        club = r.Club,
+                        weaponClass = r.WeaponClass,
+                        ageGenderClass = r.AgeGenderClass,
+                        memberId = r.MemberId,
+                        listName = r.ListName,
+                        nodeId = r.NodeId,
+                        status = r.Status,
+                        isDns = r.Status == "DNS",
+                        checkedIn = !checkedIn.TryGetValue(r.MemberId, out var ci) || ci,
+                        sprintTimeSeconds = res?.SprintTimeSeconds
+                    };
                 }).ToList();
 
                 return Json(new
