@@ -243,6 +243,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
     }
 
     /// <summary>
+    /// Clean up after a registration is deleted: remove the member from any start list (freeing the
+    /// slot, preserving everyone else), re-publish official lists, and drop their result + adjustments.
+    /// </summary>
+    public class SpringskytteCleanupRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+    }
+
+    /// <summary>
     /// Mark a shooter DNS (will not start) or clear it. DNS is what frees a start slot — distinct
     /// from Närvaro (arrival). Un-DNS restores the shooter as scheduled (RM re-assigns a slot if the
     /// old one was taken). Settable from the starter screen, timekeeper, and start-list edit modal.

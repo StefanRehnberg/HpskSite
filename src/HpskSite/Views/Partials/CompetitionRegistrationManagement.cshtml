@@ -2045,36 +2045,72 @@ function saveCompetitionRegistrationChanges() {
     });
 }
 
-function confirmDeleteCompetitionRegistration(registrationId) {
+// Springskytte deletes are start-list-aware: warn if the shooter is in a (published) list, then
+// after removal free their slot + drop result/adjustments via a cleanup call.
+const springDiscipline = '@compType' === 'Springskytte';
+
+async function confirmDeleteCompetitionRegistration(registrationId) {
+    if (springDiscipline) { await springAwareDelete(registrationId, null); return; }
     if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.')) {
         deleteRegistrationById(registrationId);
     }
 }
 
-function deleteCompetitionRegistration() {
-    const registrationId = document.getElementById('competitionEditRegistrationId').value;
+async function deleteCompetitionRegistration() {
+    const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value);
+    const modalEl = document.getElementById('competitionEditRegistrationModal');
+    if (springDiscipline) { await springAwareDelete(registrationId, modalEl); return; }
     if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.')) {
-        bootstrap.Modal.getInstance(document.getElementById('competitionEditRegistrationModal')).hide();
-        deleteRegistrationById(parseInt(registrationId));
+        bootstrap.Modal.getInstance(modalEl).hide();
+        deleteRegistrationById(registrationId);
     }
 }
 
-function deleteRegistrationById(registrationId) {
-    const data = {
-        registrationId: registrationId
-    };
+async function springAwareDelete(registrationId, modalElToHide) {
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
+    const memberId = reg ? reg.memberId : null;
+    const compId = $('.competition-registration-management').data('competition-id');
+    let msg = 'Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.';
+    try {
+        if (memberId) {
+            const m = await fetch(`/umbraco/surface/Springskytte/GetStartListMembership?competitionId=${compId}&memberId=${memberId}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json());
+            if (m.success && (m.inLists || []).length) {
+                const parts = m.inLists.map(l => `• ${l.listName} (start ${(l.startTime || '').substring(0,5)})${l.official ? ' – PUBLICERAD' : ''}`);
+                const anyOfficial = m.inLists.some(l => l.official);
+                msg = 'Skytten finns i startlista:\n' + parts.join('\n') +
+                      '\n\nStarttiden frigörs' + (anyOfficial ? ' och den publicerade startlistan uppdateras' : '') +
+                      '. Ta bort anmälan?';
+            }
+        }
+    } catch (e) { /* fall back to the generic confirm */ }
+    if (!confirm(msg)) return;
+    if (modalElToHide) { const inst = bootstrap.Modal.getInstance(modalElToHide); if (inst) inst.hide(); }
+    deleteRegistrationById(registrationId, memberId);
+}
 
+function deleteRegistrationById(registrationId, memberId) {
+    const compId = $('.competition-registration-management').data('competition-id');
     fetch('/umbraco/surface/RegistrationAdmin/DeleteCompetitionRegistration', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
         },
-        body: JSON.stringify(data)
+        body: JSON.stringify({ registrationId: registrationId })
     })
     .then(response => response.json())
-    .then(data => {
+    .then(async data => {
         if (data.success) {
+            // Springskytte: free the vacated slot + drop result/adjustment rows.
+            if (springDiscipline && memberId) {
+                try {
+                    await fetch('/umbraco/surface/Springskytte/CleanupDeletedRegistration', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val() },
+                        body: JSON.stringify({ competitionId: parseInt(compId), memberId: memberId })
+                    });
+                } catch (e) { /* registration already removed; cleanup is best-effort */ }
+            }
             loadCompetitionRegistrations();
         } else {
             alert('Kunde inte ta bort anmälan: ' + (data.message || 'okänt fel'));

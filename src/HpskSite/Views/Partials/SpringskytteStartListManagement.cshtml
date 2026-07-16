@@ -354,6 +354,8 @@ function springBuildStartersTable(card) {
     if (!card.starters || card.starters.length === 0) return '';
 
     const interval = card.defaultInterval || '01:00';
+    const normalInterval = springParseTimeMM(interval);
+    const breakSec = springParseTimeMM(card.breakDuration || '05:00');
     const canEdit = !!card.nodeId; // only persisted lists can be edited per-shooter
     const colCount = canEdit ? 7 : 6;
     let html = `
@@ -368,10 +370,23 @@ function springBuildStartersTable(card) {
     for (const s of card.starters) {
         if (prevTime && s.startTime) {
             const gap = springParseTimeDiff(prevTime, s.startTime);
-            const normalInterval = springParseTimeMM(interval);
             if (gap > normalInterval * 1.5) {
-                html += `<tr class="table-warning"><td colspan="${colCount}" class="text-center small fw-bold py-1">
-                    <i class="bi bi-pause-circle me-1"></i>Paus</td></tr>`;
+                // Distinguish a configured pause (≈ break duration, 3-5 min) from an open slot
+                // (a single missing interval, e.g. a shooter moved away) — different styling.
+                const isPause = breakSec > 0 ? (gap - normalInterval) >= breakSec * 0.75 : gap >= normalInterval * 4;
+                if (isPause) {
+                    html += `<tr class="table-warning"><td colspan="${colCount}" class="text-center small fw-bold py-1">
+                        <i class="bi bi-pause-circle me-1"></i>Paus</td></tr>`;
+                } else {
+                    const steps = Math.round(gap / normalInterval) - 1;
+                    const prevSec = springHmsToSec(prevTime);
+                    for (let k = 1; k <= steps; k++) {
+                        const slot = springSecToHms(prevSec + k * normalInterval);
+                        html += `<tr style="background:#fafbfc"><td></td>
+                            <td style="font-family:monospace;color:#8a94a0">${slot}</td>
+                            <td colspan="${colCount - 2}" class="small fst-italic text-muted"><i class="bi bi-dash-circle me-1"></i>Ledig tid</td></tr>`;
+                    }
+                }
             }
         }
         const editCell = canEdit
@@ -466,11 +481,11 @@ async function springSaveStarterEdit() {
     const makeDns = document.getElementById('springEditStarterDns').checked;
     if (isNaN(startOrder) || startOrder < 0) { fail('Ogiltigt startnummer.'); return; }
 
-    // Client-side duplicate-number guard (server also enforces).
-    const card = springLocalCards.find(c => c.tempId === springEditCtx.tempId);
-    if (startOrder !== springEditCtx.currentOrder && card) {
-        const dup = (card.starters || []).some(x => !(x.memberId === springEditCtx.memberId && x.weaponClass === springEditCtx.weaponClass)
-            && x.weaponClass === springEditCtx.weaponClass && x.startOrder === startOrder);
+    // Client-side duplicate-number guard: unique per weapon class ACROSS ALL lists (server also enforces).
+    if (startOrder !== springEditCtx.currentOrder) {
+        const dup = springLocalCards.some(c => (c.starters || []).some(x =>
+            !(x.memberId === springEditCtx.memberId && x.weaponClass === springEditCtx.weaponClass)
+            && x.weaponClass === springEditCtx.weaponClass && x.startOrder === startOrder));
         if (dup) { fail(`Startnummer ${startOrder} används redan i vapengrupp ${springEditCtx.weaponClass}.`); return; }
     }
 
@@ -766,6 +781,15 @@ function springParseTimeMM(mmss) {
     if (!mmss) return 60;
     const p = mmss.split(':').map(Number);
     return p.length === 2 ? p[0]*60+p[1] : p[0]*60;
+}
+function springHmsToSec(t) {
+    if (!t) return 0;
+    const p = t.split(':').map(Number);
+    return p.length === 3 ? p[0]*3600+p[1]*60+p[2] : p[0]*3600+p[1]*60;
+}
+function springSecToHms(s) {
+    s = Math.max(0, s);
+    return String(Math.floor(s/3600)).padStart(2,'0') + ':' + String(Math.floor((s%3600)/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
 }
 
 function escapeHtml(str) {

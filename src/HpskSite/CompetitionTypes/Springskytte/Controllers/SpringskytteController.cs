@@ -1333,20 +1333,23 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return Json(new { success = false, message = "Skytten hittades inte i startlistan." });
 
                 var currentSec = ParseStartTimeSeconds(starter.StartTime);
+                SpringTimeline? tl = null;  // built lazily, reused by both guards
 
-                // Guard: no duplicate start number within the same weapon class in this list.
+                // Guard: start number must be unique within the weapon class ACROSS ALL start lists
+                // (that's how "Numrera startnummer" assigns them), not just this list.
                 if (request.StartOrder.HasValue && request.StartOrder.Value != starter.StartOrder)
                 {
                     if (request.StartOrder.Value < 0)
                         return Json(new { success = false, message = "Ogiltigt startnummer." });
-                    bool numTaken = config.Starters.Any(s =>
-                        !(s.MemberId == request.MemberId && s.WeaponClass == request.WeaponClass)
-                        && s.WeaponClass == starter.WeaponClass && s.StartOrder == request.StartOrder.Value);
+                    tl ??= await BuildTimelineAsync(request.CompetitionId);
+                    bool numTaken = tl.Rows.Any(r =>
+                        !(r.MemberId == request.MemberId && r.WeaponClass == request.WeaponClass)
+                        && r.WeaponClass == starter.WeaponClass && r.StartOrder == request.StartOrder.Value);
                     if (numTaken)
                         return Json(new { success = false, message = $"Startnummer {request.StartOrder.Value} används redan i vapengrupp {starter.WeaponClass}." });
                 }
 
-                // Guard: don't move onto a time already reserved by another (non-DNS) shooter.
+                // Guard: don't move onto a time already reserved by another (non-DNS) shooter (same class).
                 if (!string.IsNullOrWhiteSpace(request.StartTime))
                 {
                     if (!TimeSpan.TryParse(request.StartTime.Trim(), out var ts)
@@ -1355,9 +1358,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     int newSec = (int)ts.TotalSeconds;
                     if (newSec != currentSec)
                     {
-                        // Scope the collision check to the shooter's own weapon class — classes never mix.
-                        var timeline = await BuildTimelineAsync(request.CompetitionId);
-                        if (timeline.OccupiedFor(starter.WeaponClass).Contains(newSec))
+                        tl ??= await BuildTimelineAsync(request.CompetitionId);
+                        if (tl.OccupiedFor(starter.WeaponClass).Contains(newSec))
                             return Json(new { success = false, message = "Starttiden är upptagen av en annan skytt. Välj en ledig lucka." });
                     }
                     starter.StartTime = ts.ToString(@"hh\:mm\:ss");
@@ -2028,6 +2030,105 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error setting Springskytte DNS");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>Which start lists a member appears in (for the delete-confirmation warning).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStartListMembership(int competitionId, int memberId)
+        {
+            try
+            {
+                if (competitionId <= 0 || memberId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var comp = _contentService.GetById(competitionId);
+                var inLists = new List<object>();
+                if (comp != null)
+                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
+                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    {
+                        var cfgJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cfgJson)) continue;
+                        SpringskytteStartListConfig? cfg = null;
+                        try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                        var matches = cfg?.Starters?.Where(s => s.MemberId == memberId).ToList();
+                        if (matches == null || matches.Count == 0) continue;
+                        bool official = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
+                        var listName = !string.IsNullOrWhiteSpace(cfg!.ListName) ? cfg.ListName : (node.Name ?? "Startlista");
+                        foreach (var m in matches)
+                            inLists.Add(new { listName, startTime = m.StartTime, weaponClass = m.WeaponClass, official });
+                    }
+                return Json(new { success = true, inLists });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking Springskytte start-list membership");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Clean up a deleted registration: remove the member from every start list (their slot becomes
+        /// a free gap; everyone else's number/time is preserved), re-publish official lists, and delete
+        /// their result + time-adjustment rows.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CleanupDeletedRegistration([FromBody] SpringskytteCleanupRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(request.CompetitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var freed = new List<object>();
+                var comp = _contentService.GetById(request.CompetitionId);
+                if (comp != null)
+                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
+                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    {
+                        var cfgJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cfgJson)) continue;
+                        SpringskytteStartListConfig? cfg = null;
+                        try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                        if (cfg?.Starters == null || cfg.Starters.Count == 0) continue;
+
+                        var removed = cfg.Starters.Where(s => s.MemberId == request.MemberId).ToList();
+                        if (removed.Count == 0) continue;
+
+                        cfg.Starters = cfg.Starters.Where(s => s.MemberId != request.MemberId).ToList();
+                        bool official = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
+                        node.SetValue("configurationData", JsonConvert.SerializeObject(cfg));
+                        node.SetValue("startListContent", BuildStartListHtml(cfg.Starters));
+                        _contentService.Save(node);
+                        if (official)
+                        {
+                            try { _contentService.Publish(node, new[] { "*" }); }
+                            catch (Exception pubEx) { _logger.LogWarning(pubEx, "Cleanup: publish failed for {NodeId} (saved is authoritative)", node.Id); }
+                        }
+                        foreach (var r in removed)
+                            freed.Add(new { listName = cfg.ListName, startTime = r.StartTime, wasOfficial = official });
+                    }
+
+                // Drop result + adjustment rows for the departed member.
+                try
+                {
+                    using var db = _umbracoDatabaseFactory.CreateDatabase();
+                    await db.ExecuteAsync("DELETE FROM SpringskytteResultEntry WHERE CompetitionId=@0 AND MemberId=@1", request.CompetitionId, request.MemberId);
+                    await db.ExecuteAsync("DELETE FROM SpringskytteTimeAdjustment WHERE CompetitionId=@0 AND MemberId=@1", request.CompetitionId, request.MemberId);
+                }
+                catch (Exception dbEx) { _logger.LogWarning(dbEx, "Cleanup: DB row delete failed for comp {Comp} member {Member}", request.CompetitionId, request.MemberId); }
+
+                _logger.LogInformation("Cleaned up deleted Springskytte registration comp={Comp} member={Member}, freed {Count} slot(s)",
+                    request.CompetitionId, request.MemberId, freed.Count);
+                return Json(new { success = true, freed });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error cleaning up deleted Springskytte registration");
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }
