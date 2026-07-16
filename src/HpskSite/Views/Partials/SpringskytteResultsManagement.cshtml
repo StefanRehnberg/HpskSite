@@ -494,14 +494,22 @@ function springTimeRecalc(startSec){
 }
 function springTimeNow(){
     const d=new Date(), t=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
-    if(springTimeFinishPicker) springTimeFinishPicker.setDate(t,true); else document.getElementById('springTimeFinish').value=t;
+    // setDate(...,false): do NOT fire the change event — springTimeNow saves explicitly below,
+    // so triggering change too would fire a second, concurrent save (dup-key race → false error).
+    if(springTimeFinishPicker) springTimeFinishPicker.setDate(t,false); else document.getElementById('springTimeFinish').value=t;
     springTimeRecalc(springTimeHmsToSec(springTimeActive?.startTime));
     springTimeAutoSaveFinish();  // "Nu" persists immediately — never held only in the input
 }
-// Persist the current måltid without leaving the shooter. Only fires for a complete, valid
-// HH:MM:SS so partial typing can't hit the server. Caches the returned sprint on the active
-// shooter so re-renders (after straff/tidsavdrag) restore the exact saved time.
-async function springTimeAutoSaveFinish(){
+// Persist the current måltid without leaving the shooter. Serialized through a promise chain so
+// overlapping triggers (e.g. the input's blur-change + the explicit call from "Nu") can never run
+// two concurrent SaveSpringskytteFinishTime requests — that raced on the insert and surfaced a
+// spurious "Ett fel uppstod" even though the row saved. Only a complete, valid HH:MM:SS is sent.
+let springTimeFinishSaveChain = Promise.resolve();
+function springTimeAutoSaveFinish(){
+    springTimeFinishSaveChain = springTimeFinishSaveChain.then(() => springTimeDoFinishSave());
+    return springTimeFinishSaveChain;
+}
+async function springTimeDoFinishSave(){
     if(!springTimeActive) return;
     const val=(document.getElementById('springTimeFinish')?.value||'').trim();
     if(!val || springTimeHmsToSec(val)==null) return;
@@ -1223,12 +1231,14 @@ async function springCLookup() {
 
     // Each shot toggle auto-saves, so there's no manual-save prompt — just flush any pending
     // auto-save for the current shooter before switching, so nothing in flight is lost.
-    if (springCActiveShooter) {
+    const outgoing = springCActiveShooter;
+    if (outgoing) {
         clearTimeout(springCAutoSaveTimer);
         if (springCHasUnsavedChanges() || springCAutoSaveInFlight || springCAutoSavePending) {
             await springCAutoSave();
             while (springCAutoSavePending || springCAutoSaveInFlight) { await new Promise(r => setTimeout(r, 100)); }
         }
+        springCLogRecent(outgoing);  // record the shooter we're leaving in "Senast registrerade"
     }
 
     // Find shooter by start order, Class C only
@@ -1299,11 +1309,8 @@ function springCRenderActiveCard(shooter) {
             </div>
 
             <!-- Timekeeping (Måltid/Löptid/Sluttid) and DNS/DNF live in the separate
-                 "Tidtagning & straff" view — this scoring view is shots only.
-                 Each shot toggle auto-saves; this button just moves on to the next shooter. -->
-            <button class="btn btn-primary btn-lg w-100 py-3" onclick="springCNext()" id="cNextBtn">
-                <i class="bi bi-check-circle me-1"></i>Klar — nästa skytt
-            </button>
+                 "Tidtagning & straff" view — this scoring view is shots only. Each shot toggle
+                 auto-saves; just enter the next start number to move on (no "done" button needed). -->
         </div>
     </div>`;
 
@@ -1487,29 +1494,15 @@ async function springCAutoSave() {
     }
 }
 
-// "Klar — nästa skytt": flush the latest save, log it in the recent list, reset for the next lookup.
-async function springCNext() {
-    const shooter = springCActiveShooter;
-    if (!shooter) return;
-    const btn = document.getElementById('cNextBtn');
-    if (btn) btn.disabled = true;
-    clearTimeout(springCAutoSaveTimer);
-    await springCAutoSave();
-    while (springCAutoSavePending || springCAutoSaveInFlight) { await new Promise(r => setTimeout(r, 100)); }
-    if (shooter.hasResult) {
-        springCRecentEntries.unshift({
-            startOrder: shooter.startOrder, name: shooter.memberName, registeredClass: shooter.registeredClass,
-            totalTimeDisplay: shooter.existingResult?.totalTimeDisplay, shootingScore: shooter.existingResult?.shootingScore
-        });
-        if (springCRecentEntries.length > 5) springCRecentEntries.pop();
-        springCRenderRecentList();
-    }
-    springCSnapshot = null;
-    document.getElementById('springCActiveCard').style.display = 'none';
-    springCActiveShooter = null;
-    const input = document.getElementById('springCStartNumber');
-    if (input) { input.value = ''; input.focus(); }
-    if (btn) btn.disabled = false;
+// Log the outgoing shooter in the "Senast registrerade" list once their score is saved.
+function springCLogRecent(shooter) {
+    if (!shooter || !shooter.hasResult) return;
+    springCRecentEntries.unshift({
+        startOrder: shooter.startOrder, name: shooter.memberName, registeredClass: shooter.registeredClass,
+        totalTimeDisplay: shooter.existingResult?.totalTimeDisplay, shootingScore: shooter.existingResult?.shootingScore
+    });
+    if (springCRecentEntries.length > 5) springCRecentEntries.pop();
+    springCRenderRecentList();
 }
 
 function springCRecalc() {

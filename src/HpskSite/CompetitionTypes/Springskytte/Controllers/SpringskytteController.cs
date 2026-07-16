@@ -1690,24 +1690,37 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 {
                     if (starter == null)
                         return Json(new { success = false, message = "Skytten finns inte i startlistan." });
-                    await db.InsertAsync(new SpringskytteResultEntry
+                    try
                     {
-                        CompetitionId = request.CompetitionId,
-                        MemberId = request.MemberId,
-                        WeaponClass = request.WeaponClass,
-                        AgeGenderClass = starter.AgeGenderClass,
-                        StartOrder = starter.StartOrder,
-                        StartTime = starter.StartTime,
-                        SprintTimeSeconds = sprint,
-                        ShootingScore = 0,
-                        PenaltyMultiplier = 1,
-                        TotalTimeSeconds = total,
-                        Shots = "[]",
-                        Status = status,
-                        EnteredBy = enteredBy,
-                        EnteredAt = now,
-                        LastModified = now
-                    });
+                        await db.InsertAsync(new SpringskytteResultEntry
+                        {
+                            CompetitionId = request.CompetitionId,
+                            MemberId = request.MemberId,
+                            WeaponClass = request.WeaponClass,
+                            AgeGenderClass = starter.AgeGenderClass,
+                            StartOrder = starter.StartOrder,
+                            StartTime = starter.StartTime,
+                            SprintTimeSeconds = sprint,
+                            ShootingScore = 0,
+                            PenaltyMultiplier = 1,
+                            TotalTimeSeconds = total,
+                            Shots = "[]",
+                            Status = status,
+                            EnteredBy = enteredBy,
+                            EnteredAt = now,
+                            LastModified = now
+                        });
+                    }
+                    catch
+                    {
+                        // A concurrent writer (another device, or the scoring role) inserted the row
+                        // first. Fall back to updating only the time fields — never lose the måltid to
+                        // a duplicate-key race. Shots/score set by the other writer are preserved.
+                        await db.ExecuteAsync(
+                            @"UPDATE SpringskytteResultEntry SET SprintTimeSeconds=@0, TotalTimeSeconds=@1, Status=@2, LastModified=@3
+                              WHERE CompetitionId=@4 AND MemberId=@5 AND WeaponClass=@6",
+                            sprint, total, status, now, request.CompetitionId, request.MemberId, request.WeaponClass);
+                    }
                 }
 
                 return Json(new { success = true, message = status ?? "Tid sparad.", sprintTimeSeconds = sprint });
