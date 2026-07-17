@@ -1016,6 +1016,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         _logger.LogWarning(dbEx, "Failed to update StartOrder/StartTime in SpringskytteResultEntry for CompetitionId={CompetitionId} (non-critical)", request.CompetitionId);
                     }
 
+                    // Always re-assign numbers per weapon class across ALL lists so start numbers stay
+                    // unique within a weapon class (a class may span several lists / days). This makes
+                    // duplicate start numbers impossible to introduce by generating.
+                    await RenumberAllPerWeaponClassAsync(request.CompetitionId);
+
                     _logger.LogInformation("Generated Springskytte start list '{ListName}' for CompetitionId={CompetitionId}, {Count} starters, NodeId={NodeId}",
                         listName, request.CompetitionId, starters.Count, startListContent?.Id);
 
@@ -1357,90 +1362,105 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null)
-                    return Json(new { success = false, message = "Tävling hittades inte." });
-
-                // Load all start list nodes
-                var nodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                    .Where(c => c.ContentType.Alias == "precisionStartList")
-                    .ToList();
-
-                if (!nodes.Any())
+                var (totalStarters, listCount) = await RenumberAllPerWeaponClassAsync(competitionId);
+                if (listCount == 0)
                     return Json(new { success = false, message = "Inga startlistor hittades." });
-
-                // Collect all starters with their node reference, ordered by list first-start-time then position
-                var allStarters = new List<(Umbraco.Cms.Core.Models.IContent node, SpringskytteStartListConfig config, int starterIndex)>();
-
-                var nodeConfigs = new List<(Umbraco.Cms.Core.Models.IContent node, SpringskytteStartListConfig config)>();
-                foreach (var node in nodes)
-                {
-                    var cfgJson = node.GetValue<string>("configurationData");
-                    if (string.IsNullOrEmpty(cfgJson)) continue;
-                    var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
-                    if (config?.Starters == null || !config.Starters.Any()) continue;
-                    nodeConfigs.Add((node, config));
-                }
-
-                // Sort lists by first start time so earlier lists get lower numbers
-                nodeConfigs.Sort((a, b) =>
-                {
-                    TimeSpan.TryParse(a.config.FirstStartTime, out var ta);
-                    TimeSpan.TryParse(b.config.FirstStartTime, out var tb);
-                    return ta.CompareTo(tb);
-                });
-
-                // Assign sequential numbers per weapon class across all lists
-                var weaponClassCounter = new Dictionary<string, int>();
-
-                foreach (var (node, config) in nodeConfigs)
-                {
-                    foreach (var starter in config.Starters)
-                    {
-                        if (!weaponClassCounter.ContainsKey(starter.WeaponClass))
-                            weaponClassCounter[starter.WeaponClass] = 1;
-                        starter.StartOrder = weaponClassCounter[starter.WeaponClass]++;
-                    }
-
-                    // Save updated config back to node
-                    node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                    node.SetValue("startListContent", BuildStartListHtml(config.Starters));
-                    _contentService.Save(node);
-                    var publishResult = _contentService.Publish(node, new[] { "*" });
-                    if (!publishResult.Success)
-                    {
-                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
-                    }
-                }
-
-                // Update DB result entries
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-                foreach (var (_, config) in nodeConfigs)
-                {
-                    foreach (var starter in config.Starters)
-                    {
-                        await db.ExecuteAsync(
-                            @"UPDATE SpringskytteResultEntry
-                              SET StartOrder = @0, StartTime = @1, LastModified = @2
-                              WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
-                            starter.StartOrder, starter.StartTime, DateTime.Now,
-                            competitionId, starter.MemberId, starter.WeaponClass);
-                    }
-                }
-
-                var totalStarters = nodeConfigs.Sum(nc => nc.config.Starters.Count);
-                _logger.LogInformation("Renumbered Springskytte start lists for CompetitionId={CompetitionId}, {Count} starters across {Lists} lists",
-                    competitionId, totalStarters, nodeConfigs.Count);
 
                 return Json(new
                 {
                     success = true,
-                    message = $"Startnummer tilldelade för {totalStarters} startande i {nodeConfigs.Count} listor."
+                    message = $"Startnummer tilldelade för {totalStarters} startande i {listCount} listor."
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error renumbering Springskytte start lists");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Assigns sequential start numbers PER WEAPON CLASS across ALL start lists, so a number is
+        /// unique within a weapon class for the whole competition (never two C#1's, even when C spans
+        /// several lists / days). This is the single source of truth for numbering — generation and the
+        /// "Numrera om" button both run it, so duplicates can't be introduced by construction.
+        /// </summary>
+        private async Task<(int totalStarters, int listCount)> RenumberAllPerWeaponClassAsync(int competitionId)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return (0, 0);
+
+            var nodeConfigs = new List<(Umbraco.Cms.Core.Models.IContent node, SpringskytteStartListConfig config)>();
+            foreach (var node in _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                         .Where(c => c.ContentType.Alias == "precisionStartList"))
+            {
+                var cfgJson = node.GetValue<string>("configurationData");
+                if (string.IsNullOrEmpty(cfgJson)) continue;
+                var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
+                if (config?.Starters == null || !config.Starters.Any()) continue;
+                nodeConfigs.Add((node, config));
+            }
+            if (!nodeConfigs.Any()) return (0, 0);
+
+            // Earlier lists (by first start time) get the lower numbers.
+            nodeConfigs.Sort((a, b) =>
+            {
+                TimeSpan.TryParse(a.config.FirstStartTime, out var ta);
+                TimeSpan.TryParse(b.config.FirstStartTime, out var tb);
+                return ta.CompareTo(tb);
+            });
+
+            var weaponClassCounter = new Dictionary<string, int>();
+            foreach (var (node, config) in nodeConfigs)
+            {
+                foreach (var starter in config.Starters)
+                {
+                    if (!weaponClassCounter.ContainsKey(starter.WeaponClass))
+                        weaponClassCounter[starter.WeaponClass] = 1;
+                    starter.StartOrder = weaponClassCounter[starter.WeaponClass]++;
+                }
+                node.SetValue("configurationData", JsonConvert.SerializeObject(config));
+                node.SetValue("startListContent", BuildStartListHtml(config.Starters));
+                _contentService.Save(node);
+                var publishResult = _contentService.Publish(node, new[] { "*" });
+                if (!publishResult.Success)
+                    _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
+            }
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            foreach (var (_, config) in nodeConfigs)
+                foreach (var starter in config.Starters)
+                    await db.ExecuteAsync(
+                        @"UPDATE SpringskytteResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
+                          WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                        starter.StartOrder, starter.StartTime, DateTime.Now,
+                        competitionId, starter.MemberId, starter.WeaponClass);
+
+            _logger.LogInformation("Renumbered Springskytte (per weapon class) for CompetitionId={CompetitionId}, {Count} starters across {Lists} lists",
+                competitionId, nodeConfigs.Sum(nc => nc.config.Starters.Count), nodeConfigs.Count);
+            return (nodeConfigs.Sum(nc => nc.config.Starters.Count), nodeConfigs.Count);
+        }
+
+        /// <summary>Detects duplicate start numbers within a weapon class (defence in depth for legacy data).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSpringskytteStartNumberIssues(int competitionId)
+        {
+            try
+            {
+                if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+                var tl = await BuildTimelineAsync(competitionId);
+                var duplicates = tl.Rows
+                    .Where(r => r.StartOrder > 0)
+                    .GroupBy(r => r.WeaponClass + "|" + r.StartOrder)
+                    .Where(g => g.Count() > 1)
+                    .Select(g => new { weaponClass = g.First().WeaponClass, startOrder = g.First().StartOrder, count = g.Count(), names = g.Select(x => x.Name).ToList() })
+                    .OrderBy(x => x.weaponClass).ThenBy(x => x.startOrder)
+                    .ToList();
+                return Json(new { success = true, duplicates });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking Springskytte start number issues for {Comp}", competitionId);
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }

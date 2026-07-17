@@ -54,8 +54,12 @@
                     <i class="bi bi-stopwatch me-1"></i>Vapengrupp C
                 </a>
                 <span class="vr mx-1"></span>
-                <a href="/startlinje/@competitionId" class="btn btn-outline-secondary btn-sm" target="_blank">
-                    <i class="bi bi-flag me-1"></i>Startlinje (klocka)
+                <span class="text-muted small me-1">Startlinje:</span>
+                <a href="/startlinje/@competitionId?s=A" class="btn btn-outline-secondary btn-sm" target="_blank">
+                    <i class="bi bi-flag me-1"></i>Vapengrupp A
+                </a>
+                <a href="/startlinje/@competitionId?s=C" class="btn btn-outline-secondary btn-sm" target="_blank">
+                    <i class="bi bi-flag me-1"></i>Vapengrupp C
                 </a>
             </div>
         </div>
@@ -66,7 +70,8 @@
     <div class="card" style="@(!isStationPage ? "display:none" : "")">
         @if (isStationPage)
         {
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                <div>
                 @if (isTimingMode)
                 {
                     <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Tidtagning &amp; straff — @competitionName
@@ -81,6 +86,8 @@
                         else if (presetWeaponClass == "C") { <span class="badge bg-primary ms-2">Vapengrupp C</span> }
                     </h5>
                 }
+                </div>
+                <button id="springWakeBtn" class="btn btn-outline-secondary btn-sm" title="Hindra skärmen från att slockna"><i class="bi bi-display me-1"></i>Håll skärmen vaken</button>
             </div>
         }
         else
@@ -312,7 +319,7 @@
     }
 </div>
 
-@if (isTimingMode)
+@if (isStationPage)
 {
 <div class="modal fade" id="springTimeAdjModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -425,6 +432,7 @@ let springCRecentEntries = [];  // last 5 saved entries
 let springCActiveShooter = null;
 
 document.addEventListener('DOMContentLoaded', () => {
+    springWakeInit();  // scorer + timer station screens can opt to keep the screen awake
     if (springTimingMode) { springTimeInit(); return; }   // timing role has its own pane + data
     springLoadShooters();
     springLoadResultsList();
@@ -433,6 +441,34 @@ document.addEventListener('DOMContentLoaded', () => {
         springLoadSubResultsList();
     }
 });
+
+// ===== Wake lock — keep the scoring/timing screen awake during a long session (opt-in) =====
+let springWakeLock = null, springWakeWanted = false;
+function springWakeInit() {
+    const btn = document.getElementById('springWakeBtn');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+        if (springWakeWanted) { springWakeWanted = false; if (springWakeLock) { try { await springWakeLock.release(); } catch (e) {} springWakeLock = null; } }
+        else {
+            springWakeWanted = true;
+            if (!('wakeLock' in navigator)) { btn.innerHTML = '<i class="bi bi-x me-1"></i>Stöds ej'; springWakeWanted = false; return; }
+            await springAcquireWake();
+        }
+        springRenderWakeBtn();
+    });
+    document.addEventListener('visibilitychange', async () => { if (springWakeWanted && !springWakeLock && document.visibilityState === 'visible') await springAcquireWake(); });
+}
+async function springAcquireWake() {
+    if (!('wakeLock' in navigator)) return false;
+    try { springWakeLock = await navigator.wakeLock.request('screen'); springWakeLock.addEventListener('release', () => { springWakeLock = null; }); return true; }
+    catch (e) { return false; }
+}
+function springRenderWakeBtn() {
+    const btn = document.getElementById('springWakeBtn');
+    if (!btn) return;
+    if (springWakeWanted) { btn.innerHTML = '<i class="bi bi-display-fill me-1"></i>Skärm vaken'; btn.classList.replace('btn-outline-secondary', 'btn-secondary'); }
+    else { btn.innerHTML = '<i class="bi bi-display me-1"></i>Håll skärmen vaken'; btn.classList.replace('btn-secondary', 'btn-outline-secondary'); }
+}
 
 // ===== TIMING & PENALTIES pane (timing role) — same look as the range-officer station =====
 let springTimeStarters = [];
@@ -594,10 +630,15 @@ async function springTimeSetDnf(){
     springTimeActive=null; const c=document.getElementById('springTimeActiveCard'); c.style.display='none'; c.innerHTML='';
     const sn=document.getElementById('springTimeStartNumber'); sn.value=''; sn.focus();
 }
-function springTimeOpenAdj(){
-    if(!springTimeActive) return;
-    document.getElementById('springTimeAdjName').textContent=springTimeActive.name;
-    document.getElementById('springTimeAdjClass').textContent=springTimeActive.weaponClass+' · '+springTimeActive.ageGenderClass;
+// Straff/tidsavdrag modal is shared by the timing view AND the scoring pads — it targets an
+// explicit shooter + an onSaved callback, so both roles use the same ledger.
+let springAdjTarget = null;
+let springAdjOnSaved = null;
+function springOpenAdjFor(target, onSaved){
+    if(!target) return;
+    springAdjTarget = target; springAdjOnSaved = onSaved || null;
+    document.getElementById('springTimeAdjName').textContent = target.name || '';
+    document.getElementById('springTimeAdjClass').textContent = target.weaponClass + (target.ageGenderClass ? (' · ' + target.ageGenderClass) : '');
     document.getElementById('springTimeAdjPenalty').checked=true;
     document.getElementById('springTimeAdjPoints').value=1;
     document.getElementById('springTimeAdjTime').value='';
@@ -606,6 +647,13 @@ function springTimeOpenAdj(){
     const err=document.getElementById('springTimeAdjError'); err.classList.add('d-none'); err.textContent='';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('springTimeAdjModal')).show();
 }
+function springTimeOpenAdj(){
+    if(!springTimeActive) return;
+    springOpenAdjFor(
+        { memberId:springTimeActive.memberId, weaponClass:springTimeActive.weaponClass, name:springTimeActive.name, ageGenderClass:springTimeActive.ageGenderClass },
+        async () => { await springTimeAutoSaveFinish(); await springTimeLoad(); }  // keep måltid, refresh timing card
+    );
+}
 function springTimeSyncAdjType(){
     const isPen=document.getElementById('springTimeAdjPenalty').checked;
     document.getElementById('springTimePenaltyFields').style.display=isPen?'':'none';
@@ -613,20 +661,18 @@ function springTimeSyncAdjType(){
     document.getElementById('springTimeAdjReasonSelect').innerHTML=(isPen?SPRING_TIME_PEN_REASONS:SPRING_TIME_RED_REASONS).map(r=>`<option>${springTimeEsc(r)}</option>`).join('');
 }
 async function springTimeSaveAdj(){
-    if(!springTimeActive) return;
-    // Persist any entered måltid first so the reload below re-renders with it intact.
-    await springTimeAutoSaveFinish();
+    if(!springAdjTarget) return;
     const err=document.getElementById('springTimeAdjError'); err.classList.add('d-none');
     const isPen=document.getElementById('springTimeAdjPenalty').checked;
     const sel=document.getElementById('springTimeAdjReasonSelect').value;
     const free=(document.getElementById('springTimeAdjReasonText').value||'').trim();
     const reason=free?(sel==='Annat'?free:sel+' – '+free):sel;
-    const body={competitionId:springCompetitionId,memberId:springTimeActive.memberId,weaponClass:springTimeActive.weaponClass,adjustmentType:isPen?'Penalty':'Reduction',reason};
+    const body={competitionId:springCompetitionId,memberId:springAdjTarget.memberId,weaponClass:springAdjTarget.weaponClass,adjustmentType:isPen?'Penalty':'Reduction',reason};
     if(isPen) body.points=parseInt(document.getElementById('springTimeAdjPoints').value,10);
     else body.timeInput=(document.getElementById('springTimeAdjTime').value||'').trim();
     try{
         const d=await fetch('/umbraco/surface/Springskytte/AddSpringskytteAdjustment',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify(body)}).then(r=>r.json());
-        if(d.success){ bootstrap.Modal.getOrCreateInstance(document.getElementById('springTimeAdjModal')).hide(); await springTimeLoad(); }
+        if(d.success){ bootstrap.Modal.getOrCreateInstance(document.getElementById('springTimeAdjModal')).hide(); if(springAdjOnSaved) await springAdjOnSaved(); }
         else { err.textContent=d.message||'Kunde inte spara.'; err.classList.remove('d-none'); }
     } catch(e){ err.textContent='Ett fel uppstod.'; err.classList.remove('d-none'); }
 }
@@ -795,6 +841,15 @@ function springRenderEntry() {
             <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Skjutresultat</h6>
             ${isClassC ? springRenderClassCShots() : springRenderClassAShots()}
 
+            <!-- Straff & tidsavdrag (same ledger as timekeeper) — the pad officer witnesses safety issues. -->
+            <div class="border rounded p-2 mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-bold"><i class="bi bi-exclamation-triangle me-1"></i>Straff &amp; tidsavdrag</span>
+                    <button class="btn btn-outline-danger btn-sm" onclick="springAOpenAdj()"><i class="bi bi-plus-lg"></i> Lägg till</button>
+                </div>
+                <div id="springAAdjList"><span class="text-muted small">Inga</span></div>
+            </div>
+
             <!-- Save / Delete / Status -->
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
                 <div class="d-flex gap-2">
@@ -814,6 +869,7 @@ function springRenderEntry() {
         </div>`;
 
     container.innerHTML = html;
+    springALoadAdj();
 
     // Initialize Flatpickr for finish time
     if (hasStartTime) {
@@ -1324,6 +1380,16 @@ function springCRenderActiveCard(shooter) {
                 </div>
             </div>
 
+            <!-- Straff & tidsavdrag — the range officer at the pad witnesses weapons/safety issues,
+                 so they can add penalties/extra time to the same ledger as the timekeeper. -->
+            <div class="border rounded p-2 mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-bold"><i class="bi bi-exclamation-triangle me-1"></i>Straff &amp; tidsavdrag</span>
+                    <button class="btn btn-outline-danger btn-sm" onclick="springCOpenAdj()"><i class="bi bi-plus-lg"></i> Lägg till</button>
+                </div>
+                <div id="springCAdjList"><span class="text-muted small">Inga</span></div>
+            </div>
+
             <!-- Timekeeping (Måltid/Löptid/Sluttid) and DNS/DNF live in the separate
                  "Tidtagning & straff" view — this scoring view is shots only. Each shot toggle
                  auto-saves; just enter the next start number to move on (no "done" button needed). -->
@@ -1338,6 +1404,7 @@ function springCRenderActiveCard(shooter) {
     springCAutoSaveInFlight = false;
     springCAutoSavePending = false;
     springCSetSaveStatus('');
+    springCLoadAdj();
 
     // Init Flatpickr for finish time
     if (hasStartTime) {
@@ -1520,6 +1587,42 @@ function springCLogRecent(shooter) {
     if (springCRecentEntries.length > 5) springCRecentEntries.pop();
     springCRenderRecentList();
 }
+
+// ===== Straff & tidsavdrag on the scoring pads (same ledger as the timekeeper) =====
+async function springRenderAdjBadges(shooter, elId, delFnName) {
+    const el = document.getElementById(elId);
+    if (!shooter || !el) return;
+    try {
+        const d = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteAdjustments?competitionId=${springCompetitionId}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json());
+        const list = (d.success ? (d.adjustments || []) : []).filter(a => a.memberId === shooter.memberId && a.weaponClass === shooter.weaponClass);
+        el.innerHTML = list.length ? list.map(a => {
+            const isPen = a.adjustmentType === 'Penalty'; let label;
+            if (isPen) label = '+' + a.points + ' min'; else { const mag = Math.abs(a.seconds); label = '−' + (mag % 60 === 0 ? (mag / 60) + ' min' : mag + ' s'); }
+            return `<span class="badge ${isPen ? 'bg-danger' : 'bg-success'} me-1 mb-1" title="${springTimeEsc(a.reason || '')}">${label} <a href="#" class="text-white ms-1" onclick="${delFnName}(${a.id});return false;">&times;</a></span>`;
+        }).join('') : '<span class="text-muted small">Inga</span>';
+    } catch (e) { }
+}
+async function springDelAdjGeneric(id, reloadFn) {
+    if (!confirm('Ta bort denna post?')) return;
+    try {
+        await fetch('/umbraco/surface/Springskytte/DeleteSpringskytteAdjustment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value }, body: JSON.stringify({ id, competitionId: springCompetitionId }) });
+        reloadFn();
+    } catch (e) { }
+}
+// Tab C (Vapengrupp C pad)
+function springCOpenAdj() {
+    const s = springCActiveShooter; if (!s) return;
+    springOpenAdjFor({ memberId: s.memberId, weaponClass: s.weaponClass, name: s.memberName, ageGenderClass: s.ageGenderClass }, springCLoadAdj);
+}
+function springCLoadAdj() { springRenderAdjBadges(springCActiveShooter, 'springCAdjList', 'springCDelAdj'); }
+function springCDelAdj(id) { springDelAdjGeneric(id, springCLoadAdj); }
+// Tab A (Vapengrupp A pad)
+function springAOpenAdj() {
+    const s = springFilteredShooters[springCurrentIndex]; if (!s) return;
+    springOpenAdjFor({ memberId: s.memberId, weaponClass: s.weaponClass, name: s.memberName, ageGenderClass: s.ageGenderClass }, springALoadAdj);
+}
+function springALoadAdj() { springRenderAdjBadges(springFilteredShooters[springCurrentIndex], 'springAAdjList', 'springADelAdj'); }
+function springADelAdj(id) { springDelAdjGeneric(id, springALoadAdj); }
 
 function springCRecalc() {
     let totalMisses = 0;

@@ -28,8 +28,13 @@ namespace HpskSite.Controllers
             if (competition == null || competition.ContentType.Alias != "competition") return NotFound();
             if ((competition.GetValue<string>("competitionType") ?? "") != "Springskytte") return NotFound();
 
+            // Optional weapon-class scope (?s=A / ?s=C) so each start line gets its own screen,
+            // like scoring/timing. Empty = show a class chooser (A and C are independent sequences).
+            var s = Request.Query["s"].ToString().Trim().ToUpperInvariant();
+
             ViewData["CompetitionId"] = competitionId;
             ViewData["CompetitionName"] = competition.GetValue<string>("competitionName") ?? competition.Name ?? "Tävling";
+            ViewData["PresetWeaponClass"] = s;
             return View("~/Views/SpringskytteStarter.cshtml");
         }
     }

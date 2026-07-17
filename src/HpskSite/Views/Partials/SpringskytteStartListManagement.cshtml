@@ -24,35 +24,24 @@
                     <button class="btn btn-primary btn-sm" onclick="springAddNewList()">
                         <i class="bi bi-plus-lg me-1"></i>Ny startlista
                     </button>
-                    <div class="dropdown" id="springNumberingDropdown" style="display:none">
-                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="springNumberingBtn"
-                            data-bs-toggle="dropdown" aria-expanded="false" title="Hur startnumren tilldelas">
-                            <i class="bi bi-sort-numeric-down me-1"></i>Startnummer
-                        </button>
-                        <ul class="dropdown-menu dropdown-menu-end" style="max-width:340px">
-                            <li><h6 class="dropdown-header">Tilldela startnummer</h6></li>
-                            <li>
-                                <button class="dropdown-item" onclick="springRenumberAll()">
-                                    <div class="fw-bold"><i class="bi bi-sort-numeric-down me-1"></i>Löpande över alla listor</div>
-                                    <small class="text-muted">1, 2, 3 … per vapengrupp genom alla listor (i starttidsordning)</small>
-                                </button>
-                            </li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li>
-                                <button class="dropdown-item" onclick="springResetNumbers()">
-                                    <div class="fw-bold"><i class="bi bi-arrow-counterclockwise me-1"></i>Per lista (börja om på 1)</div>
-                                    <small class="text-muted">Varje lista numreras för sig: 1, 2, 3 …</small>
-                                </button>
-                            </li>
-                        </ul>
-                    </div>
+                    <button class="btn btn-outline-secondary btn-sm" id="springNumberingBtn" style="display:none"
+                        onclick="springRenumberAll()" title="Tilldela löpande startnummer per vapengrupp över alla listor (unika nummer)">
+                        <i class="bi bi-sort-numeric-down me-1"></i>Numrera om
+                    </button>
                 </div>
             </div>
         </div>
-        <div class="card-body" id="springListCardsContainer">
-            <div class="text-center py-4" id="springLoadingIndicator">
-                <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
-                <p class="mt-2 text-muted">Laddar startlistor...</p>
+        <div class="card-body">
+            <!-- Duplicate start-number warning: a number must be unique within a weapon class. -->
+            <div class="alert alert-danger d-flex justify-content-between align-items-center d-none" id="springDupWarn">
+                <span id="springDupWarnText"></span>
+                <button class="btn btn-danger btn-sm ms-3" onclick="springRenumberAll()"><i class="bi bi-sort-numeric-down me-1"></i>Numrera om nu</button>
+            </div>
+            <div id="springListCardsContainer">
+                <div class="text-center py-4" id="springLoadingIndicator">
+                    <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
+                    <p class="mt-2 text-muted">Laddar startlistor...</p>
+                </div>
             </div>
         </div>
     </div>
@@ -929,7 +918,7 @@ async function springRenumberAll() {
         console.error('Error renumbering:', err);
         alert('Ett fel uppstod.');
     } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-numeric-down me-1"></i>Startnummer'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-numeric-down me-1"></i>Numrera om'; }
     }
 }
 
@@ -960,14 +949,33 @@ async function springResetNumbers() {
         console.error('Error resetting:', err);
         alert('Ett fel uppstod.');
     } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-numeric-down me-1"></i>Startnummer'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-numeric-down me-1"></i>Numrera om'; }
     }
 }
 
 function springUpdateTopButtons() {
     const hasGenerated = springLocalCards.some(c => c.starters && c.starters.length > 0);
-    const dd = document.getElementById('springNumberingDropdown');
-    if (dd) dd.style.display = hasGenerated ? '' : 'none';
+    const btn = document.getElementById('springNumberingBtn');
+    if (btn) btn.style.display = hasGenerated ? '' : 'none';
+    springCheckDuplicateNumbers();
+}
+
+// Start numbers must be unique within a weapon class. Warn loudly if legacy data has duplicates.
+async function springCheckDuplicateNumbers() {
+    const warn = document.getElementById('springDupWarn');
+    if (!warn) return;
+    try {
+        const d = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStartNumberIssues?competitionId=${springCompId}`).then(r => r.json());
+        const dups = (d.success && d.duplicates) ? d.duplicates : [];
+        if (dups.length) {
+            const parts = dups.map(x => `vapengrupp ${x.weaponClass} nr ${x.startOrder} (${x.count} skyttar)`);
+            document.getElementById('springDupWarnText').innerHTML =
+                `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Dubbla startnummer!</strong> ${parts.join(', ')}. Startnummer måste vara unika inom en vapengrupp — klicka "Numrera om nu".`;
+            warn.classList.remove('d-none');
+        } else {
+            warn.classList.add('d-none');
+        }
+    } catch (e) { /* non-critical */ }
 }
 
 // ===== Helpers =====

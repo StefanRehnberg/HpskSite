@@ -4,6 +4,7 @@
     Layout = null;
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "0";
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Tävling";
+    var presetWeaponClass = ViewData["PresetWeaponClass"]?.ToString() ?? "";
     var tokens = Antiforgery.GetAndStoreTokens(Context);
 }
 <!DOCTYPE html>
@@ -39,15 +40,35 @@
 <body>
 <div class="wrap">
     <div class="d-flex justify-content-between align-items-center mb-2">
-        <div><i class="bi bi-flag me-2"></i><span class="h5">@competitionName</span> <span class="text-secondary">— Startlinje</span></div>
-        <div>
+        <div><i class="bi bi-flag me-2"></i><span class="h5">@competitionName</span> <span class="text-secondary">— Startlinje</span>
+            @if (!string.IsNullOrEmpty(presetWeaponClass)) { <span class="badge bg-info text-dark ms-1">Vapengrupp @presetWeaponClass</span> }
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span id="connBadge" class="badge bg-secondary" title="Nätverksstatus"><i class="bi bi-wifi"></i></span>
+            <button id="wakeBtn" class="btn btn-outline-secondary btn-sm" title="Hindra skärmen från att slockna"><i class="bi bi-display me-1"></i>Håll skärmen vaken</button>
             <button id="soundBtn" class="btn btn-outline-warning btn-sm"><i class="bi bi-volume-up me-1"></i>Aktivera ljud</button>
             <button id="rmBtn" class="btn btn-outline-info btn-sm"><i class="bi bi-tools me-1"></i>Startledare</button>
         </div>
     </div>
 
+    <!-- Weapon-class chooser (shown only when no ?s= given — A and C are independent start lines). -->
+    <div id="classChooser" style="display:none">
+        <div class="clock-label mt-4 mb-3">Välj vapengrupp</div>
+        <div id="classChooserBtns" class="d-flex flex-column gap-3" style="max-width:480px;margin:0 auto"></div>
+    </div>
+
+    <div id="starterMain" style="@(string.IsNullOrEmpty(presetWeaponClass) ? "display:none" : "")">
     <div class="clock-label">Klockan är</div>
-    <div id="clock" class="clock mb-3">--:--:--</div>
+    <div id="clock" class="clock mb-1">--:--:--</div>
+
+    <!-- Schedule-slip offset (P3): shift the countdowns when the line runs late. Display-only, per device. -->
+    <div class="text-center mb-3" style="font-size:.9rem">
+        <span class="text-secondary me-2"><i class="bi bi-hourglass-split me-1"></i>Körs sent:</span>
+        <button id="offMinus" class="btn btn-outline-secondary btn-sm py-0">−30s</button>
+        <span id="offVal" class="mx-2 fw-bold" style="font-variant-numeric:tabular-nums">0:00</span>
+        <button id="offPlus" class="btn btn-outline-secondary btn-sm py-0">+30s</button>
+        <button id="offReset" class="btn btn-outline-secondary btn-sm py-0 ms-2">Nollställ</button>
+    </div>
 
     <div class="row g-3 align-items-stretch">
         <div class="col-md-7">
@@ -57,6 +78,14 @@
                 <div id="nextClass" class="mb-2 text-secondary"></div>
                 <div id="countdown" class="countdown">--</div>
                 <div id="cueText" class="mt-2" style="height:1.6rem;font-weight:700"></div>
+                <div id="nextAdj" class="small mt-1"></div>
+                <!-- Quick actions on the current shooter (P2) -->
+                <div id="nextActions" class="mt-3 d-flex gap-2 justify-content-center flex-wrap" style="display:none">
+                    <button id="qsDns" class="btn btn-outline-warning btn-sm"><i class="bi bi-x-octagon me-1"></i>Startade inte</button>
+                    <button id="qsBump" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-right-circle me-1"></i>Flytta fram</button>
+                    <button id="qsAdj" class="btn btn-outline-danger btn-sm"><i class="bi bi-exclamation-triangle me-1"></i>Straff / tillägg</button>
+                </div>
+                <div id="qsMsg" class="small mt-2"></div>
             </div>
         </div>
         <div class="col-md-5">
@@ -92,6 +121,52 @@
         </div>
         <div class="form-text">En lucka är ledig bara om den är en paus, efter sista start, eller frigjord av en DNS. Ej incheckad betyder inte ledig.</div>
         <div id="moveMsg" class="small mt-2"></div>
+
+        <hr style="border-color:#33414f">
+        <div class="d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Straff &amp; tidsavdrag <span class="text-secondary small" id="adjForName"></span></h6>
+            <button id="adjOpenBtn" class="btn btn-outline-danger btn-sm"><i class="bi bi-plus-lg me-1"></i>Lägg till</button>
+        </div>
+        <div id="adjList" class="mt-2"></div>
+        <div class="form-text">Straff läggs till för den skytt som är vald ovan. Läggs i samma huvudbok som tidtagningen.</div>
+    </div>
+    </div><!-- /#starterMain -->
+
+    <!-- Straff/tidsavdrag modal (P2) — same fields as the timekeeper card -->
+    <div class="modal fade" id="adjModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background:#16202b;color:#e9edf1">
+                <div class="modal-header" style="border-color:#33414f">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Straff / tidsavdrag</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3"><strong id="adjName">–</strong> <span class="text-secondary" id="adjClass"></span></p>
+                    <div class="btn-group w-100 mb-3" role="group">
+                        <input type="radio" class="btn-check" name="adjType" id="adjPenalty" value="Penalty" checked>
+                        <label class="btn btn-outline-danger" for="adjPenalty">Straff (+ min)</label>
+                        <input type="radio" class="btn-check" name="adjType" id="adjReduction" value="Reduction">
+                        <label class="btn btn-outline-success" for="adjReduction">Tidsavdrag (− tid)</label>
+                    </div>
+                    <div id="adjPenaltyFields">
+                        <label class="form-label small">Antal straffminuter (1 min per straff)</label>
+                        <input type="number" class="form-control mb-2" id="adjPoints" value="1" min="1" max="60">
+                    </div>
+                    <div id="adjReductionFields" style="display:none">
+                        <label class="form-label small">Tidsavdrag (MM:SS)</label>
+                        <input type="text" class="form-control mb-2" id="adjTime" placeholder="MM:SS">
+                    </div>
+                    <label class="form-label small">Anledning</label>
+                    <select class="form-select mb-2" id="adjReasonSelect"></select>
+                    <input type="text" class="form-control" id="adjReasonText" placeholder="Egen anledning (valfritt)">
+                    <div class="alert alert-danger mt-3 mb-0 py-2 d-none" id="adjError"></div>
+                </div>
+                <div class="modal-footer" style="border-color:#33414f">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" id="adjSaveBtn"><i class="bi bi-check-lg me-1"></i>Lägg till</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -100,7 +175,16 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const COMP = @competitionId;
-let state = { starters: [], freeSlots: [] };
+const PRESET_WC = '@presetWeaponClass';
+let state = { starters: [], freeSlots: [], adjustments: [] };
+let curNext = null; // the shooter shown in the "Nästa start" card (target of the quick actions)
+
+// ---------- schedule-slip offset (P3): shift countdowns when the line runs late ----------
+const OFF_KEY = 'hpsk_startlinje_offset_' + COMP + '_' + (PRESET_WC || 'x');
+let offsetSec = parseInt(localStorage.getItem(OFF_KEY) || '0', 10) || 0;
+function fmtOffset(s) { const m = Math.floor(s / 60), ss = s % 60; return m + ':' + String(ss).padStart(2, '0'); }
+function renderOffset() { const el = document.getElementById('offVal'); if (el) el.textContent = fmtOffset(offsetSec); }
+function nudgeOffset(delta) { offsetSec = Math.max(0, offsetSec + delta); localStorage.setItem(OFF_KEY, offsetSec); renderOffset(); }
 
 // ---------- audio ----------
 let audioCtx = null;
@@ -128,6 +212,42 @@ document.getElementById('rmBtn').addEventListener('click', () => {
     el.style.display = el.style.display === 'none' ? 'block' : 'none';
     if (el.style.display === 'block') buildMovePickers();
 });
+// offset controls
+document.getElementById('offMinus').addEventListener('click', () => nudgeOffset(-30));
+document.getElementById('offPlus').addEventListener('click', () => nudgeOffset(30));
+document.getElementById('offReset').addEventListener('click', () => nudgeOffset(-offsetSec));
+
+// ---------- wake lock (keep the big clock awake) ----------
+let wakeLock = null, wakeWanted = false;
+async function acquireWake() {
+    if (!('wakeLock' in navigator)) return false;
+    try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); return true; }
+    catch (e) { return false; }
+}
+function renderWakeBtn() {
+    const btn = document.getElementById('wakeBtn');
+    if (wakeWanted) { btn.innerHTML = '<i class="bi bi-display-fill me-1"></i>Skärm vaken'; btn.classList.replace('btn-outline-secondary', 'btn-secondary'); }
+    else { btn.innerHTML = '<i class="bi bi-display me-1"></i>Håll skärmen vaken'; btn.classList.replace('btn-secondary', 'btn-outline-secondary'); }
+}
+document.getElementById('wakeBtn').addEventListener('click', async () => {
+    if (wakeWanted) { wakeWanted = false; if (wakeLock) { try { await wakeLock.release(); } catch (e) {} wakeLock = null; } }
+    else {
+        wakeWanted = true;
+        if (!('wakeLock' in navigator)) { document.getElementById('wakeBtn').innerHTML = '<i class="bi bi-x me-1"></i>Stöds ej'; wakeWanted = false; return; }
+        await acquireWake();
+    }
+    renderWakeBtn();
+});
+// Re-acquire after the tab was hidden (the OS releases the lock automatically).
+document.addEventListener('visibilitychange', async () => { if (wakeWanted && !wakeLock && document.visibilityState === 'visible') await acquireWake(); });
+
+// ---------- connectivity indicator ----------
+function setConn(online) {
+    const el = document.getElementById('connBadge');
+    if (!el) return;
+    if (online) { el.className = 'badge bg-success'; el.innerHTML = '<i class="bi bi-wifi"></i>'; el.title = 'Uppkopplad'; }
+    else { el.className = 'badge bg-danger'; el.innerHTML = '<i class="bi bi-wifi-off"></i> Ingen kontakt'; el.title = 'Ingen kontakt med servern — åtgärder sparas inte'; }
+}
 
 // ---------- time helpers ----------
 function hmsToSec(t) {
@@ -138,6 +258,9 @@ function hmsToSec(t) {
     return null;
 }
 function nowSec() { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); }
+// "now" adjusted for a late-running line: treat now as offsetSec earlier so each scheduled
+// start's countdown lands when it actually happens. Clock display still shows real wall time.
+function effNow() { return nowSec() - offsetSec; }
 function fmtClock(d) { return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0'); }
 
 // ---------- data ----------
@@ -145,8 +268,48 @@ async function loadState() {
     try {
         const r = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStarterState?competitionId=${COMP}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
         const d = await r.json();
-        if (d.success) { state.starters = d.starters || []; state.freeSlots = d.freeSlots || []; }
-    } catch (e) { /* keep last */ }
+        if (d.success) {
+            let starters = d.starters || [], freeSlots = d.freeSlots || [];
+            // Scope to one weapon group so A and C are never interleaved into one line.
+            if (PRESET_WC) {
+                starters = starters.filter(s => s.weaponClass === PRESET_WC);
+                freeSlots = freeSlots.filter(f => f.weaponClass === PRESET_WC);
+            }
+            state.starters = starters; state.freeSlots = freeSlots;
+        }
+        // Straff/tidsavdrag ledger (same source as the timekeeper card).
+        const ar = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteAdjustments?competitionId=${COMP}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const ad = await ar.json();
+        state.adjustments = ad.success ? (ad.adjustments || []) : [];
+        setConn(true);
+    } catch (e) { setConn(false); /* keep last */ }
+}
+function adjustmentsFor(memberId, weaponClass) {
+    return (state.adjustments || []).filter(a => a.memberId === memberId && a.weaponClass === weaponClass);
+}
+function adjBadgesHtml(list) {
+    if (!list.length) return '';
+    return list.map(a => {
+        const isPen = a.adjustmentType === 'Penalty';
+        let label;
+        if (isPen) label = '+' + a.points + ' min';
+        else { const mag = Math.abs(a.seconds); label = '−' + (mag % 60 === 0 ? (mag / 60) + ' min' : mag + ' s'); }
+        return `<span class="badge ${isPen ? 'bg-danger' : 'bg-success'} me-1 mb-1" title="${escapeHtml(a.reason || '')}">${label}</span>`;
+    }).join('');
+}
+
+// When no ?s= is given, present a chooser — each weapon group is its own start line.
+async function showClassChooser() {
+    let classes = [];
+    try {
+        const r = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStarterState?competitionId=${COMP}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const d = await r.json();
+        if (d.success) classes = [...new Set((d.starters || []).map(s => s.weaponClass))].sort();
+    } catch (e) { /* fall through */ }
+    if (!classes.length) classes = ['A', 'C']; // fallback so the page is never a dead end
+    document.getElementById('classChooserBtns').innerHTML = classes.map(c =>
+        `<a class="btn btn-info btn-lg py-3 fs-4 fw-bold" href="/startlinje/${COMP}?s=${encodeURIComponent(c)}"><i class="bi bi-flag me-2"></i>Startlinje – Vapengrupp ${c}</a>`).join('');
+    document.getElementById('classChooser').style.display = 'block';
 }
 
 // ---------- cues ----------
@@ -168,9 +331,11 @@ function fireCue(threshold) {
 
 // ---------- render ----------
 function upcomingStarters() {
-    const n = nowSec();
-    // upcoming = start time >= now-5s (keep the one just started visible briefly), ordered by time
+    const n = effNow();
+    // upcoming = start time >= now-5s (keep the one just started visible briefly), ordered by time.
+    // DNS shooters drop off the line entirely.
     return state.starters
+        .filter(s => !s.isDns)
         .filter(s => { const t = hmsToSec(s.startTime); return t != null && t >= n - 5; })
         .sort((a, b) => hmsToSec(a.startTime) - hmsToSec(b.startTime));
 }
@@ -178,7 +343,7 @@ function upcomingStarters() {
 function tick() {
     const d = new Date();
     document.getElementById('clock').textContent = fmtClock(d);
-    const n = nowSec();
+    const n = effNow();
     const up = upcomingStarters();
     const next = up[0], after = up[1];
 
@@ -200,12 +365,18 @@ function tick() {
             const key = next.startTime + ':' + thr;
             if (rem <= thr && rem >= thr - 1 && !firedCues[key]) { firedCues[key] = true; fireCue(thr); }
         }
+        curNext = next;
+        document.getElementById('nextActions').style.display = 'flex';
+        document.getElementById('nextAdj').innerHTML = adjBadgesHtml(adjustmentsFor(next.memberId, next.weaponClass));
     } else {
         document.getElementById('nextTime').textContent = '';
         document.getElementById('nextName').textContent = 'Inga fler starter';
         document.getElementById('nextClass').textContent = '';
         document.getElementById('countdown').textContent = '--';
         document.getElementById('cueText').textContent = '';
+        curNext = null;
+        document.getElementById('nextActions').style.display = 'none';
+        document.getElementById('nextAdj').innerHTML = '';
     }
 
     if (after) {
@@ -245,6 +416,7 @@ function buildMovePickers() {
 
     buildSlotOptions();
     updateDnsToggleLabel();
+    adjRefresh();
 }
 
 // Slots are restricted to the selected shooter's weapon class — classes are never mixed
@@ -278,7 +450,7 @@ function updateDnsToggleLabel() {
     if (s && s.isDns) { btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-1"></i>Ångra DNS'; btn.classList.remove('btn-outline-warning'); btn.classList.add('btn-outline-secondary'); }
     else { btn.innerHTML = '<i class="bi bi-x-octagon me-1"></i>Markera DNS'; btn.classList.add('btn-outline-warning'); btn.classList.remove('btn-outline-secondary'); }
 }
-document.getElementById('moveShooter').addEventListener('change', () => { buildSlotOptions(); updateDnsToggleLabel(); });
+document.getElementById('moveShooter').addEventListener('change', () => { buildSlotOptions(); updateDnsToggleLabel(); adjRefresh(); });
 
 document.getElementById('dnsToggle').addEventListener('click', async () => {
     const sel = selectedMoveShooter();
@@ -320,10 +492,118 @@ document.getElementById('moveApply').addEventListener('click', async () => {
     } catch (e) { msg.innerHTML = '<span class="text-danger">Ett fel uppstod.</span>'; }
 });
 
+// ---------- straff & tidsavdrag (same ledger as the timekeeper card) ----------
+const PEN_REASONS = ['Vapenhantering utanför skjutområde', 'Oproppat vapen efter skjutning', 'För tidig start', 'Otillåten utrustning', 'Ordningsförseelse', 'Annat'];
+const RED_REASONS = ['Bana blockerad – väntan', 'Avbrott/incident', 'Tekniskt fel på bana', 'Väntan pga föregående skytt', 'Funktionärsfel', 'Annat'];
+let adjTarget = null;
+let adjModalInst = null;
+function adjModal() { if (!adjModalInst) adjModalInst = bootstrap.Modal.getOrCreateInstance(document.getElementById('adjModal')); return adjModalInst; }
+function syncAdjType() {
+    const isPen = document.getElementById('adjPenalty').checked;
+    document.getElementById('adjPenaltyFields').style.display = isPen ? '' : 'none';
+    document.getElementById('adjReductionFields').style.display = isPen ? 'none' : '';
+    document.getElementById('adjReasonSelect').innerHTML = (isPen ? PEN_REASONS : RED_REASONS).map(r => `<option>${escapeHtml(r)}</option>`).join('');
+}
+document.getElementById('adjPenalty').addEventListener('change', syncAdjType);
+document.getElementById('adjReduction').addEventListener('change', syncAdjType);
+
+function openAdjFor(target) {
+    if (!target) return;
+    adjTarget = target;
+    document.getElementById('adjName').textContent = target.name || ('#' + (target.startOrder || ''));
+    document.getElementById('adjClass').textContent = target.weaponClass + (target.ageGenderClass ? (' · ' + target.ageGenderClass) : '');
+    document.getElementById('adjPenalty').checked = true;
+    document.getElementById('adjPoints').value = 1;
+    document.getElementById('adjTime').value = '';
+    document.getElementById('adjReasonText').value = '';
+    const err = document.getElementById('adjError'); err.classList.add('d-none'); err.textContent = '';
+    syncAdjType();
+    adjModal().show();
+}
+document.getElementById('adjSaveBtn').addEventListener('click', async () => {
+    if (!adjTarget) return;
+    const err = document.getElementById('adjError'); err.classList.add('d-none');
+    const isPen = document.getElementById('adjPenalty').checked;
+    const sel = document.getElementById('adjReasonSelect').value;
+    const free = (document.getElementById('adjReasonText').value || '').trim();
+    const reason = free ? (sel === 'Annat' ? free : sel + ' – ' + free) : sel;
+    const body = { competitionId: COMP, memberId: adjTarget.memberId, weaponClass: adjTarget.weaponClass, adjustmentType: isPen ? 'Penalty' : 'Reduction', reason };
+    if (isPen) body.points = parseInt(document.getElementById('adjPoints').value, 10);
+    else body.timeInput = (document.getElementById('adjTime').value || '').trim();
+    const btn = document.getElementById('adjSaveBtn'); btn.disabled = true;
+    try {
+        const d = await fetch('/umbraco/surface/Springskytte/AddSpringskytteAdjustment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.getElementById('afToken').value }, body: JSON.stringify(body) }).then(r => r.json());
+        if (d.success) { adjModal().hide(); await loadState(); adjRefresh(); }
+        else { err.textContent = d.message || 'Kunde inte spara.'; err.classList.remove('d-none'); }
+    } catch (e) { err.textContent = 'Ett fel uppstod.'; err.classList.remove('d-none'); }
+    finally { btn.disabled = false; }
+});
+
+// Panel: adjustments for the selected move-shooter (add via button, delete inline)
+function adjRefresh() {
+    const nameEl = document.getElementById('adjForName');
+    const listEl = document.getElementById('adjList');
+    if (!nameEl || !listEl) return;
+    const sel = selectedMoveShooter();
+    if (!sel) { nameEl.textContent = ''; listEl.innerHTML = '<span class="text-secondary small">Välj en skytt ovan.</span>'; return; }
+    const s = state.starters.find(x => x.memberId === sel.memberId && x.weaponClass === sel.weaponClass);
+    nameEl.textContent = s ? ('— ' + s.name) : '';
+    const list = adjustmentsFor(sel.memberId, sel.weaponClass);
+    if (!list.length) { listEl.innerHTML = '<span class="text-secondary small">Inga straff/avdrag.</span>'; return; }
+    listEl.innerHTML = list.map(a => {
+        const isPen = a.adjustmentType === 'Penalty';
+        let label; if (isPen) label = '+' + a.points + ' min'; else { const mag = Math.abs(a.seconds); label = '−' + (mag % 60 === 0 ? (mag / 60) + ' min' : mag + ' s'); }
+        return `<span class="badge ${isPen ? 'bg-danger' : 'bg-success'} me-1 mb-1" title="${escapeHtml(a.reason || '')}">${label} <a href="#" class="text-white ms-1" onclick="delAdj(${a.id});return false;">&times;</a></span>`;
+    }).join('');
+}
+window.delAdj = async function (id) {
+    if (!confirm('Ta bort denna post?')) return;
+    try { await fetch('/umbraco/surface/Springskytte/DeleteSpringskytteAdjustment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.getElementById('afToken').value }, body: JSON.stringify({ id, competitionId: COMP }) }); await loadState(); adjRefresh(); } catch (e) { }
+};
+document.getElementById('adjOpenBtn').addEventListener('click', () => {
+    const sel = selectedMoveShooter();
+    if (!sel) { document.getElementById('moveMsg').innerHTML = '<span class="text-warning">Välj en skytt ovan.</span>'; return; }
+    const s = state.starters.find(x => x.memberId === sel.memberId && x.weaponClass === sel.weaponClass);
+    openAdjFor({ memberId: sel.memberId, weaponClass: sel.weaponClass, name: s ? s.name : ('#' + sel.startOrder), ageGenderClass: s ? s.ageGenderClass : '', startOrder: sel.startOrder });
+});
+
+// ---------- quick actions on the current shooter ----------
+document.getElementById('qsAdj').addEventListener('click', () => { if (curNext) openAdjFor(curNext); });
+document.getElementById('qsDns').addEventListener('click', async () => {
+    if (!curNext) return;
+    if (!confirm(`Markera #${curNext.startOrder} ${curNext.name} som "startade inte" (DNS)?`)) return;
+    const msg = document.getElementById('qsMsg'); msg.textContent = 'Markerar DNS…';
+    try {
+        const d = await fetch('/umbraco/surface/Springskytte/SetSpringskytteDns', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.getElementById('afToken').value }, body: JSON.stringify({ competitionId: COMP, memberId: curNext.memberId, weaponClass: curNext.weaponClass, isDns: true }) }).then(r => r.json());
+        if (d.success) { msg.innerHTML = '<span class="text-success">Markerad som DNS.</span>'; await loadState(); tick(); }
+        else msg.innerHTML = '<span class="text-danger">' + (d.message || 'Fel') + '</span>';
+    } catch (e) { msg.innerHTML = '<span class="text-danger">Ett fel uppstod.</span>'; }
+});
+document.getElementById('qsBump').addEventListener('click', async () => {
+    if (!curNext) return;
+    const n = nowSec();
+    const slot = (state.freeSlots || []).filter(f => f.weaponClass === curNext.weaponClass && hmsToSec(f.time) >= n - 5).sort((a, b) => hmsToSec(a.time) - hmsToSec(b.time))[0];
+    const msg = document.getElementById('qsMsg');
+    if (!slot) { msg.innerHTML = '<span class="text-warning">Ingen ledig lucka att flytta till.</span>'; return; }
+    if (!confirm(`Flytta #${curNext.startOrder} ${curNext.name} till ${slot.time.substring(0,5)}?`)) return;
+    msg.textContent = 'Flyttar…';
+    try {
+        const d = await fetch('/umbraco/surface/Springskytte/UpdateSpringskytteStarter', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.getElementById('afToken').value }, body: JSON.stringify({ competitionId: COMP, nodeId: curNext.nodeId, memberId: curNext.memberId, weaponClass: curNext.weaponClass, startOrder: curNext.startOrder, startTime: slot.time }) }).then(r => r.json());
+        if (d.success) { msg.innerHTML = '<span class="text-success">Flyttad till ' + slot.time.substring(0,5) + '.</span>'; await loadState(); tick(); }
+        else msg.innerHTML = '<span class="text-danger">' + (d.message || 'Kunde inte flytta.') + '</span>';
+    } catch (e) { msg.innerHTML = '<span class="text-danger">Ett fel uppstod.</span>'; }
+});
+
 // ---------- loop ----------
-loadState().then(() => { tick(); });
-setInterval(tick, 250);
-setInterval(loadState, 5000);
+if (!PRESET_WC) {
+    // No weapon group chosen — show the chooser and stop (A and C are separate start lines).
+    showClassChooser();
+} else {
+    renderOffset();
+    loadState().then(() => { tick(); });
+    setInterval(tick, 250);
+    setInterval(loadState, 5000);
+}
 </script>
 </body>
 </html>
