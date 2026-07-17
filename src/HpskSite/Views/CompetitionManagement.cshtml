@@ -674,6 +674,13 @@
                         // the published cache picks up the just-created child.
                         resultsViewData["ResultPageUrl"] = competition.Url().TrimEnd('/') + "/resultat/";
                     }
+                    else if (compTypeForResultPage == "Springskytte" && competition != null)
+                    {
+                        // Deterministic /resultat/ URL so the print buttons work even right after the
+                        // first calculation (before the published cache picks up the new child node).
+                        // The buttons themselves are only shown once a result list exists (client-side).
+                        resultsViewData["ResultPageUrl"] = competition.Url().TrimEnd('/') + "/resultat/";
+                    }
                     else
                     {
                         resultsViewData["ResultPageUrl"] = resultChild != null ? (resultChild.Url().TrimEnd('/') + "/") : "";

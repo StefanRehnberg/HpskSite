@@ -879,7 +879,7 @@
                                     <tr class="${rowClass}">
                                         <td class="text-center">${s.status || s.rank || '-'}</td>
                                         <td>${s.name}</td>
-                                        <td>${s.club}</td>
+                                        <td title="${s.club}">${s.clubShort || s.club}</td>
                                         <td class="text-center">${s.sprintTimeDisplay || '-'}</td>
                                         <td class="text-center">${s.shootingScore ?? '-'}</td>
                                         <td class="text-center">${s.penaltyTimeDisplay || '-'}</td>

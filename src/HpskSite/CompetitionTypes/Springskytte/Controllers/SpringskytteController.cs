@@ -410,6 +410,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                                 s.Name,
                                 s.StartOrder,
                                 s.Club,
+                                clubShort = ClubNameHelper.Shorten(s.Club),
                                 s.WeaponClass,
                                 s.AgeGenderClass,
                                 s.SprintTimeDisplay,
