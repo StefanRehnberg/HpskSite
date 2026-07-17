@@ -1712,6 +1712,7 @@ For detailed implementation information, see the following documents in the `Doc
 - **[SHOOTING_CLASS_STORAGE_SYSTEM.md](Documentation/SHOOTING_CLASS_STORAGE_SYSTEM.md)** - Shooting class storage technical spec
 - **[COMPETITION_CONFIGURATION_GUIDE.md](Documentation/COMPETITION_CONFIGURATION_GUIDE.md)** - Competition configuration guide
 - **[COMPETITION_RESULTS_WORKFLOW.md](Documentation/COMPETITION_RESULTS_WORKFLOW.md)** - Results entry workflow
+- **[SPRINGSKYTTE_STAFF_SCREENS_REUSABLE_PATTERNS.md](Documentation/SPRINGSKYTTE_STAFF_SCREENS_REUSABLE_PATTERNS.md)** - 2026-07 range-role overhaul (per-role/per-class staff screens, field-scoped auto-save, wake-lock, connectivity indicator, deferred offline-queue analysis, move/DNS + timeline free-slots, penalties ledger on every staff screen, unique-per-weapon-class numbering, calculate/publish split, dual-mode wall/operator screen). **Pattern catalogue for porting to other disciplines.**
 
 ### Other Documentation
 See [Documentation/README.md](Documentation/README.md) for complete documentation index.
