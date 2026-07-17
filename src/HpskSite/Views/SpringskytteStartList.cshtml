@@ -103,6 +103,7 @@
                             <div>
                                 <h2 class="h5 mb-1">@l.ListName</h2>
                                 <div class="text-muted small">
+                                    @if (!string.IsNullOrEmpty(l.Config.ListDate)) { <span><i class="bi bi-calendar-event me-1"></i>@l.Config.ListDate · </span> }
                                     @l.Config.Starters.Count starter
                                     @if (!string.IsNullOrEmpty(first)) { <span>· första start @first</span> }
                                     @if (!l.IsOfficial) { <span class="badge bg-secondary ms-1">Preliminär</span> }
@@ -119,7 +120,7 @@
     }
     else
     {
-        <div class="list-header mb-0">@selected.ListName</div>
+        <div class="list-header mb-0">@selected.ListName@(!string.IsNullOrEmpty(selected.Config.ListDate) ? $" – {selected.Config.ListDate}" : "")</div>
         <table class="start-list-table mb-3">
             <thead>
                 <tr>

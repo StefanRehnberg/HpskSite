@@ -12,6 +12,7 @@ using Umbraco.Cms.Core.Security;
 using HpskSite.CompetitionTypes.Springskytte.Models;
 using HpskSite.CompetitionTypes.Springskytte.Services;
 using HpskSite.CompetitionTypes.Precision.Controllers;
+using HpskSite.Helpers;
 using HpskSite.Services;
 using Newtonsoft.Json;
 
@@ -846,9 +847,36 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     BreakAfterEvery = breakAfter,
                     BreakDuration = request.BreakDuration,
                     ListName = listName,
+                    ListDate = (request.ListDate ?? "").Trim(),
                     CoveredClasses = coveredClasses,
                     Starters = starters
                 };
+
+                // Enforce a unique list name (slug) — the public /startlista/{comp}/{slug} URL
+                // needs it, and duplicate names are confusing. Compare against every OTHER list
+                // that has starters (i.e. that gets a public URL), excluding the one being regenerated.
+                if (competition != null)
+                {
+                    var newSlug = SlugHelper.Slugify(listName);
+                    if (string.IsNullOrEmpty(newSlug))
+                        return Json(new { success = false, message = "Ogiltigt listnamn. Använd bokstäver eller siffror." });
+
+                    var collision = _contentService.GetPagedChildren(competition.Id, 0, 1000, out _)
+                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                        .Where(c => !(request.ExistingNodeId.HasValue && c.Id == request.ExistingNodeId.Value))
+                        .Any(c =>
+                        {
+                            var cj = c.GetValue<string>("configurationData");
+                            if (string.IsNullOrEmpty(cj)) return false;
+                            SpringskytteStartListConfig? cc = null;
+                            try { cc = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cj); } catch { }
+                            if (cc?.Starters == null || cc.Starters.Count == 0) return false;
+                            var nm = !string.IsNullOrWhiteSpace(cc.ListName) ? cc.ListName : c.Name;
+                            return string.Equals(SlugHelper.Slugify(nm), newSlug, StringComparison.OrdinalIgnoreCase);
+                        });
+                    if (collision)
+                        return Json(new { success = false, message = $"Det finns redan en startlista med namnet \"{listName}\" (eller ett namn som ger samma webbadress). Välj ett unikt namn." });
+                }
 
                 if (competition != null)
                 {
@@ -942,28 +970,48 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!startListNodes.Any())
                     return Json(new { success = true, lists = new List<object>() });
 
-                var lists = startListNodes.Select(node =>
+                // Compute the same public-page slug the SpringskytteStartListPageController does, so
+                // the admin "Visa / skriv ut" button links to the exact /startlista/{comp}/{slug} URL
+                // (dedup applied only to lists that have starters, in node order — must match LoadLists).
+                var usedSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var lists = new List<object>();
+                foreach (var node in startListNodes)
                 {
                     var configJson = node.GetValue<string>("configurationData");
                     var config = !string.IsNullOrEmpty(configJson)
                         ? JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson)
                         : null;
 
-                    return new
+                    var starterCount = config?.Starters?.Count ?? 0;
+                    var listName = !string.IsNullOrEmpty(config?.ListName) ? config!.ListName : "Alla klasser";
+
+                    var slug = "";
+                    if (starterCount > 0)
+                    {
+                        var baseSlug = SlugHelper.Slugify(listName);
+                        if (string.IsNullOrEmpty(baseSlug)) baseSlug = "lista-" + node.Id;
+                        slug = baseSlug;
+                        var n = 2;
+                        while (!usedSlugs.Add(slug)) slug = $"{baseSlug}-{n++}";
+                    }
+
+                    lists.Add(new
                     {
                         nodeId = node.Id,
-                        listName = !string.IsNullOrEmpty(config?.ListName) ? config.ListName : "Alla klasser",
+                        listName,
+                        slug,
+                        listDate = config?.ListDate ?? "",
                         coveredClasses = config?.CoveredClasses ?? new List<string>(),
                         firstStartTime = config?.FirstStartTime ?? "10:00",
                         defaultInterval = config?.DefaultInterval ?? "01:00",
                         breakAfterEvery = config?.BreakAfterEvery ?? 10,
                         breakDuration = config?.BreakDuration ?? "05:00",
                         starters = config?.Starters ?? new List<SpringskytteStartListEntry>(),
-                        starterCount = config?.Starters?.Count ?? 0,
+                        starterCount,
                         generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
                         isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList")
-                    };
-                }).ToList();
+                    });
+                }
 
                 return Json(new { success = true, lists });
             }

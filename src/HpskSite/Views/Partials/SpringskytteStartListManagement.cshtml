@@ -64,11 +64,21 @@
             </div>
             <div class="modal-body">
                 <div class="mb-3">
+                    <label class="form-label fw-bold small" for="springSet_name">Listnamn</label>
+                    <input type="text" class="form-control" id="springSet_name" placeholder="T.ex. Seniorer lördag" maxlength="80">
+                    <div class="form-text">Namnet blir startlistans webbadress och måste vara unikt.</div>
+                </div>
+                <hr>
+                <div class="mb-3">
                     <label class="form-label fw-bold small">Klasser i denna lista</label>
                     <div id="springSettingsClasses"></div>
                 </div>
                 <hr>
                 <label class="form-label fw-bold small">Tider</label>
+                <div class="mb-2">
+                    <label class="form-label small" for="springSet_date">Datum <span class="text-muted">(för flerdagarstävlingar)</span></label>
+                    <input type="text" class="form-control form-control-sm" id="springSet_date" placeholder="ÅÅÅÅ-MM-DD" style="max-width:220px">
+                </div>
                 <div class="row g-2">
                     <div class="col-md-3">
                         <label class="form-label small">Första starttid</label>
@@ -255,6 +265,8 @@ async function springLoadAll() {
                     tempId: 'node_' + list.nodeId,
                     nodeId: list.nodeId,
                     listName: list.listName,
+                    slug: list.slug || '',
+                    listDate: list.listDate || '',
                     coveredClasses: list.coveredClasses || [],
                     firstStartTime: list.firstStartTime,
                     defaultInterval: list.defaultInterval,
@@ -328,16 +340,16 @@ function springRenderOneCard(card) {
     <div class="card spring-list-card" id="springCard_${card.tempId}">
         <div class="card-header d-flex justify-content-between align-items-center">
             <div class="d-flex align-items-center gap-2">
-                <input type="text" class="form-control form-control-sm" style="width:250px;font-weight:600"
-                    value="${escapeHtml(card.listName)}"
-                    onchange="springUpdateCardName('${card.tempId}', this.value)"
-                    placeholder="Listnamn...">
+                <span class="fw-bold" style="font-size:1rem">${escapeHtml(card.listName) || '<span class="text-muted fst-italic">Namnlös lista</span>'}</span>
                 ${statusBadge}
                 ${card.nodeId ? (card.isOfficial
                     ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Officiell</span>'
                     : '<span class="badge bg-secondary"><i class="bi bi-hourglass-split me-1"></i>Preliminär</span>') : ''}
             </div>
             <div class="d-flex align-items-center gap-2">
+                ${(card.nodeId && card.slug)
+                    ? `<a class="btn btn-outline-primary btn-sm" href="/startlista/${springCompId}/${encodeURIComponent(card.slug)}" target="_blank" rel="noopener" title="Öppna startlistan för visning och utskrift"><i class="bi bi-printer me-1"></i>Visa / skriv ut</a>`
+                    : ''}
                 <button class="btn btn-outline-secondary btn-sm" onclick="springOpenSettings('${card.tempId}')" title="Inställningar (klasser & tider)">
                     <i class="bi bi-gear"></i>
                 </button>
@@ -365,6 +377,7 @@ function springBuildSettingsSummary(card) {
         <div class="spring-settings-summary mb-3">
             <div class="mb-1">${classText}</div>
             <div>
+                ${card.listDate ? `<i class="bi bi-calendar-event me-1"></i>${escapeHtml(card.listDate)} · ` : ''}
                 <i class="bi bi-clock me-1"></i>Start ${escapeHtml(card.firstStartTime || '10:00')}
                 · Intervall ${escapeHtml(card.defaultInterval || '01:00')}
                 · Paus ${escapeHtml(card.breakDuration || '05:00')} efter ${card.breakAfterEvery || 10}
@@ -436,7 +449,6 @@ function springBuildStartersTable(card) {
 let springModalCtx = null; // { tempId, isNew, generated }
 
 function springOpenSettings(tempId) {
-    springSyncCardNames(); // don't lose an unsaved rename typed in another card header
     const card = springLocalCards.find(c => c.tempId === tempId);
     if (!card) return;
     springModalCtx = { tempId, isNew: !card.nodeId, generated: false };
@@ -451,7 +463,11 @@ function springOpenSettings(tempId) {
     const err = document.getElementById('springSettingsError');
     err.classList.add('d-none'); err.textContent = '';
 
+    // List name
+    document.getElementById('springSet_name').value = card.listName || '';
+
     // Time fields
+    document.getElementById('springSet_date').value = card.listDate || '';
     document.getElementById('springSet_firstStart').value = card.firstStartTime || '10:00';
     document.getElementById('springSet_interval').value = card.defaultInterval || '01:00';
     document.getElementById('springSet_breakAfter').value = card.breakAfterEvery || 10;
@@ -467,6 +483,7 @@ function springOpenSettings(tempId) {
         locale: 'sv', enableTime: true, noCalendar: true,
         dateFormat: 'H:i', time_24hr: true, defaultHour: 10, defaultMinute: 0
     });
+    flatpickr('#springSet_date', { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
 }
 
 function springRenderSettingsClasses() {
@@ -530,17 +547,31 @@ async function springGenerateFromModal() {
 
     const err = document.getElementById('springSettingsError');
     err.classList.add('d-none'); err.textContent = '';
+    const showErr = (m) => { err.textContent = m; err.classList.remove('d-none'); };
 
     // Read modal fields into the card
+    const newName = (document.getElementById('springSet_name').value || '').trim();
+    card.listDate = (document.getElementById('springSet_date').value || '').trim();
     card.firstStartTime = document.getElementById('springSet_firstStart').value || '10:00';
     card.defaultInterval = document.getElementById('springSet_interval').value || '01:00';
     card.breakAfterEvery = parseInt(document.getElementById('springSet_breakAfter').value) || 10;
     card.breakDuration = document.getElementById('springSet_breakDur').value || '05:00';
     card.coveredClasses = [...springModalCtx.coveredClasses];
 
+    // Name: required, produces a valid slug, and unique across the other lists (slug drives the URL).
+    if (!newName) { showErr('Ange ett listnamn.'); return; }
+    const newSlug = springSlugify(newName);
+    if (!newSlug) { showErr('Ogiltigt listnamn — använd bokstäver eller siffror.'); return; }
+    const clash = springLocalCards.some(c => {
+        if (c.tempId === card.tempId) return false;
+        const otherSlug = c.slug || springSlugify(c.listName || '');
+        return otherSlug && otherSlug === newSlug;
+    });
+    if (clash) { showErr(`Namnet "${newName}" (eller ett namn som ger samma webbadress) används redan. Välj ett unikt namn.`); return; }
+    card.listName = newName;
+
     if (card.coveredClasses.length === 0) {
-        err.textContent = 'Välj minst en klass för denna startlista.';
-        err.classList.remove('d-none');
+        showErr('Välj minst en klass för denna startlista.');
         return;
     }
 
@@ -558,6 +589,7 @@ async function springGenerateFromModal() {
             breakDuration: card.breakDuration,
             coveredClasses: card.coveredClasses,
             listName: card.listName,
+            listDate: card.listDate || '',
             existingNodeId: card.nodeId
         };
         const data = await fetch('/umbraco/surface/Springskytte/GenerateSpringskytteStartList', {
@@ -716,12 +748,12 @@ let springTempIdCounter = 0;
 
 function springAddNewList() {
     if (!confirmIfResultsExist('Lägg till startlista')) return;
-    springSyncCardNames(); // don't wipe unsaved name edits on existing cards
     const tempId = 'new_' + (++springTempIdCounter);
     springLocalCards.push({
         tempId,
         nodeId: null,
-        listName: 'Ny startlista',
+        listName: '',
+        listDate: '',
         coveredClasses: [],
         firstStartTime: '10:00',
         defaultInterval: '01:00',
@@ -733,20 +765,6 @@ function springAddNewList() {
     springRenderCards();
     // Open the settings modal straight away — configuring the new list happens there, not on the card.
     springOpenSettings(tempId);
-}
-
-function springUpdateCardName(tempId, name) {
-    const card = springLocalCards.find(c => c.tempId === tempId);
-    if (card) card.listName = name;
-}
-
-// Read the live list-name inputs back into state before a re-render, so an unsaved rename
-// (onchange hasn't fired yet) isn't wiped when the cards are rebuilt.
-function springSyncCardNames() {
-    for (const card of springLocalCards) {
-        const nameEl = document.querySelector(`#springCard_${card.tempId} input[type="text"]`);
-        if (nameEl) card.listName = nameEl.value;
-    }
 }
 
 // ===== Delete =====
@@ -782,7 +800,6 @@ async function springDeleteList(tempId) {
     }
 
     // Remove from local state
-    springSyncCardNames(); // preserve unsaved name edits on the surviving cards
     springLocalCards = springLocalCards.filter(c => c.tempId !== tempId);
     springRenderCards();
 }
@@ -887,5 +904,24 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+// Mirror of server SlugHelper.Slugify — keep in sync so the client uniqueness check matches
+// the URL the public /startlista/{comp}/{slug} page and the server guard use.
+function springSlugify(input) {
+    if (!input) return '';
+    let s = '';
+    for (const raw of input.trim().toLowerCase()) {
+        switch (raw) {
+            case 'å': case 'ä': s += 'a'; break;
+            case 'ö': s += 'o'; break;
+            case 'é': case 'è': case 'ê': s += 'e'; break;
+            case 'ü': s += 'u'; break;
+            case ' ': case '_': case '-': case '/': s += '-'; break;
+            default:
+                if ((raw >= 'a' && raw <= 'z') || (raw >= '0' && raw <= '9')) s += raw;
+        }
+    }
+    return s.replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
 }
 </script>

@@ -206,6 +206,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public int BreakAfterEvery { get; set; } = 10;  // Long break after N starters
         public string BreakDuration { get; set; } = "05:00";  // MM:SS for long break
         public string ListName { get; set; } = "";  // User-assigned label (e.g., "Vapengrupp A")
+        public string ListDate { get; set; } = "";  // Optional date (yyyy-MM-dd) — multi-day comps: same time on different days
         public List<string> CoveredClasses { get; set; } = new();  // Registration class patterns (e.g., ["A-D 21","A-H 35"])
         public List<SpringskytteStartListEntry> Starters { get; set; } = new();
     }
@@ -219,6 +220,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string BreakDuration { get; set; } = "05:00";
         public List<string> CoveredClasses { get; set; } = new();  // Which classes to include (empty = all)
         public string ListName { get; set; } = "";  // Name for this list
+        public string ListDate { get; set; } = "";  // Optional date (yyyy-MM-dd) for multi-day competitions
         public int? ExistingNodeId { get; set; }  // If set, replace this specific node; if null, create new
     }
 
