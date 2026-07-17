@@ -224,17 +224,35 @@
     @if (!isStationPage)
     {
     <!-- Results List Section -->
-    <div class="mt-3" id="springResultsListSection">
-        <div class="d-flex align-items-center gap-2 mb-2">
-            <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event)">
-                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
-            </button>
-            <span class="badge bg-secondary" id="springResultsStatusBadge" style="display:none;"></span>
+    <div class="card mt-4" id="springResultsListSection">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span class="fw-bold">
+                <i class="bi bi-trophy me-1"></i>Resultatlista
+                <span class="badge bg-secondary ms-2" id="springResultsStatusBadge">Ej skapad</span>
+            </span>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event)"
+                    title="Räknar om resultatlistan från alla registrerade resultat. Ändrar inte om listan är publik.">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                </button>
+                <button class="btn btn-success btn-sm" id="springPublishBtn" onclick="springPublishResults(event)"
+                    title="Räknar om och publicerar listan som officiell — den blir synlig publikt på tävlingssidan.">
+                    <i class="bi bi-check-circle me-1"></i>Publicera
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" id="springUnpublishBtn" style="display:none" onclick="springUnpublishResults(event)"
+                    title="Döljer resultatlistan publikt igen (gör den preliminär).">
+                    <i class="bi bi-eye-slash me-1"></i>Gör preliminär
+                </button>
+            </div>
         </div>
-        <div id="springResultsBody">
-            <div id="springResultsContent">
-                <div class="text-center py-4 text-muted">
-                    <p class="mt-2">Klicka "Uppdatera" för att skapa resultatlista</p>
+        <div class="card-body">
+            <div id="springResultsBody">
+                <div id="springResultsContent">
+                    <div class="text-center py-4 text-muted">
+                        <i class="bi bi-list-check fs-3 d-block mb-2"></i>
+                        Ingen resultatlista ännu — klicka <strong>Uppdatera</strong> för att räkna ut den,
+                        och <strong>Publicera</strong> när den ska bli synlig publikt.
+                    </div>
                 </div>
             </div>
         </div>
@@ -248,18 +266,35 @@
          competition page can surface its own Visa resultat button. Layout mirrors the
          main section exactly (no extra wrapper headings) — the Deltävling name sits in
          the button row as a small label so the visual rhythm matches. -->
-    <div class="mt-3" id="springSubResultsListSection">
-        <div class="d-flex align-items-center gap-2 mb-2">
-            <span class="fw-semibold me-2"><i class="bi bi-trophy me-1"></i>@subCompetitionName</span>
-            <button class="btn btn-outline-primary btn-sm" onclick="springCreateSubResultsList(event)">
-                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
-            </button>
-            <span class="badge bg-secondary" id="springSubResultsStatusBadge" style="display:none;"></span>
+    <div class="card mt-3" id="springSubResultsListSection">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span class="fw-bold">
+                <i class="bi bi-trophy me-1"></i>Deltävling: @subCompetitionName
+                <span class="badge bg-secondary ms-2" id="springSubResultsStatusBadge">Ej skapad</span>
+            </span>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary btn-sm" onclick="springCreateSubResultsList(event)"
+                    title="Uppdaterar deltävlingens resultatvisning (endast deltävlingsanmälda skyttar). Ändrar inte om den är publik.">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                </button>
+                <button class="btn btn-success btn-sm" id="springSubPublishBtn" onclick="springPublishSubResults(event)"
+                    title="Publicerar deltävlingens resultat som officiella — syns publikt på tävlingssidan.">
+                    <i class="bi bi-check-circle me-1"></i>Publicera
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" id="springSubUnpublishBtn" style="display:none" onclick="springUnpublishSubResults(event)"
+                    title="Döljer deltävlingens resultat publikt igen (gör den preliminär).">
+                    <i class="bi bi-eye-slash me-1"></i>Gör preliminär
+                </button>
+            </div>
         </div>
-        <div id="springSubResultsBody">
-            <div id="springSubResultsContent">
-                <div class="text-center py-4 text-muted">
-                    <p class="mt-2">Klicka "Uppdatera" för att skapa deltävlingens resultatlista</p>
+        <div class="card-body">
+            <div id="springSubResultsBody">
+                <div id="springSubResultsContent">
+                    <div class="text-center py-4 text-muted">
+                        <i class="bi bi-list-check fs-3 d-block mb-2"></i>
+                        Ingen deltävlingslista ännu — klicka <strong>Uppdatera</strong>, och
+                        <strong>Publicera</strong> när den ska bli synlig publikt.
+                    </div>
                 </div>
             </div>
         </div>
@@ -1812,35 +1847,74 @@ async function springCSetStatus(status) {
 
 // ===== RESULTS LIST =====
 
+// Reflect the stored list's published/preliminary state in the badge + which publish button shows.
+function springSetResultsStatus(resultsExist, isOfficial) {
+    const badge = document.getElementById('springResultsStatusBadge');
+    const pub = document.getElementById('springPublishBtn');
+    const unpub = document.getElementById('springUnpublishBtn');
+    if (!badge) return;
+    if (!resultsExist) {
+        badge.className = 'badge bg-secondary ms-2'; badge.textContent = 'Ej skapad';
+        if (pub) pub.style.display = ''; if (unpub) unpub.style.display = 'none';
+    } else if (isOfficial) {
+        badge.className = 'badge bg-success ms-2'; badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
+        if (pub) pub.style.display = 'none'; if (unpub) unpub.style.display = '';
+    } else {
+        badge.className = 'badge bg-warning text-dark ms-2'; badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
+        if (pub) pub.style.display = ''; if (unpub) unpub.style.display = 'none';
+    }
+}
+
+// "Uppdatera" — recompute the list, preserving its published/preliminary state (never auto-publishes).
 async function springCreateResultsList(event) {
     if (event) event.stopPropagation();
-    if (!confirm('Vill du skapa/uppdatera resultatlistan?')) return;
-
     const btn = event?.target?.closest('button');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Beräknar...'; }
-
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Uppdaterar...'; }
     try {
-        const response = await fetch('/umbraco/surface/Springskytte/CalculateSpringskytteFinalResults', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
-            },
-            body: JSON.stringify(springCompetitionId)
-        });
-        const data = await response.json();
+        const data = await springResultsPost('CalculateSpringskytteFinalResults');
+        if (data.success) { showSpringMessage(data.message, 'success'); springLoadResultsList(); }
+        else { alert(data.message || 'Fel vid beräkning.'); }
+    } catch (err) { alert('Ett fel uppstod.'); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; } }
+}
 
-        if (data.success) {
-            showSpringMessage(data.message, 'success');
-            springLoadResultsList();
-        } else {
-            alert(data.message || 'Fel vid beräkning.');
-        }
-    } catch (err) {
-        alert('Ett fel uppstod.');
-    } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; }
-    }
+// "Publicera" — recompute AND make the list official (public).
+async function springPublishResults(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Publicera resultatlistan? Den blir synlig publikt på tävlingssidan.')) return;
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Publicerar...'; }
+    try {
+        const data = await springResultsPost('PublishSpringskytteResults');
+        if (data.success) { showSpringMessage(data.message, 'success'); springLoadResultsList(); }
+        else { alert(data.message || 'Fel vid publicering.'); }
+    } catch (err) { alert('Ett fel uppstod.'); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicera'; } }
+}
+
+// "Gör preliminär" — hide the list publicly again (keeps the computed snapshot).
+async function springUnpublishResults(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Gör resultatlistan preliminär? Den döljs då publikt.')) return;
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>...'; }
+    try {
+        const data = await springResultsPost('SetSpringskytteResultsPreliminary');
+        if (data.success) { showSpringMessage(data.message, 'success'); springLoadResultsList(); }
+        else { alert(data.message || 'Kunde inte ändra status.'); }
+    } catch (err) { alert('Ett fel uppstod.'); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-eye-slash me-1"></i>Gör preliminär'; } }
+}
+
+function springResultsPost(action) {
+    return fetch('/umbraco/surface/Springskytte/' + action, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+        },
+        body: JSON.stringify(springCompetitionId)
+    }).then(r => r.json());
 }
 
 async function springLoadResultsList() {
@@ -1851,6 +1925,8 @@ async function springLoadResultsList() {
         const body = document.getElementById('springResultsBody');
         const content = document.getElementById('springResultsContent');
         if (!content) return; // results list isn't on the chromeless /station scoring page
+
+        springSetResultsStatus(data.resultsExist === true, data.resultsOfficial === true);
 
         if (data.success && data.classGroups?.length > 0) {
             if (body) body.style.display = 'block';
@@ -1901,6 +1977,8 @@ async function springLoadResultsList() {
                 </div>`;
             }
             content.innerHTML = html;
+        } else {
+            content.innerHTML = `<div class="text-center py-4 text-muted"><i class="bi bi-list-check fs-3 d-block mb-2"></i>Ingen resultatlista ännu — klicka <strong>Uppdatera</strong> för att räkna ut den, och <strong>Publicera</strong> när den ska bli synlig publikt.</div>`;
         }
     } catch (err) {
         console.error('Error loading results:', err);
@@ -1913,34 +1991,58 @@ async function springLoadResultsList() {
 // subCompetitionIsOfficial=true; GetSpringskytteResults?subCompetitionOnly=true
 // returns the filtered subset with medals recomputed on it.
 
+// Deltävling status badge + publish-button visibility (mirrors springSetResultsStatus).
+function springSetSubResultsStatus(resultsExist, isOfficial) {
+    const badge = document.getElementById('springSubResultsStatusBadge');
+    const pub = document.getElementById('springSubPublishBtn');
+    const unpub = document.getElementById('springSubUnpublishBtn');
+    if (!badge) return;
+    if (!resultsExist) {
+        badge.className = 'badge bg-secondary ms-2'; badge.textContent = 'Ej skapad';
+        if (pub) pub.style.display = ''; if (unpub) unpub.style.display = 'none';
+    } else if (isOfficial) {
+        badge.className = 'badge bg-success ms-2'; badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
+        if (pub) pub.style.display = 'none'; if (unpub) unpub.style.display = '';
+    } else {
+        badge.className = 'badge bg-warning text-dark ms-2'; badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
+        if (pub) pub.style.display = ''; if (unpub) unpub.style.display = 'none';
+    }
+}
+
+// "Uppdatera" (deltävling) — just refresh the admin view; the public deltävling page is always
+// recomputed live, so there's no snapshot to rebuild. Publishing is a separate action.
 async function springCreateSubResultsList(event) {
     if (event) event.stopPropagation();
-    if (!confirm('Vill du beräkna och publicera deltävlingens resultatlista?')) return;
-
     const btn = event?.target?.closest('button');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Beräknar...'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Uppdaterar...'; }
+    try { await springLoadSubResultsList(); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; } }
+}
 
+async function springPublishSubResults(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Publicera deltävlingens resultatlista? Den blir synlig publikt.')) return;
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Publicerar...'; }
     try {
-        const response = await fetch('/umbraco/surface/Springskytte/CalculateSpringskytteSubFinalResults', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
-            },
-            body: JSON.stringify(springCompetitionId)
-        });
-        const data = await response.json();
-        if (data.success) {
-            showSpringMessage(data.message, 'success');
-            springLoadSubResultsList();
-        } else {
-            alert(data.message || 'Fel vid beräkning.');
-        }
-    } catch (err) {
-        alert('Ett fel uppstod.');
-    } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; }
-    }
+        const data = await springResultsPost('CalculateSpringskytteSubFinalResults');
+        if (data.success) { showSpringMessage(data.message, 'success'); springLoadSubResultsList(); }
+        else { alert(data.message || 'Fel vid publicering.'); }
+    } catch (err) { alert('Ett fel uppstod.'); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicera'; } }
+}
+
+async function springUnpublishSubResults(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Gör deltävlingens resultatlista preliminär? Den döljs då publikt.')) return;
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>...'; }
+    try {
+        const data = await springResultsPost('SetSpringskytteSubResultsPreliminary');
+        if (data.success) { showSpringMessage(data.message, 'success'); springLoadSubResultsList(); }
+        else { alert(data.message || 'Kunde inte ändra status.'); }
+    } catch (err) { alert('Ett fel uppstod.'); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-eye-slash me-1"></i>Gör preliminär'; } }
 }
 
 async function springLoadSubResultsList() {
@@ -1950,6 +2052,8 @@ async function springLoadSubResultsList() {
 
         const content = document.getElementById('springSubResultsContent');
         if (!content) return;
+
+        springSetSubResultsStatus(data.resultsExist === true, data.resultsOfficial === true);
 
         if (data.success && data.classGroups?.length > 0) {
             const awardingMedals = data.isAwardingStandardMedals === true;

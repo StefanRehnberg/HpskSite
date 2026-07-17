@@ -436,11 +436,46 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var isAwardingStandardMedals = (competition?.GetValue<bool>("isAwardingStandardMedals") ?? false)
                     && !(competition?.GetValue<bool>("isClubOnly") ?? false);
 
-                return Json(new { success = true, classGroups, isAwardingStandardMedals });
+                // Published/preliminary state of the result list (for the admin status badge).
+                // For the Deltävling view the state lives in subCompetitionIsOfficial.
+                var resultNode = competition == null ? null : _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                bool resultsExist = resultNode != null;
+                bool resultsOfficial = resultNode != null && (subCompetitionOnly
+                    ? (resultNode.HasProperty("subCompetitionIsOfficial") && resultNode.GetValue<bool>("subCompetitionIsOfficial"))
+                    : (resultNode.HasProperty("isOfficial") && resultNode.GetValue<bool>("isOfficial")));
+
+                return Json(new { success = true, classGroups, isAwardingStandardMedals, resultsExist, resultsOfficial });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting Springskytte results for CompetitionId={CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        // "Gör preliminär" for the Deltävling — flip subCompetitionIsOfficial off (hide it publicly).
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetSpringskytteSubResultsPreliminary([FromBody] int competitionId)
+        {
+            try
+            {
+                if (!await HasCompetitionAccess(competitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+                var competition = _contentService.GetById(competitionId);
+                var resultPage = competition == null ? null : _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                if (resultPage == null || !resultPage.HasProperty("subCompetitionIsOfficial"))
+                    return Json(new { success = false, message = "Ingen deltävlingslista att avpublicera." });
+                resultPage.SetValue("subCompetitionIsOfficial", false);
+                _contentService.Save(resultPage);
+                _contentService.Publish(resultPage, new[] { "*" });
+                return Json(new { success = true, isOfficial = false, message = "Deltävlingslistan är nu preliminär (inte publik)." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error setting Springskytte sub results preliminary for CompetitionId={CompetitionId}", competitionId);
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }
@@ -516,7 +551,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 return Json(new
                 {
                     success = true,
-                    message = $"Deltävlingens resultat beräknade för {shooterResults.Count} skyttar.",
+                    isOfficial = true,
+                    message = $"Deltävlingens resultat beräknade och publicerade för {shooterResults.Count} skyttar.",
                     shooterCount = shooterResults.Count
                 });
             }
@@ -527,9 +563,46 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             }
         }
 
+        // "Uppdatera" — recompute the result snapshot from current data, PRESERVING the current
+        // published/preliminary state (a brand-new list starts preliminary, i.e. not public).
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> CalculateSpringskytteFinalResults([FromBody] int competitionId)
+        public Task<IActionResult> CalculateSpringskytteFinalResults([FromBody] int competitionId)
+            => ComputeStoreSpringskytteResultsAsync(competitionId, null);
+
+        // "Publicera" — recompute AND mark the list official (public). Materializes medals.
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public Task<IActionResult> PublishSpringskytteResults([FromBody] int competitionId)
+            => ComputeStoreSpringskytteResultsAsync(competitionId, true);
+
+        // "Gör preliminär" — just flip the official flag off (keeps the computed snapshot).
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetSpringskytteResultsPreliminary([FromBody] int competitionId)
+        {
+            try
+            {
+                if (!await HasCompetitionAccess(competitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+                var competition = _contentService.GetById(competitionId);
+                var resultPage = competition == null ? null : _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                if (resultPage == null)
+                    return Json(new { success = false, message = "Ingen resultatlista att avpublicera." });
+                resultPage.SetValue("isOfficial", false);
+                _contentService.Save(resultPage);
+                _contentService.Publish(resultPage, new[] { "*" });
+                return Json(new { success = true, isOfficial = false, message = "Resultatlistan är nu preliminär (inte publik)." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error setting Springskytte results preliminary for CompetitionId={CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        private async Task<IActionResult> ComputeStoreSpringskytteResultsAsync(int competitionId, bool? forceOfficial)
         {
             try
             {
@@ -588,41 +661,47 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .OrderBy(g => g.ClassName)
                     .ToList();
 
-                var finalResults = new SpringskytteFinalResults
-                {
-                    CompetitionId = competitionId,
-                    UpdatedAt = DateTime.Now,
-                    IsOfficial = true,
-                    ClassGroups = classGroups
-                };
-
                 // Store results on competitionResult child node (same pattern as Precision)
                 var competition = _contentService.GetById(competitionId);
+                bool official = false;
                 if (competition != null)
                 {
                     var resultPage = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
                         .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
 
-                    var isNewNode = false;
+                    // Preserve the current published/preliminary state unless we're explicitly publishing.
+                    // A brand-new list defaults to preliminary (not public) — matches Precision/Fältskytte.
+                    var existingOfficial = resultPage != null && resultPage.HasProperty("isOfficial") && resultPage.GetValue<bool>("isOfficial");
+                    official = forceOfficial ?? existingOfficial;
+
+                    var finalResults = new SpringskytteFinalResults
+                    {
+                        CompetitionId = competitionId,
+                        UpdatedAt = DateTime.Now,
+                        IsOfficial = official,
+                        ClassGroups = classGroups
+                    };
+
                     if (resultPage == null)
                     {
                         resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                        isNewNode = true;
                     }
 
                     resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
                     resultPage.SetValue("lastUpdated", DateTime.Now);
                     resultPage.SetValue("resultType", "Final Results");
-                    resultPage.SetValue("isOfficial", true);
+                    resultPage.SetValue("isOfficial", official);
 
                     _contentService.Save(resultPage);
                     _contentService.Publish(resultPage, new[] { "*" });
 
-                    _logger.LogInformation("Published Springskytte final results for CompetitionId={CompetitionId}, {Count} shooters",
-                        competitionId, shooterResults.Count);
+                    _logger.LogInformation("Stored Springskytte results for CompetitionId={CompetitionId}, {Count} shooters, official={Official}",
+                        competitionId, shooterResults.Count, official);
 
-                    // Materialize won Standard medals into the ledger. Springskytte has no
+                    // Materialize won Standard medals into the ledger only when the list is official —
+                    // preliminary lists must not write to the medal ledger. Springskytte has no
                     // Riksmästarklass, but its medals still count toward the pooled Guldmedalj.
+                    if (official)
                     try
                     {
                         var competitionDate = competition.GetValue<DateTime?>("competitionDate");
@@ -646,7 +725,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 return Json(new
                 {
                     success = true,
-                    message = $"Resultat beräknade för {shooterResults.Count} skyttar i {classGroups.Count} klasser.",
+                    isOfficial = official,
+                    message = official
+                        ? $"Resultat beräknade och publicerade för {shooterResults.Count} skyttar i {classGroups.Count} klasser."
+                        : $"Resultat uppdaterade (preliminära) för {shooterResults.Count} skyttar i {classGroups.Count} klasser.",
                     classGroups = classGroups.Select(g => new
                     {
                         className = g.ClassName,
@@ -657,7 +739,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error calculating Springskytte final results for CompetitionId={CompetitionId}", competitionId);
+                _logger.LogError(ex, "Error computing Springskytte results for CompetitionId={CompetitionId}", competitionId);
                 return Json(new { success = false, message = "Ett fel uppstod vid beräkning av slutresultat." });
             }
         }
@@ -951,6 +1033,75 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             {
                 _logger.LogError(ex, "Error generating Springskytte start list");
                 return Json(new { success = false, message = "Ett fel uppstod vid generering av startlista." });
+            }
+        }
+
+        /// <summary>
+        /// Update ONLY a start list's name + date. Deliberately does NOT touch the starters, so it's
+        /// safe to rename/redate a published list without reshuffling start numbers/times.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveSpringskytteStartListMeta([FromBody] SpringskytteStartListMetaRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.NodeId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                var node = _contentService.GetById(request.NodeId);
+                if (node == null || node.ParentId != competition.Id || node.ContentType.Alias != "precisionStartList")
+                    return Json(new { success = false, message = "Startlistan hittades inte." });
+
+                var listName = (request.ListName ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(listName))
+                    return Json(new { success = false, message = "Ange ett listnamn." });
+                var newSlug = SlugHelper.Slugify(listName);
+                if (string.IsNullOrEmpty(newSlug))
+                    return Json(new { success = false, message = "Ogiltigt listnamn. Använd bokstäver eller siffror." });
+
+                // Unique slug among the OTHER lists that have starters (i.e. that get a public URL).
+                var collision = _contentService.GetPagedChildren(competition.Id, 0, 1000, out _)
+                    .Where(c => c.ContentType.Alias == "precisionStartList" && c.Id != request.NodeId)
+                    .Any(c =>
+                    {
+                        var cj = c.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cj)) return false;
+                        SpringskytteStartListConfig? cc = null;
+                        try { cc = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cj); } catch { }
+                        if (cc?.Starters == null || cc.Starters.Count == 0) return false;
+                        var nm = !string.IsNullOrWhiteSpace(cc.ListName) ? cc.ListName : c.Name;
+                        return string.Equals(SlugHelper.Slugify(nm), newSlug, StringComparison.OrdinalIgnoreCase);
+                    });
+                if (collision)
+                    return Json(new { success = false, message = $"Det finns redan en startlista med namnet \"{listName}\" (eller ett namn som ger samma webbadress). Välj ett unikt namn." });
+
+                var json = node.GetValue<string>("configurationData");
+                SpringskytteStartListConfig? config = null;
+                try { config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(json ?? ""); } catch { }
+                if (config == null)
+                    return Json(new { success = false, message = "Kunde inte läsa startlistans konfiguration." });
+
+                config.ListName = listName;
+                config.ListDate = (request.ListDate ?? "").Trim();
+                node.Name = listName;
+                node.SetValue("configurationData", JsonConvert.SerializeObject(config));
+                _contentService.Save(node);
+                _contentService.Publish(node, new[] { "*" });
+
+                // Slug is unique among lists-with-starters, so it equals the base slug (no dedup needed).
+                return Json(new { success = true, slug = newSlug, listName, listDate = config.ListDate });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving Springskytte start list meta");
+                return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }
 

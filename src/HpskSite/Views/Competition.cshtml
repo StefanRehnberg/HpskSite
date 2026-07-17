@@ -1338,36 +1338,16 @@
 							}
 							else if (isSpringskytte)
 							{
-								@* Springskytte: start lists are precisionStartList children directly under competition *@
+								@* Springskytte can have several start lists (per weapon group / day). One button
+								   opens the /startlista/{id} hub that lists them all, instead of one button each. *@
 								var springStartLists = competitionChildren
 									.Where(c => c.ContentType.Alias == "precisionStartList")
 									.ToList();
 								if (springStartLists.Any())
 								{
-									foreach (var sl in springStartLists)
-									{
-										var slName = sl.Name;
-										var slConfigJson = sl.Value<string>("configurationData");
-										if (!string.IsNullOrEmpty(slConfigJson))
-										{
-											try
-											{
-												var slConfig = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(slConfigJson);
-												var listName = (string)slConfig?.ListName;
-												if (!string.IsNullOrEmpty(listName)) slName = listName;
-											}
-											catch { }
-										}
-										var hasCustomName = !string.IsNullOrEmpty(slName) && slName != "Startlista";
-										var buttonText = hasCustomName ? $"Startlista: {slName}" : "Visa startlista";
-										// Stable routed URL (/startlista/{compId}/{slug}) instead of the fragile
-										// name-derived node URL that 404'd for nested/club-hosted competitions.
-										var slSlug = HpskSite.Helpers.SlugHelper.Slugify(slName);
-										var slUrl = string.IsNullOrEmpty(slSlug) ? $"/startlista/{Model.Id}" : $"/startlista/{Model.Id}/{slSlug}";
-										<a href="@slUrl" class="btn btn-info w-100 mb-1" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
-											<i class="bi bi-list-ol me-1"></i> @buttonText
-										</a>
-									}
+									<a href="/startlista/@Model.Id" class="btn btn-info w-100" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
+										<i class="bi bi-list-ol me-1"></i> @(springStartLists.Count > 1 ? "Visa startlistor" : "Visa startlista")
+									</a>
 								}
 								else
 								{

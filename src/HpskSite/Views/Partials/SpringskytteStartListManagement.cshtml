@@ -63,47 +63,65 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label fw-bold small" for="springSet_name">Listnamn</label>
-                    <input type="text" class="form-control" id="springSet_name" placeholder="T.ex. Seniorer lördag" maxlength="80">
-                    <div class="form-text">Namnet blir startlistans webbadress och måste vara unikt.</div>
-                </div>
-                <hr>
-                <div class="mb-3">
-                    <label class="form-label fw-bold small">Klasser i denna lista</label>
-                    <div id="springSettingsClasses"></div>
-                </div>
-                <hr>
-                <label class="form-label fw-bold small">Tider</label>
-                <div class="mb-2">
-                    <label class="form-label small" for="springSet_date">Datum <span class="text-muted">(för flerdagarstävlingar)</span></label>
-                    <input type="text" class="form-control form-control-sm" id="springSet_date" placeholder="ÅÅÅÅ-MM-DD" style="max-width:220px">
-                </div>
-                <div class="row g-2">
-                    <div class="col-md-3">
-                        <label class="form-label small">Första starttid</label>
-                        <input type="text" class="form-control form-control-sm" id="springSet_firstStart" placeholder="HH:MM">
+                <!-- Section A: name + date. Saved on its own — never rebuilds the start list,
+                     so it's safe to rename / redate a published list. -->
+                <div class="border rounded p-3 mb-3">
+                    <div class="fw-bold small mb-2"><i class="bi bi-card-text me-1"></i>Namn &amp; datum</div>
+                    <div class="mb-2">
+                        <label class="form-label small" for="springSet_name">Listnamn</label>
+                        <input type="text" class="form-control" id="springSet_name" placeholder="T.ex. Seniorer lördag" maxlength="80">
+                        <div class="form-text">Namnet blir startlistans webbadress och måste vara unikt.</div>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label small">Intervall (MM:SS)</label>
-                        <input type="text" class="form-control form-control-sm" id="springSet_interval" placeholder="MM:SS">
+                    <div class="mb-2">
+                        <label class="form-label small" for="springSet_date">Datum <span class="text-muted">(för flerdagarstävlingar)</span></label>
+                        <input type="text" class="form-control form-control-sm" id="springSet_date" placeholder="ÅÅÅÅ-MM-DD" style="max-width:220px">
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label small">Paus efter antal</label>
-                        <input type="number" class="form-control form-control-sm" id="springSet_breakAfter" min="3" max="30">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label small">Pauslängd (MM:SS)</label>
-                        <input type="text" class="form-control form-control-sm" id="springSet_breakDur" placeholder="MM:SS">
+                    <div class="alert alert-danger py-2 mb-2 d-none" id="springMetaError"></div>
+                    <div class="d-flex align-items-center gap-2" id="springMetaSaveRow" style="display:none!important">
+                        <button type="button" class="btn btn-primary btn-sm" id="springSaveMetaBtn" onclick="springSaveMeta()">
+                            <i class="bi bi-check-lg me-1"></i>Spara namn &amp; datum
+                        </button>
+                        <span class="small" id="springMetaSavedMsg"></span>
                     </div>
                 </div>
-                <div class="alert alert-danger mt-3 mb-0 py-2 d-none" id="springSettingsError"></div>
+
+                <!-- Section B: classes + times. Saving here REBUILDS the list (reshuffles start
+                     numbers + times) — guarded, especially when the list is published. -->
+                <div class="border rounded p-3">
+                    <div class="fw-bold small mb-2"><i class="bi bi-arrow-clockwise me-1"></i>Klasser &amp; tider</div>
+                    <div class="mb-3">
+                        <label class="form-label small">Klasser i denna lista</label>
+                        <div id="springSettingsClasses"></div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-3">
+                            <label class="form-label small">Första starttid</label>
+                            <input type="text" class="form-control form-control-sm" id="springSet_firstStart" placeholder="HH:MM">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small">Intervall (MM:SS)</label>
+                            <input type="text" class="form-control form-control-sm" id="springSet_interval" placeholder="MM:SS">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small">Paus efter antal</label>
+                            <input type="number" class="form-control form-control-sm" id="springSet_breakAfter" min="3" max="30">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small">Pauslängd (MM:SS)</label>
+                            <input type="text" class="form-control form-control-sm" id="springSet_breakDur" placeholder="MM:SS">
+                        </div>
+                    </div>
+                    <div class="alert alert-warning py-2 mb-2 d-none" id="springRebuildWarn">
+                        <i class="bi bi-exclamation-triangle me-1"></i><span id="springRebuildWarnText"></span>
+                    </div>
+                    <div class="alert alert-danger py-2 mb-2 d-none" id="springSettingsError"></div>
+                    <button type="button" class="btn btn-primary" id="springSettingsGenBtn" onclick="springGenerateFromModal()">
+                        <i class="bi bi-play-fill me-1"></i>Generera startlista
+                    </button>
+                </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" id="springSettingsGenBtn" onclick="springGenerateFromModal()">
-                    <i class="bi bi-play-fill me-1"></i>Generera startlista
-                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
             </div>
         </div>
     </div>
@@ -451,14 +469,36 @@ let springModalCtx = null; // { tempId, isNew, generated }
 function springOpenSettings(tempId) {
     const card = springLocalCards.find(c => c.tempId === tempId);
     if (!card) return;
-    springModalCtx = { tempId, isNew: !card.nodeId, generated: false };
+    const isExisting = !!card.nodeId;
+    springModalCtx = { tempId, isNew: !isExisting, generated: false };
 
-    document.getElementById('springSettingsTitle').textContent = card.nodeId
+    document.getElementById('springSettingsTitle').textContent = isExisting
         ? `Inställningar – ${card.listName || 'startlista'}`
         : 'Ny startlista';
-    document.getElementById('springSettingsGenBtn').innerHTML = card.nodeId
-        ? '<i class="bi bi-arrow-clockwise me-1"></i>Spara & generera om'
+
+    // Section A (name & date) gets its own save only for an existing list — a new list is
+    // created by the generate button, so there's nothing to "save separately" yet.
+    document.getElementById('springMetaSaveRow').style.display = isExisting ? 'flex' : 'none';
+    const metaMsg = document.getElementById('springMetaSavedMsg'); if (metaMsg) metaMsg.innerHTML = '';
+    const metaErr = document.getElementById('springMetaError'); metaErr.classList.add('d-none'); metaErr.textContent = '';
+
+    // Section B (classes & times) is the rebuild action.
+    document.getElementById('springSettingsGenBtn').innerHTML = isExisting
+        ? '<i class="bi bi-arrow-clockwise me-1"></i>Generera om startlistan'
         : '<i class="bi bi-play-fill me-1"></i>Generera startlista';
+
+    // Warn before rebuilding an existing list (reshuffles numbers/times); extra-strong if published.
+    const warn = document.getElementById('springRebuildWarn');
+    const warnText = document.getElementById('springRebuildWarnText');
+    if (isExisting && card.isOfficial) {
+        warnText.textContent = 'Denna startlista är PUBLICERAD som officiell. Att generera om ger alla skyttar nya startnummer och tider och skriver över eventuella manuella ändringar. Ändra bara namn/datum ovan om det är det du vill.';
+        warn.classList.remove('d-none');
+    } else if (isExisting) {
+        warnText.textContent = 'Att generera om ger alla skyttar nya startnummer och tider och skriver över eventuella manuella ändringar. Vill du bara byta namn eller datum använder du "Spara namn & datum" ovan.';
+        warn.classList.remove('d-none');
+    } else {
+        warn.classList.add('d-none');
+    }
 
     const err = document.getElementById('springSettingsError');
     err.classList.add('d-none'); err.textContent = '';
@@ -539,11 +579,67 @@ function springToggleModalClass(classId, checked) {
     }
 }
 
+// Shared name validation — required, valid slug, unique among the OTHER lists (slug drives the URL).
+// Returns an error string, or null if OK.
+function springNameSlugError(name, selfTempId) {
+    if (!name) return 'Ange ett listnamn.';
+    const slug = springSlugify(name);
+    if (!slug) return 'Ogiltigt listnamn — använd bokstäver eller siffror.';
+    const clash = springLocalCards.some(c => {
+        if (c.tempId === selfTempId) return false;
+        const otherSlug = c.slug || springSlugify(c.listName || '');
+        return otherSlug && otherSlug === slug;
+    });
+    if (clash) return `Namnet "${name}" (eller ett namn som ger samma webbadress) används redan. Välj ett unikt namn.`;
+    return null;
+}
+
+// Save ONLY name + date (section A) — never rebuilds the list, so it's safe on a published list.
+async function springSaveMeta() {
+    if (!springModalCtx) return;
+    const card = springLocalCards.find(c => c.tempId === springModalCtx.tempId);
+    if (!card || !card.nodeId) return;
+
+    const err = document.getElementById('springMetaError');
+    const msg = document.getElementById('springMetaSavedMsg');
+    err.classList.add('d-none'); err.textContent = ''; if (msg) msg.innerHTML = '';
+    const showErr = (m) => { err.textContent = m; err.classList.remove('d-none'); };
+
+    const newName = (document.getElementById('springSet_name').value || '').trim();
+    const newDate = (document.getElementById('springSet_date').value || '').trim();
+    const nameErr = springNameSlugError(newName, card.tempId);
+    if (nameErr) { showErr(nameErr); return; }
+
+    const btn = document.getElementById('springSaveMetaBtn');
+    btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Sparar...';
+    try {
+        const data = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteStartListMeta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value },
+            body: JSON.stringify({ competitionId: springCompId, nodeId: card.nodeId, listName: newName, listDate: newDate })
+        }).then(r => r.json());
+        if (data.success) {
+            card.listName = data.listName || newName;
+            card.listDate = data.listDate || newDate;
+            if (data.slug) card.slug = data.slug;
+            springRenderCards(); // reflect the new name/date/URL on the card behind the modal
+            document.getElementById('springSettingsTitle').textContent = `Inställningar – ${card.listName}`;
+            if (msg) msg.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Sparat</span>';
+        } else {
+            showErr(data.message || 'Kunde inte spara.');
+        }
+    } catch (e) {
+        showErr('Ett fel uppstod.');
+    } finally {
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Spara namn & datum';
+    }
+}
+
 async function springGenerateFromModal() {
     if (!springModalCtx) return;
     const card = springLocalCards.find(c => c.tempId === springModalCtx.tempId);
     if (!card) return;
-    if (!confirmIfResultsExist(card.nodeId ? 'Generera om startlista' : 'Generera startlista')) return;
+    const wasExisting = !!card.nodeId;
 
     const err = document.getElementById('springSettingsError');
     err.classList.add('d-none'); err.textContent = '';
@@ -551,6 +647,20 @@ async function springGenerateFromModal() {
 
     // Read modal fields into the card
     const newName = (document.getElementById('springSet_name').value || '').trim();
+    const nameErr = springNameSlugError(newName, card.tempId);
+    if (nameErr) { showErr(nameErr); return; }
+    if (springModalCtx.coveredClasses.length === 0) { showErr('Välj minst en klass för denna startlista.'); return; }
+
+    // Guard the destructive rebuild. Published list = extra-strong confirm.
+    if (wasExisting) {
+        const warn = card.isOfficial
+            ? `"${card.listName}" är PUBLICERAD som officiell. Att generera om ger ALLA skyttar nya startnummer och tider och skriver över manuella ändringar.\n\nÄr du helt säker?`
+            : `Generera om "${card.listName}"? Alla skyttar får nya startnummer och tider och manuella ändringar skrivs över.`;
+        if (!confirm(warn)) return;
+    }
+    if (!confirmIfResultsExist(wasExisting ? 'Generera om startlista' : 'Generera startlista')) return;
+
+    card.listName = newName;
     card.listDate = (document.getElementById('springSet_date').value || '').trim();
     card.firstStartTime = document.getElementById('springSet_firstStart').value || '10:00';
     card.defaultInterval = document.getElementById('springSet_interval').value || '01:00';
@@ -558,25 +668,7 @@ async function springGenerateFromModal() {
     card.breakDuration = document.getElementById('springSet_breakDur').value || '05:00';
     card.coveredClasses = [...springModalCtx.coveredClasses];
 
-    // Name: required, produces a valid slug, and unique across the other lists (slug drives the URL).
-    if (!newName) { showErr('Ange ett listnamn.'); return; }
-    const newSlug = springSlugify(newName);
-    if (!newSlug) { showErr('Ogiltigt listnamn — använd bokstäver eller siffror.'); return; }
-    const clash = springLocalCards.some(c => {
-        if (c.tempId === card.tempId) return false;
-        const otherSlug = c.slug || springSlugify(c.listName || '');
-        return otherSlug && otherSlug === newSlug;
-    });
-    if (clash) { showErr(`Namnet "${newName}" (eller ett namn som ger samma webbadress) används redan. Välj ett unikt namn.`); return; }
-    card.listName = newName;
-
-    if (card.coveredClasses.length === 0) {
-        showErr('Välj minst en klass för denna startlista.');
-        return;
-    }
-
     const btn = document.getElementById('springSettingsGenBtn');
-    const wasExisting = !!card.nodeId;
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Genererar...';
 
@@ -617,7 +709,7 @@ async function springGenerateFromModal() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = wasExisting
-            ? '<i class="bi bi-arrow-clockwise me-1"></i>Spara & generera om'
+            ? '<i class="bi bi-arrow-clockwise me-1"></i>Generera om startlistan'
             : '<i class="bi bi-play-fill me-1"></i>Generera startlista';
     }
 }

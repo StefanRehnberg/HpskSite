@@ -230,6 +230,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public int NodeId { get; set; }
     }
 
+    /// <summary>Update ONLY a start list's name + date (never rebuilds/reshuffles the starters).</summary>
+    public class SpringskytteStartListMetaRequest
+    {
+        public int CompetitionId { get; set; }
+        public int NodeId { get; set; }
+        public string ListName { get; set; } = "";
+        public string ListDate { get; set; } = "";
+    }
+
     /// <summary>
     /// Edit a single starter's start number and/or start time within an existing start list,
     /// without regenerating (which would reshuffle everyone). Identity = (MemberId, WeaponClass).
