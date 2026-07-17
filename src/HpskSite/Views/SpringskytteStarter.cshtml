@@ -40,7 +40,9 @@
 <body>
 <div class="wrap">
     <div class="d-flex justify-content-between align-items-center mb-2">
-        <div><i class="bi bi-flag me-2"></i><span class="h5">@competitionName</span> <span class="text-secondary">— Startlinje</span>
+        <div>
+            <a href="/competitionmanagement?competitionId=@competitionId" class="text-secondary text-decoration-none me-3" title="Tillbaka till tävlingshanteringen"><i class="bi bi-arrow-left"></i> Till tävlingen</a>
+            <i class="bi bi-flag me-2"></i><span class="h5">@competitionName</span> <span class="text-secondary">— Startlinje</span>
             @if (!string.IsNullOrEmpty(presetWeaponClass)) { <span class="badge bg-info text-dark ms-1">Vapengrupp @presetWeaponClass</span> }
         </div>
         <div class="d-flex align-items-center gap-2">
