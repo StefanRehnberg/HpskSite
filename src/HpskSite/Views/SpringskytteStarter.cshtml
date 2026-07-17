@@ -61,8 +61,9 @@
     <div class="clock-label">Klockan är</div>
     <div id="clock" class="clock mb-1">--:--:--</div>
 
-    <!-- Schedule-slip offset (P3): shift the countdowns when the line runs late. Display-only, per device. -->
-    <div class="text-center mb-3" style="font-size:.9rem">
+    <!-- Schedule-slip offset (P3): shift the countdowns when the line runs late. Display-only, per device.
+         Admin control — only shown in Startledare-läge, never on the shooter-facing wall screen. -->
+    <div class="text-center mb-3" id="offsetRow" style="font-size:.9rem;display:none">
         <span class="text-secondary me-2"><i class="bi bi-hourglass-split me-1"></i>Körs sent:</span>
         <button id="offMinus" class="btn btn-outline-secondary btn-sm py-0">−30s</button>
         <span id="offVal" class="mx-2 fw-bold" style="font-variant-numeric:tabular-nums">0:00</span>
@@ -79,8 +80,9 @@
                 <div id="countdown" class="countdown">--</div>
                 <div id="cueText" class="mt-2" style="height:1.6rem;font-weight:700"></div>
                 <div id="nextAdj" class="small mt-1"></div>
-                <!-- Quick actions on the current shooter (P2) -->
-                <div id="nextActions" class="mt-3 d-flex gap-2 justify-content-center flex-wrap" style="display:none">
+                <!-- Quick actions on the current shooter (P2) — admin only. NOTE: no .d-flex class here;
+                     its display:flex !important would beat the inline display toggle. Flex is set via style. -->
+                <div id="nextActions" class="mt-3 gap-2 justify-content-center flex-wrap" style="display:none">
                     <button id="qsDns" class="btn btn-outline-warning btn-sm"><i class="bi bi-x-octagon me-1"></i>Startade inte</button>
                     <button id="qsBump" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-right-circle me-1"></i>Flytta fram</button>
                     <button id="qsAdj" class="btn btn-outline-danger btn-sm"><i class="bi bi-exclamation-triangle me-1"></i>Straff / tillägg</button>
@@ -207,10 +209,24 @@ document.getElementById('soundBtn').addEventListener('click', () => {
     document.getElementById('soundBtn').innerHTML = '<i class="bi bi-volume-up me-1"></i>Ljud på';
     document.getElementById('soundBtn').classList.replace('btn-outline-warning', 'btn-warning');
 });
+// "Startledare-läge" reveals ALL admin controls (offset row, the quick actions in the Nästa-start
+// card, and the move/straff panel). Default = clean shooter-facing wall view. Persisted per device
+// so the manager's pad stays in admin mode while the wall screen stays clean.
+const ADMIN_KEY = 'hpsk_startlinje_admin_' + COMP + '_' + (PRESET_WC || 'x');
+let adminMode = localStorage.getItem(ADMIN_KEY) === '1';
+function applyAdminMode() {
+    document.getElementById('rmPanel').style.display = adminMode ? 'block' : 'none';
+    document.getElementById('offsetRow').style.display = adminMode ? '' : 'none';
+    const btn = document.getElementById('rmBtn');
+    btn.classList.toggle('btn-info', adminMode);
+    btn.classList.toggle('btn-outline-info', !adminMode);
+    if (adminMode) buildMovePickers();
+    // The quick-action buttons in the card are toggled inside tick() (they also need a current shooter).
+}
 document.getElementById('rmBtn').addEventListener('click', () => {
-    const el = document.getElementById('rmPanel');
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-    if (el.style.display === 'block') buildMovePickers();
+    adminMode = !adminMode;
+    localStorage.setItem(ADMIN_KEY, adminMode ? '1' : '0');
+    applyAdminMode();
 });
 // offset controls
 document.getElementById('offMinus').addEventListener('click', () => nudgeOffset(-30));
@@ -366,8 +382,9 @@ function tick() {
             if (rem <= thr && rem >= thr - 1 && !firedCues[key]) { firedCues[key] = true; fireCue(thr); }
         }
         curNext = next;
-        document.getElementById('nextActions').style.display = 'flex';
-        document.getElementById('nextAdj').innerHTML = adjBadgesHtml(adjustmentsFor(next.memberId, next.weaponClass));
+        document.getElementById('nextActions').style.display = adminMode ? 'flex' : 'none';
+        // Penalties on the current shooter are relevant to the manager; hide on the clean wall view.
+        document.getElementById('nextAdj').innerHTML = adminMode ? adjBadgesHtml(adjustmentsFor(next.memberId, next.weaponClass)) : '';
     } else {
         document.getElementById('nextTime').textContent = '';
         document.getElementById('nextName').textContent = 'Inga fler starter';
@@ -600,7 +617,7 @@ if (!PRESET_WC) {
     showClassChooser();
 } else {
     renderOffset();
-    loadState().then(() => { tick(); });
+    loadState().then(() => { applyAdminMode(); tick(); });
     setInterval(tick, 250);
     setInterval(loadState, 5000);
 }
