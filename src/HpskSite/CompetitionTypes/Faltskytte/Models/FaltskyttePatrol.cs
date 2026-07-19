@@ -42,6 +42,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// add-departedat-to-faltskyttepatrol.sql column.
         /// </summary>
         public DateTime? DepartedAt { get; set; }
+
+        /// <summary>
+        /// Starter "hold/wait": true when the patrol is parked waiting for a member. A held
+        /// patrol is skipped in the "NÄST PÅ TUR" calc (but NOT departed) so the starter can
+        /// send the next patrol; the held one resumes later. Requires
+        /// add-held-to-faltskyttepatrol.sql.
+        /// </summary>
+        public bool Held { get; set; }
     }
 
     [TableName("FaltskyttePatrolMember")]
@@ -68,5 +76,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
         [Required]
         public string ClubName { get; set; } = "";
+
+        /// <summary>
+        /// Per-shooter status: null = normal, "DNS" = did-not-start. A DNS'd shooter stays on the
+        /// patrol (visible + flagged) but is excluded from the patrol's capacity count so their seat
+        /// frees for a late registration. Requires add-status-to-faltskyttepatrolmember.sql.
+        /// </summary>
+        public string? Status { get; set; }
     }
 }

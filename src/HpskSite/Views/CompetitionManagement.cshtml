@@ -442,18 +442,23 @@
                 Hanterar: <strong>@(competition?.Value<string>("competitionName") ?? "Okänd tävling")</strong>
             </p>
         </div>
-        <div class="d-flex gap-2">
-            <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-left"></i> Tillbaka till tävlingen
-            </a>
-            @if (canManageCompetition)
-            {
-                var isExternalComp = competition?.Value<bool>("isExternal") ?? false;
-                <button type="button" class="btn btn-outline-primary"
-                        onclick="openEditCompetitionModal(@competitionId, @(isExternalComp ? "true" : "false"), '@competitionType')">
-                    <i class="bi bi-pencil"></i> Redigera tävling
-                </button>
-            }
+        <div class="d-flex flex-column align-items-end gap-2">
+            <div class="d-flex gap-2">
+                <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left"></i> Tillbaka till tävlingen
+                </a>
+                @if (canManageCompetition)
+                {
+                    var isExternalComp = competition?.Value<bool>("isExternal") ?? false;
+                    <button type="button" class="btn btn-outline-primary"
+                            onclick="openEditCompetitionModal(@competitionId, @(isExternalComp ? "true" : "false"), '@competitionType')">
+                        <i class="bi bi-pencil"></i> Redigera tävling
+                    </button>
+                }
+            </div>
+            @* Funktionärsmeddelanden — the discipline's staff-screen partial mounts its message button
+               here (under the two buttons), so it sits with the page's top controls. *@
+            <div id="evtInboxMount"></div>
         </div>
     </div>
 

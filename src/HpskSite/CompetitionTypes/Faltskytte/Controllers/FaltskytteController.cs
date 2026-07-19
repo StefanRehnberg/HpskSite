@@ -453,11 +453,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 startTime = p.StartTime,
                 label = p.Label,
                 departedAt = p.DepartedAt,
+                held = p.Held,
                 members = members.Where(m => m.PatrolId == p.Id).Select(m => new
                 {
+                    patrolMemberId = m.Id,
                     name = m.MemberName,
                     club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
-                    shootingClass = m.ShootingClass
+                    shootingClass = m.ShootingClass,
+                    status = m.Status
                 }).ToList()
             }).ToList();
 
@@ -481,6 +484,27 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             object when = request.Departed ? DateTime.UtcNow : (object)DBNull.Value;
             await db.ExecuteAsync("UPDATE FaltskyttePatrol SET DepartedAt = @0 WHERE Id = @1", when, request.PatrolId);
             return Json(new { success = true, departed = request.Departed });
+        }
+
+        /// <summary>
+        /// Starter "hold/wait": parks/unparks a patrol (staff-gated). A held patrol is skipped in the
+        /// send-off screen's next-up calc so the starter can send the next patrol; it's NOT departed.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetPatrolHeld([FromBody] SetPatrolHeldRequest request)
+        {
+            if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+                "WHERE Id = @0 AND CompetitionId = @1", request.PatrolId, request.CompetitionId);
+            if (patrol == null)
+                return Json(new { success = false, message = "Patrullen hittades inte." });
+
+            await db.ExecuteAsync("UPDATE FaltskyttePatrol SET Held = @0 WHERE Id = @1", request.Held ? 1 : 0, request.PatrolId);
+            return Json(new { success = true, held = request.Held });
         }
 
         // ── Station Entry View ──────────────────────────────────────
@@ -540,7 +564,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         Name = m.MemberName,
                         Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
                         ShootingClass = m.ShootingClass,
-                        HasResult = completedKeys.Contains(m.MemberId + "_" + m.ShootingClass)
+                        HasResult = completedKeys.Contains(m.MemberId + "_" + m.ShootingClass),
+                        Status = m.Status
                     }).ToList(),
                     CompletedCount = members.Count(m => completedKeys.Contains(m.MemberId + "_" + m.ShootingClass))
                 };
@@ -2005,11 +2030,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     message = "Skytten finns redan i patrull " + (existingPatrol?.PatrolNumber ?? 0) });
             }
 
-            // Find latest patrol for this weapon group with space
+            // Find latest patrol for this weapon group with space. DNS'd shooters don't count toward
+            // capacity, so a did-not-start seat is reused before spilling to a new patrol.
             var openPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
                 @"SELECT p.* FROM FaltskyttePatrol p
                   WHERE p.CompetitionId = @0 AND p.WeaponGroup = @1
-                  AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id) < @2
+                  AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id AND (Status IS NULL OR Status <> 'DNS')) < @2
                   ORDER BY p.PatrolNumber DESC",
                 request.CompetitionId, weaponGroup, patrolSize);
 
@@ -2354,7 +2380,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         Position = m.Position,
                         Name = m.MemberName,
                         Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
-                        ShootingClass = m.ShootingClass
+                        ShootingClass = m.ShootingClass,
+                        Status = m.Status
                     }).ToList()
             }).ToList();
 
@@ -2484,6 +2511,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new { success = true });
         }
 
+        /// <summary>
+        /// Mark/unmark a shooter as DNS (did-not-start). The membership row is kept (shooter stays
+        /// visible + flagged) but a DNS'd shooter is excluded from the patrol's capacity count, so
+        /// their seat frees for a late registration (see JoinNextPatrol / AssignWalkInToPatrol).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetShooterDns([FromBody] SetShooterDnsRequest request)
+        {
+            if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            object status = request.IsDns ? "DNS" : (object)DBNull.Value;
+            await db.ExecuteAsync("UPDATE FaltskyttePatrolMember SET Status = @0 WHERE Id = @1", status, request.PatrolMemberId);
+            return Json(new { success = true, isDns = request.IsDns });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> MoveShooterToPatrol([FromBody] MoveShooterToPatrolRequest request)
@@ -2566,6 +2611,23 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 .GroupBy(sc => ShootingClasses.GetWeaponClassCode(sc.Class) ?? "")
                 .ToList();
 
+            // Patrol capacity for "nästa lediga" — from the rolling-start config (default 6). Lets a
+            // walk-in fall into a patrol that has a free (or DNS-freed) seat before a new one is made.
+            int walkInPatrolSize = 6;
+            var walkInCompNode = _contentService.GetById(request.CompetitionId);
+            var walkInRsJson = walkInCompNode?.GetValue<string>("rollingStart");
+            if (!string.IsNullOrEmpty(walkInRsJson))
+            {
+                try
+                {
+                    var rs = Newtonsoft.Json.Linq.JObject.Parse(walkInRsJson);
+                    var psTok = rs["patrolSize"];
+                    if (psTok != null && int.TryParse(psTok.ToString(), out int ps) && ps > 0)
+                        walkInPatrolSize = ps;
+                }
+                catch { }
+            }
+
             var assignments = new List<object>();
             foreach (var grp in classesByGroup)
             {
@@ -2590,16 +2652,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 }
                 else // "nextAvailable" — also the fallback when the explicit pick is in the wrong group
                 {
-                    var existing = await db.FetchAsync<FaltskyttePatrol>(
-                        @"WHERE CompetitionId = @0
-                          AND (WeaponGroup = @1 OR WeaponGroup = '' OR WeaponGroup IS NULL)
-                          ORDER BY PatrolNumber DESC",
-                        request.CompetitionId, weaponGroup);
+                    // Fill the lowest-numbered patrol of this group that still has a free (non-DNS)
+                    // seat — so a DNS'd shooter's freed slot gets used before spilling to a new patrol.
+                    var openPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+                        @"SELECT p.* FROM FaltskyttePatrol p
+                          WHERE p.CompetitionId = @0
+                          AND (p.WeaponGroup = @1 OR p.WeaponGroup = '' OR p.WeaponGroup IS NULL)
+                          AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id AND (Status IS NULL OR Status <> 'DNS')) < @2
+                          ORDER BY p.PatrolNumber ASC",
+                        request.CompetitionId, weaponGroup, walkInPatrolSize);
 
-                    if (existing.Any())
+                    if (openPatrol != null)
                     {
-                        patrolId = existing.First().Id;
-                        patrolNumber = existing.First().PatrolNumber;
+                        patrolId = openPatrol.Id;
+                        patrolNumber = openPatrol.PatrolNumber;
                     }
                     else
                     {
@@ -2866,7 +2932,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             competition.SetValue("faltskyttePatrolsPublished", request.Publish);
             _contentService.Save(competition);
-            _contentService.Publish(competition, new[] { "*" }, -1);
+            var pub = _contentService.Publish(competition, new[] { "*" }, -1);
+
+            // Don't report a false success: if the competition node itself fails to publish (e.g. a
+            // mandatory field is empty), the flag stays only on the draft and the public competition
+            // page — which reads the PUBLISHED cache — keeps showing "har inte publicerats än".
+            if (!pub.Success)
+            {
+                var invalid = pub.InvalidProperties != null && pub.InvalidProperties.Any()
+                    ? " Ogiltiga/obligatoriska fält: " + string.Join(", ", pub.InvalidProperties.Select(p => p.Alias))
+                    : "";
+                _logger.LogWarning("PublishPatrolList: node publish failed for comp {CompetitionId}: {Result}{Invalid}",
+                    request.CompetitionId, pub.Result, invalid);
+                return Json(new { success = false, message = $"Patrullistan sparades men tävlingen kunde inte publiceras ({pub.Result}).{invalid} Åtgärda detta i tävlingens inställningar och publicera igen." });
+            }
 
             return Json(new { success = true, published = request.Publish });
         }

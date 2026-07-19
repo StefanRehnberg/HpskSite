@@ -227,6 +227,22 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool Departed { get; set; }
     }
 
+    /// <summary>Park/unpark a patrol (starter "hold/wait" — skipped in next-up, not departed).</summary>
+    public class SetPatrolHeldRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolId { get; set; }
+        public bool Held { get; set; }
+    }
+
+    /// <summary>Mark/unmark a shooter in a patrol as DNS (did-not-start; frees their seat).</summary>
+    public class SetShooterDnsRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolMemberId { get; set; }
+        public bool IsDns { get; set; }
+    }
+
     // ── Flow/statistics page (/faltskytte/statistik/{id}) ─────────
 
     public class FaltskytteStatsModel
@@ -302,6 +318,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string ShootingClass { get; set; } = "";
         /// <summary>Whether a result exists for this member at the queried station</summary>
         public bool HasResult { get; set; }
+        /// <summary>null = normal, "DNS" = did-not-start (seat freed for a late registration).</summary>
+        public string? Status { get; set; }
     }
 
     // ── Station Entry View ──────────────────────────────────────────

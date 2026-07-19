@@ -22,17 +22,36 @@
                 <div>
                     <h5 class="mb-0 d-inline"><i class="bi bi-people me-2"></i>Patrullista</h5>
                     <span class="badge ms-2" id="faltPublishBadge">Preliminär</span>
+                    @if (isRollingStart)
+                    {
+                        <span class="badge bg-info text-dark ms-1" title="Patruller skapas automatiskt när skyttar anmäler sig"><i class="bi bi-arrow-repeat me-1"></i>Rullande start</span>
+                    }
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
-                    @if (!isRollingStart)
+                    @* Generera/Skapa stay available even under rolling start so a stranded comp (patrols
+                       deleted) can be rebuilt — but under rolling start "Generera" is de-emphasised and
+                       guarded (rolling start auto-creates; regenerating is an "only if something is wrong"
+                       action). "Skapa patrull" (add one) is safe and stays normal. *@
+                    @if (isRollingStart)
                     {
-                    <button class="btn btn-primary btn-sm" onclick="faltShowGenerateModal()">
-                        <i class="bi bi-plus-lg me-1"></i>Generera patruller
-                    </button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="faltGuardedGenerate()" title="Rullande start: patruller skapas automatiskt vid anmälan. Generera om bara om något är fel.">
+                            <i class="bi bi-plus-lg me-1"></i>Generera patruller
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary btn-sm" onclick="faltShowGenerateModal()">
+                            <i class="bi bi-plus-lg me-1"></i>Generera patruller
+                        </button>
+                    }
                     <button class="btn btn-outline-primary btn-sm" onclick="faltCreatePatrol()">
                         <i class="bi bi-plus-circle me-1"></i>Skapa patrull
                     </button>
-                    }
+                    @* Starter's OPERATOR screen (send-off / hold / DNS at the line) — pad-optimised,
+                       staff-only. The public read-only wall is the "Visa patrullista" page. *@
+                    <a class="btn btn-success btn-sm" href="/startledare/@competitionId" target="_blank" title="Öppna startledarvyn — skicka iväg patruller, håll kvar, markera DNS">
+                        <i class="bi bi-megaphone me-1"></i>Startledarvy
+                    </a>
                     <button class="btn btn-success btn-sm" onclick="faltPublish(true)" id="faltPublishBtn" style="display:none">
                         <i class="bi bi-globe me-1"></i>Publicera
                     </button>
@@ -59,6 +78,7 @@
                     <option value="">Flytta till patrull...</option>
                 </select>
                 <button class="btn btn-sm btn-outline-primary" onclick="faltBulkMove()">Flytta</button>
+                <button class="btn btn-sm btn-outline-warning" onclick="faltBulkDns()" title="Markera som DNS – frigör platserna">Markera DNS</button>
                 <button class="btn btn-sm btn-outline-danger" onclick="faltBulkRemove()">Ta bort</button>
                 <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="faltClearSelection()">Avmarkera</button>
             </div>
@@ -69,7 +89,7 @@
             <div id="faltPatrolsEmpty" class="text-center py-4">
                 @if (isRollingStart)
                 {
-                <p class="text-muted mb-0">Rullande start aktiverad. Patruller skapas automatiskt vid anmälan.</p>
+                <p class="text-muted mb-0">Rullande start aktiverad — patruller skapas automatiskt vid anmälan. Du kan även generera eller skapa patruller manuellt här.</p>
                 }
                 else
                 {
@@ -82,6 +102,16 @@
         </div>
     </div>
 </div>
+
+<script>
+    // Under rolling start, regenerating replaces the auto-created lists — confirm before opening the
+    // generate modal so it can't be triggered by accident.
+    window.faltGuardedGenerate = function () {
+        if (confirm('Rullande start är aktiverad — patruller skapas automatiskt när skyttar anmäler sig.\n\nGenerera om patrullerna bara om något är fel. Vill du fortsätta?')) {
+            faltShowGenerateModal();
+        }
+    };
+</script>
 
 <!-- Generation Settings Modal -->
 <div class="modal fade" id="faltGenerateModal" tabindex="-1" style="z-index:1060">
@@ -353,10 +383,13 @@
                     html += '<div class="text-muted small fst-italic">Tom patrull</div>';
                 } else {
                     patrol.members.forEach(function(m) {
-                        html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row" data-pm-id="' + m.patrolMemberId + '">' +
+                        var isDns = m.status === 'DNS';
+                        html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row' + (isDns ? ' opacity-50' : '') + '" data-pm-id="' + m.patrolMemberId + '">' +
                             '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
                             '<span class="flex-grow-1 small">' + m.name + ' <span class="text-muted">(' + m.club + ')</span>' +
-                            ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span></span>' +
+                            ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span>' +
+                            (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span>' +
+                            '<button class="btn ' + (isDns ? 'btn-warning' : 'btn-outline-warning') + ' btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',' + (!isDns) + ')" title="' + (isDns ? 'Ångra DNS' : 'Markera DNS – frigör platsen') + '">DNS</button>' +
                             '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltRemoveShooter(' + m.patrolMemberId + ')" title="Ta bort"><i class="bi bi-x"></i></button>' +
                             '</div>';
                     });
@@ -425,6 +458,25 @@
         var data = await apiPost('RemoveShooterFromPatrol', { competitionId: parseInt(compId), patrolMemberId: pmId });
         if (data.success) loadFaltPatrols();
         else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    // DNS: keep the shooter on record but flag them did-not-start, which frees their seat so a late
+    // registration can take it (the capacity count ignores DNS).
+    window.faltSetDns = async function(pmId, isDns) {
+        var data = await apiPost('SetShooterDns', { competitionId: parseInt(compId), patrolMemberId: pmId, isDns: isDns });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltBulkDns = async function() {
+        var ids = [];
+        document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
+        if (ids.length === 0) return;
+        if (!confirm('Markera ' + ids.length + ' markerade skyttar som DNS (frigör deras platser)?')) return;
+        for (var i = 0; i < ids.length; i++) {
+            await apiPost('SetShooterDns', { competitionId: parseInt(compId), patrolMemberId: ids[i], isDns: true });
+        }
+        loadFaltPatrols();
     };
 
     window.faltDeletePatrol = async function(patrolId) {

@@ -146,6 +146,12 @@ namespace HpskSite.Composers
             // (online auto-scored + instructor-recorded paper). Reads Märken + certs for eligibility.
             builder.Services.AddScoped<CourseTestService>();
 
+            // In-app functionary messaging (Funktionärs-/stationsmeddelanden) — competition-scoped
+            // message store addressed by generic (ScopeType, ScopeKey), delivered over the staff-screen
+            // poll. Run create-event-message-tables.sql. Transport/addressing kept pluggable so the
+            // later shooter-facing web-push channel can reuse the same rows.
+            builder.Services.AddScoped<HpskSite.Services.Messaging.EventMessageService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

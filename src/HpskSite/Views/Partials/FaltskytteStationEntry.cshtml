@@ -306,6 +306,19 @@
         stationData = data.data;
         shooterHits = {}; // Clear local state on station load
 
+        // Keep the URL in sync with the dropdown so a reload — and the message inbox's scope —
+        // can't drift from the station on screen. (Was: dropdown changed but ?s= kept its old value.)
+        if (!selfService) {
+            try {
+                var _u = new URL(window.location.href);
+                _u.searchParams.set('s', stationNum);
+                history.replaceState(null, '', _u.pathname + _u.search);
+            } catch (e) { /* history unavailable — non-fatal */ }
+            if (window.EventInbox && window.__evtStationCtx) {
+                EventInbox.setContext(window.__evtStationCtx(stationNum));
+            }
+        }
+
         // Self-service: keep only the user's resolved patrol in the list AND
         // jump straight into it — the team should never see other patrols and
         // shouldn't have to tap a list of one.
@@ -1310,3 +1323,35 @@
     };
 })();
 </script>
+
+@* Stationschefens meddelandeinkorg — endast för funktionärer (ej självservice-skyttar). *@
+@if (!isSelfService)
+{
+    @await Html.PartialAsync("_EventMessageInbox")
+    <script>
+    (function () {
+        var cont = document.querySelector('.faltskytte-station-entry');
+        if (!cont || !window.EventInbox) return;
+        var compId = parseInt(cont.getAttribute('data-competition-id'), 10);
+        if (!compId) return;
+        var preset = cont.getAttribute('data-preset-station') || '';
+        // Exposed so fseLoadStation() can re-scope the inbox when the station dropdown changes.
+        window.__evtStationCtx = function (stn) {
+            var scopes = [{ type: 'Role', key: 'stationschef' }];
+            if (stn) scopes.push({ type: 'Station', key: String(stn) });
+            return {
+                scopes: scopes,
+                fromScope: stn ? { type: 'Station', key: String(stn) } : { type: 'Role', key: 'stationschef' },
+                label: stn ? ('Station ' + stn) : 'Stationschef',
+                recipients: [
+                    { type: 'All' },
+                    { type: 'Role', key: 'startledare', label: 'Startledare' },
+                    { type: 'Role', key: 'ledning', label: 'Tävlingsledning' }
+                ]
+            };
+        };
+        // Master-layout page — float the button top-right, just below the site nav (clear of it).
+        EventInbox.init(Object.assign({ competitionId: compId, topOffset: 72 }, window.__evtStationCtx(preset)));
+    })();
+    </script>
+}

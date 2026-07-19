@@ -1,0 +1,198 @@
+@using HpskSite.CompetitionTypes.Faltskytte.Models
+@model FaltskyttePatrolListModel
+@{
+    // Startledarvy — the Fältskytte starter's OPERATOR screen (pad-optimised). Send patrols off,
+    // park/hold a patrol waiting for a shooter, and mark shooters DNS at the line. Staff-only.
+    // The public read-only big-screen wall is /patrullista. Both poll GetPatrolListState.
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Startledare@(string.IsNullOrEmpty(Model.CompetitionName) ? "" : " — " + Model.CompetitionName)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { background: #f5f6f8; }
+        .sl-time { font-variant-numeric: tabular-nums; }
+        .sl-departed { opacity: .5; }
+        .sl-held { border: 2px solid var(--bs-warning, #ffc107); }
+        .sl-next { box-shadow: 0 0 0 .25rem rgba(25,135,84,.35); }
+        .sl-member { min-height: 40px; }         /* real + blank rows share a height → equal cards */
+        .sl-member.sl-dns { opacity: .5; }
+        .sl-blank { pointer-events: none; }
+        .sl-act { align-items: center; }         /* buttons keep their natural height, never stretch */
+        .sl-act .btn { min-height: 46px; }       /* pad touch targets */
+        .sl-dns-btn { min-width: 54px; }
+        #slWake.active { background: var(--bs-success); color: #fff; border-color: var(--bs-success); }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-2">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2 border-bottom pb-2">
+            <h4 class="mb-0"><i class="bi bi-megaphone-fill me-2"></i>Startledare</h4>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="fw-bold">@Model.CompetitionName</span>
+                <span id="slConn" class="badge bg-secondary" title="Anslutning"><i class="bi bi-wifi"></i></span>
+                <button id="slWake" class="btn btn-outline-secondary btn-sm" onclick="slToggleWake()"><i class="bi bi-lightbulb me-1"></i>Håll skärmen vaken</button>
+                <a class="btn btn-outline-secondary btn-sm" href="/patrullista/@Model.CompetitionId" target="_blank" title="Öppna väggskärmen (publik)"><i class="bi bi-tv me-1"></i>Väggskärm</a>
+                <span id="evtMountStartledare"></span>
+            </div>
+        </div>
+
+        @if (!Model.CanSendOff)
+        {
+            <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>Du har inte behörighet till startledarvyn.</div>
+        }
+        else
+        {
+            @Html.AntiForgeryToken()
+            <div id="slBanner"></div>
+            <div class="row g-2" id="slCards">
+                <div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+            </div>
+        }
+    </div>
+
+    @if (Model.CanSendOff)
+    {
+        <script>
+            var compId = @Model.CompetitionId;
+            var REFRESH = 8000;
+            var timer = null;
+
+            function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+            function fmt(d) { try { return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+            function token() { var el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
+            function setConn(ok) { var e = document.getElementById('slConn'); if (e) e.className = 'badge ' + (ok ? 'bg-success' : 'bg-danger'); }
+
+            async function refresh() {
+                try {
+                    var r = await fetch('/umbraco/surface/Faltskytte/GetPatrolListState?competitionId=' + compId);
+                    var d = await r.json();
+                    setConn(true);
+                    render(d);
+                } catch (e) { setConn(false); }
+            }
+
+            function render(d) {
+                var banner = document.getElementById('slBanner');
+                var host = document.getElementById('slCards');
+                if (!d || !d.success) return;
+                if (!d.published) {
+                    banner.innerHTML = '';
+                    host.innerHTML = '<div class="col-12"><div class="alert alert-info"><i class="bi bi-hourglass-split me-2"></i>Patrullistan är inte publicerad än. Publicera den på Startlistor-fliken.</div></div>';
+                    return;
+                }
+                var patrols = d.patrols || [];
+                if (!patrols.length) { banner.innerHTML = ''; host.innerHTML = '<div class="col-12"><div class="alert alert-warning">Inga patruller.</div></div>'; return; }
+
+                var next = patrols.find(function (p) { return !p.departedAt && !p.held; });
+                // Pad every patrol's member list to the largest patrol so all cards are the same height
+                // (missing shooters become blank rows instead of stretching the buttons).
+                var maxMembers = patrols.reduce(function (mx, p) { return Math.max(mx, (p.members || []).length); }, 1);
+
+                var b = '';
+                if (next) {
+                    b += '<div class="alert alert-success d-flex align-items-center justify-content-between flex-wrap gap-2 py-3 mb-2">'
+                        + '<div><span class="badge bg-success me-2">NÄST PÅ TUR</span><span class="fs-3 fw-bold">Patrull ' + next.patrolNumber + '</span>'
+                        + '<span class="fs-5 ms-2 text-muted">Vapengrupp ' + esc(next.weaponGroup) + '</span></div>'
+                        + '<button class="btn btn-success btn-lg" onclick="sendOff(' + next.patrolId + ',true)"><i class="bi bi-send-fill me-1"></i>Skicka iväg patrull ' + next.patrolNumber + '</button></div>';
+                } else {
+                    var anyHeld = patrols.some(function (p) { return !p.departedAt && p.held; });
+                    b += '<div class="alert alert-secondary fs-5 py-3 mb-2"><i class="bi bi-check2-all me-2"></i>'
+                        + (anyHeld ? 'Inga fler att skicka just nu — parkerade patruller väntar.' : 'Alla patruller har gått ut.') + '</div>';
+                }
+                banner.innerHTML = b;
+
+                host.innerHTML = patrols.map(function (p) {
+                    var dep = p.departedAt ? new Date(p.departedAt) : null;
+                    var isNext = next && p.patrolId === next.patrolId;
+                    var cardCls = 'card h-100' + (dep ? ' sl-departed' : (p.held ? ' sl-held' : (isNext ? ' sl-next border-success' : '')));
+                    var timeStr = p.startTime ? fmt(new Date(p.startTime)) : '';
+                    var statusBadge = dep ? '<span class="badge bg-success">Utgått ' + fmt(dep) + '</span>'
+                        : (p.held ? '<span class="badge bg-warning text-dark"><i class="bi bi-pause-fill me-1"></i>Väntar</span>'
+                            : (isNext ? '<span class="badge bg-success">NÄST</span>' : ''));
+                    var ctrl;
+                    if (dep) {
+                        ctrl = '<button class="btn btn-outline-secondary btn-sm" onclick="sendOff(' + p.patrolId + ',false)"><i class="bi bi-arrow-counterclockwise me-1"></i>Ångra</button>';
+                    } else {
+                        var holdBtn = p.held
+                            ? '<button class="btn btn-outline-warning btn-sm" onclick="setHeld(' + p.patrolId + ',false)"><i class="bi bi-play-fill me-1"></i>Återuppta</button>'
+                            : '<button class="btn btn-outline-secondary btn-sm" onclick="setHeld(' + p.patrolId + ',true)" title="Parkera – vänta på skytt, skicka nästa istället"><i class="bi bi-pause me-1"></i>Håll kvar</button>';
+                        var sendBtn = '<button class="btn ' + (isNext ? 'btn-success' : 'btn-outline-success') + ' btn-sm" onclick="sendOff(' + p.patrolId + ',true)"><i class="bi bi-send me-1"></i>Skicka</button>';
+                        ctrl = holdBtn + sendBtn;
+                    }
+                    var real = (p.members || []);
+                    var members = real.map(function (m) {
+                        var isDns = m.status === 'DNS';
+                        return '<li class="list-group-item py-1 d-flex justify-content-between align-items-center sl-member' + (isDns ? ' sl-dns' : '') + '">'
+                            + '<span>' + esc(m.name) + ' <span class="text-muted small">(' + esc(m.club) + ')</span> <span class="badge bg-body-secondary text-body">' + esc(m.shootingClass) + '</span>' + (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span>'
+                            + '<button class="btn ' + (isDns ? 'btn-warning' : 'btn-outline-warning') + ' btn-sm sl-dns-btn" onclick="setDns(' + m.patrolMemberId + ',' + (!isDns) + ')" title="' + (isDns ? 'Ångra DNS' : 'Markera DNS – frigör platsen') + '">DNS</button>'
+                            + '</li>';
+                    }).join('');
+                    for (var bi = real.length; bi < maxMembers; bi++) {
+                        members += '<li class="list-group-item py-1 sl-member sl-blank">&nbsp;</li>';
+                    }
+                    return '<div class="col-12 col-md-6 col-xl-4" data-patrol="' + p.patrolId + '">'
+                        + '<div class="' + cardCls + '">'
+                        + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
+                        + '<span class="fw-bold">Patrull ' + p.patrolNumber + ' · ' + esc(p.weaponGroup) + (timeStr ? ' · ' + timeStr : '') + '</span>' + statusBadge + '</div>'
+                        + '<div class="p-2 sl-act d-flex gap-1 flex-wrap">' + ctrl + '</div>'
+                        + '<ul class="list-group list-group-flush flex-grow-1">' + members + '</ul>'
+                        + '</div></div>';
+                }).join('');
+            }
+
+            window.sendOff = async function (patrolId, departed) {
+                try { await fetch('/umbraco/surface/Faltskytte/SetPatrolDeparted', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify({ competitionId: compId, patrolId: patrolId, departed: departed }) }); } catch (e) { }
+                refresh();
+            };
+            window.setHeld = async function (patrolId, held) {
+                try { await fetch('/umbraco/surface/Faltskytte/SetPatrolHeld', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify({ competitionId: compId, patrolId: patrolId, held: held }) }); } catch (e) { }
+                refresh();
+            };
+            window.setDns = async function (pmId, isDns) {
+                try { await fetch('/umbraco/surface/Faltskytte/SetShooterDns', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify({ competitionId: compId, patrolMemberId: pmId, isDns: isDns }) }); } catch (e) { }
+                refresh();
+            };
+
+            // Screen wake lock — keep the pad awake at the line; re-acquire when the tab returns.
+            var wakeLock = null, wakeWanted = false;
+            async function slAcquireWake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { } }
+            window.slToggleWake = async function () {
+                wakeWanted = !wakeWanted;
+                document.getElementById('slWake').classList.toggle('active', wakeWanted);
+                if (wakeWanted) await slAcquireWake();
+                else if (wakeLock) { try { await wakeLock.release(); } catch (e) { } wakeLock = null; }
+            };
+
+            refresh();
+            timer = setInterval(refresh, REFRESH);
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) { if (timer) { clearInterval(timer); timer = null; } }
+                else { refresh(); timer = setInterval(refresh, REFRESH); if (wakeWanted) slAcquireWake(); }
+            });
+        </script>
+
+        @* Starter's functionary message inbox — the operator (not the public wall) gets messaging. *@
+        @await Html.PartialAsync("_EventMessageInbox")
+        <script>
+            EventInbox.init({
+                competitionId: @Model.CompetitionId,
+                mountSelector: '#evtMountStartledare',
+                label: 'Startledare',
+                fromScope: { type: 'Role', key: 'startledare' },
+                scopes: [ { type: 'Role', key: 'startledare' } ],
+                recipients: [
+                    { type: 'All' },
+                    { type: 'Role', key: 'stationschef', label: 'Stationschefer' },
+                    { type: 'Role', key: 'ledning', label: 'Tävlingsledning' }
+                ]
+            });
+        </script>
+    }
+</body>
+</html>

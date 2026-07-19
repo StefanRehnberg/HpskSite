@@ -1,0 +1,464 @@
+@*
+    Reusable in-app functionary message inbox (Funktionärs-/stationsmeddelanden).
+
+    One partial, dropped once per staff screen. The host page calls EventInbox.init({...}) with the
+    scopes it RECEIVES (e.g. Station:2) and the recipients it can SEND to. Re-scope live with
+    EventInbox.setContext(...) when the screen changes what it represents (e.g. the /station dropdown).
+
+    Self-contained: vanilla JS (no Bootstrap JS dependency), inline CSS, own antiforgery token.
+    Delivered over the same ~10 s poll the staff screens already run. See EventMessageController.
+*@
+@using Microsoft.AspNetCore.Mvc.ViewFeatures
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    var evtTokenSet = Antiforgery.GetAndStoreTokens(Context);
+}
+<div id="evtInboxRoot" class="evtinbox" hidden aria-live="polite">
+    <button type="button" id="evtInboxToggle" class="evtinbox-fab" aria-expanded="false" title="Meddelanden">
+        <i class="bi bi-envelope"></i>
+        <span class="evtinbox-fablabel">Meddelanden</span>
+        <span id="evtInboxBadge" class="evtinbox-badge" hidden>0</span>
+        <span id="evtInboxConn" class="evtinbox-conn" title="Anslutning"></span>
+    </button>
+
+    <div id="evtInboxPanel" class="evtinbox-panel" hidden>
+        <div class="evtinbox-head">
+            <strong>Meddelanden</strong>
+            <span id="evtInboxScopeLabel" class="evtinbox-scope"></span>
+            <button type="button" id="evtInboxClose" class="evtinbox-x" title="Stäng">&times;</button>
+        </div>
+
+        <div id="evtInboxList" class="evtinbox-list">
+            <div class="evtinbox-empty">Inga meddelanden ännu.</div>
+        </div>
+
+        <form id="evtInboxComposer" class="evtinbox-composer" autocomplete="off">
+            <div class="evtinbox-row">
+                <select id="evtInboxTo" class="evtinbox-sel" title="Till"></select>
+                <select id="evtInboxUrgency" class="evtinbox-sel evtinbox-urg" title="Prioritet">
+                    <option value="Normal">Normal</option>
+                    <option value="Urgent">Viktigt</option>
+                    <option value="Safety">Säkerhet</option>
+                </select>
+            </div>
+            <div class="evtinbox-row">
+                <input type="text" id="evtInboxBody" class="evtinbox-body" maxlength="2000" placeholder="Skriv ett meddelande…"
+                       autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore data-form-type="other">
+                <button type="submit" id="evtInboxSend" class="evtinbox-send" title="Skicka"><i class="bi bi-send"></i></button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    /* Floating fallback (chromeless field screens with no host anchor): fixed, top-right,
+       clear of the AI chat bubble which owns the bottom-right corner. */
+    .evtinbox { position: fixed; top: var(--evt-top, 10px); right: 12px; z-index: 1035; font-size: 14px; }
+    /* Anchored mode: the host drops the button inline into its own top button row. */
+    .evtinbox.evt-inline { position: static; z-index: auto; display: inline-block; }
+    .evtinbox-fab { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 38px;
+        padding: 0 14px; border-radius: 20px; border: 1px solid #0d6efd; background: #0d6efd; color: #fff;
+        font-size: 14px; font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,.2); cursor: pointer; white-space: nowrap; }
+    .evtinbox-fab.evt-unread { background: #dc3545; border-color: #dc3545; }
+    .evtinbox-fab.evt-attn { animation: evtPulse 1s ease-in-out infinite; border-color: #dc3545; background: #dc3545; }
+    @@keyframes evtPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(220,53,69,.6); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0); } }
+    .evtinbox-fablabel { line-height: 1; }
+    .evtinbox-badge { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px;
+        border-radius: 10px; background: #dc3545; color: #fff; font-size: 12px; line-height: 20px; font-weight: 700;
+        text-align: center; box-shadow: 0 0 0 2px var(--bs-body-bg, #fff); }
+    .evtinbox-conn { width: 9px; height: 9px; border-radius: 50%; background: #6c757d; }
+    .evtinbox-conn.evt-ok { background: #63e6a0; }
+    .evtinbox-conn.evt-bad { background: #ffb3b3; }
+    /* Panel is positioned by JS (fixed) to drop from wherever the button sits. */
+    .evtinbox-panel { position: fixed; width: 360px; max-width: calc(100vw - 24px);
+        max-height: 72vh; display: flex; flex-direction: column; background: var(--bs-body-bg, #fff);
+        color: var(--bs-body-color, #212529); border: 1px solid var(--bs-border-color, #dee2e6);
+        border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); overflow: hidden; }
+    .evtinbox-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+        border-bottom: 1px solid var(--bs-border-color, #dee2e6); }
+    .evtinbox-scope { color: var(--bs-secondary-color, #6c757d); font-size: 12px; margin-left: auto; }
+    .evtinbox-x { border: none; background: none; font-size: 22px; line-height: 1; cursor: pointer;
+        color: var(--bs-secondary-color, #6c757d); }
+    .evtinbox-list { flex: 1 1 auto; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+    .evtinbox-empty { color: var(--bs-secondary-color, #6c757d); text-align: center; padding: 20px 0; }
+    .evtinbox-msg { border: 1px solid var(--bs-border-color, #dee2e6); border-left-width: 4px; border-radius: 8px;
+        padding: 8px 10px; background: var(--bs-tertiary-bg, #f8f9fa); }
+    .evtinbox-msg.evt-mine { background: rgba(13,110,253,.08); }
+    .evtinbox-msg.evt-urgent { border-left-color: #fd7e14; }
+    .evtinbox-msg.evt-safety { border-left-color: #dc3545; background: rgba(220,53,69,.08); }
+    .evtinbox-msg.evt-normal { border-left-color: #0d6efd; }
+    .evtinbox-mhead { display: flex; align-items: baseline; gap: 6px; font-size: 12px;
+        color: var(--bs-secondary-color, #6c757d); margin-bottom: 2px; }
+    .evtinbox-from { font-weight: 700; color: var(--bs-body-color, #212529); }
+    .evtinbox-to { background: var(--bs-secondary-bg, #e9ecef); border-radius: 6px; padding: 0 5px; }
+    .evtinbox-time { margin-left: auto; }
+    .evtinbox-text { white-space: pre-wrap; word-break: break-word; }
+    .evtinbox-mfoot { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+    .evtinbox-ack { border: 1px solid #198754; background: none; color: #198754; border-radius: 6px;
+        padding: 1px 8px; cursor: pointer; font-size: 12px; }
+    .evtinbox-ack.evt-done { border-color: #adb5bd; color: #6c757d; cursor: default; }
+    .evtinbox-ackcount { color: var(--bs-secondary-color, #6c757d); }
+    .evtinbox-composer { border-top: 1px solid var(--bs-border-color, #dee2e6); padding: 8px 10px; display: flex;
+        flex-direction: column; gap: 6px; }
+    .evtinbox-row { display: flex; gap: 6px; }
+    .evtinbox-sel { flex: 1 1 auto; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--bs-border-color, #ced4da);
+        background: var(--bs-body-bg, #fff); color: var(--bs-body-color, #212529); }
+    .evtinbox-urg { flex: 0 0 110px; }
+    .evtinbox-body { flex: 1 1 auto; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--bs-border-color, #ced4da);
+        background: var(--bs-body-bg, #fff); color: var(--bs-body-color, #212529); }
+    .evtinbox-send { flex: 0 0 auto; border: none; background: #0d6efd; color: #fff; border-radius: 8px;
+        padding: 0 14px; cursor: pointer; font-size: 16px; }
+    .evtinbox-send:disabled { opacity: .5; cursor: default; }
+    @@media (max-width: 420px) {
+        .evtinbox-fablabel { display: none; }
+    }
+</style>
+
+<script>
+(function () {
+    if (window.EventInbox) return; // guard double-include
+
+    var TOKEN = '@evtTokenSet.RequestToken';
+    var state = {
+        competitionId: 0,
+        me: null,
+        scopes: [],          // [{type,key}] the screen receives
+        recipients: [],      // [{type,key,label}] the composer can send to
+        fromScope: null,     // {type,key} stamped as sender scope
+        label: '',
+        consoleMode: false,  // true → GetAllMessages (tävlingsledning)
+        pollMs: 10000,
+        timer: null,
+        seenIds: {},         // id → true, to detect newly-arrived
+        knownMax: 0,
+        open: false,
+        started: false
+    };
+
+    var el = {}; // filled on init
+
+    function scopeLabel(type, key) {
+        switch (type) {
+            case 'All': return 'Alla funktionärer';
+            case 'Station': return 'Station ' + key;
+            case 'Klass': return 'Klass ' + key;
+            case 'Skjutlag': return 'Skjutlag ' + key;
+            case 'Role': return roleLabel(key);
+            case 'Person': return 'Direkt';
+            default: return type + (key ? ' ' + key : '');
+        }
+    }
+    function roleLabel(k) {
+        var m = { stationschef: 'Stationschefer', startledare: 'Startledare', starter: 'Startledare',
+            timer: 'Tidtagare', scorer: 'Poängräknare', skjutledare: 'Skjutledare', ledning: 'Tävlingsledning' };
+        return m[(k || '').toLowerCase()] || ('Roll: ' + k);
+    }
+    function fmtTime(iso) {
+        try {
+            var d = new Date(iso);
+            return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+        } catch (e) { return ''; }
+    }
+    function esc(s) {
+        return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function setConn(ok) {
+        if (!el.conn) return;
+        el.conn.classList.toggle('evt-ok', ok);
+        el.conn.classList.toggle('evt-bad', !ok);
+    }
+
+    function scopesQuery() {
+        return state.scopes.map(function (s) { return s.type + ':' + (s.key == null ? '' : s.key); }).join(',');
+    }
+
+    function buildRecipients() {
+        if (!el.to) return;
+        var opts = state.recipients && state.recipients.length
+            ? state.recipients
+            : [{ type: 'All' }];
+        el.to.innerHTML = opts.map(function (r) {
+            var lbl = r.label || scopeLabel(r.type, r.key);
+            var val = r.type + ':' + (r.key == null ? '' : r.key);
+            return '<option value="' + esc(val) + '">' + esc(lbl) + '</option>';
+        }).join('');
+    }
+
+    function render(messages) {
+        var unread = 0, hasNewAttn = false;
+        var byScope = {};   // "Type:Key" → unread count, for per-card dots on the console
+        // messages arrive newest-first
+        var html = messages.map(function (m) {
+            var cls = 'evtinbox-msg evt-' + (m.urgency || 'Normal').toLowerCase();
+            if (m.mine) cls += ' evt-mine';
+            var to = '<span class="evtinbox-to">→ ' + esc(scopeLabel(m.scopeType, m.scopeKey)) + '</span>';
+            var isNew = !state.seenIds[m.id];
+            if (!m.mine && !m.ackedByMe) {
+                unread++;
+                // Attribute the unread to the station it concerns (addressed-to OR sent-from),
+                // so the Stationer console can light a dot on that station's card.
+                if (m.scopeType === 'Station' && m.scopeKey) byScope['Station:' + m.scopeKey] = (byScope['Station:' + m.scopeKey] || 0) + 1;
+                if (m.fromScopeType === 'Station' && m.fromScopeKey) byScope['Station:' + m.fromScopeKey] = (byScope['Station:' + m.fromScopeKey] || 0) + 1;
+            }
+            if (isNew && !m.mine && (m.urgency === 'Urgent' || m.urgency === 'Safety')) hasNewAttn = true;
+
+            var ack = '';
+            if (m.mine) {
+                // Your own message: "Skickat" until someone acks, then the received count.
+                ack = '<span class="evtinbox-ackcount">' + (m.ackCount > 0 ? ('Mottaget av ' + m.ackCount) : 'Skickat') + '</span>';
+            } else if (m.ackedByMe) {
+                ack = '<button class="evtinbox-ack evt-done" disabled>✓ Mottaget</button>';
+            } else {
+                ack = '<button class="evtinbox-ack" data-ack="' + m.id + '">Kvittera mottaget</button>';
+            }
+            var ackNames = (m.acks || []).map(function (a) { return a.memberName; }).join(', ');
+            var countTitle = ackNames ? ' title="' + esc(ackNames) + '"' : '';
+
+            return '<div class="' + cls + '" data-id="' + m.id + '">' +
+                '<div class="evtinbox-mhead">' +
+                    '<span class="evtinbox-from">' + esc(m.fromName || 'Funktionär') + '</span>' + to +
+                    '<span class="evtinbox-time">' + fmtTime(m.createdDate) + '</span>' +
+                '</div>' +
+                '<div class="evtinbox-text">' + esc(m.body) + '</div>' +
+                '<div class="evtinbox-mfoot"' + countTitle + '>' + ack + '</div>' +
+            '</div>';
+        }).join('');
+
+        el.list.innerHTML = html || '<div class="evtinbox-empty">Inga meddelanden ännu.</div>';
+
+        // remember which ids we've now shown
+        messages.forEach(function (m) { state.seenIds[m.id] = true; });
+
+        // badge + attention
+        if (el.badge) {
+            el.badge.textContent = unread;
+            el.badge.hidden = unread === 0;
+        }
+        // Unread → turn the whole button red (obvious for a busy functionary); urgent/safety also pulses.
+        if (el.fab) {
+            el.fab.classList.toggle('evt-unread', unread > 0 && !state.open);
+            el.fab.classList.toggle('evt-attn', hasNewAttn && !state.open);
+        }
+        if (hasNewAttn) {
+            try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch (e) {}
+            if (!state.open) openPanel(); // force-surface urgent/safety
+        }
+
+        // Broadcast per-scope unread so decentralized surfaces (station cards) can paint their own
+        // dots without coupling to this partial.
+        try { document.dispatchEvent(new CustomEvent('evt-inbox-update', { detail: { total: unread, byScope: byScope } })); } catch (e) {}
+        if (typeof state.onUpdate === 'function') { try { state.onUpdate({ total: unread, byScope: byScope }); } catch (e) {} }
+    }
+
+    async function poll() {
+        try {
+            var url = state.consoleMode
+                ? '/umbraco/surface/EventMessage/GetAllMessages?competitionId=' + state.competitionId
+                : '/umbraco/surface/EventMessage/GetMessages?competitionId=' + state.competitionId +
+                    '&scopes=' + encodeURIComponent(scopesQuery());
+            var resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            var data = await resp.json();
+            setConn(true);
+            if (data && data.success) render(data.messages || []);
+        } catch (e) {
+            setConn(false);
+        }
+    }
+
+    async function send(scopeType, scopeKey, urgency, body) {
+        var payload = {
+            competitionId: state.competitionId,
+            scopeType: scopeType,
+            scopeKey: scopeKey,
+            body: body,
+            urgency: urgency,
+            fromScopeType: state.fromScope ? state.fromScope.type : null,
+            fromScopeKey: state.fromScope ? state.fromScope.key : null
+        };
+        var resp = await fetch('/umbraco/surface/EventMessage/PostMessage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+            body: JSON.stringify(payload)
+        });
+        return await resp.json();
+    }
+
+    async function ack(id) {
+        var resp = await fetch('/umbraco/surface/EventMessage/AckMessage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+            body: JSON.stringify({ competitionId: state.competitionId, messageId: id })
+        });
+        return await resp.json();
+    }
+
+    // Drop the panel from wherever the button currently sits (works for both the inline-anchored
+    // button on the management page and the fixed top-right button on field screens).
+    function positionPanel() {
+        if (!el.panel || el.panel.hidden) return;
+        var r = el.toggle.getBoundingClientRect();
+        var top = Math.min(r.bottom + 6, window.innerHeight - 120);
+        var right = Math.max(8, window.innerWidth - r.right);
+        el.panel.style.top = top + 'px';
+        el.panel.style.right = right + 'px';
+        el.panel.style.maxHeight = Math.max(220, window.innerHeight - top - 16) + 'px';
+    }
+    function openPanel() {
+        state.open = true;
+        el.panel.hidden = false;
+        positionPanel();
+        el.toggle.setAttribute('aria-expanded', 'true');
+        el.fab.classList.remove('evt-attn');
+        setTimeout(function () { if (el.body) el.body.focus(); }, 50);
+    }
+    function closePanel() {
+        state.open = false;
+        el.panel.hidden = true;
+        el.toggle.setAttribute('aria-expanded', 'false');
+    }
+
+    function wire() {
+        el.root = document.getElementById('evtInboxRoot');
+        el.fab = el.toggle = document.getElementById('evtInboxToggle');
+        el.badge = document.getElementById('evtInboxBadge');
+        el.conn = document.getElementById('evtInboxConn');
+        el.panel = document.getElementById('evtInboxPanel');
+        el.list = document.getElementById('evtInboxList');
+        el.scopeLbl = document.getElementById('evtInboxScopeLabel');
+        el.to = document.getElementById('evtInboxTo');
+        el.urg = document.getElementById('evtInboxUrgency');
+        el.body = document.getElementById('evtInboxBody');
+        el.send = document.getElementById('evtInboxSend');
+        el.composer = document.getElementById('evtInboxComposer');
+
+        // Move the panel to <body> so it's viewport-fixed and never clipped by the header/card the
+        // button is anchored inside.
+        if (el.panel && el.panel.parentNode !== document.body) document.body.appendChild(el.panel);
+
+        el.toggle.addEventListener('click', function () { state.open ? closePanel() : openPanel(); });
+        document.getElementById('evtInboxClose').addEventListener('click', closePanel);
+        window.addEventListener('resize', function () { if (state.open) positionPanel(); });
+        window.addEventListener('scroll', function () { if (state.open) positionPanel(); }, true);
+
+        el.list.addEventListener('click', async function (ev) {
+            var btn = ev.target.closest('[data-ack]');
+            if (!btn) return;
+            btn.disabled = true;
+            var id = parseInt(btn.getAttribute('data-ack'), 10);
+            var r = await ack(id);
+            if (r && r.success) poll(); else btn.disabled = false;
+        });
+
+        el.composer.addEventListener('submit', async function (ev) {
+            ev.preventDefault();
+            var body = (el.body.value || '').trim();
+            if (!body) return;
+            var toVal = el.to.value || 'All:';
+            var i = toVal.indexOf(':');
+            var type = i < 0 ? toVal : toVal.substring(0, i);
+            var key = i < 0 ? '' : toVal.substring(i + 1);
+            el.send.disabled = true;
+            var r = await send(type, key || null, el.urg.value, body);
+            el.send.disabled = false;
+            if (r && r.success) {
+                el.body.value = '';
+                poll();
+            } else {
+                alert((r && r.message) || 'Kunde inte skicka meddelandet.');
+            }
+        });
+
+        // visibility-aware polling — pause when hidden, immediate refresh on resume
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                if (state.timer) { clearInterval(state.timer); state.timer = null; }
+            } else if (state.started && !state.timer) {
+                poll();
+                state.timer = setInterval(poll, state.pollMs);
+            }
+        });
+    }
+
+    function applyContext() {
+        if (el.scopeLbl) el.scopeLbl.textContent = state.label || '';
+        buildRecipients();
+    }
+
+    window.EventInbox = {
+        init: function (opts) {
+            opts = opts || {};
+            if (!opts.competitionId) return;
+            state.competitionId = opts.competitionId;
+            state.me = opts.me || null;
+            state.scopes = opts.scopes || [];
+            state.recipients = opts.recipients || [{ type: 'All' }];
+            state.fromScope = opts.fromScope || null;
+            state.label = opts.label || '';
+            state.consoleMode = !!opts.consoleMode;
+            state.pollMs = opts.pollMs || 10000;
+            state.onUpdate = opts.onUpdate || null;
+
+            wire();
+            applyContext();
+
+            // Anchor the button inline into a host container (e.g. under the two top buttons on the
+            // management page). Falls back to the fixed top-right button when no anchor is given.
+            var anchor = opts.mountSelector ? document.querySelector(opts.mountSelector) : null;
+            if (anchor) {
+                el.root.classList.add('evt-inline');
+                anchor.appendChild(el.root);
+            } else if (opts.topOffset != null) {
+                el.root.style.setProperty('--evt-top', opts.topOffset + 'px');
+            }
+            el.root.hidden = false;
+
+            state.started = true;
+            poll();
+            state.timer = setInterval(poll, state.pollMs);
+        },
+        // Re-scope live (e.g. the /station dropdown changed which station this screen represents).
+        setContext: function (ctx) {
+            ctx = ctx || {};
+            if (ctx.scopes) state.scopes = ctx.scopes;
+            if (ctx.recipients) state.recipients = ctx.recipients;
+            if ('fromScope' in ctx) state.fromScope = ctx.fromScope;
+            if ('label' in ctx) state.label = ctx.label;
+            state.seenIds = {}; // treat the new scope's traffic as fresh
+            applyContext();
+            poll();
+        },
+        // Refresh just the composer's recipient options (no re-scope, no unread reset). Preserves
+        // the current selection when it still exists. Used by the console to track live stations.
+        setRecipients: function (list) {
+            if (!list) return;
+            var prev = el.to ? el.to.value : null;
+            state.recipients = list;
+            buildRecipients();
+            if (prev && el.to) {
+                for (var i = 0; i < el.to.options.length; i++) {
+                    if (el.to.options[i].value === prev) { el.to.value = prev; break; }
+                }
+            }
+        },
+        // Open the panel with the composer pre-targeted to a scope (decentralized send — e.g. a
+        // station card's "Skicka meddelande" button).
+        openCompose: function (type, key, label) {
+            var val = type + ':' + (key == null ? '' : key);
+            if (el.to) {
+                var found = false;
+                for (var i = 0; i < el.to.options.length; i++) { if (el.to.options[i].value === val) { found = true; break; } }
+                if (!found) {
+                    var o = document.createElement('option');
+                    o.value = val; o.textContent = label || scopeLabel(type, key);
+                    el.to.appendChild(o);
+                }
+                el.to.value = val;
+            }
+            openPanel();
+        },
+        isReady: function () { return !!state.started; },
+        poll: poll
+    };
+})();
+</script>

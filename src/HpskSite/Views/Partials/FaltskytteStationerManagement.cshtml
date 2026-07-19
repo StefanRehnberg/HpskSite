@@ -109,7 +109,12 @@
                     + '<div class="card h-100">'
                     + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
                     + '<span class="fw-bold">Station ' + s.station + '</span>'
+                    + '<div class="d-flex gap-1">'
+                    + '<button class="btn btn-outline-primary btn-sm position-relative" title="Skicka meddelande till stationen" onclick="fseMsgStation(' + s.station + ')"><i class="bi bi-envelope"></i>'
+                    + '<span class="evt-stn-dot badge rounded-pill bg-danger position-absolute top-0 start-100 translate-middle" data-stn="' + s.station + '" style="display:none;font-size:.6rem" title="Olästa meddelanden">0</span>'
+                    + '</button>'
                     + '<a class="btn btn-outline-primary btn-sm" title="Skriv ut stationskort" href="/faltskytte/stationskort/' + compId + '?station=' + s.station + '" target="_blank"><i class="bi bi-printer"></i></a>'
+                    + '</div>'
                     + '</div>'
                     + '<div class="card-body">'
                     + '<div class="d-flex flex-wrap gap-1 mb-2">' + figThumbs(s.figures) + '</div>'
@@ -120,6 +125,22 @@
                     + '</div></div></div>';
             }).join('');
             host.innerHTML = html || '<div class="col-12 text-muted text-center py-4">Inga stationer konfigurerade.</div>';
+
+            // Keep the message composer's recipient list in sync with the live stations, so
+            // tävlingsledning can address a specific station chief ("5 min till start", "byt riktning").
+            if (window.EventInbox) {
+                var recips = [
+                    { type: 'All' },
+                    { type: 'Role', key: 'stationschef', label: 'Alla stationschefer' },
+                    { type: 'Role', key: 'startledare', label: 'Startledare' }
+                ];
+                (d.stations || []).forEach(function (s) {
+                    recips.push({ type: 'Station', key: String(s.station), label: 'Station ' + s.station });
+                });
+                EventInbox.setRecipients(recips);
+            }
+
+            if (window.fsePaintStationDots) window.fsePaintStationDots(); // cards were rebuilt — restore dots
             var up = document.getElementById('fseStnUpdated');
             if (up) up.textContent = 'Uppdaterad ' + new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         } catch (e) { console.error(e); }
@@ -204,4 +225,42 @@
         else { refresh(); timer = setInterval(refresh, REFRESH); }
     });
 })();
+</script>
+
+@* Tävlingsledningens meddelandekonsol — ser alla trådar för tävlingen (console mode). Knappen
+   monteras under de två topp-knapparna (#evtInboxMount); varje stationskort får en "Skicka"-knapp
+   (decentraliserad utskick till just den stationen) + en prick när stationen har olästa. *@
+@await Html.PartialAsync("_EventMessageInbox")
+<script>
+    // Decentralized send: a station card's button opens the composer pre-targeted to that station.
+    window.fseMsgStation = function (stn) {
+        if (window.EventInbox) window.EventInbox.openCompose('Station', String(stn), 'Station ' + stn);
+    };
+    // Per-card unread dots, fed by the inbox's per-scope broadcast.
+    window.__fseMsgUnread = {};
+    window.fsePaintStationDots = function () {
+        document.querySelectorAll('.evt-stn-dot').forEach(function (d) {
+            var n = window.__fseMsgUnread['Station:' + d.getAttribute('data-stn')] || 0;
+            d.style.display = n > 0 ? 'inline-block' : 'none';
+            d.textContent = n;
+        });
+    };
+    document.addEventListener('evt-inbox-update', function (e) {
+        window.__fseMsgUnread = (e.detail && e.detail.byScope) || {};
+        window.fsePaintStationDots();
+    });
+
+    EventInbox.init({
+        competitionId: @competitionId,
+        consoleMode: true,
+        mountSelector: '#evtInboxMount',
+        label: 'Tävlingsledning',
+        fromScope: { type: 'Role', key: 'ledning' },
+        scopes: [ { type: 'Role', key: 'ledning' } ],
+        recipients: [
+            { type: 'All' },
+            { type: 'Role', key: 'stationschef', label: 'Alla stationschefer' },
+            { type: 'Role', key: 'startledare', label: 'Startledare' }
+        ]
+    });
 </script>
