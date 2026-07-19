@@ -254,6 +254,20 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
     }
 
     /// <summary>
+    /// Drop a walk-in (rullande start) into an existing start list on the spot: assign the picked
+    /// free start time + the next start number for that weapon class, without reshuffling anyone else.
+    /// The desk "Anmäl och betala" flow calls this after creating the registration, per registered class.
+    /// </summary>
+    public class SpringskytteWalkInStartTimeRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";  // registration class, e.g. "A-D 21"
+        public int? NodeId { get; set; }                  // the picked slot's list node (derived from CoveredClasses if absent)
+        public string StartTime { get; set; } = "";       // "HH:mm" or "HH:mm:ss"
+    }
+
+    /// <summary>
     /// Clean up after a registration is deleted: remove the member from any start list (freeing the
     /// slot, preserving everyone else), re-publish official lists, and drop their result + adjustments.
     /// </summary>

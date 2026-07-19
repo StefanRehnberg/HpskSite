@@ -2214,6 +2214,171 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         }
 
         /// <summary>
+        /// Rullande start (on-site drop-in): slot a walk-in into an existing start list at the picked
+        /// free time, giving them the next start number for their weapon class. Springskytte has no
+        /// patrols — each shooter is an individual interval start — so this is the discipline's analogue
+        /// of Fältskytte's AssignWalkInToPatrol / precision's AssignWalkInToStartListTeam. Called by the
+        /// desk "Anmäl och betala" modal after the registration is created, once per registered class.
+        /// Appending a new number (max+1 for the class) never renumbers or disturbs anyone already listed.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AssignSpringskytteWalkInStartTime([FromBody] SpringskytteWalkInStartTimeRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0
+                    || string.IsNullOrWhiteSpace(request.ShootingClass) || string.IsNullOrWhiteSpace(request.StartTime))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                if (!TimeSpan.TryParse(request.StartTime.Trim(), out var ts)
+                    || ts < TimeSpan.Zero || ts >= TimeSpan.FromDays(1))
+                    return Json(new { success = false, message = "Ogiltig starttid. Använd formatet HH:MM eller HH:MM:SS." });
+                var startTime = ts.ToString(@"hh\:mm\:ss");
+                var newSec = (int)ts.TotalSeconds;
+
+                var weaponClass = ExtractWeaponClass(request.ShootingClass);
+                var ageGenderClass = ExtractAgeGenderClass(request.ShootingClass);
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                // Pick the target list: prefer the one whose CoveredClasses covers this registration
+                // class; fall back to the node the picked slot came from (NodeId). Weapon classes are
+                // never mixed, so a slot's node is always the right list for that class.
+                var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .Where(c => c.ContentType.Alias == "precisionStartList").ToList();
+
+                Umbraco.Cms.Core.Models.IContent? targetNode = null;
+                SpringskytteStartListConfig? targetConfig = null;
+                foreach (var node in startListNodes)
+                {
+                    var cfgJson = node.GetValue<string>("configurationData");
+                    if (string.IsNullOrEmpty(cfgJson)) continue;
+                    SpringskytteStartListConfig? cfg = null;
+                    try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                    if (cfg == null) continue;
+                    bool covers = cfg.CoveredClasses != null && cfg.CoveredClasses
+                        .Any(cc => string.Equals(cc?.Trim(), request.ShootingClass.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (covers || (request.NodeId.HasValue && node.Id == request.NodeId.Value))
+                    {
+                        targetNode = node;
+                        targetConfig = cfg;
+                        if (covers) break;  // a covering list beats a bare NodeId match
+                    }
+                }
+
+                if (targetNode == null || targetConfig == null)
+                    return Json(new { success = false, message = "Ingen startlista täcker klassen. Generera startlistan först." });
+
+                targetConfig.Starters ??= new List<SpringskytteStartListEntry>();
+
+                // Resolve display name / club (fall back to the member record).
+                var info = LoadMemberInfo(new List<int> { request.MemberId });
+                var name = info.TryGetValue(request.MemberId, out var mi) && !string.IsNullOrWhiteSpace(mi.Name)
+                    ? mi.Name : $"Skytt {request.MemberId}";
+                var club = info.TryGetValue(request.MemberId, out var mc) ? mc.Club : "";
+
+                // Guard: the time must be free for THIS weapon class (never mix classes). Reuse the same
+                // shared timeline the start-line move-tool uses, so "occupied" means exactly the same thing.
+                var tl = await BuildTimelineAsync(request.CompetitionId);
+
+                // Idempotent: if this member is already a starter in this weapon class (e.g. a double
+                // submit), just move them to the picked time instead of adding a duplicate row.
+                var existing = targetConfig.Starters.FirstOrDefault(s =>
+                    s.MemberId == request.MemberId && s.WeaponClass == weaponClass);
+
+                if (existing == null && tl.OccupiedFor(weaponClass).Contains(newSec))
+                    return Json(new { success = false, message = "Starttiden är upptagen av en annan skytt. Välj en ledig lucka." });
+
+                int startOrder;
+                if (existing != null)
+                {
+                    existing.StartTime = startTime;
+                    existing.AgeGenderClass = ageGenderClass;
+                    if (!string.IsNullOrWhiteSpace(name)) existing.Name = name;
+                    if (!string.IsNullOrWhiteSpace(club)) existing.Club = club;
+                    startOrder = existing.StartOrder;
+                }
+                else
+                {
+                    // Next start number for this weapon class across the whole competition (never reused,
+                    // never renumbers others) — same "global max + 1" approach as Fältskytte patrols.
+                    startOrder = tl.Rows.Where(r => r.WeaponClass == weaponClass).Select(r => r.StartOrder).DefaultIfEmpty(0).Max() + 1;
+                    targetConfig.Starters.Add(new SpringskytteStartListEntry
+                    {
+                        StartOrder = startOrder,
+                        StartTime = startTime,
+                        MemberId = request.MemberId,
+                        Name = name,
+                        Club = club,
+                        WeaponClass = weaponClass,
+                        AgeGenderClass = ageGenderClass
+                    });
+                }
+
+                // Keep the array in start-time order so the public list, paus detection and generated
+                // HTML stay correct (same invariant UpdateSpringskytteStarter maintains).
+                targetConfig.Starters = targetConfig.Starters
+                    .OrderBy(s => ParseStartTimeSeconds(s.StartTime))
+                    .ThenBy(s => s.StartOrder)
+                    .ToList();
+
+                targetNode.SetValue("configurationData", JsonConvert.SerializeObject(targetConfig));
+                targetNode.SetValue("startListContent", BuildStartListHtml(targetConfig.Starters));
+                _contentService.Save(targetNode);
+
+                // Mirror onto the DB result row if one already exists (normally none for a fresh walk-in);
+                // best-effort — the saved config is authoritative for the start-list page.
+                try
+                {
+                    using var db = _umbracoDatabaseFactory.CreateDatabase();
+                    await db.ExecuteAsync(
+                        @"UPDATE SpringskytteResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
+                          WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                        startOrder, startTime, DateTime.Now,
+                        request.CompetitionId, request.MemberId, weaponClass);
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogWarning(dbEx, "DB mirror of walk-in start-time failed (config saved); comp={Comp} member={Member}", request.CompetitionId, request.MemberId);
+                }
+
+                try
+                {
+                    var publishResult = _contentService.Publish(targetNode, new[] { "*" });
+                    if (!publishResult.Success)
+                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", targetNode.Id, publishResult.Result);
+                }
+                catch (Exception pubEx)
+                {
+                    _logger.LogWarning(pubEx, "Publish of start list node {NodeId} failed after walk-in insert; saved config is authoritative", targetNode.Id);
+                }
+
+                _logger.LogInformation("Springskytte walk-in slotted comp={Comp} member={Member} wc={Wc} -> #{Order} @ {Time}",
+                    request.CompetitionId, request.MemberId, weaponClass, startOrder, startTime);
+
+                return Json(new
+                {
+                    success = true,
+                    message = $"Skytten tilldelad startnummer {startOrder} kl {ts:hh\\:mm} i vapengrupp {weaponClass}.",
+                    startOrder,
+                    startTime,
+                    weaponClass
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error assigning Springskytte walk-in start time");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
         /// Mark/unmark a shooter DNS. DNS frees the start slot (distinct from Närvaro/arrival) and
         /// ranks the shooter last; un-DNS restores them as scheduled (RM re-assigns a slot if taken).
         /// </summary>

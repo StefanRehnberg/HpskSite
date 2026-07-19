@@ -29,6 +29,38 @@
     var dpRaw = ViewData["DirektplaceringConfig"]?.ToString() ?? "";
     var dpEnabled = HpskSite.Models.DirektplaceringConfig.Parse(dpRaw) != null;
 
+    // Rullande start for Springskytte (item #7). Springskytte has no patrols/skjutlag — each
+    // shooter is an individual interval start — so the desk drops a walk-in straight onto a free
+    // start TIME in an existing start list (per registered class). No competition-level toggle:
+    // it just surfaces whenever a Springskytte start list already exists for the ticked class.
+    var springskytteEnabled = compType == "Springskytte";
+
+    // Springskytte class selector: mirror the public registration modal (tick A/C weapon groups +
+    // pick ONE spelled-out age class) instead of a flat checkbox list of composite ids. This makes
+    // the two structural mistakes impossible at the desk — two C-classes, or a different age class
+    // for A vs C. Derive the offered weapons + age classes from the competition's configured ids.
+    var springWeapons = new HashSet<string>();
+    var springAgeClasses = new HashSet<string>();
+    if (springskytteEnabled)
+    {
+        try
+        {
+            using var scDoc = System.Text.Json.JsonDocument.Parse(availableShootingClassesJson);
+            foreach (var el in scDoc.RootElement.EnumerateArray())
+            {
+                var id = el.TryGetProperty("id", out var idp) ? (idp.GetString() ?? "") : "";
+                if (string.IsNullOrEmpty(id)) continue;
+                var dash = id.IndexOf('-');
+                if (dash < 0) { springWeapons.Add(id.Trim()); continue; }
+                springWeapons.Add(id.Substring(0, dash).Trim());
+                springAgeClasses.Add(id.Substring(dash + 1).Trim());
+            }
+        }
+        catch { }
+    }
+    var springHasA = springWeapons.Contains("A");
+    var springHasC = springWeapons.Contains("C");
+
     // Deltävling (sub-competition) opt-in. When the competition has a configured name,
     // the walk-in + edit modals render a checkbox so the cashier can opt the shooter in
     // (and the backend recomputes the fee via RegistrationFeeCalculator).
@@ -562,13 +594,101 @@
                     <input type="hidden" id="walkInSelectedMemberId" value="">
                 </div>
 
-                <div class="@((rollingStartEnabled || dpEnabled) ? "mb-3" : "mb-0")">
-                    <label class="form-label fw-bold">Vapenklasser</label>
-                    <small class="text-muted d-block mb-2">Bocka i en eller flera klasser. Egenbokning visar skjutlag-väljare per vald klass.</small>
-                    <div id="walkInClassList" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;">
-                        <!-- Populated from walkInAvailableClasses on modal open -->
+                @if (springskytteEnabled)
+                {
+                    @* Springskytte: A/C weapon-group checkboxes + ONE spelled-out age-class dropdown,
+                       exactly like the public SpringskytteRegistrationModal. Builds "A-<age>" / "C-<age>"
+                       so the operator can't pick two C-classes or mismatch the age across A and C. *@
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Vapengrupp</label>
+                        <div class="d-flex gap-2" id="walkInSpringClassSelector">
+                            @if (springHasA)
+                            {
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input walk-in-spring-ctl" type="checkbox" id="walkInSpringWeaponA" value="A">
+                                    <label class="form-check-label" for="walkInSpringWeaponA">
+                                        <span class="badge bg-primary fs-6 px-3 py-2">A</span>
+                                        <small class="d-block text-muted mt-1">Tavla (ring 1-4)</small>
+                                    </label>
+                                </div>
+                            }
+                            @if (springHasC)
+                            {
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input walk-in-spring-ctl" type="checkbox" id="walkInSpringWeaponC" value="C">
+                                    <label class="form-check-label" for="walkInSpringWeaponC">
+                                        <span class="badge bg-primary fs-6 px-3 py-2">C</span>
+                                        <small class="d-block text-muted mt-1">Fallmål</small>
+                                    </label>
+                                </div>
+                            }
+                        </div>
                     </div>
-                </div>
+                    <div class="@((springskytteEnabled) ? "mb-3" : "mb-0")">
+                        <label for="walkInSpringAgeClass" class="form-label fw-bold">Ålders-/könsklass</label>
+                        <select class="form-select walk-in-spring-ctl" id="walkInSpringAgeClass">
+                            <option value="">-- Välj klass --</option>
+                            @{
+                                var wiJuniorClasses = new (string val, string label)[] {
+                                    ("D 15", "D 15 (Dam –15 år)"), ("H 15", "H 15 (Herr –15 år)"),
+                                    ("D 18", "D 18 (Dam 16–18 år)"), ("H 18", "H 18 (Herr 16–18 år)"),
+                                    ("D jun", "D jun (Dam junior 15–20 år)"), ("H jun", "H jun (Herr junior 15–20 år)")
+                                };
+                                var wiSeniorClasses = new (string val, string label)[] {
+                                    ("D 21", "D 21 (Dam 21–34 år)"), ("H 21", "H 21 (Herr 21–34 år)"),
+                                    ("D 35", "D 35 (Dam 35–49 år)"), ("H 35", "H 35 (Herr 35–49 år)")
+                                };
+                                var wiVeteranClasses = new (string val, string label)[] {
+                                    ("D 50", "D 50 (Dam 50–59 år)"), ("H 50", "H 50 (Herr 50–59 år)"),
+                                    ("D 60", "D 60 (Dam 60–64 år)"), ("H 60", "H 60 (Herr 60–64 år)"),
+                                    ("D 65", "D 65 (Dam 65–69 år)"), ("H 65", "H 65 (Herr 65–69 år)"),
+                                    ("D 70", "D 70 (Dam 70+ år)"), ("H 70", "H 70 (Herr 70+ år)")
+                                };
+                                var wiFilteredJunior = wiJuniorClasses.Where(c => springAgeClasses.Contains(c.val)).ToArray();
+                                var wiFilteredSenior = wiSeniorClasses.Where(c => springAgeClasses.Contains(c.val)).ToArray();
+                                var wiFilteredVeteran = wiVeteranClasses.Where(c => springAgeClasses.Contains(c.val)).ToArray();
+                            }
+                            @if (wiFilteredJunior.Any())
+                            {
+                                <optgroup label="Junior">
+                                    @foreach (var c in wiFilteredJunior)
+                                    {
+                                        <option value="@c.val">@c.label</option>
+                                    }
+                                </optgroup>
+                            }
+                            @if (wiFilteredSenior.Any())
+                            {
+                                <optgroup label="Senior">
+                                    @foreach (var c in wiFilteredSenior)
+                                    {
+                                        <option value="@c.val">@c.label</option>
+                                    }
+                                </optgroup>
+                            }
+                            @if (wiFilteredVeteran.Any())
+                            {
+                                <optgroup label="Veteran">
+                                    @foreach (var c in wiFilteredVeteran)
+                                    {
+                                        <option value="@c.val">@c.label</option>
+                                    }
+                                </optgroup>
+                            }
+                        </select>
+                        <small class="text-muted d-block mt-1">Bocka i A och/eller C, välj sedan en klass. Samma klass gäller för båda vapengrupperna.</small>
+                    </div>
+                }
+                else
+                {
+                    <div class="@((rollingStartEnabled || dpEnabled) ? "mb-3" : "mb-0")">
+                        <label class="form-label fw-bold">Vapenklasser</label>
+                        <small class="text-muted d-block mb-2">Bocka i en eller flera klasser. Egenbokning visar skjutlag-väljare per vald klass.</small>
+                        <div id="walkInClassList" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;">
+                            <!-- Populated from walkInAvailableClasses on modal open -->
+                        </div>
+                    </div>
+                }
 
                 @if (dpEnabled)
                 {
@@ -611,11 +731,25 @@
                     </div>
                 }
 
+                @* Springskytte rullande start: one start-TIME dropdown per ticked class, populated
+                   at runtime from the free slots of an existing start list (per weapon class). Hidden
+                   silently when no start list covers the class yet — the shooter still registers and
+                   can be slotted in later from the Startlista tab. *@
+                @if (springskytteEnabled)
+                {
+                    <div class="mb-0">
+                        <div id="walkInSpringSlotsContainer">
+                            <!-- Per-class start-time pickers rendered when classes are ticked. -->
+                        </div>
+                    </div>
+                }
+
                 @* Non-DP precision start-list picker. Only rendered when the modal isn't
-                   already showing the rolling-start patrol picker or the DP slot picker —
-                   those handle their own placement flows. The dropdown is populated and
-                   shown at runtime only when GetWalkInStartListTeams returns teams. *@
-                @if (!rollingStartEnabled && !dpEnabled)
+                   already showing the rolling-start patrol picker, the DP slot picker or the
+                   Springskytte start-time picker — those handle their own placement flows. The
+                   dropdown is populated and shown at runtime only when GetWalkInStartListTeams
+                   returns teams. *@
+                @if (!rollingStartEnabled && !dpEnabled && !springskytteEnabled)
                 {
                     <div class="mb-0 d-none" id="walkInStartListPickerWrapper">
                         <label for="walkInStartListTeam" class="form-label fw-bold">Skjutlag</label>
@@ -2690,6 +2824,15 @@ const walkInPatrolPickerEnabled = @(rollingStartEnabled ? "true" : "false");
 // checked class gets its own slot dropdown.
 const walkInDirektplaceringEnabled = @(dpEnabled ? "true" : "false");
 
+// Item #7: Springskytte rullande start. Renders a start-TIME dropdown per ticked class from
+// the free slots of an existing start list; the flag drives the post-registration call to
+// AssignSpringskytteWalkInStartTime.
+const walkInSpringskytteEnabled = @(springskytteEnabled ? "true" : "false");
+
+// Free slots for the current modal session, grouped by weapon class (A/C). Each entry is
+// { time, nodeId, kind }. Populated on open from GetSpringskytteFreeSlots.
+let springFreeSlotsByWc = null;
+
 // Cached team availability for the current modal session — populated on open, consumed
 // by per-class slot dropdown rendering. Refresh on each modal open.
 let dpTeamAvailabilityCache = null;
@@ -2777,6 +2920,124 @@ function renderDpSlotRows(hostEl, checkedClasses, existingTeamByClass) {
         const sel = buildDpSlotSelect(c.id, presel,
             existingTeamByClass ? existingTeamByClass[c.id] : null);
         row.appendChild(sel);
+
+        hostEl.appendChild(row);
+    });
+}
+
+// ─── Springskytte rullande start: free start-time slots per weapon class ────
+
+// Weapon class (A/C) from a registration class id like "A-D 21" / "C-H 35" / "A".
+function springClassWeapon(classId) {
+    const head = String(classId || '').trim().split('-')[0].trim().toUpperCase();
+    return head.startsWith('A') ? 'A' : (head.startsWith('C') ? 'C' : head.charAt(0));
+}
+
+// "HH:mm:ss" → "HH:mm" for display; leaves anything unexpected untouched.
+function springTimeShort(t) {
+    const m = String(t || '').match(/^(\d{1,2}):(\d{2})/);
+    return m ? `${m[1].padStart(2, '0')}:${m[2]}` : String(t || '');
+}
+
+// The walk-in's selected classes as [{id, name}], unified across both selectors:
+// Springskytte → weapon checkboxes (A/C) × one age dropdown → "A-<age>" / "C-<age>";
+// everything else → the flat #walkInClassList checkboxes. Single source of truth for the
+// submit collection, submit-enabled state, and the Springskytte start-time slot rows.
+function getWalkInSelectedClasses() {
+    if (walkInSpringskytteEnabled) {
+        const age = document.getElementById('walkInSpringAgeClass')?.value || '';
+        if (!age) return [];
+        const out = [];
+        const a = document.getElementById('walkInSpringWeaponA');
+        const c = document.getElementById('walkInSpringWeaponC');
+        if (a && a.checked) out.push({ id: `A-${age}`, name: `A · ${age}` });
+        if (c && c.checked) out.push({ id: `C-${age}`, name: `C · ${age}` });
+        return out;
+    }
+    return Array.from(document.querySelectorAll('#walkInClassList .walk-in-class-cb:checked'))
+        .map(cb => ({ id: cb.value, name: cb.dataset.className || cb.value }));
+}
+
+// Pull the competition's free start slots (paus gaps, DNS-freed times, trailing "efter" slots)
+// once per modal open and bucket them by weapon class for the per-class dropdowns. Fails soft:
+// no slots → the class rows just show "ingen startlista genererad".
+async function refreshSpringFreeSlots() {
+    springFreeSlotsByWc = { A: [], C: [] };
+    if (!walkInSpringskytteEnabled) return;
+    try {
+        const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+        const resp = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteFreeSlots?competitionId=${competitionId}`);
+        const data = await resp.json();
+        if (!data.success || !Array.isArray(data.freeSlots)) return;
+        const byWc = {};
+        data.freeSlots.forEach(s => {
+            const wc = String(s.weaponClass || '').toUpperCase();
+            if (!wc) return;
+            (byWc[wc] = byWc[wc] || []).push({ time: s.time, nodeId: s.nodeId, kind: s.kind });
+        });
+        Object.keys(byWc).forEach(wc => byWc[wc].sort((a, b) => String(a.time).localeCompare(String(b.time))));
+        springFreeSlotsByWc = byWc;
+    } catch (err) {
+        console.warn('Could not load Springskytte free slots for walk-in:', err);
+    }
+}
+
+// One start-time dropdown per ticked class (mirrors the DP per-class slot rows). Preserves any
+// picks already made so re-renders (as more classes are ticked) don't clobber them.
+function renderSpringSlotRows(hostEl, checkedClasses) {
+    if (!walkInSpringskytteEnabled || !hostEl) return;
+    const previous = {};
+    hostEl.querySelectorAll('.spring-slot-select').forEach(s => {
+        if (s.value) previous[s.dataset.classId] = s.value;
+    });
+
+    if (checkedClasses.length === 0) { hostEl.innerHTML = ''; return; }
+
+    hostEl.innerHTML = '';
+    const heading = document.createElement('div');
+    heading.className = 'form-label fw-bold mb-1';
+    heading.textContent = 'Starttid per klass';
+    hostEl.appendChild(heading);
+
+    checkedClasses.forEach(c => {
+        const wc = springClassWeapon(c.id);
+        const slots = (springFreeSlotsByWc && springFreeSlotsByWc[wc]) || [];
+
+        const row = document.createElement('div');
+        row.className = 'd-flex align-items-center gap-2 mb-2';
+
+        const label = document.createElement('div');
+        label.className = 'small fw-semibold';
+        label.style.minWidth = '120px';
+        label.textContent = c.name || c.id;
+        row.appendChild(label);
+
+        if (slots.length === 0) {
+            const note = document.createElement('div');
+            note.className = 'form-text text-muted small mb-0';
+            note.textContent = 'Ingen startlista genererad — anmäls utan starttid.';
+            row.appendChild(note);
+        } else {
+            const sel = document.createElement('select');
+            sel.className = 'form-select form-select-sm spring-slot-select';
+            sel.dataset.classId = c.id;
+            // Placeholder is empty + non-submittable so a start-time choice is REQUIRED — a forgotten
+            // dropdown must not silently leave the shooter off the start list. "Lägg inte på
+            // startlistan" is an explicit, deliberate option alongside the actual times.
+            const placeholder = new Option('— Välj starttid —', '');
+            placeholder.disabled = true;
+            sel.add(placeholder);
+            sel.add(new Option('Lägg inte på startlistan', 'skip'));
+            slots.forEach(s => {
+                const kindLabel = s.kind === 'dns' ? 'ledig (DNS)' : (s.kind === 'paus' ? 'lucka' : 'efter sista');
+                const opt = new Option(`kl ${springTimeShort(s.time)} · ${kindLabel}`, `${s.time}|${s.nodeId}`);
+                sel.add(opt);
+            });
+            // Restore a prior pick if any; otherwise leave the (empty) placeholder selected so the
+            // submit button stays disabled until the operator actively chooses.
+            sel.value = (previous[c.id] != null) ? previous[c.id] : '';
+            row.appendChild(sel);
+        }
 
         hostEl.appendChild(row);
     });
@@ -2917,26 +3178,37 @@ async function openWalkInRegistrationModal() {
     const walkInSubCompCb = document.getElementById('walkInSubCompetitionCheckbox');
     if (walkInSubCompCb) walkInSubCompCb.checked = false;
 
-    // Populate the class checkbox list from the competition's actual allowed classes.
-    // Multi-class so the cashier can register A + C in a single round trip — particularly
-    // important for direktplacering competitions where each class needs its own slot.
-    const classListEl = document.getElementById('walkInClassList');
-    const classes = (Array.isArray(walkInAvailableClasses) && walkInAvailableClasses.length > 0)
-        ? walkInAvailableClasses
-        : []; // No fallback for the multi-class form — operator must have a configured class list.
-
-    if (classes.length === 0) {
-        classListEl.innerHTML = '<div class="text-muted small">Inga klasser tillgängliga för denna tävling.</div>';
+    if (walkInSpringskytteEnabled) {
+        // Springskytte uses the server-rendered A/C + age-class selector (mirrors the public modal).
+        // Just reset it here — nothing to build in JS.
+        const wA = document.getElementById('walkInSpringWeaponA');
+        const wC = document.getElementById('walkInSpringWeaponC');
+        if (wA) wA.checked = false;
+        if (wC) wC.checked = false;
+        const wAge = document.getElementById('walkInSpringAgeClass');
+        if (wAge) wAge.value = '';
     } else {
-        classListEl.innerHTML = classes.map(c => {
-            const safeId = `walkInCls_${c.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-            return `
-                <div class="form-check">
-                    <input class="form-check-input walk-in-class-cb" type="checkbox"
-                           id="${safeId}" value="${c.id}" data-class-name="${(c.name || c.id).replace(/"/g, '&quot;')}">
-                    <label class="form-check-label" for="${safeId}">${c.name || c.id}</label>
-                </div>`;
-        }).join('');
+        // Populate the class checkbox list from the competition's actual allowed classes.
+        // Multi-class so the cashier can register A + C in a single round trip — particularly
+        // important for direktplacering competitions where each class needs its own slot.
+        const classListEl = document.getElementById('walkInClassList');
+        const classes = (Array.isArray(walkInAvailableClasses) && walkInAvailableClasses.length > 0)
+            ? walkInAvailableClasses
+            : []; // No fallback for the multi-class form — operator must have a configured class list.
+
+        if (classes.length === 0) {
+            classListEl.innerHTML = '<div class="text-muted small">Inga klasser tillgängliga för denna tävling.</div>';
+        } else {
+            classListEl.innerHTML = classes.map(c => {
+                const safeId = `walkInCls_${c.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                return `
+                    <div class="form-check">
+                        <input class="form-check-input walk-in-class-cb" type="checkbox"
+                               id="${safeId}" value="${c.id}" data-class-name="${(c.name || c.id).replace(/"/g, '&quot;')}">
+                        <label class="form-check-label" for="${safeId}">${c.name || c.id}</label>
+                    </div>`;
+            }).join('');
+        }
     }
 
     if (!walkInModalInstance) {
@@ -2959,11 +3231,19 @@ async function openWalkInRegistrationModal() {
         await refreshDpTeamAvailability();
     }
 
-    // Non-DP / non-rolling-start: probe for an existing precisionStartList and render
-    // the team picker only if one is present with usable teams. This is the equivalent
+    // Springskytte rullande start: pull the free start slots once, clear the per-class rows
+    // (they render as classes are ticked, via the checkbox change handler).
+    if (walkInSpringskytteEnabled) {
+        const springHost = document.getElementById('walkInSpringSlotsContainer');
+        if (springHost) springHost.innerHTML = '';
+        await refreshSpringFreeSlots();
+    }
+
+    // Non-DP / non-rolling-start / non-Springskytte: probe for an existing precisionStartList and
+    // render the team picker only if one is present with usable teams. This is the equivalent
     // of the DP slot picker for "regular" precision competitions where the start list
     // is generated all-at-once but we still want a clean way to drop a late shooter in.
-    if (!walkInPatrolPickerEnabled && !walkInDirektplaceringEnabled) {
+    if (!walkInPatrolPickerEnabled && !walkInDirektplaceringEnabled && !walkInSpringskytteEnabled) {
         await refreshWalkInStartListTeams();
     }
 
@@ -3124,6 +3404,28 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// Springskytte A/C + age-class selector: any change re-renders the per-class start-time rows
+// and re-evaluates the submit button. The controls are server-rendered, so they exist at load.
+document.addEventListener('DOMContentLoaded', () => {
+    if (!walkInSpringskytteEnabled) return;
+    document.querySelectorAll('.walk-in-spring-ctl').forEach(el => {
+        el.addEventListener('change', () => {
+            const host = document.getElementById('walkInSpringSlotsContainer');
+            if (host) renderSpringSlotRows(host, getWalkInSelectedClasses());
+            refreshWalkInSubmitState();
+        });
+    });
+    // Picking a start time (or "Lägg inte på startlistan") in a dynamically-rendered row must
+    // re-enable the submit button — the rows require an explicit choice. Delegated so it works
+    // across re-renders.
+    const springSlotHost = document.getElementById('walkInSpringSlotsContainer');
+    if (springSlotHost) {
+        springSlotHost.addEventListener('change', (e) => {
+            if (e.target.classList.contains('spring-slot-select')) refreshWalkInSubmitState();
+        });
+    }
+});
+
 // Debounced member search via the existing TrainingGroup/SearchMembers endpoint
 // (which already handles four-tier auth and returns name + email + club).
 document.addEventListener('DOMContentLoaded', () => {
@@ -3207,8 +3509,16 @@ function selectWalkInMember(memberId, memberName, clubName) {
 
 function refreshWalkInSubmitState() {
     const memberId = document.getElementById('walkInSelectedMemberId').value;
-    const anyClassChecked = !!document.querySelector('#walkInClassList .walk-in-class-cb:checked');
-    document.getElementById('walkInSubmitBtn').disabled = !(memberId && anyClassChecked);
+    let ok = !!memberId && getWalkInSelectedClasses().length > 0;
+    // Springskytte: every rendered start-time dropdown must have an explicit choice (a time OR
+    // "Lägg inte på startlistan"). A blank placeholder blocks submit so a slot can't be forgotten.
+    if (ok && walkInSpringskytteEnabled) {
+        const springSelects = document.querySelectorAll('#walkInSpringSlotsContainer .spring-slot-select');
+        for (const sel of springSelects) {
+            if (!sel.value) { ok = false; break; }
+        }
+    }
+    document.getElementById('walkInSubmitBtn').disabled = !ok;
 }
 
 async function submitWalkInRegistration() {
@@ -3224,10 +3534,10 @@ async function submitWalkInRegistration() {
             if (sel.value) slotByClass[sel.dataset.classId] = parseInt(sel.value, 10);
         });
     }
-    const classes = Array.from(document.querySelectorAll('#walkInClassList .walk-in-class-cb:checked'))
-        .map(cb => {
-            const entry = { class: cb.value, startPreference: 'Inget' };
-            if (slotByClass[cb.value] != null) entry.teamNumber = slotByClass[cb.value];
+    const classes = getWalkInSelectedClasses()
+        .map(c => {
+            const entry = { class: c.id, startPreference: 'Inget' };
+            if (slotByClass[c.id] != null) entry.teamNumber = slotByClass[c.id];
             return entry;
         });
 
@@ -3289,9 +3599,42 @@ async function submitWalkInRegistration() {
             }
         }
 
+        // Springskytte rullande start: slot the new shooter onto the picked free start TIME, per
+        // class. Same fail-soft semantics — registration is the load-bearing op; a slotting hiccup
+        // is surfaced but the shooter can be placed from the Startlista tab afterward.
+        if (walkInSpringskytteEnabled) {
+            // Only rows where an actual time was picked get slotted; "skip" (Lägg inte på
+            // startlistan) and the empty placeholder are deliberately left off the start list.
+            const springSelects = Array.from(document.querySelectorAll('#walkInSpringSlotsContainer .spring-slot-select'))
+                .filter(sel => sel.value && sel.value !== 'skip');
+            for (const sel of springSelects) {
+                const [startTime, nodeIdRaw] = sel.value.split('|');
+                const nodeId = nodeIdRaw ? parseInt(nodeIdRaw, 10) : null;
+                try {
+                    const springResp = await fetch('/umbraco/surface/Springskytte/AssignSpringskytteWalkInStartTime', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'RequestVerificationToken': token
+                        },
+                        body: JSON.stringify({ competitionId, memberId, shootingClass: sel.dataset.classId, startTime, nodeId })
+                    });
+                    const springData = await springResp.json();
+                    if (!springData.success) {
+                        console.warn('Springskytte start-time assignment failed:', springData.message);
+                        errBox.textContent = 'Anmälan skapad, men kunde inte läggas på startlistan: '
+                            + (springData.message || 'okänt fel');
+                        errBox.classList.remove('d-none');
+                    }
+                } catch (springErr) {
+                    console.warn('Springskytte start-time assignment threw:', springErr);
+                }
+            }
+        }
+
         // Non-DP precision: drop the new shooter onto the picked start team. Same fail-soft
         // semantics as the patrol assignment above — registration is the load-bearing op.
-        if (!walkInPatrolPickerEnabled && !walkInDirektplaceringEnabled) {
+        if (!walkInPatrolPickerEnabled && !walkInDirektplaceringEnabled && !walkInSpringskytteEnabled) {
             const teamRaw = document.getElementById('walkInStartListTeam')?.value || '';
             const teamNumber = teamRaw ? parseInt(teamRaw, 10) : null;
             if (teamNumber != null && Number.isFinite(teamNumber)) {
