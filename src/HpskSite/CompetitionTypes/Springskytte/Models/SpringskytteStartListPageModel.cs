@@ -30,6 +30,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string Slug { get; set; } = "";
         public bool IsOfficial { get; set; }
         public System.DateTime GeneratedDate { get; set; }
+
+        /// <summary>Individual (per-shooter) config. Null for stafett lists.</summary>
         public SpringskytteStartListConfig Config { get; set; } = new();
+
+        /// <summary>True when this list is a stafett (relay) list — render Teams, not Starters.</summary>
+        public bool IsStafett { get; set; }
+
+        /// <summary>Stafett (per-team, mass-start) config. Null for individual lists.</summary>
+        public SpringskytteStafettStartListConfig? StafettConfig { get; set; }
     }
 }

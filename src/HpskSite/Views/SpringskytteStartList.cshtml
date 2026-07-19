@@ -10,8 +10,8 @@
     var pageTitle = selected != null
         ? $"{selected.ListName} – {Model.CompetitionName}"
         : $"Startlistor – {Model.CompetitionName}";
-    var intervalSec = selected != null ? IntervalSeconds(selected.Config.DefaultInterval) : 60;
-    var breakSec = selected != null ? IntervalSeconds(selected.Config.BreakDuration) : 300;
+    var intervalSec = selected != null && !selected.IsStafett ? IntervalSeconds(selected.Config.DefaultInterval) : 60;
+    var breakSec = selected != null && !selected.IsStafett ? IntervalSeconds(selected.Config.BreakDuration) : 300;
 }
 @functions {
     static int ParseTimeToSeconds(string? time)
@@ -96,16 +96,24 @@
         <div class="row g-3">
             @foreach (var l in Model.Lists)
             {
-                var first = l.Config.Starters.FirstOrDefault()?.StartTime ?? "";
+                var isStafett = l.IsStafett;
+                var first = isStafett
+                    ? (l.StafettConfig?.Teams?.FirstOrDefault()?.StartTime ?? l.StafettConfig?.CommonStartTime ?? "")
+                    : (l.Config.Starters.FirstOrDefault()?.StartTime ?? "");
+                var count = isStafett ? (l.StafettConfig?.Teams?.Count ?? 0) : l.Config.Starters.Count;
+                var listDate = isStafett ? (l.StafettConfig?.ListDate ?? "") : l.Config.ListDate;
                 <div class="col-md-6">
                     <div class="card h-100">
                         <div class="card-body d-flex justify-content-between align-items-center">
                             <div>
-                                <h2 class="h5 mb-1">@l.ListName</h2>
+                                <h2 class="h5 mb-1">
+                                    @if (isStafett) { <i class="bi bi-people-fill me-1 text-primary"></i> }
+                                    @l.ListName
+                                </h2>
                                 <div class="text-muted small">
-                                    @if (!string.IsNullOrEmpty(l.Config.ListDate)) { <span><i class="bi bi-calendar-event me-1"></i>@l.Config.ListDate · </span> }
-                                    @l.Config.Starters.Count starter
-                                    @if (!string.IsNullOrEmpty(first)) { <span>· första start @first</span> }
+                                    @if (!string.IsNullOrEmpty(listDate)) { <span><i class="bi bi-calendar-event me-1"></i>@listDate · </span> }
+                                    @if (isStafett) { <span>@count lag</span> } else { <span>@count starter</span> }
+                                    @if (!string.IsNullOrEmpty(first)) { <span>· @(isStafett ? "gemensam start" : "första start") @first</span> }
                                     @if (!l.IsOfficial) { <span class="badge bg-secondary ms-1">Preliminär</span> }
                                 </div>
                             </div>
@@ -117,6 +125,45 @@
                 </div>
             }
         </div>
+    }
+    else if (selected.IsStafett)
+    {
+        var scfg = selected.StafettConfig!;
+        <div class="list-header mb-0">
+            <i class="bi bi-people-fill me-1"></i>@selected.ListName@(!string.IsNullOrEmpty(scfg.ListDate) ? $" – {scfg.ListDate}" : "")
+            <span class="badge bg-primary ms-2">Gemensam start @scfg.CommonStartTime</span>
+        </div>
+        <table class="start-list-table mb-3">
+            <thead>
+                <tr>
+                    <th style="width:48px" class="text-center">#</th>
+                    <th style="width:110px">Starttid</th>
+                    <th>Lag</th>
+                    <th>Förening</th>
+                    <th style="width:150px">Klass</th>
+                    <th>Deltagare</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var team in scfg.Teams.OrderBy(t => t.StartOrder))
+                {
+                    var rowClass = !string.IsNullOrEmpty(Model.CurrentMemberClub) && team.Club == Model.CurrentMemberClub ? "same-club" : "";
+                    var legs = team.Members.Where(m => !m.IsSpare).Select(m => m.Name).ToList();
+                    var spares = team.Members.Where(m => m.IsSpare).Select(m => m.Name).ToList();
+                    <tr class="@rowClass">
+                        <td class="text-center">@team.StartOrder</td>
+                        <td class="time">@team.StartTime</td>
+                        <td><strong>@team.TeamName</strong></td>
+                        <td>@HpskSite.Helpers.ClubNameHelper.Shorten(team.Club)</td>
+                        <td>@team.StafettClass</td>
+                        <td>
+                            @string.Join(", ", legs)
+                            @if (spares.Any()) { <span class="text-muted"> (reserv: @string.Join(", ", spares))</span> }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
     }
     else
     {

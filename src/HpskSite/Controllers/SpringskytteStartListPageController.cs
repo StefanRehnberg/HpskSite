@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using HpskSite.CompetitionTypes.Springskytte.Controllers;
 using HpskSite.CompetitionTypes.Springskytte.Models;
 using HpskSite.Helpers;
 using HpskSite.Services;
@@ -96,6 +97,37 @@ namespace HpskSite.Controllers
                 var json = node.GetValue<string>("configurationData");
                 if (string.IsNullOrEmpty(json)) continue;
 
+                var isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
+                var generated = node.HasProperty("generatedDate") ? node.GetValue<DateTime>("generatedDate") : node.UpdateDate;
+
+                // Stafett (relay) lists carry Teams, not Starters, and are tagged teamFormat.
+                if (SpringskytteController.IsStafettConfig(json))
+                {
+                    SpringskytteStafettStartListConfig? scfg = null;
+                    try { scfg = JsonConvert.DeserializeObject<SpringskytteStafettStartListConfig>(json); }
+                    catch { }
+                    if (scfg?.Teams == null || scfg.Teams.Count == 0) continue;
+
+                    var sName = !string.IsNullOrWhiteSpace(scfg.ListName) ? scfg.ListName
+                              : (!string.IsNullOrWhiteSpace(node.Name) ? node.Name : "Stafett");
+                    var sBase = SlugHelper.Slugify(sName);
+                    if (string.IsNullOrEmpty(sBase)) sBase = "lista-" + node.Id;
+                    var sSlug = sBase; var sn = 2;
+                    while (!usedSlugs.Add(sSlug)) sSlug = $"{sBase}-{sn++}";
+
+                    lists.Add(new SpringskytteStartListView
+                    {
+                        NodeId = node.Id,
+                        ListName = sName,
+                        Slug = sSlug,
+                        IsOfficial = isOfficial,
+                        GeneratedDate = generated,
+                        IsStafett = true,
+                        StafettConfig = scfg
+                    });
+                    continue;
+                }
+
                 SpringskytteStartListConfig? cfg = null;
                 try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(json); }
                 catch { }
@@ -116,17 +148,17 @@ namespace HpskSite.Controllers
                     NodeId = node.Id,
                     ListName = listName,
                     Slug = uniqueSlug,
-                    IsOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList"),
-                    GeneratedDate = node.HasProperty("generatedDate")
-                        ? node.GetValue<DateTime>("generatedDate")
-                        : node.UpdateDate,
+                    IsOfficial = isOfficial,
+                    GeneratedDate = generated,
                     Config = cfg
                 });
             }
 
             // Stable, human order: earliest first start first, then name.
             return lists
-                .OrderBy(l => l.Config.Starters.FirstOrDefault()?.StartTime ?? "")
+                .OrderBy(l => (l.IsStafett
+                    ? l.StafettConfig?.Teams?.FirstOrDefault()?.StartTime
+                    : l.Config.Starters.FirstOrDefault()?.StartTime) ?? "")
                 .ThenBy(l => l.ListName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }

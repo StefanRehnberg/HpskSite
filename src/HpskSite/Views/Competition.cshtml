@@ -10,6 +10,7 @@
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject HpskSite.Services.ClubService ClubService
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
+@inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
@@ -516,6 +517,22 @@
     // correct "no sub-comp published yet" answer.
     var isSubResultsOfficial = resultPageNode?.Value<bool>("subCompetitionIsOfficial") ?? false;
     var hasSubCompetition = !string.IsNullOrWhiteSpace(subCompetitionNameRaw);
+
+    // Springskytte stafett (relay) results — published independently via the
+    // SpringskytteStafettResultPublish flag table (gates the public /stafettresultat/ page + button).
+    var isStafettResultsOfficial = false;
+    if (isSpringskytte)
+    {
+        try
+        {
+            using var _stfDb = DbFactory.CreateDatabase();
+            var _stfVal = _stfDb.ExecuteScalar<int?>(
+                "SELECT CAST(IsOfficial AS INT) FROM SpringskytteStafettResultPublish WHERE CompetitionId = @0", Model.Id);
+            isStafettResultsOfficial = _stfVal == 1;
+        }
+        catch { /* table missing → not published */ }
+    }
+    var stafettResultsUrl = "/stafettresultat/" + Model.Id;
 
     // Results URL (used in sidebar and JavaScript)
     var resultsUrl = Model.Url().TrimEnd('/') + "/resultat/";
@@ -1417,6 +1434,12 @@
 									<i class="bi bi-trophy me-1"></i> Visa @subCompetitionNameRaw resultat
 								</a>
 							}
+							@if (isSpringskytte && isStafettResultsOfficial)
+							{
+								<a href="@stafettResultsUrl" class="btn btn-warning w-100 mt-2" target="_blank" rel="noopener">
+									<i class="bi bi-people-fill me-1"></i> Visa stafettresultat
+								</a>
+							}
 						</div>
 					}
 					else
@@ -1920,14 +1943,6 @@ window.CompetitionConfig = {
 
 @* Styles for Information Sidebar *@
 <style>
-/* Desktop: sticky sidebar */
-@@media (min-width: 992px) {
-    .information-sidebar {
-        position: sticky;
-        top: 20px;
-    }
-}
-
 /* Card styling */
 .information-sidebar .card-header {
     background-color: var(--bs-secondary-bg);

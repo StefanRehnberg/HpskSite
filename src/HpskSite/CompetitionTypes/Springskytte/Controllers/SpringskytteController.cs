@@ -18,7 +18,7 @@ using Newtonsoft.Json;
 
 namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 {
-    public class SpringskytteController : SurfaceController
+    public partial class SpringskytteController : SurfaceController
     {
         private readonly IContentService _contentService;
         private readonly IMemberService _memberService;
@@ -31,6 +31,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private readonly AdminAuthorizationService _adminAuthorizationService;
         private readonly SpringskytteScoringService _scoringService;
         private readonly StandardMedalMaterializationService _medalMaterialization;
+        private readonly CompetitionTeamService _teamService;
 
         public SpringskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -47,7 +48,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             UmbracoStartListRepository startListRepository,
             ClubService clubService,
             AdminAuthorizationService adminAuthorizationService,
-            StandardMedalMaterializationService medalMaterialization)
+            StandardMedalMaterializationService medalMaterialization,
+            CompetitionTeamService teamService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -61,6 +63,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             _adminAuthorizationService = adminAuthorizationService;
             _scoringService = new SpringskytteScoringService();
             _medalMaterialization = medalMaterialization;
+            _teamService = teamService;
         }
 
         // ===== RESULT ENTRY =====
@@ -1150,6 +1153,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 foreach (var node in startListNodes)
                 {
                     var configJson = node.GetValue<string>("configurationData");
+                    // Stafett lists live in their own management section — never surface them among
+                    // the individual (per-shooter) start lists, where they'd render as empty cards.
+                    if (IsStafettConfig(configJson)) continue;
                     var config = !string.IsNullOrEmpty(configJson)
                         ? JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson)
                         : null;

@@ -1,0 +1,211 @@
+@*
+ * Springskytte STAFETT (relay) start-list management — sibling of SpringskytteStartListManagement,
+ * same chrome (clean cards + a settings modal behind "Ny stafett-startlista" / the card cog).
+ * Relay is a mass start with an elapsed clock (SHB L.6.11.3): one common start time per class,
+ * det lag som kommer först i mål vinner. Result entry lives in the Resultat tab
+ * (SpringskytteStafettResults), matching the individual flow. Card hidden unless relay teams exist.
+ *@
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+}
+
+<div class="springskytte-stafett-management" data-competition-id="@competitionId">
+    <div class="card mb-3" id="stafettMgmtCard" style="display:none;">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Stafett-startlistor (lag)</h5>
+                <button class="btn btn-primary btn-sm" onclick="stfOpenSettings(null)">
+                    <i class="bi bi-plus-lg me-1"></i>Ny stafett-startlista
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                <i class="bi bi-info-circle me-1"></i>
+                Stafett körs med <strong>gemensam start</strong> — alla lag i en klass startar samtidigt och
+                det lag som kommer först i mål vinner. Resultat (sluttider) registreras på fliken <strong>Resultat</strong>.
+            </p>
+            <div id="stfListCards"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings modal: common start time + classes + name (kept out of the cards, like the individual list) -->
+<div class="modal fade" id="stafettSettingsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear me-2"></i><span id="stfSettingsTitle">Ny stafett-startlista</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stfSet_nodeId">
+                <div class="mb-3">
+                    <label class="form-label small" for="stfSet_name">Listnamn</label>
+                    <input type="text" class="form-control" id="stfSet_name" placeholder="T.ex. Stafett" maxlength="80">
+                    <div class="form-text">Namnet blir startlistans webbadress och måste vara unikt.</div>
+                </div>
+                <div class="mb-3" style="max-width:220px">
+                    <label class="form-label small" for="stfSet_start">Gemensam starttid</label>
+                    <input type="text" class="form-control form-control-sm" id="stfSet_start" placeholder="HH:MM" value="10:00">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small">Klasser i denna lista <span class="text-muted">(lämna tomt = alla stafettklasser)</span></label>
+                    <div id="stfSet_classes" class="d-flex flex-wrap gap-2"></div>
+                </div>
+                <div class="alert alert-danger py-2 mb-0 d-none" id="stfSettingsError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="stfGenBtn" onclick="stfGenerate()">
+                    <i class="bi bi-play-fill me-1"></i>Generera startlista
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const stfCompId = parseInt('@competitionId');
+    const stfToken = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    let stfClasses = [];
+
+    const stfPost = async (url, body) => {
+        const r = await fetch('/umbraco/surface/Springskytte/' + url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': stfToken() },
+            body: JSON.stringify(body)
+        });
+        return r.json();
+    };
+    const stfGet = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => r.json());
+    const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+
+    // Teams inline in the card (like the individual list shows its starters) — Nr / Lag / Klass / Deltagare.
+    function stfTeamsTable(teams) {
+        if (!teams.length) return '';
+        const rows = teams.slice().sort((a, b) => (a.startOrder || 0) - (b.startOrder || 0)).map(t => {
+            const legs = (t.members || []).filter(m => !m.isSpare).map(m => esc(m.name));
+            const spares = (t.members || []).filter(m => m.isSpare).map(m => esc(m.name));
+            let deltagare = legs.join(', ');
+            if (spares.length) deltagare += ` <span class="text-muted">(reserv: ${spares.join(', ')})</span>`;
+            if (!legs.length && !spares.length) deltagare = '<span class="text-muted fst-italic">Deltagare ej namngivna</span>';
+            return `<tr>
+                <td class="text-center">${t.startOrder}</td>
+                <td><strong>${esc(t.teamName)}</strong> <span class="text-muted small">${esc(t.club)}</span></td>
+                <td>${esc(t.stafettClass)}</td>
+                <td class="small">${deltagare}</td>
+            </tr>`;
+        }).join('');
+        return `<table class="table table-sm spring-starters-table mb-0">
+            <thead><tr><th style="width:44px" class="text-center">Nr</th><th>Lag</th><th>Klass</th><th>Deltagare</th></tr></thead>
+            <tbody>${rows}</tbody></table>`;
+    }
+
+    // Only render the whole section when the competition actually has relay teams.
+    window.stfInitMgmt = async function () {
+        const card = document.getElementById('stafettMgmtCard');
+        if (!card) return;
+        const data = await stfGet('GetSpringskytteStafettTeams?competitionId=' + stfCompId);
+        if (!data || !data.success || !data.teams || data.teams.length === 0) { card.style.display = 'none'; return; }
+        card.style.display = '';
+        stfClasses = data.classes || [];
+        await stfLoadLists();
+    };
+
+    async function stfLoadLists() {
+        const wrap = document.getElementById('stfListCards');
+        const data = await stfGet('GetSpringskytteStafettStartLists?competitionId=' + stfCompId);
+        const lists = (data && data.lists) || [];
+        if (lists.length === 0) {
+            wrap.innerHTML = '<p class="text-muted small mb-0"><i class="bi bi-hourglass-split me-1"></i>Ingen stafett-startlista skapad än. Klicka <strong>Ny stafett-startlista</strong>.</p>';
+            return;
+        }
+        wrap.innerHTML = lists.map(l => {
+            const classBadges = (l.coveredClasses && l.coveredClasses.length)
+                ? l.coveredClasses.map(c => `<span class="badge bg-light text-dark border me-1">${esc(c)}</span>`).join('')
+                : '<span class="badge bg-light text-dark border me-1">Alla stafettklasser</span>';
+            const officialBadge = l.isOfficial
+                ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Officiell</span>'
+                : '<span class="badge bg-secondary"><i class="bi bi-hourglass-split me-1"></i>Preliminär</span>';
+            const publishBtn = l.isOfficial
+                ? `<button class="btn btn-outline-secondary btn-sm" onclick="stfToggleOfficial(${l.nodeId}, false)" title="Gör startlistan preliminär igen"><i class="bi bi-arrow-counterclockwise me-1"></i>Gör preliminär</button>`
+                : `<button class="btn btn-success btn-sm" onclick="stfToggleOfficial(${l.nodeId}, true)" title="Publicera som officiell startlista"><i class="bi bi-check-circle me-1"></i>Publicera officiell</button>`;
+            return `
+            <div class="card spring-list-card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="fw-bold" style="font-size:1rem">${esc(l.listName)}</span>
+                        <span class="badge bg-success spring-status-badge"><i class="bi bi-check-circle me-1"></i>Genererad (${l.teamCount} lag${l.generatedDate ? ', ' + esc(l.generatedDate) : ''})</span>
+                        ${officialBadge}
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <a class="btn btn-outline-primary btn-sm" href="/startlista/${stfCompId}/${encodeURIComponent(l.slug)}" target="_blank" rel="noopener" title="Öppna startlistan för visning och utskrift"><i class="bi bi-printer me-1"></i>Visa / skriv ut</a>
+                        <button class="btn btn-outline-secondary btn-sm" onclick='stfOpenSettings(${JSON.stringify(l)})' title="Inställningar (starttid & klasser)"><i class="bi bi-gear"></i></button>
+                        ${publishBtn}
+                        <button class="btn btn-outline-danger btn-sm" onclick="stfDeleteList(${l.nodeId}, '${esc(l.listName)}')" title="Ta bort startlista"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="spring-settings-summary mb-2">
+                        <div class="mb-1">${classBadges}</div>
+                        <div><i class="bi bi-people me-1"></i>${l.teamCount} lag · <i class="bi bi-flag me-1"></i>Gemensam start ${esc(l.commonStartTime)}</div>
+                    </div>
+                    ${stfTeamsTable(l.teams || [])}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    window.stfOpenSettings = function (list) {
+        document.getElementById('stfSettingsError').classList.add('d-none');
+        const editing = !!list;
+        document.getElementById('stfSettingsTitle').textContent = editing ? 'Stafett-startlisteinställningar' : 'Ny stafett-startlista';
+        document.getElementById('stfSet_nodeId').value = editing ? list.nodeId : '';
+        document.getElementById('stfSet_name').value = editing ? (list.listName || '') : 'Stafett';
+        document.getElementById('stfSet_start').value = editing ? (list.commonStartTime || '10:00') : '10:00';
+        const covered = editing ? (list.coveredClasses || []) : [];
+        document.getElementById('stfSet_classes').innerHTML = stfClasses.map(c =>
+            `<label class="form-check-label small border rounded px-2 py-1">
+                <input type="checkbox" class="form-check-input me-1 stf-set-class" value="${esc(c)}" ${covered.includes(c) ? 'checked' : ''}> ${esc(c)}
+             </label>`).join('') || '<span class="text-muted small">Inga stafettklasser</span>';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('stafettSettingsModal')).show();
+    };
+
+    window.stfGenerate = async function () {
+        const err = document.getElementById('stfSettingsError');
+        const btn = document.getElementById('stfGenBtn');
+        const nodeId = document.getElementById('stfSet_nodeId').value;
+        const name = document.getElementById('stfSet_name').value.trim() || 'Stafett';
+        const start = document.getElementById('stfSet_start').value.trim();
+        const covered = Array.from(document.querySelectorAll('.stf-set-class:checked')).map(cb => cb.value);
+        err.classList.add('d-none');
+        btn.disabled = true;
+        try {
+            const body = { competitionId: stfCompId, commonStartTime: start, coveredClasses: covered, listName: name };
+            if (nodeId) body.existingNodeId = parseInt(nodeId);
+            const res = await stfPost('GenerateSpringskytteStafettStartList', body);
+            if (!res.success) { err.textContent = res.message || 'Kunde inte generera.'; err.classList.remove('d-none'); return; }
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('stafettSettingsModal')).hide();
+            await stfLoadLists();
+        } finally {
+            btn.disabled = false;
+        }
+    };
+
+    window.stfToggleOfficial = async function (nodeId, makeOfficial) {
+        await stfPost('SetSpringskytteStartListOfficial', { competitionId: stfCompId, nodeId: nodeId, isOfficial: makeOfficial });
+        await stfLoadLists();
+    };
+
+    window.stfDeleteList = async function (nodeId, name) {
+        if (!confirm(`Ta bort stafett-startlistan "${name}"?`)) return;
+        await stfPost('DeleteSpringskytteStartList', { competitionId: stfCompId, nodeId: nodeId });
+        await stfLoadLists();
+    };
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', stfInitMgmt);
+    else stfInitMgmt();
+})();
+</script>

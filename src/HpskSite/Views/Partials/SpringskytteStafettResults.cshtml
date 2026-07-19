@@ -1,0 +1,136 @@
+@*
+ * Springskytte STAFETT (relay) result entry + ranked board — Resultat tab, next to the individual
+ * results, same toolbar shape (Uppdatera / Publicera / Skriv ut). One elapsed time per team
+ * (tid från gemensam start till målgång); lowest wins per class. Publish → public /stafettresultat/.
+ * Card hidden unless the competition has relay teams.
+ *@
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+}
+
+<div class="card mb-3" id="stafettResultsCard" style="display:none;">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0">
+            <i class="bi bi-people-fill me-2"></i>Stafett – resultat (lag)
+            <span id="stfrOfficialBadge" class="badge bg-secondary ms-2"><i class="bi bi-hourglass-split me-1"></i>Preliminär</span>
+        </h5>
+        <div class="d-flex align-items-center gap-2">
+            <a id="stfrPrintBtn" class="btn btn-outline-secondary btn-sm" href="/stafettresultat/@competitionId" target="_blank" rel="noopener" style="display:none" title="Öppna de publicerade stafettresultaten för visning och utskrift">
+                <i class="bi bi-printer me-1"></i>Skriv ut
+            </a>
+            <button class="btn btn-outline-primary btn-sm" onclick="stfrReload()" title="Uppdatera resultattavlan">
+                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+            </button>
+            <button id="stfrPublishBtn" class="btn btn-success btn-sm" onclick="stfrPublish(true)" title="Publicera stafettresultaten som officiella — syns publikt">
+                <i class="bi bi-check-circle me-1"></i>Publicera
+            </button>
+            <button id="stfrUnpublishBtn" class="btn btn-outline-secondary btn-sm" style="display:none" onclick="stfrPublish(false)" title="Gör stafettresultaten preliminära igen">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Ångra publicering
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            <i class="bi bi-stopwatch me-1"></i>
+            Ange varje lags <strong>sluttid</strong> (tid från gemensam start till målgång), t.ex. <code>15:40</code>.
+            Bommade fallmål är straffrundor som laget redan sprungit, så de ligger i sluttiden. Lägsta tid vinner.
+            Klicka <strong>Publicera</strong> när resultaten ska bli synliga publikt.
+        </p>
+        <div id="stfrResults"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const compId = parseInt('@competitionId');
+    const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    const post = async (url, body) => (await fetch('/umbraco/surface/Springskytte/' + url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify(body)
+    })).json();
+    const get = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => r.json());
+    const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+
+    window.stfrInit = async function () {
+        const card = document.getElementById('stafettResultsCard');
+        if (!card) return;
+        const data = await get('GetSpringskytteStafettResults?competitionId=' + compId);
+        if (!data || !data.success || !data.classGroups || data.classGroups.length === 0) { card.style.display = 'none'; return; }
+        card.style.display = '';
+        applyOfficial(!!data.isOfficial);
+        renderResults(data.classGroups);
+    };
+
+    window.stfrReload = async function () {
+        const data = await get('GetSpringskytteStafettResults?competitionId=' + compId);
+        applyOfficial(!!(data && data.isOfficial));
+        renderResults((data && data.classGroups) || []);
+    };
+
+    function applyOfficial(isOfficial) {
+        const badge = document.getElementById('stfrOfficialBadge');
+        badge.className = 'badge ms-2 ' + (isOfficial ? 'bg-success' : 'bg-secondary');
+        badge.innerHTML = isOfficial
+            ? '<i class="bi bi-check-circle me-1"></i>Officiell'
+            : '<i class="bi bi-hourglass-split me-1"></i>Preliminär';
+        document.getElementById('stfrPublishBtn').style.display = isOfficial ? 'none' : '';
+        document.getElementById('stfrUnpublishBtn').style.display = isOfficial ? '' : 'none';
+        document.getElementById('stfrPrintBtn').style.display = isOfficial ? '' : 'none';
+    }
+
+    window.stfrPublish = async function (makeOfficial) {
+        const res = await post('PublishSpringskytteStafettResults', { competitionId: compId, isOfficial: makeOfficial });
+        if (!res.success) { alert(res.message || 'Kunde inte publicera.'); return; }
+        applyOfficial(makeOfficial);
+    };
+
+    function renderResults(groups) {
+        const wrap = document.getElementById('stfrResults');
+        wrap.innerHTML = groups.map(g => `
+            <div class="mb-3">
+                <div class="fw-bold border-bottom pb-1 mb-2">${esc(g.className)}</div>
+                <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr class="small text-muted">
+                        <th style="width:44px">#</th><th>Lag</th><th>Förening</th>
+                        <th style="width:130px">Sluttid (MM:SS)</th><th style="width:110px">Status</th><th style="width:70px"></th>
+                    </tr></thead>
+                    <tbody>
+                    ${g.teams.map(t => `
+                        <tr>
+                            <td>${t.rank > 0 ? '<span class="badge bg-primary">' + t.rank + '</span>' : ''}</td>
+                            <td><strong>${esc(t.teamName)}</strong>${(t.members && t.members.filter(m => !m.isSpare).length) ? `<div class="small text-muted">${t.members.filter(m => !m.isSpare).map(m => esc(m.name)).join(', ')}</div>` : ''}</td>
+                            <td class="small">${esc(t.club)}</td>
+                            <td><input type="text" class="form-control form-control-sm stfr-elapsed" data-team="${t.teamId}" value="${t.status ? '' : esc(t.elapsedDisplay === '-' ? '' : t.elapsedDisplay)}" placeholder="MM:SS"></td>
+                            <td>
+                                <select class="form-select form-select-sm stfr-status" data-team="${t.teamId}">
+                                    <option value="" ${!t.status ? 'selected' : ''}>—</option>
+                                    <option value="DNS" ${t.status === 'DNS' ? 'selected' : ''}>DNS</option>
+                                    <option value="DNF" ${t.status === 'DNF' ? 'selected' : ''}>DNF</option>
+                                </select>
+                            </td>
+                            <td><button class="btn btn-primary btn-sm" onclick="stfrSave(${t.teamId})" title="Spara"><i class="bi bi-save"></i></button></td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+                </div>
+            </div>`).join('');
+    }
+
+    window.stfrSave = async function (teamId) {
+        const elapsedEl = document.querySelector(`.stfr-elapsed[data-team="${teamId}"]`);
+        const status = document.querySelector(`.stfr-status[data-team="${teamId}"]`).value || null;
+        const body = { competitionId: compId, teamId: teamId, status: status };
+        if (!status) {
+            const v = (elapsedEl.value || '').trim();
+            if (!v) { alert('Ange en sluttid eller välj DNS/DNF.'); return; }
+            body.elapsedInput = v;
+        }
+        const res = await post('SaveSpringskytteStafettResult', body);
+        if (!res.success) { alert(res.message || 'Kunde inte spara.'); return; }
+        await stfrReload();
+    };
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', stfrInit);
+    else stfrInit();
+})();
+</script>
