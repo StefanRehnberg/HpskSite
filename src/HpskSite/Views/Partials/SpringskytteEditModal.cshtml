@@ -101,6 +101,10 @@
                         <input type="text" class="form-control" id="springEdit_venue" name="venue" required>
                     </div>
 
+                    @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map.
+                       Saves via CompetitionEdit/SaveCompetition (type-agnostic rangeId handling). *@
+                    @await Html.PartialAsync("_CompetitionRangePicker", "springEdit_")
+
                     <hr>
 
                     <div class="row">
@@ -559,6 +563,9 @@ window.populateSpringEditModal = function(comp) {
 
     setVal('springEdit_competitionName', comp.competitionName);
     setVal('springEdit_venue', comp.venue);
+
+    // Shooting-range picker — loads the currently linked range + the club's ranges (list/search/map).
+    if (typeof compRangeInit === 'function') compRangeInit('springEdit_', { compId: comp.id, clubId: comp.clubId });
     setVal('springEdit_maxParticipants', comp.maxParticipants || 50);
     setVal('springEdit_registrationFee', comp.registrationFee || 0);
     setVal('springEdit_juniorRegistrationFee', comp.juniorRegistrationFee || 0);
@@ -740,6 +747,8 @@ function springEditOnClubChange() {
     const regionSelect = document.getElementById('springEdit_regionalFederation');
     regionSelect.disabled = !!clubId;
     if (clubId) regionSelect.value = '';
+    // Refresh the range picker's club-linked quick buttons for the newly selected club.
+    if (typeof compRangeLoadClubRanges === 'function') compRangeLoadClubRanges('springEdit_', clubId);
 }
 
 function springEditOnRegionChange() {

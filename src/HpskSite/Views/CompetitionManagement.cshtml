@@ -460,68 +460,9 @@
     @* Anti-forgery token for AJAX requests *@
     @Html.AntiForgeryToken()
 
-    @if (canManageCompetition)
-    {
-        <div class="card mb-3" id="rngPickCard">
-            <div class="card-body py-2">
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <div>
-                        <span class="fw-semibold"><i class="bi bi-geo-alt me-1"></i>Tävlingsplats (skjutbana)</span>
-                        <span id="rngPickCurrent" class="ms-2 small text-muted">Laddar…</span>
-                    </div>
-                    <div class="position-relative" style="min-width:300px">
-                        <input type="text" class="form-control form-control-sm" id="rngPickSearch" placeholder="Sök skjutbana att koppla…" autocomplete="off">
-                        <div id="rngPickResults" class="list-group position-absolute w-100 shadow" style="z-index:1080;display:none;max-height:260px;overflow:auto"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <script>
-        (function () {
-            const compId = @competitionId;
-            const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
-            const esc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-            let t = null;
-            async function load() {
-                const cur = document.getElementById('rngPickCurrent');
-                try {
-                    const d = await (await fetch('/umbraco/surface/ShootingRange/GetRangeForCompetition?competitionId=' + compId)).json();
-                    if (d.success && d.hasRange) {
-                        cur.innerHTML = `<span class="badge bg-success-subtle text-success-emphasis">${esc(d.range.name)}${d.range.city ? ' · ' + esc(d.range.city) : ''}</span> <a href="#" id="rngPickClear" class="ms-1">Ta bort</a>`;
-                        document.getElementById('rngPickClear').onclick = e => { e.preventDefault(); setRange(0); };
-                    } else { cur.textContent = 'Ingen vald'; }
-                } catch (e) { cur.textContent = ''; }
-            }
-            async function setRange(id) {
-                const r = await fetch('/umbraco/surface/ShootingRange/SetCompetitionRange', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
-                    body: JSON.stringify({ competitionId: compId, rangeId: id })
-                });
-                const d = await r.json();
-                if (!d.success) { alert(d.message || 'Fel'); return; }
-                document.getElementById('rngPickSearch').value = '';
-                document.getElementById('rngPickResults').style.display = 'none';
-                load();
-            }
-            window.rngPickSelect = id => setRange(id);
-            document.getElementById('rngPickSearch').addEventListener('input', function () {
-                clearTimeout(t);
-                const q = this.value;
-                t = setTimeout(async () => {
-                    const box = document.getElementById('rngPickResults');
-                    if (!q || q.length < 2) { box.style.display = 'none'; return; }
-                    const d = await (await fetch('/umbraco/surface/ShootingRange/GetRangePicker?query=' + encodeURIComponent(q))).json();
-                    box.innerHTML = (d.ranges || []).map(x =>
-                        `<button type="button" class="list-group-item list-group-item-action py-1" onclick="rngPickSelect(${x.id})">${esc(x.name)}<small class="text-muted">${x.city ? ' · ' + esc(x.city) : ''}${x.municipality ? ' · ' + esc(x.municipality) : ''}</small></button>`
-                    ).join('') || '<div class="list-group-item small text-muted">Inga träffar</div>';
-                    box.style.display = '';
-                }, 250);
-            });
-            document.addEventListener('click', e => { if (!e.target.closest('#rngPickCard')) document.getElementById('rngPickResults').style.display = 'none'; });
-            load();
-        })();
-        </script>
-    }
+    @* Venue (Tävlingsplats/skjutbana) is set in each discipline's edit modal (standard, Springskytte,
+       advert) via the shared _CompetitionRangePicker — the old standalone card here was removed once
+       all edit modals covered it. *@
 
     <!-- Navigation tabs -->
     <ul class="nav nav-tabs" id="managementTabs" role="tablist">

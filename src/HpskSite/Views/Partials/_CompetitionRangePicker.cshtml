@@ -64,8 +64,13 @@
     window._compRangeMaps = window._compRangeMaps || {};
     function dataFor(p) { return (window._compRangeData[p] = window._compRangeData[p] || { search: [], club: [] }); }
 
-    // The venue free-text field id differs: the wizard prefixes it, the edit modal doesn't.
-    function venueFieldId(prefix) { return prefix === 'wizard_' ? 'wizard_venue' : 'venue'; }
+    // The venue free-text field id differs per host: the standard edit modal uses "venue";
+    // the wizard/springskytte modals prefix it ("wizard_venue"/"springEdit_venue"). Prefer the
+    // prefixed field when it exists, else fall back to "venue". Prevents the prefill from writing
+    // into another modal's venue field when several modals coexist on the page.
+    function venueFieldId(prefix) {
+        return document.getElementById(prefix + 'venue') ? (prefix + 'venue') : 'venue';
+    }
 
     window.compRangeSetRange = function (prefix, id, name, city) {
         var hid = document.getElementById(prefix + 'rangeId');
