@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using NPoco;
 
 namespace HpskSite.CompetitionTypes.Springskytte.Models
@@ -50,6 +51,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         /// </summary>
         public string Shots { get; set; } = "[]";
 
+        /// <summary>
+        /// Per-station grip: JSON string array parallel to the stations, "1" = one hand (enhand),
+        /// "2" = two hands (stödhand/tvåhand). E.g. ["1","2","1","1","1","2"]. Null/empty = not
+        /// recorded. Springskytte alternates one/two hand per station; a shooter must use one hand
+        /// on at least 3 of 6 stations unless their age class is 65+ (then two hands allowed on all).
+        /// </summary>
+        public string? StationHands { get; set; }
+
         public int? ShootingScore { get; set; }  // Total penalty points
 
         public int PenaltyMultiplier { get; set; } = 1;  // 1 normal, 2 for markestagning (class C)
@@ -93,6 +102,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
 
         // Shot details per stop/series
         public List<List<string>> ShotSeries { get; set; } = new();
+
+        // Per-station grip ("1" one hand / "2" two hands), parallel to the stations. Empty = not recorded.
+        public List<string> StationHands { get; set; } = new();
+
+        // Per-station grip counts. "At least 3 one-hand" ⇔ "at most 3 two-hand"; recording 4+ two-hand
+        // stations is a definite violation regardless of any still-unset stations. Waived for 65+.
+        public int OneHandStationCount => StationHands.Count(h => h == "1");
+        public int TwoHandStationCount => StationHands.Count(h => h == "2");
+        public bool OneHandWarning => !SpringskytteClasses.IsTwoHandExempt(AgeGenderClass)
+            && TwoHandStationCount >= 4;
 
         // Status
         public string? Status { get; set; }  // null, "DNS", "DNF"
@@ -155,6 +174,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string? SprintTimeInput { get; set; }  // "MM:SS" or "H:MM:SS" for UI parsing
         public string? FinishTimeInput { get; set; }  // "HH:MM:SS" finish time — sprint = finish - start
         public List<List<string>>? ShotSeries { get; set; }
+        public List<string>? StationHands { get; set; }  // per-station "1"/"2" (one/two hands); null = leave the stored value untouched
         public int PenaltyMultiplier { get; set; } = 1;
         public string? Status { get; set; }  // null, "DNS", "DNF"
     }
@@ -377,6 +397,18 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         };
 
         public static readonly List<string> WeaponClasses = new() { "A", "C" };
+
+        /// <summary>
+        /// True when the age class is 65 or older ("D 65"/"H 65"/"D 70"/"H 70", incl. "A-H 65"
+        /// style ids). Such shooters may use two hands on all stations, so the "at least 3 one-hand
+        /// stations" requirement does not apply to them.
+        /// </summary>
+        public static bool IsTwoHandExempt(string? ageGenderClass)
+        {
+            if (string.IsNullOrEmpty(ageGenderClass)) return false;
+            var m = System.Text.RegularExpressions.Regex.Match(ageGenderClass, @"(\d+)");
+            return m.Success && int.TryParse(m.Value, out var age) && age >= 65;
+        }
 
         public static string GetClassCategory(string ageGenderClass)
         {

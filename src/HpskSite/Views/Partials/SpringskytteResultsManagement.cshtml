@@ -380,6 +380,13 @@
     .shot-btn-lg.active-miss { background-color: var(--bs-danger); border-color: var(--bs-danger); color: #fff; }
     .spring-c-station { border: 1px solid var(--bs-border-color); border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 0.75rem; }
     .spring-c-station-header { font-weight: 700; font-size: 1rem; margin-bottom: 0.5rem; }
+    /* Per-station one/two-hand grip toggle — sits on the station header row (never the shot row) so
+       it can't widen the 5-button grid on a phone. Colour-coded so the grip reads at a glance. */
+    .hand-toggle-btn { font-size: 0.8rem; font-weight: 600; white-space: nowrap; padding: 0.15rem 0.5rem; }
+    /* Unset = a dashed outline prompt so it clearly reads as a button that still needs a choice. */
+    .hand-toggle-btn.hand-unset { border-style: dashed; }
+    .hand-toggle-btn.hand-one { background-color: var(--bs-primary); border-color: var(--bs-primary); color: #fff; }
+    .hand-toggle-btn.hand-two { background-color: var(--bs-warning); border-color: var(--bs-warning); color: #000; }
     .spring-c-recent-item { cursor: pointer; }
     .spring-c-recent-item:hover { background-color: var(--bs-tertiary-bg); }
 </style>
@@ -1282,6 +1289,7 @@ let springCSnapshot = null;
 function springCTakeSnapshot() {
     return JSON.stringify({
         shots: springCCollectShots(),
+        hands: springCCollectHands(),
         finishTime: document.getElementById('cFinishTime')?.value || '',
         multiplier: springCMultiplier
     });
@@ -1342,11 +1350,14 @@ function springCRenderActiveCard(shooter) {
             <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Stationer</h6>`;
 
     for (let stop = 1; stop <= 6; stop++) {
+        // Grip starts UNSET — the score-keeper must actively choose. Tapping cycles
+        // Fattning? → Enhand → Tvåhand → Fattning?. The dashed outline signals it's a button.
         html += `
             <div class="spring-c-station" id="cStation${stop}">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="spring-c-station-header">Station ${stop}</span>
-                    <span class="fw-bold" id="cStop${stop}Count">0/5</span>
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="spring-c-station-header">Station ${stop} <span class="fw-normal text-muted small" id="cStop${stop}Count">0/5</span></span>
+                    <button type="button" class="btn btn-sm btn-outline-primary hand-toggle-btn hand-unset" id="cHand_${stop}"
+                        data-stop="${stop}" data-hand="" onclick="springCToggleHand(this)"><i class="bi bi-hand-index-thumb"></i> Fattning?</button>
                 </div>
                 <div class="d-flex gap-2 flex-wrap" id="cStationShots${stop}">`;
         for (let shot = 1; shot <= 5; shot++) {
@@ -1363,6 +1374,9 @@ function springCRenderActiveCard(shooter) {
     }
 
     html += `
+            <!-- Grip warning: fewer than 3 one-hand stations (waived for age class 65+) -->
+            <div id="cHandWarning" class="alert alert-warning py-2 px-3 small mb-3" style="display:none"></div>
+
             <!-- Shooting score summary + auto-save status (each toggle saves automatically) -->
             <div class="d-flex align-items-center gap-3 my-3 p-2 rounded" style="background: var(--bs-tertiary-bg);">
                 <span class="fw-bold">Skjutpoäng: <span id="cTotalMisses" class="text-danger fs-5">0</span></span>
@@ -1463,9 +1477,24 @@ function springCRenderActiveCard(shooter) {
             }
         }
 
+        // Restore saved per-station grip (falls back to the alternating default set in the markup).
+        if (Array.isArray(existing.stationHands) && existing.stationHands.length) {
+            for (let stop = 1; stop <= 6; stop++) {
+                const hv = existing.stationHands[stop - 1];
+                if (hv === '1' || hv === '2') {
+                    const hbtn = document.getElementById(`cHand_${stop}`);
+                    if (hbtn) springCApplyHandStyle(hbtn, hv);
+                }
+            }
+        }
+
         // Recalculate station counts, shooting score, sprint/total from restored finish time
         springCRecalc();
     }
+
+    // Evaluate the grip warning for the freshly loaded shooter (defaults are valid, but a restored
+    // shooter may already have < 3 one-hand stations recorded).
+    springCUpdateHandWarning();
 
     // Take snapshot of initial state for unsaved-changes detection
     springCSnapshot = springCTakeSnapshot();
@@ -1479,6 +1508,64 @@ function springCSetMultiplier(val) {
     document.getElementById('cMult2').className = `btn btn-lg ${val === 2 ? 'btn-warning' : 'btn-outline-secondary'}`;
     springCRecalc();
     springCScheduleAutoSave();
+}
+
+// ===== Per-station grip (unset / one hand / two hands) =====
+// Three-state toggle on each station header, stored parallel to the shots as "" / "1" / "2".
+// Starts unset so the score-keeper must actively choose (no silent preset).
+function springCApplyHandStyle(btn, hand) {
+    if (hand === '1') {
+        btn.className = 'btn btn-sm hand-toggle-btn hand-one';
+        btn.innerHTML = '<i class="bi bi-hand-index"></i> Enhand';
+        btn.dataset.hand = '1';
+    } else if (hand === '2') {
+        btn.className = 'btn btn-sm hand-toggle-btn hand-two';
+        btn.innerHTML = '<i class="bi bi-hexagon"></i> Tvåhand';
+        btn.dataset.hand = '2';
+    } else {
+        btn.className = 'btn btn-sm btn-outline-primary hand-toggle-btn hand-unset';
+        btn.innerHTML = '<i class="bi bi-hand-index-thumb"></i> Fattning?';
+        btn.dataset.hand = '';
+    }
+}
+
+function springCToggleHand(btn) {
+    const cur = btn.dataset.hand || '';
+    const next = cur === '' ? '1' : (cur === '1' ? '2' : '');
+    springCApplyHandStyle(btn, next);
+    springCUpdateHandWarning();
+    springCScheduleAutoSave();
+}
+
+function springCCollectHands() {
+    const hands = [];
+    for (let stop = 1; stop <= 6; stop++) {
+        const v = document.getElementById(`cHand_${stop}`)?.dataset.hand;
+        hands.push(v === '1' ? '1' : (v === '2' ? '2' : ''));
+    }
+    return hands;
+}
+
+// 65+ age classes may shoot two-handed on all stations, so they're exempt from the rule.
+function springIsTwoHandExempt(ageOrClass) {
+    const m = String(ageOrClass || '').match(/(\d+)/);
+    return m ? parseInt(m[1], 10) >= 65 : false;
+}
+
+// Rule: at least 3 of 6 stations one-handed ⇔ at most 3 two-handed. So 4+ two-hand stations is a
+// definite violation regardless of any still-unset stations — no false alarms from the unset default.
+function springCUpdateHandWarning() {
+    const el = document.getElementById('cHandWarning');
+    if (!el) return;
+    const shooter = springCActiveShooter;
+    const twoHand = springCCollectHands().filter(h => h === '2').length;
+    const exempt = springIsTwoHandExempt(shooter?.ageGenderClass || shooter?.registeredClass);
+    if (!exempt && twoHand >= 4) {
+        el.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>${twoHand}</strong> stationer med tvåhandsfattning — högst <strong>3</strong> tillåtet (gäller ej klass 65+).`;
+        el.style.display = '';
+    } else {
+        el.style.display = 'none';
+    }
 }
 
 function springCToggleShot(btn) {
@@ -1541,6 +1628,7 @@ async function springCAutoSave() {
         ageGenderClass: shooter.ageGenderClass,
         finishTimeInput: null,   // scoring never touches time — server preserves the timing role's finish
         shotSeries: shotSeries,
+        stationHands: springCCollectHands(),
         penaltyMultiplier: springCMultiplier,
         status: null
     };
@@ -1712,6 +1800,7 @@ async function springCSave() {
         ageGenderClass: shooter.ageGenderClass,
         finishTimeInput: finishInput,
         shotSeries: shotSeries,
+        stationHands: springCCollectHands(),
         penaltyMultiplier: springCMultiplier,
         status: null
     };
@@ -2021,6 +2110,22 @@ async function springLoadResultsList() {
             const awardingMedals = data.isAwardingStandardMedals === true;
 
             let html = '';
+
+            // Grip check (management alert): shooters who used one hand on fewer than 3 stations.
+            // Allowed only for age class 65+, so the server already excludes those from handWarning.
+            const flagged = [];
+            for (const group of data.classGroups) {
+                for (const s of group.shooters) if (s.handWarning) flagged.push(s);
+            }
+            if (flagged.length) {
+                html += `
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                    <strong>${flagged.length} skytt${flagged.length === 1 ? '' : 'ar'}</strong> har fler än 3 stationer med tvåhandsfattning (högst 3 tillåtet — undantag klass 65+). Kontrollera fattningen:
+                    <div class="mt-1 small">${flagged.map(s => `${springTimeEsc(s.name)}${s.startOrder ? ' (' + s.startOrder + ')' : ''} — ${s.twoHandCount}/6 tvåhand`).join(' · ')}</div>
+                </div>`;
+            }
+
             for (const group of data.classGroups) {
                 html += `
                 <div class="mb-4">
@@ -2047,7 +2152,7 @@ async function springLoadResultsList() {
                     html += `
                                 <tr>
                                     <td>${s.status ? s.status : (s.rank || '-')}</td>
-                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}</td>
+                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}${s.handWarning ? ' <span class="badge bg-warning text-dark" title="Fler än 3 stationer med tvåhandsfattning (' + s.twoHandCount + '/6 tvåhand)">⚠ fattning</span>' : ''}</td>
                                     <td title="${s.club}">${s.clubShort || s.club}</td>
                                     <td class="time-col">${s.sprintTimeDisplay}</td>
                                     <td>${s.shootingScore ?? '-'}</td>
@@ -2146,6 +2251,22 @@ async function springLoadSubResultsList() {
         if (data.success && data.classGroups?.length > 0) {
             const awardingMedals = data.isAwardingStandardMedals === true;
             let html = '';
+
+            // Grip check (management alert): shooters who used one hand on fewer than 3 stations.
+            // Allowed only for age class 65+, so the server already excludes those from handWarning.
+            const flagged = [];
+            for (const group of data.classGroups) {
+                for (const s of group.shooters) if (s.handWarning) flagged.push(s);
+            }
+            if (flagged.length) {
+                html += `
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                    <strong>${flagged.length} skytt${flagged.length === 1 ? '' : 'ar'}</strong> har fler än 3 stationer med tvåhandsfattning (högst 3 tillåtet — undantag klass 65+). Kontrollera fattningen:
+                    <div class="mt-1 small">${flagged.map(s => `${springTimeEsc(s.name)}${s.startOrder ? ' (' + s.startOrder + ')' : ''} — ${s.twoHandCount}/6 tvåhand`).join(' · ')}</div>
+                </div>`;
+            }
+
             for (const group of data.classGroups) {
                 html += `
                 <div class="mb-4">
@@ -2172,7 +2293,7 @@ async function springLoadSubResultsList() {
                     html += `
                                 <tr>
                                     <td>${s.status ? s.status : (s.rank || '-')}</td>
-                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}</td>
+                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}${s.handWarning ? ' <span class="badge bg-warning text-dark" title="Fler än 3 stationer med tvåhandsfattning (' + s.twoHandCount + '/6 tvåhand)">⚠ fattning</span>' : ''}</td>
                                     <td title="${s.club}">${s.clubShort || s.club}</td>
                                     <td class="time-col">${s.sprintTimeDisplay}</td>
                                     <td>${s.shootingScore ?? '-'}</td>

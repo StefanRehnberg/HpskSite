@@ -178,9 +178,25 @@ namespace HpskSite.CompetitionTypes.Springskytte.Services
                 PenaltyMultiplier = entry.PenaltyMultiplier,
                 TotalTimeSeconds = entry.TotalTimeSeconds,
                 ShotSeries = shotSeries,
+                StationHands = DeserializeHands(entry.StationHands),
                 Status = entry.Status,
                 HitsPerStop = CalculateHitsPerStop(entry.Shots, entry.WeaponClass)
             };
+        }
+
+        /// <summary>Deserialize the per-station grip array ("1"/"2"); empty on null/blank/invalid.</summary>
+        public static List<string> DeserializeHands(string? handsJson)
+        {
+            if (string.IsNullOrWhiteSpace(handsJson) || handsJson == "[]")
+                return new List<string>();
+            try
+            {
+                return JsonConvert.DeserializeObject<List<string>>(handsJson) ?? new List<string>();
+            }
+            catch
+            {
+                return new List<string>();
+            }
         }
 
         public static List<List<string>> DeserializeShots(string shotsJson)

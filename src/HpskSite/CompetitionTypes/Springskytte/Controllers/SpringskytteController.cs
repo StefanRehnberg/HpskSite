@@ -170,6 +170,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     ? JsonConvert.SerializeObject(request.ShotSeries)
                     : "[]";
 
+                // Per-station grip (one/two hands). Null = the caller didn't touch it (e.g. the timing
+                // role, or the Class A pad) → COALESCE preserves whatever the scoring role stored.
+                var stationHandsJson = request.StationHands != null
+                    ? JsonConvert.SerializeObject(request.StationHands)
+                    : null;
+
                 // Calculate shooting score and total time
                 int shootingScore = _scoringService.CalculateShootingScore(shotsJson, request.WeaponClass);
                 int penaltyMultiplier = request.PenaltyMultiplier > 0 ? request.PenaltyMultiplier : 1;
@@ -198,12 +204,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     WHEN MATCHED THEN
                         UPDATE SET AgeGenderClass = @3, SprintTimeSeconds = @4, Shots = @5,
                                    ShootingScore = @6, PenaltyMultiplier = @7, TotalTimeSeconds = @8,
-                                   Status = @9, EnteredBy = @10, LastModified = @11
+                                   Status = @9, EnteredBy = @10, LastModified = @11,
+                                   StationHands = COALESCE(@12, target.StationHands)
                     WHEN NOT MATCHED THEN
                         INSERT (CompetitionId, MemberId, WeaponClass, AgeGenderClass, StartOrder,
                                 SprintTimeSeconds, Shots, ShootingScore, PenaltyMultiplier, TotalTimeSeconds,
-                                Status, EnteredBy, EnteredAt, LastModified)
-                        VALUES (@0, @1, @2, @3, 0, @4, @5, @6, @7, @8, @9, @10, @11, @11)
+                                Status, EnteredBy, EnteredAt, LastModified, StationHands)
+                        VALUES (@0, @1, @2, @3, 0, @4, @5, @6, @7, @8, @9, @10, @11, @11, @12)
                     OUTPUT INSERTED.Id;";
 
                 var savedResultId = await db.ExecuteScalarAsync<int>(mergeSql,
@@ -218,7 +225,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     effectiveTotalTime,              // @8
                     request.Status,                  // @9
                     enteredBy,                       // @10
-                    now                              // @11
+                    now,                             // @11
+                    (object?)stationHandsJson ?? DBNull.Value   // @12
                 );
 
                 transaction.Complete();
@@ -424,7 +432,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                                 s.TotalTimeSeconds,
                                 s.StandardMedal,
                                 s.Status,
-                                s.ShotSeries
+                                s.ShotSeries,
+                                // Per-station grip + the "too many two-hand stations" flag (waived for
+                                // 65+), so management can spot a shooter who used two hands too often.
+                                stationHands = s.StationHands,
+                                oneHandCount = s.OneHandStationCount,
+                                twoHandCount = s.TwoHandStationCount,
+                                handWarning = s.OneHandWarning
                             })
                         };
                     })
@@ -815,7 +829,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                                 totalTimeDisplay = FormatTime(res.TotalTimeSeconds),
                                 res.Status,
                                 res.PenaltyMultiplier,
-                                shots = SpringskytteScoringService.DeserializeShots(res.Shots)
+                                shots = SpringskytteScoringService.DeserializeShots(res.Shots),
+                                stationHands = SpringskytteScoringService.DeserializeHands(res.StationHands)
                             }
                             : null
                     };
