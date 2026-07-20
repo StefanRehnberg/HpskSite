@@ -87,7 +87,10 @@
                     </h5>
                 }
                 </div>
-                <button id="springWakeBtn" class="btn btn-outline-secondary btn-sm" title="Hindra skärmen från att slockna"><i class="bi bi-display me-1"></i>Håll skärmen vaken</button>
+                <div class="d-flex align-items-center gap-2">
+                    <button id="springWakeBtn" class="btn btn-outline-secondary btn-sm" title="Hindra skärmen från att slockna"><i class="bi bi-display me-1"></i>Håll skärmen vaken</button>
+                    <span id="evtMountSpringStation"></span>
+                </div>
             </div>
         }
         else
@@ -2424,3 +2427,36 @@ function showSpringMessage(msg, type) {
     setTimeout(() => alertDiv.remove(), 3000);
 }
 </script>
+
+@if (isStationPage)
+{
+    @* Funktionärsinbox for the scorer/timer station screen — scoped to this weapon-group line.
+       Only mounted in station mode (never on the management-tab embed of this same partial). *@
+    @await Html.PartialAsync("_EventMessageInbox")
+    <script>
+        (function () {
+            if (!window.EventInbox || !springPresetWeaponClass) return;
+            var role = springTimingMode ? 'timer' : 'scorer';
+            var roleLabel = springTimingMode ? 'Tid & straff ' : 'Poäng ';
+            EventInbox.init({
+                competitionId: springCompetitionId,
+                mountSelector: '#evtMountSpringStation',
+                label: roleLabel + springPresetWeaponClass,
+                // A and C never run at the same time — one physical line, so messaging is role-based
+                // (no per-class scope). Matches the roles + "Alla funktionärer" model of other disciplines.
+                fromScope: { type: 'Role', key: role },
+                scopes: [
+                    { type: 'Role', key: role }
+                ],
+                // The three Springskytte staff roles (each has its own per-class screen) + tävlingsledningen.
+                recipients: [
+                    { type: 'All', label: 'Alla funktionärer' },
+                    { type: 'Role', key: 'startledare', label: 'Startledare' },
+                    { type: 'Role', key: 'timer', label: 'Tidtagare' },
+                    { type: 'Role', key: 'scorer', label: 'Poängräknare' },
+                    { type: 'Role', key: 'ledning', label: 'Tävlingsledning' }
+                ]
+            });
+        })();
+    </script>
+}

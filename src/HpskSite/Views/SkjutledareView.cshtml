@@ -110,7 +110,10 @@
 
         <div class="d-flex align-items-center justify-content-between mb-2 p-2 rounded" style="background:var(--bs-warning-bg-subtle); border:2px solid var(--bs-warning-border-subtle)">
             <span class="fw-bold fs-5"><i class="bi bi-megaphone me-1"></i>Skjutledare</span>
-            <span class="badge bg-info fs-6">Lag @lagNumber</span>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-info fs-6">Lag @lagNumber</span>
+                <span id="evtMountSkjutledare"></span>
+            </div>
         </div>
         <div class="small text-muted mb-3">@competitionName · @competitionType · @qualificationSeriesCount serier</div>
 
@@ -525,6 +528,27 @@
                 document.getElementById('skjStartBtnSerieNum').textContent = skjCurrentSerie;
             }
         })();
+        </script>
+
+        @* Skjutledarens funktionärsinbox — anchored in the header. Receives messages to its own
+           skjutlag + the skjutledarkollektivet; talks up to tävlingsledningen. *@
+        @await Html.PartialAsync("_EventMessageInbox")
+        <script>
+            EventInbox.init({
+                competitionId: @competitionId,
+                mountSelector: '#evtMountSkjutledare',
+                label: 'Skjutledare · Lag @lagNumber',
+                fromScope: { type: 'Skjutlag', key: '@lagNumber' },
+                scopes: [
+                    { type: 'Skjutlag', key: '@lagNumber' },
+                    { type: 'Role', key: 'skjutledare' }
+                ],
+                recipients: [
+                    { type: 'All' },
+                    { type: 'Role', key: 'ledning', label: 'Tävlingsledning' },
+                    { type: 'Role', key: 'skjutledare', label: 'Alla skjutledare' }
+                ]
+            });
         </script>
     }
 

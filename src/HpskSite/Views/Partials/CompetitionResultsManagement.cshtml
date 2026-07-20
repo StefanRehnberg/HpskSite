@@ -175,9 +175,12 @@
                             <span class="badge bg-warning text-dark ms-2"><i class="bi bi-trophy me-1"></i>Final</span>
                         }
                     </h5>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resultEntrySettingsModal" title="Inställningar">
-                        <i class="bi bi-gear"></i>
-                    </button>
+                    <div class="d-flex align-items-center gap-2">
+                        <span id="evtMountPrecisionStation"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resultEntrySettingsModal" title="Inställningar">
+                            <i class="bi bi-gear"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         }
@@ -3673,3 +3676,32 @@ function confirmChangeShooterClass() {
 }
 
 </script>
+
+@if (isStationPage && supportsSkjutledareView)
+{
+    @* Poängräknarens funktionärsinbox — scoped to this skjutlag. Only mounted on the /station
+       scorer screen (Precision/MagnumPrecision), never on the management-tab embed. *@
+    @await Html.PartialAsync("_EventMessageInbox")
+    <script>
+        (function () {
+            if (!window.EventInbox) return;
+            var lag = '@presetTeamNumber';
+            if (!lag || lag === '0') return;
+            EventInbox.init({
+                competitionId: @competitionId,
+                mountSelector: '#evtMountPrecisionStation',
+                label: '@(isFinalsPhase ? $"Final {presetTeamNumber}" : $"Lag {presetTeamNumber}")',
+                fromScope: { type: 'Skjutlag', key: lag },
+                scopes: [
+                    { type: 'Skjutlag', key: lag },
+                    { type: 'Role', key: 'scorer' }
+                ],
+                recipients: [
+                    { type: 'All' },
+                    { type: 'Skjutlag', key: lag, label: 'Skjutledare lag ' + lag },
+                    { type: 'Role', key: 'ledning', label: 'Tävlingsledning' }
+                ]
+            });
+        })();
+    </script>
+}

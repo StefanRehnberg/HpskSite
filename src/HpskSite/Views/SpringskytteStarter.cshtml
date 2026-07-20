@@ -50,6 +50,7 @@
             <button id="wakeBtn" class="btn btn-outline-secondary btn-sm" title="Hindra skärmen från att slockna"><i class="bi bi-display me-1"></i>Håll skärmen vaken</button>
             <button id="soundBtn" class="btn btn-outline-warning btn-sm"><i class="bi bi-volume-up me-1"></i>Aktivera ljud</button>
             <button id="rmBtn" class="btn btn-outline-info btn-sm"><i class="bi bi-tools me-1"></i>Startledare</button>
+            <span id="evtMountSpringStarter" style="display:none"></span>
         </div>
     </div>
 
@@ -176,6 +177,10 @@
 
 <input type="hidden" id="afToken" value="@tokens.RequestToken" />
 
+@* Startledarens funktionärsinbox — only surfaced in Startledare-läge (operator), never on the
+   public wall view. Anchored in the toolbar next to the other operator controls. *@
+@await Html.PartialAsync("_EventMessageInbox")
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const COMP = @competitionId;
@@ -216,13 +221,41 @@ document.getElementById('soundBtn').addEventListener('click', () => {
 // so the manager's pad stays in admin mode while the wall screen stays clean.
 const ADMIN_KEY = 'hpsk_startlinje_admin_' + COMP + '_' + (PRESET_WC || 'x');
 let adminMode = localStorage.getItem(ADMIN_KEY) === '1';
+let evtInited = false;
+function ensureStarterInbox() {
+    // Lazily start the inbox the first time the operator enters Startledare-läge. The public wall
+    // view never mounts it (and never polls the messaging endpoints).
+    if (evtInited || !PRESET_WC || !window.EventInbox) return;
+    evtInited = true;
+    EventInbox.init({
+        competitionId: COMP,
+        mountSelector: '#evtMountSpringStarter',
+        label: 'Startlinje ' + PRESET_WC,
+        // A and C never run at the same time — there is one physical line, so messaging is role-based
+        // (no per-class scope). Matches the roles + "Alla funktionärer" model of the other disciplines.
+        fromScope: { type: 'Role', key: 'startledare' },
+        scopes: [
+            { type: 'Role', key: 'startledare' }
+        ],
+        // The three Springskytte staff roles (each has its own per-class screen) + tävlingsledningen.
+        recipients: [
+            { type: 'All', label: 'Alla funktionärer' },
+            { type: 'Role', key: 'startledare', label: 'Startledare' },
+            { type: 'Role', key: 'timer', label: 'Tidtagare' },
+            { type: 'Role', key: 'scorer', label: 'Poängräknare' },
+            { type: 'Role', key: 'ledning', label: 'Tävlingsledning' }
+        ]
+    });
+}
 function applyAdminMode() {
     document.getElementById('rmPanel').style.display = adminMode ? 'block' : 'none';
     document.getElementById('offsetRow').style.display = adminMode ? '' : 'none';
+    const mount = document.getElementById('evtMountSpringStarter');
+    if (mount) mount.style.display = adminMode ? '' : 'none';
     const btn = document.getElementById('rmBtn');
     btn.classList.toggle('btn-info', adminMode);
     btn.classList.toggle('btn-outline-info', !adminMode);
-    if (adminMode) buildMovePickers();
+    if (adminMode) { buildMovePickers(); ensureStarterInbox(); }
     // The quick-action buttons in the card are toggled inside tick() (they also need a current shooter).
 }
 document.getElementById('rmBtn').addEventListener('click', () => {
