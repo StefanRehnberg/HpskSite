@@ -334,6 +334,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             var byStation = allResults.GroupBy(r => r.StationNumber).ToDictionary(g => g.Key, g => g.ToList());
 
+            // Resolve operator names once per member (a handful of stations → memoise to avoid repeat lookups).
+            var nameCache = new Dictionary<int, string>();
+            string ResolveName(int memberId)
+            {
+                if (memberId <= 0) return "";
+                if (nameCache.TryGetValue(memberId, out var cached)) return cached;
+                var nm = _memberService.GetById(memberId)?.Name ?? "";
+                nameCache[memberId] = nm;
+                return nm;
+            }
+
             var stations = stationNumbers.Select(n =>
             {
                 var sample = config.WeaponConfigs.Values
@@ -346,10 +357,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     .ToList();
 
                 FaltskytteResultEntry? last = null;
+                FaltskytteResultEntry? lastActive = null;
                 int entryCount = 0, distinctPatrols = 0;
                 if (byStation.TryGetValue(n, out var rows) && rows.Count > 0)
                 {
                     last = rows.OrderByDescending(r => r.EnteredAt).First();
+                    // "Senast aktiv" = most recent server contact. LastModified moves on corrections/re-saves,
+                    // so a chief re-saving an older row still reads as active now (unlike EnteredAt, which is
+                    // deliberately frozen at first registration for "Senaste patrull").
+                    lastActive = rows.OrderByDescending(r => r.LastModified).First();
                     entryCount = rows.Count;
                     distinctPatrols = rows.Select(r => r.PatrolNumber).Distinct().Count();
                 }
@@ -366,6 +382,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     managerMemberId = mgr?.MemberId,
                     lastPatrolNumber = last?.PatrolNumber,
                     lastEnteredAt = last?.EnteredAt,
+                    // Who last registered/corrected here + when — a battery-free, cellular-safe proxy for
+                    // "who's manning the station" (the field device sends nothing extra; this is derived from
+                    // saves it makes anyway). Rendered as "Senast aktiv", not live presence.
+                    lastActiveBy = lastActive != null ? ResolveName(lastActive.EnteredBy) : "",
+                    lastActiveAt = lastActive?.LastModified,
+                    // Freshness computed server-side in UTC (both sides UtcNow-based) so the "aktiv nyss"
+                    // colour can't be thrown off by DateTime serialization/timezone quirks. -1 = no activity yet.
+                    lastActiveMinsAgo = lastActive != null ? (int)Math.Max(0, (DateTime.UtcNow - lastActive.LastModified).TotalMinutes) : -1,
                     entryCount,
                     distinctPatrols
                 };

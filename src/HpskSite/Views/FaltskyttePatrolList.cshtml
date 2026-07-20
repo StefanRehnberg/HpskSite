@@ -8,7 +8,7 @@
     Layout = null;
 }
 <!DOCTYPE html>
-<html lang="sv">
+<html lang="sv" data-bs-theme="dark">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -16,10 +16,25 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
     <style>
-        body { background: #f5f6f8; }
+        /* Big-screen dark theme — matches the live results board (/live). Bootstrap dark mode
+           handles cards/alerts/badges; we only recolour the surfaces to the board's navy palette. */
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            --bs-body-bg: #1a1a2e;
+            --bs-body-color: #e0e0e0;
+            --bs-emphasis-color: #ffffff;
+            --bs-border-color: #0f3460;
+            --bs-card-bg: #16213e;
+            --bs-card-border-color: #0f3460;
+            --bs-card-cap-bg: #0f3460;
+            --bs-list-group-bg: #16213e;
+            --bs-list-group-border-color: rgba(255,255,255,.06);
+        }
+        h2 i { color: #4ecca3; }               /* teal accent, same as the results board */
         .pl-time { font-variant-numeric: tabular-nums; }
         .pl-departed { opacity: .55; }
-        .pl-next { box-shadow: 0 0 0 .25rem rgba(25,135,84,.35); }
+        .pl-next { box-shadow: 0 0 0 .25rem rgba(78,204,163,.45); }
         .pl-held { opacity: .75; border: 2px solid var(--bs-warning, #ffc107); }
         .pl-member { font-size: .9rem; }
     </style>
@@ -101,7 +116,7 @@
                 var dep = p.departedAt ? new Date(p.departedAt) : null;
                 var isNext = next && p.patrolId === next.patrolId;
                 var cardCls = 'card h-100' + (dep ? ' pl-departed' : (p.held ? ' pl-held' : (isNext ? ' border-success border-3 pl-next' : '')));
-                var startBadge = p.startTime ? '<span class="badge bg-light text-dark pl-time"><i class="bi bi-clock me-1"></i>' + fmt(new Date(p.startTime)) + '</span>' : '';
+                var startBadge = p.startTime ? '<span class="badge bg-dark-subtle text-body pl-time"><i class="bi bi-clock me-1"></i>' + fmt(new Date(p.startTime)) + '</span>' : '';
                 var status = dep
                     ? '<span class="badge bg-success"><i class="bi bi-check-lg me-1"></i>Utgått ' + fmt(dep) + '</span>'
                     : (p.held ? '<span class="badge bg-warning text-dark"><i class="bi bi-pause-fill me-1"></i>Väntar</span>'

@@ -7,7 +7,7 @@
     Layout = null;
 }
 <!DOCTYPE html>
-<html lang="sv">
+<html lang="sv" data-bs-theme="dark">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -15,11 +15,27 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
     <style>
-        body { background: #f5f6f8; }
+        /* Big-screen dark theme — matches the live results board (/live) and the public
+           patrullista wall. Bootstrap dark mode handles cards/alerts/badges; we only recolour
+           the surfaces to the board's navy palette. */
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            --bs-body-bg: #1a1a2e;
+            --bs-body-color: #e0e0e0;
+            --bs-emphasis-color: #ffffff;
+            --bs-border-color: #0f3460;
+            --bs-card-bg: #16213e;
+            --bs-card-border-color: #0f3460;
+            --bs-card-cap-bg: #0f3460;
+            --bs-list-group-bg: #16213e;
+            --bs-list-group-border-color: rgba(255,255,255,.06);
+        }
+        h4 i { color: #4ecca3; }                 /* teal accent, same as the results board */
         .sl-time { font-variant-numeric: tabular-nums; }
         .sl-departed { opacity: .5; }
         .sl-held { border: 2px solid var(--bs-warning, #ffc107); }
-        .sl-next { box-shadow: 0 0 0 .25rem rgba(25,135,84,.35); }
+        .sl-next { box-shadow: 0 0 0 .25rem rgba(78,204,163,.45); }
         .sl-member { min-height: 40px; }         /* real + blank rows share a height → equal cards */
         .sl-member.sl-dns { opacity: .5; }
         .sl-blank { pointer-events: none; }
@@ -38,6 +54,10 @@
                 <span id="slConn" class="badge bg-secondary" title="Anslutning"><i class="bi bi-wifi"></i></span>
                 <button id="slWake" class="btn btn-outline-secondary btn-sm" onclick="slToggleWake()"><i class="bi bi-lightbulb me-1"></i>Håll skärmen vaken</button>
                 <a class="btn btn-outline-secondary btn-sm" href="/patrullista/@Model.CompetitionId" target="_blank" title="Öppna väggskärmen (publik)"><i class="bi bi-tv me-1"></i>Väggskärm</a>
+                @if (Model.CanSendOff)
+                {
+                    <button id="slHideDeparted" class="btn btn-outline-secondary btn-sm" onclick="slToggleHideDeparted()" title="Dölj patruller som redan gått ut"><i class="bi bi-eye-slash me-1"></i>Dölj utgångna</button>
+                }
                 <span id="evtMountStartledare"></span>
             </div>
         </div>
@@ -62,11 +82,28 @@
             var compId = @Model.CompetitionId;
             var REFRESH = 8000;
             var timer = null;
+            var lastData = null;                                                          // last GetPatrolListState payload (toggle re-renders from this, no refetch)
+            var hideDeparted = localStorage.getItem('hpsk_sl_hidedep_' + compId) === '1'; // "Dölj utgångna" state, persisted per comp
 
             function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
             function fmt(d) { try { return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
             function token() { var el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
             function setConn(ok) { var e = document.getElementById('slConn'); if (e) e.className = 'badge ' + (ok ? 'bg-success' : 'bg-danger'); }
+
+            function slUpdateHideBtn(departedCount) {
+                var btn = document.getElementById('slHideDeparted');
+                if (!btn) return;
+                btn.classList.toggle('active', hideDeparted);   // filled = a filter is applied
+                var n = departedCount ? ' (' + departedCount + ')' : '';
+                btn.innerHTML = hideDeparted
+                    ? '<i class="bi bi-eye me-1"></i>Visa utgångna' + n
+                    : '<i class="bi bi-eye-slash me-1"></i>Dölj utgångna' + n;
+            }
+            window.slToggleHideDeparted = function () {
+                hideDeparted = !hideDeparted;
+                localStorage.setItem('hpsk_sl_hidedep_' + compId, hideDeparted ? '1' : '0');
+                if (lastData) render(lastData);   // re-render from cache — no network hit on the field/desk device
+            };
 
             async function refresh() {
                 try {
@@ -81,6 +118,7 @@
                 var banner = document.getElementById('slBanner');
                 var host = document.getElementById('slCards');
                 if (!d || !d.success) return;
+                lastData = d;   // cache so the "Dölj utgångna" toggle can re-render without a refetch
                 if (!d.published) {
                     banner.innerHTML = '';
                     host.innerHTML = '<div class="col-12"><div class="alert alert-info"><i class="bi bi-hourglass-split me-2"></i>Patrullistan är inte publicerad än. Publicera den på Startlistor-fliken.</div></div>';
@@ -90,9 +128,16 @@
                 if (!patrols.length) { banner.innerHTML = ''; host.innerHTML = '<div class="col-12"><div class="alert alert-warning">Inga patruller.</div></div>'; return; }
 
                 var next = patrols.find(function (p) { return !p.departedAt && !p.held; });
-                // Pad every patrol's member list to the largest patrol so all cards are the same height
+
+                // "Dölj utgångna": hide already-departed patrols from the card grid. The banner / NÄST PÅ TUR
+                // are computed from the full list, so hiding never affects who's next.
+                var departedCount = patrols.filter(function (p) { return p.departedAt; }).length;
+                slUpdateHideBtn(departedCount);
+                var visible = hideDeparted ? patrols.filter(function (p) { return !p.departedAt; }) : patrols;
+
+                // Pad every patrol's member list to the largest VISIBLE patrol so all cards are the same height
                 // (missing shooters become blank rows instead of stretching the buttons).
-                var maxMembers = patrols.reduce(function (mx, p) { return Math.max(mx, (p.members || []).length); }, 1);
+                var maxMembers = visible.reduce(function (mx, p) { return Math.max(mx, (p.members || []).length); }, 1);
 
                 var b = '';
                 if (next) {
@@ -107,7 +152,11 @@
                 }
                 banner.innerHTML = b;
 
-                host.innerHTML = patrols.map(function (p) {
+                if (!visible.length) {
+                    host.innerHTML = '<div class="col-12"><div class="alert alert-secondary d-flex align-items-center gap-2 mb-0"><i class="bi bi-eye-slash"></i>Alla patruller har gått ut och är dolda.<button class="btn btn-sm btn-outline-secondary ms-auto" onclick="slToggleHideDeparted()">Visa utgångna</button></div></div>';
+                    return;
+                }
+                host.innerHTML = visible.map(function (p) {
                     var dep = p.departedAt ? new Date(p.departedAt) : null;
                     var isNext = next && p.patrolId === next.patrolId;
                     var cardCls = 'card h-100' + (dep ? ' sl-departed' : (p.held ? ' sl-held' : (isNext ? ' sl-next border-success' : '')));
@@ -169,6 +218,7 @@
                 else if (wakeLock) { try { await wakeLock.release(); } catch (e) { } wakeLock = null; }
             };
 
+            slUpdateHideBtn(0);   // reflect persisted state immediately (count fills in on first render)
             refresh();
             timer = setInterval(refresh, REFRESH);
             document.addEventListener('visibilitychange', function () {

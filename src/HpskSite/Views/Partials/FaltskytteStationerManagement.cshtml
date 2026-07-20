@@ -71,6 +71,19 @@
     }
     function fmtTime(iso) { if (!iso) return '—'; try { return new Date(iso).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return '—'; } }
 
+    // "Senast aktiv" — who last registered/corrected at the station + how long ago. Green when fresh
+    // (≤5 min → someone's working it now), muted otherwise. Freshness (minsAgo) comes from the server
+    // in UTC; the clock uses the same rendering as "Senaste patrull". NOT a live-presence claim.
+    function activeLine(s) {
+        var mins = (typeof s.lastActiveMinsAgo === 'number') ? s.lastActiveMinsAgo : -1;
+        if (mins < 0 || !s.lastActiveBy) return '<span class="text-muted">—</span>';
+        var fresh = mins <= 5;
+        var rel = mins <= 0 ? 'nyss' : (mins + ' min sedan');
+        var dot = fresh ? '<i class="bi bi-circle-fill me-1" style="font-size:.5rem;vertical-align:middle"></i>' : '';
+        return '<span class="' + (fresh ? 'text-success fw-semibold' : 'text-muted') + '">' + dot + esc(s.lastActiveBy) + '</span>'
+            + ' <span class="text-muted">· ' + fmtTime(s.lastActiveAt) + ' (' + rel + ')</span>';
+    }
+
     function figThumbs(figs) {
         var html = (figs || []).map(function (f) {
             var star = f.isPoangmal ? '<span style="position:absolute;top:-5px;right:-3px;color:#d39e00;font-size:.8rem;text-shadow:0 0 2px #fff">★</span>' : '';
@@ -105,6 +118,8 @@
                     : '<span class="text-muted">ej satt</span>';
                 var lastP = s.lastPatrolNumber ? ('Patrull ' + s.lastPatrolNumber + ' · ' + fmtTime(s.lastEnteredAt)) : '<span class="text-muted">—</span>';
                 var done = s.entryCount + (expected > 0 ? (' / ' + expected) : '');
+                var isDone = expected > 0 && s.entryCount >= expected;
+                var entryBtnCls = isDone ? 'btn-success' : 'btn-primary';   // green once the station's roster is fully entered
                 return '<div class="col-12 col-md-6 col-xl-4">'
                     + '<div class="card h-100">'
                     + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
@@ -120,9 +135,14 @@
                     + '<div class="d-flex flex-wrap gap-1 mb-2">' + figThumbs(s.figures) + '</div>'
                     + '<div class="small mb-1"><i class="bi bi-person-badge me-1"></i><strong>Stationschef:</strong> ' + chief
                     + ' <button class="btn btn-link btn-sm p-0 ms-1 align-baseline" onclick="fseMgrEdit(' + s.station + ')">Ändra</button></div>'
+                    + '<div class="small mb-1"><i class="bi bi-person-check me-1"></i><strong>Senast aktiv:</strong> ' + activeLine(s) + '</div>'
                     + '<div class="small mb-1"><i class="bi bi-people me-1"></i><strong>Senaste patrull:</strong> ' + lastP + '</div>'
                     + '<div class="small"><i class="bi bi-check2-square me-1"></i><strong>Klart:</strong> ' + done + '</div>'
-                    + '</div></div></div>';
+                    + '</div>'
+                    + '<div class="card-footer p-2">'
+                    + '<a class="btn ' + entryBtnCls + ' w-100" href="/station?c=' + compId + '&s=' + s.station + '" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna resultatinmatning</a>'
+                    + '</div>'
+                    + '</div></div>';
             }).join('');
             host.innerHTML = html || '<div class="col-12 text-muted text-center py-4">Inga stationer konfigurerade.</div>';
 
