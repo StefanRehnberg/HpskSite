@@ -152,6 +152,13 @@ namespace HpskSite.Composers
             // later shooter-facing web-push channel can reuse the same rows.
             builder.Services.AddScoped<HpskSite.Services.Messaging.EventMessageService>();
 
+            // Competition planning & staffing (Tävlingsplanering) — Phase 1: day-of functionary roster
+            // (StaffAssignment) + Phase 1b preparation work-breakdown (WorkArea/WorkItem). Run
+            // create-staff-assignment-table.sql + create-work-breakdown-tables.sql. See
+            // Documentation/COMPETITION_STAFFING_SYSTEM.md.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingService>();
+            builder.Services.AddScoped<HpskSite.Services.Staffing.WorkBreakdownService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

@@ -1,0 +1,457 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    // Bemanning — the day-of functionary roster (StaffAssignment). Discipline-aware role groups from
+    // the server; one "Lägg till funktionär" dialog (also reachable per role group). Person = member
+    // search (autofills name/phone) or free text. Shifts, target ranges, responsible, status, and the
+    // Tävlingsledning app-access mirror all live here. See COMPETITION_STAFFING_SYSTEM.md §6.
+    var competitionId = ViewData["CompetitionId"];
+    var stfToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <p class="text-muted small mb-0" style="max-width:640px">
+        Planera vilka som bemannar tävlingen — roll, var (skjutlag/station/klass) och när (pass).
+        Fungerar redan innan startlistan finns. "Dagsläge" visar sedan vem som faktiskt arbetar.
+    </p>
+    <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small" id="stfCount"></span>
+        <button type="button" class="btn btn-primary btn-sm" onclick="stfOpenAdd('')">
+            <i class="bi bi-person-plus me-1"></i>Lägg till funktionär
+        </button>
+    </div>
+</div>
+
+<div id="stfRoster">
+    <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+</div>
+
+<!-- Add/Edit modal -->
+<div class="modal fade" id="stfModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="stfModalTitle">Lägg till funktionär</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stfId" value="0">
+                <input type="hidden" id="stfMemberId" value="0">
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Person</label>
+                    <div class="position-relative">
+                        <input type="text" class="form-control" id="stfMemberSearch" placeholder="Sök medlem (namn eller e-post)…" autocomplete="off">
+                        <div id="stfMemberResults" class="list-group position-absolute w-100 shadow" style="z-index:1080; display:none; max-height:240px; overflow:auto;"></div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-sm-7">
+                            <input type="text" class="form-control" id="stfName" placeholder="Namn (eller extern hjälp utan konto)">
+                        </div>
+                        <div class="col-sm-5">
+                            <input type="text" class="form-control" id="stfPhone" placeholder="Telefon (valfritt)">
+                        </div>
+                    </div>
+                    <div class="form-text">Sök en medlem för att fylla i namn och telefon, eller skriv ett fritt namn för en extern hjälpare.</div>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-semibold">Roll</label>
+                        <select class="form-select" id="stfRole"></select>
+                        <div class="form-text" id="stfRoleDesc"></div>
+                    </div>
+                    <div class="col-md-6 mb-3" id="stfFunctionTitleWrap" style="display:none">
+                        <label class="form-label fw-semibold">Funktion</label>
+                        <input type="text" class="form-control" id="stfFunctionTitle" list="stfFunctionTitles" placeholder="t.ex. Tävlingsledare">
+                        <datalist id="stfFunctionTitles">
+                            <option value="Tävlingsledare"></option>
+                            <option value="Bitr. tävlingsledare"></option>
+                            <option value="Säkerhetschef"></option>
+                            <option value="Sekreterare"></option>
+                        </datalist>
+                    </div>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label fw-semibold">Var</label>
+                        <select class="form-select" id="stfScopeType">
+                            <option value="All">Hela tävlingen</option>
+                            <option value="Skjutlag">Skjutlag</option>
+                            <option value="Station">Station</option>
+                            <option value="Klass">Klass</option>
+                            <option value="Patrull">Patrull</option>
+                            <option value="Bana">Bana</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-3" id="stfScopeKeyWrap" style="display:none">
+                        <label class="form-label fw-semibold" id="stfScopeKeyLabel">Nummer</label>
+                        <input type="text" class="form-control" id="stfScopeKey" placeholder="t.ex. 2">
+                    </div>
+                    <div class="col-md-4 mb-3" id="stfTargetWrap" style="display:none">
+                        <label class="form-label fw-semibold">Tavlor (intervall)</label>
+                        <div class="input-group">
+                            <input type="number" min="1" class="form-control" id="stfTargetFrom" placeholder="från">
+                            <span class="input-group-text">–</span>
+                            <input type="number" min="1" class="form-control" id="stfTargetTo" placeholder="till">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label fw-semibold">Pass — från</label>
+                        <input type="text" class="form-control" id="stfStartsAt" placeholder="Heldag">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label fw-semibold">Pass — till</label>
+                        <input type="text" class="form-control" id="stfEndsAt" placeholder="Heldag">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label fw-semibold">Status</label>
+                        <select class="form-select" id="stfStatus">
+                            <option value="Planned">Planerad</option>
+                            <option value="Invited">Inbjuden</option>
+                            <option value="Accepted">Accepterad</option>
+                            <option value="Declined">Avböjt</option>
+                            <option value="Confirmed">Bekräftad</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-text mb-3" style="margin-top:-.5rem">Lämna passtiderna tomma för heldag. Flera personer kan dela samma roll/plats på olika tider (avlösning).</div>
+
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="stfResponsible">
+                    <label class="form-check-label" for="stfResponsible">Ansvarig för rollen/området</label>
+                </div>
+                <div class="form-check mb-3" id="stfAdminAccessWrap" style="display:none">
+                    <input class="form-check-input" type="checkbox" id="stfAdminAccess">
+                    <label class="form-check-label" for="stfAdminAccess">
+                        Ge appbehörighet (kan hantera tävlingen i pistol.nu)
+                    </label>
+                    <div class="form-text text-warning-emphasis">Endast för Tävlingsledning. Personen läggs till som tävlingsansvarig.</div>
+                </div>
+
+                <div class="mb-1">
+                    <label class="form-label fw-semibold">Anteckning</label>
+                    <textarea class="form-control" id="stfNote" rows="2" placeholder="Valfritt"></textarea>
+                </div>
+                <div class="text-danger small" id="stfError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="stfSaveBtn" onclick="stfSave()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var compId = @competitionId;
+    var TOKEN = '@stfToken';
+    var roles = [];        // role metadata from the roster response
+    var groups = [];       // current roster groups
+    var modal = null;
+    var searchTimer = null;
+
+    var STATUS_LABEL = { Planned: 'Planerad', Invited: 'Inbjuden', Accepted: 'Accepterad', Declined: 'Avböjt', Confirmed: 'Bekräftad' };
+    var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-primary', Declined: 'bg-danger', Confirmed: 'bg-success' };
+    var SCOPE_KEY_LABEL = { Skjutlag: 'Skjutlag nr', Station: 'Station nr', Klass: 'Klass', Patrull: 'Patrull nr', Bana: 'Bana' };
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function roleByKey(k) { for (var i = 0; i < roles.length; i++) if (roles[i].roleKey === k) return roles[i]; return null; }
+
+    async function loadRoster() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetRoster?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { document.getElementById('stfRoster').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa bemanningen.') + '</div>'; return; }
+            groups = d.groups || [];
+            roles = groups.filter(function (g) { return g.roleKey && g.roleKey.charAt(0) !== '_'; })
+                          .map(function (g) { return g; });
+            renderRoster();
+            populateRoleSelect();
+        } catch (e) {
+            document.getElementById('stfRoster').innerHTML = '<div class="alert alert-warning">Kunde inte läsa bemanningen.</div>';
+        }
+    }
+
+    function renderRoster() {
+        var host = document.getElementById('stfRoster');
+        var total = 0;
+        var html = groups.map(function (g) {
+            var items = g.assignments || [];
+            total += items.length;
+            var isCatchAll = g.roleKey && g.roleKey.charAt(0) === '_';
+            var addBtn = isCatchAll ? '' :
+                '<button type="button" class="btn btn-outline-primary btn-sm" onclick="stfOpenAdd(\'' + g.roleKey + '\')"><i class="bi bi-plus-lg me-1"></i>Lägg till ' + esc(g.roleName.toLowerCase()) + '</button>';
+            var body = items.length
+                ? items.map(rowHtml).join('')
+                : '<div class="text-muted small py-2">Ingen tilldelad ännu.</div>';
+            return '<div class="card mb-3">'
+                + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
+                + '<span class="fw-semibold">' + esc(g.rolePlural || g.roleName) + ' <span class="badge bg-light text-dark ms-1">' + items.length + '</span></span>'
+                + addBtn
+                + '</div>'
+                + '<div class="card-body py-2">'
+                + (g.description && !isCatchAll ? '<div class="text-muted small mb-2">' + esc(g.description) + '</div>' : '')
+                + body
+                + '</div></div>';
+        }).join('');
+        host.innerHTML = html || '<div class="text-muted">Inga roller för denna gren.</div>';
+        var c = document.getElementById('stfCount');
+        if (c) c.textContent = total > 0 ? (total + ' tilldelade') : '';
+    }
+
+    function rowHtml(a) {
+        var star = a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" title="Ansvarig"></i>' : '';
+        var adminBadge = a.hasAdminAccess ? '<span class="badge bg-warning text-dark ms-1" title="Har appbehörighet"><i class="bi bi-shield-lock"></i> Behörighet</span>' : '';
+        var statusBadge = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + ' ms-1">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
+        var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
+        var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
+        var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
+        var phone = a.phone ? '<a class="btn btn-sm btn-outline-success" href="tel:' + esc(a.phone) + '" title="Ring"><i class="bi bi-telephone"></i></a>' : '';
+        var note = a.note ? '<div class="text-muted small mt-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(a.note) + '</div>' : '';
+        return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
+            + '<div class="flex-grow-1">'
+            + '<div>' + star + '<span class="fw-semibold">' + esc(a.displayName) + '</span>' + fn + statusBadge + adminBadge + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1">' + scope + shift + '</div>'
+            + note
+            + '</div>'
+            + '<div class="d-flex gap-1 flex-shrink-0">'
+            + phone
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ',\'' + esc(a.displayName).replace(/'/g, "\\'") + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
+            + '</div>'
+            + '</div>';
+    }
+
+    function findAssignment(id) {
+        for (var i = 0; i < groups.length; i++) {
+            var items = groups[i].assignments || [];
+            for (var j = 0; j < items.length; j++) if (items[j].id === id) return items[j];
+        }
+        return null;
+    }
+
+    // ---- role select + field visibility ----
+
+    function populateRoleSelect() {
+        var sel = document.getElementById('stfRole');
+        sel.innerHTML = roles.map(function (g) { return '<option value="' + g.roleKey + '">' + esc(g.roleName) + '</option>'; }).join('');
+    }
+
+    function applyRoleFields() {
+        var role = roleByKey(document.getElementById('stfRole').value);
+        var desc = document.getElementById('stfRoleDesc');
+        desc.textContent = role ? (role.description || '') : '';
+        document.getElementById('stfFunctionTitleWrap').style.display = (role && role.supportsFunctionTitle) ? '' : 'none';
+        document.getElementById('stfAdminAccessWrap').style.display = (role && role.roleKey === 'tavlingsledning') ? '' : 'none';
+        document.getElementById('stfTargetWrap').style.display = (role && role.supportsTargetRange) ? '' : 'none';
+    }
+
+    function applyScopeFields() {
+        var st = document.getElementById('stfScopeType').value;
+        var keyWrap = document.getElementById('stfScopeKeyWrap');
+        if (st === 'All' || !st) { keyWrap.style.display = 'none'; }
+        else {
+            keyWrap.style.display = '';
+            document.getElementById('stfScopeKeyLabel').textContent = SCOPE_KEY_LABEL[st] || 'Nummer';
+        }
+    }
+
+    document.getElementById('stfRole').addEventListener('change', function () {
+        var role = roleByKey(this.value);
+        if (role && role.defaultScopeType) {
+            document.getElementById('stfScopeType').value = role.defaultScopeType;
+        }
+        applyRoleFields();
+        applyScopeFields();
+    });
+    document.getElementById('stfScopeType').addEventListener('change', applyScopeFields);
+
+    // ---- member search ----
+
+    var searchBox = document.getElementById('stfMemberSearch');
+    searchBox.addEventListener('input', function () {
+        var q = this.value.trim();
+        if (searchTimer) clearTimeout(searchTimer);
+        if (q.length < 2) { hideResults(); return; }
+        searchTimer = setTimeout(function () { doSearch(q); }, 220);
+    });
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('#stfMemberResults') && e.target !== searchBox) hideResults();
+    });
+
+    async function doSearch(q) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SearchMembers?competitionId=' + compId + '&query=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { hideResults(); return; }
+            var box = document.getElementById('stfMemberResults');
+            var list = d.members || [];
+            if (!list.length) { box.innerHTML = '<div class="list-group-item small text-muted">Inga träffar</div>'; box.style.display = 'block'; return; }
+            box.innerHTML = list.map(function (m) {
+                return '<button type="button" class="list-group-item list-group-item-action" '
+                    + 'data-id="' + m.memberId + '" data-name="' + esc(m.memberName) + '" data-phone="' + esc(m.phone || '') + '">'
+                    + esc(m.memberName) + (m.clubName ? ' <span class="text-muted small">· ' + esc(m.clubName) + '</span>' : '') + '</button>';
+            }).join('');
+            box.style.display = 'block';
+            box.querySelectorAll('button').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    document.getElementById('stfMemberId').value = this.getAttribute('data-id');
+                    document.getElementById('stfName').value = this.getAttribute('data-name');
+                    var ph = this.getAttribute('data-phone');
+                    if (ph) document.getElementById('stfPhone').value = ph;
+                    searchBox.value = this.getAttribute('data-name');
+                    hideResults();
+                });
+            });
+        } catch (e) { hideResults(); }
+    }
+    function hideResults() { var b = document.getElementById('stfMemberResults'); if (b) b.style.display = 'none'; }
+
+    // If the admin edits the name manually after picking, treat it as free text (drop the member link).
+    document.getElementById('stfName').addEventListener('input', function () {
+        document.getElementById('stfMemberId').value = '0';
+    });
+
+    // ---- open / edit / save / delete ----
+
+    function ensureModal() {
+        if (!modal) modal = new bootstrap.Modal(document.getElementById('stfModal'));
+        return modal;
+    }
+
+    function resetForm() {
+        document.getElementById('stfId').value = '0';
+        document.getElementById('stfMemberId').value = '0';
+        document.getElementById('stfMemberSearch').value = '';
+        document.getElementById('stfName').value = '';
+        document.getElementById('stfPhone').value = '';
+        document.getElementById('stfFunctionTitle').value = '';
+        document.getElementById('stfScopeKey').value = '';
+        document.getElementById('stfTargetFrom').value = '';
+        document.getElementById('stfTargetTo').value = '';
+        document.getElementById('stfStartsAt').value = '';
+        document.getElementById('stfEndsAt').value = '';
+        document.getElementById('stfStatus').value = 'Planned';
+        document.getElementById('stfResponsible').checked = false;
+        document.getElementById('stfAdminAccess').checked = false;
+        document.getElementById('stfNote').value = '';
+        document.getElementById('stfError').textContent = '';
+        hideResults();
+    }
+
+    window.stfOpenAdd = function (roleKey) {
+        if (!roles.length) return;
+        resetForm();
+        document.getElementById('stfModalTitle').textContent = 'Lägg till funktionär';
+        var sel = document.getElementById('stfRole');
+        if (roleKey) sel.value = roleKey;
+        var role = roleByKey(sel.value);
+        document.getElementById('stfScopeType').value = (role && role.defaultScopeType) ? role.defaultScopeType : 'All';
+        if (role) document.getElementById('stfResponsible').checked = false;
+        applyRoleFields();
+        applyScopeFields();
+        ensureModal().show();
+    };
+
+    window.stfEdit = function (id) {
+        var a = findAssignment(id);
+        if (!a) return;
+        resetForm();
+        document.getElementById('stfModalTitle').textContent = 'Redigera funktionär';
+        document.getElementById('stfId').value = a.id;
+        document.getElementById('stfMemberId').value = a.memberId || 0;
+        document.getElementById('stfName').value = a.displayName || '';
+        document.getElementById('stfMemberSearch').value = a.displayName || '';
+        document.getElementById('stfPhone').value = a.phone || '';
+        document.getElementById('stfRole').value = a.roleKey;
+        document.getElementById('stfFunctionTitle').value = a.functionTitle || '';
+        document.getElementById('stfScopeType').value = a.scopeType || 'All';
+        document.getElementById('stfScopeKey').value = a.scopeKey || '';
+        document.getElementById('stfTargetFrom').value = a.targetFrom || '';
+        document.getElementById('stfTargetTo').value = a.targetTo || '';
+        document.getElementById('stfStatus').value = a.status || 'Planned';
+        document.getElementById('stfResponsible').checked = !!a.isResponsible;
+        document.getElementById('stfAdminAccess').checked = !!a.hasAdminAccess;
+        document.getElementById('stfNote').value = a.note || '';
+        // shift label back into time fields is best-effort; the picker keeps raw text
+        if (a.shiftLabel && a.shiftLabel.indexOf('–') > -1) {
+            var parts = a.shiftLabel.split('–');
+            document.getElementById('stfStartsAt').value = parts[0].replace('från ', '').trim();
+            document.getElementById('stfEndsAt').value = (parts[1] || '').trim();
+        }
+        applyRoleFields();
+        applyScopeFields();
+        ensureModal().show();
+    };
+
+    window.stfSave = async function () {
+        var err = document.getElementById('stfError');
+        err.textContent = '';
+        var scopeType = document.getElementById('stfScopeType').value;
+        var payload = {
+            id: parseInt(document.getElementById('stfId').value, 10) || 0,
+            competitionId: compId,
+            memberId: parseInt(document.getElementById('stfMemberId').value, 10) || 0,
+            displayName: document.getElementById('stfName').value.trim(),
+            phone: document.getElementById('stfPhone').value.trim(),
+            roleKey: document.getElementById('stfRole').value,
+            functionTitle: document.getElementById('stfFunctionTitle').value.trim(),
+            scopeType: scopeType,
+            scopeKey: scopeType === 'All' ? '' : document.getElementById('stfScopeKey').value.trim(),
+            targetFrom: parseInt(document.getElementById('stfTargetFrom').value, 10) || 0,
+            targetTo: parseInt(document.getElementById('stfTargetTo').value, 10) || 0,
+            startsAt: document.getElementById('stfStartsAt').value.trim(),
+            endsAt: document.getElementById('stfEndsAt').value.trim(),
+            isResponsible: document.getElementById('stfResponsible').checked,
+            hasAdminAccess: document.getElementById('stfAdminAccess').checked,
+            status: document.getElementById('stfStatus').value,
+            note: document.getElementById('stfNote').value.trim()
+        };
+        if (!payload.displayName) { err.textContent = 'Ange en person (sök medlem eller skriv namn).'; return; }
+        var btn = document.getElementById('stfSaveBtn');
+        btn.disabled = true;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SaveAssignment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify(payload)
+            });
+            var d = await r.json();
+            if (!d.success) { err.textContent = d.message || 'Kunde inte spara.'; btn.disabled = false; return; }
+            ensureModal().hide();
+            await loadRoster();
+        } catch (e) { err.textContent = 'Nätverksfel.'; }
+        btn.disabled = false;
+    };
+
+    window.stfDelete = async function (id, name) {
+        if (!confirm('Ta bort ' + name + ' från bemanningen?')) return;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/DeleteAssignment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify({ id: id, competitionId: compId })
+            });
+            var d = await r.json();
+            if (d.success) await loadRoster();
+            else alert(d.message || 'Kunde inte ta bort.');
+        } catch (e) { alert('Nätverksfel.'); }
+    };
+
+    // Flatpickr time pickers for the shift fields (loaded elsewhere on the page).
+    function initPickers() {
+        if (typeof flatpickr === 'undefined') return;
+        ['#stfStartsAt', '#stfEndsAt'].forEach(function (sel) {
+            flatpickr(sel, { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
+        });
+    }
+    initPickers();
+
+    loadRoster();
+})();
+</script>

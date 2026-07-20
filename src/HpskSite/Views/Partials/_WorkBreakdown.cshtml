@@ -1,0 +1,348 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    // Förberedelser — the preparation work-breakdown (WorkArea → WorkItem). Områden with an
+    // områdesansvarig; uppgifter with assignee (from the same people pool), deadline and status;
+    // per-område progress + overdue flag. Independent of start lists — pure planning. Seedable from
+    // built-in size templates (klubb/krets/SM). See COMPETITION_STAFFING_SYSTEM.md §4, §6 Phase 1b.
+    var competitionId = ViewData["CompetitionId"];
+    var wbToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <p class="text-muted small mb-0" style="max-width:640px">
+        Förberedelserna inför tävlingen — materiel, mark &amp; bana, inköp, sekretariat… Varje uppgift har
+        en ansvarig, en deadline och en status. Ju större tävling, desto mer att planera.
+    </p>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <div class="btn-group">
+            <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-magic me-1"></i>Fyll i från mall
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><button class="dropdown-item" type="button" onclick="wbSeed('klubb')">Klubbtävling</button></li>
+                <li><button class="dropdown-item" type="button" onclick="wbSeed('krets')">Kretstävling</button></li>
+                <li><button class="dropdown-item" type="button" onclick="wbSeed('sm')">Mästerskap (SM)</button></li>
+            </ul>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="wbOpenArea(0)">
+            <i class="bi bi-folder-plus me-1"></i>Lägg till område
+        </button>
+    </div>
+</div>
+
+<div id="wbAreas">
+    <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+</div>
+
+<!-- Område modal -->
+<div class="modal fade" id="wbAreaModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="wbAreaModalTitle">Lägg till område</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="wbAreaId" value="0">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Områdesnamn</label>
+                    <input type="text" class="form-control" id="wbAreaName" placeholder="t.ex. Materiel">
+                </div>
+                <div class="mb-1">
+                    <label class="form-label fw-semibold">Områdesansvarig (valfritt)</label>
+                    <input type="hidden" id="wbAreaRespId" value="0">
+                    <div class="position-relative">
+                        <input type="text" class="form-control" id="wbAreaRespSearch" placeholder="Sök medlem…" autocomplete="off">
+                        <div id="wbAreaRespResults" class="list-group position-absolute w-100 shadow" style="z-index:1080; display:none; max-height:220px; overflow:auto;"></div>
+                    </div>
+                    <input type="text" class="form-control mt-1" id="wbAreaRespName" placeholder="eller fritt namn">
+                </div>
+                <div class="text-danger small mt-2" id="wbAreaError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="wbSaveArea()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Uppgift modal -->
+<div class="modal fade" id="wbItemModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="wbItemModalTitle">Lägg till uppgift</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="wbItemId" value="0">
+                <input type="hidden" id="wbItemAreaId" value="0">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Uppgift</label>
+                    <input type="text" class="form-control" id="wbItemTitle" placeholder="t.ex. Beställa tavlor">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Beskrivning (valfritt)</label>
+                    <textarea class="form-control" id="wbItemDesc" rows="2"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Tilldelad (valfritt)</label>
+                    <input type="hidden" id="wbItemAssignId" value="0">
+                    <div class="position-relative">
+                        <input type="text" class="form-control" id="wbItemAssignSearch" placeholder="Sök medlem…" autocomplete="off">
+                        <div id="wbItemAssignResults" class="list-group position-absolute w-100 shadow" style="z-index:1080; display:none; max-height:220px; overflow:auto;"></div>
+                    </div>
+                    <input type="text" class="form-control mt-1" id="wbItemAssignName" placeholder="eller fritt namn">
+                </div>
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2">
+                        <label class="form-label fw-semibold">Deadline (valfritt)</label>
+                        <input type="text" class="form-control" id="wbItemDue" placeholder="Ingen">
+                    </div>
+                    <div class="col-sm-6 mb-2">
+                        <label class="form-label fw-semibold">Status</label>
+                        <select class="form-select" id="wbItemStatus">
+                            <option value="Planerad">Planerad</option>
+                            <option value="Pagar">Pågår</option>
+                            <option value="Blockerad">Blockerad</option>
+                            <option value="Klar">Klar</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="text-danger small mt-2" id="wbItemError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="wbSaveItem()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var compId = @competitionId;
+    var TOKEN = '@wbToken';
+    var areas = [];
+    var areaModal = null, itemModal = null;
+
+    var STATUS_LABEL = { Planerad: 'Planerad', Pagar: 'Pågår', Blockerad: 'Blockerad', Klar: 'Klar' };
+    var STATUS_CLS = { Planerad: 'bg-secondary', Pagar: 'bg-primary', Blockerad: 'bg-danger', Klar: 'bg-success' };
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function q(id) { return document.getElementById(id); }
+
+    async function load() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetWorkBreakdown?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { q('wbAreas').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa förberedelserna.') + '</div>'; return; }
+            areas = d.areas || [];
+            render();
+        } catch (e) { q('wbAreas').innerHTML = '<div class="alert alert-warning">Kunde inte läsa förberedelserna.</div>'; }
+    }
+
+    function render() {
+        if (!areas.length) {
+            q('wbAreas').innerHTML = '<div class="text-center text-muted py-4">Inga områden ännu. Lägg till ett område, eller fyll i från en mall.</div>';
+            return;
+        }
+        q('wbAreas').innerHTML = areas.map(areaHtml).join('');
+    }
+
+    function areaHtml(a) {
+        var pct = a.totalCount > 0 ? Math.round((a.doneCount / a.totalCount) * 100) : 0;
+        var overdue = a.overdueCount > 0 ? '<span class="badge bg-danger ms-1" title="Försenade">' + a.overdueCount + ' försenade</span>' : '';
+        var resp = a.responsibleName ? '<span class="text-muted small ms-2"><i class="bi bi-person me-1"></i>' + esc(a.responsibleName) + '</span>' : '';
+        var items = (a.items || []).map(itemHtml).join('') || '<div class="text-muted small py-2">Inga uppgifter ännu.</div>';
+        return '<div class="card mb-3">'
+            + '<div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-1">'
+            + '<span><span class="fw-semibold">' + esc(a.name) + '</span> <span class="badge bg-light text-dark">' + a.doneCount + '/' + a.totalCount + ' klara</span>' + overdue + resp + '</span>'
+            + '<span class="d-flex gap-1">'
+            + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbOpenItem(' + a.id + ',0)"><i class="bi bi-plus-lg me-1"></i>Uppgift</button>'
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenArea(' + a.id + ')" title="Redigera område"><i class="bi bi-pencil"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteArea(' + a.id + ',\'' + esc(a.name).replace(/'/g, "\\'") + '\')" title="Ta bort område"><i class="bi bi-trash"></i></button>'
+            + '</span>'
+            + '</div>'
+            + '<div class="card-body py-2">'
+            + '<div class="progress mb-2" style="height:6px"><div class="progress-bar bg-success" style="width:' + pct + '%"></div></div>'
+            + items
+            + '</div></div>';
+    }
+
+    function itemHtml(i) {
+        var done = i.status === 'Klar';
+        var due = i.dueDate ? '<span class="badge ' + (i.isOverdue ? 'bg-danger' : 'bg-light text-dark border') + '"><i class="bi bi-calendar-event me-1"></i>' + esc(i.dueDate) + '</span>' : '';
+        var who = i.assignedName ? '<span class="badge bg-light text-dark border"><i class="bi bi-person me-1"></i>' + esc(i.assignedName) + '</span>' : '<span class="badge bg-light text-secondary border">otilldelad</span>';
+        var statusBadge = '<span class="badge ' + (STATUS_CLS[i.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[i.status] || i.status) + '</span>';
+        var titleCls = done ? 'text-decoration-line-through text-muted' : '';
+        return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
+            + '<div class="flex-grow-1">'
+            + '<div class="form-check">'
+            + '<input class="form-check-input" type="checkbox" ' + (done ? 'checked' : '') + ' onchange="wbToggle(' + i.id + ',this.checked)">'
+            + '<label class="form-check-label ' + titleCls + '">' + esc(i.title) + '</label>'
+            + '</div>'
+            + (i.description ? '<div class="text-muted small ms-4">' + esc(i.description) + '</div>' : '')
+            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + '</div>'
+            + '</div>'
+            + '<div class="d-flex gap-1 flex-shrink-0">'
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenItem(' + i.workAreaId + ',' + i.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteItem(' + i.id + ',\'' + esc(i.title).replace(/'/g, "\\'") + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
+            + '</div>'
+            + '</div>';
+    }
+
+    function findArea(id) { for (var i = 0; i < areas.length; i++) if (areas[i].id === id) return areas[i]; return null; }
+    function findItem(id) {
+        for (var i = 0; i < areas.length; i++) { var its = areas[i].items || []; for (var j = 0; j < its.length; j++) if (its[j].id === id) return its[j]; }
+        return null;
+    }
+
+    // ---- generic member search (used by both modals) ----
+    function wireSearch(searchId, resultsId, idField, nameField) {
+        var box = q(searchId), results = q(resultsId);
+        var timer = null;
+        box.addEventListener('input', function () {
+            var val = this.value.trim();
+            if (timer) clearTimeout(timer);
+            if (val.length < 2) { results.style.display = 'none'; return; }
+            timer = setTimeout(function () { run(val); }, 220);
+        });
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('#' + resultsId) && e.target !== box) results.style.display = 'none';
+        });
+        async function run(val) {
+            try {
+                var r = await fetch('/umbraco/surface/Staffing/SearchMembers?competitionId=' + compId + '&query=' + encodeURIComponent(val), { headers: { 'Accept': 'application/json' } });
+                var d = await r.json();
+                if (!d.success) { results.style.display = 'none'; return; }
+                var list = d.members || [];
+                if (!list.length) { results.innerHTML = '<div class="list-group-item small text-muted">Inga träffar</div>'; results.style.display = 'block'; return; }
+                results.innerHTML = list.map(function (m) {
+                    return '<button type="button" class="list-group-item list-group-item-action" data-id="' + m.memberId + '" data-name="' + esc(m.memberName) + '">'
+                        + esc(m.memberName) + (m.clubName ? ' <span class="text-muted small">· ' + esc(m.clubName) + '</span>' : '') + '</button>';
+                }).join('');
+                results.style.display = 'block';
+                results.querySelectorAll('button').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        q(idField).value = this.getAttribute('data-id');
+                        q(nameField).value = this.getAttribute('data-name');
+                        box.value = this.getAttribute('data-name');
+                        results.style.display = 'none';
+                    });
+                });
+            } catch (e) { results.style.display = 'none'; }
+        }
+        q(nameField).addEventListener('input', function () { q(idField).value = '0'; });
+    }
+    wireSearch('wbAreaRespSearch', 'wbAreaRespResults', 'wbAreaRespId', 'wbAreaRespName');
+    wireSearch('wbItemAssignSearch', 'wbItemAssignResults', 'wbItemAssignId', 'wbItemAssignName');
+
+    // ---- område ----
+    window.wbOpenArea = function (id) {
+        if (!areaModal) areaModal = new bootstrap.Modal(q('wbAreaModal'));
+        q('wbAreaError').textContent = '';
+        var a = id ? findArea(id) : null;
+        q('wbAreaId').value = a ? a.id : 0;
+        q('wbAreaName').value = a ? a.name : '';
+        q('wbAreaRespId').value = a && a.responsibleMemberId ? a.responsibleMemberId : 0;
+        q('wbAreaRespName').value = a && a.responsibleName ? a.responsibleName : '';
+        q('wbAreaRespSearch').value = a && a.responsibleName ? a.responsibleName : '';
+        q('wbAreaModalTitle').textContent = a ? 'Redigera område' : 'Lägg till område';
+        areaModal.show();
+    };
+
+    window.wbSaveArea = async function () {
+        var name = q('wbAreaName').value.trim();
+        if (!name) { q('wbAreaError').textContent = 'Ange ett namn.'; return; }
+        var payload = {
+            id: parseInt(q('wbAreaId').value, 10) || 0,
+            competitionId: compId,
+            name: name,
+            responsibleMemberId: parseInt(q('wbAreaRespId').value, 10) || 0,
+            responsibleName: q('wbAreaRespName').value.trim()
+        };
+        var d = await post('/umbraco/surface/Staffing/SaveWorkArea', payload);
+        if (d.success) { areaModal.hide(); await load(); }
+        else q('wbAreaError').textContent = d.message || 'Kunde inte spara.';
+    };
+
+    window.wbDeleteArea = async function (id, name) {
+        if (!confirm('Ta bort området "' + name + '" och alla dess uppgifter?')) return;
+        var d = await post('/umbraco/surface/Staffing/DeleteWorkArea', { id: id, competitionId: compId });
+        if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
+    };
+
+    // ---- uppgift ----
+    window.wbOpenItem = function (areaId, itemId) {
+        if (!itemModal) itemModal = new bootstrap.Modal(q('wbItemModal'));
+        q('wbItemError').textContent = '';
+        var i = itemId ? findItem(itemId) : null;
+        q('wbItemId').value = i ? i.id : 0;
+        q('wbItemAreaId').value = areaId;
+        q('wbItemTitle').value = i ? i.title : '';
+        q('wbItemDesc').value = i && i.description ? i.description : '';
+        q('wbItemAssignId').value = i && i.assignedMemberId ? i.assignedMemberId : 0;
+        q('wbItemAssignName').value = i && i.assignedName ? i.assignedName : '';
+        q('wbItemAssignSearch').value = i && i.assignedName ? i.assignedName : '';
+        q('wbItemDue').value = i && i.dueDate ? i.dueDate : '';
+        q('wbItemStatus').value = i ? i.status : 'Planerad';
+        q('wbItemModalTitle').textContent = i ? 'Redigera uppgift' : 'Lägg till uppgift';
+        itemModal.show();
+    };
+
+    window.wbSaveItem = async function () {
+        var title = q('wbItemTitle').value.trim();
+        if (!title) { q('wbItemError').textContent = 'Ange en uppgift.'; return; }
+        var payload = {
+            id: parseInt(q('wbItemId').value, 10) || 0,
+            competitionId: compId,
+            workAreaId: parseInt(q('wbItemAreaId').value, 10) || 0,
+            title: title,
+            description: q('wbItemDesc').value.trim(),
+            assignedMemberId: parseInt(q('wbItemAssignId').value, 10) || 0,
+            assignedName: q('wbItemAssignName').value.trim(),
+            dueDate: q('wbItemDue').value.trim(),
+            status: q('wbItemStatus').value
+        };
+        var d = await post('/umbraco/surface/Staffing/SaveWorkItem', payload);
+        if (d.success) { itemModal.hide(); await load(); }
+        else q('wbItemError').textContent = d.message || 'Kunde inte spara.';
+    };
+
+    window.wbDeleteItem = async function (id, title) {
+        if (!confirm('Ta bort uppgiften "' + title + '"?')) return;
+        var d = await post('/umbraco/surface/Staffing/DeleteWorkItem', { id: id, competitionId: compId });
+        if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
+    };
+
+    window.wbToggle = async function (id, checked) {
+        var d = await post('/umbraco/surface/Staffing/SetWorkItemStatus', { id: id, competitionId: compId, status: checked ? 'Klar' : 'Planerad' });
+        if (d.success) await load();
+    };
+
+    window.wbSeed = async function (size) {
+        var label = size === 'sm' ? 'Mästerskap (SM)' : (size === 'krets' ? 'Kretstävling' : 'Klubbtävling');
+        if (!confirm('Fyll i förberedelsemallen för ' + label + '? Befintliga områden med samma namn hoppas över.')) return;
+        var d = await post('/umbraco/surface/Staffing/SeedPrepTemplate', { competitionId: compId, size: size });
+        if (d.success) { await load(); }
+        else alert(d.message || 'Kunde inte fylla i mallen.');
+    };
+
+    async function post(url, payload) {
+        try {
+            var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify(payload) });
+            return await r.json();
+        } catch (e) { return { success: false, message: 'Nätverksfel.' }; }
+    }
+
+    function initPickers() {
+        if (typeof flatpickr === 'undefined') return;
+        flatpickr('#wbItemDue', { locale: 'sv', dateFormat: 'Y-m-d' });
+    }
+    initPickers();
+
+    load();
+})();
+</script>
