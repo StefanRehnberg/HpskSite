@@ -1,0 +1,186 @@
+@{
+    // "Funktionärer" tab (Precision / MagnumPrecision). The competition-day cockpit:
+    //  - Skjutlag timeline (each lag + its start time + progress + done/active/stalled/upcoming)
+    //  - per active lag, the scorers working it in parallel (saves-derived: pace, freshness, the
+    //    position block they've been entering) + a "behöver hjälp" flag
+    //  - launchers into each lag's scoring screen + the Skjutledare view
+    //  - the tävlingsledning message console (mounted on #evtInboxMount in the page header)
+    // Everything is derived from the saves scorers already make (GetPrecisionFunctionaryLoad) — no
+    // heartbeat, honouring the cellular/battery constraint. Polls every 15 s (visibility-aware).
+    var competitionId = ViewData["CompetitionId"];
+}
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <span class="fw-bold fs-5"><i class="bi bi-person-badge me-1"></i>Funktionärer</span>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="text-muted small" id="pfnUpdated"></span>
+        <a class="btn btn-outline-success btn-sm" href="/live?c=@competitionId" target="_blank" rel="noopener">
+            <i class="bi bi-tv me-1"></i>Live-resultattavla
+        </a>
+    </div>
+</div>
+
+@Html.AntiForgeryToken()
+
+<div class="row g-3" id="pfnSkjutlag">
+    <div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+</div>
+
+<p class="text-muted small mt-3 mb-0">
+    Bemanningen härleds från inmatningarna som poängräknarna redan gör — ingen extra app och ingen
+    batteridränerande inloggningssignal. "Arbetar nu" visar vilka som registrerat nyligen, deras takt
+    (serier senaste 10 min) och vilka platser de matat in. En skytt som just satt sig syns först efter
+    första sparade serien.
+</p>
+
+@await Html.PartialAsync("_EventMessageInbox")
+<script>
+(function () {
+    var compId = @competitionId;
+    var REFRESH = 15000;
+    var timer = null;
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+    function statusBadge(s) {
+        switch (s) {
+            case 'done': return '<span class="badge bg-success">Klar</span>';
+            case 'active': return '<span class="badge bg-primary">Pågår</span>';
+            case 'stalled': return '<span class="badge bg-warning text-dark">Vilande</span>';
+            default: return '<span class="badge bg-secondary">Väntar</span>';
+        }
+    }
+    function freshDot(mins) {
+        var cls = mins <= 2 ? 'text-success' : (mins <= 4 ? 'text-warning' : 'text-danger');
+        return '<i class="bi bi-circle-fill ' + cls + ' me-1" style="font-size:.5rem;vertical-align:middle"></i>';
+    }
+    function scorerRow(sc, maxRecent) {
+        var barPct = maxRecent > 0 ? Math.round((sc.entriesRecent / maxRecent) * 100) : 0;
+        var pos = sc.posCount > 0
+            ? '<span class="text-muted">platser ' + sc.posFrom + (sc.posTo !== sc.posFrom ? '–' + sc.posTo : '') + '</span>'
+            : '';
+        return '<div class="d-flex align-items-center gap-2 small py-1">'
+            + '<span style="min-width:130px">' + freshDot(sc.lastSaveMinsAgo) + '<span class="fw-semibold">' + esc(sc.name) + '</span></span>'
+            + '<span style="min-width:84px">' + pos + '</span>'
+            + '<div class="flex-grow-1"><div class="progress" style="height:6px" title="' + sc.entriesRecent + ' serier senaste 10 min">'
+            + '<div class="progress-bar bg-info" style="width:' + barPct + '%"></div></div></div>'
+            + '<span class="text-muted text-nowrap">' + sc.entriesRecent + '/10 min · '
+            + (sc.lastSaveMinsAgo <= 0 ? 'nyss' : sc.lastSaveMinsAgo + ' min') + '</span>'
+            + '</div>';
+    }
+
+    function render(d) {
+        var host = document.getElementById('pfnSkjutlag');
+        var upd = document.getElementById('pfnUpdated');
+        if (!d.success) { host.innerHTML = '<div class="col-12 text-danger">' + esc(d.message || 'Kunde inte läsa funktionärsdata.') + '</div>'; return; }
+        if (upd) upd.textContent = 'Uppdaterad ' + new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        var lag = d.skjutlag || [];
+        // Scale the pace bars against the busiest scorer across the whole comp so imbalance is visible.
+        var maxRecent = 0;
+        lag.forEach(function (sl) { (sl.scorers || []).forEach(function (sc) { if (sc.entriesRecent > maxRecent) maxRecent = sc.entriesRecent; }); });
+
+        if (!lag.length) {
+            host.innerHTML = '<div class="col-12 text-muted text-center py-4">Ingen startlista publicerad ännu. Skapa och publicera en startlista under Startlistor.</div>';
+            syncRecipients(lag);
+            return;
+        }
+
+        host.innerHTML = lag.map(function (sl) {
+            var pct = sl.seriesExpected > 0 ? Math.min(100, Math.round((sl.seriesEntered / sl.seriesExpected) * 100)) : 0;
+            var barCls = sl.status === 'done' ? 'bg-success' : (sl.status === 'active' ? 'bg-primary' : 'bg-secondary');
+            var scorers = sl.scorers || [];
+            var showRoster = (sl.status === 'active' || sl.status === 'stalled') || scorers.length > 0;
+
+            var rosterHtml = '';
+            if (showRoster && scorers.length) {
+                // "Arbetar nu" only while a lag is live; a finished lag just lists who scored it.
+                var rosterLabel = (sl.status === 'active' || sl.status === 'stalled') ? 'Arbetar nu' : 'Poängräknare';
+                rosterHtml = '<div class="mt-2"><div class="small text-muted mb-1"><i class="bi bi-people me-1"></i>' + rosterLabel + ' ('
+                    + scorers.length + ')</div>' + scorers.map(function (sc) { return scorerRow(sc, maxRecent); }).join('') + '</div>';
+            } else if (sl.status === 'upcoming') {
+                rosterHtml = '<div class="small text-muted mt-2">Inget registrerat ännu.</div>';
+            }
+
+            var help = sl.needsHelp
+                ? '<div class="alert alert-warning py-1 px-2 small mt-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Behöver hjälp: ' + esc(sl.needsHelpReason) + '</div>'
+                : '';
+
+            var timeStr = sl.startTime ? '<span class="text-muted ms-1">' + esc(sl.startTime) + '</span>' : '';
+            var labelStr = sl.label ? '<span class="text-muted ms-1">· ' + esc(sl.label) + '</span>' : '';
+
+            return '<div class="col-12 col-xl-6">'
+                + '<div class="card h-100' + (sl.needsHelp ? ' border-warning' : '') + '">'
+                + '<div class="card-header d-flex justify-content-between align-items-center py-2 gap-2">'
+                + '<span><span class="fw-bold">Skjutlag ' + sl.teamNumber + '</span>' + timeStr + labelStr + ' ' + statusBadge(sl.status) + '</span>'
+                + '<button type="button" class="btn btn-outline-primary btn-sm" title="Skicka meddelande till Skjutlag ' + sl.teamNumber + '" onclick="pfnMsgLag(' + sl.teamNumber + ')"><i class="bi bi-envelope"></i></button>'
+                + '</div>'
+                + '<div class="card-body py-2">'
+                + '<div class="progress" style="height:8px"><div class="progress-bar ' + barCls + '" style="width:' + pct + '%"></div></div>'
+                + '<div class="small text-muted mt-1">' + sl.seriesEntered + '/' + sl.seriesExpected + ' serier'
+                + (sl.shootersExpected ? ' · ' + sl.shootersExpected + ' skyttar' : '') + '</div>'
+                + rosterHtml + help
+                + '</div>'
+                + '<div class="card-footer p-2">'
+                + '<a class="btn btn-primary w-100 mb-2" href="/station?c=' + compId + '&s=' + sl.teamNumber + '" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna resultatinmatning</a>'
+                + '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + sl.teamNumber + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>'
+                + '</div>'
+                + '</div></div>';
+        }).join('');
+
+        syncRecipients(lag);
+    }
+
+    // Keep the console composer able to address a specific lag (its scorers + skjutledare subscribe to
+    // Skjutlag:N), e.g. "hjälp på väg till lag 3".
+    function syncRecipients(lag) {
+        if (!window.EventInbox) return;
+        var recips = [
+            { type: 'All', label: 'Alla funktionärer' },
+            { type: 'Role', key: 'skjutledare', label: 'Alla skjutledare' },
+            { type: 'Role', key: 'scorer', label: 'Alla poängräknare' }
+        ];
+        (lag || []).forEach(function (sl) { recips.push({ type: 'Skjutlag', key: String(sl.teamNumber), label: 'Skjutlag ' + sl.teamNumber }); });
+        EventInbox.setRecipients(recips);
+    }
+
+    window.pfnMsgLag = function (n) {
+        if (window.EventInbox) window.EventInbox.openCompose('Skjutlag', String(n), 'Skjutlag ' + n);
+    };
+
+    async function refresh() {
+        try {
+            var r = await fetch('/umbraco/surface/CompetitionResults/GetPrecisionFunctionaryLoad?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            render(d);
+        } catch (e) {
+            var host = document.getElementById('pfnSkjutlag');
+            if (host && host.querySelector('.spinner-border')) host.innerHTML = '<div class="col-12 text-muted text-center py-4">Kunde inte läsa funktionärsdata.</div>';
+        }
+    }
+
+    // Tävlingsledningens meddelandekonsol — sees every thread (consoleMode).
+    if (window.EventInbox) {
+        EventInbox.init({
+            competitionId: compId,
+            consoleMode: true,
+            mountSelector: '#evtInboxMount',
+            label: 'Tävlingsledning',
+            fromScope: { type: 'Role', key: 'ledning' },
+            scopes: [ { type: 'Role', key: 'ledning' } ],
+            recipients: [
+                { type: 'All', label: 'Alla funktionärer' },
+                { type: 'Role', key: 'skjutledare', label: 'Alla skjutledare' },
+                { type: 'Role', key: 'scorer', label: 'Alla poängräknare' }
+            ]
+        });
+    }
+
+    refresh();
+    timer = setInterval(refresh, REFRESH);
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { if (timer) { clearInterval(timer); timer = null; } }
+        else if (!timer) { refresh(); timer = setInterval(refresh, REFRESH); }
+    });
+})();
+</script>

@@ -45,7 +45,10 @@
 }
 
 <div class="competition-results-management" data-competition-id="@competitionId" data-preset-phase="@presetPhase">
-    @if (!isStationPage)
+    @* Precision/MagnumPrecision launch their scoring + skjutledare screens from the dedicated
+       "Funktionärer" hub tab, so the launcher card is hidden here for them. Duell/Milsnabb/
+       NationellHelmatch have no hub, so they keep it on the Resultat tab. *@
+    @if (!isStationPage && !supportsSkjutledareView)
     {
     <!-- Team Links — navigate to station page for result entry -->
     <div class="card mb-3">

@@ -1875,6 +1875,144 @@ namespace HpskSite.Controllers
                 competitionId);
         }
 
+        /// <summary>
+        /// Live functionary load for the Precision/MagnumPrecision "Funktionärer" hub — derived purely from
+        /// the saves scorers already make (no heartbeat, honouring the cellular/battery constraint). Returns
+        /// the skjutlag timeline (each lag + its start time + progress + done/active/stalled/upcoming) and,
+        /// per lag, the scorers working it (from EnteredBy): pace (entries in the last PACE_WINDOW min),
+        /// freshness (minutes since their last save), and the position block they've been entering. A lag is
+        /// flagged "behöver hjälp" when it's active with nothing registered recently or a big backlog on one
+        /// scorer. Timestamps are stored local (DateTime.Now) so freshness is computed against DateTime.Now.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPrecisionFunctionaryLoad(int competitionId)
+        {
+            if (!await CanManageCompetitionResults(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet att se funktionärsöversikten för denna tävling." });
+
+            const int ACTIVE_WINDOW = 15, PACE_WINDOW = 10;
+            var now = DateTime.Now;   // Precision result timestamps are stored local (DateTime.Now), not UTC.
+
+            var comp = _contentService.GetById(competitionId);
+            int numSeries = comp?.GetValue<int>("numberOfSeriesOrStations") ?? 0;
+            int numFinal = comp?.GetValue<int>("numberOfFinalSeries") ?? 0;
+            int qualSeries = numFinal > 0 ? Math.Max(1, numSeries - numFinal) : Math.Max(1, numSeries);
+
+            var rows = await GetCompetitionResultsInternal(competitionId);
+            var cfg = LoadOfficialStartListConfig(competitionId);
+            var teamsCfg = cfg?.Teams ?? new List<StartListTeam>();
+            var nameMap = BuildEntererNameMap(rows.Select(r => r.EnteredBy));
+
+            var rowsByTeam = rows.GroupBy(r => r.TeamNumber).ToDictionary(g => g.Key, g => g.ToList());
+            var teamNumbers = teamsCfg.Select(t => t.TeamNumber)
+                .Concat(rows.Select(r => r.TeamNumber))
+                .Where(n => n > 0).Distinct().OrderBy(n => n).ToList();
+
+            var skjutlag = teamNumbers.Select(tn =>
+            {
+                var tcfg = teamsCfg.FirstOrDefault(t => t.TeamNumber == tn);
+                rowsByTeam.TryGetValue(tn, out var trows);
+                trows ??= new List<PrecisionResultEntry>();
+
+                int shootersExpected = (tcfg?.ShooterCount ?? 0) > 0
+                    ? tcfg!.ShooterCount
+                    : (tcfg?.Shooters?.Count ?? trows.Select(r => r.MemberId).Distinct().Count());
+                int seriesExpected = shootersExpected * qualSeries;
+                int seriesEntered = trows.Count;
+                DateTime? lastSaveAt = trows.Count > 0 ? trows.Max(r => r.LastModified) : (DateTime?)null;
+                int lastMins = lastSaveAt.HasValue ? (int)Math.Max(0, (now - lastSaveAt.Value).TotalMinutes) : -1;
+                bool isDone = seriesExpected > 0 && seriesEntered >= seriesExpected;
+                bool isActive = !isDone && lastMins >= 0 && lastMins <= ACTIVE_WINDOW;
+                string status = isDone ? "done" : isActive ? "active" : (seriesEntered > 0 ? "stalled" : "upcoming");
+
+                var scorers = trows.Where(r => r.EnteredBy > 0)
+                    .GroupBy(r => r.EnteredBy)
+                    .Select(g =>
+                    {
+                        var poss = g.Select(r => r.Position).Where(p => p > 0).Distinct().OrderBy(p => p).ToList();
+                        return new
+                        {
+                            memberId = g.Key,
+                            name = nameMap.TryGetValue(g.Key, out var nm) ? nm : ("#" + g.Key),
+                            entriesTotal = g.Count(),
+                            entriesRecent = g.Count(r => (now - r.LastModified).TotalMinutes <= PACE_WINDOW),
+                            lastSaveMinsAgo = (int)Math.Max(0, (now - g.Max(r => r.LastModified)).TotalMinutes),
+                            posFrom = poss.Count > 0 ? poss[0] : 0,
+                            posTo = poss.Count > 0 ? poss[poss.Count - 1] : 0,
+                            posCount = poss.Count
+                        };
+                    })
+                    .OrderBy(s => s.lastSaveMinsAgo)
+                    .ToList();
+
+                int remaining = Math.Max(0, seriesExpected - seriesEntered);
+                int recentPace = scorers.Sum(s => s.entriesRecent);
+                bool needsHelp = false;
+                string helpReason = "";
+                if (isActive && remaining > 0)
+                {
+                    if (recentPace == 0) { needsHelp = true; helpReason = "Inget registrerat på " + PACE_WINDOW + " min"; }
+                    else if (remaining > 30 && scorers.Count <= 1) { needsHelp = true; helpReason = remaining + " serier kvar, endast en poängräknare"; }
+                }
+
+                return new
+                {
+                    teamNumber = tn,
+                    startTime = tcfg?.StartTime ?? "",
+                    label = tcfg?.Label ?? "",
+                    shootersExpected,
+                    seriesExpected,
+                    seriesEntered,
+                    status,
+                    lastSaveMinsAgo = lastMins,
+                    scorers,
+                    needsHelp,
+                    needsHelpReason = helpReason
+                };
+            }).ToList();
+
+            return Json(new { success = true, serverTime = now, qualSeriesCount = qualSeries, skjutlag });
+        }
+
+        /// <summary>Load + deserialize the official (or first available) precisionStartList configurationData.</summary>
+        private StartListConfiguration? LoadOfficialStartListConfig(int competitionId)
+        {
+            try
+            {
+                var comp = _contentService.GetById(competitionId);
+                if (comp == null) return null;
+                var aliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
+                bool IsOfficial(Umbraco.Cms.Core.Models.IContent c) { try { return c.GetValue<bool>("isOfficialStartList"); } catch { return false; } }
+
+                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _);
+                Umbraco.Cms.Core.Models.IContent? node = children
+                    .Where(c => aliases.Contains(c.ContentType.Alias))
+                    .OrderByDescending(IsOfficial)
+                    .FirstOrDefault();
+                if (node == null)
+                {
+                    var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+                    if (hub != null)
+                    {
+                        var hubChildren = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _);
+                        node = hubChildren
+                            .Where(c => aliases.Contains(c.ContentType.Alias))
+                            .OrderByDescending(IsOfficial)
+                            .FirstOrDefault();
+                    }
+                }
+                if (node == null) return null;
+                var json = node.GetValue<string>("configurationData");
+                if (string.IsNullOrEmpty(json)) return null;
+                return JsonConvert.DeserializeObject<StartListConfiguration>(json);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "LoadOfficialStartListConfig failed for competition {CompetitionId}", competitionId);
+                return null;
+            }
+        }
+
         private async Task<bool> DeleteResultFromDatabase(DeleteResultRequest request)
         {
             try

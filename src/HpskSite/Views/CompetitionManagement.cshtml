@@ -489,6 +489,14 @@
                 </button>
             </li>
         }
+        @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Precision" or "MagnumPrecision" or "Springskytte")
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="funktionarer-tab" data-bs-toggle="tab" data-bs-target="#funktionarer" type="button" role="tab">
+                    <i class="bi bi-person-badge me-1"></i>Funktionärer
+                </button>
+            </li>
+        }
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="results-tab" data-bs-toggle="tab" data-bs-target="#results" type="button" role="tab">
                 <i class="bi bi-trophy me-1"></i>Resultat
@@ -660,31 +668,29 @@
             </div>
         }
 
+        @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Precision" or "MagnumPrecision" or "Springskytte")
+        {
+            <!-- Funktionärer Tab (competition-day hub: launchers + messaging console + live functionary load) -->
+            <div class="tab-pane fade" id="funktionarer" role="tabpanel">
+                <div class="mt-3">
+                    @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
+                    {
+                        @await Html.PartialAsync("SpringskytteFunktionarerManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                    }
+                    else
+                    {
+                        @await Html.PartialAsync("PrecisionFunktionarerManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                    }
+                </div>
+            </div>
+        }
+
     </div>
 </div>
 
-@* Tävlingsledningens meddelandekonsol för icke-Fältskytte-discipliner. Fältskytte mounts its own
-   console via the Stationer-tab partial (with per-station cards + dots); Springskytte/Precision have
-   no station-card surface here, so they get a plain console button on #evtInboxMount (the header).
-   consoleMode → sees every thread for the competition. *@
-@if (canManageCompetition && competitionType is "Springskytte" or "Precision" or "MagnumPrecision")
-{
-    var consoleRecipients = competitionType == "Springskytte"
-        ? "{ type: 'All', label: 'Alla funktionärer' }, { type: 'Role', key: 'startledare', label: 'Startledare' }, { type: 'Role', key: 'timer', label: 'Tidtagare' }, { type: 'Role', key: 'scorer', label: 'Poängräknare' }"
-        : "{ type: 'All', label: 'Alla funktionärer' }, { type: 'Role', key: 'skjutledare', label: 'Alla skjutledare' }, { type: 'Role', key: 'scorer', label: 'Alla poängräknare' }";
-    @await Html.PartialAsync("_EventMessageInbox")
-    <script>
-        EventInbox.init({
-            competitionId: @competitionId,
-            consoleMode: true,
-            mountSelector: '#evtInboxMount',
-            label: 'Tävlingsledning',
-            fromScope: { type: 'Role', key: 'ledning' },
-            scopes: [ { type: 'Role', key: 'ledning' } ],
-            recipients: [ @Html.Raw(consoleRecipients) ]
-        });
-    </script>
-}
+@* Tävlingsledningens meddelandekonsol mounts on #evtInboxMount from each discipline's hub-tab partial:
+   Fältskytte → Stationer, Precision/MagnumPrecision + Springskytte → Funktionärer. No generic block
+   needed here anymore. *@
 
 <script>
 // Competition Management JavaScript

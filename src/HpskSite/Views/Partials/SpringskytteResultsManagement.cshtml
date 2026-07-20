@@ -28,43 +28,8 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <div class="springskytte-results-management" data-competition-id="@competitionId" data-number-of-series="@numberOfSeries">
-    @if (!isStationPage)
-    {
-    <!-- Role-split entry surfaces (item 5): scoring vs timing/penalties are different jobs, run
-         by different staff on different devices. Plus the start-line starter screen (item 7). -->
-    <div class="card mb-3">
-        <div class="card-header py-2">
-            <span class="fw-bold small"><i class="bi bi-pencil-square me-2"></i>Inmatning &amp; startlinje</span>
-        </div>
-        <div class="card-body py-2">
-            <div class="d-flex gap-2 flex-wrap align-items-center">
-                <span class="text-muted small me-1">Poäng (skott):</span>
-                <a href="/station?c=@competitionId&s=A" class="btn btn-outline-primary btn-sm" target="_blank">
-                    <i class="bi bi-card-list me-1"></i>Vapengrupp A
-                </a>
-                <a href="/station?c=@competitionId&s=C" class="btn btn-outline-primary btn-sm" target="_blank">
-                    <i class="bi bi-phone me-1"></i>Vapengrupp C
-                </a>
-                <span class="vr mx-1"></span>
-                <span class="text-muted small me-1">Tid &amp; straff:</span>
-                <a href="/station?c=@competitionId&s=A&mode=tid" class="btn btn-outline-success btn-sm" target="_blank">
-                    <i class="bi bi-stopwatch me-1"></i>Vapengrupp A
-                </a>
-                <a href="/station?c=@competitionId&s=C&mode=tid" class="btn btn-outline-success btn-sm" target="_blank">
-                    <i class="bi bi-stopwatch me-1"></i>Vapengrupp C
-                </a>
-                <span class="vr mx-1"></span>
-                <span class="text-muted small me-1">Startlinje:</span>
-                <a href="/startlinje/@competitionId?s=A" class="btn btn-outline-secondary btn-sm" target="_blank">
-                    <i class="bi bi-flag me-1"></i>Vapengrupp A
-                </a>
-                <a href="/startlinje/@competitionId?s=C" class="btn btn-outline-secondary btn-sm" target="_blank">
-                    <i class="bi bi-flag me-1"></i>Vapengrupp C
-                </a>
-            </div>
-        </div>
-    </div>
-    }
+    @* The role-screen launchers (Poäng / Tid & straff / Startlinje per class) moved to the dedicated
+       "Funktionärer" hub tab, alongside the live functionary load view. *@
 
     <!-- Results Entry Section -->
     <div class="card" style="@(!isStationPage ? "display:none" : "")">

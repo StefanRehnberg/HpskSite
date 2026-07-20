@@ -74,6 +74,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public DateTime EnteredAt { get; set; } = DateTime.Now;
 
         public DateTime LastModified { get; set; } = DateTime.Now;
+
+        // Per-role attribution for the Funktionärer hub's live load view. The score (scorer) and the
+        // måltid (timekeeper) are written to this same row by different people, so LastModified alone
+        // can't separate the two roles. ScoreModified is stamped only by the scoring save; TimeEnteredBy
+        // + TimeModified only by the finish-time save. All nullable (backfilled null for legacy rows).
+        public DateTime? ScoreModified { get; set; }
+        public int? TimeEnteredBy { get; set; }
+        public DateTime? TimeModified { get; set; }
     }
 
     /// <summary>

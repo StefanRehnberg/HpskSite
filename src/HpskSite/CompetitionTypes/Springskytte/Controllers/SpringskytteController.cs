@@ -207,13 +207,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     WHEN MATCHED THEN
                         UPDATE SET AgeGenderClass = @3, SprintTimeSeconds = @4, Shots = @5,
                                    ShootingScore = @6, PenaltyMultiplier = @7, TotalTimeSeconds = @8,
-                                   Status = @9, EnteredBy = @10, LastModified = @11,
+                                   Status = @9, EnteredBy = @10, LastModified = @11, ScoreModified = @11,
                                    StationHands = COALESCE(@12, target.StationHands)
                     WHEN NOT MATCHED THEN
                         INSERT (CompetitionId, MemberId, WeaponClass, AgeGenderClass, StartOrder,
                                 SprintTimeSeconds, Shots, ShootingScore, PenaltyMultiplier, TotalTimeSeconds,
-                                Status, EnteredBy, EnteredAt, LastModified, StationHands)
-                        VALUES (@0, @1, @2, @3, 0, @4, @5, @6, @7, @8, @9, @10, @11, @11, @12)
+                                Status, EnteredBy, EnteredAt, LastModified, StationHands, ScoreModified)
+                        VALUES (@0, @1, @2, @3, 0, @4, @5, @6, @7, @8, @9, @10, @11, @11, @12, @11)
                     OUTPUT INSERTED.Id;";
 
                 var savedResultId = await db.ExecuteScalarAsync<int>(mergeSql,
@@ -1745,6 +1745,151 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             return TimeSpan.TryParse(t, out var ts) ? (int)ts.TotalSeconds : int.MaxValue;
         }
 
+        /// <summary>
+        /// Live functionary load for the Springskytte "Funktionärer" hub — derived purely from the saves
+        /// scorers and timekeepers already make (no heartbeat). Per weapon-class line (A/C, one runs at a
+        /// time): how many scorers / timekeepers are active, who they are, their pace (entries in the last
+        /// PACE_WINDOW min) and freshness (minutes since their last save), plus backlog (scored vs startade,
+        /// måltider vs startade) with a "behöver hjälp" flag. Scorer attribution = EnteredBy + ScoreModified;
+        /// timekeeper attribution = TimeEnteredBy + TimeModified. Timestamps are local (DateTime.Now).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSpringskytteFunctionaryLoad(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                const int ACTIVE_WINDOW = 15, PACE_WINDOW = 10;
+                var now = DateTime.Now;   // Springskytte result timestamps are stored local (DateTime.Now).
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var rows = await db.FetchAsync<SpringskytteResultEntry>(
+                    "WHERE CompetitionId = @0", competitionId);
+
+                // Starters per weapon class from the start list(s).
+                var startersByClass = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var comp = _contentService.GetById(competitionId);
+                if (comp != null)
+                {
+                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 200, out _)
+                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    {
+                        var cfgJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cfgJson)) continue;
+                        SpringskytteStartListConfig? cfg = null;
+                        try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                        foreach (var st in cfg?.Starters ?? new List<SpringskytteStartListEntry>())
+                        {
+                            var wc = st.WeaponClass ?? "";
+                            if (wc.Length == 0) continue;
+                            startersByClass[wc] = startersByClass.TryGetValue(wc, out var n) ? n + 1 : 1;
+                        }
+                    }
+                }
+
+                var nameCache = new Dictionary<int, string>();
+                string ResolveName(int id)
+                {
+                    if (id <= 0) return "";
+                    if (nameCache.TryGetValue(id, out var c)) return c;
+                    string nm;
+                    try { nm = _memberService.GetById(id)?.Name ?? ("#" + id); } catch { nm = "#" + id; }
+                    nameCache[id] = nm;
+                    return nm;
+                }
+
+                var weaponClasses = startersByClass.Keys
+                    .Concat(rows.Select(r => r.WeaponClass ?? ""))
+                    .Where(w => w.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(w => w)
+                    .ToList();
+
+                var classes = weaponClasses.Select(wc =>
+                {
+                    var crows = rows.Where(r => string.Equals(r.WeaponClass, wc, StringComparison.OrdinalIgnoreCase)).ToList();
+                    int starters = startersByClass.TryGetValue(wc, out var sc) ? sc : crows.Select(r => r.MemberId).Distinct().Count();
+                    int scored = crows.Count(r => r.ScoreModified.HasValue);
+                    int maltider = crows.Count(r => r.TimeModified.HasValue);
+
+                    // Scorer roster — rows a scorer actually scored (ScoreModified stamped), grouped by EnteredBy.
+                    var scorers = crows.Where(r => r.ScoreModified.HasValue && r.EnteredBy > 0)
+                        .GroupBy(r => r.EnteredBy)
+                        .Select(g => new
+                        {
+                            memberId = g.Key,
+                            name = ResolveName(g.Key),
+                            entriesTotal = g.Count(),
+                            entriesRecent = g.Count(r => (now - r.ScoreModified!.Value).TotalMinutes <= PACE_WINDOW),
+                            lastSaveMinsAgo = (int)Math.Max(0, (now - g.Max(r => r.ScoreModified!.Value)).TotalMinutes)
+                        })
+                        .OrderBy(s => s.lastSaveMinsAgo).ToList();
+
+                    // Timekeeper roster — rows with a måltid (TimeModified stamped), grouped by TimeEnteredBy.
+                    var timers = crows.Where(r => r.TimeModified.HasValue && (r.TimeEnteredBy ?? 0) > 0)
+                        .GroupBy(r => r.TimeEnteredBy!.Value)
+                        .Select(g => new
+                        {
+                            memberId = g.Key,
+                            name = ResolveName(g.Key),
+                            entriesTotal = g.Count(),
+                            entriesRecent = g.Count(r => (now - r.TimeModified!.Value).TotalMinutes <= PACE_WINDOW),
+                            lastSaveMinsAgo = (int)Math.Max(0, (now - g.Max(r => r.TimeModified!.Value)).TotalMinutes)
+                        })
+                        .OrderBy(s => s.lastSaveMinsAgo).ToList();
+
+                    DateTime? lastActivity = crows
+                        .SelectMany(r => new[] { r.ScoreModified, r.TimeModified })
+                        .Where(d => d.HasValue).Select(d => d!.Value)
+                        .DefaultIfEmpty(DateTime.MinValue).Max();
+                    bool active = lastActivity.HasValue && lastActivity.Value != DateTime.MinValue
+                                  && (now - lastActivity.Value).TotalMinutes <= ACTIVE_WINDOW;
+
+                    int scoreRemaining = Math.Max(0, starters - scored);
+                    int timeRemaining = Math.Max(0, starters - maltider);
+                    int scorePace = scorers.Sum(s => s.entriesRecent);
+                    int timePace = timers.Sum(s => s.entriesRecent);
+
+                    bool scoringNeedsHelp = false; string scoringHelpReason = "";
+                    if (active && scoreRemaining > 0)
+                    {
+                        if (scorers.Count > 0 && scorePace == 0) { scoringNeedsHelp = true; scoringHelpReason = "Inget poäng registrerat på " + PACE_WINDOW + " min"; }
+                        else if (scoreRemaining > 20 && scorers.Count <= 1) { scoringNeedsHelp = true; scoringHelpReason = scoreRemaining + " kvar att poängsätta, endast en poängräknare"; }
+                    }
+                    bool timingNeedsHelp = false; string timingHelpReason = "";
+                    if (active && timeRemaining > 0)
+                    {
+                        if (timers.Count > 0 && timePace == 0) { timingNeedsHelp = true; timingHelpReason = "Ingen sluttid registrerad på " + PACE_WINDOW + " min"; }
+                        else if (timeRemaining > 20 && timers.Count <= 1) { timingNeedsHelp = true; timingHelpReason = timeRemaining + " kvar att tidta, endast en tidtagare"; }
+                    }
+
+                    return new
+                    {
+                        weaponClass = wc,
+                        starters,
+                        scored,
+                        maltider,
+                        active,
+                        scorers,
+                        timers,
+                        scoringNeedsHelp,
+                        scoringHelpReason,
+                        timingNeedsHelp,
+                        timingHelpReason
+                    };
+                }).ToList();
+
+                return Json(new { success = true, serverTime = now, classes });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building Springskytte functionary load for {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
         // ===== TIME ADJUSTMENTS (items 6 & 9: manual penalties + reductions) =====
 
         [HttpGet]
@@ -1921,11 +2066,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 if (existing != null)
                 {
-                    // Preserve shots/score/multiplier — update only the time + status.
+                    // Preserve shots/score/multiplier — update only the time + status. Stamp the
+                    // timekeeper attribution (TimeEnteredBy/TimeModified) without touching EnteredBy/
+                    // ScoreModified, which belong to the scorer.
                     await db.ExecuteAsync(
-                        @"UPDATE SpringskytteResultEntry SET SprintTimeSeconds=@0, TotalTimeSeconds=@1, Status=@2, LastModified=@3
+                        @"UPDATE SpringskytteResultEntry SET SprintTimeSeconds=@0, TotalTimeSeconds=@1, Status=@2,
+                                 LastModified=@3, TimeEnteredBy=@7, TimeModified=@3
                           WHERE CompetitionId=@4 AND MemberId=@5 AND WeaponClass=@6",
-                        sprint, total, status, now, request.CompetitionId, request.MemberId, request.WeaponClass);
+                        sprint, total, status, now, request.CompetitionId, request.MemberId, request.WeaponClass, enteredBy);
                 }
                 else
                 {
@@ -1949,7 +2097,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                             Status = status,
                             EnteredBy = enteredBy,
                             EnteredAt = now,
-                            LastModified = now
+                            LastModified = now,
+                            TimeEnteredBy = enteredBy,
+                            TimeModified = now
                         });
                     }
                     catch
@@ -1958,9 +2108,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         // first. Fall back to updating only the time fields — never lose the måltid to
                         // a duplicate-key race. Shots/score set by the other writer are preserved.
                         await db.ExecuteAsync(
-                            @"UPDATE SpringskytteResultEntry SET SprintTimeSeconds=@0, TotalTimeSeconds=@1, Status=@2, LastModified=@3
+                            @"UPDATE SpringskytteResultEntry SET SprintTimeSeconds=@0, TotalTimeSeconds=@1, Status=@2,
+                                     LastModified=@3, TimeEnteredBy=@7, TimeModified=@3
                               WHERE CompetitionId=@4 AND MemberId=@5 AND WeaponClass=@6",
-                            sprint, total, status, now, request.CompetitionId, request.MemberId, request.WeaponClass);
+                            sprint, total, status, now, request.CompetitionId, request.MemberId, request.WeaponClass, enteredBy);
                     }
                 }
 
