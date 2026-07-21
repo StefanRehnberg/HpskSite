@@ -231,6 +231,10 @@
         var notifyBtn = (a.memberId || a.email)
             ? '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfNotify(' + a.id + ',\'' + nameEsc + '\')" title="Bjud in / notifiera (e-post + push)"><i class="bi bi-envelope"></i></button>'
             : '';
+        // External (non-member) helper: offer a copyable accept/decline link to send manually (SMS etc.).
+        var linkBtn = (!a.memberId && !a.readOnly)
+            ? '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfCopyInviteLink(' + a.id + ')" title="Kopiera svarslänk (för SMS m.m.)"><i class="bi bi-link-45deg"></i></button>'
+            : '';
         var note = a.note ? '<div class="text-muted small mt-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(a.note) + '</div>' : '';
         var avail = (a.availabilityLabels && a.availabilityLabels.length)
             ? '<div class="text-success small mt-1"><i class="bi bi-calendar-week me-1"></i>Tillgänglig: ' + a.availabilityLabels.map(esc).join(' · ') + '</div>'
@@ -241,7 +245,7 @@
             : '';
         var actions = a.readOnly
             ? phone
-            : (phone + notifyBtn
+            : (phone + notifyBtn + linkBtn
                 + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
                 + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ',\'' + nameEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>');
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
@@ -477,6 +481,16 @@
                 alert('Skickat' + (ch.length ? ' (' + ch.join(' + ') + ')' : '') + '. Status satt till Inbjuden.');
                 await loadRoster();
             } else alert(d.message || 'Kunde inte skicka.');
+        } catch (e) { alert('Nätverksfel.'); }
+    };
+
+    window.stfCopyInviteLink = async function (id) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetInviteLink?competitionId=' + compId + '&id=' + id, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { alert(d.message || 'Kunde inte hämta länken.'); return; }
+            try { await navigator.clipboard.writeText(d.url); alert('Svarslänk kopierad:\n' + d.url); }
+            catch (e) { prompt('Kopiera svarslänken och skicka till hjälparen:', d.url); }
         } catch (e) { alert('Nätverksfel.'); }
     };
 

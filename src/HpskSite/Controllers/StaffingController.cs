@@ -2,6 +2,7 @@ using HpskSite.Models.Staffing;
 using HpskSite.Services;
 using HpskSite.Services.Notifications;
 using HpskSite.Services.Staffing;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
@@ -35,6 +36,7 @@ namespace HpskSite.Controllers
         private readonly PrepDocumentStorage _docs;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
+        private readonly IDataProtectionProvider _dataProtection;
         private readonly ILogger<StaffingController> _logger;
 
         public StaffingController(
@@ -53,6 +55,7 @@ namespace HpskSite.Controllers
             PrepDocumentStorage docs,
             EmailService email,
             WebPushService webPush,
+            IDataProtectionProvider dataProtection,
             ILogger<StaffingController> logger)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -66,6 +69,7 @@ namespace HpskSite.Controllers
             _docs = docs;
             _email = email;
             _webPush = webPush;
+            _dataProtection = dataProtection;
             _logger = logger;
         }
 
@@ -535,16 +539,23 @@ namespace HpskSite.Controllers
             var where = string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
                 ? "hela tävlingen" : $"{a.ScopeType} {a.ScopeKey}".Trim();
             var subject = $"Funktionärsförfrågan: {roleName} – {meta.Name}";
-            const string mineUrl = "/mina-uppdrag";   // invited helpers act here, not on the staff planning page
-            var html = NotifyEmailHtml(
-                $"Du är inplanerad som <strong>{System.Net.WebUtility.HtmlEncode(roleName)}</strong> på {System.Net.WebUtility.HtmlEncode(where)} under <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>. Tacka ja eller nej och ange när du kan arbeta.",
-                "Öppna Mina uppdrag", mineUrl, viewer.Name);
+            var bodyText = $"Du är inplanerad som <strong>{System.Net.WebUtility.HtmlEncode(roleName)}</strong> på {System.Net.WebUtility.HtmlEncode(where)} under <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>. Tacka ja eller nej.";
 
             bool email = false; int push = 0;
             if (a.MemberId is > 0)
+            {
+                // Members act on the member-scoped page (accept/decline + availability).
+                const string mineUrl = "/mina-uppdrag";
+                var html = NotifyEmailHtml(bodyText + " Ange gärna när du kan arbeta.", "Öppna Mina uppdrag", mineUrl, viewer.Name);
                 (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", mineUrl);
+            }
             else if (!string.IsNullOrWhiteSpace(a.Email))
-                { try { email = await _email.SendHtmlEmailAsync(a.Email!, subject, html); } catch { } }
+            {
+                // External (non-member) helper: a tokened accept/decline link, no login required.
+                var token = StaffingInviteToken.Protect(_dataProtection, a.Id);
+                var html = NotifyEmailHtml(bodyText, "Svara på förfrågan", $"/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}", viewer.Name);
+                try { email = await _email.SendHtmlEmailAsync(a.Email!, subject, html); } catch { }
+            }
 
             if (!email && push == 0)
                 return Json(new { success = false, message = "Kunde inte skicka — ingen e-post eller push-prenumeration." });
@@ -554,6 +565,21 @@ namespace HpskSite.Controllers
                 _staffing.SetStatus(a.Id, a.CompetitionId, StaffAssignmentStatus.Invited);
 
             return Json(new { success = true, email, push });
+        }
+
+        /// <summary>Return the tokened external accept/decline link for an assignment, so the organiser can
+        /// send it manually (SMS etc.) to a non-member helper. Staff-gated.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetInviteLink(int competitionId, int id)
+        {
+            if (id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var a = _staffing.GetById(id);
+            if (a == null) return Json(new { success = false, message = "Funktionären hittades inte." });
+            if (!await HasCompetitionAccessAsync(a.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var token = StaffingInviteToken.Protect(_dataProtection, a.Id);
+            var url = $"{Request.Scheme}://{Request.Host}/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}";
+            return Json(new { success = true, url, token });
         }
 
         /// <summary>Notify the member assigned to an uppgift about the task + deadline; log it to the thread.</summary>

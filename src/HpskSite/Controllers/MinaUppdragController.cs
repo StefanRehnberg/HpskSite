@@ -1,6 +1,7 @@
 using System.Globalization;
 using HpskSite.Models.Staffing;
 using HpskSite.Services.Staffing;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -25,17 +26,47 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly StaffingService _staffing;
+        private readonly IDataProtectionProvider _dataProtection;
 
         public MinaUppdragController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager,
             IMemberService memberService,
-            StaffingService staffing)
+            StaffingService staffing,
+            IDataProtectionProvider dataProtection)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
             _staffing = staffing;
+            _dataProtection = dataProtection;
+        }
+
+        // ---- External (non-member) helper accept/decline via tokened link (no login) ----
+
+        [HttpGet("svar")]
+        public IActionResult Svar(string? t)
+        {
+            var model = new InviteResponseModel { Token = t ?? "" };
+            var id = string.IsNullOrEmpty(t) ? null : StaffingInviteToken.Unprotect(_dataProtection, t!);
+            if (id != null)
+            {
+                var info = _staffing.GetInviteInfo(id.Value);
+                if (info != null) { info.Token = t!; model = info; }
+            }
+            return View("UppdragSvar", model);
+        }
+
+        [HttpPost("svar")]
+        [ValidateAntiForgeryToken]
+        public IActionResult SvarRespond([FromForm] string t, [FromForm] string status)
+        {
+            var id = string.IsNullOrEmpty(t) ? null : StaffingInviteToken.Unprotect(_dataProtection, t);
+            if (id == null) return View("UppdragSvar", new InviteResponseModel { Token = t ?? "" });
+            _staffing.SetInviteResponse(id.Value, status);
+            var info = _staffing.GetInviteInfo(id.Value) ?? new InviteResponseModel { Token = t };
+            info.Token = t;
+            return View("UppdragSvar", info);
         }
 
         [HttpGet("")]

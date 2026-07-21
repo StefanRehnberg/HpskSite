@@ -370,6 +370,44 @@ namespace HpskSite.Services.Staffing
             return true;
         }
 
+        /// <summary>Set an assignment's accept/decline status from a tokened external-invite link (the token is
+        /// the authorization — no member ownership check). Only Accepted/Declined allowed.</summary>
+        public (bool Ok, string? Message) SetInviteResponse(int assignmentId, string status)
+        {
+            var wanted = status switch
+            {
+                StaffAssignmentStatus.Accepted => StaffAssignmentStatus.Accepted,
+                StaffAssignmentStatus.Declined => StaffAssignmentStatus.Declined,
+                _ => null,
+            };
+            if (wanted == null) return (false, "Ogiltigt svar.");
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var n = db.Execute("UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2", wanted, DateTime.UtcNow, assignmentId);
+            return n > 0 ? (true, null) : (false, "Uppdraget hittades inte.");
+        }
+
+        /// <summary>Resolve display info for the external-invite page (comp name, role, scope, shift, status).</summary>
+        public InviteResponseModel? GetInviteInfo(int assignmentId)
+        {
+            var a = GetById(assignmentId);
+            if (a == null) return null;
+            var content = _contentService.GetById(a.CompetitionId);
+            var compName = content?.GetValue<string>("competitionName") ?? "Tävling";
+            var discipline = content?.GetValue<string>("competitionType") ?? "";
+            var role = FunctionaryRoles.Resolve(discipline, a.RoleKey);
+            return new InviteResponseModel
+            {
+                Valid = true,
+                CompName = compName,
+                RoleName = role?.DisplayName ?? a.RoleKey,
+                ScopeLabel = BuildScopeLabel(a),
+                ShiftLabel = BuildShiftLabel(a.StartsAt, a.EndsAt),
+                PersonName = a.DisplayName,
+                Status = a.Status,
+            };
+        }
+
         /// <summary>A member accepts/declines their OWN assignment. Ownership-checked; no comp-staff access needed.</summary>
         public (bool Ok, string? Message) RespondAsMember(int assignmentId, int memberId, string status)
         {
