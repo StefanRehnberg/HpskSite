@@ -227,6 +227,10 @@
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
         var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
         var phone = a.phone ? '<a class="btn btn-sm btn-outline-success" href="tel:' + esc(a.phone) + '" title="Ring"><i class="bi bi-telephone"></i></a>' : '';
+        var nameEsc = esc(a.displayName).replace(/'/g, "\\'");
+        var notifyBtn = (a.memberId || a.email)
+            ? '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfNotify(' + a.id + ',\'' + nameEsc + '\')" title="Bjud in / notifiera (e-post + push)"><i class="bi bi-envelope"></i></button>'
+            : '';
         var note = a.note ? '<div class="text-muted small mt-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(a.note) + '</div>' : '';
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
@@ -236,8 +240,9 @@
             + '</div>'
             + '<div class="d-flex gap-1 flex-shrink-0">'
             + phone
+            + notifyBtn
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ',\'' + esc(a.displayName).replace(/'/g, "\\'") + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ',\'' + nameEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
             + '</div>'
             + '</div>';
     }
@@ -448,6 +453,23 @@
             await loadRoster();
         } catch (e) { err.textContent = 'Nätverksfel.'; }
         btn.disabled = false;
+    };
+
+    window.stfNotify = async function (id, name) {
+        if (!confirm('Skicka en förfrågan/notis till ' + name + ' (e-post + push om möjligt)?')) return;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/NotifyAssignment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify({ id: id, competitionId: compId })
+            });
+            var d = await r.json();
+            if (d.success) {
+                var ch = []; if (d.email) ch.push('e-post'); if (d.push) ch.push('push');
+                alert('Skickat' + (ch.length ? ' (' + ch.join(' + ') + ')' : '') + '. Status satt till Inbjuden.');
+                await loadRoster();
+            } else alert(d.message || 'Kunde inte skicka.');
+        } catch (e) { alert('Nätverksfel.'); }
     };
 
     window.stfDelete = async function (id, name) {

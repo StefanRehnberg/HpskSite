@@ -1,5 +1,6 @@
 using HpskSite.Models.Staffing;
 using HpskSite.Services;
+using HpskSite.Services.Notifications;
 using HpskSite.Services.Staffing;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -32,6 +33,8 @@ namespace HpskSite.Controllers
         private readonly StaffingService _staffing;
         private readonly WorkBreakdownService _work;
         private readonly PrepDocumentStorage _docs;
+        private readonly EmailService _email;
+        private readonly WebPushService _webPush;
         private readonly ILogger<StaffingController> _logger;
 
         public StaffingController(
@@ -48,6 +51,8 @@ namespace HpskSite.Controllers
             StaffingService staffing,
             WorkBreakdownService work,
             PrepDocumentStorage docs,
+            EmailService email,
+            WebPushService webPush,
             ILogger<StaffingController> logger)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -59,6 +64,8 @@ namespace HpskSite.Controllers
             _staffing = staffing;
             _work = work;
             _docs = docs;
+            _email = email;
+            _webPush = webPush;
             _logger = logger;
         }
 
@@ -468,6 +475,113 @@ namespace HpskSite.Controllers
             return Json(new { success = true });
         }
 
+        // ======================= Notiser & påminnelser (P2) =======================
+
+        /// <summary>Notify a roster person (member → e-post + push; extern hjälpare → e-post) about their
+        /// role, and flip Planerad → Inbjuden. The Phase-2 invitation seam.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> NotifyAssignment([FromBody] DeleteStaffAssignmentRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var a = _staffing.GetById(request.Id);
+            if (a == null) return Json(new { success = false, message = "Funktionären hittades inte." });
+            if (!await HasCompetitionAccessAsync(a.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            if (a.MemberId is not > 0 && string.IsNullOrWhiteSpace(a.Email))
+                return Json(new { success = false, message = "Personen saknar konto och e-post — kan inte notifieras." });
+
+            var meta = GetCompMeta(a.CompetitionId);
+            var roleName = FunctionaryRoles.Resolve(GetDiscipline(a.CompetitionId), a.RoleKey)?.DisplayName ?? a.RoleKey;
+            var where = string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
+                ? "hela tävlingen" : $"{a.ScopeType} {a.ScopeKey}".Trim();
+            var subject = $"Funktionärsförfrågan: {roleName} – {meta.Name}";
+            var html = NotifyEmailHtml(
+                $"Du är inplanerad som <strong>{System.Net.WebUtility.HtmlEncode(roleName)}</strong> på {System.Net.WebUtility.HtmlEncode(where)} under <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>.",
+                "Öppna planeringen", meta.Url, viewer.Name);
+
+            bool email = false; int push = 0;
+            if (a.MemberId is > 0)
+                (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", meta.Url);
+            else if (!string.IsNullOrWhiteSpace(a.Email))
+                { try { email = await _email.SendHtmlEmailAsync(a.Email!, subject, html); } catch { } }
+
+            if (!email && push == 0)
+                return Json(new { success = false, message = "Kunde inte skicka — ingen e-post eller push-prenumeration." });
+
+            // Only flip Planerad → Inbjuden once something actually reached the person.
+            if (string.Equals(a.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase))
+                _staffing.SetStatus(a.Id, a.CompetitionId, StaffAssignmentStatus.Invited);
+
+            return Json(new { success = true, email, push });
+        }
+
+        /// <summary>Notify the member assigned to an uppgift about the task + deadline; log it to the thread.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> NotifyWorkItem([FromBody] DeleteWorkRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var it = _work.GetItem(request.Id);
+            if (it == null) return Json(new { success = false, message = "Uppgiften hittades inte." });
+            if (!await HasCompetitionAccessAsync(it.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            if (it.AssignedMemberId is not > 0)
+                return Json(new { success = false, message = "Uppgiften har ingen tilldelad medlem att notifiera." });
+
+            var meta = GetCompMeta(it.CompetitionId);
+            var due = it.DueDate.HasValue ? it.DueDate.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null;
+            var subject = $"Uppgift: {it.Title} – {meta.Name}";
+            var body = $"Du är ansvarig för uppgiften <strong>{System.Net.WebUtility.HtmlEncode(it.Title)}</strong> inför <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>."
+                + (due != null ? $" Senast: <strong>{due}</strong>." : "");
+            var html = NotifyEmailHtml(body, "Öppna planeringen", meta.Url, viewer.Name);
+            var (email, push) = await NotifyMemberAsync(it.AssignedMemberId.Value, subject, html, "Uppgift",
+                it.Title + (due != null ? " · senast " + due : ""), meta.Url);
+
+            _work.LogAudit(it.CompetitionId, it.Id, $"Påminnelse skickad till {it.AssignedName ?? "tilldelad medlem"}", viewer.Id, viewer.Name);
+            if (!email && push == 0)
+                return Json(new { success = false, message = "Kunde inte skicka — medlemmen saknar e-post och push-prenumeration." });
+            return Json(new { success = true, email, push });
+        }
+
+        /// <summary>Nudge everyone with an overdue uppgift — one grouped reminder per member. Logs each item.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemindOverdue([FromBody] SeedStationTasksRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var wb = _work.Build(request.CompetitionId, canEdit: true);
+            var overdue = wb.Areas.SelectMany(a => a.Items).Where(i => i.IsOverdue && i.AssignedMemberId is > 0).ToList();
+            if (overdue.Count == 0)
+                return Json(new { success = true, notified = 0, items = 0, message = "Inga försenade uppgifter med tilldelad medlem." });
+
+            var meta = GetCompMeta(request.CompetitionId);
+            int notified = 0, sentItems = 0;
+            foreach (var g in overdue.GroupBy(i => i.AssignedMemberId!.Value))
+            {
+                var list = g.ToList();
+                var rows = string.Join("", list.Select(i =>
+                    $"<li>{System.Net.WebUtility.HtmlEncode(i.Title)}{(i.DueDate != null ? $" — senast {System.Net.WebUtility.HtmlEncode(i.DueDate)}" : "")}</li>"));
+                var html = NotifyEmailHtml(
+                    $"Du har <strong>{list.Count}</strong> försenad(e) uppgift(er) inför <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>:<ul>{rows}</ul>",
+                    "Öppna planeringen", meta.Url, viewer.Name);
+                var (email, push) = await NotifyMemberAsync(g.Key, $"Påminnelse: försenade uppgifter – {meta.Name}", html,
+                    "Försenade uppgifter", $"{list.Count} uppgift(er) på {meta.Name}", meta.Url);
+                if (email || push > 0) notified++;
+                foreach (var i in list) { _work.LogAudit(request.CompetitionId, i.Id, "Påminnelse skickad (försenad)", viewer.Id, viewer.Name); sentItems++; }
+            }
+            return Json(new { success = true, notified, items = sentItems });
+        }
+
         // ======================= Shared: member picker =======================
 
         [HttpGet]
@@ -536,6 +650,51 @@ namespace HpskSite.Controllers
             }
             catch { }
             return "";
+        }
+
+        /// <summary>Competition display name + the planning page URL, for notifications.</summary>
+        private (string Name, string Url) GetCompMeta(int competitionId)
+        {
+            var name = "tävlingen";
+            try
+            {
+                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
+                {
+                    var comp = ctx.Content.GetById(competitionId);
+                    var n = comp?.Value<string>("competitionName");
+                    if (!string.IsNullOrWhiteSpace(n)) name = n!;
+                }
+            }
+            catch { }
+            return (name, $"/tavlingsplanering?c={competitionId}");
+        }
+
+        /// <summary>Send an in-app web-push + e-mail to a member (best-effort). Returns which channels landed.</summary>
+        private async Task<(bool Email, int Push)> NotifyMemberAsync(int memberId, string subject, string emailHtml, string pushTitle, string pushBody, string url)
+        {
+            bool email = false; int push = 0;
+            try
+            {
+                var m = _memberService.GetById(memberId);
+                var addr = m?.Email;
+                if (!string.IsNullOrWhiteSpace(addr))
+                    email = await _email.SendHtmlEmailAsync(addr!, subject, emailHtml);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: notify e-mail failed for member {MemberId}", memberId); }
+            try { push = await _webPush.SendToMemberAsync(memberId, pushTitle, pushBody, url, $"planering-{memberId}"); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: notify push failed for member {MemberId}", memberId); }
+            return (email, push);
+        }
+
+        private static string NotifyEmailHtml(string bodyHtml, string ctaLabel, string ctaUrl, string senderName)
+        {
+            var abs = ctaUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ctaUrl : $"https://pistol.nu{ctaUrl}";
+            return $@"<div style='font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222'>
+<p>Hej!</p>
+<p>{bodyHtml}</p>
+<p style='margin:24px 0'><a href='{abs}' style='background:#0d6efd;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none'>{System.Net.WebUtility.HtmlEncode(ctaLabel)}</a></p>
+<p style='color:#666;font-size:13px'>Skickat av {System.Net.WebUtility.HtmlEncode(senderName)} via pistol.nu tävlingsplanering.</p>
+</div>";
         }
 
         /// <summary>Competition date + whole days until it (negative once passed), for deadline anchoring.</summary>

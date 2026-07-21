@@ -166,6 +166,15 @@ namespace HpskSite.Services.Staffing
             return savedId;
         }
 
+        /// <summary>Lightweight status update (e.g. Planned → Invited after a notification) without a full save.</summary>
+        public void SetStatus(int id, int competitionId, string status)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute(
+                "UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND CompetitionId = @3",
+                NormalizeStatus(status), DateTime.UtcNow, id, competitionId);
+        }
+
         public void Delete(int id, int competitionId)
         {
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))

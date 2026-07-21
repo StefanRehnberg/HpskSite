@@ -25,6 +25,9 @@
             </ul>
         </div>
         <span id="wbStationSeedSlot"></span>
+        <button type="button" class="btn btn-outline-warning btn-sm" onclick="wbRemindOverdue()" title="Skicka en påminnelse till alla med försenade uppgifter">
+            <i class="bi bi-bell me-1"></i>Påminn försenade
+        </button>
         <button type="button" class="btn btn-primary btn-sm" onclick="wbOpenArea(0)">
             <i class="bi bi-folder-plus me-1"></i>Lägg till område
         </button>
@@ -352,6 +355,7 @@
         var blockLine = blockedByLine(i);
         var titleEsc = esc(i.title).replace(/'/g, "\\'");
         var threadBtn = '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenThread(' + i.id + ',\'' + titleEsc + '\')" title="Kommentarer, logg &amp; beroenden"><i class="bi bi-chat-dots"></i>' + (i.commentCount ? ' ' + i.commentCount : '') + '</button>';
+        var notifyBtn = i.assignedMemberId ? '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbNotifyItem(' + i.id + ',\'' + titleEsc + '\')" title="Notifiera tilldelad medlem"><i class="bi bi-bell"></i></button>' : '';
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
             + '<div class="form-check">'
@@ -364,6 +368,7 @@
             + links
             + '</div>'
             + '<div class="d-flex gap-1 flex-shrink-0">'
+            + notifyBtn
             + threadBtn
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenLink(0,' + i.id + ')" title="Bifoga dokument/länk"><i class="bi bi-paperclip"></i></button>'
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenItem(' + i.workAreaId + ',' + i.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
@@ -606,6 +611,25 @@
         if (!confirm('Ta bort dokumentet/länken?')) return;
         var d = await post('/umbraco/surface/Staffing/DeleteWorkLink', { id: id, competitionId: compId });
         if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
+    };
+
+    // ---- notiser & påminnelser ----
+    window.wbNotifyItem = async function (id, title) {
+        if (!confirm('Skicka en påminnelse till den tilldelade medlemmen för "' + title + '"?')) return;
+        var d = await post('/umbraco/surface/Staffing/NotifyWorkItem', { id: id, competitionId: compId });
+        if (d.success) {
+            var ch = []; if (d.email) ch.push('e-post'); if (d.push) ch.push('push');
+            alert('Skickat' + (ch.length ? ' (' + ch.join(' + ') + ')' : '') + '.'); await load();
+        } else alert(d.message || 'Kunde inte skicka.');
+    };
+
+    window.wbRemindOverdue = async function () {
+        if (!confirm('Skicka en påminnelse till alla som har försenade uppgifter?')) return;
+        var d = await post('/umbraco/surface/Staffing/RemindOverdue', { competitionId: compId });
+        if (d.success) {
+            alert(d.message || ('Påminnelser skickade till ' + d.notified + ' person(er) · ' + d.items + ' uppgift(er).'));
+            await load();
+        } else alert(d.message || 'Kunde inte skicka.');
     };
 
     // ---- tråd: kommentarer/logg + beroenden ----

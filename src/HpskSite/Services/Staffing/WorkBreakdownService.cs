@@ -185,6 +185,12 @@ namespace HpskSite.Services.Staffing
             return added;
         }
 
+        public WorkItem? GetItem(int id)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0", id);
+        }
+
         // ---- WorkArea writes ----
 
         public int SaveArea(SaveWorkAreaRequest req, int byMemberId)
