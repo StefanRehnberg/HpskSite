@@ -57,6 +57,7 @@ pistol.nu är en webbplats för pistolskytte i Sverige, sponsrad av Hallands Pis
 - Registrera träningsresultat och se statistik
 - Delta i träningsmatcher med handikapp-system
 - Administrera klubbar, tävlingar och användare
+- Planera och bemanna tävlingar — förberedelser (arbetslista med områden/uppgifter, deadlines, budget, materiel), funktionärsroster (roller, platser, pass), upprop på tävlingsdagen, samt att medlemmar tillfrågas eller anmäler sig själva som funktionärer (se dokumentet om Tävlingsplanering)
 
 ## Användarens roll
 
