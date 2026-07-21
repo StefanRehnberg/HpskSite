@@ -35,6 +35,7 @@ namespace HpskSite.Controllers
         private readonly WorkBreakdownService _work;
         private readonly StaffingTemplateService _templates;
         private readonly MaterielEstimateService _materiel;
+        private readonly StaffingSignupService _signup;
         private readonly PrepDocumentStorage _docs;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
@@ -56,6 +57,7 @@ namespace HpskSite.Controllers
             WorkBreakdownService work,
             StaffingTemplateService templates,
             MaterielEstimateService materiel,
+            StaffingSignupService signup,
             PrepDocumentStorage docs,
             EmailService email,
             WebPushService webPush,
@@ -72,6 +74,7 @@ namespace HpskSite.Controllers
             _work = work;
             _templates = templates;
             _materiel = materiel;
+            _signup = signup;
             _docs = docs;
             _email = email;
             _webPush = webPush;
@@ -440,6 +443,42 @@ namespace HpskSite.Controllers
                 series = est.Series,
                 rows = est.Rows,
             });
+        }
+
+        // ---- Phase 3: sourcing scope (organiser opens the comp for self-sign-up) ----
+
+        [HttpGet]
+        public async Task<IActionResult> GetSourceScopes(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            return Json(new { success = true, scopes = _signup.GetScopes(competitionId) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddSourceScope([FromBody] SaveSourceScopeRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var (ok, msg, id) = _signup.AddScope(request.CompetitionId, request.ScopeType, request.ScopeKey, viewer.Id);
+            return Json(new { success = ok, message = msg, id });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteSourceScope([FromBody] DeleteWorkRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            _signup.RemoveScope(request.Id, request.CompetitionId);
+            return Json(new { success = true });
         }
 
         // ---- Phase 1.5: editable per-club/region planning templates ----

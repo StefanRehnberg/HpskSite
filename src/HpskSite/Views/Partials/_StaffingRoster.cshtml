@@ -21,6 +21,10 @@
     </div>
 </div>
 
+<div class="card mb-3" id="stfSourceCard">
+    <div class="card-body py-2" id="stfSourceBody"><div class="text-muted small">Laddar…</div></div>
+</div>
+
 <div id="stfRoster">
     <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
 </div>
@@ -484,6 +488,52 @@
         } catch (e) { alert('Nätverksfel.'); }
     };
 
+    // ---- sourcing scope: open the comp for member self-sign-up (Phase 3) ----
+    async function loadScopes() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetSourceScopes?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            renderScopes((d && d.success) ? (d.scopes || []) : []);
+        } catch (e) { /* leave as-is */ }
+    }
+    function renderScopes(scopes) {
+        var body = document.getElementById('stfSourceBody');
+        if (!body) return;
+        var chips = scopes.map(function (s) {
+            return '<span class="badge bg-success-subtle text-success-emphasis border d-inline-flex align-items-center gap-1" style="font-weight:500">'
+                + '<i class="bi bi-unlock me-1"></i>' + esc(s.label)
+                + '<button type="button" class="btn-close" style="font-size:.6rem" title="Stäng för anmälan" onclick="stfRemoveScope(' + s.id + ')"></button></span>';
+        }).join(' ');
+        body.innerHTML = '<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">'
+            + '<div><div class="fw-semibold mb-1"><i class="bi bi-people-fill me-1"></i>Öppen för självanmälan</div>'
+            + (chips || '<span class="text-muted small">Ingen — bara inbjudna kan bemanna. Öppna för klubbens/kretsens medlemmar så kan de anmäla sig själva.</span>')
+            + '</div>'
+            + '<div class="d-flex gap-1 flex-wrap">'
+            + '<button type="button" class="btn btn-sm btn-outline-success" onclick="stfAddScope(\'Club\')"><i class="bi bi-plus-lg me-1"></i>Arrangörsklubben</button>'
+            + '<button type="button" class="btn btn-sm btn-outline-success" onclick="stfAddScope(\'Region\')"><i class="bi bi-plus-lg me-1"></i>Kretsen</button>'
+            + '</div></div>';
+    }
+    window.stfAddScope = async function (type) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/AddSourceScope', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify({ competitionId: compId, scopeType: type, scopeKey: 'self' })
+            });
+            var d = await r.json();
+            if (d.success) await loadScopes(); else alert(d.message || 'Kunde inte öppna.');
+        } catch (e) { alert('Nätverksfel.'); }
+    };
+    window.stfRemoveScope = async function (id) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/DeleteSourceScope', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify({ id: id, competitionId: compId })
+            });
+            var d = await r.json();
+            if (d.success) await loadScopes();
+        } catch (e) { }
+    };
+
     window.stfCopyInviteLink = async function (id) {
         try {
             var r = await fetch('/umbraco/surface/Staffing/GetInviteLink?competitionId=' + compId + '&id=' + id, { headers: { 'Accept': 'application/json' } });
@@ -530,6 +580,7 @@
     initPickers();
 
     loadRoster();
+    loadScopes();
     startTimer();
 })();
 </script>

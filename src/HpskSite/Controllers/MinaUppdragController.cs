@@ -26,6 +26,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly StaffingService _staffing;
+        private readonly StaffingSignupService _signup;
         private readonly IDataProtectionProvider _dataProtection;
 
         public MinaUppdragController(
@@ -33,13 +34,35 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             IMemberService memberService,
             StaffingService staffing,
+            StaffingSignupService signup,
             IDataProtectionProvider dataProtection)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
             _staffing = staffing;
+            _signup = signup;
             _dataProtection = dataProtection;
+        }
+
+        [HttpGet("open")]
+        public async Task<IActionResult> Open()
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
+            return Json(new { success = true, competitions = _signup.GetOpenSignups(memberId.Value) });
+        }
+
+        [HttpPost("signup")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SignUp([FromBody] SelfSignUpRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.RoleKey))
+                return Json(new { success = false, message = "Välj en roll." });
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
+            var (ok, msg) = _signup.SelfSignUp(memberId.Value, request.CompetitionId, request.RoleKey);
+            return Json(new { success = ok, message = msg });
         }
 
         // ---- External (non-member) helper accept/decline via tokened link (no login) ----
