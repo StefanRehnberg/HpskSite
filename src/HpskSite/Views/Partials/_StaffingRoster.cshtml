@@ -150,6 +150,8 @@
 (function () {
     var compId = @competitionId;
     var TOKEN = '@stfToken';
+    var REFRESH = 12000;
+    var timer = null;
     var roles = [];        // role metadata from the roster response
     var groups = [];       // current roster groups
     var modal = null;
@@ -201,7 +203,11 @@
         }).join('');
         host.innerHTML = html || '<div class="text-muted">Inga roller för denna gren.</div>';
         var c = document.getElementById('stfCount');
-        if (c) c.textContent = total > 0 ? (total + ' tilldelade') : '';
+        if (c) {
+            var t = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+            c.innerHTML = '<span title="Flera kan bemanna samtidigt — uppdateras automatiskt"><i class="bi bi-people me-1"></i>'
+                + (total > 0 ? (total + ' tilldelade · ') : '') + 'uppdaterad ' + t + '</span>';
+        }
     }
 
     function rowHtml(a) {
@@ -443,6 +449,18 @@
         } catch (e) { alert('Nätverksfel.'); }
     };
 
+    // Live refresh so several people can build the roster in parallel (planning meeting) and see each
+    // other's assignments. Skip while a modal is open (don't disrupt an in-progress edit) or the tab is
+    // hidden. Assignments are independent rows, so parallel edits to different roles never clobber.
+    function poll() {
+        if (document.hidden) return;
+        if (document.querySelector('.modal.show')) return;
+        loadRoster();
+    }
+    function startTimer() { if (!timer) timer = setInterval(poll, REFRESH); }
+    function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+    document.addEventListener('visibilitychange', function () { if (document.hidden) stopTimer(); else { poll(); startTimer(); } });
+
     // Flatpickr time pickers for the shift fields (loaded elsewhere on the page).
     function initPickers() {
         if (typeof flatpickr === 'undefined') return;
@@ -453,5 +471,6 @@
     initPickers();
 
     loadRoster();
+    startTimer();
 })();
 </script>

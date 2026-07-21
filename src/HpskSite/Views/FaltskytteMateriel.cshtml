@@ -1,0 +1,146 @@
+@using HpskSite.CompetitionTypes.Faltskytte.Models
+@model FaltskytteBomResult
+@{
+    // Print-friendly Fältskytte materiellista (BOM), derived from the attached station config.
+    // Self-contained HTML (Layout = null), like FaltskyttePrintStationCards. Roll-up first (order list),
+    // then per-station breakdown, each figure with its image. Counts = per-station union/max across
+    // weapon classes (see FaltskytteBom). Screen chrome hides on print.
+    Layout = null;
+    string Sz(int? g) => g.HasValue ? $"grupp {g}" : "";
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Materiellista – @Model.CompetitionName</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; color: #1a1a1a; background: #fff; }
+        .wrap { max-width: 960px; margin: 0 auto; }
+        h1 { font-size: 1.6rem; margin: 0 0 2px; }
+        h2 { font-size: 1.15rem; margin: 28px 0 8px; border-bottom: 2px solid #222; padding-bottom: 4px; }
+        .sub { color: #555; margin: 0 0 16px; }
+        .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 6px; border: 1px solid #ccc; background: #f6f6f6; color: #222; text-decoration: none; font-size: .9rem; cursor: pointer; }
+        .btn-primary { background: #0d6efd; border-color: #0d6efd; color: #fff; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+        th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e2e2e2; vertical-align: middle; font-size: .92rem; }
+        th { background: #f2f2f2; font-size: .8rem; text-transform: uppercase; letter-spacing: .02em; color: #444; }
+        td.num, th.num { text-align: right; white-space: nowrap; }
+        tr.total td { font-weight: 700; border-top: 2px solid #222; background: #fafafa; }
+        .thumb { width: 40px; height: 40px; object-fit: contain; background: #fff; border: 1px solid #ddd; border-radius: 4px; }
+        .poang { display: inline-block; font-size: .72rem; font-weight: 700; color: #a06a00; background: #fff3cd; border: 1px solid #ffe69c; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+        .st-meta { color: #555; font-size: .88rem; font-weight: 400; }
+        .empty { padding: 40px; text-align: center; color: #777; }
+        .note { color: #777; font-size: .82rem; margin: 8px 0 24px; }
+        .lead-note { background: #f2f7ff; border: 1px solid #cfe0ff; border-radius: 6px; padding: 10px 14px; font-size: .9rem; margin-bottom: 18px; }
+        .station-block { margin-top: 8px; }
+        @@media print {
+            body { padding: 0; }
+            .toolbar { display: none; }
+            h2 { page-break-after: avoid; }
+            table { page-break-inside: auto; }
+            tr { page-break-inside: avoid; }
+            /* Each station on its own page so the coordinator can hand each build-team its sheet. */
+            .station-block { page-break-before: always; }
+            .rollup-block { page-break-after: always; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>Materiellista</h1>
+    <p class="sub">@Model.CompetitionName · Fältskytte — härledd från stationskonfigurationen</p>
+
+    <div class="toolbar">
+        <button class="btn btn-primary" onclick="window.print()">🖨 Skriv ut</button>
+        <a class="btn" href="#" onclick="history.back();return false;">← Tillbaka</a>
+    </div>
+
+    @if (!Model.HasConfig)
+    {
+        <div class="empty">
+            Ingen stationskonfiguration hittades för den här tävlingen.<br />
+            Koppla en Fältkonfigurator-konfiguration till tävlingen först, så byggs materiellistan automatiskt.
+        </div>
+    }
+    else
+    {
+        <div class="rollup-block">
+            <h2>Beställningslista <span class="st-meta">— total materiel för alla stationer och klasser</span></h2>
+            <div class="lead-note">
+                Komplett lista för materielansvarig: allt som ska finnas till tävlingen, summerat över
+                <strong>@Model.Stations.Count stationer</strong>. Använd stationsbladen nedan för att dela ut till
+                de lag som bygger respektive station.
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th></th><th>Figur</th><th>Grupp</th>
+                        <th class="num">Figurer</th><th class="num">Tavlor</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in Model.Rollup)
+                    {
+                        <tr>
+                            <td>@if (!string.IsNullOrEmpty(f.ImageUrl)) { <img class="thumb" src="@f.ImageUrl" alt="" /> }</td>
+                            <td>@f.Label @if (f.IsPoangmal) { <span class="poang">★ poäng</span> }</td>
+                            <td>@Sz(f.SizeGroup)</td>
+                            <td class="num">@f.Figures st</td>
+                            <td class="num">@f.Targets st</td>
+                        </tr>
+                    }
+                    <tr class="total">
+                        <td></td><td>Totalt</td><td></td>
+                        <td class="num">@Model.GrandTotalFigures st</td>
+                        <td class="num">@Model.GrandTotalTargets st</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        @foreach (var st in Model.Stations)
+        {
+            // Precompute suffixes — avoid inline @if glued to a word ("tavlor@if…"), which Razor's
+            // email-detection renders as literal text (see memory razor-literal-at-in-script).
+            var nameSuffix = !string.IsNullOrWhiteSpace(st.Name) ? " · " + st.Name : "";
+            var clsSuffix = st.WeaponClasses.Any() ? " · klasser: " + string.Join(", ", st.WeaponClasses) : "";
+            <div class="station-block">
+            <h2>Station @st.Station <span class="st-meta">@(nameSuffix) — @st.TotalFigures figurer / @st.TotalTargets tavlor@(clsSuffix)</span></h2>
+            @if (st.Figures.Count == 0)
+            {
+                <p class="st-meta">Inga figurer konfigurerade.</p>
+            }
+            else
+            {
+                <table>
+                    <thead>
+                        <tr><th></th><th>Figur</th><th>Grupp</th><th class="num">Figurer</th><th class="num">Tavlor</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var f in st.Figures)
+                        {
+                            <tr>
+                                <td>@if (!string.IsNullOrEmpty(f.ImageUrl)) { <img class="thumb" src="@f.ImageUrl" alt="" /> }</td>
+                                <td>@f.Label @if (f.IsPoangmal) { <span class="poang">★ poäng</span> }</td>
+                                <td>@Sz(f.SizeGroup)</td>
+                                <td class="num">@f.Figures st</td>
+                                <td class="num">@f.Targets st</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            </div>
+        }
+
+        <p class="note">
+            Antal per station = det största antal någon enskild vapenklass behöver av varje figur (stationen byggs en gång).
+            Förbrukningsmateriel (klister, tejp, häftklamrar m.m.) ingår inte — lägg det som egna uppgifter under Materiel.
+        </p>
+    }
+</div>
+</body>
+</html>

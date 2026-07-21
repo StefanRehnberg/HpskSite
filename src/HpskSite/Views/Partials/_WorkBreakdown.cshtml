@@ -185,6 +185,9 @@
 (function () {
     var compId = @competitionId;
     var TOKEN = '@wbToken';
+    var REFRESH = 12000;
+    var timer = null;
+    var lastUpdated = '';
     var areas = [];
     var compLinks = [];
     var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null };
@@ -205,9 +208,22 @@
             areas = d.areas || [];
             compLinks = d.compLinks || [];
             ctx = { discipline: d.discipline || '', compDate: d.compDate || null, daysUntilComp: d.daysUntilComp, stationSeed: d.stationSeed || null };
+            lastUpdated = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
             render();
         } catch (e) { q('wbAreas').innerHTML = '<div class="alert alert-warning">Kunde inte läsa förberedelserna.</div>'; }
     }
+
+    // Live refresh so several people can plan in parallel and see each other's changes. Skip while a
+    // modal is open (don't disrupt an in-progress edit) or while the tab is hidden. Different områden/
+    // uppgifter are independent rows, so parallel edits to different parts never clobber each other.
+    function poll() {
+        if (document.hidden) return;
+        if (document.querySelector('.modal.show')) return;   // someone is mid-edit — leave their form alone
+        load();
+    }
+    function startTimer() { if (!timer) timer = setInterval(poll, REFRESH); }
+    function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+    document.addEventListener('visibilitychange', function () { if (document.hidden) stopTimer(); else { poll(); startTimer(); } });
 
     function render() {
         renderContext();
@@ -222,12 +238,17 @@
 
     function renderContext() {
         var host = q('wbContext');
-        if (!ctx.compDate) { host.innerHTML = ''; return; }
-        var days = ctx.daysUntilComp;
-        var when = (days == null) ? '' :
-            (days > 0 ? (days + ' dagar kvar') : (days === 0 ? 'idag' : (Math.abs(days) + ' dagar sedan')));
-        var cls = (days != null && days < 0) ? 'text-muted' : (days != null && days <= 14 ? 'text-danger-emphasis' : '');
-        host.innerHTML = '<span class="badge bg-light text-dark border ' + cls + '"><i class="bi bi-calendar-event me-1"></i>Tävlingsdatum: ' + esc(ctx.compDate) + (when ? ' · ' + when : '') + '</span>';
+        var parts = [];
+        if (ctx.compDate) {
+            var days = ctx.daysUntilComp;
+            var when = (days == null) ? '' :
+                (days > 0 ? (days + ' dagar kvar') : (days === 0 ? 'idag' : (Math.abs(days) + ' dagar sedan')));
+            var cls = (days != null && days < 0) ? 'text-muted' : (days != null && days <= 14 ? 'text-danger-emphasis' : '');
+            parts.push('<span class="badge bg-light text-dark border ' + cls + '"><i class="bi bi-calendar-event me-1"></i>Tävlingsdatum: ' + esc(ctx.compDate) + (when ? ' · ' + when : '') + '</span>');
+        }
+        // Live-collab hint: several people can plan in parallel; the list refreshes so everyone sees changes.
+        parts.push('<span class="text-muted small" id="wbUpdated" title="Uppdateras automatiskt — flera kan planera samtidigt"><i class="bi bi-people me-1"></i>Flera kan arbeta samtidigt' + (lastUpdated ? ' · uppdaterad ' + lastUpdated : '') + '</span>');
+        host.innerHTML = '<div class="d-flex flex-wrap align-items-center gap-2">' + parts.join('') + '</div>';
     }
 
     function renderStationSeedBtn() {
@@ -235,7 +256,9 @@
         if (!slot) return;
         var s = ctx.stationSeed;
         if (s && s.available) {
-            slot.innerHTML = '<button type="button" class="btn btn-outline-primary btn-sm" onclick="wbSeedStations()" title="Skapa en bygguppgift per station"><i class="bi bi-geo-alt me-1"></i>Skapa stationsuppgifter (' + s.stationCount + ')</button>';
+            slot.innerHTML =
+                '<a class="btn btn-outline-primary btn-sm" href="/faltskytte/materiel/' + compId + '" target="_blank" rel="noopener" title="Materiellista från stationskonfigurationen"><i class="bi bi-box-seam me-1"></i>Materiellista</a> '
+                + '<button type="button" class="btn btn-outline-primary btn-sm" onclick="wbSeedStations()" title="Skapa en bygguppgift per station"><i class="bi bi-geo-alt me-1"></i>Skapa stationsuppgifter (' + s.stationCount + ')</button>';
         } else { slot.innerHTML = ''; }
     }
 
@@ -546,5 +569,6 @@
     initPickers();
 
     load();
+    startTimer();
 })();
 </script>
