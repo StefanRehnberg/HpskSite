@@ -160,6 +160,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.WorkBreakdownService>();
             // Phase 1.5: editable per-club/region planning templates. Run create-staffing-template-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingTemplateService>();
+            // Materiel-quantity estimate (general Beställningslista from participant/class/series counts).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.MaterielEstimateService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
 

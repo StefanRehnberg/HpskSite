@@ -248,6 +248,26 @@
     </div>
 </div>
 
+<!-- Materielberäkning modal (general Beställningslista) -->
+<div class="modal fade" id="wbMaterielModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content" id="wbMaterielPrint">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-box-seam me-2"></i>Materielberäkning</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Uppskattad materiel utifrån antal deltagare, klasser och serier. Detta är en <strong>uppskattning</strong> — justera efter behov innan beställning.</p>
+                <div id="wbMaterielBody"><div class="text-muted small">Laddar…</div></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary" onclick="window.print()"><i class="bi bi-printer me-1"></i>Skriv ut</button>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var compId = @competitionId;
@@ -342,7 +362,10 @@
             slot.innerHTML =
                 '<a class="btn btn-outline-primary btn-sm" href="/faltskytte/materiel/' + compId + '" target="_blank" rel="noopener" title="Materiellista från stationskonfigurationen"><i class="bi bi-box-seam me-1"></i>Materiellista</a> '
                 + '<button type="button" class="btn btn-outline-primary btn-sm" onclick="wbSeedStations()" title="Skapa en bygguppgift per station"><i class="bi bi-geo-alt me-1"></i>Skapa stationsuppgifter (' + s.stationCount + ')</button>';
-        } else { slot.innerHTML = ''; }
+        } else {
+            // Non-Fält: a general materiel estimate (Beställningslista) from participant/class/series counts.
+            slot.innerHTML = '<button type="button" class="btn btn-outline-primary btn-sm" onclick="wbOpenMateriel()" title="Uppskattad materiel från antal deltagare/klasser/serier"><i class="bi bi-box-seam me-1"></i>Materielberäkning</button>';
+        }
     }
 
     function renderCompDocs() {
@@ -594,6 +617,29 @@
     window.wbToggle = async function (id, checked) {
         var d = await post('/umbraco/surface/Staffing/SetWorkItemStatus', { id: id, competitionId: compId, status: checked ? 'Klar' : 'Planerad' });
         if (d.success) await load();
+    };
+
+    // ---- materiel estimate (general Beställningslista) ----
+    var materielModal = null;
+    window.wbOpenMateriel = async function () {
+        if (!materielModal) materielModal = new bootstrap.Modal(q('wbMaterielModal'));
+        q('wbMaterielBody').innerHTML = '<div class="text-muted small">Laddar…</div>';
+        materielModal.show();
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetMaterielEstimate?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { q('wbMaterielBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte beräkna.') + '</div>'; return; }
+            var counts = '<div class="mb-2 small text-muted">Underlag: <strong>' + d.participantCount + '</strong> deltagare · <strong>' + d.startCount + '</strong> starter · <strong>' + d.classCount + '</strong> klasser'
+                + (d.series > 0 ? ' · <strong>' + d.series + '</strong> serier' : '') + '</div>';
+            var rows = (d.rows || []).map(function (row) {
+                return '<tr><td>' + esc(row.category) + '</td><td>' + esc(row.item) + '</td>'
+                    + '<td class="text-end">' + (row.quantity != null ? row.quantity + (row.unit ? ' ' + esc(row.unit) : '') : '<span class="text-muted">efter behov</span>') + '</td>'
+                    + '<td class="text-muted small">' + esc(row.basis) + '</td></tr>';
+            }).join('') || '<tr><td colspan="4" class="text-muted">Inga poster.</td></tr>';
+            q('wbMaterielBody').innerHTML = counts
+                + '<table class="table table-sm"><thead><tr><th>Kategori</th><th>Materiel</th><th class="text-end">Antal</th><th>Underlag</th></tr></thead><tbody>' + rows + '</tbody></table>'
+                + '<p class="text-muted small mb-0">Deltagarantal räknas från anmälningarna. Fler antal fylls på när fler anmäler sig.</p>';
+        } catch (e) { q('wbMaterielBody').innerHTML = '<div class="alert alert-warning">Nätverksfel.</div>'; }
     };
 
     // ---- editable per-club/region templates (Phase 1.5) ----

@@ -34,6 +34,7 @@ namespace HpskSite.Controllers
         private readonly StaffingService _staffing;
         private readonly WorkBreakdownService _work;
         private readonly StaffingTemplateService _templates;
+        private readonly MaterielEstimateService _materiel;
         private readonly PrepDocumentStorage _docs;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
@@ -54,6 +55,7 @@ namespace HpskSite.Controllers
             StaffingService staffing,
             WorkBreakdownService work,
             StaffingTemplateService templates,
+            MaterielEstimateService materiel,
             PrepDocumentStorage docs,
             EmailService email,
             WebPushService webPush,
@@ -69,6 +71,7 @@ namespace HpskSite.Controllers
             _staffing = staffing;
             _work = work;
             _templates = templates;
+            _materiel = materiel;
             _docs = docs;
             _email = email;
             _webPush = webPush;
@@ -417,6 +420,26 @@ namespace HpskSite.Controllers
                 ? _templates.SeedFromTemplate(request.CompetitionId, request.TemplateId, compDate, viewer.Id)
                 : _work.SeedTemplate(request.CompetitionId, request.Size, discipline, compDate, viewer.Id);
             return Json(new { success = true, added });
+        }
+
+        /// <summary>Discipline-aware materiel-quantity estimate from participant/class/series counts.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMaterielEstimate(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var est = _materiel.Estimate(competitionId);
+            return Json(new
+            {
+                success = est.Success,
+                message = est.Message,
+                discipline = est.Discipline,
+                participantCount = est.ParticipantCount,
+                startCount = est.StartCount,
+                classCount = est.ClassCount,
+                series = est.Series,
+                rows = est.Rows,
+            });
         }
 
         // ---- Phase 1.5: editable per-club/region planning templates ----
