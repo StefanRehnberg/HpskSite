@@ -47,7 +47,38 @@ namespace HpskSite.Models.Staffing
         public DateTime ModifiedDate { get; set; }
     }
 
+    /// <summary>
+    /// A document or link attached to a scope within a competition's prep — the whole competition
+    /// (WorkAreaId + WorkItemId both null), an område, or a single uppgift. Either a URL or an uploaded
+    /// file (stored via PrepDocumentStorage). Prep is document-heavy, so this closes the biggest gap.
+    /// </summary>
+    [TableName("WorkLink")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class WorkLink
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        public int? WorkAreaId { get; set; }
+        public int? WorkItemId { get; set; }
+        public string Title { get; set; } = "";
+        public string? Url { get; set; }
+        public string? StoredFileName { get; set; }
+        public string? OriginalFileName { get; set; }
+        public int CreatedByMemberId { get; set; }
+        public DateTime CreatedDate { get; set; }
+    }
+
     // --- Output DTOs ---
+
+    public class WorkLinkView
+    {
+        public int Id { get; set; }
+        public int? WorkAreaId { get; set; }
+        public int? WorkItemId { get; set; }
+        public string Title { get; set; } = "";
+        public string? Url { get; set; }          // external link, OR the download URL for a stored file
+        public bool IsFile { get; set; }          // true = uploaded document, false = plain URL
+    }
 
     public class WorkItemView
     {
@@ -63,6 +94,7 @@ namespace HpskSite.Models.Staffing
         public string? ScopeKey { get; set; }
         public bool IsOverdue { get; set; }           // past DueDate and not Klar
         public int SortOrder { get; set; }
+        public List<WorkLinkView> Links { get; set; } = new();
     }
 
     public class WorkAreaView
@@ -76,6 +108,15 @@ namespace HpskSite.Models.Staffing
         public int TotalCount { get; set; }
         public int OverdueCount { get; set; }
         public List<WorkItemView> Items { get; set; } = new();
+        public List<WorkLinkView> Links { get; set; } = new();
+    }
+
+    /// <summary>Whether a Fältskytte comp can auto-seed one "Bygg station N" task per configured station.</summary>
+    public class StationSeedInfo
+    {
+        public bool Available { get; set; }
+        public int StationCount { get; set; }
+        public int AttachedConfigId { get; set; }   // 0 = none; links station tasks to the Fältkonfigurator
     }
 
     public class WorkBreakdownResponse
@@ -83,6 +124,11 @@ namespace HpskSite.Models.Staffing
         public bool Success { get; set; } = true;
         public string? Message { get; set; }
         public bool CanEdit { get; set; }
+        public string Discipline { get; set; } = "";
+        public string? CompDate { get; set; }       // "yyyy-MM-dd" or null
+        public int? DaysUntilComp { get; set; }      // negative once the comp has passed
+        public StationSeedInfo? StationSeed { get; set; }
+        public List<WorkLinkView> CompLinks { get; set; } = new();   // competition-level documents
         public List<WorkAreaView> Areas { get; set; } = new();
     }
 
@@ -122,5 +168,19 @@ namespace HpskSite.Models.Staffing
     {
         public int CompetitionId { get; set; }
         public string? Size { get; set; }             // klubb | krets | sm
+    }
+
+    public class SaveWorkLinkRequest
+    {
+        public int CompetitionId { get; set; }
+        public int? WorkAreaId { get; set; }
+        public int? WorkItemId { get; set; }
+        public string Title { get; set; } = "";
+        public string? Url { get; set; }
+    }
+
+    public class SeedStationTasksRequest
+    {
+        public int CompetitionId { get; set; }
     }
 }

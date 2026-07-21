@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly StaffingService _staffing;
         private readonly WorkBreakdownService _work;
+        private readonly PrepDocumentStorage _docs;
         private readonly ILogger<StaffingController> _logger;
 
         public StaffingController(
@@ -46,6 +47,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             StaffingService staffing,
             WorkBreakdownService work,
+            PrepDocumentStorage docs,
             ILogger<StaffingController> logger)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -56,6 +58,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _staffing = staffing;
             _work = work;
+            _docs = docs;
             _logger = logger;
         }
 
@@ -174,7 +177,26 @@ namespace HpskSite.Controllers
             if (!await HasCompetitionAccessAsync(competitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
             var wb = _work.Build(competitionId, canEdit: true);
-            return Json(new { success = true, canEdit = wb.CanEdit, areas = wb.Areas });
+
+            // Enrich with competition context (date anchoring + Fält station-seed availability).
+            var discipline = GetDiscipline(competitionId);
+            var (compDate, daysUntil) = GetCompDate(competitionId);
+            wb.Discipline = discipline;
+            wb.CompDate = compDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            wb.DaysUntilComp = daysUntil;
+            wb.StationSeed = GetStationSeed(competitionId, discipline);
+
+            return Json(new
+            {
+                success = true,
+                canEdit = wb.CanEdit,
+                discipline = wb.Discipline,
+                compDate = wb.CompDate,
+                daysUntilComp = wb.DaysUntilComp,
+                stationSeed = wb.StationSeed,
+                compLinks = wb.CompLinks,
+                areas = wb.Areas,
+            });
         }
 
         [HttpPost]
@@ -262,8 +284,112 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var added = _work.SeedTemplate(request.CompetitionId, request.Size, viewer.Id);
+            var discipline = GetDiscipline(request.CompetitionId);
+            var (compDate, _) = GetCompDate(request.CompetitionId);
+            var added = _work.SeedTemplate(request.CompetitionId, request.Size, discipline, compDate, viewer.Id);
             return Json(new { success = true, added });
+        }
+
+        /// <summary>Auto-seed one "Bygg station N" uppgift per configured station (Fältskytte).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SeedStationTasks([FromBody] SeedStationTasksRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var seed = GetStationSeed(request.CompetitionId, GetDiscipline(request.CompetitionId));
+            if (seed == null || !seed.Available)
+                return Json(new { success = false, message = "Ingen stationskonfiguration hittades." });
+            var added = _work.SeedStationTasks(request.CompetitionId, seed.StationCount, viewer.Id);
+            return Json(new { success = true, added });
+        }
+
+        // ======================= Dokument & länkar (WorkLink) =======================
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveWorkLink([FromBody] SaveWorkLinkRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (string.IsNullOrWhiteSpace(request.Url)) return Json(new { success = false, message = "Ange en länk (URL)." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var url = request.Url.Trim();
+            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                url = "https://" + url;
+            var title = string.IsNullOrWhiteSpace(request.Title) ? url : request.Title.Trim();
+
+            var id = _work.SaveLink(new WorkLink
+            {
+                CompetitionId = request.CompetitionId,
+                WorkAreaId = request.WorkAreaId is > 0 ? request.WorkAreaId : null,
+                WorkItemId = request.WorkItemId is > 0 ? request.WorkItemId : null,
+                Title = title.Length > 200 ? title.Substring(0, 200) : title,
+                Url = url,
+                CreatedByMemberId = viewer.Id,
+            });
+            return Json(new { success = true, id });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> UploadWorkDocument(int competitionId, int? workAreaId, int? workItemId, string? title, IFormFile? file)
+        {
+            if (competitionId <= 0 || file == null) return Json(new { success = false, message = "Ingen fil vald." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var (ok, err) = _docs.Validate(file.FileName, file.Length);
+            if (!ok) return Json(new { success = false, message = err });
+
+            string stored;
+            using (var s = file.OpenReadStream()) stored = await _docs.SaveAsync(s, file.FileName);
+            var display = string.IsNullOrWhiteSpace(title) ? file.FileName : title.Trim();
+
+            var id = _work.SaveLink(new WorkLink
+            {
+                CompetitionId = competitionId,
+                WorkAreaId = workAreaId is > 0 ? workAreaId : null,
+                WorkItemId = workItemId is > 0 ? workItemId : null,
+                Title = display.Length > 200 ? display.Substring(0, 200) : display,
+                StoredFileName = stored,
+                OriginalFileName = file.FileName,
+                CreatedByMemberId = viewer.Id,
+            });
+            return Json(new { success = true, id });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> DownloadWorkDocument(int id)
+        {
+            var link = _work.GetLink(id);
+            if (link == null || string.IsNullOrEmpty(link.StoredFileName)) return NotFound();
+            if (!await HasCompetitionAccessAsync(link.CompetitionId)) return Forbid();
+            var path = _docs.GetFilePath(link.StoredFileName);
+            if (path == null) return NotFound();
+            var download = string.IsNullOrEmpty(link.OriginalFileName) ? link.StoredFileName : link.OriginalFileName;
+            return PhysicalFile(path, PrepDocumentStorage.ContentTypeFor(link.StoredFileName), download);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteWorkLink([FromBody] DeleteWorkRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var storedFile = _work.DeleteLink(request.Id, request.CompetitionId);
+            if (!string.IsNullOrEmpty(storedFile)) _docs.Delete(storedFile);
+            return Json(new { success = true });
         }
 
         // ======================= Shared: member picker =======================
@@ -334,6 +460,58 @@ namespace HpskSite.Controllers
             }
             catch { }
             return "";
+        }
+
+        /// <summary>Competition date + whole days until it (negative once passed), for deadline anchoring.</summary>
+        private (DateTime? Date, int? DaysUntil) GetCompDate(int competitionId)
+        {
+            try
+            {
+                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
+                {
+                    var comp = ctx.Content.GetById(competitionId);
+                    var d = comp?.Value<DateTime?>("competitionDate");
+                    if (d.HasValue && d.Value != default)
+                        return (d.Value, (int)(d.Value.Date - DateTime.Now.Date).TotalDays);
+                }
+            }
+            catch { }
+            return (null, null);
+        }
+
+        /// <summary>
+        /// For a Fältskytte/MagnumFält comp, whether we can auto-seed station-build tasks: station count
+        /// (numberOfSeriesOrStations) + the attached Fältkonfigurator id (from the stationConfig blob meta).
+        /// </summary>
+        private StationSeedInfo? GetStationSeed(int competitionId, string discipline)
+        {
+            if (discipline is not ("Faltskytte" or "MagnumFalt")) return null;
+            try
+            {
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return null;
+                var comp = ctx.Content.GetById(competitionId);
+                if (comp == null) return null;
+
+                var stationCount = comp.Value<int>("numberOfSeriesOrStations");
+                int attachedConfigId = 0;
+                var cfgJson = comp.HasProperty("stationConfig") ? comp.Value<string>("stationConfig") : null;
+                if (!string.IsNullOrWhiteSpace(cfgJson))
+                {
+                    try
+                    {
+                        var jo = Newtonsoft.Json.Linq.JObject.Parse(cfgJson);
+                        attachedConfigId = jo.Value<int?>("_attachedConfigId") ?? 0;
+                    }
+                    catch { /* legacy/non-object blob — leave 0 */ }
+                }
+                return new StationSeedInfo
+                {
+                    Available = stationCount > 0,
+                    StationCount = stationCount,
+                    AttachedConfigId = attachedConfigId,
+                };
+            }
+            catch { return null; }
         }
 
         /// <summary>

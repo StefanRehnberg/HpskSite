@@ -158,6 +158,8 @@ namespace HpskSite.Composers
             // Documentation/COMPETITION_STAFFING_SYSTEM.md.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingService>();
             builder.Services.AddScoped<HpskSite.Services.Staffing.WorkBreakdownService>();
+            // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
 
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");

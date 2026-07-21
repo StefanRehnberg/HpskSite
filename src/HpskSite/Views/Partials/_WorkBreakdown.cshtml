@@ -24,11 +24,15 @@
                 <li><button class="dropdown-item" type="button" onclick="wbSeed('sm')">Mästerskap (SM)</button></li>
             </ul>
         </div>
+        <span id="wbStationSeedSlot"></span>
         <button type="button" class="btn btn-primary btn-sm" onclick="wbOpenArea(0)">
             <i class="bi bi-folder-plus me-1"></i>Lägg till område
         </button>
     </div>
 </div>
+
+<div id="wbContext" class="mb-2"></div>
+<div id="wbCompDocs" class="mb-3"></div>
 
 <div id="wbAreas">
     <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
@@ -110,6 +114,24 @@
                         </select>
                     </div>
                 </div>
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2">
+                        <label class="form-label fw-semibold">Koppla till (valfritt)</label>
+                        <select class="form-select" id="wbItemScopeType">
+                            <option value="">—</option>
+                            <option value="Station">Station</option>
+                            <option value="Skjutlag">Skjutlag</option>
+                            <option value="Klass">Klass</option>
+                            <option value="Patrull">Patrull</option>
+                            <option value="Bana">Bana</option>
+                        </select>
+                    </div>
+                    <div class="col-sm-6 mb-2" id="wbItemScopeKeyWrap" style="display:none">
+                        <label class="form-label fw-semibold" id="wbItemScopeKeyLabel">Nummer</label>
+                        <input type="text" class="form-control" id="wbItemScopeKey" placeholder="t.ex. 3">
+                    </div>
+                </div>
+                <div class="form-text mb-1" style="margin-top:-.4rem">Koppla t.ex. en bygguppgift till <strong>Station 3</strong> — då länkas den till Fältkonfiguratorn.</div>
                 <div class="text-danger small mt-2" id="wbItemError"></div>
             </div>
             <div class="modal-footer">
@@ -120,15 +142,57 @@
     </div>
 </div>
 
+<!-- Dokument/länk modal (shared: competition-level, per-område, per-uppgift) -->
+<div class="modal fade" id="wbLinkModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="wbLinkModalTitle">Lägg till dokument / länk</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="wbLinkAreaId" value="0">
+                <input type="hidden" id="wbLinkItemId" value="0">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Namn (valfritt)</label>
+                    <input type="text" class="form-control" id="wbLinkTitle" placeholder="t.ex. Inbjudan, Sanktionsbeslut, Ban-ritning">
+                </div>
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                    <li class="nav-item"><button class="nav-link active" id="wbLinkUrlTab" data-bs-toggle="tab" data-bs-target="#wbLinkUrlPane" type="button"><i class="bi bi-link-45deg me-1"></i>Länk</button></li>
+                    <li class="nav-item"><button class="nav-link" id="wbLinkFileTab" data-bs-toggle="tab" data-bs-target="#wbLinkFilePane" type="button"><i class="bi bi-upload me-1"></i>Fil</button></li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="wbLinkUrlPane">
+                        <input type="url" class="form-control" id="wbLinkUrl" placeholder="https://…">
+                        <div class="form-text">Publicerad inbjudan, Google Drive, SHB-referens…</div>
+                    </div>
+                    <div class="tab-pane fade" id="wbLinkFilePane">
+                        <input type="file" class="form-control" id="wbLinkFile">
+                        <div class="form-text">PDF, bild, Word, Excel, PowerPoint eller text (max 25 MB).</div>
+                    </div>
+                </div>
+                <div class="text-danger small mt-2" id="wbLinkError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="wbLinkSaveBtn" onclick="wbSaveLink()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var compId = @competitionId;
     var TOKEN = '@wbToken';
     var areas = [];
-    var areaModal = null, itemModal = null;
+    var compLinks = [];
+    var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null };
+    var areaModal = null, itemModal = null, linkModal = null;
 
     var STATUS_LABEL = { Planerad: 'Planerad', Pagar: 'Pågår', Blockerad: 'Blockerad', Klar: 'Klar' };
     var STATUS_CLS = { Planerad: 'bg-secondary', Pagar: 'bg-primary', Blockerad: 'bg-danger', Klar: 'bg-success' };
+    var SCOPE_KEY_LABEL = { Station: 'Station nr', Skjutlag: 'Skjutlag nr', Klass: 'Klass', Patrull: 'Patrull nr', Bana: 'Bana' };
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
@@ -139,16 +203,64 @@
             var d = await r.json();
             if (!d.success) { q('wbAreas').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa förberedelserna.') + '</div>'; return; }
             areas = d.areas || [];
+            compLinks = d.compLinks || [];
+            ctx = { discipline: d.discipline || '', compDate: d.compDate || null, daysUntilComp: d.daysUntilComp, stationSeed: d.stationSeed || null };
             render();
         } catch (e) { q('wbAreas').innerHTML = '<div class="alert alert-warning">Kunde inte läsa förberedelserna.</div>'; }
     }
 
     function render() {
+        renderContext();
+        renderStationSeedBtn();
+        renderCompDocs();
         if (!areas.length) {
             q('wbAreas').innerHTML = '<div class="text-center text-muted py-4">Inga områden ännu. Lägg till ett område, eller fyll i från en mall.</div>';
             return;
         }
         q('wbAreas').innerHTML = areas.map(areaHtml).join('');
+    }
+
+    function renderContext() {
+        var host = q('wbContext');
+        if (!ctx.compDate) { host.innerHTML = ''; return; }
+        var days = ctx.daysUntilComp;
+        var when = (days == null) ? '' :
+            (days > 0 ? (days + ' dagar kvar') : (days === 0 ? 'idag' : (Math.abs(days) + ' dagar sedan')));
+        var cls = (days != null && days < 0) ? 'text-muted' : (days != null && days <= 14 ? 'text-danger-emphasis' : '');
+        host.innerHTML = '<span class="badge bg-light text-dark border ' + cls + '"><i class="bi bi-calendar-event me-1"></i>Tävlingsdatum: ' + esc(ctx.compDate) + (when ? ' · ' + when : '') + '</span>';
+    }
+
+    function renderStationSeedBtn() {
+        var slot = q('wbStationSeedSlot');
+        if (!slot) return;
+        var s = ctx.stationSeed;
+        if (s && s.available) {
+            slot.innerHTML = '<button type="button" class="btn btn-outline-primary btn-sm" onclick="wbSeedStations()" title="Skapa en bygguppgift per station"><i class="bi bi-geo-alt me-1"></i>Skapa stationsuppgifter (' + s.stationCount + ')</button>';
+        } else { slot.innerHTML = ''; }
+    }
+
+    function renderCompDocs() {
+        var host = q('wbCompDocs');
+        var chips = linkChips(compLinks);
+        host.innerHTML = '<div class="card"><div class="card-header d-flex justify-content-between align-items-center py-2">'
+            + '<span class="fw-semibold"><i class="bi bi-folder2-open me-1"></i>Dokument &amp; länkar</span>'
+            + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbOpenLink(0,0)"><i class="bi bi-plus-lg me-1"></i>Lägg till</button>'
+            + '</div><div class="card-body py-2">'
+            + (chips || '<div class="text-muted small">Inga dokument ännu. Lägg sanktion, inbjudan, säkerhetsplan, ban-ritning, bokningar här.</div>')
+            + '</div></div>';
+    }
+
+    // Renders a link/file chip row (used at comp level + per uppgift). Each chip opens the URL/download; a
+    // small × deletes it.
+    function linkChips(links) {
+        if (!links || !links.length) return '';
+        return '<div class="d-flex flex-wrap gap-1">' + links.map(function (l) {
+            var icon = l.isFile ? 'bi-paperclip' : 'bi-link-45deg';
+            return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1" style="font-weight:500">'
+                + '<a href="' + esc(l.url) + '" target="_blank" rel="noopener" class="text-decoration-none"><i class="bi ' + icon + ' me-1"></i>' + esc(l.title) + '</a>'
+                + '<button type="button" class="btn-close" style="font-size:.6rem" title="Ta bort" onclick="wbDeleteLink(' + l.id + ')"></button>'
+                + '</span>';
+        }).join('') + '</div>';
     }
 
     function areaHtml(a) {
@@ -176,7 +288,9 @@
         var due = i.dueDate ? '<span class="badge ' + (i.isOverdue ? 'bg-danger' : 'bg-light text-dark border') + '"><i class="bi bi-calendar-event me-1"></i>' + esc(i.dueDate) + '</span>' : '';
         var who = i.assignedName ? '<span class="badge bg-light text-dark border"><i class="bi bi-person me-1"></i>' + esc(i.assignedName) + '</span>' : '<span class="badge bg-light text-secondary border">otilldelad</span>';
         var statusBadge = '<span class="badge ' + (STATUS_CLS[i.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[i.status] || i.status) + '</span>';
+        var scope = scopeBadge(i);
         var titleCls = done ? 'text-decoration-line-through text-muted' : '';
+        var links = (i.links && i.links.length) ? ('<div class="mt-1 ms-4">' + linkChips(i.links) + '</div>') : '';
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
             + '<div class="form-check">'
@@ -184,13 +298,26 @@
             + '<label class="form-check-label ' + titleCls + '">' + esc(i.title) + '</label>'
             + '</div>'
             + (i.description ? '<div class="text-muted small ms-4">' + esc(i.description) + '</div>' : '')
-            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + scope + '</div>'
+            + links
             + '</div>'
             + '<div class="d-flex gap-1 flex-shrink-0">'
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenLink(0,' + i.id + ')" title="Bifoga dokument/länk"><i class="bi bi-paperclip"></i></button>'
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenItem(' + i.workAreaId + ',' + i.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
             + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteItem(' + i.id + ',\'' + esc(i.title).replace(/'/g, "\\'") + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
             + '</div>'
             + '</div>';
+    }
+
+    // Scope badge; a Station scope links to the attached Fältkonfigurator when we have its id.
+    function scopeBadge(i) {
+        if (!i.scopeType) return '';
+        var label = i.scopeType + (i.scopeKey ? ' ' + i.scopeKey : '');
+        var cfg = ctx.stationSeed && ctx.stationSeed.attachedConfigId;
+        if (i.scopeType === 'Station' && cfg) {
+            return '<a class="badge bg-info-subtle text-info-emphasis border text-decoration-none" href="/faltkonfig/' + cfg + '/redigera" target="_blank" rel="noopener" title="Öppna i Fältkonfiguratorn"><i class="bi bi-geo-alt me-1"></i>' + esc(label) + ' <i class="bi bi-box-arrow-up-right"></i></a>';
+        }
+        return '<span class="badge bg-info-subtle text-info-emphasis border"><i class="bi bi-geo-alt me-1"></i>' + esc(label) + '</span>';
     }
 
     function findArea(id) { for (var i = 0; i < areas.length; i++) if (areas[i].id === id) return areas[i]; return null; }
@@ -288,13 +415,25 @@
         q('wbItemAssignSearch').value = i && i.assignedName ? i.assignedName : '';
         q('wbItemDue').value = i && i.dueDate ? i.dueDate : '';
         q('wbItemStatus').value = i ? i.status : 'Planerad';
+        q('wbItemScopeType').value = i && i.scopeType ? i.scopeType : '';
+        q('wbItemScopeKey').value = i && i.scopeKey ? i.scopeKey : '';
+        applyItemScope();
         q('wbItemModalTitle').textContent = i ? 'Redigera uppgift' : 'Lägg till uppgift';
         itemModal.show();
     };
 
+    function applyItemScope() {
+        var st = q('wbItemScopeType').value;
+        var wrap = q('wbItemScopeKeyWrap');
+        if (!st) { wrap.style.display = 'none'; }
+        else { wrap.style.display = ''; q('wbItemScopeKeyLabel').textContent = SCOPE_KEY_LABEL[st] || 'Nummer'; }
+    }
+    q('wbItemScopeType').addEventListener('change', applyItemScope);
+
     window.wbSaveItem = async function () {
         var title = q('wbItemTitle').value.trim();
         if (!title) { q('wbItemError').textContent = 'Ange en uppgift.'; return; }
+        var st = q('wbItemScopeType').value;
         var payload = {
             id: parseInt(q('wbItemId').value, 10) || 0,
             competitionId: compId,
@@ -304,7 +443,9 @@
             assignedMemberId: parseInt(q('wbItemAssignId').value, 10) || 0,
             assignedName: q('wbItemAssignName').value.trim(),
             dueDate: q('wbItemDue').value.trim(),
-            status: q('wbItemStatus').value
+            status: q('wbItemStatus').value,
+            scopeType: st,
+            scopeKey: st ? q('wbItemScopeKey').value.trim() : ''
         };
         var d = await post('/umbraco/surface/Staffing/SaveWorkItem', payload);
         if (d.success) { itemModal.hide(); await load(); }
@@ -328,6 +469,67 @@
         var d = await post('/umbraco/surface/Staffing/SeedPrepTemplate', { competitionId: compId, size: size });
         if (d.success) { await load(); }
         else alert(d.message || 'Kunde inte fylla i mallen.');
+    };
+
+    window.wbSeedStations = async function () {
+        var s = ctx.stationSeed;
+        if (!s || !s.available) return;
+        if (!confirm('Skapa en "Bygg station N"-uppgift för var och en av de ' + s.stationCount + ' stationerna? Befintliga stationsuppgifter hoppas över.')) return;
+        var d = await post('/umbraco/surface/Staffing/SeedStationTasks', { competitionId: compId });
+        if (d.success) { await load(); }
+        else alert(d.message || 'Kunde inte skapa stationsuppgifter.');
+    };
+
+    // ---- dokument & länkar ----
+    window.wbOpenLink = function (areaId, itemId) {
+        if (!linkModal) linkModal = new bootstrap.Modal(q('wbLinkModal'));
+        q('wbLinkError').textContent = '';
+        q('wbLinkAreaId').value = areaId || 0;
+        q('wbLinkItemId').value = itemId || 0;
+        q('wbLinkTitle').value = '';
+        q('wbLinkUrl').value = '';
+        q('wbLinkFile').value = '';
+        // default to the Länk tab
+        new bootstrap.Tab(q('wbLinkUrlTab')).show();
+        var where = itemId ? 'uppgiften' : (areaId ? 'området' : 'tävlingen');
+        q('wbLinkModalTitle').textContent = 'Lägg till dokument / länk för ' + where;
+        linkModal.show();
+    };
+
+    window.wbSaveLink = async function () {
+        var err = q('wbLinkError'); err.textContent = '';
+        var areaId = parseInt(q('wbLinkAreaId').value, 10) || 0;
+        var itemId = parseInt(q('wbLinkItemId').value, 10) || 0;
+        var title = q('wbLinkTitle').value.trim();
+        var url = q('wbLinkUrl').value.trim();
+        var file = q('wbLinkFile').files[0];
+        var btn = q('wbLinkSaveBtn'); btn.disabled = true;
+        try {
+            var d;
+            if (file) {
+                var fd = new FormData();
+                fd.append('competitionId', compId);
+                if (areaId) fd.append('workAreaId', areaId);
+                if (itemId) fd.append('workItemId', itemId);
+                if (title) fd.append('title', title);
+                fd.append('file', file);
+                var r = await fetch('/umbraco/surface/Staffing/UploadWorkDocument', { method: 'POST', headers: { 'RequestVerificationToken': TOKEN }, body: fd });
+                d = await r.json();
+            } else if (url) {
+                d = await post('/umbraco/surface/Staffing/SaveWorkLink', { competitionId: compId, workAreaId: areaId, workItemId: itemId, title: title, url: url });
+            } else {
+                err.textContent = 'Ange en länk eller välj en fil.'; btn.disabled = false; return;
+            }
+            if (d.success) { linkModal.hide(); await load(); }
+            else err.textContent = d.message || 'Kunde inte spara.';
+        } catch (e) { err.textContent = 'Nätverksfel.'; }
+        btn.disabled = false;
+    };
+
+    window.wbDeleteLink = async function (id) {
+        if (!confirm('Ta bort dokumentet/länken?')) return;
+        var d = await post('/umbraco/surface/Staffing/DeleteWorkLink', { id: id, competitionId: compId });
+        if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
     };
 
     async function post(url, payload) {
