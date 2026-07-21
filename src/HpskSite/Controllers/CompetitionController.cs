@@ -421,31 +421,13 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    // Check if existing registration has an invoice
-                    var existingInvoiceId = existingRegistration.GetValue<int>("invoiceId");
-                    if (existingInvoiceId > 0)
-                    {
-                        var invoice = _contentService.GetById(existingInvoiceId);
-                        if (invoice != null)
-                        {
-                            var paymentStatus = invoice.GetValue<string>("paymentStatus");
-
-                            // BLOCK: Cannot update paid registrations
-                            if (paymentStatus == "Paid")
-                            {
-                                var errorMsg = "Kan inte ändra anmälan med betald faktura. Vänligen kontakta administratören.";
-                                _logger.LogWarning("Blocked update of paid registration {RegId} for member {MemberId}", existingRegistration.Id, targetMember.Id);
-                                if (IsAjaxRequest())
-                                {
-                                    return Json(new { success = false, message = errorMsg });
-                                }
-                                TempData["Error"] = errorMsg;
-                                return RedirectToCurrentUmbracoPage();
-                            }
-                            // Fee changes are reconciled after save via
-                            // PaymentService.ReconcileRegistrationInvoiceAsync (below).
-                        }
-                    }
+                    // A paid registration is NO LONGER blocked from changes. Adding/swapping/removing
+                    // classes is reconciled after save via PaymentService.ReconcileRegistrationInvoiceAsync
+                    // (below) under the delta/top-up model: Paid invoices are never touched, a new Pending
+                    // top-up invoice is minted for any additional amount owed, and if the fee drops to or
+                    // below what's already paid, any leftover Pending is cancelled (a refund, if owed, is
+                    // handled manually by the organizer). The client is told the outstanding amount via
+                    // `amountDue` in the response so it can offer a Swish top-up.
 
                     registration = existingRegistration;
                     isUpdate = true;
@@ -674,6 +656,22 @@ namespace HpskSite.Controllers
                         successMessage += " Placering: " + string.Join(", ", teamInfoParts);
                     }
 
+                    // Outstanding amount the shooter still owes AFTER this change, under the delta/
+                    // top-up model (full fee minus everything already Paid). The client uses this to
+                    // decide whether to offer a Swish top-up (>0) or just confirm (0 — e.g. a swap, a
+                    // removal, or an already-fully-paid registration). Read-only; best-effort.
+                    decimal amountDue = newFee;
+                    try
+                    {
+                        var paymentSvc = HttpContext?.RequestServices?.GetService(typeof(PaymentService)) as PaymentService;
+                        if (paymentSvc != null)
+                            amountDue = paymentSvc.GetInvoiceTotalsForRegistration(competitionId, registrationId).Outstanding;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Could not compute amountDue for registration {RegId}", registrationId);
+                    }
+
                     if (IsAjaxRequest())
                     {
                         return Json(new
@@ -685,6 +683,7 @@ namespace HpskSite.Controllers
                             feeChanged = feeChanged,
                             oldFee = oldFee,
                             newFee = newFee,
+                            amountDue = amountDue,
                             teamAssignments = dpConfig != null ? teamAssignments : null
                         });
                     }

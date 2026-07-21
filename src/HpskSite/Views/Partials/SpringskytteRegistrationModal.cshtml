@@ -518,20 +518,30 @@ async function springRegSubmit() {
         if (data.success) {
             const hasSwish = @(hasSwish ? "true" : "false");
             const targetId = springRegSelectedTargetMemberId || '';
+            // Outstanding amount after this change (delta/top-up model). null = server didn't report it.
+            const amountDue = (typeof data.amountDue === 'number') ? data.amountDue : null;
+            const heading = data.isUpdate ? 'Anmälan uppdaterad!' : 'Anmälan registrerad!';
 
             // Hide the form and footer, show success state
             document.getElementById('springRegFormBody').style.display = 'none';
             document.getElementById('springRegFooter').style.display = 'none';
 
-            if (hasSwish) {
-                // Show success + Swish payment option
+            // Offer Swish only when something is actually owed. A swap or removal (amountDue <= 0)
+            // — or an already-fully-paid registration — needs no further payment.
+            const showSwish = hasSwish && (amountDue === null || amountDue > 0);
+
+            if (showSwish) {
+                const amountLabel = (amountDue && amountDue > 0)
+                    ? `<p class="mb-2">Att betala: <strong>${amountDue} kr</strong></p>`
+                    : '';
                 successDiv.innerHTML = `
                     <div class="text-center py-3">
                         <div class="text-success mb-3"><i class="bi bi-check-circle" style="font-size: 3rem;"></i></div>
-                        <h5 class="mb-2">Anmälan registrerad!</h5>
+                        <h5 class="mb-2">${heading}</h5>
                         <p class="text-muted mb-3">${data.message || ''}</p>
                         <hr>
                         <p class="mb-2"><strong><i class="bi bi-wallet2 me-1"></i>Betala tävlingsavgift</strong></p>
+                        ${amountLabel}
                         <div class="d-flex flex-column gap-2 align-items-center">
                             <button type="button" class="btn btn-primary w-75" onclick="springRegShowSwish(${@competitionId}, '${targetId}')">
                                 <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
@@ -543,12 +553,16 @@ async function springRegSubmit() {
                     </div>`;
                 successDiv.style.display = 'block';
             } else {
-                // No Swish — show success with close button
+                // No Swish, or nothing left to pay (swap/removal, or already fully paid).
+                const paidNote = (amountDue !== null && amountDue <= 0 && data.isUpdate)
+                    ? '<p class="text-muted mb-3">Ingen ytterligare betalning krävs. Om avgiften har minskat hanteras eventuell återbetalning av arrangören.</p>'
+                    : '';
                 successDiv.innerHTML = `
                     <div class="text-center py-3">
                         <div class="text-success mb-3"><i class="bi bi-check-circle" style="font-size: 3rem;"></i></div>
-                        <h5 class="mb-2">Anmälan registrerad!</h5>
+                        <h5 class="mb-2">${heading}</h5>
                         <p class="text-muted mb-3">${data.message || ''}</p>
+                        ${paidNote}
                         <button type="button" class="btn btn-secondary" onclick="springRegCloseAndReload()">
                             <i class="bi bi-x-circle me-1"></i>Stäng
                         </button>

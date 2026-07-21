@@ -628,6 +628,59 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Read-only snapshot of a registration's billing state under the delta/top-up model:
+        /// <c>FullFee</c> = the fee the registration owes as it now stands; <c>SumPaid</c> = total of
+        /// every Paid invoice; <c>Outstanding</c> = <c>max(0, FullFee - SumPaid)</c> (what still has to
+        /// be collected); <c>PendingInvoice</c> = the single outstanding Pending invoice, if one exists.
+        /// Does NOT create or modify anything — use <see cref="EnsureOutstandingInvoiceAsync"/> when you
+        /// need the Pending invoice to actually exist for payment.
+        /// </summary>
+        public RegistrationInvoiceTotals GetInvoiceTotalsForRegistration(int competitionId, int registrationId)
+        {
+            var result = new RegistrationInvoiceTotals();
+            var competition = _contentService.GetById(competitionId);
+            var registration = _contentService.GetById(registrationId);
+            if (competition == null || registration == null ||
+                registration.ContentType.Alias != "competitionRegistration")
+                return result;
+
+            var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
+                registration.GetValue<string>("shootingClasses") ?? "");
+            var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
+            var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
+            var classesForCalc = classCodes.Count > 0
+                ? (IReadOnlyCollection<string>)classCodes
+                : new[] { string.Empty };
+            result.FullFee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+
+            foreach (var inv in GetAllNonCancelledInvoicesForRegistration(competition, registrationId))
+            {
+                var s = (inv.GetValue<string>("paymentStatus") ?? "Pending").Trim().Trim('[', ']').Trim('"');
+                var amt = inv.GetValue<decimal>("totalAmount");
+                if (s == "Paid") result.SumPaid += amt;
+                else if (s == "Pending" && result.PendingInvoice == null) result.PendingInvoice = inv;
+            }
+
+            result.Outstanding = Math.Max(0m, result.FullFee - result.SumPaid);
+            return result;
+        }
+
+        /// <summary>
+        /// Reconcile the registration's invoices to the current fee (delta/top-up model, so an
+        /// add/swap/remove of classes on an already-paid registration is billed only for the delta —
+        /// Paid invoices are never modified) and return the resulting billing snapshot. On return, if
+        /// <c>Outstanding &gt; 0</c> the <c>PendingInvoice</c> exists and carries exactly that amount;
+        /// if <c>Outstanding == 0</c> there is nothing to collect (any leftover Pending was cancelled).
+        /// This is the payment entry point — call it before generating a Swish QR so the shooter pays
+        /// the top-up, not the full fee again.
+        /// </summary>
+        public async Task<RegistrationInvoiceTotals> EnsureOutstandingInvoiceAsync(int competitionId, int registrationId)
+        {
+            await ReconcileRegistrationInvoiceAsync(competitionId, registrationId);
+            return GetInvoiceTotalsForRegistration(competitionId, registrationId);
+        }
+
+        /// <summary>
         /// All non-cancelled invoices for a registration (matched by <c>registrationId</c> or the
         /// legacy <c>relatedRegistrationIds</c> JSON array), newest first.
         /// </summary>
@@ -1199,5 +1252,20 @@ namespace HpskSite.Services
                 return Task.FromResult<IContent?>(null);
             }
         }
+    }
+
+    /// <summary>
+    /// Billing snapshot for a single registration under the delta/top-up invoice model.
+    /// </summary>
+    public class RegistrationInvoiceTotals
+    {
+        /// <summary>Fee the registration owes as it currently stands (all classes + deltävling).</summary>
+        public decimal FullFee { get; set; }
+        /// <summary>Total of every Paid invoice for the registration.</summary>
+        public decimal SumPaid { get; set; }
+        /// <summary>What still has to be collected: <c>max(0, FullFee - SumPaid)</c>.</summary>
+        public decimal Outstanding { get; set; }
+        /// <summary>The single outstanding Pending invoice, if one exists.</summary>
+        public IContent? PendingInvoice { get; set; }
     }
 }

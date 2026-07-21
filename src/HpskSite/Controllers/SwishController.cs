@@ -346,112 +346,37 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du har inga aktiva anmälningar för denna tävling." });
                 }
 
-                // Calculate total amount (per-class base/junior fee + optional deltävling surcharge)
+                // Classes for the deltävling-portion display below (cosmetic breakdown only).
                 var classesForCalc = userShootingClasses.Count > 0
                     ? (IReadOnlyCollection<string>)userShootingClasses
                     : new[] { string.Empty }; // single non-junior bucket so baseFee applies once when class list is empty
-                var totalAmount = RegistrationFeeCalculator.Calculate(competition, classesForCalc, registeredIsSubCompetition);
-                var amountString = totalAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
-                _logger.LogInformation("Payment calculation - RegistrationId: {RegistrationId}, ClassCount: {ClassCount}, RegistrationFee: {Fee}, IsSubCompetition: {SubComp}, TotalAmount: {Total}",
-                    userRegistrationId.Value, userShootingClasses.Count, registrationFee, registeredIsSubCompetition, totalAmount);
-                _logger.LogInformation("User shooting classes found: {ShootingClasses}", string.Join(", ", userShootingClasses));
-
-                if (totalAmount <= 0)
-                {
-                    return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad." });
-                }
-
-                // Get or create invoice for this registration (SIMPLIFIED FLOW)
                 var memberId = registeredMemberId ?? currentMember.Id.ToString();
                 var memberName = registeredMemberName ?? currentMember.Name;
 
-                _logger.LogInformation("Getting/creating invoice for registration {RegistrationId}, member {MemberId}", userRegistrationId.Value, memberId);
+                // Bill only what's still OWED, not the full fee again. Under the delta/top-up model, a
+                // shooter who already paid for some classes and then added/swapped classes owes only the
+                // difference. EnsureOutstandingInvoiceAsync reconciles the invoices (Paid ones are never
+                // touched) and returns the single outstanding Pending invoice, creating/patching it so
+                // the QR is correct even before the background reconcile has run.
+                var billing = await _paymentService.EnsureOutstandingInvoiceAsync(competitionId, userRegistrationId.Value);
 
-                // Get the registration document to check for existing invoice
-                var registrationDoc = Services.ContentService.GetById(userRegistrationId.Value);
-                if (registrationDoc == null)
+                _logger.LogInformation("Payment QR (delta model) - RegistrationId: {RegistrationId}, FullFee: {Full}, SumPaid: {Paid}, Outstanding: {Out}",
+                    userRegistrationId.Value, billing.FullFee, billing.SumPaid, billing.Outstanding);
+
+                if (billing.PendingInvoice == null || billing.Outstanding <= 0)
                 {
-                    return Json(new { success = false, message = "Anmälan kunde inte hittas." });
+                    // Nothing (more) to collect: fully paid already, or the fee dropped to/below what's
+                    // been paid (a swap or removal). Any refund is handled manually by the organizer.
+                    var msg = billing.SumPaid > 0
+                        ? "Din anmälan är betald. Om avgiften har minskat hanteras eventuell återbetalning av arrangören."
+                        : "Ingen anmälningsavgift är konfigurerad.";
+                    return Json(new { success = false, message = msg });
                 }
 
-                var invoiceId = registrationDoc.GetValue<int>("invoiceId");
-                IContent? invoice = null;
-
-                if (invoiceId > 0)
-                {
-                    // Invoice exists, check its status
-                    invoice = Services.ContentService.GetById(invoiceId);
-                    if (invoice != null)
-                    {
-                        var paymentStatus = invoice.GetValue<string>("paymentStatus");
-                        _logger.LogInformation("Found existing invoice {InvoiceId} with status {Status}", invoiceId, paymentStatus);
-
-                        if (paymentStatus == "Paid")
-                        {
-                            return Json(new { success = false, message = "Denna anmälan har redan betalats." });
-                        }
-
-                        if (paymentStatus == "Cancelled")
-                        {
-                            // Old invoice was cancelled, create new one
-                            _logger.LogInformation("Existing invoice {InvoiceId} is cancelled, creating new invoice", invoiceId);
-
-                            invoice = await _paymentService.CreateInvoiceAsync(
-                                competitionId,
-                                memberId,
-                                memberName ?? "Okänd medlem",
-                                userRegistrationId.Value,
-                                totalAmount,
-                                "Swish");
-
-                            if (invoice == null)
-                            {
-                                return Json(new { success = false, message = "Kunde inte skapa faktura för betalning." });
-                            }
-
-                            // Link new invoice back to registration
-                            registrationDoc.SetValue("invoiceId", invoice.Id);
-                            var saveResult = Services.ContentService.Save(registrationDoc);
-                            if (saveResult.Success)
-                            {
-                                Services.ContentService.Publish(registrationDoc, new[] { "*" });
-                            }
-                        }
-
-                        // If status is "Pending", reuse the invoice (fee didn't change)
-                    }
-                    else
-                    {
-                        return Json(new { success = false, message = "Faktura kunde inte hittas." });
-                    }
-                }
-                else
-                {
-                    // No invoice exists yet, create it
-                    _logger.LogInformation("No invoice exists for registration {RegistrationId}, creating new invoice", userRegistrationId.Value);
-
-                    invoice = await _paymentService.CreateInvoiceAsync(
-                        competitionId,
-                        memberId,
-                        memberName ?? "Okänd medlem",
-                        userRegistrationId.Value,
-                        totalAmount,
-                        "Swish");
-
-                    if (invoice == null)
-                    {
-                        return Json(new { success = false, message = "Kunde inte skapa faktura för betalning." });
-                    }
-
-                    // Link invoice back to registration
-                    registrationDoc.SetValue("invoiceId", invoice.Id);
-                    var saveResult = Services.ContentService.Save(registrationDoc);
-                    if (saveResult.Success)
-                    {
-                        Services.ContentService.Publish(registrationDoc, new[] { "*" });
-                    }
-                }
+                var invoice = billing.PendingInvoice;
+                var totalAmount = billing.Outstanding;
+                var amountString = totalAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
                 // Get the invoice number from the created invoice
                 var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
@@ -499,9 +424,14 @@ namespace HpskSite.Controllers
                     invoiceNumber = invoiceNumber,
                     message = message,
                     paymentAlreadySent = invoice.GetValue<DateTime?>("paymentSentDate").HasValue,
-                    includesSubCompetition = subCompPortion > 0,
+                    // Only surface the deltävling breakdown on a full (nothing-yet-paid) invoice — on a
+                    // partial top-up the outstanding amount may be less than the deltävling portion.
+                    includesSubCompetition = subCompPortion > 0 && billing.SumPaid == 0m,
                     subCompetitionName = subCompetitionName,
-                    subCompetitionFeeTotal = subCompPortion
+                    subCompetitionFeeTotal = billing.SumPaid == 0m ? subCompPortion : 0m,
+                    isTopUp = billing.SumPaid > 0m,
+                    fullFee = billing.FullFee,
+                    alreadyPaid = billing.SumPaid
                 });
             }
             catch (Exception ex)
