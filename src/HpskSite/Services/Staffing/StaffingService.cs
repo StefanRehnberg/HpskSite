@@ -233,6 +233,8 @@ namespace HpskSite.Services.Staffing
             // Mirror to competitionManagers AFTER the write scope has committed, so the ContentService
             // Save+Publish runs in its own transaction (no publish nested inside the raw-SQL scope).
             SyncCompetitionManagers(req.CompetitionId);
+            if (string.Equals(req.RoleKey, StationschefRole, StringComparison.OrdinalIgnoreCase))
+                SyncStationManagers(req.CompetitionId);
             return savedId;
         }
 
@@ -247,11 +249,15 @@ namespace HpskSite.Services.Staffing
 
         public void Delete(int id, int competitionId)
         {
+            string? roleKey;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
+                roleKey = scope.Database.ExecuteScalar<string>("SELECT RoleKey FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
                 scope.Database.Execute("DELETE FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
             }
             SyncCompetitionManagers(competitionId);
+            if (string.Equals(roleKey, StationschefRole, StringComparison.OrdinalIgnoreCase))
+                SyncStationManagers(competitionId);
         }
 
         // ---- day-of cockpit: roll-call / upprop (+ overlay hook) ----
@@ -584,6 +590,65 @@ namespace HpskSite.Services.Staffing
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Staffing: competitionManagers sync failed for competition {CompetitionId}", competitionId);
+            }
+        }
+
+        private const string StationschefRole = "stationschef";
+
+        /// <summary>
+        /// Fält convergence: write the roster's stationschef rows through into the competition's
+        /// faltskytteStationManagers JSON (the canonical store the Stationer tab, station-entry page and
+        /// prints all read), so a chief assigned in the Bemanning roster shows up everywhere and there is
+        /// no double-entry. Roster rows are authoritative for their station (tagged "_fromRoster"); entries
+        /// set on the Stationer tab for stations without a roster row are preserved. Deleting a roster row
+        /// drops its entry on the next sync.
+        /// </summary>
+        private void SyncStationManagers(int competitionId)
+        {
+            try
+            {
+                var content = _contentService.GetById(competitionId);
+                if (content == null || !content.HasProperty("faltskytteStationManagers")) return;
+                var type = content.GetValue<string>("competitionType") ?? "";
+                if (!FunctionaryRoles.FaltFamily.Contains(type, StringComparer.OrdinalIgnoreCase)) return;
+
+                var json = content.GetValue<string>("faltskytteStationManagers") ?? "";
+                Newtonsoft.Json.Linq.JObject obj;
+                try { obj = string.IsNullOrWhiteSpace(json) ? new Newtonsoft.Json.Linq.JObject() : Newtonsoft.Json.Linq.JObject.Parse(json); }
+                catch { obj = new Newtonsoft.Json.Linq.JObject(); }
+
+                // Drop previous roster-origin entries; rebuild from current stationschef rows.
+                foreach (var p in obj.Properties().ToList())
+                    if (p.Value is Newtonsoft.Json.Linq.JObject o && o.Value<bool?>("_fromRoster") == true)
+                        p.Remove();
+
+                List<StaffAssignment> rows;
+                using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                    rows = scope.Database.Fetch<StaffAssignment>(
+                        "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1", competitionId, StationschefRole);
+
+                foreach (var r in rows)
+                {
+                    if (!string.Equals(r.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(r.ScopeKey))
+                        continue;
+                    obj[r.ScopeKey!] = new Newtonsoft.Json.Linq.JObject
+                    {
+                        ["name"] = r.DisplayName,
+                        ["phone"] = r.Phone ?? "",
+                        ["memberId"] = r.MemberId,
+                        ["_fromRoster"] = true,
+                    };
+                }
+
+                var newJson = obj.ToString(Newtonsoft.Json.Formatting.None);
+                if (string.Equals(newJson, json, StringComparison.Ordinal)) return;   // no change → don't republish
+                content.SetValue("faltskytteStationManagers", newJson);
+                _contentService.Save(content);
+                _contentService.Publish(content, new[] { "*" }, -1);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Staffing: station-manager sync failed for competition {CompetitionId}", competitionId);
             }
         }
 
