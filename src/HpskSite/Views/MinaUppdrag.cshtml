@@ -20,10 +20,7 @@
     <div id="muGroups">
         <div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> Laddar…</div>
     </div>
-
-    <h2 class="h5 mt-4"><i class="bi bi-clipboard-plus me-2"></i>Anmäl dig som funktionär</h2>
-    <p class="text-muted small">Tävlingar som är öppna för anmälan från din klubb eller krets. Välj en roll och anmäl dig — arrangören ser dig direkt i bemanningen.</p>
-    <div id="muOpen"><div class="text-muted small">Laddar…</div></div>
+    <p class="text-muted small mt-3">Vill du anmäla dig som funktionär till en tävling? Öppna tävlingens bemanningssida (länk i inbjudan eller på startsidan).</p>
 </div>
 
 <!-- Tillgänglighet modal -->
@@ -171,38 +168,6 @@
         if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
     };
 
-    // ---- self-sign-up for open competitions ----
-    async function loadOpen() {
-        try {
-            var r = await fetch('/mina-uppdrag/open', { headers: { 'Accept': 'application/json' } });
-            var d = await r.json();
-            renderOpen((d && d.success) ? (d.competitions || []) : []);
-        } catch (e) { q('muOpen').innerHTML = '<div class="text-muted small">Kunde inte läsa öppna tävlingar.</div>'; }
-    }
-
-    function renderOpen(list) {
-        if (!list.length) { q('muOpen').innerHTML = '<div class="text-muted small fst-italic">Inga tävlingar är öppna för anmälan just nu.</div>'; return; }
-        q('muOpen').innerHTML = list.map(function (c) {
-            var when = c.compDate ? '<span class="text-muted small ms-2"><i class="bi bi-calendar-event me-1"></i>' + esc(c.compDate) + '</span>' : '';
-            var opts = (c.roles || []).map(function (r) { return '<option value="' + esc(r.key) + '">' + esc(r.name) + '</option>'; }).join('');
-            return '<div class="card mb-2"><div class="card-body py-2">'
-                + '<div class="fw-semibold mb-2">' + esc(c.compName) + when + '</div>'
-                + '<div class="input-group input-group-sm" style="max-width:420px">'
-                + '<select class="form-select" id="muRole-' + c.competitionId + '">' + opts + '</select>'
-                + '<button class="btn btn-primary" type="button" onclick="muSignUp(' + c.competitionId + ')"><i class="bi bi-check-lg me-1"></i>Anmäl mig</button>'
-                + '</div></div></div>';
-        }).join('');
-    }
-
-    window.muSignUp = async function (compId) {
-        var sel = q('muRole-' + compId);
-        var roleKey = sel ? sel.value : '';
-        if (!roleKey) return;
-        var d = await post('/mina-uppdrag/signup', { competitionId: compId, roleKey: roleKey });
-        if (d.success) { alert('Tack! Du är anmäld.'); await load(); await loadOpen(); }
-        else alert(d.message || 'Kunde inte anmäla.');
-    };
-
     async function post(url, payload) {
         try {
             var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify(payload) });
@@ -218,6 +183,5 @@
     }
     initPickers();
     load();
-    loadOpen();
 })();
 </script>

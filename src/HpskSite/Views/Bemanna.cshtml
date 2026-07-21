@@ -1,0 +1,168 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Bemanning";
+    var competitionId = ViewData["CompetitionId"];
+    var compExists = ViewData["CompetitionExists"] as bool? ?? false;
+    var token = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="container mt-4 mb-5" style="max-width:720px">
+    @if (!compExists)
+    {
+        <div class="alert alert-warning">Tävlingen hittades inte.</div>
+    }
+    else
+    {
+        <h1 class="h3"><i class="bi bi-person-badge me-2"></i>Bemanning</h1>
+        <p class="text-muted" id="beHeader">Laddar…</p>
+
+        <div id="beMine"></div>
+        <div id="beAvail" class="mt-3"></div>
+        <div id="beOpen" class="mt-3"></div>
+        <div id="beEmpty"></div>
+    }
+</div>
+
+<!-- Tillgänglighet modal -->
+<div class="modal fade" id="beAvailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Lägg till tillgänglighet</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Lämna tomt för <strong>heldag</strong>, eller ange ett tidsfönster.</p>
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="beAvFrom" placeholder="Heldag"></div>
+                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="beAvTo" placeholder="Heldag"></div>
+                </div>
+                <div class="mb-1"><label class="form-label fw-semibold">Kommentar (valfritt)</label><input type="text" class="form-control" id="beAvNote"></div>
+                <div class="text-danger small mt-2" id="beAvError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="beAvSaveBtn" onclick="beSaveAvail()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var compId = @(competitionId ?? 0);
+    var TOKEN = '@token';
+    var availModal = null;
+    var STATUS_LABEL = { Planned: 'Ej svarat', Invited: 'Inbjuden', Accepted: 'Tackat ja', Declined: 'Tackat nej', Confirmed: 'Bekräftad' };
+    var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-success', Declined: 'bg-danger', Confirmed: 'bg-success' };
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function q(id) { return document.getElementById(id); }
+
+    async function load() {
+        try {
+            var r = await fetch('/mina-uppdrag/for-competition?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { q('beHeader').textContent = d.message || 'Kunde inte läsa.'; return; }
+            render(d);
+        } catch (e) { q('beHeader').textContent = 'Kunde inte läsa bemanningen.'; }
+    }
+
+    function render(d) {
+        q('beHeader').innerHTML = 'Tävling: <strong>' + esc(d.compName) + '</strong>' + (d.compDate ? ' · ' + esc(d.compDate) : '');
+        var a = d.assignments || [], av = d.availability || [], roles = d.roles || [];
+
+        // My roles here (accept/decline)
+        q('beMine').innerHTML = a.length
+            ? '<div class="card"><div class="card-header py-2 fw-semibold">Dina uppdrag i tävlingen</div><div class="card-body py-2">'
+                + a.map(assignmentHtml).join('') + '</div></div>'
+            : '';
+
+        // Availability (only meaningful once you have/seek a role here)
+        q('beAvail').innerHTML = (a.length || d.isOpen)
+            ? '<div class="card"><div class="card-header py-2 d-flex justify-content-between align-items-center">'
+                + '<span class="fw-semibold">Din tillgänglighet</span>'
+                + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="beOpenAvail()"><i class="bi bi-plus-lg me-1"></i>Lägg till</button></div>'
+                + '<div class="card-body py-2">' + (av.length
+                    ? av.map(function (w) { return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1 me-1 mb-1" style="font-weight:500"><i class="bi bi-clock-history me-1"></i>' + esc(w.label) + (w.note ? ' — ' + esc(w.note) : '') + '<button type="button" class="btn-close" style="font-size:.6rem" onclick="beDelAvail(' + w.id + ')"></button></span>'; }).join('')
+                    : '<span class="text-muted small fst-italic">Ingen angiven (antas heldag).</span>')
+                + '</div></div>'
+            : '';
+
+        // Open sign-up
+        q('beOpen').innerHTML = d.isOpen
+            ? '<div class="card border-success-subtle"><div class="card-header bg-success-subtle py-2 fw-semibold"><i class="bi bi-clipboard-plus me-1"></i>Anmäl dig som funktionär</div>'
+                + '<div class="card-body py-2"><p class="text-muted small">Välj en roll du kan hjälpa till med.</p>'
+                + '<div class="input-group input-group-sm" style="max-width:420px">'
+                + '<select class="form-select" id="beRole">' + roles.map(function (r) { return '<option value="' + esc(r.key) + '">' + esc(r.name) + '</option>'; }).join('') + '</select>'
+                + '<button class="btn btn-primary" type="button" onclick="beSignUp()"><i class="bi bi-check-lg me-1"></i>Anmäl mig</button></div></div></div>'
+            : '';
+
+        q('beEmpty').innerHTML = (!a.length && !d.isOpen)
+            ? '<div class="alert alert-secondary">Det finns inget för dig att göra i den här tävlingen just nu. Om du blivit tillfrågad hittar du förfrågan här när arrangören lagt in dig.</div>'
+            : '';
+    }
+
+    function assignmentHtml(a) {
+        var star = a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1"></i>' : '';
+        var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
+        var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border ms-1"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
+        var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border ms-1"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
+        var statusBadge = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + ' ms-1">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
+        var accepted = a.status === 'Accepted', declined = a.status === 'Declined';
+        return '<div class="d-flex justify-content-between align-items-start py-2 gap-2 flex-wrap border-bottom">'
+            + '<div>' + star + '<span class="fw-semibold">' + esc(a.roleName) + '</span>' + fn + scope + shift + statusBadge + '</div>'
+            + '<div class="btn-group btn-group-sm">'
+            + '<button type="button" class="btn ' + (accepted ? 'btn-success' : 'btn-outline-success') + '" onclick="beRespond(' + a.id + ',\'Accepted\')">Tacka ja</button>'
+            + '<button type="button" class="btn ' + (declined ? 'btn-danger' : 'btn-outline-danger') + '" onclick="beRespond(' + a.id + ',\'Declined\')">Tacka nej</button>'
+            + '</div></div>';
+    }
+
+    async function post(url, payload) {
+        try {
+            var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify(payload) });
+            return await r.json();
+        } catch (e) { return { success: false, message: 'Nätverksfel.' }; }
+    }
+
+    window.beRespond = async function (id, status) {
+        var d = await post('/mina-uppdrag/respond', { assignmentId: id, status: status });
+        if (d.success) await load(); else alert(d.message || 'Kunde inte spara.');
+    };
+    window.beSignUp = async function () {
+        var sel = q('beRole'); var roleKey = sel ? sel.value : '';
+        if (!roleKey) return;
+        var d = await post('/mina-uppdrag/signup', { competitionId: compId, roleKey: roleKey });
+        if (d.success) { alert('Tack! Du är anmäld.'); await load(); } else alert(d.message || 'Kunde inte anmäla.');
+    };
+    window.beOpenAvail = function () {
+        if (!availModal) availModal = new bootstrap.Modal(q('beAvailModal'));
+        q('beAvFrom').value = ''; q('beAvTo').value = ''; q('beAvNote').value = ''; q('beAvError').textContent = '';
+        availModal.show();
+    };
+    window.beSaveAvail = async function () {
+        var btn = q('beAvSaveBtn'); btn.disabled = true;
+        var d = await post('/mina-uppdrag/availability', { competitionId: compId, from: q('beAvFrom').value.trim(), to: q('beAvTo').value.trim(), note: q('beAvNote').value.trim() });
+        btn.disabled = false;
+        if (d.success) { availModal.hide(); await load(); } else q('beAvError').textContent = d.message || 'Kunde inte spara.';
+    };
+    window.beDelAvail = async function (id) {
+        if (!confirm('Ta bort tillgänglighetsfönstret?')) return;
+        var d = await post('/mina-uppdrag/availability/delete', { id: id });
+        if (d.success) await load();
+    };
+
+    function initPickers() {
+        if (typeof flatpickr === 'undefined') return;
+        ['#beAvFrom', '#beAvTo'].forEach(function (sel) { flatpickr(sel, { locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i' }); });
+    }
+    initPickers();
+    if (compId > 0) load();
+})();
+</script>

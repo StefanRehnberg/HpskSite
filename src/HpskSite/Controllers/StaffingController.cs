@@ -653,10 +653,10 @@ namespace HpskSite.Controllers
             bool email = false; int push = 0;
             if (a.MemberId is > 0)
             {
-                // Members act on the member-scoped page (accept/decline + availability).
-                const string mineUrl = "/mina-uppdrag";
-                var html = NotifyEmailHtml(bodyText + " Ange gärna när du kan arbeta.", "Öppna Mina uppdrag", mineUrl, viewer.Name);
-                (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", mineUrl);
+                // Members act on the per-comp landing page (accept/decline + availability, in context).
+                var beUrl = $"/bemanna?c={a.CompetitionId}";
+                var html = NotifyEmailHtml(bodyText + " Ange gärna när du kan arbeta.", "Öppna bemanningssidan", beUrl, viewer.Name);
+                (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", beUrl);
             }
             else if (!string.IsNullOrWhiteSpace(a.Email))
             {

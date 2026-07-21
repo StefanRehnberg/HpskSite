@@ -116,6 +116,57 @@ namespace HpskSite.Controllers
             return Json(new { success = true, groups });
         }
 
+        /// <summary>Per-competition sign-up landing page — the single action surface: accept/decline an
+        /// invitation, declare availability, and (if the comp is open for you) volunteer for a role.</summary>
+        [HttpGet("/bemanna")]
+        public async Task<IActionResult> Bemanna(int c)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
+            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current?.Email == null)
+                return Redirect($"/login-&-register/?tab=login&RedirectUrl=/bemanna?c={c}");
+
+            var comp = c > 0 ? ctx.Content.GetById(c) : null;
+            var isComp = comp != null && comp.ContentType.Alias == "competition";
+            ViewData["CompetitionId"] = c;
+            ViewData["CompetitionExists"] = isComp;
+            ViewData["CompetitionName"] = isComp ? (comp!.Value<string>("competitionName") ?? "Tävling") : "";
+            return View("Bemanna", rootNode);
+        }
+
+        [HttpGet("for-competition")]
+        public async Task<IActionResult> GetForCompetition(int competitionId)
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
+            var mine = _staffing.GetMyAssignments(memberId.Value).FirstOrDefault(g => g.CompetitionId == competitionId);
+            var open = _signup.GetOpenSignups(memberId.Value).FirstOrDefault(o => o.CompetitionId == competitionId);
+            var compName = mine?.CompName ?? open?.CompName ?? "Tävling";
+            if (mine == null && open == null)
+            {
+                try
+                {
+                    if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
+                        compName = ctx.Content.GetById(competitionId)?.Value<string>("competitionName") ?? compName;
+                }
+                catch { }
+            }
+            return Json(new
+            {
+                success = true,
+                compName,
+                compDate = mine?.CompDate ?? open?.CompDate,
+                discipline = open?.Discipline ?? "",
+                assignments = mine?.Assignments ?? new List<Models.Staffing.MyAssignmentView>(),
+                availability = mine?.Availability ?? new List<Models.Staffing.StaffAvailabilityView>(),
+                isOpen = open != null,
+                roles = open?.Roles ?? new List<Models.Staffing.RoleOption>(),
+            });
+        }
+
         [HttpPost("respond")]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Respond([FromBody] RespondAssignmentRequest request)

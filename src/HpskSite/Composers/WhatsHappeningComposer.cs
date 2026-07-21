@@ -18,6 +18,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<BoardHubService>();
             // Shooting-range compliance reminders on the hub.
             builder.Services.AddScoped<RangeHubService>();
+            // Functionary-commitments hub section ("Dina funktionärsuppdrag").
+            builder.Services.AddScoped<StaffHubService>();
         }
     }
 }
