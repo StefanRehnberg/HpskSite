@@ -1988,6 +1988,12 @@ async function editCompetitionRegistration(registrationId) {
     );
     const list = document.getElementById('competitionEditClassList');
     if (Array.isArray(walkInAvailableClasses) && walkInAvailableClasses.length > 0) {
+        // Any class the registration already has but that is NOT in the competition's current
+        // allowed-class list (e.g. the comp was edited after the shooter registered). Without this,
+        // no checkbox renders for it → it silently drops on the next save. Show it pre-checked so
+        // the operator has to deliberately untick to remove it.
+        const availableIds = new Set(walkInAvailableClasses.map(c => c.id));
+        const orphanExisting = Array.from(existingIds).filter(id => id && !availableIds.has(id));
         list.innerHTML = walkInAvailableClasses.map(c => {
             const checked = existingIds.has(c.id) ? 'checked' : '';
             const safeId = `editCls_${c.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -1997,6 +2003,16 @@ async function editCompetitionRegistration(registrationId) {
                            id="${safeId}" value="${escapeAttr(c.id)}" ${checked}>
                     <label class="form-check-label" for="${safeId}">
                         ${escapeAttr(c.name)}
+                    </label>
+                </div>`;
+        }).join('') + orphanExisting.map(id => {
+            const safeId = `editCls_${id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+            return `
+                <div class="form-check">
+                    <input class="form-check-input edit-class-cb" type="checkbox"
+                           id="${safeId}" value="${escapeAttr(id)}" checked>
+                    <label class="form-check-label" for="${safeId}">
+                        ${escapeAttr(id)} <span class="badge bg-warning text-dark">befintlig</span>
                     </label>
                 </div>`;
         }).join('');

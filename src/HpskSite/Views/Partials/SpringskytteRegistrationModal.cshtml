@@ -223,9 +223,18 @@ let springRegExistingSubComp = false; // whether that member's existing registra
 // Uses the member-scoped GetMemberRegistrationsForCompetition (authorizes self OR admin-of-target),
 // so it works for regular members too. The old GetCompetitionRegistrations call was admin-only,
 // so members never saw their existing registration and could silently drop it on re-registration.
+let springRegLoadingExisting = false;
+
 async function springRegCheckExisting(memberId) {
     springRegExistingClasses = [];
     springRegExistingSubComp = false;
+
+    // Keep Anmäl disabled while we load, so nobody can submit a half-loaded form (which would
+    // drop whatever this fetch is about to re-check). Cleared by springRegUpdateSummary() once
+    // springRegApplyExisting() has run.
+    springRegLoadingExisting = true;
+    const _submitBtn = document.getElementById('springRegSubmitBtn');
+    if (_submitBtn) _submitBtn.disabled = true;
 
     if (memberId) {
         try {
@@ -249,6 +258,7 @@ async function springRegCheckExisting(memberId) {
         }
     }
 
+    springRegLoadingExisting = false;
     springRegApplyExisting();
 }
 
@@ -278,7 +288,24 @@ function springRegApplyExisting() {
     // Always set the age class (to '' when there is no existing registration) so switching to a
     // member without a registration clears a previously-shown member's age class.
     const ageSelect = document.getElementById('springRegAgeClass');
-    if (ageSelect) ageSelect.value = ageClass;
+    if (ageSelect) {
+        // Drop any option injected for a previously-inspected member so they don't accumulate.
+        [...ageSelect.options].filter(o => o.dataset.injectedExisting).forEach(o => o.remove());
+        // The dropdown only lists age classes present in the competition's CURRENT config. If the
+        // existing registration uses an age class that's no longer offered (e.g. the comp was edited
+        // after the shooter registered), a plain `.value = ageClass` would silently no-op and leave
+        // the field empty — which both disables the Anmäl button AND silently drops the existing
+        // weapon group on re-submit (the server replaces the whole class set). Inject the class as an
+        // option so it can round-trip faithfully.
+        if (ageClass && ![...ageSelect.options].some(o => o.value === ageClass)) {
+            const opt = document.createElement('option');
+            opt.value = ageClass;
+            opt.textContent = (window.formatAgeSpan ? formatAgeSpan(ageClass) : ageClass) + ' (befintlig anmälan)';
+            opt.dataset.injectedExisting = '1';
+            ageSelect.appendChild(opt);
+        }
+        ageSelect.value = ageClass;
+    }
 
     // "Redan anmäld i…" notice
     const notice = document.getElementById('springRegExistingNotice');
@@ -409,9 +436,9 @@ function springRegUpdateSummary() {
     const badgesDiv = document.getElementById('springRegSummaryBadges');
     const submitBtn = document.getElementById('springRegSubmitBtn');
 
-    // Need classes AND a target member
+    // Need classes AND a target member — and never while an existing registration is still loading.
     const hasTarget = springRegSelectedTargetMemberId || !document.getElementById('springRegClubSelect');
-    const canSubmit = classes.length > 0 && hasTarget;
+    const canSubmit = classes.length > 0 && hasTarget && !springRegLoadingExisting;
 
     if (classes.length > 0) {
         summaryDiv.style.display = 'block';
@@ -431,6 +458,18 @@ async function springRegSubmit() {
     if (!classes.length) {
         springRegShowError('Välj minst en vapengrupp och en ålders-/könsklass.');
         return;
+    }
+
+    // A registration submit REPLACES the shooter's whole class set server-side. If any class the
+    // shooter was already registered in is not in the new selection, make the removal explicit
+    // instead of silently dropping it (the original bug: adding A wiped an existing C registration).
+    const dropped = springRegExistingClasses.filter(ex => !classes.includes(ex));
+    if (dropped.length) {
+        const fmt = c => window.formatAgeSpan ? formatAgeSpan(c) : c;
+        const msg = 'Du tar bort följande från anmälan: ' + dropped.map(fmt).join(', ') +
+            '.\n\nDu anmäls nu i: ' + classes.map(fmt).join(', ') +
+            '.\n\nVill du fortsätta?';
+        if (!confirm(msg)) return;
     }
 
     const submitBtn = document.getElementById('springRegSubmitBtn');
