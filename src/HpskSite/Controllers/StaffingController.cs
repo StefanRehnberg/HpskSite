@@ -500,13 +500,14 @@ namespace HpskSite.Controllers
             var where = string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
                 ? "hela tävlingen" : $"{a.ScopeType} {a.ScopeKey}".Trim();
             var subject = $"Funktionärsförfrågan: {roleName} – {meta.Name}";
+            const string mineUrl = "/mina-uppdrag";   // invited helpers act here, not on the staff planning page
             var html = NotifyEmailHtml(
-                $"Du är inplanerad som <strong>{System.Net.WebUtility.HtmlEncode(roleName)}</strong> på {System.Net.WebUtility.HtmlEncode(where)} under <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>.",
-                "Öppna planeringen", meta.Url, viewer.Name);
+                $"Du är inplanerad som <strong>{System.Net.WebUtility.HtmlEncode(roleName)}</strong> på {System.Net.WebUtility.HtmlEncode(where)} under <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>. Tacka ja eller nej och ange när du kan arbeta.",
+                "Öppna Mina uppdrag", mineUrl, viewer.Name);
 
             bool email = false; int push = 0;
             if (a.MemberId is > 0)
-                (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", meta.Url);
+                (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", mineUrl);
             else if (!string.IsNullOrWhiteSpace(a.Email))
                 { try { email = await _email.SendHtmlEmailAsync(a.Email!, subject, html); } catch { } }
 

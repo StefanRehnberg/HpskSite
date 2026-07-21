@@ -619,6 +619,7 @@
                                         var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
                                     }
                                     <li><a class="dropdown-item" href="@userProfileUrl"><i class="bi bi-person"></i> Min Sida</a></li>
+                                    <li><a class="dropdown-item" href="/mina-uppdrag"><i class="bi bi-person-check"></i> Mina uppdrag</a></li>
                                     @if (isOnBoard || hasAdminAccess)
                                     {
                                         <li><a class="dropdown-item" href="/styrelse"><i class="bi bi-clipboard-check"></i> Styrelse</a></li>

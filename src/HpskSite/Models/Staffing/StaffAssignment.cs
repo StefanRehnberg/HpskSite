@@ -42,7 +42,51 @@ namespace HpskSite.Models.Staffing
         public DateTime ModifiedDate { get; set; }
     }
 
+    /// <summary>A member's declared availability window for a competition (P3 sign-up + tillgänglighet).
+    /// Several rows per person = several windows. NULL/NULL = whole event.</summary>
+    [TableName("StaffAvailability")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class StaffAvailability
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public DateTime? AvailableFrom { get; set; }
+        public DateTime? AvailableTo { get; set; }
+        public string? Note { get; set; }
+        public DateTime CreatedDate { get; set; }
+    }
+
     // --- Output DTOs (not table-mapped) ---
+
+    public class StaffAvailabilityView
+    {
+        public int Id { get; set; }
+        public string Label { get; set; } = "";   // "Lör 13:00–17:00" or "Heldag"
+        public string? Note { get; set; }
+    }
+
+    /// <summary>One of the current member's own assignments, for the /mina-uppdrag page.</summary>
+    public class MyAssignmentView
+    {
+        public int Id { get; set; }
+        public string RoleName { get; set; } = "";
+        public string? FunctionTitle { get; set; }
+        public string ScopeLabel { get; set; } = "";
+        public string? ShiftLabel { get; set; }
+        public string Status { get; set; } = StaffAssignmentStatus.Planned;
+        public bool IsResponsible { get; set; }
+    }
+
+    /// <summary>The current member's assignments + availability for one competition.</summary>
+    public class MyCompetitionGroup
+    {
+        public int CompetitionId { get; set; }
+        public string CompName { get; set; } = "";
+        public string? CompDate { get; set; }
+        public List<MyAssignmentView> Assignments { get; set; } = new();
+        public List<StaffAvailabilityView> Availability { get; set; } = new();
+    }
 
     /// <summary>A single assignment with its resolved role metadata for the roster UI.</summary>
     public class StaffAssignmentView
@@ -69,6 +113,7 @@ namespace HpskSite.Models.Staffing
         /// from faltskytteStationManagers on the Stationer tab. No edit/delete/notify in the UI.</summary>
         public bool ReadOnly { get; set; }
         public string? SourceLabel { get; set; }   // e.g. "Stationer-fliken"
+        public List<string> AvailabilityLabels { get; set; } = new();   // the member's declared windows (organiser view)
     }
 
     /// <summary>A role group (one section in the roster) with its assignments.</summary>
@@ -123,5 +168,21 @@ namespace HpskSite.Models.Staffing
     {
         public int Id { get; set; }
         public int CompetitionId { get; set; }
+    }
+
+    // --- Member-facing (/mina-uppdrag) request DTOs ---
+
+    public class RespondAssignmentRequest
+    {
+        public int AssignmentId { get; set; }
+        public string Status { get; set; } = "";   // Accepted | Declined (or back to Planned)
+    }
+
+    public class SaveAvailabilityRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? From { get; set; }           // Flatpickr "Y-m-d H:i" or null
+        public string? To { get; set; }
+        public string? Note { get; set; }
     }
 }

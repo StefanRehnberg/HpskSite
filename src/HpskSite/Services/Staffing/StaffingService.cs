@@ -110,6 +110,16 @@ namespace HpskSite.Services.Staffing
                 });
             }
 
+            // Availability (P3): show each assignee's declared windows so the organiser can plan around them.
+            var availByMember = GetAvailabilityForCompetition(competitionId)
+                .GroupBy(a => a.MemberId)
+                .ToDictionary(g => g.Key, g => g.Select(a => BuildAvailabilityLabel(a.AvailableFrom, a.AvailableTo)).ToList());
+            if (availByMember.Count > 0)
+                foreach (var grp in resp.Groups)
+                    foreach (var a in grp.Assignments)
+                        if (a.MemberId is int mid && availByMember.TryGetValue(mid, out var labels))
+                            a.AvailabilityLabels = labels;
+
             // Fält convergence (P2): surface station chiefs assigned on the Stationer tab
             // (faltskytteStationManagers JSON) as read-only rows in the stationschef group, so the roster
             // shows the full picture. Deduped by station — a real StaffAssignment for Station:N wins.
@@ -242,6 +252,128 @@ namespace HpskSite.Services.Staffing
                 scope.Database.Execute("DELETE FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
             }
             SyncCompetitionManagers(competitionId);
+        }
+
+        // ---- availability + member self-service (P3: sign-up + tillgänglighet) ----
+
+        public List<StaffAvailability> GetAvailabilityForCompetition(int competitionId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<StaffAvailability>(
+                "SELECT * FROM StaffAvailability WHERE CompetitionId = @0 ORDER BY MemberId, AvailableFrom", competitionId);
+        }
+
+        public bool MemberHasAssignment(int competitionId, int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1", competitionId, memberId) > 0;
+        }
+
+        public int AddAvailability(int competitionId, int memberId, DateTime? from, DateTime? to, string? note)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return Convert.ToInt32(scope.Database.Insert(new StaffAvailability
+            {
+                CompetitionId = competitionId,
+                MemberId = memberId,
+                AvailableFrom = from,
+                AvailableTo = to,
+                Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+                CreatedDate = DateTime.UtcNow,
+            }));
+        }
+
+        /// <summary>Delete an availability window — only the owning member may.</summary>
+        public bool DeleteAvailability(int id, int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var row = db.SingleOrDefault<StaffAvailability>("SELECT * FROM StaffAvailability WHERE Id = @0", id);
+            if (row == null || row.MemberId != memberId) return false;
+            db.Execute("DELETE FROM StaffAvailability WHERE Id = @0", id);
+            return true;
+        }
+
+        /// <summary>A member accepts/declines their OWN assignment. Ownership-checked; no comp-staff access needed.</summary>
+        public (bool Ok, string? Message) RespondAsMember(int assignmentId, int memberId, string status)
+        {
+            var wanted = status switch
+            {
+                StaffAssignmentStatus.Accepted => StaffAssignmentStatus.Accepted,
+                StaffAssignmentStatus.Declined => StaffAssignmentStatus.Declined,
+                _ => null,
+            };
+            if (wanted == null) return (false, "Ogiltigt svar.");
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var row = db.SingleOrDefault<StaffAssignment>("SELECT * FROM StaffAssignment WHERE Id = @0", assignmentId);
+            if (row == null) return (false, "Uppdraget hittades inte.");
+            if (row.MemberId != memberId) return (false, "Du kan bara svara på dina egna uppdrag.");
+            db.Execute("UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2", wanted, DateTime.UtcNow, assignmentId);
+            return (true, null);
+        }
+
+        /// <summary>Every assignment the member holds, grouped by competition, with their availability windows.</summary>
+        public List<MyCompetitionGroup> GetMyAssignments(int memberId)
+        {
+            List<StaffAssignment> rows;
+            List<StaffAvailability> avail;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                rows = scope.Database.Fetch<StaffAssignment>(
+                    "SELECT * FROM StaffAssignment WHERE MemberId = @0", memberId);
+                avail = scope.Database.Fetch<StaffAvailability>(
+                    "SELECT * FROM StaffAvailability WHERE MemberId = @0", memberId);
+            }
+
+            var compIds = rows.Select(r => r.CompetitionId).Concat(avail.Select(a => a.CompetitionId)).Distinct().ToList();
+            var availByComp = avail.GroupBy(a => a.CompetitionId).ToDictionary(g => g.Key, g => g.ToList());
+            var rowsByComp = rows.GroupBy(r => r.CompetitionId).ToDictionary(g => g.Key, g => g.ToList());
+
+            var result = new List<MyCompetitionGroup>();
+            foreach (var compId in compIds)
+            {
+                var content = _contentService.GetById(compId);
+                if (content == null) continue;
+                var name = content.GetValue<string>("competitionName") ?? "Tävling";
+                var discipline = content.GetValue<string>("competitionType") ?? "";
+                var date = content.GetValue<DateTime?>("competitionDate");
+
+                var grp = new MyCompetitionGroup
+                {
+                    CompetitionId = compId,
+                    CompName = name,
+                    CompDate = date is { } d && d != default ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null,
+                };
+                if (rowsByComp.TryGetValue(compId, out var rs))
+                {
+                    grp.Assignments = rs
+                        .OrderBy(r => r.RoleKey).ThenBy(r => r.ScopeKey, StringComparer.OrdinalIgnoreCase)
+                        .Select(r => new MyAssignmentView
+                        {
+                            Id = r.Id,
+                            RoleName = FunctionaryRoles.Resolve(discipline, r.RoleKey)?.DisplayName ?? r.RoleKey,
+                            FunctionTitle = r.FunctionTitle,
+                            ScopeLabel = BuildScopeLabel(r),
+                            ShiftLabel = BuildShiftLabel(r.StartsAt, r.EndsAt),
+                            Status = r.Status,
+                            IsResponsible = r.IsResponsible,
+                        }).ToList();
+                }
+                if (availByComp.TryGetValue(compId, out var av))
+                {
+                    grp.Availability = av
+                        .OrderBy(a => a.AvailableFrom ?? DateTime.MinValue)
+                        .Select(a => new StaffAvailabilityView { Id = a.Id, Label = BuildAvailabilityLabel(a.AvailableFrom, a.AvailableTo), Note = a.Note })
+                        .ToList();
+                }
+                result.Add(grp);
+            }
+            return result
+                .OrderBy(g => g.CompDate == null)                 // dated first
+                .ThenBy(g => g.CompDate, StringComparer.Ordinal)
+                .ToList();
         }
 
         // ---- competitionManagers mirror ----
@@ -411,6 +543,22 @@ namespace HpskSite.Services.Staffing
             }
             if (from != null) return $"från {F(from.Value)}";
             return $"till {F(to!.Value)}";
+        }
+
+        /// <summary>Human label for an availability window — "lör 13:00–17:00", "12 jun heldag", "Heldag".</summary>
+        private static string BuildAvailabilityLabel(DateTime? from, DateTime? to)
+        {
+            var ci = CultureInfo.GetCultureInfo("sv-SE");
+            if (from == null && to == null) return "Heldag";
+            string Day(DateTime d) => d.ToString("ddd d MMM", ci);
+            string T(DateTime d) => d.ToString("HH:mm", ci);
+            if (from != null && to != null)
+            {
+                if (from.Value.Date == to.Value.Date) return $"{Day(from.Value)} {T(from.Value)}–{T(to.Value)}";
+                return $"{Day(from.Value)} {T(from.Value)} – {Day(to.Value)} {T(to.Value)}";
+            }
+            if (from != null) return $"från {Day(from.Value)} {T(from.Value)}";
+            return $"till {Day(to!.Value)} {T(to.Value)}";
         }
 
         private static DateTime? ParseDateTime(string? s)

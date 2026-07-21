@@ -1,0 +1,186 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Mina uppdrag";
+    var token = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="container mt-4 mb-5">
+    <h1><i class="bi bi-person-check me-2"></i>Mina uppdrag</h1>
+    <p class="text-muted" style="max-width:720px">
+        Här ser du de funktionärsuppdrag du blivit inbjuden till. Tacka ja eller nej, och berätta
+        <strong>när du kan arbeta</strong> så att arrangören kan planera.
+    </p>
+
+    <div id="muGroups">
+        <div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> Laddar…</div>
+    </div>
+</div>
+
+<!-- Tillgänglighet modal -->
+<div class="modal fade" id="muAvailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Lägg till tillgänglighet</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="muAvailComp" value="0">
+                <p class="text-muted small">Lämna tomt för <strong>heldag</strong>, eller ange ett tidsfönster.</p>
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2">
+                        <label class="form-label fw-semibold">Från</label>
+                        <input type="text" class="form-control" id="muAvailFrom" placeholder="Heldag">
+                    </div>
+                    <div class="col-sm-6 mb-2">
+                        <label class="form-label fw-semibold">Till</label>
+                        <input type="text" class="form-control" id="muAvailTo" placeholder="Heldag">
+                    </div>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label fw-semibold">Kommentar (valfritt)</label>
+                    <input type="text" class="form-control" id="muAvailNote" placeholder="t.ex. kan bara förmiddag">
+                </div>
+                <div class="text-danger small mt-2" id="muAvailError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="muAvailSaveBtn" onclick="muSaveAvail()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var TOKEN = '@token';
+    var groups = [];
+    var availModal = null;
+
+    var STATUS_LABEL = { Planned: 'Ej svarat', Invited: 'Inbjuden', Accepted: 'Tackat ja', Declined: 'Tackat nej', Confirmed: 'Bekräftad' };
+    var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-success', Declined: 'bg-danger', Confirmed: 'bg-success' };
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function q(id) { return document.getElementById(id); }
+
+    async function load() {
+        try {
+            var r = await fetch('/mina-uppdrag/mine', { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { q('muGroups').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa.') + '</div>'; return; }
+            groups = d.groups || [];
+            render();
+        } catch (e) { q('muGroups').innerHTML = '<div class="alert alert-warning">Kunde inte läsa dina uppdrag.</div>'; }
+    }
+
+    function render() {
+        if (!groups.length) {
+            q('muGroups').innerHTML = '<div class="card"><div class="card-body text-center text-muted py-5"><i class="bi bi-inbox fs-2 d-block mb-2"></i>Du har inga uppdrag ännu. När en arrangör bjuder in dig dyker det upp här.</div></div>';
+            return;
+        }
+        q('muGroups').innerHTML = groups.map(groupHtml).join('');
+    }
+
+    function groupHtml(g) {
+        var when = g.compDate ? '<span class="text-muted small ms-2"><i class="bi bi-calendar-event me-1"></i>' + esc(g.compDate) + '</span>' : '';
+        var assignments = (g.assignments || []).map(assignmentHtml).join('') || '<div class="text-muted small py-2">Inga roller.</div>';
+        var avail = availHtml(g);
+        return '<div class="card mb-3">'
+            + '<div class="card-header py-2"><span class="fw-semibold">' + esc(g.compName) + '</span>' + when + '</div>'
+            + '<div class="card-body py-2">'
+            + assignments
+            + '<hr class="my-2">'
+            + avail
+            + '</div></div>';
+    }
+
+    function assignmentHtml(a) {
+        var star = a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" title="Ansvarig"></i>' : '';
+        var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
+        var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
+        var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
+        var statusBadge = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
+        var accepted = a.status === 'Accepted';
+        var declined = a.status === 'Declined';
+        var actions = '<div class="btn-group btn-group-sm">'
+            + '<button type="button" class="btn ' + (accepted ? 'btn-success' : 'btn-outline-success') + '" onclick="muRespond(' + a.id + ',\'Accepted\')"><i class="bi bi-check-lg"></i> Tacka ja</button>'
+            + '<button type="button" class="btn ' + (declined ? 'btn-danger' : 'btn-outline-danger') + '" onclick="muRespond(' + a.id + ',\'Declined\')"><i class="bi bi-x-lg"></i> Tacka nej</button>'
+            + '</div>';
+        return '<div class="d-flex justify-content-between align-items-start py-2 gap-2 flex-wrap">'
+            + '<div class="flex-grow-1">'
+            + '<div>' + star + '<span class="fw-semibold">' + esc(a.roleName) + '</span>' + fn + ' ' + statusBadge + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1">' + scope + shift + '</div>'
+            + '</div>' + actions
+            + '</div>';
+    }
+
+    function availHtml(g) {
+        var chips = (g.availability || []).map(function (w) {
+            return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1" style="font-weight:500">'
+                + '<i class="bi bi-clock-history me-1"></i>' + esc(w.label) + (w.note ? ' — ' + esc(w.note) : '')
+                + '<button type="button" class="btn-close" style="font-size:.6rem" title="Ta bort" onclick="muDeleteAvail(' + w.id + ')"></button>'
+                + '</span>';
+        }).join(' ');
+        return '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">'
+            + '<div><span class="text-muted small me-2"><i class="bi bi-calendar-week me-1"></i>Min tillgänglighet:</span>'
+            + (chips || '<span class="text-muted small fst-italic">Ingen angiven (antas heldag)</span>') + '</div>'
+            + '<button type="button" class="btn btn-outline-primary btn-sm" onclick="muOpenAvail(' + g.competitionId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tillgänglighet</button>'
+            + '</div>';
+    }
+
+    window.muRespond = async function (id, status) {
+        var d = await post('/mina-uppdrag/respond', { assignmentId: id, status: status });
+        if (d.success) await load(); else alert(d.message || 'Kunde inte spara svaret.');
+    };
+
+    window.muOpenAvail = function (compId) {
+        if (!availModal) availModal = new bootstrap.Modal(q('muAvailModal'));
+        q('muAvailComp').value = compId;
+        q('muAvailFrom').value = ''; q('muAvailTo').value = ''; q('muAvailNote').value = '';
+        q('muAvailError').textContent = '';
+        availModal.show();
+    };
+
+    window.muSaveAvail = async function () {
+        var compId = parseInt(q('muAvailComp').value, 10) || 0;
+        var btn = q('muAvailSaveBtn'); btn.disabled = true;
+        var d = await post('/mina-uppdrag/availability', {
+            competitionId: compId,
+            from: q('muAvailFrom').value.trim(),
+            to: q('muAvailTo').value.trim(),
+            note: q('muAvailNote').value.trim()
+        });
+        btn.disabled = false;
+        if (d.success) { availModal.hide(); await load(); }
+        else q('muAvailError').textContent = d.message || 'Kunde inte spara.';
+    };
+
+    window.muDeleteAvail = async function (id) {
+        if (!confirm('Ta bort tillgänglighetsfönstret?')) return;
+        var d = await post('/mina-uppdrag/availability/delete', { id: id });
+        if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
+    };
+
+    async function post(url, payload) {
+        try {
+            var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify(payload) });
+            return await r.json();
+        } catch (e) { return { success: false, message: 'Nätverksfel.' }; }
+    }
+
+    function initPickers() {
+        if (typeof flatpickr === 'undefined') return;
+        ['#muAvailFrom', '#muAvailTo'].forEach(function (sel) {
+            flatpickr(sel, { locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i' });
+        });
+    }
+    initPickers();
+    load();
+})();
+</script>
