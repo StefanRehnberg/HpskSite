@@ -68,6 +68,41 @@ namespace HpskSite.Models.Staffing
         public DateTime CreatedDate { get; set; }
     }
 
+    public static class WorkCommentKind
+    {
+        public const string Comment = "comment";  // a person wrote it
+        public const string Audit = "audit";       // system event (status change, done, reminder sent)
+    }
+
+    /// <summary>A comment or audit event on a WorkItem (P2 — coordination). Doubles as the prep comms
+    /// channel and the who-marked-done trail.</summary>
+    [TableName("WorkItemComment")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class WorkItemComment
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        public int WorkItemId { get; set; }
+        public string Kind { get; set; } = WorkCommentKind.Comment;
+        public string Body { get; set; } = "";
+        public int AuthorMemberId { get; set; }
+        public string? AuthorName { get; set; }
+        public DateTime CreatedDate { get; set; }
+    }
+
+    /// <summary>"WorkItemId is blocked by BlockedByItemId" — a dependency link ("blockeras av").</summary>
+    [TableName("WorkItemDependency")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class WorkItemDependency
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        public int WorkItemId { get; set; }
+        public int BlockedByItemId { get; set; }
+        public int CreatedByMemberId { get; set; }
+        public DateTime CreatedDate { get; set; }
+    }
+
     // --- Output DTOs ---
 
     public class WorkLinkView
@@ -95,6 +130,48 @@ namespace HpskSite.Models.Staffing
         public bool IsOverdue { get; set; }           // past DueDate and not Klar
         public int SortOrder { get; set; }
         public List<WorkLinkView> Links { get; set; } = new();
+        public int CommentCount { get; set; }              // person-written comments (audit excluded)
+        public List<WorkItemBlockerView> BlockedBy { get; set; } = new();  // dependency links
+        public bool IsBlocked { get; set; }                // any blocker not yet Klar
+    }
+
+    /// <summary>A blocker reference shown on an item ("blockeras av …").</summary>
+    public class WorkItemBlockerView
+    {
+        public int DependencyId { get; set; }  // WorkItemDependency.Id (for removal)
+        public int ItemId { get; set; }         // the blocking WorkItem
+        public string Title { get; set; } = "";
+        public string Status { get; set; } = WorkItemStatus.Planerad;
+        public bool Done { get; set; }
+    }
+
+    public class WorkItemCommentView
+    {
+        public int Id { get; set; }
+        public string Kind { get; set; } = WorkCommentKind.Comment;
+        public string Body { get; set; } = "";
+        public int AuthorMemberId { get; set; }
+        public string? AuthorName { get; set; }
+        public string CreatedDate { get; set; } = "";  // "yyyy-MM-dd HH:mm"
+    }
+
+    /// <summary>Full per-uppgift thread (comments + audit + dependency mgmt), fetched on demand.</summary>
+    public class WorkItemThreadResponse
+    {
+        public bool Success { get; set; } = true;
+        public string? Message { get; set; }
+        public bool CanEdit { get; set; }
+        public string Title { get; set; } = "";
+        public List<WorkItemCommentView> Comments { get; set; } = new();
+        public List<WorkItemBlockerView> BlockedBy { get; set; } = new();
+        public List<CandidateItem> Candidates { get; set; } = new();  // other items that can be added as blockers
+    }
+
+    public class CandidateItem
+    {
+        public int Id { get; set; }
+        public string Title { get; set; } = "";
+        public string Area { get; set; } = "";
     }
 
     public class WorkAreaView
@@ -182,5 +259,20 @@ namespace HpskSite.Models.Staffing
     public class SeedStationTasksRequest
     {
         public int CompetitionId { get; set; }
+    }
+
+    public class AddWorkItemCommentRequest
+    {
+        public int CompetitionId { get; set; }
+        public int WorkItemId { get; set; }
+        public string Body { get; set; } = "";
+    }
+
+    public class WorkItemDependencyRequest
+    {
+        public int CompetitionId { get; set; }
+        public int WorkItemId { get; set; }
+        public int BlockedByItemId { get; set; }  // add: the blocker; remove: ignored (use Id)
+        public int Id { get; set; }                // remove: WorkItemDependency.Id
     }
 }

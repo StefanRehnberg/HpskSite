@@ -29,10 +29,19 @@ namespace HpskSite.Services.Staffing
             var links = db.Fetch<WorkLink>(
                 "SELECT * FROM WorkLink WHERE CompetitionId = @0 ORDER BY Id", competitionId);
 
+            var comments = db.Fetch<WorkItemComment>(
+                "SELECT * FROM WorkItemComment WHERE CompetitionId = @0", competitionId);
+            var deps = db.Fetch<WorkItemDependency>(
+                "SELECT * FROM WorkItemDependency WHERE CompetitionId = @0", competitionId);
+
             var today = DateTime.UtcNow.Date;
             var itemsByArea = items.GroupBy(i => i.WorkAreaId).ToDictionary(g => g.Key, g => g.ToList());
+            var itemById = items.ToDictionary(i => i.Id);
             var linksByItem = links.Where(l => l.WorkItemId.HasValue).GroupBy(l => l.WorkItemId!.Value).ToDictionary(g => g.Key, g => g.ToList());
             var linksByArea = links.Where(l => l.WorkAreaId.HasValue && !l.WorkItemId.HasValue).GroupBy(l => l.WorkAreaId!.Value).ToDictionary(g => g.Key, g => g.ToList());
+            var commentCount = comments.Where(c => string.Equals(c.Kind, WorkCommentKind.Comment, StringComparison.OrdinalIgnoreCase))
+                .GroupBy(c => c.WorkItemId).ToDictionary(g => g.Key, g => g.Count());
+            var depsByItem = deps.GroupBy(d => d.WorkItemId).ToDictionary(g => g.Key, g => g.ToList());
 
             var resp = new WorkBreakdownResponse { CanEdit = canEdit };
             // Competition-level documents (no område, no uppgift) — where the big docs live.
@@ -46,6 +55,24 @@ namespace HpskSite.Services.Staffing
                 {
                     var v = ToView(i, today);
                     if (linksByItem.TryGetValue(i.Id, out var il)) v.Links = il.Select(ToLinkView).ToList();
+                    v.CommentCount = commentCount.TryGetValue(i.Id, out var cc) ? cc : 0;
+                    if (depsByItem.TryGetValue(i.Id, out var dl))
+                    {
+                        foreach (var dep in dl)
+                        {
+                            itemById.TryGetValue(dep.BlockedByItemId, out var b);
+                            var done = b != null && string.Equals(b.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase);
+                            v.BlockedBy.Add(new WorkItemBlockerView
+                            {
+                                DependencyId = dep.Id,
+                                ItemId = dep.BlockedByItemId,
+                                Title = b?.Title ?? $"#{dep.BlockedByItemId}",
+                                Status = b?.Status ?? "",
+                                Done = done,
+                            });
+                        }
+                        v.IsBlocked = v.BlockedBy.Any(x => !x.Done);
+                    }
                     return v;
                 }).ToList();
                 resp.Areas.Add(new WorkAreaView
@@ -189,21 +216,30 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
+            // Clean up comments + dependencies of the område's items before dropping the items themselves.
+            var itemIds = db.Fetch<int>("SELECT Id FROM WorkItem WHERE WorkAreaId = @0 AND CompetitionId = @1", id, competitionId);
+            if (itemIds.Count > 0)
+            {
+                db.Execute("DELETE FROM WorkItemComment WHERE CompetitionId = @0 AND WorkItemId IN (@1)", competitionId, itemIds);
+                db.Execute("DELETE FROM WorkItemDependency WHERE CompetitionId = @0 AND (WorkItemId IN (@1) OR BlockedByItemId IN (@1))", competitionId, itemIds);
+            }
             db.Execute("DELETE FROM WorkItem WHERE WorkAreaId = @0 AND CompetitionId = @1", id, competitionId);
             db.Execute("DELETE FROM WorkArea WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
         }
 
         // ---- WorkItem writes ----
 
-        public int SaveItem(SaveWorkItemRequest req, int byMemberId)
+        public int SaveItem(SaveWorkItemRequest req, int byMemberId, string? byName = null)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             WorkItem row;
+            string? oldStatus = null;
             if (req.Id > 0)
             {
                 row = db.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0", req.Id)
                       ?? new WorkItem { CompetitionId = req.CompetitionId, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
+                if (row.Id > 0) oldStatus = row.Status;
             }
             else
             {
@@ -224,22 +260,173 @@ namespace HpskSite.Services.Staffing
 
             if (row.Id > 0) db.Update(row);
             else row.Id = Convert.ToInt32(db.Insert(row));
+
+            // Audit the status transition (who-marked-done trail) when an existing item's status changed.
+            if (oldStatus != null && !string.Equals(oldStatus, row.Status, StringComparison.OrdinalIgnoreCase))
+                InsertAudit(db, req.CompetitionId, row.Id, StatusAuditText(row.Status), byMemberId, byName);
+
             return row.Id;
         }
 
         public void DeleteItem(int id, int competitionId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute("DELETE FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
+            var db = scope.Database;
+            db.Execute("DELETE FROM WorkItemComment WHERE WorkItemId = @0 AND CompetitionId = @1", id, competitionId);
+            db.Execute("DELETE FROM WorkItemDependency WHERE (WorkItemId = @0 OR BlockedByItemId = @0) AND CompetitionId = @1", id, competitionId);
+            db.Execute("DELETE FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
         }
 
-        /// <summary>Quick status toggle from the checkbox (Planerad/Klar) without opening the editor.</summary>
-        public void SetItemStatus(int id, int competitionId, string status)
+        /// <summary>Quick status toggle from the checkbox (Planerad/Klar) without opening the editor.
+        /// Logs an audit entry to the item's thread (the who-marked-done trail) when the status changes.</summary>
+        public void SetItemStatus(int id, int competitionId, string status, int byMemberId = 0, string? byName = null)
+        {
+            var newStatus = NormalizeStatus(status);
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var row = db.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
+            if (row == null) return;
+            if (string.Equals(row.Status, newStatus, StringComparison.OrdinalIgnoreCase)) return;  // no change
+            db.Execute("UPDATE WorkItem SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND CompetitionId = @3",
+                newStatus, DateTime.UtcNow, id, competitionId);
+            InsertAudit(db, competitionId, id, StatusAuditText(newStatus), byMemberId, byName);
+        }
+
+        // ---- comments / audit thread + dependencies (P2 coordination) ----
+
+        private static string StatusAuditText(string status) => status switch
+        {
+            WorkItemStatus.Klar => "Markerade uppgiften som klar",
+            WorkItemStatus.Pagar => "Satte status till Pågår",
+            WorkItemStatus.Blockerad => "Satte status till Blockerad",
+            _ => "Satte status till Planerad",
+        };
+
+        private static void InsertAudit(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId, int itemId, string body, int byMemberId, string? byName)
+        {
+            db.Insert(new WorkItemComment
+            {
+                CompetitionId = competitionId,
+                WorkItemId = itemId,
+                Kind = WorkCommentKind.Audit,
+                Body = body,
+                AuthorMemberId = byMemberId,
+                AuthorName = byName,
+                CreatedDate = DateTime.UtcNow,
+            });
+        }
+
+        /// <summary>Append a system audit line to an item's thread (used by status changes + notify/remind).</summary>
+        public void LogAudit(int competitionId, int itemId, string body, int byMemberId, string? byName)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute(
-                "UPDATE WorkItem SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND CompetitionId = @3",
-                NormalizeStatus(status), DateTime.UtcNow, id, competitionId);
+            InsertAudit(scope.Database, competitionId, itemId, body, byMemberId, byName);
+        }
+
+        /// <summary>Add a person-written comment to an item's thread. Returns the new row id.</summary>
+        public int AddComment(int competitionId, int itemId, string body, int byMemberId, string? byName)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return Convert.ToInt32(scope.Database.Insert(new WorkItemComment
+            {
+                CompetitionId = competitionId,
+                WorkItemId = itemId,
+                Kind = WorkCommentKind.Comment,
+                Body = body,
+                AuthorMemberId = byMemberId,
+                AuthorName = byName,
+                CreatedDate = DateTime.UtcNow,
+            }));
+        }
+
+        public void DeleteComment(int id, int competitionId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute("DELETE FROM WorkItemComment WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
+        }
+
+        /// <summary>The full thread for one uppgift: comments+audit (chronological), current blockers, and
+        /// candidate items that can be added as blockers (other items in the comp, excluding cycles).</summary>
+        public WorkItemThreadResponse GetThread(int competitionId, int itemId, bool canEdit)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var item = db.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", itemId, competitionId);
+            if (item == null) return new WorkItemThreadResponse { Success = false, Message = "Uppgiften hittades inte." };
+
+            var resp = new WorkItemThreadResponse { CanEdit = canEdit, Title = item.Title };
+
+            var comments = db.Fetch<WorkItemComment>(
+                "SELECT * FROM WorkItemComment WHERE WorkItemId = @0 ORDER BY CreatedDate, Id", itemId);
+            resp.Comments = comments.Select(c => new WorkItemCommentView
+            {
+                Id = c.Id,
+                Kind = c.Kind,
+                Body = c.Body,
+                AuthorMemberId = c.AuthorMemberId,
+                AuthorName = c.AuthorName,
+                CreatedDate = c.CreatedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.GetCultureInfo("sv-SE")),
+            }).ToList();
+
+            var allItems = db.Fetch<WorkItem>("SELECT * FROM WorkItem WHERE CompetitionId = @0", competitionId);
+            var byId = allItems.ToDictionary(i => i.Id);
+            var deps = db.Fetch<WorkItemDependency>("SELECT * FROM WorkItemDependency WHERE WorkItemId = @0", itemId);
+            resp.BlockedBy = deps.Select(d =>
+            {
+                byId.TryGetValue(d.BlockedByItemId, out var b);
+                return new WorkItemBlockerView
+                {
+                    DependencyId = d.Id,
+                    ItemId = d.BlockedByItemId,
+                    Title = b?.Title ?? $"#{d.BlockedByItemId}",
+                    Status = b?.Status ?? "",
+                    Done = b != null && string.Equals(b.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase),
+                };
+            }).ToList();
+
+            // Candidates = other items not already a blocker and not directly blocked BY this item (cycle guard).
+            var reverse = db.Fetch<WorkItemDependency>("SELECT * FROM WorkItemDependency WHERE BlockedByItemId = @0", itemId)
+                .Select(d => d.WorkItemId).ToHashSet();
+            var existingBlockers = deps.Select(d => d.BlockedByItemId).ToHashSet();
+            var areaNames = db.Fetch<WorkArea>("SELECT * FROM WorkArea WHERE CompetitionId = @0", competitionId)
+                .ToDictionary(a => a.Id, a => a.Name);
+            resp.Candidates = allItems
+                .Where(i => i.Id != itemId && !existingBlockers.Contains(i.Id) && !reverse.Contains(i.Id))
+                .OrderBy(i => i.SortOrder).ThenBy(i => i.Id)
+                .Select(i => new CandidateItem { Id = i.Id, Title = i.Title, Area = areaNames.TryGetValue(i.WorkAreaId, out var n) ? n : "" })
+                .ToList();
+            return resp;
+        }
+
+        /// <summary>Add a "blockeras av" dependency. Guards against self- and direct reciprocal cycles.</summary>
+        public (bool Ok, string? Message) AddDependency(int competitionId, int itemId, int blockedByItemId, int byMemberId)
+        {
+            if (itemId <= 0 || blockedByItemId <= 0) return (false, "Ogiltig uppgift.");
+            if (itemId == blockedByItemId) return (false, "En uppgift kan inte blockeras av sig själv.");
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var both = db.Fetch<WorkItem>("SELECT * FROM WorkItem WHERE CompetitionId = @0 AND Id IN (@1, @2)", competitionId, itemId, blockedByItemId);
+            if (both.Count < 2) return (false, "Uppgiften hittades inte.");
+            // Direct reciprocal (blockedBy is already blocked by this item) → would be a cycle.
+            var reverse = db.ExecuteScalar<int>("SELECT COUNT(*) FROM WorkItemDependency WHERE WorkItemId = @0 AND BlockedByItemId = @1", blockedByItemId, itemId);
+            if (reverse > 0) return (false, "Det skulle skapa en cirkulär koppling.");
+            var dup = db.ExecuteScalar<int>("SELECT COUNT(*) FROM WorkItemDependency WHERE WorkItemId = @0 AND BlockedByItemId = @1", itemId, blockedByItemId);
+            if (dup > 0) return (true, null);  // already there — idempotent
+            db.Insert(new WorkItemDependency
+            {
+                CompetitionId = competitionId,
+                WorkItemId = itemId,
+                BlockedByItemId = blockedByItemId,
+                CreatedByMemberId = byMemberId,
+                CreatedDate = DateTime.UtcNow,
+            });
+            return (true, null);
+        }
+
+        public void RemoveDependency(int id, int competitionId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute("DELETE FROM WorkItemDependency WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
         }
 
         /// <summary>

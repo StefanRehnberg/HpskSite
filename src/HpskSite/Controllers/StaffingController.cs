@@ -245,7 +245,7 @@ namespace HpskSite.Controllers
             if (request.AssignedMemberId is > 0 && string.IsNullOrWhiteSpace(request.AssignedName))
                 request.AssignedName = MemberDisplayName(request.AssignedMemberId.Value);
 
-            var id = _work.SaveItem(request, viewer.Id);
+            var id = _work.SaveItem(request, viewer.Id, viewer.Name);
             return Json(new { success = true, id });
         }
 
@@ -272,7 +272,82 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
-            _work.SetItemStatus(request.Id, request.CompetitionId, request.Status ?? WorkItemStatus.Planerad);
+            _work.SetItemStatus(request.Id, request.CompetitionId, request.Status ?? WorkItemStatus.Planerad, viewer.Id, viewer.Name);
+            return Json(new { success = true });
+        }
+
+        // ======================= Kommentarer / logg + beroenden (uppgift-tråd) =======================
+
+        [HttpGet]
+        public async Task<IActionResult> GetWorkItemThread(int competitionId, int workItemId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var t = _work.GetThread(competitionId, workItemId, canEdit: true);
+            return Json(new
+            {
+                success = t.Success,
+                message = t.Message,
+                canEdit = t.CanEdit,
+                title = t.Title,
+                comments = t.Comments,
+                blockedBy = t.BlockedBy,
+                candidates = t.Candidates,
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddWorkItemComment([FromBody] AddWorkItemCommentRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || request.WorkItemId <= 0 || string.IsNullOrWhiteSpace(request.Body))
+                return Json(new { success = false, message = "Skriv en kommentar." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var body = request.Body.Trim();
+            if (body.Length > 4000) body = body.Substring(0, 4000);
+            var id = _work.AddComment(request.CompetitionId, request.WorkItemId, body, viewer.Id, viewer.Name);
+            return Json(new { success = true, id });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteWorkItemComment([FromBody] DeleteWorkRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            _work.DeleteComment(request.Id, request.CompetitionId);
+            return Json(new { success = true });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddWorkItemDependency([FromBody] WorkItemDependencyRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var (ok, msg) = _work.AddDependency(request.CompetitionId, request.WorkItemId, request.BlockedByItemId, viewer.Id);
+            return Json(new { success = ok, message = msg });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveWorkItemDependency([FromBody] WorkItemDependencyRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            _work.RemoveDependency(request.Id, request.CompetitionId);
             return Json(new { success = true });
         }
 

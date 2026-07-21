@@ -181,6 +181,40 @@
     </div>
 </div>
 
+<!-- Tråd modal: kommentarer/logg + beroenden ("blockeras av") per uppgift -->
+<div class="modal fade" id="wbThreadModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-chat-dots me-2"></i><span id="wbThreadTitle">Uppgift</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="wbThreadItemId" value="0">
+
+                <h6 class="fw-semibold"><i class="bi bi-diagram-3 me-1"></i>Beroenden</h6>
+                <div class="text-muted small mb-2">Uppgifter som måste vara klara innan den här kan göras.</div>
+                <div id="wbThreadBlockers" class="mb-2"></div>
+                <div class="input-group input-group-sm mb-3">
+                    <select class="form-select" id="wbThreadBlockerSelect"><option value="">Välj uppgift som blockerar…</option></select>
+                    <button class="btn btn-outline-primary" type="button" onclick="wbAddDependency()"><i class="bi bi-plus-lg"></i> Lägg till</button>
+                </div>
+
+                <h6 class="fw-semibold"><i class="bi bi-chat-left-text me-1"></i>Kommentarer &amp; logg</h6>
+                <div id="wbThreadComments" class="mb-2"><div class="text-muted small">Laddar…</div></div>
+                <div class="input-group">
+                    <textarea class="form-control" id="wbThreadCommentBox" rows="2" placeholder="Skriv en kommentar…"></textarea>
+                    <button class="btn btn-primary" type="button" id="wbThreadCommentBtn" onclick="wbAddComment()">Kommentera</button>
+                </div>
+                <div class="text-danger small mt-2" id="wbThreadError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var compId = @competitionId;
@@ -191,7 +225,7 @@
     var areas = [];
     var compLinks = [];
     var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null };
-    var areaModal = null, itemModal = null, linkModal = null;
+    var areaModal = null, itemModal = null, linkModal = null, threadModal = null;
 
     var STATUS_LABEL = { Planerad: 'Planerad', Pagar: 'Pågår', Blockerad: 'Blockerad', Klar: 'Klar' };
     var STATUS_CLS = { Planerad: 'bg-secondary', Pagar: 'bg-primary', Blockerad: 'bg-danger', Klar: 'bg-success' };
@@ -312,8 +346,12 @@
         var who = i.assignedName ? '<span class="badge bg-light text-dark border"><i class="bi bi-person me-1"></i>' + esc(i.assignedName) + '</span>' : '<span class="badge bg-light text-secondary border">otilldelad</span>';
         var statusBadge = '<span class="badge ' + (STATUS_CLS[i.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[i.status] || i.status) + '</span>';
         var scope = scopeBadge(i);
+        var blockedBadge = i.isBlocked ? '<span class="badge bg-danger-subtle text-danger-emphasis border" title="Väntar på en annan uppgift"><i class="bi bi-slash-circle me-1"></i>Blockerad</span>' : '';
         var titleCls = done ? 'text-decoration-line-through text-muted' : '';
         var links = (i.links && i.links.length) ? ('<div class="mt-1 ms-4">' + linkChips(i.links) + '</div>') : '';
+        var blockLine = blockedByLine(i);
+        var titleEsc = esc(i.title).replace(/'/g, "\\'");
+        var threadBtn = '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenThread(' + i.id + ',\'' + titleEsc + '\')" title="Kommentarer, logg &amp; beroenden"><i class="bi bi-chat-dots"></i>' + (i.commentCount ? ' ' + i.commentCount : '') + '</button>';
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
             + '<div class="form-check">'
@@ -321,13 +359,15 @@
             + '<label class="form-check-label ' + titleCls + '">' + esc(i.title) + '</label>'
             + '</div>'
             + (i.description ? '<div class="text-muted small ms-4">' + esc(i.description) + '</div>' : '')
-            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + scope + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + blockedBadge + scope + '</div>'
+            + blockLine
             + links
             + '</div>'
             + '<div class="d-flex gap-1 flex-shrink-0">'
+            + threadBtn
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenLink(0,' + i.id + ')" title="Bifoga dokument/länk"><i class="bi bi-paperclip"></i></button>'
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenItem(' + i.workAreaId + ',' + i.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteItem(' + i.id + ',\'' + esc(i.title).replace(/'/g, "\\'") + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteItem(' + i.id + ',\'' + titleEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
             + '</div>'
             + '</div>';
     }
@@ -341,6 +381,19 @@
             return '<a class="badge bg-info-subtle text-info-emphasis border text-decoration-none" href="/faltkonfig/' + cfg + '/redigera" target="_blank" rel="noopener" title="Öppna i Fältkonfiguratorn"><i class="bi bi-geo-alt me-1"></i>' + esc(label) + ' <i class="bi bi-box-arrow-up-right"></i></a>';
         }
         return '<span class="badge bg-info-subtle text-info-emphasis border"><i class="bi bi-geo-alt me-1"></i>' + esc(label) + '</span>';
+    }
+
+    // Compact "blockeras av …" line under an item (full mgmt is in the thread modal).
+    function blockedByLine(i) {
+        var bb = i.blockedBy || [];
+        if (!bb.length) return '';
+        var lead = i.isBlocked
+            ? '<span class="text-danger"><i class="bi bi-slash-circle me-1"></i>Blockeras av:</span> '
+            : '<span class="text-muted"><i class="bi bi-check2-all me-1"></i>Var blockerad av:</span> ';
+        var names = bb.map(function (b) {
+            return '<span class="' + (b.done ? 'text-muted text-decoration-line-through' : '') + '">' + esc(b.title) + '</span>';
+        }).join(', ');
+        return '<div class="small mt-1 ms-4">' + lead + names + '</div>';
     }
 
     function findArea(id) { for (var i = 0; i < areas.length; i++) if (areas[i].id === id) return areas[i]; return null; }
@@ -553,6 +606,96 @@
         if (!confirm('Ta bort dokumentet/länken?')) return;
         var d = await post('/umbraco/surface/Staffing/DeleteWorkLink', { id: id, competitionId: compId });
         if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
+    };
+
+    // ---- tråd: kommentarer/logg + beroenden ----
+    window.wbOpenThread = function (itemId, title) {
+        if (!threadModal) threadModal = new bootstrap.Modal(q('wbThreadModal'));
+        q('wbThreadItemId').value = itemId;
+        q('wbThreadTitle').textContent = title || 'Uppgift';
+        q('wbThreadError').textContent = '';
+        q('wbThreadCommentBox').value = '';
+        q('wbThreadBlockers').innerHTML = '<div class="text-muted small">Laddar…</div>';
+        q('wbThreadComments').innerHTML = '<div class="text-muted small">Laddar…</div>';
+        threadModal.show();
+        loadThread(itemId);
+    };
+
+    async function loadThread(itemId) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetWorkItemThread?competitionId=' + compId + '&workItemId=' + itemId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { q('wbThreadComments').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa tråden.') + '</div>'; return; }
+            renderBlockers(d.blockedBy || [], d.candidates || []);
+            renderComments(d.comments || []);
+        } catch (e) { q('wbThreadComments').innerHTML = '<div class="alert alert-warning">Nätverksfel.</div>'; }
+    }
+
+    function renderBlockers(list, candidates) {
+        var host = q('wbThreadBlockers');
+        host.innerHTML = list.length ? list.map(function (b) {
+            var badge = b.done ? '<span class="badge bg-success ms-1">Klar</span>' : '<span class="badge bg-secondary ms-1">' + esc(b.status || 'Ej klar') + '</span>';
+            var icon = b.done ? '<i class="bi bi-check2-circle text-success me-1"></i>' : '<i class="bi bi-slash-circle text-danger me-1"></i>';
+            return '<div class="d-flex justify-content-between align-items-center border rounded px-2 py-1 mb-1">'
+                + '<span>' + icon + esc(b.title) + badge + '</span>'
+                + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbRemoveDependency(' + b.dependencyId + ')" title="Ta bort beroende"><i class="bi bi-x-lg"></i></button>'
+                + '</div>';
+        }).join('') : '<div class="text-muted small fst-italic mb-1">Inga beroenden.</div>';
+        var sel = q('wbThreadBlockerSelect');
+        sel.innerHTML = '<option value="">Välj uppgift som blockerar…</option>' + candidates.map(function (c) {
+            return '<option value="' + c.id + '">' + esc(c.title) + (c.area ? ' (' + esc(c.area) + ')' : '') + '</option>';
+        }).join('');
+    }
+
+    function renderComments(list) {
+        var host = q('wbThreadComments');
+        if (!list.length) { host.innerHTML = '<div class="text-muted small fst-italic">Inga kommentarer eller händelser ännu.</div>'; return; }
+        host.innerHTML = list.map(function (c) {
+            var who = esc(c.authorName || (c.kind === 'audit' ? 'System' : 'Okänd'));
+            if (c.kind === 'audit') {
+                return '<div class="small text-muted fst-italic py-1"><i class="bi bi-clock-history me-1"></i>' + who + ' ' + esc(c.body) + ' · ' + esc(c.createdDate) + '</div>';
+            }
+            return '<div class="border rounded px-2 py-1 mb-1">'
+                + '<div class="d-flex justify-content-between align-items-center"><span class="fw-semibold small">' + who + '</span>'
+                + '<span class="d-flex align-items-center gap-2"><span class="text-muted small">' + esc(c.createdDate) + '</span>'
+                + '<button type="button" class="btn-close" style="font-size:.6rem" title="Ta bort" onclick="wbDeleteComment(' + c.id + ')"></button></span></div>'
+                + '<div class="small" style="white-space:pre-wrap">' + esc(c.body) + '</div>'
+                + '</div>';
+        }).join('');
+    }
+
+    window.wbAddComment = async function () {
+        var itemId = parseInt(q('wbThreadItemId').value, 10) || 0;
+        var body = q('wbThreadCommentBox').value.trim();
+        if (!body || !itemId) return;
+        var btn = q('wbThreadCommentBtn'); btn.disabled = true;
+        var d = await post('/umbraco/surface/Staffing/AddWorkItemComment', { competitionId: compId, workItemId: itemId, body: body });
+        btn.disabled = false;
+        if (d.success) { q('wbThreadCommentBox').value = ''; await loadThread(itemId); await load(); }
+        else q('wbThreadError').textContent = d.message || 'Kunde inte spara.';
+    };
+
+    window.wbDeleteComment = async function (id) {
+        if (!confirm('Ta bort kommentaren?')) return;
+        var itemId = parseInt(q('wbThreadItemId').value, 10) || 0;
+        var d = await post('/umbraco/surface/Staffing/DeleteWorkItemComment', { id: id, competitionId: compId });
+        if (d.success) { await loadThread(itemId); await load(); }
+    };
+
+    window.wbAddDependency = async function () {
+        var itemId = parseInt(q('wbThreadItemId').value, 10) || 0;
+        var blockedBy = parseInt(q('wbThreadBlockerSelect').value, 10) || 0;
+        if (!itemId || !blockedBy) { q('wbThreadError').textContent = 'Välj en uppgift.'; return; }
+        q('wbThreadError').textContent = '';
+        var d = await post('/umbraco/surface/Staffing/AddWorkItemDependency', { competitionId: compId, workItemId: itemId, blockedByItemId: blockedBy });
+        if (d.success) { await loadThread(itemId); await load(); }
+        else q('wbThreadError').textContent = d.message || 'Kunde inte lägga till.';
+    };
+
+    window.wbRemoveDependency = async function (depId) {
+        var itemId = parseInt(q('wbThreadItemId').value, 10) || 0;
+        var d = await post('/umbraco/surface/Staffing/RemoveWorkItemDependency', { id: depId, competitionId: compId });
+        if (d.success) { await loadThread(itemId); await load(); }
     };
 
     async function post(url, payload) {
