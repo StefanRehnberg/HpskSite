@@ -39,6 +39,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
     public static class FaltskytteBom
     {
+        // Order the BOM alphabetically by label so variants of the same product group together
+        // (C30 (blå) / C30 (grön) / C30 (svart)) — one product, its colours adjacent — which is how
+        // you order from a supplier. Swedish, case-insensitive so å/ä/ö sort correctly.
+        private static readonly IComparer<string> SvLabel =
+            StringComparer.Create(System.Globalization.CultureInfo.GetCultureInfo("sv-SE"), ignoreCase: true);
+
         /// <summary>
         /// Build the BOM from a parsed competition config. <paramref name="sizeByName"/> is an optional
         /// Figurkatalog lookup (target Name → SizeGroup) so BOM rows can show the storleksgrupp.
@@ -111,7 +117,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
                     Station = n,
                     Name = name,
                     WeaponClasses = classes,
-                    Figures = best.Values.OrderByDescending(f => f.IsPoangmal).ThenBy(f => f.Label).ToList(),
+                    Figures = best.Values.OrderBy(f => f.Label, SvLabel).ToList(),
                 });
             }
 
@@ -131,7 +137,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
                     r.IsPoangmal |= f.IsPoangmal;
                 }
             }
-            result.Rollup = roll.Values.OrderByDescending(f => f.Figures).ThenBy(f => f.Label).ToList();
+            result.Rollup = roll.Values.OrderBy(f => f.Label, SvLabel).ToList();
             return result;
         }
 
