@@ -25,6 +25,42 @@
     <div class="card-body py-2" id="stfSourceBody"><div class="text-muted small">Laddar…</div></div>
 </div>
 
+<!-- Skicka funktionärsförfrågan modal -->
+<div class="modal fade" id="stfRequestModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-send me-2"></i>Skicka funktionärsförfrågan</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-muted small mb-2" id="stfReqAudience"></div>
+                <div class="mb-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="stfReqMode" id="stfReqRelay" value="Relay" checked onchange="stfReqModeChanged()">
+                        <label class="form-check-label" for="stfReqRelay"><strong>Till klubb-/kretsansvariga</strong> — de distribuerar vidare <span class="badge bg-light text-dark border" id="stfReqRelayCount"></span></label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="stfReqMode" id="stfReqDirect" value="Direct" onchange="stfReqModeChanged()">
+                        <label class="form-check-label" for="stfReqDirect"><strong>Direkt till medlemmar</strong> (push + e-post) <span class="badge bg-light text-dark border" id="stfReqDirectCount"></span></label>
+                        <div class="form-text" id="stfReqDirectNote"></div>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold">Meddelande (valfritt)</label>
+                    <textarea class="form-control" id="stfReqMessage" rows="2" placeholder="t.ex. Vi behöver markörer och kassa till lördagens tävling."></textarea>
+                </div>
+                <div class="small text-muted" id="stfReqLastSent"></div>
+                <div class="text-danger small mt-1" id="stfReqError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="stfReqSendBtn" onclick="stfSendRequest()"><i class="bi bi-send me-1"></i>Skicka</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="stfRoster">
     <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
 </div>
@@ -511,6 +547,7 @@
             + '<div class="d-flex gap-1 flex-wrap">'
             + '<button type="button" class="btn btn-sm btn-outline-success" onclick="stfAddScope(\'Club\')"><i class="bi bi-plus-lg me-1"></i>Arrangörsklubben</button>'
             + '<button type="button" class="btn btn-sm btn-outline-success" onclick="stfAddScope(\'Region\')"><i class="bi bi-plus-lg me-1"></i>Kretsen</button>'
+            + (scopes.length ? '<button type="button" class="btn btn-sm btn-primary" onclick="stfOpenRequest()"><i class="bi bi-send me-1"></i>Skicka förfrågan</button>' : '')
             + '</div></div>';
     }
     window.stfAddScope = async function (type) {
@@ -532,6 +569,49 @@
             var d = await r.json();
             if (d.success) await loadScopes();
         } catch (e) { }
+    };
+
+    // ---- mail-out: "sök funktionärer" ----
+    var requestModal = null, reqPreview = null;
+    window.stfOpenRequest = async function () {
+        if (!requestModal) requestModal = new bootstrap.Modal(document.getElementById('stfRequestModal'));
+        document.getElementById('stfReqError').textContent = '';
+        document.getElementById('stfReqMessage').value = '';
+        document.getElementById('stfReqAudience').textContent = 'Laddar…';
+        requestModal.show();
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/PreviewStaffRequest?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            reqPreview = await r.json();
+            if (!reqPreview.success) { document.getElementById('stfReqError').textContent = reqPreview.message || 'Kunde inte läsa.'; return; }
+            document.getElementById('stfReqAudience').innerHTML = 'Mottagare: ' + ((reqPreview.audienceLabels || []).map(esc).join(', ') || '—');
+            document.getElementById('stfReqRelayCount').textContent = (reqPreview.relayCount || 0) + ' e-post';
+            document.getElementById('stfReqDirectCount').textContent = (reqPreview.directCount || 0) + ' medlemmar';
+            document.getElementById('stfReqDirectNote').textContent = reqPreview.directAvailable
+                ? 'E-post skickas via Brevo (klubbens nyckel), push till de som tillåtit det.'
+                : 'Ingen Brevo-nyckel på klubben → endast push når medlemmar direkt. Rekommenderat: skicka till ansvariga.';
+            document.getElementById('stfReqLastSent').textContent = reqPreview.lastSent ? ('Senast skickat: ' + reqPreview.lastSent) : '';
+            stfReqModeChanged();
+        } catch (e) { document.getElementById('stfReqError').textContent = 'Nätverksfel.'; }
+    };
+    window.stfReqModeChanged = function () {
+        // (hook for future per-mode UI hints; counts already shown per option)
+    };
+    window.stfSendRequest = async function () {
+        var mode = document.querySelector('input[name="stfReqMode"]:checked').value;
+        var btn = document.getElementById('stfReqSendBtn'); btn.disabled = true;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SendStaffRequest', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify({ competitionId: compId, mode: mode, message: document.getElementById('stfReqMessage').value.trim() })
+            });
+            var d = await r.json();
+            btn.disabled = false;
+            if (d.success) {
+                requestModal.hide();
+                alert('Skickat: ' + d.sent + ' e-post' + (d.push ? ' + ' + d.push + ' push' : '') + ' (' + d.recipients + ' mottagare).');
+                loadScopes();
+            } else document.getElementById('stfReqError').textContent = d.message || 'Kunde inte skicka.';
+        } catch (e) { btn.disabled = false; document.getElementById('stfReqError').textContent = 'Nätverksfel.'; }
     };
 
     window.stfCopyInviteLink = async function (id) {

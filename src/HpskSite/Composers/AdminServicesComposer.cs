@@ -164,6 +164,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.MaterielEstimateService>();
             // Phase 3: sourcing scope + member self-sign-up. Run create-staffing-source-scope-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingSignupService>();
+            // "Sök funktionärer" mail-out (relay to club/region admins, or direct via push+Brevo).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffRequestService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
 

@@ -36,6 +36,7 @@ namespace HpskSite.Controllers
         private readonly StaffingTemplateService _templates;
         private readonly MaterielEstimateService _materiel;
         private readonly StaffingSignupService _signup;
+        private readonly StaffRequestService _request;
         private readonly PrepDocumentStorage _docs;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
@@ -58,6 +59,7 @@ namespace HpskSite.Controllers
             StaffingTemplateService templates,
             MaterielEstimateService materiel,
             StaffingSignupService signup,
+            StaffRequestService request,
             PrepDocumentStorage docs,
             EmailService email,
             WebPushService webPush,
@@ -75,6 +77,7 @@ namespace HpskSite.Controllers
             _templates = templates;
             _materiel = materiel;
             _signup = signup;
+            _request = request;
             _docs = docs;
             _email = email;
             _webPush = webPush;
@@ -479,6 +482,37 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ingen behörighet" });
             _signup.RemoveScope(request.Id, request.CompetitionId);
             return Json(new { success = true });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> PreviewStaffRequest(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var p = _request.Preview(competitionId);
+            return Json(new
+            {
+                success = true,
+                hasScopes = p.HasScopes,
+                relayCount = p.RelayCount,
+                directCount = p.DirectCount,
+                directAvailable = p.DirectAvailable,
+                audienceLabels = p.AudienceLabels,
+                lastSent = p.LastSent,
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendStaffRequest([FromBody] SendStaffRequestRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var (ok, msg, sent, push, recipients) = _request.Send(request.CompetitionId, request.Mode, request.Message, viewer.Id);
+            return Json(new { success = ok, message = msg, sent, push, recipients });
         }
 
         // ---- Phase 1.5: editable per-club/region planning templates ----
