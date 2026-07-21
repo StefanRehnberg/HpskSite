@@ -77,6 +77,7 @@ namespace HpskSite.Models.Staffing
         public bool SupportsTargetRange { get; set; }
         public bool SupportsFunctionTitle { get; set; }
         public string Description { get; set; } = "";
+        public string[] Needs { get; set; } = Array.Empty<string>();
         public List<StaffAssignmentView> Assignments { get; set; } = new();
     }
 

@@ -41,6 +41,9 @@ namespace HpskSite.Models.Staffing
         public bool SupportsFunctionTitle { get; set; }    // Tävlingsledning-style function title
         public bool IsResponsibleByDefault { get; set; }
         public string Description { get; set; } = "";
+        /// <summary>"Vad behövs" — the kit / briefing a person in this role needs (P2 item 7).
+        /// Static per-role checklist shown in the roster + add-dialog; data-driven, no schema.</summary>
+        public string[] Needs { get; set; } = Array.Empty<string>();
 
         public string Plural => string.IsNullOrEmpty(PluralName) ? DisplayName : PluralName;
     }
@@ -68,11 +71,26 @@ namespace HpskSite.Models.Staffing
         {
             new() { Key = "tavlingsledning", DisplayName = "Tävlingsledning", PluralName = "Tävlingsledning",
                     DefaultScopeType = StaffScopeType.All, SupportsFunctionTitle = true, IsResponsibleByDefault = true,
-                    Description = "Tävlingsledare / Bitr. tävlingsledare / Säkerhetschef / Sekreterare. Kan ges appbehörighet." },
+                    Description = "Tävlingsledare / Bitr. tävlingsledare / Säkerhetschef / Sekreterare. Kan ges appbehörighet.",
+                    Needs = new[] { "TävlingsPM och tidsplan", "Säkerhetsplan", "Kontaktlista funktionärer", "Sanktionsbevis" } },
             new() { Key = "kassa", DisplayName = "Kassa", PluralName = "Kassa",
-                    DefaultScopeType = StaffScopeType.All },
+                    DefaultScopeType = StaffScopeType.All,
+                    Needs = new[] { "Kontantkassa / Swish-nummer", "Anmälnings- och avgiftslista", "Kvittoblock" } },
             new() { Key = "sekretariat", DisplayName = "Sekretariat", PluralName = "Sekretariat",
-                    DefaultScopeType = StaffScopeType.All },
+                    DefaultScopeType = StaffScopeType.All,
+                    Needs = new[] { "Startlistor", "Resultatinmatning / dator", "Skrivare", "Priser och medaljer" } },
+            new() { Key = "materielansvarig", DisplayName = "Materielansvarig", PluralName = "Materielansvariga",
+                    DefaultScopeType = StaffScopeType.All, IsResponsibleByDefault = true,
+                    Description = "Ansvarar för materiel — beställning, transport och återlämning.",
+                    Needs = new[] { "Materiellista / beställningslista", "Transport", "Nyckel till förråd" } },
+            new() { Key = "banansvarig", DisplayName = "Banansvarig", PluralName = "Banansvariga",
+                    DefaultScopeType = StaffScopeType.All, IsResponsibleByDefault = true,
+                    Description = "Ansvarar för att banan byggs, skyltas och besiktas.",
+                    Needs = new[] { "Ban-ritning / stationskonfiguration", "Skyltar och avspärrning", "Besiktningsprotokoll" } },
+            new() { Key = "sjukvardsansvarig", DisplayName = "Sjukvårdsansvarig", PluralName = "Sjukvårdsansvariga",
+                    DefaultScopeType = StaffScopeType.All, IsResponsibleByDefault = true,
+                    Description = "Ansvarar för sjukvård och första hjälpen under tävlingen.",
+                    Needs = new[] { "Första hjälpen-väska", "Hjärtstartare", "Larmrutin och vägbeskrivning", "Vätska" } },
         };
 
         // --- Precision-family ---
@@ -80,10 +98,12 @@ namespace HpskSite.Models.Staffing
         {
             new() { Key = "skjutledare", DisplayName = "Skjutledare", PluralName = "Skjutledare",
                     DefaultScopeType = StaffScopeType.Skjutlag, IsResponsibleByDefault = true,
-                    Description = "Leder eldlinjen för ett skjutlag." },
+                    Description = "Leder eldlinjen för ett skjutlag.",
+                    Needs = new[] { "Skjutledarbehörighet", "Kommandon / ljudanläggning", "Tidtagning", "Säkerhetsgenomgång" } },
             new() { Key = "markor", DisplayName = "Markör", PluralName = "Markörer",
                     DefaultScopeType = StaffScopeType.Skjutlag, SupportsTargetRange = true,
-                    Description = "Flera per skjutlag, var och en täcker ett tavelintervall (t.ex. tavlor 1–8)." },
+                    Description = "Flera per skjutlag, var och en täcker ett tavelintervall (t.ex. tavlor 1–8).",
+                    Needs = new[] { "Markeringsutrustning", "Kikare", "Protokoll och penna", "Tavlor / klister" } },
         };
 
         // --- Springskytte (first pass) ---
@@ -91,15 +111,20 @@ namespace HpskSite.Models.Staffing
         {
             new() { Key = "startledare", DisplayName = "Startledare", PluralName = "Startledare",
                     DefaultScopeType = StaffScopeType.Klass, IsResponsibleByDefault = true,
-                    Description = "Sköter startlinjen." },
+                    Description = "Sköter startlinjen.",
+                    Needs = new[] { "Startlista", "Nummervästar", "Kommunikationsradio" } },
             new() { Key = "tidtagare", DisplayName = "Tidtagare", PluralName = "Tidtagare",
-                    DefaultScopeType = StaffScopeType.Klass, Description = "Registrerar sluttid." },
+                    DefaultScopeType = StaffScopeType.Klass, Description = "Registrerar sluttid.",
+                    Needs = new[] { "Tidtagningsutrustning (löpande klocka)", "Reservtidtagning", "Protokoll" } },
             new() { Key = "bomkontrollant", DisplayName = "Bomkontrollant", PluralName = "Bomkontrollanter",
-                    DefaultScopeType = StaffScopeType.Klass, Description = "Kontrollerar träff/bom på figurerna." },
+                    DefaultScopeType = StaffScopeType.Klass, Description = "Kontrollerar träff/bom på figurerna.",
+                    Needs = new[] { "Kikare", "Protokoll och penna" } },
             new() { Key = "varvraknare", DisplayName = "Varvräknare", PluralName = "Varvräknare",
-                    DefaultScopeType = StaffScopeType.Klass, Description = "Räknar varv." },
+                    DefaultScopeType = StaffScopeType.Klass, Description = "Räknar varv.",
+                    Needs = new[] { "Varvräknarblad", "Penna" } },
             new() { Key = "maldomare", DisplayName = "Måldomare", PluralName = "Måldomare",
-                    DefaultScopeType = StaffScopeType.All, Description = "Domare vid mållinjen." },
+                    DefaultScopeType = StaffScopeType.All, Description = "Domare vid mållinjen.",
+                    Needs = new[] { "SHB / regelverk", "Mållinjemarkering", "Protokoll" } },
         };
 
         // --- Fältskytte / MagnumFält (first pass) ---
@@ -107,16 +132,21 @@ namespace HpskSite.Models.Staffing
         {
             new() { Key = "stationschef", DisplayName = "Stationschef", PluralName = "Stationschefer",
                     DefaultScopeType = StaffScopeType.Station, IsResponsibleByDefault = true,
-                    Description = "Ansvarar för en station (tilldelas idag via Stationer-fliken; konvergerar hit)." },
+                    Description = "Ansvarar för en station (tilldelas idag via Stationer-fliken; konvergerar hit).",
+                    Needs = new[] { "Stationskort / QR", "Tidur", "Figurer och markering", "Säkerhetsvinklar" } },
             new() { Key = "stationsmarkor", DisplayName = "Stationsmarkör", PluralName = "Stationsmarkörer",
                     DefaultScopeType = StaffScopeType.Station, SupportsTargetRange = true,
-                    Description = "Flera per station vid behov; markerar figurer." },
+                    Description = "Flera per station vid behov; markerar figurer.",
+                    Needs = new[] { "Markeringsutrustning", "Protokoll", "Skärmar" } },
             new() { Key = "startledare", DisplayName = "Startledare (utsläpp)", PluralName = "Startledare (utsläpp)",
-                    DefaultScopeType = StaffScopeType.All, Description = "Släpper ut patruller från starten." },
+                    DefaultScopeType = StaffScopeType.All, Description = "Släpper ut patruller från starten.",
+                    Needs = new[] { "Patrullista", "Utsläppsschema", "Kommunikationsradio" } },
             new() { Key = "patrulledare", DisplayName = "Patrulledare", PluralName = "Patrulledare",
-                    DefaultScopeType = StaffScopeType.Patrull, Description = "Leder en patrull runt banan." },
+                    DefaultScopeType = StaffScopeType.Patrull, Description = "Leder en patrull runt banan.",
+                    Needs = new[] { "Patrullkort", "Poängkort", "Penna" } },
             new() { Key = "bandomare", DisplayName = "Bandomare", PluralName = "Bandomare",
-                    DefaultScopeType = StaffScopeType.Bana, Description = "Avgör träff/tvister." },
+                    DefaultScopeType = StaffScopeType.Bana, Description = "Avgör träff/tvister.",
+                    Needs = new[] { "SHB / regelverk", "Måttband", "Protokoll" } },
         };
 
         /// <summary>Ordered role list for a competition type: cross-discipline first, then the discipline set.</summary>

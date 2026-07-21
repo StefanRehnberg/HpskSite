@@ -81,6 +81,7 @@ namespace HpskSite.Services.Staffing
                     SupportsTargetRange = role.SupportsTargetRange,
                     SupportsFunctionTitle = role.SupportsFunctionTitle,
                     Description = role.Description,
+                    Needs = role.Needs,
                 };
                 if (byRole.TryGetValue(role.Key, out var assignments))
                 {

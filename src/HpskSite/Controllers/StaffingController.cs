@@ -80,6 +80,7 @@ namespace HpskSite.Controllers
                 supportsTargetRange = r.SupportsTargetRange,
                 supportsFunctionTitle = r.SupportsFunctionTitle,
                 description = r.Description,
+                needs = r.Needs,
             });
             return Json(new { success = true, discipline, roles });
         }

@@ -59,6 +59,7 @@
                         <label class="form-label fw-semibold">Roll</label>
                         <select class="form-select" id="stfRole"></select>
                         <div class="form-text" id="stfRoleDesc"></div>
+                        <div class="form-text mt-1" id="stfRoleNeeds"></div>
                     </div>
                     <div class="col-md-6 mb-3" id="stfFunctionTitleWrap" style="display:none">
                         <label class="form-label fw-semibold">Funktion</label>
@@ -164,6 +165,13 @@
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function roleByKey(k) { for (var i = 0; i < roles.length; i++) if (roles[i].roleKey === k) return roles[i]; return null; }
 
+    // "Vad behövs" — the kit/briefing checklist for a role (P2 item 7), shown per role group + in the dialog.
+    function needsHtml(g, isCatchAll) {
+        if (isCatchAll || !g.needs || !g.needs.length) return '';
+        var chips = g.needs.map(function (n) { return '<span class="badge bg-light text-secondary border fw-normal">' + esc(n) + '</span>'; }).join(' ');
+        return '<div class="mb-2 d-flex flex-wrap align-items-center gap-1"><span class="text-muted small"><i class="bi bi-check2-square me-1"></i>Vad behövs:</span>' + chips + '</div>';
+    }
+
     async function loadRoster() {
         try {
             var r = await fetch('/umbraco/surface/Staffing/GetRoster?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
@@ -197,7 +205,8 @@
                 + addBtn
                 + '</div>'
                 + '<div class="card-body py-2">'
-                + (g.description && !isCatchAll ? '<div class="text-muted small mb-2">' + esc(g.description) + '</div>' : '')
+                + (g.description && !isCatchAll ? '<div class="text-muted small mb-1">' + esc(g.description) + '</div>' : '')
+                + needsHtml(g, isCatchAll)
                 + body
                 + '</div></div>';
         }).join('');
@@ -252,6 +261,12 @@
         var role = roleByKey(document.getElementById('stfRole').value);
         var desc = document.getElementById('stfRoleDesc');
         desc.textContent = role ? (role.description || '') : '';
+        var needs = document.getElementById('stfRoleNeeds');
+        if (needs) {
+            needs.innerHTML = (role && role.needs && role.needs.length)
+                ? '<i class="bi bi-check2-square me-1"></i>Vad behövs: ' + role.needs.map(esc).join(' · ')
+                : '';
+        }
         document.getElementById('stfFunctionTitleWrap').style.display = (role && role.supportsFunctionTitle) ? '' : 'none';
         document.getElementById('stfAdminAccessWrap').style.display = (role && role.roleKey === 'tavlingsledning') ? '' : 'none';
         document.getElementById('stfTargetWrap').style.display = (role && role.supportsTargetRange) ? '' : 'none';
