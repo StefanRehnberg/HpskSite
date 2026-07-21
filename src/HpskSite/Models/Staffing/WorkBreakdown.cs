@@ -254,7 +254,8 @@ namespace HpskSite.Models.Staffing
     public class SeedPrepTemplateRequest
     {
         public int CompetitionId { get; set; }
-        public string? Size { get; set; }             // klubb | krets | sm
+        public string? Size { get; set; }             // klubb | krets | sm (built-in); ignored when TemplateId > 0
+        public int TemplateId { get; set; }           // > 0 = seed from a saved StaffingTemplate instead
     }
 
     public class SaveWorkLinkRequest

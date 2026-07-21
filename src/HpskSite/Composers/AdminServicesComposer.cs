@@ -158,6 +158,8 @@ namespace HpskSite.Composers
             // Documentation/COMPETITION_STAFFING_SYSTEM.md.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingService>();
             builder.Services.AddScoped<HpskSite.Services.Staffing.WorkBreakdownService>();
+            // Phase 1.5: editable per-club/region planning templates. Run create-staffing-template-table.sql.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingTemplateService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
 

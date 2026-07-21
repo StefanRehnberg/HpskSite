@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly StaffingService _staffing;
         private readonly WorkBreakdownService _work;
+        private readonly StaffingTemplateService _templates;
         private readonly PrepDocumentStorage _docs;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
@@ -52,6 +53,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             StaffingService staffing,
             WorkBreakdownService work,
+            StaffingTemplateService templates,
             PrepDocumentStorage docs,
             EmailService email,
             WebPushService webPush,
@@ -66,6 +68,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _staffing = staffing;
             _work = work;
+            _templates = templates;
             _docs = docs;
             _email = email;
             _webPush = webPush;
@@ -410,8 +413,52 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ingen behörighet" });
             var discipline = GetDiscipline(request.CompetitionId);
             var (compDate, _) = GetCompDate(request.CompetitionId);
-            var added = _work.SeedTemplate(request.CompetitionId, request.Size, discipline, compDate, viewer.Id);
+            var added = request.TemplateId > 0
+                ? _templates.SeedFromTemplate(request.CompetitionId, request.TemplateId, compDate, viewer.Id)
+                : _work.SeedTemplate(request.CompetitionId, request.Size, discipline, compDate, viewer.Id);
             return Json(new { success = true, added });
+        }
+
+        // ---- Phase 1.5: editable per-club/region planning templates ----
+
+        [HttpGet]
+        public async Task<IActionResult> ListTemplates(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var templates = _templates.GetForCompetition(competitionId, GetDiscipline(competitionId), canManage: true);
+            return Json(new { success = true, templates });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveAsTemplate([FromBody] SaveAsTemplateRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.Name))
+                return Json(new { success = false, message = "Ange ett namn på mallen." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var id = _templates.SaveSnapshot(request.CompetitionId, request.Name, request.OwnerType, viewer.Id);
+            return Json(new { success = true, id });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteTemplate([FromBody] DeleteTemplateRequest request)
+        {
+            if (request == null || request.TemplateId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            // Only allow deleting a template that belongs to this competition's club/region.
+            var owned = _templates.GetForCompetition(request.CompetitionId, GetDiscipline(request.CompetitionId), canManage: true)
+                .Any(t => t.Id == request.TemplateId);
+            if (!owned) return Json(new { success = false, message = "Mallen tillhör inte den här tävlingens klubb/krets." });
+            _templates.Delete(request.TemplateId);
+            return Json(new { success = true });
         }
 
         /// <summary>Auto-seed one "Bygg station N" uppgift per configured station (Fältskytte).</summary>

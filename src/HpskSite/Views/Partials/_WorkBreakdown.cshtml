@@ -18,7 +18,8 @@
             <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="bi bi-magic me-1"></i>Fyll i från mall
             </button>
-            <ul class="dropdown-menu dropdown-menu-end">
+            <ul class="dropdown-menu dropdown-menu-end" id="wbTemplateMenu">
+                <li><h6 class="dropdown-header">Standardmallar</h6></li>
                 <li><button class="dropdown-item" type="button" onclick="wbSeed('klubb')">Klubbtävling</button></li>
                 <li><button class="dropdown-item" type="button" onclick="wbSeed('krets')">Kretstävling</button></li>
                 <li><button class="dropdown-item" type="button" onclick="wbSeed('sm')">Mästerskap (SM)</button></li>
@@ -228,6 +229,25 @@
     </div>
 </div>
 
+<!-- Hantera mallar modal (Phase 1.5) -->
+<div class="modal fade" id="wbTemplateModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-collection me-2"></i>Sparade mallar</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Klubbens/kretsens egna planeringsmallar. Använd en för att fylla på förberedelserna, eller ta bort en du inte behöver. Spara nuvarande förberedelser som en ny mall via "Fyll i från mall → Spara nuvarande som mall".</p>
+                <div id="wbTemplateList"><div class="text-muted small">Laddar…</div></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var compId = @competitionId;
@@ -236,9 +256,10 @@
     var timer = null;
     var lastUpdated = '';
     var areas = [];
+    var templates = [];
     var compLinks = [];
     var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null, totalEstimatedCost: 0, totalActualCost: 0 };
-    var areaModal = null, itemModal = null, linkModal = null, threadModal = null;
+    var areaModal = null, itemModal = null, linkModal = null, threadModal = null, templateModal = null;
 
     var STATUS_LABEL = { Planerad: 'Planerad', Pagar: 'Pågår', Blockerad: 'Blockerad', Klar: 'Klar' };
     var STATUS_CLS = { Planerad: 'bg-secondary', Pagar: 'bg-primary', Blockerad: 'bg-danger', Klar: 'bg-success' };
@@ -575,6 +596,77 @@
         if (d.success) await load();
     };
 
+    // ---- editable per-club/region templates (Phase 1.5) ----
+    async function loadTemplates() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/ListTemplates?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            templates = (d && d.success) ? (d.templates || []) : [];
+        } catch (e) { templates = []; }
+        renderTemplateMenu();
+    }
+
+    function renderTemplateMenu() {
+        var menu = q('wbTemplateMenu');
+        if (!menu) return;
+        var html = '<li><h6 class="dropdown-header">Standardmallar</h6></li>'
+            + '<li><button class="dropdown-item" type="button" onclick="wbSeed(\'klubb\')">Klubbtävling</button></li>'
+            + '<li><button class="dropdown-item" type="button" onclick="wbSeed(\'krets\')">Kretstävling</button></li>'
+            + '<li><button class="dropdown-item" type="button" onclick="wbSeed(\'sm\')">Mästerskap (SM)</button></li>';
+        if (templates.length) {
+            html += '<li><hr class="dropdown-divider"></li><li><h6 class="dropdown-header">Klubbens/kretsens mallar</h6></li>';
+            html += templates.map(function (t) {
+                return '<li><button class="dropdown-item" type="button" onclick="wbSeedTemplate(' + t.id + ',\'' + esc(t.name).replace(/'/g, "\\'") + '\')">' + esc(t.name) + ' <span class="text-muted small">· ' + t.areaCount + ' områden</span></button></li>';
+            }).join('');
+        }
+        html += '<li><hr class="dropdown-divider"></li>'
+            + '<li><button class="dropdown-item" type="button" onclick="wbSaveAsTemplate()"><i class="bi bi-save me-1"></i>Spara nuvarande som mall…</button></li>'
+            + '<li><button class="dropdown-item" type="button" onclick="wbOpenTemplates()"><i class="bi bi-collection me-1"></i>Hantera mallar…</button></li>';
+        menu.innerHTML = html;
+    }
+
+    window.wbSeedTemplate = async function (id, name) {
+        if (!confirm('Fyll i förberedelser från mallen "' + name + '"? Områden med samma namn hoppas över.')) return;
+        var d = await post('/umbraco/surface/Staffing/SeedPrepTemplate', { competitionId: compId, templateId: id });
+        if (d.success) await load(); else alert(d.message || 'Kunde inte fylla i mallen.');
+    };
+
+    window.wbSaveAsTemplate = async function () {
+        var name = prompt('Namn på mallen (sparas för klubben/kretsen så ni kan återanvända den):');
+        if (!name || !name.trim()) return;
+        var d = await post('/umbraco/surface/Staffing/SaveAsTemplate', { competitionId: compId, name: name.trim() });
+        if (d.success) { await loadTemplates(); alert('Mallen "' + name.trim() + '" sparad.'); }
+        else alert(d.message || 'Kunde inte spara mallen.');
+    };
+
+    window.wbOpenTemplates = function () {
+        if (!templateModal) templateModal = new bootstrap.Modal(q('wbTemplateModal'));
+        renderTemplateList();
+        templateModal.show();
+    };
+
+    function renderTemplateList() {
+        var host = q('wbTemplateList');
+        if (!host) return;
+        if (!templates.length) { host.innerHTML = '<div class="text-muted small fst-italic">Inga sparade mallar ännu.</div>'; return; }
+        host.innerHTML = templates.map(function (t) {
+            var nm = esc(t.name).replace(/'/g, "\\'");
+            return '<div class="d-flex justify-content-between align-items-center border rounded px-2 py-2 mb-2">'
+                + '<div><span class="fw-semibold">' + esc(t.name) + '</span> <span class="badge bg-light text-dark border">' + (t.ownerType === 'Region' ? 'Krets' : 'Klubb') + '</span>'
+                + '<div class="text-muted small">' + t.areaCount + ' områden · ' + t.itemCount + ' uppgifter' + (t.staffRowCount ? ' · ' + t.staffRowCount + ' rollrader' : '') + '</div></div>'
+                + '<div class="d-flex gap-1">'
+                + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbSeedTemplate(' + t.id + ',\'' + nm + '\')">Använd</button>'
+                + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteTemplate(' + t.id + ',\'' + nm + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
+                + '</div></div>';
+        }).join('');
+    }
+
+    window.wbDeleteTemplate = async function (id, name) {
+        if (!confirm('Ta bort mallen "' + name + '"?')) return;
+        var d = await post('/umbraco/surface/Staffing/DeleteTemplate', { competitionId: compId, templateId: id });
+        if (d.success) { await loadTemplates(); renderTemplateList(); } else alert(d.message || 'Kunde inte ta bort.');
+    };
+
     window.wbSeed = async function (size) {
         var label = size === 'sm' ? 'Mästerskap (SM)' : (size === 'krets' ? 'Kretstävling' : 'Klubbtävling');
         if (!confirm('Fyll i förberedelsemallen för ' + label + '? Befintliga områden med samma namn hoppas över.')) return;
@@ -767,6 +859,7 @@
     initPickers();
 
     load();
+    loadTemplates();
     startTimer();
 })();
 </script>

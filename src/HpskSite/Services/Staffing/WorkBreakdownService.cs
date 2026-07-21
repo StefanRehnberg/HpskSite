@@ -453,8 +453,13 @@ namespace HpskSite.Services.Staffing
         /// that don't already exist by name — safe to run on a competition that already has some structure.
         /// </summary>
         public int SeedTemplate(int competitionId, string? size, string? discipline, DateTime? compDate, int byMemberId)
+            => SeedAreas(competitionId, PrepTemplates.For(discipline, size), compDate, byMemberId);
+
+        /// <summary>Seed a list of områden + uppgifter (skip områden already present by name), anchoring each
+        /// uppgift's DueDate to compDate − DaysBeforeComp. Shared by the built-in size templates and the
+        /// editable per-club/region StaffingTemplate seeding. Returns how many områden were created.</summary>
+        internal int SeedAreas(int competitionId, List<PrepArea> template, DateTime? compDate, int byMemberId)
         {
-            var template = PrepTemplates.For(discipline, size);
             int added = 0;
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
