@@ -177,6 +177,41 @@ namespace HpskSite.Controllers
             return Json(new { success = true });
         }
 
+        // ======================= Dagen: upprop + planerad-vs-aktiv (day-of cockpit) =======================
+
+        [HttpGet]
+        public async Task<IActionResult> GetDayOfCockpit(int competitionId)
+        {
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var c = _staffing.BuildDayOfCockpit(competitionId, GetDiscipline(competitionId), canEdit: true);
+            return Json(new
+            {
+                success = true,
+                canEdit = c.CanEdit,
+                discipline = c.Discipline,
+                totalPlanned = c.TotalPlanned,
+                totalCheckedIn = c.TotalCheckedIn,
+                groups = c.Groups,
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetCheckedIn([FromBody] CheckInRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
+            if (!await HasCompetitionAccessAsync(compId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            _staffing.SetCheckedIn(request.Id, compId, request.CheckedIn);
+            return Json(new { success = true });
+        }
+
         // ======================= Förberedelser (work-breakdown) =======================
 
         [HttpGet]

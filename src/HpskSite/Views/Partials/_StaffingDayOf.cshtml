@@ -1,0 +1,152 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    // Day-of cockpit — upprop (roll-call): the planned crew per scope unit (skjutlag/station/klass/…)
+    // with a check-in toggle + a "N/M incheckade" tally, so tävlingsledningen sees who has shown up.
+    // Discipline-agnostic (built from the roster's scope projection). #1b layers the live "aktiv nu"
+    // signal on top by reconciling against the discipline's load endpoint. Polls every 15 s.
+    var competitionId = ViewData["CompetitionId"];
+    var discipline = ViewData["Discipline"]?.ToString() ?? "";
+    var sdToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+
+<div class="card mb-3" id="sdCard">
+    <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+        <span class="fw-bold"><i class="bi bi-clipboard-check me-1"></i>Upprop — bemanning idag <span id="sdTally" class="badge bg-light text-dark ms-1"></span></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#sdBody" aria-expanded="true">
+            <i class="bi bi-chevron-expand"></i> Visa/dölj
+        </button>
+    </div>
+    <div class="collapse show" id="sdBody">
+        <div class="card-body py-2">
+            <div id="sdGroups"><div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div> Laddar…</div></div>
+            <p class="text-muted small mb-0 mt-2">Bocka av funktionärer när de kommer. "Aktiv nu" visar vilka som redan matar in resultat i sitt skjutlag/sin station (härlett från inmatningarna).</p>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var compId = @competitionId;
+    var DISCIPLINE = '@discipline';
+    var TOKEN = '@sdToken';
+    var REFRESH = 15000;
+    var timer = null;
+    var groups = [];
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function q(id) { return document.getElementById(id); }
+
+    async function load() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetDayOfCockpit?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { q('sdGroups').innerHTML = '<div class="text-muted small">' + esc(d.message || 'Kunde inte läsa.') + '</div>'; return; }
+            groups = d.groups || [];
+            await applyActiveOverlay();          // #1b — no-op if the discipline has no load feed
+            render(d.totalPlanned, d.totalCheckedIn);
+        } catch (e) { q('sdGroups').innerHTML = '<div class="text-muted small">Kunde inte läsa uppropet.</div>'; }
+    }
+
+    function render(totalPlanned, totalCheckedIn) {
+        var tally = q('sdTally');
+        if (tally) tally.textContent = (totalCheckedIn || 0) + '/' + (totalPlanned || 0) + ' incheckade';
+        if (!groups.length) {
+            q('sdGroups').innerHTML = '<div class="text-muted small">Ingen bemanning planerad ännu. Lägg till funktionärer under Planering → Bemanning.</div>';
+            return;
+        }
+        q('sdGroups').innerHTML = groups.map(groupHtml).join('');
+    }
+
+    function groupHtml(g) {
+        var tally = '<span class="badge ' + (g.checkedInCount >= g.plannedCount ? 'bg-success' : 'bg-secondary') + ' ms-1">' + g.checkedInCount + '/' + g.plannedCount + ' incheckade</span>';
+        var notPlanned = g.activeNotPlanned > 0
+            ? '<span class="badge bg-warning text-dark ms-1" title="Aktiva som inte är planerade i det här scopet"><i class="bi bi-exclamation-triangle me-1"></i>' + g.activeNotPlanned + ' aktiv ej planerad</span>'
+            : '';
+        var rows = (g.planned || []).map(personRow).join('') || '<div class="text-muted small py-1">Ingen planerad.</div>';
+        return '<div class="mb-3">'
+            + '<div class="fw-semibold border-bottom pb-1 mb-1">' + esc(g.scopeLabel) + tally + notPlanned + '</div>'
+            + rows + '</div>';
+    }
+
+    function personRow(p) {
+        var star = p.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" title="Ansvarig"></i>' : '';
+        var role = '<span class="text-muted small"> · ' + esc(p.roleName) + (p.functionTitle ? ' (' + esc(p.functionTitle) + ')' : '') + '</span>';
+        var shift = p.shiftLabel ? '<span class="badge bg-light text-dark border ms-1"><i class="bi bi-clock me-1"></i>' + esc(p.shiftLabel) + '</span>' : '';
+        var active = p.activeNow ? '<span class="badge bg-primary ms-1" title="Matar in resultat nu"><i class="bi bi-broadcast me-1"></i>Aktiv nu</span>' : '';
+        var phone = p.phone ? '<a class="btn btn-sm btn-outline-success" href="tel:' + esc(p.phone) + '" title="Ring"><i class="bi bi-telephone"></i></a>' : '';
+        var control = p.readOnly
+            ? '<span class="badge bg-secondary-subtle text-secondary-emphasis border" title="Från Stationer-fliken">läst</span>'
+            : '<div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" role="switch" ' + (p.checkedIn ? 'checked' : '') + ' onchange="sdToggle(' + p.id + ',this.checked)" title="Incheckad"></div>';
+        var nameCls = p.checkedIn ? 'fw-semibold' : '';
+        return '<div class="d-flex justify-content-between align-items-center py-1 gap-2">'
+            + '<div>' + (p.checkedIn ? '<i class="bi bi-check-circle-fill text-success me-1"></i>' : '<i class="bi bi-circle text-muted me-1"></i>') + star + '<span class="' + nameCls + '">' + esc(p.name) + '</span>' + role + shift + active + '</div>'
+            + '<div class="d-flex align-items-center gap-2">' + phone + control + '</div>'
+            + '</div>';
+    }
+
+    window.sdToggle = async function (id, checked) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SetCheckedIn', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify({ id: id, competitionId: compId, checkedIn: checked })
+            });
+            var d = await r.json();
+            if (d.success) await load(); else alert(d.message || 'Kunde inte spara.');
+        } catch (e) { alert('Nätverksfel.'); }
+    };
+
+    // ---- planned-vs-active overlay: mark planned people "aktiv nu" + count active-but-unplanned ----
+    function norm(s) { return (s == null ? '' : String(s)).trim().toLowerCase(); }
+
+    async function applyActiveOverlay() {
+        var feed = null;
+        try {
+            if (DISCIPLINE === 'Precision' || DISCIPLINE === 'MagnumPrecision') feed = await loadPrecisionActive();
+            else if (DISCIPLINE === 'Springskytte') feed = await loadSpringActive();
+        } catch (e) { feed = null; }
+        if (!feed) return;   // no live feed (e.g. no start list yet) → roll-call still fully works
+        groups.forEach(function (g) {
+            if (g.scopeType === 'All') return;
+            var active = feed[g.scopeType + ':' + (g.scopeKey || '')] || [];
+            var activeLc = active.map(norm);
+            var plannedLc = {};
+            g.planned.forEach(function (p) { var n = norm(p.name); plannedLc[n] = true; p.activeNow = activeLc.indexOf(n) >= 0; });
+            var seen = {};
+            g.activeNotPlanned = activeLc.filter(function (n) { if (plannedLc[n] || seen[n]) return false; seen[n] = true; return true; }).length;
+        });
+    }
+
+    async function loadPrecisionActive() {
+        var r = await fetch('/umbraco/surface/CompetitionResults/GetPrecisionFunctionaryLoad?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+        var d = await r.json();
+        if (!d || !d.success) return null;
+        var map = {};
+        (d.skjutlag || []).forEach(function (sl) {
+            var names = (sl.scorers || []).map(function (sc) { return sc.name; }).filter(Boolean);
+            if (names.length) map['Skjutlag:' + sl.teamNumber] = names;
+        });
+        return map;
+    }
+
+    async function loadSpringActive() {
+        var r = await fetch('/umbraco/surface/Springskytte/GetSpringskytteFunctionaryLoad?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+        var d = await r.json();
+        if (!d || !d.success) return null;
+        var map = {};
+        (d.classes || []).forEach(function (c) {
+            var names = (c.scorers || []).concat(c.timers || []).map(function (p) { return p.name; }).filter(Boolean);
+            if (names.length) map['Klass:' + c.weaponClass] = names;
+        });
+        return map;
+    }
+
+    function startTimer() { if (!timer) timer = setInterval(function () { if (!document.hidden) load(); }, REFRESH); }
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { if (timer) { clearInterval(timer); timer = null; } }
+        else { load(); startTimer(); }
+    });
+
+    load();
+    startTimer();
+})();
+</script>

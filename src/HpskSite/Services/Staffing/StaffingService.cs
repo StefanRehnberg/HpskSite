@@ -254,6 +254,81 @@ namespace HpskSite.Services.Staffing
             SyncCompetitionManagers(competitionId);
         }
 
+        // ---- day-of cockpit: roll-call / upprop (+ overlay hook) ----
+
+        public void SetCheckedIn(int id, int competitionId, bool checkedIn)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute(
+                "UPDATE StaffAssignment SET CheckedInAt = @0, ModifiedDate = @1 WHERE Id = @2 AND CompetitionId = @3",
+                checkedIn ? DateTime.UtcNow : (DateTime?)null, DateTime.UtcNow, id, competitionId);
+        }
+
+        /// <summary>
+        /// Scope-centric projection of the roster for the competition-day cockpit: one group per scope unit
+        /// (Skjutlag/Station/Klass/Patrull/Bana + "Hela tävlingen"), each listing its planned crew and a
+        /// roll-call tally (how many have checked in). Includes read-only Fält station chiefs. The live
+        /// "ActiveNow" reconciliation (#1b) is merged client-side against the discipline's load endpoint.
+        /// </summary>
+        public DayOfCockpitResponse BuildDayOfCockpit(int competitionId, string? discipline, bool canEdit)
+        {
+            // Reuse BuildRoster so station-chief injection + availability + role resolution are consistent.
+            var roster = BuildRoster(competitionId, discipline, canEdit);
+            var resp = new DayOfCockpitResponse { Discipline = discipline ?? "", CanEdit = canEdit };
+
+            var groups = new Dictionary<string, DayOfScopeGroup>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rg in roster.Groups)
+            {
+                foreach (var a in rg.Assignments)
+                {
+                    var isAll = string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase);
+                    var scopeType = isAll ? StaffScopeType.All : a.ScopeType!;
+                    var scopeKey = isAll ? null : a.ScopeKey;
+                    var mapKey = $"{scopeType}:{scopeKey}";
+                    if (!groups.TryGetValue(mapKey, out var g))
+                    {
+                        g = new DayOfScopeGroup
+                        {
+                            ScopeType = scopeType,
+                            ScopeKey = scopeKey,
+                            ScopeLabel = isAll ? "Hela tävlingen" : $"{scopeType} {scopeKey}".Trim(),
+                            SortKey = isAll ? int.MaxValue : (int.TryParse(scopeKey, out var n) ? n : int.MaxValue - 1),
+                        };
+                        groups[mapKey] = g;
+                    }
+                    g.Planned.Add(new DayOfPersonView
+                    {
+                        Id = a.Id,
+                        MemberId = a.MemberId,
+                        Name = a.DisplayName,
+                        RoleKey = a.RoleKey,
+                        RoleName = a.RoleName,
+                        FunctionTitle = a.FunctionTitle,
+                        ShiftLabel = a.ShiftLabel,
+                        IsResponsible = a.IsResponsible,
+                        CheckedIn = a.CheckedIn,
+                        ReadOnly = a.ReadOnly,
+                        Phone = a.Phone,
+                    });
+                }
+            }
+
+            foreach (var g in groups.Values)
+            {
+                g.PlannedCount = g.Planned.Count;
+                g.CheckedInCount = g.Planned.Count(p => p.CheckedIn);
+                g.Planned = g.Planned
+                    .OrderByDescending(p => p.IsResponsible)
+                    .ThenBy(p => p.RoleName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            resp.Groups = groups.Values.OrderBy(g => g.SortKey).ThenBy(g => g.ScopeType, StringComparer.OrdinalIgnoreCase).ToList();
+            resp.TotalPlanned = resp.Groups.Sum(g => g.PlannedCount);
+            resp.TotalCheckedIn = resp.Groups.Sum(g => g.CheckedInCount);
+            return resp;
+        }
+
         // ---- availability + member self-service (P3: sign-up + tillgänglighet) ----
 
         public List<StaffAvailability> GetAvailabilityForCompetition(int competitionId)
@@ -513,6 +588,7 @@ namespace HpskSite.Services.Staffing
                 HasAdminAccess = a.HasAdminAccess,
                 Status = a.Status,
                 Note = a.Note,
+                CheckedIn = a.CheckedInAt.HasValue,
             };
         }
 

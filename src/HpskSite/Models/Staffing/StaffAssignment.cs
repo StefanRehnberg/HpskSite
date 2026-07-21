@@ -36,6 +36,7 @@ namespace HpskSite.Models.Staffing
         public bool HasAdminAccess { get; set; }        // Tävlingsledning: mirror into competitionManagers
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public string? Note { get; set; }
+        public DateTime? CheckedInAt { get; set; }      // roll-call/upprop: set when the person shows up on the day
 
         public int AssignedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }
@@ -78,6 +79,49 @@ namespace HpskSite.Models.Staffing
         public bool IsResponsible { get; set; }
     }
 
+    // --- Day-of cockpit (roll-call / upprop + planned-vs-actual overlay) ---
+
+    /// <summary>One planned functionary in a scope unit, for the day-of cockpit.</summary>
+    public class DayOfPersonView
+    {
+        public int Id { get; set; }
+        public int? MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string RoleKey { get; set; } = "";
+        public string RoleName { get; set; } = "";
+        public string? FunctionTitle { get; set; }
+        public string? ShiftLabel { get; set; }
+        public bool IsResponsible { get; set; }
+        public bool CheckedIn { get; set; }
+        public bool ReadOnly { get; set; }        // mirror row (Fält station chief) — no check-in toggle
+        public string? Phone { get; set; }
+        public bool ActiveNow { get; set; }        // #1b: matched to a live-load "active" signal in this scope
+    }
+
+    /// <summary>A scope unit (Skjutlag/Station/Klass/…/Hela tävlingen) with its planned crew + roll-call tally.</summary>
+    public class DayOfScopeGroup
+    {
+        public string ScopeType { get; set; } = "";
+        public string? ScopeKey { get; set; }
+        public string ScopeLabel { get; set; } = "";
+        public int SortKey { get; set; }
+        public List<DayOfPersonView> Planned { get; set; } = new();
+        public int PlannedCount { get; set; }
+        public int CheckedInCount { get; set; }
+        public int ActiveNotPlanned { get; set; }   // #1b: active people in this scope with no plan row
+    }
+
+    public class DayOfCockpitResponse
+    {
+        public bool Success { get; set; } = true;
+        public string? Message { get; set; }
+        public bool CanEdit { get; set; }
+        public string Discipline { get; set; } = "";
+        public List<DayOfScopeGroup> Groups { get; set; } = new();
+        public int TotalPlanned { get; set; }
+        public int TotalCheckedIn { get; set; }
+    }
+
     /// <summary>The current member's assignments + availability for one competition.</summary>
     public class MyCompetitionGroup
     {
@@ -109,6 +153,7 @@ namespace HpskSite.Models.Staffing
         public bool HasAdminAccess { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public string? Note { get; set; }
+        public bool CheckedIn { get; set; }
         /// <summary>Read-only mirror row (not a StaffAssignment) — e.g. a Fältskytte station chief pulled in
         /// from faltskytteStationManagers on the Stationer tab. No edit/delete/notify in the UI.</summary>
         public bool ReadOnly { get; set; }
@@ -168,6 +213,13 @@ namespace HpskSite.Models.Staffing
     {
         public int Id { get; set; }
         public int CompetitionId { get; set; }
+    }
+
+    public class CheckInRequest
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        public bool CheckedIn { get; set; }
     }
 
     // --- Member-facing (/mina-uppdrag) request DTOs ---
