@@ -110,8 +110,68 @@ namespace HpskSite.Services.Staffing
                 });
             }
 
+            // Fält convergence (P2): surface station chiefs assigned on the Stationer tab
+            // (faltskytteStationManagers JSON) as read-only rows in the stationschef group, so the roster
+            // shows the full picture. Deduped by station — a real StaffAssignment for Station:N wins.
+            if (FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase))
+                InjectStationChiefs(competitionId, resp);
+
             resp.TotalAssigned = rows.Count;
             return resp;
+        }
+
+        /// <summary>Add read-only stationschef rows from the competition's faltskytteStationManagers JSON.</summary>
+        private void InjectStationChiefs(int competitionId, StaffRosterResponse resp)
+        {
+            try
+            {
+                var content = _contentService.GetById(competitionId);
+                var json = content?.HasProperty("faltskytteStationManagers") == true
+                    ? content.GetValue<string>("faltskytteStationManagers") : null;
+                if (string.IsNullOrWhiteSpace(json)) return;
+
+                var group = resp.Groups.FirstOrDefault(g => string.Equals(g.RoleKey, "stationschef", StringComparison.OrdinalIgnoreCase));
+                if (group == null) return;
+                var haveStations = group.Assignments
+                    .Where(a => string.Equals(a.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(a.ScopeKey))
+                    .Select(a => a.ScopeKey!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var obj = Newtonsoft.Json.Linq.JObject.Parse(json);
+                foreach (var prop in obj.Properties().OrderBy(p => int.TryParse(p.Name, out var n) ? n : int.MaxValue))
+                {
+                    var station = prop.Name;
+                    if (haveStations.Contains(station)) continue;   // a real assignment already covers it
+                    var v = prop.Value as Newtonsoft.Json.Linq.JObject;
+                    var name = v?.Value<string>("name");
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var phone = v?.Value<string>("phone");
+                    var memberId = v?.Value<int?>("memberId");
+                    group.Assignments.Add(new StaffAssignmentView
+                    {
+                        Id = 0,
+                        MemberId = memberId is > 0 ? memberId : null,
+                        DisplayName = name!,
+                        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone,
+                        RoleKey = "stationschef",
+                        RoleName = "Stationschef",
+                        ScopeType = StaffScopeType.Station,
+                        ScopeKey = station,
+                        ScopeLabel = $"Station {station}",
+                        IsResponsible = true,
+                        Status = StaffAssignmentStatus.Confirmed,
+                        ReadOnly = true,
+                        SourceLabel = "Stationer-fliken",
+                    });
+                }
+                group.Assignments = group.Assignments
+                    .OrderBy(a => int.TryParse(a.ScopeKey, out var n) ? n : int.MaxValue)
+                    .ThenByDescending(a => a.IsResponsible)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Staffing: station-chief injection failed for competition {CompetitionId}", competitionId);
+            }
         }
 
         // ---- writes ----

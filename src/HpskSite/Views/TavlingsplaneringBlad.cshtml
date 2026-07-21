@@ -1,0 +1,155 @@
+@model HpskSite.Models.Staffing.PlaneringBladModel
+@using System.Globalization
+@{
+    Layout = null;
+    var ci = CultureInfo.GetCultureInfo("sv-SE");
+    string StatusSv(string s) => s switch
+    {
+        "Planerad" => "Planerad", "Pagar" => "Pågår", "Blockerad" => "Blockerad", "Klar" => "Klar",
+        "Planned" => "Planerad", "Invited" => "Inbjuden", "Accepted" => "Accepterad", "Declined" => "Avböjt", "Confirmed" => "Bekräftad",
+        _ => s
+    };
+    // Only role groups that actually have people (keeps the sheet tight); prep shows every område.
+    var filledGroups = Model.Roster?.Groups?.Where(g => g.Assignments != null && g.Assignments.Count > 0).ToList()
+                       ?? new List<HpskSite.Models.Staffing.StaffRoleGroup>();
+    var areas = Model.Work?.Areas ?? new List<HpskSite.Models.Staffing.WorkAreaView>();
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vem gör vad – @Model.CompName</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1a1a1a; margin: 0; padding: 24px; }
+        .wrap { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin: 0 0 .2rem; }
+        h2 { font-size: 1.15rem; margin: 1.4rem 0 .5rem; border-bottom: 2px solid #333; padding-bottom: .2rem; }
+        h3 { font-size: 1rem; margin: .9rem 0 .3rem; }
+        .meta { color: #555; margin-bottom: 1rem; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: .6rem; }
+        th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #ddd; vertical-align: top; font-size: .9rem; }
+        th { background: #f3f3f3; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: #444; }
+        .resp { color: #b8860b; }
+        .muted { color: #777; }
+        .pill { display: inline-block; font-size: .72rem; padding: 1px 7px; border: 1px solid #bbb; border-radius: 10px; color: #444; }
+        .done { text-decoration: line-through; color: #888; }
+        .overdue { color: #c00; font-weight: 600; }
+        .blocked { color: #c00; }
+        .toolbar { margin-bottom: 1rem; }
+        .btn { display: inline-block; padding: 8px 16px; background: #0d6efd; color: #fff; border: 0; border-radius: 6px; text-decoration: none; cursor: pointer; font-size: .95rem; }
+        .btn.secondary { background: #6c757d; }
+        .area-head { display: flex; justify-content: space-between; align-items: baseline; }
+        @@media print { .no-print { display: none !important; } body { padding: 0; } h2 { page-break-after: avoid; } tr { page-break-inside: avoid; } }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    @if (!Model.Exists)
+    {
+        <p>Tävlingen hittades inte.</p>
+    }
+    else if (!Model.CanAccess)
+    {
+        <p>Du har inte behörighet att se den här planeringen.</p>
+    }
+    else
+    {
+        <div class="toolbar no-print">
+            <button class="btn" onclick="window.print()"><i class="bi bi-printer"></i> Skriv ut</button>
+            <a class="btn secondary" href="/tavlingsplanering?c=@Model.CompetitionId"><i class="bi bi-arrow-left"></i> Tillbaka till planeringen</a>
+        </div>
+
+        <h1>Vem gör vad</h1>
+        <div class="meta">
+            <strong>@Model.CompName</strong>
+            @if (!string.IsNullOrEmpty(Model.CompDate)) { <span> · Tävlingsdatum @Model.CompDate</span> }
+        </div>
+
+        <h2><i class="bi bi-person-badge"></i> Bemanning</h2>
+        @if (!filledGroups.Any())
+        {
+            <p class="muted">Inga funktionärer tilldelade ännu.</p>
+        }
+        else
+        {
+            foreach (var g in filledGroups)
+            {
+                <h3>@g.RolePlural</h3>
+                <table>
+                    <thead>
+                        <tr><th style="width:30%">Namn</th><th style="width:14%">Funktion</th><th style="width:22%">Var</th><th style="width:14%">Tid</th><th style="width:12%">Telefon</th><th style="width:8%">Status</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var a in g.Assignments)
+                    {
+                        <tr>
+                            <td>
+                                @if (a.IsResponsible) { <i class="bi bi-star-fill resp" title="Ansvarig"></i> }
+                                @a.DisplayName
+                                @if (a.ReadOnly && !string.IsNullOrEmpty(a.SourceLabel)) { <span class="pill">@a.SourceLabel</span> }
+                            </td>
+                            <td>@(string.IsNullOrEmpty(a.FunctionTitle) ? "" : a.FunctionTitle)</td>
+                            <td>@a.ScopeLabel</td>
+                            <td>@(string.IsNullOrEmpty(a.ShiftLabel) ? "Heldag" : a.ShiftLabel)</td>
+                            <td>@(string.IsNullOrEmpty(a.Phone) ? "" : a.Phone)</td>
+                            <td>@StatusSv(a.Status)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        }
+
+        <h2><i class="bi bi-list-check"></i> Förberedelser</h2>
+        @if (!areas.Any())
+        {
+            <p class="muted">Inga förberedelseområden ännu.</p>
+        }
+        else
+        {
+            foreach (var area in areas)
+            {
+                <div class="area-head">
+                    <h3>@area.Name <span class="muted">(@area.DoneCount/@area.TotalCount klara)</span></h3>
+                    @if (!string.IsNullOrEmpty(area.ResponsibleName)) { <span class="muted"><i class="bi bi-person"></i> @area.ResponsibleName</span> }
+                </div>
+                @if (area.Items != null && area.Items.Any())
+                {
+                    <table>
+                        <thead>
+                            <tr><th style="width:44%">Uppgift</th><th style="width:24%">Ansvarig</th><th style="width:16%">Deadline</th><th style="width:16%">Status</th></tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var it in area.Items)
+                        {
+                            var done = string.Equals(it.Status, "Klar", StringComparison.OrdinalIgnoreCase);
+                            <tr>
+                                <td class="@(done ? "done" : "")">
+                                    @it.Title
+                                    @if (it.IsBlocked)
+                                    {
+                                        <div class="blocked" style="font-size:.8rem"><i class="bi bi-slash-circle"></i> Blockeras av: @string.Join(", ", it.BlockedBy.Where(b => !b.Done).Select(b => b.Title))</div>
+                                    }
+                                </td>
+                                <td>@(string.IsNullOrEmpty(it.AssignedName) ? "—" : it.AssignedName)</td>
+                                <td class="@(it.IsOverdue ? "overdue" : "")">@(string.IsNullOrEmpty(it.DueDate) ? "" : it.DueDate)</td>
+                                <td>@StatusSv(it.Status)</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <p class="muted">Inga uppgifter.</p>
+                }
+            }
+        }
+
+        <p class="muted" style="margin-top:2rem; font-size:.8rem">Utskrivet från pistol.nu tävlingsplanering.</p>
+    }
+</div>
+</body>
+</html>

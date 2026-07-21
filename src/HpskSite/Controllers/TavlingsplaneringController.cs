@@ -1,4 +1,6 @@
+using HpskSite.Models.Staffing;
 using HpskSite.Services;
+using HpskSite.Services.Staffing;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -26,17 +28,23 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _auth;
+        private readonly StaffingService _staffing;
+        private readonly WorkBreakdownService _work;
 
         public TavlingsplaneringController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager,
             IMemberService memberService,
-            AdminAuthorizationService auth)
+            AdminAuthorizationService auth,
+            StaffingService staffing,
+            WorkBreakdownService work)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
             _auth = auth;
+            _staffing = staffing;
+            _work = work;
         }
 
         [HttpGet("")]
@@ -64,6 +72,41 @@ namespace HpskSite.Controllers
             ViewData["CanAccess"] = isCompetition && await HasCompetitionAccessAsync(c);
 
             return View("Tavlingsplanering", rootNode);
+        }
+
+        /// <summary>Printable "vem gör vad"-blad — roster (Bemanning) + prep (Förberedelser) on one sheet.</summary>
+        [HttpGet("blad")]
+        public async Task<IActionResult> Blad(int c)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember?.Email == null)
+                return Redirect($"/login-&-register/?tab=login&RedirectUrl=/tavlingsplanering/blad?c={c}");
+
+            var competition = c > 0 ? ctx.Content.GetById(c) : null;
+            var isCompetition = competition != null && competition.ContentType.Alias == "competition";
+            var canAccess = isCompetition && await HasCompetitionAccessAsync(c);
+
+            var model = new PlaneringBladModel
+            {
+                CompetitionId = c,
+                Exists = isCompetition,
+                CanAccess = canAccess,
+                CompName = isCompetition ? (competition!.Value<string>("competitionName") ?? "Tävling") : "",
+                Discipline = isCompetition ? (competition!.Value("competitionType")?.ToString() ?? "Precision") : "Precision",
+            };
+
+            if (canAccess)
+            {
+                var d = competition!.Value<DateTime?>("competitionDate");
+                if (d.HasValue && d.Value != default)
+                    model.CompDate = d.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                model.Roster = _staffing.BuildRoster(c, model.Discipline, canEdit: false);
+                model.Work = _work.Build(c, canEdit: false);
+            }
+            return View("TavlingsplaneringBlad", model);
         }
 
         /// <summary>

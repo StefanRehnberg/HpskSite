@@ -65,6 +65,10 @@ namespace HpskSite.Models.Staffing
         public bool HasAdminAccess { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public string? Note { get; set; }
+        /// <summary>Read-only mirror row (not a StaffAssignment) — e.g. a Fältskytte station chief pulled in
+        /// from faltskytteStationManagers on the Stationer tab. No edit/delete/notify in the UI.</summary>
+        public bool ReadOnly { get; set; }
+        public string? SourceLabel { get; set; }   // e.g. "Stationer-fliken"
     }
 
     /// <summary>A role group (one section in the roster) with its assignments.</summary>

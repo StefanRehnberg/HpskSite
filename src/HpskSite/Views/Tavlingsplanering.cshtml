@@ -23,9 +23,17 @@
                 <p class="text-muted mb-0">Förbereder: <strong>@compName</strong></p>
             }
         </div>
-        <a href="@manageUrl" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left"></i> Tillbaka till tävlingshantering
-        </a>
+        <div class="d-flex gap-2 flex-wrap">
+            @if (compExists && canAccess)
+            {
+                <a href="/tavlingsplanering/blad?c=@competitionId" target="_blank" rel="noopener" class="btn btn-outline-primary" title="Skriv ut vem gör vad">
+                    <i class="bi bi-printer"></i> Skriv ut plan
+                </a>
+            }
+            <a href="@manageUrl" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Tillbaka till tävlingshantering
+            </a>
+        </div>
     </div>
 
     @if (!compExists)

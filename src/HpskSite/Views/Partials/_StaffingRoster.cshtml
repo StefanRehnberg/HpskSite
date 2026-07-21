@@ -232,18 +232,22 @@
             ? '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfNotify(' + a.id + ',\'' + nameEsc + '\')" title="Bjud in / notifiera (e-post + push)"><i class="bi bi-envelope"></i></button>'
             : '';
         var note = a.note ? '<div class="text-muted small mt-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(a.note) + '</div>' : '';
+        // Read-only mirror row (e.g. Fält station chief from the Stationer tab): source badge, no edit/notify.
+        var srcBadge = (a.readOnly && a.sourceLabel)
+            ? '<span class="badge bg-secondary-subtle text-secondary-emphasis border ms-1" title="Tilldelad på Stationer-fliken. Lägg till här om du vill hantera i planeringen."><i class="bi bi-diagram-2 me-1"></i>' + esc(a.sourceLabel) + '</span>'
+            : '';
+        var actions = a.readOnly
+            ? phone
+            : (phone + notifyBtn
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
+                + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ',\'' + nameEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>');
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
-            + '<div>' + star + '<span class="fw-semibold">' + esc(a.displayName) + '</span>' + fn + statusBadge + adminBadge + '</div>'
+            + '<div>' + star + '<span class="fw-semibold">' + esc(a.displayName) + '</span>' + fn + statusBadge + adminBadge + srcBadge + '</div>'
             + '<div class="d-flex flex-wrap gap-1 mt-1">' + scope + shift + '</div>'
             + note
             + '</div>'
-            + '<div class="d-flex gap-1 flex-shrink-0">'
-            + phone
-            + notifyBtn
-            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ',\'' + nameEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
-            + '</div>'
+            + '<div class="d-flex gap-1 flex-shrink-0">' + actions + '</div>'
             + '</div>';
     }
 
