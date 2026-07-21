@@ -1,0 +1,70 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Planering";
+    var competitionId = ViewData["CompetitionId"];
+    var compName = ViewData["CompetitionName"]?.ToString() ?? "";
+    var discipline = ViewData["Discipline"]?.ToString() ?? "Precision";
+    var manageUrl = ViewData["ManageUrl"]?.ToString() ?? "/";
+    var canAccess = ViewData["CanAccess"] as bool? ?? false;
+    var compExists = ViewData["CompetitionExists"] as bool? ?? false;
+
+    var childVd = new ViewDataDictionary(ViewData);
+    childVd["CompetitionId"] = competitionId;
+    childVd["Discipline"] = discipline;
+}
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <h1><i class="bi bi-clipboard-check me-2"></i>Planering</h1>
+            @if (compExists)
+            {
+                <p class="text-muted mb-0">Förbereder: <strong>@compName</strong></p>
+            }
+        </div>
+        <a href="@manageUrl" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Tillbaka till tävlingshantering
+        </a>
+    </div>
+
+    @if (!compExists)
+    {
+        <div class="alert alert-warning">Tävlingen hittades inte.</div>
+    }
+    else if (!canAccess)
+    {
+        <div class="alert alert-warning">Du har inte behörighet att planera den här tävlingen.</div>
+    }
+    else
+    {
+        <p class="text-muted" style="max-width:720px">
+            Här planerar du arbetet <em>runt</em> tävlingen — det som görs i förväg, vid skrivbordet.
+            <strong>Förberedelser</strong> är arbetslistan (materiel, mark &amp; bana, inköp…) och
+            <strong>Bemanning</strong> är funktionärsrostern (vem gör vad, var och när). Själva
+            tävlingsdagen sköter du från <a href="@manageUrl">Funktionärer-fliken</a> i tävlingshanteringen.
+        </p>
+
+        <ul class="nav nav-pills mb-3 flex-wrap gap-1" id="planeringPills" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="plan-forberedelser-tab" data-bs-toggle="pill" data-bs-target="#plan-forberedelser" type="button" role="tab">
+                    <i class="bi bi-list-check me-1"></i>Förberedelser
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="plan-bemanning-tab" data-bs-toggle="pill" data-bs-target="#plan-bemanning" type="button" role="tab">
+                    <i class="bi bi-person-badge me-1"></i>Bemanning
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="planeringPillContent">
+            <div class="tab-pane fade show active" id="plan-forberedelser" role="tabpanel">
+                @await Html.PartialAsync("_WorkBreakdown", childVd)
+            </div>
+            <div class="tab-pane fade" id="plan-bemanning" role="tabpanel">
+                @await Html.PartialAsync("_StaffingRoster", childVd)
+            </div>
+        </div>
+    }
+</div>

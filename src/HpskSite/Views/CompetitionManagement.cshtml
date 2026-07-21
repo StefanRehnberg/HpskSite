@@ -450,6 +450,9 @@
                 @if (canManageCompetition)
                 {
                     var isExternalComp = competition?.Value<bool>("isExternal") ?? false;
+                    <a href="/tavlingsplanering?c=@competitionId" class="btn btn-outline-primary" title="Planera tävlingen — förberedelser och bemanning">
+                        <i class="bi bi-clipboard-check"></i> Planering
+                    </a>
                     <button type="button" class="btn btn-outline-primary"
                             onclick="openEditCompetitionModal(@competitionId, @(isExternalComp ? "true" : "false"), '@competitionType')">
                         <i class="bi bi-pencil"></i> Redigera tävling
@@ -470,26 +473,17 @@
        all edit modals covered it. *@
 
     @{
-        // "Planering" (Tävlingsplanering) is the first/default tab for the disciplines whose old
-        // "Funktionärer" tab it replaces (Precision-family + Springskytte). It's the natural place to
-        // start organising — prep + staffing + day-of — and is usable before a start list exists.
-        // Fältskytte's Stationer tab is the discipline-shaped sibling that folds in over time, so its
-        // default landing stays Anmälningar. See Documentation/COMPETITION_STAFFING_SYSTEM.md.
-        var planeringDiscipline = ViewData["CompetitionType"]?.ToString() ?? "Precision";
-        var hasPlanering = planeringDiscipline is "Precision" or "MagnumPrecision" or "Springskytte";
+        // Funktionärer is the day-of operational hub (live functionary load + tävlingsledning message
+        // console) for Precision-family + Springskytte — a major comp-management tab. The preparatory
+        // work (Förberedelser + Bemanning) lives on the separate /tavlingsplanering page reached via the
+        // "Planering" header button, since it relates to the comp rather than being part of running it.
+        // See Documentation/COMPETITION_STAFFING_SYSTEM.md.
+        var hasFunktionarerTab = (ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Precision" or "MagnumPrecision" or "Springskytte";
     }
     <!-- Navigation tabs -->
     <ul class="nav nav-tabs" id="managementTabs" role="tablist">
-        @if (hasPlanering)
-        {
-            <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="planering-tab" data-bs-toggle="tab" data-bs-target="#planering" type="button" role="tab">
-                    <i class="bi bi-clipboard-check me-1"></i>Planering
-                </button>
-            </li>
-        }
         <li class="nav-item" role="presentation">
-            <button class="nav-link @(hasPlanering ? "" : "active")" id="registrations-tab" data-bs-toggle="tab" data-bs-target="#registrations" type="button" role="tab">
+            <button class="nav-link active" id="registrations-tab" data-bs-toggle="tab" data-bs-target="#registrations" type="button" role="tab">
                 <i class="bi bi-people me-1"></i>Anmälningar
             </button>
         </li>
@@ -506,6 +500,14 @@
                 </button>
             </li>
         }
+        @if (hasFunktionarerTab)
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="funktionarer-tab" data-bs-toggle="tab" data-bs-target="#funktionarer" type="button" role="tab">
+                    <i class="bi bi-person-badge me-1"></i>Funktionärer
+                </button>
+            </li>
+        }
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="results-tab" data-bs-toggle="tab" data-bs-target="#results" type="button" role="tab">
                 <i class="bi bi-trophy me-1"></i>Resultat
@@ -515,18 +517,8 @@
 
     <!-- Tab content -->
     <div class="tab-content" id="managementTabContent">
-        @if (hasPlanering)
-        {
-            <!-- Planering Tab (Tävlingsplanering: Bemanning + Förberedelser + Dagsläge) -->
-            <div class="tab-pane fade show active" id="planering" role="tabpanel">
-                <div class="mt-3">
-                    @await Html.PartialAsync("CompetitionPlaneringManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId }, { "Discipline", planeringDiscipline } })
-                </div>
-            </div>
-        }
-
         <!-- Registrations Tab -->
-        <div class="tab-pane fade @(hasPlanering ? "" : "show active")" id="registrations" role="tabpanel">
+        <div class="tab-pane fade show active" id="registrations" role="tabpanel">
             <div class="mt-3">
                 @{
                     // Hand the partial the competition's actual allowed classes (id+name) so the
@@ -687,12 +679,28 @@
             </div>
         }
 
+        @if (hasFunktionarerTab)
+        {
+            <!-- Funktionärer Tab (day-of hub: live functionary load + tävlingsledning message console) -->
+            <div class="tab-pane fade" id="funktionarer" role="tabpanel">
+                <div class="mt-3">
+                    @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
+                    {
+                        @await Html.PartialAsync("SpringskytteFunktionarerManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                    }
+                    else
+                    {
+                        @await Html.PartialAsync("PrecisionFunktionarerManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                    }
+                </div>
+            </div>
+        }
+
     </div>
 </div>
 
 @* Tävlingsledningens meddelandekonsol mounts on #evtInboxMount from each discipline's hub-tab partial:
-   Fältskytte → Stationer, Precision/MagnumPrecision + Springskytte → Planering (Dagsläge-pillen, som
-   bäddar in PrecisionFunktionarerManagement / SpringskytteFunktionarerManagement). No generic block
+   Fältskytte → Stationer, Precision/MagnumPrecision + Springskytte → Funktionärer. No generic block
    needed here anymore. *@
 
 <script>
