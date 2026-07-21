@@ -41,6 +41,8 @@ namespace HpskSite.Models.Staffing
         public string Status { get; set; } = WorkItemStatus.Planerad;
         public string? ScopeType { get; set; }
         public string? ScopeKey { get; set; }
+        public decimal? EstimatedCost { get; set; }   // budgeterad kostnad
+        public decimal? ActualCost { get; set; }       // faktisk kostnad
         public int SortOrder { get; set; }
         public int CreatedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }
@@ -128,6 +130,8 @@ namespace HpskSite.Models.Staffing
         public string? ScopeType { get; set; }
         public string? ScopeKey { get; set; }
         public bool IsOverdue { get; set; }           // past DueDate and not Klar
+        public decimal? EstimatedCost { get; set; }
+        public decimal? ActualCost { get; set; }
         public int SortOrder { get; set; }
         public List<WorkLinkView> Links { get; set; } = new();
         public int CommentCount { get; set; }              // person-written comments (audit excluded)
@@ -184,6 +188,8 @@ namespace HpskSite.Models.Staffing
         public int DoneCount { get; set; }
         public int TotalCount { get; set; }
         public int OverdueCount { get; set; }
+        public decimal EstimatedCostSum { get; set; }
+        public decimal ActualCostSum { get; set; }
         public List<WorkItemView> Items { get; set; } = new();
         public List<WorkLinkView> Links { get; set; } = new();
     }
@@ -205,6 +211,8 @@ namespace HpskSite.Models.Staffing
         public string? CompDate { get; set; }       // "yyyy-MM-dd" or null
         public int? DaysUntilComp { get; set; }      // negative once the comp has passed
         public StationSeedInfo? StationSeed { get; set; }
+        public decimal TotalEstimatedCost { get; set; }
+        public decimal TotalActualCost { get; set; }
         public List<WorkLinkView> CompLinks { get; set; } = new();   // competition-level documents
         public List<WorkAreaView> Areas { get; set; } = new();
     }
@@ -233,6 +241,8 @@ namespace HpskSite.Models.Staffing
         public string? Status { get; set; }
         public string? ScopeType { get; set; }
         public string? ScopeKey { get; set; }
+        public decimal? EstimatedCost { get; set; }
+        public decimal? ActualCost { get; set; }
     }
 
     public class DeleteWorkRequest

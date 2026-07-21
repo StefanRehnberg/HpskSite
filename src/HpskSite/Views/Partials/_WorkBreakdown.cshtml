@@ -135,6 +135,16 @@
                     </div>
                 </div>
                 <div class="form-text mb-1" style="margin-top:-.4rem">Koppla t.ex. en bygguppgift till <strong>Station 3</strong> — då länkas den till Fältkonfiguratorn.</div>
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2">
+                        <label class="form-label fw-semibold">Budget (kr)</label>
+                        <input type="number" min="0" step="1" class="form-control" id="wbItemEstCost" placeholder="valfritt">
+                    </div>
+                    <div class="col-sm-6 mb-2">
+                        <label class="form-label fw-semibold">Utfall (kr)</label>
+                        <input type="number" min="0" step="1" class="form-control" id="wbItemActCost" placeholder="valfritt">
+                    </div>
+                </div>
                 <div class="text-danger small mt-2" id="wbItemError"></div>
             </div>
             <div class="modal-footer">
@@ -227,7 +237,7 @@
     var lastUpdated = '';
     var areas = [];
     var compLinks = [];
-    var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null };
+    var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null, totalEstimatedCost: 0, totalActualCost: 0 };
     var areaModal = null, itemModal = null, linkModal = null, threadModal = null;
 
     var STATUS_LABEL = { Planerad: 'Planerad', Pagar: 'Pågår', Blockerad: 'Blockerad', Klar: 'Klar' };
@@ -236,6 +246,17 @@
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
+    function fmtKr(n) { return (Math.round(Number(n) || 0)).toLocaleString('sv-SE') + ' kr'; }
+    // Budget/utfall chip for an item or an område sum. Shows budget, and utfall when set.
+    function costBadge(est, act) {
+        est = Number(est) || 0; act = Number(act) || 0;
+        if (est <= 0 && act <= 0) return '';
+        var parts = [];
+        if (est > 0) parts.push('budget ' + fmtKr(est));
+        if (act > 0) parts.push('utfall ' + fmtKr(act));
+        var over = (est > 0 && act > est);
+        return '<span class="badge ' + (over ? 'bg-danger-subtle text-danger-emphasis' : 'bg-light text-dark') + ' border" title="Kostnad"><i class="bi bi-cash-coin me-1"></i>' + parts.join(' · ') + '</span>';
+    }
 
     async function load() {
         try {
@@ -244,7 +265,7 @@
             if (!d.success) { q('wbAreas').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa förberedelserna.') + '</div>'; return; }
             areas = d.areas || [];
             compLinks = d.compLinks || [];
-            ctx = { discipline: d.discipline || '', compDate: d.compDate || null, daysUntilComp: d.daysUntilComp, stationSeed: d.stationSeed || null };
+            ctx = { discipline: d.discipline || '', compDate: d.compDate || null, daysUntilComp: d.daysUntilComp, stationSeed: d.stationSeed || null, totalEstimatedCost: d.totalEstimatedCost || 0, totalActualCost: d.totalActualCost || 0 };
             lastUpdated = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
             render();
         } catch (e) { q('wbAreas').innerHTML = '<div class="alert alert-warning">Kunde inte läsa förberedelserna.</div>'; }
@@ -282,6 +303,10 @@
                 (days > 0 ? (days + ' dagar kvar') : (days === 0 ? 'idag' : (Math.abs(days) + ' dagar sedan')));
             var cls = (days != null && days < 0) ? 'text-muted' : (days != null && days <= 14 ? 'text-danger-emphasis' : '');
             parts.push('<span class="badge bg-light text-dark border ' + cls + '"><i class="bi bi-calendar-event me-1"></i>Tävlingsdatum: ' + esc(ctx.compDate) + (when ? ' · ' + when : '') + '</span>');
+        }
+        if ((ctx.totalEstimatedCost || 0) > 0 || (ctx.totalActualCost || 0) > 0) {
+            var cb = costBadge(ctx.totalEstimatedCost, ctx.totalActualCost);
+            parts.push('<span title="Total budget / utfall för tävlingen">' + cb.replace('bi-cash-coin me-1', 'bi-wallet2 me-1') + '</span>');
         }
         // Live-collab hint: several people can plan in parallel; the list refreshes so everyone sees changes.
         parts.push('<span class="text-muted small" id="wbUpdated" title="Uppdateras automatiskt — flera kan planera samtidigt"><i class="bi bi-people me-1"></i>Flera kan arbeta samtidigt' + (lastUpdated ? ' · uppdaterad ' + lastUpdated : '') + '</span>');
@@ -326,11 +351,13 @@
     function areaHtml(a) {
         var pct = a.totalCount > 0 ? Math.round((a.doneCount / a.totalCount) * 100) : 0;
         var overdue = a.overdueCount > 0 ? '<span class="badge bg-danger ms-1" title="Försenade">' + a.overdueCount + ' försenade</span>' : '';
+        var areaCost = costBadge(a.estimatedCostSum, a.actualCostSum);
+        var areaCostWrap = areaCost ? ' ' + areaCost : '';
         var resp = a.responsibleName ? '<span class="text-muted small ms-2"><i class="bi bi-person me-1"></i>' + esc(a.responsibleName) + '</span>' : '';
         var items = (a.items || []).map(itemHtml).join('') || '<div class="text-muted small py-2">Inga uppgifter ännu.</div>';
         return '<div class="card mb-3">'
             + '<div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-1">'
-            + '<span><span class="fw-semibold">' + esc(a.name) + '</span> <span class="badge bg-light text-dark">' + a.doneCount + '/' + a.totalCount + ' klara</span>' + overdue + resp + '</span>'
+            + '<span><span class="fw-semibold">' + esc(a.name) + '</span> <span class="badge bg-light text-dark">' + a.doneCount + '/' + a.totalCount + ' klara</span>' + overdue + areaCostWrap + resp + '</span>'
             + '<span class="d-flex gap-1">'
             + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbOpenItem(' + a.id + ',0)"><i class="bi bi-plus-lg me-1"></i>Uppgift</button>'
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenArea(' + a.id + ')" title="Redigera område"><i class="bi bi-pencil"></i></button>'
@@ -363,7 +390,7 @@
             + '<label class="form-check-label ' + titleCls + '">' + esc(i.title) + '</label>'
             + '</div>'
             + (i.description ? '<div class="text-muted small ms-4">' + esc(i.description) + '</div>' : '')
-            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + blockedBadge + scope + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + blockedBadge + scope + costBadge(i.estimatedCost, i.actualCost) + '</div>'
             + blockLine
             + links
             + '</div>'
@@ -498,6 +525,8 @@
         q('wbItemStatus').value = i ? i.status : 'Planerad';
         q('wbItemScopeType').value = i && i.scopeType ? i.scopeType : '';
         q('wbItemScopeKey').value = i && i.scopeKey ? i.scopeKey : '';
+        q('wbItemEstCost').value = i && i.estimatedCost != null ? i.estimatedCost : '';
+        q('wbItemActCost').value = i && i.actualCost != null ? i.actualCost : '';
         applyItemScope();
         q('wbItemModalTitle').textContent = i ? 'Redigera uppgift' : 'Lägg till uppgift';
         itemModal.show();
@@ -526,7 +555,9 @@
             dueDate: q('wbItemDue').value.trim(),
             status: q('wbItemStatus').value,
             scopeType: st,
-            scopeKey: st ? q('wbItemScopeKey').value.trim() : ''
+            scopeKey: st ? q('wbItemScopeKey').value.trim() : '',
+            estimatedCost: q('wbItemEstCost').value === '' ? null : parseFloat(q('wbItemEstCost').value),
+            actualCost: q('wbItemActCost').value === '' ? null : parseFloat(q('wbItemActCost').value)
         };
         var d = await post('/umbraco/surface/Staffing/SaveWorkItem', payload);
         if (d.success) { itemModal.hide(); await load(); }
