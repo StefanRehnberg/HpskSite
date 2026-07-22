@@ -120,6 +120,26 @@ namespace HpskSite.Services.Staffing
                         if (a.MemberId is int mid && availByMember.TryGetValue(mid, out var labels))
                             a.AvailabilityLabels = labels;
 
+            // Pass labels (structured shift) — resolve PassId → "Label · 06:00–13:00" on each assignment.
+            try
+            {
+                using var pscope = _scopeProvider.CreateScope(autoComplete: true);
+                var passes = pscope.Database.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE CompetitionId = @0", competitionId);
+                if (passes.Count > 0)
+                {
+                    var byId = passes.ToDictionary(p => p.Id, p =>
+                    {
+                        var lbl = string.IsNullOrWhiteSpace(p.Label) ? p.PassDate.ToString("ddd d MMM", CultureInfo.GetCultureInfo("sv-SE")) : p.Label;
+                        var t = (string.IsNullOrEmpty(p.StartTime) && string.IsNullOrEmpty(p.EndTime)) ? null : $"{p.StartTime}–{p.EndTime}";
+                        return t == null ? lbl : $"{lbl} · {t}";
+                    });
+                    foreach (var g in resp.Groups)
+                        foreach (var a in g.Assignments)
+                            if (a.PassId is int pid && byId.TryGetValue(pid, out var lbl)) a.PassLabel = lbl;
+                }
+            }
+            catch { }
+
             // Fält convergence (P2): surface station chiefs assigned on the Stationer tab
             // (faltskytteStationManagers JSON) as read-only rows in the stationschef group, so the roster
             // shows the full picture. Deduped by station — a real StaffAssignment for Station:N wins.
@@ -219,6 +239,7 @@ namespace HpskSite.Services.Staffing
                 row.TargetTo = req.TargetTo is > 0 ? req.TargetTo : null;
                 row.StartsAt = ParseDateTime(req.StartsAt);
                 row.EndsAt = ParseDateTime(req.EndsAt);
+                row.PassId = req.PassId is > 0 ? req.PassId : null;
                 row.IsResponsible = req.IsResponsible;
                 row.HasAdminAccess = req.HasAdminAccess && string.Equals(row.RoleKey, TavlingsledningRole, StringComparison.OrdinalIgnoreCase);
                 row.Status = NormalizeStatus(req.Status);
@@ -687,6 +708,7 @@ namespace HpskSite.Services.Staffing
                 TargetFrom = a.TargetFrom,
                 TargetTo = a.TargetTo,
                 ShiftLabel = BuildShiftLabel(a.StartsAt, a.EndsAt),
+                PassId = a.PassId,
                 IsResponsible = a.IsResponsible,
                 HasAdminAccess = a.HasAdminAccess,
                 Status = a.Status,

@@ -168,6 +168,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffRequestService>();
             // Self-sign-up rework: organiser help-slots + member checkbox sign-up. Run create-staff-help-tables.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffHelpService>();
+            // Big-comp staffing: shift/pass model + crew needs + coverage matrix. Run create-staff-pass-tables.sql.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffPassService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
 

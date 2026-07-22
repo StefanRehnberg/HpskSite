@@ -38,6 +38,7 @@ namespace HpskSite.Controllers
         private readonly StaffingSignupService _signup;
         private readonly StaffRequestService _request;
         private readonly StaffHelpService _help;
+        private readonly StaffPassService _pass;
         private readonly PrepDocumentStorage _docs;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
@@ -62,6 +63,7 @@ namespace HpskSite.Controllers
             StaffingSignupService signup,
             StaffRequestService request,
             StaffHelpService help,
+            StaffPassService pass,
             PrepDocumentStorage docs,
             EmailService email,
             WebPushService webPush,
@@ -81,6 +83,7 @@ namespace HpskSite.Controllers
             _signup = signup;
             _request = request;
             _help = help;
+            _pass = pass;
             _docs = docs;
             _email = email;
             _webPush = webPush;
@@ -448,6 +451,84 @@ namespace HpskSite.Controllers
                 classCount = est.ClassCount,
                 series = est.Series,
                 rows = est.Rows,
+            });
+        }
+
+        // ---- Big-comp staffing: passes + crew needs + coverage matrix ----
+
+        [HttpGet]
+        public async Task<IActionResult> GetPasses(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            return Json(new { success = true, passes = _pass.GetPasses(competitionId) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SavePass([FromBody] SavePassRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.Date))
+                return Json(new { success = false, message = "Ange ett datum för passet." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var id = _pass.SavePass(request, viewer.Id);
+            return Json(new { success = true, id });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeletePass([FromBody] DeleteWorkRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            _pass.DeletePass(request.Id, request.CompetitionId);
+            return Json(new { success = true });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetCrewNeeds(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            return Json(new { success = true, needs = _pass.GetCrewNeeds(competitionId, GetDiscipline(competitionId)) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveCrewNeeds([FromBody] SaveCrewNeedsRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            _pass.SaveCrewNeeds(request.CompetitionId, request.Needs);
+            return Json(new { success = true });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetCoverage(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var discipline = GetDiscipline(competitionId);
+            var seed = GetStationSeed(competitionId, discipline);
+            var cov = _pass.BuildCoverage(competitionId, discipline, seed?.StationCount ?? 0);
+            return Json(new
+            {
+                success = true,
+                discipline = cov.Discipline,
+                stationCount = cov.StationCount,
+                hasNeeds = cov.HasNeeds,
+                totalNeeded = cov.TotalNeeded,
+                totalFilled = cov.TotalFilled,
+                passes = cov.Passes,
             });
         }
 

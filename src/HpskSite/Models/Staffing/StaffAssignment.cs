@@ -31,6 +31,7 @@ namespace HpskSite.Models.Staffing
 
         public DateTime? StartsAt { get; set; }         // shift start; NULL = heldag
         public DateTime? EndsAt { get; set; }
+        public int? PassId { get; set; }                 // structured shift (StaffPass); NULL = ad-hoc
 
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }        // Tävlingsledning: mirror into competitionManagers
@@ -149,6 +150,8 @@ namespace HpskSite.Models.Staffing
         public int? TargetFrom { get; set; }
         public int? TargetTo { get; set; }
         public string? ShiftLabel { get; set; }       // "13:00–15:00" or null (heldag)
+        public int? PassId { get; set; }
+        public string? PassLabel { get; set; }         // "Lör FM 06–13" resolved from the pass
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
@@ -203,6 +206,7 @@ namespace HpskSite.Models.Staffing
         public int? TargetTo { get; set; }
         public string? StartsAt { get; set; }          // Flatpickr "Y-m-d H:i" or null
         public string? EndsAt { get; set; }
+        public int? PassId { get; set; }                 // structured shift
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }
         public string? Status { get; set; }

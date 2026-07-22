@@ -104,6 +104,47 @@
     </div>
 </div>
 
+<div class="card mb-3" id="stfPassCard">
+    <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+        <span class="fw-semibold"><i class="bi bi-calendar2-week me-1"></i>Pass, bemanningsbehov &amp; täckning</span>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenPass(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till pass</button>
+    </div>
+    <div class="card-body py-2">
+        <div class="small text-muted mb-1">Pass = skift som funktionärer bemannar (t.ex. Lör FM 06–13). Tilldela personer till ett pass i "Lägg till funktionär".</div>
+        <div id="stfPassList" class="mb-2"><div class="text-muted small">Laddar…</div></div>
+        <div id="stfNeedsEditor" class="mb-2"></div>
+        <hr class="my-2">
+        <div class="fw-semibold small mb-1"><i class="bi bi-grid-3x3-gap me-1"></i>Täckning (bemannat / behov)</div>
+        <div id="stfCoverage"><div class="text-muted small">Laddar…</div></div>
+    </div>
+</div>
+
+<!-- Pass-redigering modal -->
+<div class="modal fade" id="stfPassModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Pass</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stfPassId" value="0">
+                <div class="mb-2"><label class="form-label fw-semibold">Namn (valfritt)</label><input type="text" class="form-control" id="stfPassLabel" placeholder="t.ex. Lördag FM"></div>
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Datum</label><input type="text" class="form-control" id="stfPassDate" placeholder="2026-08-15"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="stfPassFrom" placeholder="06:00"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="stfPassTo" placeholder="13:00"></div>
+                </div>
+                <div class="text-danger small mt-1" id="stfPassError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="stfSavePass()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="stfRoster">
     <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
 </div>
@@ -179,6 +220,14 @@
                             <span class="input-group-text">–</span>
                             <input type="number" min="1" class="form-control" id="stfTargetTo" placeholder="till">
                         </div>
+                    </div>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-12 mb-2">
+                        <label class="form-label fw-semibold">Pass (skift)</label>
+                        <select class="form-select" id="stfPass"><option value="">— inget pass —</option></select>
+                        <div class="form-text">Välj ett pass så räknas personen in i täckningen. Eller ange egna tider nedan för heldag/avvikande tid.</div>
                     </div>
                 </div>
 
@@ -265,6 +314,8 @@
                           .map(function (g) { return g; });
             renderRoster();
             populateRoleSelect();
+            renderNeedsEditor();   // roles now known → (re)render the crew-needs inputs
+            loadCoverage();        // keep coverage live as assignments change
         } catch (e) {
             document.getElementById('stfRoster').innerHTML = '<div class="alert alert-warning">Kunde inte läsa bemanningen.</div>';
         }
@@ -309,6 +360,7 @@
         var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
         var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
+        var pass = a.passLabel ? '<span class="badge bg-primary-subtle text-primary-emphasis border"><i class="bi bi-calendar2-week me-1"></i>' + esc(a.passLabel) + '</span>' : '';
         var phone = a.phone ? '<a class="btn btn-sm btn-outline-success" href="tel:' + esc(a.phone) + '" title="Ring"><i class="bi bi-telephone"></i></a>' : '';
         var nameEsc = esc(a.displayName).replace(/'/g, "\\'");
         var notifyBtn = (a.memberId || a.email)
@@ -334,7 +386,7 @@
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
             + '<div>' + star + '<span class="fw-semibold">' + esc(a.displayName) + '</span>' + fn + statusBadge + adminBadge + srcBadge + '</div>'
-            + '<div class="d-flex flex-wrap gap-1 mt-1">' + scope + shift + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1">' + scope + pass + shift + '</div>'
             + avail
             + note
             + '</div>'
@@ -457,6 +509,7 @@
         document.getElementById('stfTargetTo').value = '';
         document.getElementById('stfStartsAt').value = '';
         document.getElementById('stfEndsAt').value = '';
+        document.getElementById('stfPass').value = '';
         document.getElementById('stfStatus').value = 'Planned';
         document.getElementById('stfResponsible').checked = false;
         document.getElementById('stfAdminAccess').checked = false;
@@ -496,6 +549,7 @@
         document.getElementById('stfTargetFrom').value = a.targetFrom || '';
         document.getElementById('stfTargetTo').value = a.targetTo || '';
         document.getElementById('stfStatus').value = a.status || 'Planned';
+        document.getElementById('stfPass').value = a.passId || '';
         document.getElementById('stfResponsible').checked = !!a.isResponsible;
         document.getElementById('stfAdminAccess').checked = !!a.hasAdminAccess;
         document.getElementById('stfNote').value = a.note || '';
@@ -526,6 +580,7 @@
             scopeKey: scopeType === 'All' ? '' : document.getElementById('stfScopeKey').value.trim(),
             targetFrom: parseInt(document.getElementById('stfTargetFrom').value, 10) || 0,
             targetTo: parseInt(document.getElementById('stfTargetTo').value, 10) || 0,
+            passId: parseInt(document.getElementById('stfPass').value, 10) || 0,
             startsAt: document.getElementById('stfStartsAt').value.trim(),
             endsAt: document.getElementById('stfEndsAt').value.trim(),
             isResponsible: document.getElementById('stfResponsible').checked,
@@ -613,6 +668,155 @@
             if (d.success) await loadScopes();
         } catch (e) { }
     };
+
+    // ---- pass, bemanningsbehov & täckning ----
+    var passModal = null, passes = [], crewNeeds = [];
+
+    async function loadPasses() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetPasses?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            passes = (d && d.success) ? (d.passes || []) : [];
+        } catch (e) { passes = []; }
+        renderPassList();
+        populatePassSelect();
+        await loadNeeds();
+        await loadCoverage();
+    }
+
+    function renderPassList() {
+        var host = document.getElementById('stfPassList'); if (!host) return;
+        if (!passes.length) { host.innerHTML = '<span class="text-muted small fst-italic">Inga pass ännu. Lägg till pass (t.ex. Lör FM 06–13, Lör EM 13–20).</span>'; return; }
+        host.innerHTML = passes.map(function (p) {
+            return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1 me-1 mb-1" style="font-weight:500">'
+                + '<i class="bi bi-calendar2-week me-1"></i>' + esc(p.displayLabel)
+                + '<button type="button" class="btn btn-sm btn-link p-0 ms-1 text-secondary" onclick="stfOpenPass(' + p.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
+                + '<button type="button" class="btn-close" style="font-size:.55rem" title="Ta bort" onclick="stfDeletePass(' + p.id + ')"></button></span>';
+        }).join('');
+    }
+
+    function populatePassSelect() {
+        var sel = document.getElementById('stfPass'); if (!sel) return;
+        var cur = sel.value;
+        sel.innerHTML = '<option value="">— inget pass —</option>' + passes.map(function (p) { return '<option value="' + p.id + '">' + esc(p.displayLabel) + '</option>'; }).join('');
+        sel.value = cur;
+    }
+
+    window.stfOpenPass = function (id) {
+        if (!passModal) passModal = new bootstrap.Modal(document.getElementById('stfPassModal'));
+        var p = id ? passes.find(function (x) { return x.id === id; }) : null;
+        document.getElementById('stfPassId').value = p ? p.id : 0;
+        document.getElementById('stfPassDate').value = p ? p.date : '';
+        document.getElementById('stfPassFrom').value = p && p.startTime ? p.startTime : '';
+        document.getElementById('stfPassTo').value = p && p.endTime ? p.endTime : '';
+        document.getElementById('stfPassLabel').value = p ? p.label : '';
+        document.getElementById('stfPassError').textContent = '';
+        passModal.show();
+        if (typeof flatpickr !== 'undefined') {
+            flatpickr('#stfPassDate', { locale: 'sv', dateFormat: 'Y-m-d' });
+            flatpickr('#stfPassFrom', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
+            flatpickr('#stfPassTo', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
+        }
+    };
+
+    window.stfSavePass = async function () {
+        var payload = {
+            id: parseInt(document.getElementById('stfPassId').value, 10) || 0, competitionId: compId,
+            date: document.getElementById('stfPassDate').value.trim(), startTime: document.getElementById('stfPassFrom').value.trim(),
+            endTime: document.getElementById('stfPassTo').value.trim(), label: document.getElementById('stfPassLabel').value.trim()
+        };
+        if (!payload.date) { document.getElementById('stfPassError').textContent = 'Ange ett datum.'; return; }
+        var r = await fetch('/umbraco/surface/Staffing/SavePass', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify(payload) });
+        var d = await r.json();
+        if (d.success) { passModal.hide(); await loadPasses(); } else document.getElementById('stfPassError').textContent = d.message || 'Kunde inte spara.';
+    };
+
+    window.stfDeletePass = async function (id) {
+        if (!confirm('Ta bort passet? Personer kopplade till passet blir opasslagda.')) return;
+        var r = await fetch('/umbraco/surface/Staffing/DeletePass', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify({ id: id, competitionId: compId }) });
+        var d = await r.json();
+        if (d.success) { await loadPasses(); await loadRoster(); }
+    };
+
+    async function loadNeeds() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetCrewNeeds?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            crewNeeds = (d && d.success) ? (d.needs || []) : [];
+        } catch (e) { crewNeeds = []; }
+        renderNeedsEditor();
+    }
+
+    function needCount(kind, roleKey) { var n = crewNeeds.find(function (x) { return x.scopeKind === kind && x.roleKey === roleKey; }); return n ? n.count : 0; }
+
+    function renderNeedsEditor() {
+        var host = document.getElementById('stfNeedsEditor'); if (!host || !roles.length) return;
+        var stationRoles = roles.filter(function (g) { return g.defaultScopeType === 'Station'; });
+        var otherRoles = roles.filter(function (g) { return g.defaultScopeType !== 'Station'; });
+        function inputRow(kind, g) {
+            return '<div class="d-flex align-items-center gap-2 mb-1"><span style="min-width:180px" class="small">' + esc(g.roleName) + '</span>'
+                + '<input type="number" min="0" class="form-control form-control-sm stf-need" data-kind="' + kind + '" data-role="' + esc(g.roleKey) + '" value="' + needCount(kind, g.roleKey) + '" style="max-width:80px"></div>';
+        }
+        var html = '<div class="border rounded p-2"><div class="small text-muted mb-1">Bemanningsbehov (antal per roll) — driver täckningen nedan:</div>';
+        if (stationRoles.length) html += '<div class="fw-semibold small mt-1">Per station</div>' + stationRoles.map(function (g) { return inputRow('Station', g); }).join('');
+        html += '<div class="fw-semibold small mt-2">Totalt (hela tävlingen)</div>' + otherRoles.map(function (g) { return inputRow('All', g); }).join('');
+        html += '<button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="stfSaveNeeds()"><i class="bi bi-save me-1"></i>Spara behov</button></div>';
+        host.innerHTML = html;
+    }
+
+    window.stfSaveNeeds = async function () {
+        var needs = [];
+        document.querySelectorAll('.stf-need').forEach(function (inp) {
+            var c = parseInt(inp.value, 10) || 0;
+            if (c > 0) needs.push({ scopeKind: inp.getAttribute('data-kind'), roleKey: inp.getAttribute('data-role'), count: c });
+        });
+        var r = await fetch('/umbraco/surface/Staffing/SaveCrewNeeds', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify({ competitionId: compId, needs: needs }) });
+        var d = await r.json();
+        if (d.success) { crewNeeds = needs.slice(); await loadCoverage(); }
+    };
+
+    async function loadCoverage() {
+        var host = document.getElementById('stfCoverage'); if (!host) return;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetCoverage?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { host.innerHTML = '<div class="text-muted small">Kunde inte läsa täckning.</div>'; return; }
+            renderCoverage(d);
+        } catch (e) { host.innerHTML = '<div class="text-muted small">Kunde inte läsa täckning.</div>'; }
+    }
+
+    function covClass(filled, needed) {
+        if (filled >= needed && needed > 0) return 'bg-success-subtle text-success-emphasis';
+        if (filled > 0) return 'bg-warning-subtle text-warning-emphasis';
+        return 'bg-danger-subtle text-danger-emphasis';
+    }
+
+    function renderCoverage(d) {
+        var host = document.getElementById('stfCoverage');
+        if (!(d.passes || []).length) { host.innerHTML = '<div class="text-muted small fst-italic">Lägg till pass för att se täckning.</div>'; return; }
+        if (!d.hasNeeds) { host.innerHTML = '<div class="text-muted small fst-italic">Sätt bemanningsbehov ovan för att se täckning per pass.</div>'; return; }
+        var html = '<div class="small mb-2">Totalt bemannat: <strong>' + d.totalFilled + '/' + d.totalNeeded + '</strong></div>';
+        d.passes.forEach(function (p) {
+            html += '<div class="mb-3"><div class="fw-semibold">' + esc(p.label || p.date) + (p.timeLabel ? ' <span class="text-muted">' + esc(p.timeLabel) + '</span>' : '') + ' <span class="badge bg-light text-dark border">' + p.filled + '/' + p.needed + '</span></div>';
+            if ((p.stations || []).length && (p.stations[0].roles || []).length) {
+                var cols = p.stations[0].roles.map(function (r) { return r.roleName; });
+                html += '<div class="table-responsive"><table class="table table-sm table-bordered mb-1" style="width:auto"><thead><tr><th class="small">Station</th>'
+                    + cols.map(function (rn) { return '<th class="text-center small">' + esc(rn) + '</th>'; }).join('') + '</tr></thead><tbody>';
+                p.stations.forEach(function (u) {
+                    html += '<tr><td class="fw-semibold">' + esc(u.scopeKey) + '</td>'
+                        + (u.roles || []).map(function (r) { return '<td class="text-center ' + covClass(r.filled, r.needed) + '">' + r.filled + '/' + r.needed + '</td>'; }).join('') + '</tr>';
+                });
+                html += '</tbody></table></div>';
+            }
+            if ((p.general || []).length) {
+                html += '<div class="d-flex flex-wrap gap-1">' + p.general.map(function (r) {
+                    return '<span class="badge border ' + covClass(r.filled, r.needed) + '">' + esc(r.roleName) + ' ' + r.filled + '/' + r.needed + '</span>';
+                }).join('') + '</div>';
+            }
+            html += '</div>';
+        });
+        host.innerHTML = html;
+    }
 
     // ---- mail-out: "sök funktionärer" ----
     var requestModal = null, reqPreview = null;
@@ -799,6 +1003,7 @@
     loadRoster();
     loadScopes();
     loadHelp();
+    loadPasses();
     startTimer();
 })();
 </script>
