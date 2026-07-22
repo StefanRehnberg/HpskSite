@@ -105,7 +105,7 @@ namespace HpskSite.Controllers
 
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current?.Email == null)
-                return Redirect("/login-&-register/?tab=login&RedirectUrl=/mina-uppdrag");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString("/mina-uppdrag")}");
 
             return View("MinaUppdrag", rootNode);
         }
@@ -130,7 +130,7 @@ namespace HpskSite.Controllers
             if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current?.Email == null)
-                return Redirect($"/login-&-register/?tab=login&RedirectUrl={Uri.EscapeDataString($"/bemanna?c={c}")}");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/bemanna?c={c}")}");
 
             var comp = c > 0 ? ctx.Content.GetById(c) : null;
             var isComp = comp != null && comp.ContentType.Alias == "competition";

@@ -59,7 +59,7 @@ namespace HpskSite.Controllers
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember?.Email == null)
-                return Redirect($"/login-&-register/?tab=login&RedirectUrl={Uri.EscapeDataString($"/tavlingsplanering?c={c}")}");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering?c={c}")}");
 
             var competition = c > 0 ? ctx.Content.GetById(c) : null;
             var isCompetition = competition != null && competition.ContentType.Alias == "competition";
@@ -83,7 +83,7 @@ namespace HpskSite.Controllers
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember?.Email == null)
-                return Redirect($"/login-&-register/?tab=login&RedirectUrl={Uri.EscapeDataString($"/tavlingsplanering/blad?c={c}")}");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering/blad?c={c}")}");
 
             var competition = c > 0 ? ctx.Content.GetById(c) : null;
             var isCompetition = competition != null && competition.ContentType.Alias == "competition";

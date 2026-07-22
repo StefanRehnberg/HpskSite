@@ -42,7 +42,7 @@
         function render(d) {
             const c = $('content');
             if (!d.success) {
-                if (d.needsLogin) { location.href = '/login-register/?tab=login&RedirectUrl=' + encodeURIComponent('/styrelse/justera?t=' + TOKEN); return; }
+                if (d.needsLogin) { location.href = '/login-register/?tab=login&returnUrl=' + encodeURIComponent('/styrelse/justera?t=' + TOKEN); return; }
                 c.innerHTML = `<div class="alert alert-warning">${esc(d.message || 'Kunde inte hämta protokollet.')}</div>`;
                 return;
             }

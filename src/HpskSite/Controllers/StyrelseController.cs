@@ -58,7 +58,7 @@ namespace HpskSite.Controllers
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember?.Email == null)
-                return Redirect("/login-&-register/?tab=login&RedirectUrl=/styrelse");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString("/styrelse")}");
 
             var memberData = _memberService.GetByEmail(currentMember.Email);
             var memberId = memberData?.Id ?? 0;
@@ -122,7 +122,7 @@ namespace HpskSite.Controllers
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember?.Email == null)
-                return Redirect($"/login-&-register/?tab=login&RedirectUrl=/styrelse/{mode}/{meetingId}");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/styrelse/{mode}/{meetingId}")}");
 
             bool isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
             if (!await CanAccessScopeAsync(meeting.OwnerType, meeting.OwnerId, isSiteAdmin))
@@ -170,7 +170,7 @@ namespace HpskSite.Controllers
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember?.Email == null)
-                return Redirect($"/login-&-register/?tab=login&RedirectUrl=/styrelse/valforslag?type={type}%26id={id}%26year={year}");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/styrelse/valforslag?type={type}&id={id}&year={year}")}");
             bool isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
             if (!await CanAccessValberedningAsync(type, id, isSiteAdmin)) return Forbid();
 
@@ -193,7 +193,7 @@ namespace HpskSite.Controllers
             if (currentMember?.Email == null)
             {
                 var back = Uri.EscapeDataString($"/styrelse/justera?t={t}");
-                return Redirect($"/login-&-register/?tab=login&RedirectUrl={back}");
+                return Redirect($"/login-register/?tab=login&returnUrl={back}");
             }
             return View("StyrelseJustera");
         }
