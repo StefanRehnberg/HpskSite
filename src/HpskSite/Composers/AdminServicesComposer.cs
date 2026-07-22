@@ -166,6 +166,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingSignupService>();
             // "Sök funktionärer" mail-out (relay to club/region admins, or direct via push+Brevo).
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffRequestService>();
+            // Self-sign-up rework: organiser help-slots + member checkbox sign-up. Run create-staff-help-tables.sql.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffHelpService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
 

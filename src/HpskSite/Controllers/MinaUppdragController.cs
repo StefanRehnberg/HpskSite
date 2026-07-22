@@ -27,6 +27,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly StaffingService _staffing;
         private readonly StaffingSignupService _signup;
+        private readonly StaffHelpService _help;
         private readonly IDataProtectionProvider _dataProtection;
 
         public MinaUppdragController(
@@ -35,6 +36,7 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             StaffingService staffing,
             StaffingSignupService signup,
+            StaffHelpService help,
             IDataProtectionProvider dataProtection)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -42,6 +44,7 @@ namespace HpskSite.Controllers
             _memberService = memberService;
             _staffing = staffing;
             _signup = signup;
+            _help = help;
             _dataProtection = dataProtection;
         }
 
@@ -134,37 +137,63 @@ namespace HpskSite.Controllers
             ViewData["CompetitionId"] = c;
             ViewData["CompetitionExists"] = isComp;
             ViewData["CompetitionName"] = isComp ? (comp!.Value<string>("competitionName") ?? "Tävling") : "";
+            // Preview mode: a manager verifying how the page looks for a fresh, not-yet-signed-up member.
+            ViewData["Preview"] = Request.Query.ContainsKey("preview");
             return View("Bemanna", rootNode);
         }
 
         [HttpGet("for-competition")]
-        public async Task<IActionResult> GetForCompetition(int competitionId)
+        public async Task<IActionResult> GetForCompetition(int competitionId, bool preview = false)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
+
             var mine = _staffing.GetMyAssignments(memberId.Value).FirstOrDefault(g => g.CompetitionId == competitionId);
-            var open = _signup.GetOpenSignups(memberId.Value).FirstOrDefault(o => o.CompetitionId == competitionId);
-            var compName = mine?.CompName ?? open?.CompName ?? "Tävling";
-            if (mine == null && open == null)
+            var compName = mine?.CompName;
+            string? compDate = mine?.CompDate;
+            if (compName == null)
             {
                 try
                 {
                     if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
-                        compName = ctx.Content.GetById(competitionId)?.Value<string>("competitionName") ?? compName;
+                    {
+                        var comp = ctx.Content.GetById(competitionId);
+                        compName = comp?.Value<string>("competitionName") ?? "Tävling";
+                        var d = comp?.Value<DateTime?>("competitionDate");
+                        if (d is { } dd && dd != default) compDate = dd.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                    }
                 }
                 catch { }
             }
+
+            var slots = _help.GetSlots(competitionId);
+            // In preview a manager sees the page as a fresh member: no own assignments, no prior sign-up.
+            var assignments = preview ? new List<Models.Staffing.MyAssignmentView>() : (mine?.Assignments ?? new List<Models.Staffing.MyAssignmentView>());
+            var mySignup = preview ? null : _help.GetMySignup(competitionId, memberId.Value);
+
             return Json(new
             {
                 success = true,
-                compName,
-                compDate = mine?.CompDate ?? open?.CompDate,
-                discipline = open?.Discipline ?? "",
-                assignments = mine?.Assignments ?? new List<Models.Staffing.MyAssignmentView>(),
-                availability = mine?.Availability ?? new List<Models.Staffing.StaffAvailabilityView>(),
-                isOpen = open != null,
-                roles = open?.Roles ?? new List<Models.Staffing.RoleOption>(),
+                compName = compName ?? "Tävling",
+                compDate,
+                assignments,
+                slots,
+                mySignup,
             });
+        }
+
+        [HttpPost("help-signup")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveHelpSignup([FromBody] SaveHelpSignupRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
+            var md = _memberService.GetByEmail((await _memberManager.GetCurrentMemberAsync())?.Email ?? "");
+            var name = md == null ? $"Medlem {memberId}"
+                : ($"{md.GetValue<string>("firstName")} {md.GetValue<string>("lastName")}".Trim() is { Length: > 0 } n ? n : (md.Name ?? $"Medlem {memberId}"));
+            _help.SaveMySignup(request.CompetitionId, memberId.Value, name, request.Comment, request.Slots);
+            return Json(new { success = true });
         }
 
         [HttpPost("respond")]

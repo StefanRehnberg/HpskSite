@@ -5,6 +5,7 @@
     ViewBag.Title = "Bemanning";
     var competitionId = ViewData["CompetitionId"];
     var compExists = ViewData["CompetitionExists"] as bool? ?? false;
+    var preview = ViewData["Preview"] as bool? ?? false;
     var token = Antiforgery.GetAndStoreTokens(Context).RequestToken;
 }
 
@@ -12,116 +13,152 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
-<div class="container mt-4 mb-5" style="max-width:720px">
+<div class="container mt-4 mb-5" style="max-width:760px">
     @if (!compExists)
     {
         <div class="alert alert-warning">Tävlingen hittades inte.</div>
     }
     else
     {
+        @if (preview)
+        {
+            <div class="alert alert-info d-flex align-items-center gap-2" role="alert">
+                <i class="bi bi-eye fs-5"></i>
+                <div><strong>Förhandsgranskning.</strong> Så här ser anmälningssidan ut för en medlem som ännu inte anmält sig. Inget sparas här.</div>
+            </div>
+        }
+
         <h1 class="h3"><i class="bi bi-person-badge me-2"></i>Bemanning</h1>
         <p class="text-muted" id="beHeader">Laddar…</p>
 
         <div id="beMine"></div>
-        <div id="beAvail" class="mt-3"></div>
-        <div id="beOpen" class="mt-3"></div>
-        <div id="beEmpty"></div>
-    }
-</div>
 
-<!-- Tillgänglighet modal -->
-<div class="modal fade" id="beAvailModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Lägg till tillgänglighet</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p class="text-muted small">Lämna tomt för <strong>heldag</strong>, eller ange ett tidsfönster.</p>
-                <div class="row g-2">
-                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="beAvFrom" placeholder="Heldag"></div>
-                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="beAvTo" placeholder="Heldag"></div>
+        <div class="card mt-3">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-hand-thumbs-up me-1"></i>Kan du hjälpa till?</div>
+            <div class="card-body py-2">
+                <p class="text-muted small mb-2">Bocka för de pass du kan hjälpa till med. Du kan (valfritt) ange vilka tider du kan — flera tider per pass går bra. Skriv gärna en kommentar om vad du kan bidra med, eller vad du inte kan göra.</p>
+                <div id="beSlots"><div class="text-muted small">Laddar…</div></div>
+                <div class="mb-2 mt-3">
+                    <label class="form-label fw-semibold">Kommentar (valfritt)</label>
+                    <textarea class="form-control" id="beComment" rows="3" placeholder="t.ex. Jag kan hjälpa i kansliet men inte stå i markeringsgraven. Kan köra material på fredagen."></textarea>
                 </div>
-                <div class="mb-1"><label class="form-label fw-semibold">Kommentar (valfritt)</label><input type="text" class="form-control" id="beAvNote"></div>
-                <div class="text-danger small mt-2" id="beAvError"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" id="beAvSaveBtn" onclick="beSaveAvail()">Spara</button>
+                <button type="button" class="btn btn-primary" id="beSaveBtn" onclick="beSave()"><i class="bi bi-check-lg me-1"></i>Spara min anmälan</button>
+                <span class="ms-2 small text-success" id="beSaved" style="display:none"><i class="bi bi-check-circle me-1"></i>Sparat</span>
             </div>
         </div>
-    </div>
+    }
 </div>
 
 <script>
 (function () {
     var compId = @(competitionId ?? 0);
     var TOKEN = '@token';
-    var availModal = null;
+    var PREVIEW = @(preview ? "true" : "false");
     var STATUS_LABEL = { Planned: 'Ej svarat', Invited: 'Inbjuden', Accepted: 'Tackat ja', Declined: 'Tackat nej', Confirmed: 'Bekräftad' };
     var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-success', Declined: 'bg-danger', Confirmed: 'bg-success' };
+
+    var slots = [];              // help-slots from the organiser
+    var checked = {};            // { slotId: [{from,to}, ...] } — the member's current choices
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
 
     async function load() {
         try {
-            var r = await fetch('/mina-uppdrag/for-competition?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var r = await fetch('/mina-uppdrag/for-competition?competitionId=' + compId + (PREVIEW ? '&preview=true' : ''), { headers: { 'Accept': 'application/json' } });
             var d = await r.json();
             if (!d.success) { q('beHeader').textContent = d.message || 'Kunde inte läsa.'; return; }
-            render(d);
+            q('beHeader').innerHTML = 'Tävling: <strong>' + esc(d.compName) + '</strong>' + (d.compDate ? ' · ' + esc(d.compDate) : '');
+            slots = d.slots || [];
+            checked = {};
+            if (d.mySignup) {
+                q('beComment').value = d.mySignup.comment || '';
+                (d.mySignup.slots || []).forEach(function (c) { checked[c.slotId] = (c.times || []).map(function (t) { return { from: t.from || '', to: t.to || '' }; }); });
+            }
+            renderMine(d.assignments || []);
+            renderSlots();
+            if (PREVIEW) { q('beSaveBtn').disabled = true; q('beSaveBtn').textContent = 'Förhandsgranskning'; }
         } catch (e) { q('beHeader').textContent = 'Kunde inte läsa bemanningen.'; }
     }
 
-    function render(d) {
-        q('beHeader').innerHTML = 'Tävling: <strong>' + esc(d.compName) + '</strong>' + (d.compDate ? ' · ' + esc(d.compDate) : '');
-        var a = d.assignments || [], av = d.availability || [], roles = d.roles || [];
-
-        // My roles here (accept/decline)
+    // Directed invitations (accept/decline) — kept, separate from volunteering.
+    function renderMine(a) {
         q('beMine').innerHTML = a.length
-            ? '<div class="card"><div class="card-header py-2 fw-semibold">Dina uppdrag i tävlingen</div><div class="card-body py-2">'
-                + a.map(assignmentHtml).join('') + '</div></div>'
-            : '';
-
-        // Availability (only meaningful once you have/seek a role here)
-        q('beAvail').innerHTML = (a.length || d.isOpen)
-            ? '<div class="card"><div class="card-header py-2 d-flex justify-content-between align-items-center">'
-                + '<span class="fw-semibold">Din tillgänglighet</span>'
-                + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="beOpenAvail()"><i class="bi bi-plus-lg me-1"></i>Lägg till</button></div>'
-                + '<div class="card-body py-2">' + (av.length
-                    ? av.map(function (w) { return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1 me-1 mb-1" style="font-weight:500"><i class="bi bi-clock-history me-1"></i>' + esc(w.label) + (w.note ? ' — ' + esc(w.note) : '') + '<button type="button" class="btn-close" style="font-size:.6rem" onclick="beDelAvail(' + w.id + ')"></button></span>'; }).join('')
-                    : '<span class="text-muted small fst-italic">Ingen angiven (antas heldag).</span>')
-                + '</div></div>'
-            : '';
-
-        // Open sign-up
-        q('beOpen').innerHTML = d.isOpen
-            ? '<div class="card border-success-subtle"><div class="card-header bg-success-subtle py-2 fw-semibold"><i class="bi bi-clipboard-plus me-1"></i>Anmäl dig som funktionär</div>'
-                + '<div class="card-body py-2"><p class="text-muted small">Välj en roll du kan hjälpa till med.</p>'
-                + '<div class="input-group input-group-sm" style="max-width:420px">'
-                + '<select class="form-select" id="beRole">' + roles.map(function (r) { return '<option value="' + esc(r.key) + '">' + esc(r.name) + '</option>'; }).join('') + '</select>'
-                + '<button class="btn btn-primary" type="button" onclick="beSignUp()"><i class="bi bi-check-lg me-1"></i>Anmäl mig</button></div></div></div>'
-            : '';
-
-        q('beEmpty').innerHTML = (!a.length && !d.isOpen)
-            ? '<div class="alert alert-secondary">Det finns inget för dig att göra i den här tävlingen just nu. Om du blivit tillfrågad hittar du förfrågan här när arrangören lagt in dig.</div>'
+            ? '<div class="card"><div class="card-header py-2 fw-semibold">Du är tillfrågad</div><div class="card-body py-2">' + a.map(assignmentHtml).join('') + '</div></div>'
             : '';
     }
-
     function assignmentHtml(a) {
         var star = a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1"></i>' : '';
         var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border ms-1"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
-        var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border ms-1"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
-        var statusBadge = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + ' ms-1">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
-        var accepted = a.status === 'Accepted', declined = a.status === 'Declined';
+        var st = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + ' ms-1">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
+        var acc = a.status === 'Accepted', dec = a.status === 'Declined';
         return '<div class="d-flex justify-content-between align-items-start py-2 gap-2 flex-wrap border-bottom">'
-            + '<div>' + star + '<span class="fw-semibold">' + esc(a.roleName) + '</span>' + fn + scope + shift + statusBadge + '</div>'
+            + '<div>' + star + '<span class="fw-semibold">' + esc(a.roleName) + '</span>' + fn + scope + st + '</div>'
             + '<div class="btn-group btn-group-sm">'
-            + '<button type="button" class="btn ' + (accepted ? 'btn-success' : 'btn-outline-success') + '" onclick="beRespond(' + a.id + ',\'Accepted\')">Tacka ja</button>'
-            + '<button type="button" class="btn ' + (declined ? 'btn-danger' : 'btn-outline-danger') + '" onclick="beRespond(' + a.id + ',\'Declined\')">Tacka nej</button>'
+            + '<button type="button" class="btn ' + (acc ? 'btn-success' : 'btn-outline-success') + '" onclick="beRespond(' + a.id + ',\'Accepted\')">Tacka ja</button>'
+            + '<button type="button" class="btn ' + (dec ? 'btn-danger' : 'btn-outline-danger') + '" onclick="beRespond(' + a.id + ',\'Declined\')">Tacka nej</button>'
             + '</div></div>';
+    }
+
+    function renderSlots() {
+        var host = q('beSlots');
+        if (!slots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Arrangören har inte lagt upp några pass att anmäla sig till ännu.</div>'; return; }
+        var html = '', lastDate = null;
+        slots.forEach(function (s) {
+            if (s.date !== lastDate) { html += '<div class="fw-semibold mt-2 mb-1"><i class="bi bi-calendar-event me-1"></i>' + esc(s.date) + '</div>'; lastDate = s.date; }
+            var isOn = Object.prototype.hasOwnProperty.call(checked, s.id);
+            var timeRange = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
+            html += '<div class="border rounded p-2 mb-2">'
+                + '<div class="form-check">'
+                + '<input class="form-check-input" type="checkbox" id="beSlot' + s.id + '" ' + (isOn ? 'checked' : '') + ' onchange="beToggle(' + s.id + ',this.checked)">'
+                + '<label class="form-check-label" for="beSlot' + s.id + '"><strong>' + esc(s.headline) + '</strong>' + timeRange + '</label>'
+                + (s.description ? '<div class="text-muted small ms-1">' + esc(s.description) + '</div>' : '')
+                + '</div>'
+                + (isOn ? timesBlock(s.id) : '')
+                + '</div>';
+        });
+        host.innerHTML = html;
+        initTimePickers();
+    }
+
+    function timesBlock(slotId) {
+        var wins = checked[slotId] || [];
+        var rows = wins.map(function (w, i) {
+            return '<div class="input-group input-group-sm mb-1" style="max-width:300px">'
+                + '<input type="text" class="form-control be-time" data-slot="' + slotId + '" data-idx="' + i + '" data-f="from" placeholder="från" value="' + esc(w.from || '') + '">'
+                + '<span class="input-group-text">–</span>'
+                + '<input type="text" class="form-control be-time" data-slot="' + slotId + '" data-idx="' + i + '" data-f="to" placeholder="till" value="' + esc(w.to || '') + '">'
+                + '<button class="btn btn-outline-danger" type="button" onclick="beRemoveTime(' + slotId + ',' + i + ')"><i class="bi bi-x"></i></button>'
+                + '</div>';
+        }).join('');
+        return '<div class="ms-4 mt-2"><div class="small text-muted mb-1">Jag kan (valfritt — lämna tomt = hela passet):</div>'
+            + rows
+            + '<button class="btn btn-sm btn-outline-secondary" type="button" onclick="beAddTime(' + slotId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tid</button></div>';
+    }
+
+    // Read time inputs from the DOM into state before any re-render (preserve typed values).
+    function readTimes() {
+        document.querySelectorAll('.be-time').forEach(function (inp) {
+            var sid = inp.getAttribute('data-slot'), idx = +inp.getAttribute('data-idx'), f = inp.getAttribute('data-f');
+            if (!checked[sid]) return;
+            if (!checked[sid][idx]) checked[sid][idx] = { from: '', to: '' };
+            checked[sid][idx][f] = inp.value.trim();
+        });
+    }
+
+    window.beToggle = function (slotId, on) {
+        readTimes();
+        if (on) { if (!checked[slotId]) checked[slotId] = []; }
+        else { delete checked[slotId]; }
+        renderSlots();
+    };
+    window.beAddTime = function (slotId) { readTimes(); (checked[slotId] = checked[slotId] || []).push({ from: '', to: '' }); renderSlots(); };
+    window.beRemoveTime = function (slotId, idx) { readTimes(); if (checked[slotId]) checked[slotId].splice(idx, 1); renderSlots(); };
+
+    function initTimePickers() {
+        if (typeof flatpickr === 'undefined') return;
+        flatpickr('.be-time', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
     }
 
     async function post(url, payload) {
@@ -135,34 +172,20 @@
         var d = await post('/mina-uppdrag/respond', { assignmentId: id, status: status });
         if (d.success) await load(); else alert(d.message || 'Kunde inte spara.');
     };
-    window.beSignUp = async function () {
-        var sel = q('beRole'); var roleKey = sel ? sel.value : '';
-        if (!roleKey) return;
-        var d = await post('/mina-uppdrag/signup', { competitionId: compId, roleKey: roleKey });
-        if (d.success) { alert('Tack! Du är anmäld.'); await load(); } else alert(d.message || 'Kunde inte anmäla.');
-    };
-    window.beOpenAvail = function () {
-        if (!availModal) availModal = new bootstrap.Modal(q('beAvailModal'));
-        q('beAvFrom').value = ''; q('beAvTo').value = ''; q('beAvNote').value = ''; q('beAvError').textContent = '';
-        availModal.show();
-    };
-    window.beSaveAvail = async function () {
-        var btn = q('beAvSaveBtn'); btn.disabled = true;
-        var d = await post('/mina-uppdrag/availability', { competitionId: compId, from: q('beAvFrom').value.trim(), to: q('beAvTo').value.trim(), note: q('beAvNote').value.trim() });
+
+    window.beSave = async function () {
+        if (PREVIEW) return;
+        readTimes();
+        var payloadSlots = Object.keys(checked).map(function (sid) {
+            return { slotId: +sid, times: (checked[sid] || []).filter(function (t) { return (t.from && t.from.length) || (t.to && t.to.length); }) };
+        });
+        var btn = q('beSaveBtn'); btn.disabled = true;
+        var d = await post('/mina-uppdrag/help-signup', { competitionId: compId, comment: q('beComment').value.trim(), slots: payloadSlots });
         btn.disabled = false;
-        if (d.success) { availModal.hide(); await load(); } else q('beAvError').textContent = d.message || 'Kunde inte spara.';
-    };
-    window.beDelAvail = async function (id) {
-        if (!confirm('Ta bort tillgänglighetsfönstret?')) return;
-        var d = await post('/mina-uppdrag/availability/delete', { id: id });
-        if (d.success) await load();
+        if (d.success) { var s = q('beSaved'); s.style.display = 'inline'; setTimeout(function () { s.style.display = 'none'; }, 2500); }
+        else alert(d.message || 'Kunde inte spara.');
     };
 
-    function initPickers() {
-        if (typeof flatpickr === 'undefined') return;
-        ['#beAvFrom', '#beAvTo'].forEach(function (sel) { flatpickr(sel, { locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i' }); });
-    }
-    initPickers();
     if (compId > 0) load();
 })();
 </script>

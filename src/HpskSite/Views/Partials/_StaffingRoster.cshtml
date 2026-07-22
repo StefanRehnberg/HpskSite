@@ -61,6 +61,49 @@
     </div>
 </div>
 
+<div class="card mb-3" id="stfHelpCard">
+    <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+        <span class="fw-semibold"><i class="bi bi-hand-thumbs-up me-1"></i>Anmälningssida (självanmälan)</span>
+        <span class="d-flex gap-1 flex-wrap">
+            <a class="btn btn-sm btn-outline-secondary" id="stfPreviewBtn" href="#" target="_blank" rel="noopener"><i class="bi bi-eye me-1"></i>Förhandsgranska</a>
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenSlot(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till pass</button>
+        </span>
+    </div>
+    <div class="card-body py-2">
+        <div class="text-muted small mb-2">Lägg upp de <strong>pass</strong> ni behöver hjälp med (datum, tid, rubrik, kort beskrivning — flera per datum går bra). Medlemmar bockar för de pass de kan hjälpa till med på sidan <code>/bemanna</code> och skriver en kommentar.</div>
+        <div id="stfHelpSlots" class="mb-3"><div class="text-muted small">Laddar…</div></div>
+        <div class="fw-semibold small mb-1"><i class="bi bi-people me-1"></i>Anmälda</div>
+        <div id="stfHelpSignups"><div class="text-muted small">Laddar…</div></div>
+    </div>
+</div>
+
+<!-- Pass-redigering modal -->
+<div class="modal fade" id="stfSlotModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="stfSlotTitle">Lägg till pass</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stfSlotId" value="0">
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Datum</label><input type="text" class="form-control" id="stfSlotDate" placeholder="2026-08-02"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="stfSlotFrom" placeholder="06:00"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="stfSlotTo" placeholder="22:00"></div>
+                </div>
+                <div class="mb-2"><label class="form-label fw-semibold">Rubrik</label><input type="text" class="form-control" id="stfSlotHeadline" placeholder="t.ex. Tävlingsdag 1 · Kansliet"></div>
+                <div class="mb-1"><label class="form-label fw-semibold">Kort beskrivning (valfritt)</label><textarea class="form-control" id="stfSlotDesc" rows="2" placeholder="t.ex. Personal till kansliet"></textarea></div>
+                <div class="text-danger small mt-2" id="stfSlotError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="stfSaveSlot()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="stfRoster">
     <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
 </div>
@@ -614,6 +657,100 @@
         } catch (e) { btn.disabled = false; document.getElementById('stfReqError').textContent = 'Nätverksfel.'; }
     };
 
+    // ---- självanmälan: pass-konfiguration + anmälda + förhandsgranskning ----
+    var slotModal = null, helpSlots = [];
+    (function () { var b = document.getElementById('stfPreviewBtn'); if (b) b.href = '/bemanna?c=' + compId + '&preview=1'; })();
+
+    async function loadHelp() {
+        try {
+            var rs = await fetch('/umbraco/surface/Staffing/GetHelpSlots?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var ds = await rs.json();
+            helpSlots = (ds && ds.success) ? (ds.slots || []) : [];
+            renderHelpSlots();
+        } catch (e) { }
+        try {
+            var rp = await fetch('/umbraco/surface/Staffing/GetHelpSignups?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var dp = await rp.json();
+            renderHelpSignups((dp && dp.success) ? (dp.signups || []) : []);
+        } catch (e) { }
+    }
+
+    function renderHelpSlots() {
+        var host = document.getElementById('stfHelpSlots');
+        if (!host) return;
+        if (!helpSlots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Inga pass ännu. Lägg till minst ett pass så kan medlemmar anmäla sig.</div>'; return; }
+        var html = '', lastDate = null;
+        helpSlots.forEach(function (s) {
+            if (s.date !== lastDate) { html += '<div class="fw-semibold small mt-2"><i class="bi bi-calendar-event me-1"></i>' + esc(s.date) + '</div>'; lastDate = s.date; }
+            var tr = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
+            html += '<div class="d-flex justify-content-between align-items-start border-bottom py-1 gap-2">'
+                + '<div><span class="fw-semibold">' + esc(s.headline) + '</span>' + tr + (s.description ? '<div class="text-muted small">' + esc(s.description) + '</div>' : '') + '</div>'
+                + '<div class="d-flex gap-1 flex-shrink-0">'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfOpenSlot(' + s.id + ')"><i class="bi bi-pencil"></i></button>'
+                + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDeleteSlot(' + s.id + ')"><i class="bi bi-trash"></i></button>'
+                + '</div></div>';
+        });
+        host.innerHTML = html;
+    }
+
+    function renderHelpSignups(list) {
+        var host = document.getElementById('stfHelpSignups');
+        if (!host) return;
+        if (!list.length) { host.innerHTML = '<div class="text-muted small fst-italic">Ingen har anmält sig ännu.</div>'; return; }
+        host.innerHTML = list.map(function (v) {
+            var slots = (v.slots || []).map(function (s) {
+                return '<li>' + esc(s.label) + (s.timesText ? ' — <span class="text-primary">' + esc(s.timesText) + '</span>' : ' <span class="text-muted">(hela passet)</span>') + '</li>';
+            }).join('');
+            return '<div class="border rounded p-2 mb-2">'
+                + '<div class="fw-semibold">' + esc(v.memberName) + ' <span class="text-muted small">· ' + esc(v.updated) + '</span></div>'
+                + (slots ? '<ul class="small mb-1 mt-1">' + slots + '</ul>' : '<div class="text-muted small">Inga pass valda.</div>')
+                + (v.comment ? '<div class="small"><i class="bi bi-chat-left-text me-1"></i>' + esc(v.comment) + '</div>' : '')
+                + '</div>';
+        }).join('');
+    }
+
+    window.stfOpenSlot = function (id) {
+        if (!slotModal) slotModal = new bootstrap.Modal(document.getElementById('stfSlotModal'));
+        var s = id ? helpSlots.find(function (x) { return x.id === id; }) : null;
+        document.getElementById('stfSlotId').value = s ? s.id : 0;
+        document.getElementById('stfSlotDate').value = s ? s.date : '';
+        document.getElementById('stfSlotFrom').value = s && s.startTime ? s.startTime : '';
+        document.getElementById('stfSlotTo').value = s && s.endTime ? s.endTime : '';
+        document.getElementById('stfSlotHeadline').value = s ? s.headline : '';
+        document.getElementById('stfSlotDesc').value = s && s.description ? s.description : '';
+        document.getElementById('stfSlotError').textContent = '';
+        document.getElementById('stfSlotTitle').textContent = s ? 'Redigera pass' : 'Lägg till pass';
+        slotModal.show();
+        if (typeof flatpickr !== 'undefined') {
+            flatpickr('#stfSlotDate', { locale: 'sv', dateFormat: 'Y-m-d' });
+            flatpickr('#stfSlotFrom', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
+            flatpickr('#stfSlotTo', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
+        }
+    };
+
+    window.stfSaveSlot = async function () {
+        var payload = {
+            id: parseInt(document.getElementById('stfSlotId').value, 10) || 0,
+            competitionId: compId,
+            date: document.getElementById('stfSlotDate').value.trim(),
+            startTime: document.getElementById('stfSlotFrom').value.trim(),
+            endTime: document.getElementById('stfSlotTo').value.trim(),
+            headline: document.getElementById('stfSlotHeadline').value.trim(),
+            description: document.getElementById('stfSlotDesc').value.trim()
+        };
+        if (!payload.date || !payload.headline) { document.getElementById('stfSlotError').textContent = 'Ange datum och rubrik.'; return; }
+        var r = await fetch('/umbraco/surface/Staffing/SaveHelpSlot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify(payload) });
+        var d = await r.json();
+        if (d.success) { slotModal.hide(); await loadHelp(); } else document.getElementById('stfSlotError').textContent = d.message || 'Kunde inte spara.';
+    };
+
+    window.stfDeleteSlot = async function (id) {
+        if (!confirm('Ta bort passet? Anmälningar till det tas bort ur medlemmarnas val.')) return;
+        var r = await fetch('/umbraco/surface/Staffing/DeleteHelpSlot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify({ id: id, competitionId: compId }) });
+        var d = await r.json();
+        if (d.success) await loadHelp();
+    };
+
     window.stfCopyInviteLink = async function (id) {
         try {
             var r = await fetch('/umbraco/surface/Staffing/GetInviteLink?competitionId=' + compId + '&id=' + id, { headers: { 'Accept': 'application/json' } });
@@ -661,6 +798,7 @@
 
     loadRoster();
     loadScopes();
+    loadHelp();
     startTimer();
 })();
 </script>

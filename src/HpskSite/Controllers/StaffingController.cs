@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly MaterielEstimateService _materiel;
         private readonly StaffingSignupService _signup;
         private readonly StaffRequestService _request;
+        private readonly StaffHelpService _help;
         private readonly PrepDocumentStorage _docs;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
@@ -60,6 +61,7 @@ namespace HpskSite.Controllers
             MaterielEstimateService materiel,
             StaffingSignupService signup,
             StaffRequestService request,
+            StaffHelpService help,
             PrepDocumentStorage docs,
             EmailService email,
             WebPushService webPush,
@@ -78,6 +80,7 @@ namespace HpskSite.Controllers
             _materiel = materiel;
             _signup = signup;
             _request = request;
+            _help = help;
             _docs = docs;
             _email = email;
             _webPush = webPush;
@@ -446,6 +449,51 @@ namespace HpskSite.Controllers
                 series = est.Series,
                 rows = est.Rows,
             });
+        }
+
+        // ---- Self-sign-up rework: help-slots (organiser config) + review ----
+
+        [HttpGet]
+        public async Task<IActionResult> GetHelpSlots(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            return Json(new { success = true, slots = _help.GetSlots(competitionId) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveHelpSlot([FromBody] SaveHelpSlotRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.Headline) || string.IsNullOrWhiteSpace(request.Date))
+                return Json(new { success = false, message = "Ange datum och rubrik." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var id = _help.SaveSlot(request, viewer.Id);
+            return Json(new { success = true, id });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteHelpSlot([FromBody] DeleteWorkRequest request)
+        {
+            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            _help.DeleteSlot(request.Id, request.CompetitionId);
+            return Json(new { success = true });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetHelpSignups(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            return Json(new { success = true, signups = _help.GetReview(competitionId) });
         }
 
         // ---- Phase 3: sourcing scope (organiser opens the comp for self-sign-up) ----
