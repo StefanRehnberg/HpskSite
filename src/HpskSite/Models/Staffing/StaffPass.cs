@@ -114,4 +114,11 @@ namespace HpskSite.Models.Staffing
         public int CompetitionId { get; set; }
         public List<CrewNeedRow> Needs { get; set; } = new();   // full replace of the comp's crew needs
     }
+
+    public class CopyPassRequest
+    {
+        public int CompetitionId { get; set; }
+        public int FromPassId { get; set; }
+        public int ToPassId { get; set; }
+    }
 }

@@ -687,13 +687,36 @@
     function renderPassList() {
         var host = document.getElementById('stfPassList'); if (!host) return;
         if (!passes.length) { host.innerHTML = '<span class="text-muted small fst-italic">Inga pass ännu. Lägg till pass (t.ex. Lör FM 06–13, Lör EM 13–20).</span>'; return; }
-        host.innerHTML = passes.map(function (p) {
+        var badges = passes.map(function (p) {
             return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1 me-1 mb-1" style="font-weight:500">'
                 + '<i class="bi bi-calendar2-week me-1"></i>' + esc(p.displayLabel)
                 + '<button type="button" class="btn btn-sm btn-link p-0 ms-1 text-secondary" onclick="stfOpenPass(' + p.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
                 + '<button type="button" class="btn-close" style="font-size:.55rem" title="Ta bort" onclick="stfDeletePass(' + p.id + ')"></button></span>';
         }).join('');
+        // Copy the crew of one pass to another (e.g. Day 1 → Day 2) — the bulk shortcut.
+        var copyCtl = '';
+        if (passes.length >= 2) {
+            var opts = passes.map(function (p) { return '<option value="' + p.id + '">' + esc(p.displayLabel) + '</option>'; }).join('');
+            copyCtl = '<div class="input-group input-group-sm mt-1" style="max-width:520px" title="Kopiera bemanningen från ett pass till ett annat">'
+                + '<span class="input-group-text">Kopiera bemanning</span>'
+                + '<select class="form-select" id="stfCopyFrom">' + opts + '</select>'
+                + '<span class="input-group-text">→</span>'
+                + '<select class="form-select" id="stfCopyTo">' + opts + '</select>'
+                + '<button class="btn btn-outline-primary" type="button" onclick="stfCopyPass()"><i class="bi bi-files me-1"></i>Kopiera</button></div>';
+        }
+        host.innerHTML = badges + copyCtl;
     }
+
+    window.stfCopyPass = async function () {
+        var from = parseInt(document.getElementById('stfCopyFrom').value, 10) || 0;
+        var to = parseInt(document.getElementById('stfCopyTo').value, 10) || 0;
+        if (!from || !to || from === to) { alert('Välj två olika pass.'); return; }
+        if (!confirm('Kopiera bemanningen till det andra passet? Personer som redan finns där hoppas över.')) return;
+        var r = await fetch('/umbraco/surface/Staffing/CopyPassAssignments', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify({ competitionId: compId, fromPassId: from, toPassId: to }) });
+        var d = await r.json();
+        if (d.success) { alert(d.copied + ' personer kopierade.'); await loadRoster(); await loadCoverage(); }
+        else alert(d.message || 'Kunde inte kopiera.');
+    };
 
     function populatePassSelect() {
         var sel = document.getElementById('stfPass'); if (!sel) return;
@@ -905,13 +928,25 @@
             var slots = (v.slots || []).map(function (s) {
                 return '<li>' + esc(s.label) + (s.timesText ? ' — <span class="text-primary">' + esc(s.timesText) + '</span>' : ' <span class="text-muted">(hela passet)</span>') + '</li>';
             }).join('');
+            var nm = esc(v.memberName).replace(/'/g, "\\'");
             return '<div class="border rounded p-2 mb-2">'
-                + '<div class="fw-semibold">' + esc(v.memberName) + ' <span class="text-muted small">· ' + esc(v.updated) + '</span></div>'
+                + '<div class="d-flex justify-content-between align-items-start gap-2">'
+                + '<span class="fw-semibold">' + esc(v.memberName) + ' <span class="text-muted small">· ' + esc(v.updated) + '</span></span>'
+                + '<button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" onclick="stfAssignFromPool(' + v.memberId + ',\'' + nm + '\')" title="Lägg till som funktionär"><i class="bi bi-person-plus me-1"></i>Tilldela</button>'
+                + '</div>'
                 + (slots ? '<ul class="small mb-1 mt-1">' + slots + '</ul>' : '<div class="text-muted small">Inga pass valda.</div>')
                 + (v.comment ? '<div class="small"><i class="bi bi-chat-left-text me-1"></i>' + esc(v.comment) + '</div>' : '')
                 + '</div>';
         }).join('');
     }
+
+    // Assign a volunteer from the "Anmälda" pool: open the add-funktionär dialog pre-filled with the person.
+    window.stfAssignFromPool = function (memberId, name) {
+        stfOpenAdd('');
+        document.getElementById('stfMemberId').value = memberId || 0;
+        document.getElementById('stfName').value = name || '';
+        document.getElementById('stfMemberSearch').value = name || '';
+    };
 
     window.stfOpenSlot = function (id) {
         if (!slotModal) slotModal = new bootstrap.Modal(document.getElementById('stfSlotModal'));

@@ -356,6 +356,53 @@ namespace HpskSite.Services.Staffing
             return resp;
         }
 
+        /// <summary>Clone every assignment on one pass to another (e.g. copy Day 1 → Day 2). Same person +
+        /// role + scope + target range + responsible, new PassId. Skips rows already present on the target
+        /// (deduped by person + role + scope). Returns how many were copied.</summary>
+        public int CopyPassAssignments(int competitionId, int fromPassId, int toPassId, int byMemberId)
+        {
+            if (fromPassId <= 0 || toPassId <= 0 || fromPassId == toPassId) return 0;
+            int copied = 0;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                var db = scope.Database;
+                var src = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND PassId = @1", competitionId, fromPassId);
+                var dst = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND PassId = @1", competitionId, toPassId);
+                string Key(StaffAssignment a) => $"{(a.MemberId is > 0 ? "m" + a.MemberId : "n" + (a.DisplayName ?? "").Trim().ToLowerInvariant())}|{a.RoleKey}|{a.ScopeType}|{a.ScopeKey}";
+                var have = dst.Select(Key).ToHashSet();
+                var now = DateTime.UtcNow;
+                foreach (var a in src)
+                {
+                    if (have.Contains(Key(a))) continue;
+                    db.Insert(new StaffAssignment
+                    {
+                        CompetitionId = competitionId,
+                        MemberId = a.MemberId,
+                        DisplayName = a.DisplayName,
+                        Phone = a.Phone,
+                        Email = a.Email,
+                        RoleKey = a.RoleKey,
+                        FunctionTitle = a.FunctionTitle,
+                        ScopeType = a.ScopeType,
+                        ScopeKey = a.ScopeKey,
+                        TargetFrom = a.TargetFrom,
+                        TargetTo = a.TargetTo,
+                        PassId = toPassId,
+                        IsResponsible = a.IsResponsible,
+                        HasAdminAccess = a.HasAdminAccess,
+                        Status = a.Status,
+                        Note = a.Note,
+                        AssignedByMemberId = byMemberId,
+                        CreatedDate = now,
+                        ModifiedDate = now,
+                    });
+                    copied++;
+                }
+            }
+            if (copied > 0) { SyncCompetitionManagers(competitionId); SyncStationManagers(competitionId); }
+            return copied;
+        }
+
         // ---- availability + member self-service (P3: sign-up + tillgänglighet) ----
 
         public List<StaffAvailability> GetAvailabilityForCompetition(int competitionId)

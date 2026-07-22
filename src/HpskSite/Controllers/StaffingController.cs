@@ -512,6 +512,22 @@ namespace HpskSite.Controllers
             return Json(new { success = true });
         }
 
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CopyPassAssignments([FromBody] CopyPassRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || request.FromPassId <= 0 || request.ToPassId <= 0)
+                return Json(new { success = false, message = "Välj pass att kopiera från och till." });
+            if (request.FromPassId == request.ToPassId)
+                return Json(new { success = false, message = "Välj två olika pass." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var copied = _staffing.CopyPassAssignments(request.CompetitionId, request.FromPassId, request.ToPassId, viewer.Id);
+            return Json(new { success = true, copied });
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetCoverage(int competitionId)
         {
