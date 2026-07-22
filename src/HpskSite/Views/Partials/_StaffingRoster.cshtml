@@ -22,20 +22,20 @@
     Fungerar redan innan startlistan finns.
 </p>
 
-<ul class="nav nav-pills mb-3 gap-1" id="bemSubNav" role="tablist">
+<ul class="nav nav-tabs mb-3" id="bemSubNav" role="tablist">
     <li class="nav-item" role="presentation">
-        <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#bem-roster" type="button" role="tab">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#bem-roster" type="button" role="tab">
             <i class="bi bi-person-lines-fill me-1"></i>Funktionärer
-            <span class="badge bg-light text-dark ms-1" id="stfRosterBadge" style="display:none"></span>
+            <span class="badge bg-secondary ms-1" id="stfRosterBadge" style="display:none"></span>
         </button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="pill" data-bs-target="#bem-behov" type="button" role="tab">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-behov" type="button" role="tab">
             <i class="bi bi-clipboard-data me-1"></i>Behov &amp; täckning
         </button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="pill" data-bs-target="#bem-varvning" type="button" role="tab">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-varvning" type="button" role="tab">
             <i class="bi bi-megaphone me-1"></i>Värvning &amp; anmälningar
         </button>
     </li>
@@ -375,12 +375,6 @@
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function roleByKey(k) { for (var i = 0; i < roles.length; i++) if (roles[i].roleKey === k) return roles[i]; return null; }
-
-    // Jump between the three sub-views (used by cross-links, e.g. the coverage summary on the roster tab).
-    window.bemGo = function (id) {
-        var el = document.querySelector('#bemSubNav [data-bs-target="#' + id + '"]');
-        if (el && window.bootstrap) bootstrap.Tab.getOrCreateInstance(el).show();
-    };
 
     // ---- roster filtering + group collapse (keeps 100+ funktionärer manageable) ----
     function activeFilter() {
@@ -954,15 +948,15 @@
         return 'bg-danger-subtle text-danger-emphasis';
     }
 
-    // Glanceable coverage line shown on the Funktionärer tab (deep-links into Behov & täckning).
+    // Glanceable staffing status shown on the Funktionärer tab. Pure info — no navigation link
+    // (the "Behov & täckning" tab already does that; a link here just duplicates it).
     function renderCovSummary(d) {
         var sum = document.getElementById('stfCovSummary'); if (!sum) return;
         if (d && d.hasNeeds && (d.passes || []).length && d.totalNeeded > 0) {
             var cls = (d.totalFilled >= d.totalNeeded) ? 'text-success' : (d.totalFilled > 0 ? 'text-warning-emphasis' : 'text-danger');
-            sum.innerHTML = '<i class="bi bi-people-fill me-1"></i>Bemannat <span class="fw-semibold ' + cls + '">' + d.totalFilled + '/' + d.totalNeeded + '</span>'
-                + ' · <a href="#" onclick="bemGo(\'bem-behov\');return false;">täckning per skift</a>';
+            sum.innerHTML = '<i class="bi bi-people-fill me-1"></i>Bemannat <span class="fw-semibold ' + cls + '">' + d.totalFilled + '/' + d.totalNeeded + '</span> mot behovet';
         } else {
-            sum.innerHTML = '<a href="#" onclick="bemGo(\'bem-behov\');return false;"><i class="bi bi-sliders me-1"></i>Sätt skift &amp; bemanningsbehov</a>';
+            sum.innerHTML = '';
         }
     }
 
