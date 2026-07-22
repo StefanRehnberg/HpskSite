@@ -22,8 +22,7 @@
     Fungerar redan innan startlistan finns.
 </p>
 
-<ul class="nav nav-pills d-inline-flex flex-wrap gap-1 mb-3 p-1 rounded" id="bemSubNav" role="tablist"
-    style="background:var(--bs-tertiary-bg)">
+<ul class="nav nav-pills mb-3 gap-1" id="bemSubNav" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#bem-roster" type="button" role="tab">
             <i class="bi bi-person-lines-fill me-1"></i>Funktionärer
@@ -908,11 +907,18 @@
 
     function renderNeedsEditor() {
         var host = document.getElementById('stfNeedsEditor'); if (!host || !roles.length) return;
+        // The 12s roster poll calls this. Don't rebuild while the user is editing inside it — that
+        // would reset unsaved values to the last-saved number (and steal focus mid-typing).
+        if (host.querySelector('.stf-need') && host.contains(document.activeElement)) return;
+        // Belt & suspenders: keep whatever is currently on screen across a rebuild, not just the saved value.
+        var live = {};
+        host.querySelectorAll('.stf-need').forEach(function (inp) { live[inp.getAttribute('data-kind') + '|' + inp.getAttribute('data-role')] = inp.value; });
+        function cur(kind, roleKey) { var k = kind + '|' + roleKey; return (k in live) ? live[k] : needCount(kind, roleKey); }
         var stationRoles = roles.filter(function (g) { return g.defaultScopeType === 'Station'; });
         var otherRoles = roles.filter(function (g) { return g.defaultScopeType !== 'Station'; });
         function inputRow(kind, g) {
             return '<div class="d-flex align-items-center gap-2 mb-1"><span style="min-width:180px" class="small">' + esc(g.roleName) + '</span>'
-                + '<input type="number" min="0" class="form-control form-control-sm stf-need" data-kind="' + kind + '" data-role="' + esc(g.roleKey) + '" value="' + needCount(kind, g.roleKey) + '" style="max-width:80px"></div>';
+                + '<input type="number" min="0" class="form-control form-control-sm stf-need" data-kind="' + kind + '" data-role="' + esc(g.roleKey) + '" value="' + cur(kind, g.roleKey) + '" style="max-width:80px"></div>';
         }
         var html = '<div class="border rounded p-2"><div class="small text-muted mb-1">Bemanningsbehov (antal per roll) — driver täckningen nedan:</div>';
         if (stationRoles.length) html += '<div class="fw-semibold small mt-1">Per station</div>' + stationRoles.map(function (g) { return inputRow('Station', g); }).join('');
