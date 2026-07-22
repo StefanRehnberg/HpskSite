@@ -4,152 +4,142 @@
     // the server; one "Lägg till funktionär" dialog (also reachable per role group). Person = member
     // search (autofills name/phone) or free text. Shifts, target ranges, responsible, status, and the
     // Tävlingsledning app-access mirror all live here. See COMPETITION_STAFFING_SYSTEM.md §6.
+    //
+    // The tab is split into three focused sub-views so it stops being one overwhelming scroll:
+    //   1. Funktionärer   — the roster (the core, default view) + a glanceable coverage line
+    //   2. Behov & täckning — arbetspass (skift), bemanningsbehov, coverage grid
+    //   3. Värvning        — open-for-signup scopes, mail-out request, /bemanna signup page + anmälda
     var competitionId = ViewData["CompetitionId"];
     var stfToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
 }
 
-<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-    <p class="text-muted small mb-0" style="max-width:640px">
-        Planera vilka som bemannar tävlingen — roll, var (skjutlag/station/klass) och när (pass).
-        Fungerar redan innan startlistan finns. "Dagsläge" visar sedan vem som faktiskt arbetar.
-    </p>
-    <div class="d-flex align-items-center gap-2">
-        <span class="text-muted small" id="stfCount"></span>
-        <button type="button" class="btn btn-primary btn-sm" onclick="stfOpenAdd('')">
-            <i class="bi bi-person-plus me-1"></i>Lägg till funktionär
+<p class="text-muted small mb-3" style="max-width:760px">
+    <i class="bi bi-signpost-2 me-1"></i>
+    <strong>Så gör du:</strong>
+    <span class="text-nowrap">1. lägg upp <em>skift</em> och hur många ni behöver</span> ·
+    <span class="text-nowrap">2. lägg till funktionärer</span> ·
+    <span class="text-nowrap">3. saknas folk? öppna för självanmälan och skicka förfrågan.</span>
+    Fungerar redan innan startlistan finns.
+</p>
+
+<ul class="nav nav-pills d-inline-flex flex-wrap gap-1 mb-3 p-1 rounded" id="bemSubNav" role="tablist"
+    style="background:var(--bs-tertiary-bg)">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#bem-roster" type="button" role="tab">
+            <i class="bi bi-person-lines-fill me-1"></i>Funktionärer
+            <span class="badge bg-light text-dark ms-1" id="stfRosterBadge" style="display:none"></span>
         </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="pill" data-bs-target="#bem-behov" type="button" role="tab">
+            <i class="bi bi-clipboard-data me-1"></i>Behov &amp; täckning
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="pill" data-bs-target="#bem-varvning" type="button" role="tab">
+            <i class="bi bi-megaphone me-1"></i>Värvning &amp; anmälningar
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="bemSubContent">
+
+    @* ---- TAB 1: Funktionärer (the roster — default) ---- *@
+    <div class="tab-pane fade show active" id="bem-roster" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <div>
+                <span class="text-muted small" id="stfCount"></span>
+                <div class="small mt-1" id="stfCovSummary"></div>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="stfOpenAdd('')">
+                <i class="bi bi-person-plus me-1"></i>Lägg till funktionär
+            </button>
+        </div>
+
+        @* Filter/search toolbar — keeps the roster usable when there are 100+ funktionärer. *@
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="stfFilterBar">
+            <div class="position-relative flex-grow-1" style="min-width:170px;max-width:280px">
+                <i class="bi bi-search position-absolute text-muted" style="left:.65rem;top:50%;transform:translateY(-50%)"></i>
+                <input type="text" class="form-control form-control-sm ps-4" id="stfFilter" placeholder="Sök namn, roll, plats…" autocomplete="off">
+            </div>
+            <select class="form-select form-select-sm" id="stfFilterRole" style="width:auto"><option value="">Alla roller</option></select>
+            <select class="form-select form-select-sm" id="stfFilterPass" style="width:auto"><option value="">Alla skift</option></select>
+            <select class="form-select form-select-sm" id="stfFilterStatus" style="width:auto">
+                <option value="">Alla statusar</option>
+                <option value="Planned">Planerad</option>
+                <option value="Invited">Inbjuden</option>
+                <option value="Accepted">Accepterad</option>
+                <option value="Declined">Avböjt</option>
+                <option value="Confirmed">Bekräftad</option>
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="stfFilterClear" onclick="stfClearFilter()" style="display:none"><i class="bi bi-x-lg me-1"></i>Rensa</button>
+            <span class="text-muted small ms-auto" id="stfFilterCount"></span>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Fäll ihop / visa alla">
+                <button type="button" class="btn btn-outline-secondary" onclick="stfExpandAll(true)" title="Visa alla"><i class="bi bi-arrows-expand"></i></button>
+                <button type="button" class="btn btn-outline-secondary" onclick="stfExpandAll(false)" title="Fäll ihop alla"><i class="bi bi-arrows-collapse"></i></button>
+            </div>
+        </div>
+
+        <div id="stfRoster">
+            <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+        </div>
     </div>
-</div>
 
-<div class="card mb-3" id="stfSourceCard">
-    <div class="card-body py-2" id="stfSourceBody"><div class="text-muted small">Laddar…</div></div>
-</div>
+    @* ---- TAB 2: Behov & täckning (arbetspass/skift + behov + coverage) ---- *@
+    <div class="tab-pane fade" id="bem-behov" role="tabpanel">
+        <p class="text-muted small mb-3" style="max-width:680px">
+            Lägg upp <strong>skift</strong> (t.ex. Lör FM 06–13) och hur många ni behöver per roll.
+            Täckningen längst ner visar <em>bemannat mot behov</em> så du ser var det fattas folk.
+        </p>
+        <div class="card mb-3" id="stfPassCard">
+            <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+                <span class="fw-semibold"><i class="bi bi-calendar2-week me-1"></i>Arbetspass (skift)</span>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenPass(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till skift</button>
+            </div>
+            <div class="card-body py-2">
+                <div class="small text-muted mb-1">Ett skift = en tidsperiod som funktionärer bemannar. Koppla personer till ett skift i "Lägg till funktionär" så räknas de in i täckningen.</div>
+                <div id="stfPassList" class="mb-2"><div class="text-muted small">Laddar…</div></div>
+                <div id="stfNeedsEditor" class="mb-2"></div>
+                <hr class="my-2">
+                <div class="fw-semibold small mb-1"><i class="bi bi-grid-3x3-gap me-1"></i>Täckning (bemannat / behov)</div>
+                <div id="stfCoverage"><div class="text-muted small">Laddar…</div></div>
+            </div>
+        </div>
+    </div>
 
-<!-- Skicka funktionärsförfrågan modal -->
-<div class="modal fade" id="stfRequestModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-send me-2"></i>Skicka funktionärsförfrågan</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    @* ---- TAB 3: Värvning & anmälningar (sourcing + mail-out + signup page) ---- *@
+    <div class="tab-pane fade" id="bem-varvning" role="tabpanel">
+        <p class="text-muted small mb-3" style="max-width:680px">
+            <i class="bi bi-megaphone me-1"></i>Saknas funktionärer? Öppna tävlingen för självanmälan, skicka
+            en förfrågan till klubben/kretsen, och lägg upp en <strong>anmälningssida</strong> där medlemmar
+            bockar för de pass de kan hjälpa till med.
+        </p>
+
+        <div class="card mb-3" id="stfSourceCard">
+            <div class="card-body py-2" id="stfSourceBody"><div class="text-muted small">Laddar…</div></div>
+        </div>
+
+        <div class="card mb-3" id="stfHelpCard">
+            <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+                <span class="fw-semibold"><i class="bi bi-hand-thumbs-up me-1"></i>Anmälningssida (självanmälan)</span>
+                <span class="d-flex gap-1 flex-wrap">
+                    <a class="btn btn-sm btn-outline-secondary" id="stfPreviewBtn" href="#" target="_blank" rel="noopener"><i class="bi bi-eye me-1"></i>Förhandsgranska</a>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenSlot(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till pass</button>
+                </span>
             </div>
-            <div class="modal-body">
-                <div class="text-muted small mb-2" id="stfReqAudience"></div>
-                <div class="mb-2">
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="stfReqMode" id="stfReqRelay" value="Relay" checked onchange="stfReqModeChanged()">
-                        <label class="form-check-label" for="stfReqRelay"><strong>Till klubb-/kretsansvariga</strong> — de distribuerar vidare <span class="badge bg-light text-dark border" id="stfReqRelayCount"></span></label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="stfReqMode" id="stfReqDirect" value="Direct" onchange="stfReqModeChanged()">
-                        <label class="form-check-label" for="stfReqDirect"><strong>Direkt till medlemmar</strong> (push + e-post) <span class="badge bg-light text-dark border" id="stfReqDirectCount"></span></label>
-                        <div class="form-text" id="stfReqDirectNote"></div>
-                    </div>
-                </div>
-                <div class="mb-2">
-                    <label class="form-label fw-semibold">Meddelande (valfritt)</label>
-                    <textarea class="form-control" id="stfReqMessage" rows="2" placeholder="t.ex. Vi behöver markörer och kassa till lördagens tävling."></textarea>
-                </div>
-                <div class="small text-muted" id="stfReqLastSent"></div>
-                <div class="text-danger small mt-1" id="stfReqError"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" id="stfReqSendBtn" onclick="stfSendRequest()"><i class="bi bi-send me-1"></i>Skicka</button>
+            <div class="card-body py-2">
+                <div class="text-muted small mb-2">Lägg upp de <strong>pass</strong> ni behöver hjälp med (datum, tid, rubrik, kort beskrivning — flera per datum går bra). Medlemmar bockar för de pass de kan hjälpa till med på sidan <code>/bemanna</code> och skriver en kommentar.</div>
+                <div id="stfHelpSlots" class="mb-3"><div class="text-muted small">Laddar…</div></div>
+                <div class="fw-semibold small mb-1"><i class="bi bi-people me-1"></i>Anmälda</div>
+                <div id="stfHelpSignups"><div class="text-muted small">Laddar…</div></div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="card mb-3" id="stfHelpCard">
-    <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
-        <span class="fw-semibold"><i class="bi bi-hand-thumbs-up me-1"></i>Anmälningssida (självanmälan)</span>
-        <span class="d-flex gap-1 flex-wrap">
-            <a class="btn btn-sm btn-outline-secondary" id="stfPreviewBtn" href="#" target="_blank" rel="noopener"><i class="bi bi-eye me-1"></i>Förhandsgranska</a>
-            <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenSlot(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till pass</button>
-        </span>
-    </div>
-    <div class="card-body py-2">
-        <div class="text-muted small mb-2">Lägg upp de <strong>pass</strong> ni behöver hjälp med (datum, tid, rubrik, kort beskrivning — flera per datum går bra). Medlemmar bockar för de pass de kan hjälpa till med på sidan <code>/bemanna</code> och skriver en kommentar.</div>
-        <div id="stfHelpSlots" class="mb-3"><div class="text-muted small">Laddar…</div></div>
-        <div class="fw-semibold small mb-1"><i class="bi bi-people me-1"></i>Anmälda</div>
-        <div id="stfHelpSignups"><div class="text-muted small">Laddar…</div></div>
-    </div>
-</div>
+@* ============================ Modals (kept outside the tab panes) ============================ *@
 
-<!-- Pass-redigering modal -->
-<div class="modal fade" id="stfSlotModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="stfSlotTitle">Lägg till pass</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="stfSlotId" value="0">
-                <div class="row g-2">
-                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Datum</label><input type="text" class="form-control" id="stfSlotDate" placeholder="2026-08-02"></div>
-                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="stfSlotFrom" placeholder="06:00"></div>
-                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="stfSlotTo" placeholder="22:00"></div>
-                </div>
-                <div class="mb-2"><label class="form-label fw-semibold">Rubrik</label><input type="text" class="form-control" id="stfSlotHeadline" placeholder="t.ex. Tävlingsdag 1 · Kansliet"></div>
-                <div class="mb-1"><label class="form-label fw-semibold">Kort beskrivning (valfritt)</label><textarea class="form-control" id="stfSlotDesc" rows="2" placeholder="t.ex. Personal till kansliet"></textarea></div>
-                <div class="text-danger small mt-2" id="stfSlotError"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" onclick="stfSaveSlot()">Spara</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="card mb-3" id="stfPassCard">
-    <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
-        <span class="fw-semibold"><i class="bi bi-calendar2-week me-1"></i>Pass, bemanningsbehov &amp; täckning</span>
-        <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenPass(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till pass</button>
-    </div>
-    <div class="card-body py-2">
-        <div class="small text-muted mb-1">Pass = skift som funktionärer bemannar (t.ex. Lör FM 06–13). Tilldela personer till ett pass i "Lägg till funktionär".</div>
-        <div id="stfPassList" class="mb-2"><div class="text-muted small">Laddar…</div></div>
-        <div id="stfNeedsEditor" class="mb-2"></div>
-        <hr class="my-2">
-        <div class="fw-semibold small mb-1"><i class="bi bi-grid-3x3-gap me-1"></i>Täckning (bemannat / behov)</div>
-        <div id="stfCoverage"><div class="text-muted small">Laddar…</div></div>
-    </div>
-</div>
-
-<!-- Pass-redigering modal -->
-<div class="modal fade" id="stfPassModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Pass</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="stfPassId" value="0">
-                <div class="mb-2"><label class="form-label fw-semibold">Namn (valfritt)</label><input type="text" class="form-control" id="stfPassLabel" placeholder="t.ex. Lördag FM"></div>
-                <div class="row g-2">
-                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Datum</label><input type="text" class="form-control" id="stfPassDate" placeholder="2026-08-15"></div>
-                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="stfPassFrom" placeholder="06:00"></div>
-                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="stfPassTo" placeholder="13:00"></div>
-                </div>
-                <div class="text-danger small mt-1" id="stfPassError"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" onclick="stfSavePass()">Spara</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div id="stfRoster">
-    <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
-</div>
-
-<!-- Add/Edit modal -->
+<!-- Add/Edit funktionär modal -->
 <div class="modal fade" id="stfModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -279,6 +269,95 @@
     </div>
 </div>
 
+<!-- Arbetspass (skift) modal -->
+<div class="modal fade" id="stfPassModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Arbetspass (skift)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stfPassId" value="0">
+                <div class="mb-2"><label class="form-label fw-semibold">Namn (valfritt)</label><input type="text" class="form-control" id="stfPassLabel" placeholder="t.ex. Lördag FM"></div>
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Datum</label><input type="text" class="form-control" id="stfPassDate" placeholder="2026-08-15"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="stfPassFrom" placeholder="06:00"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="stfPassTo" placeholder="13:00"></div>
+                </div>
+                <div class="text-danger small mt-1" id="stfPassError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="stfSavePass()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Anmälningspass (självanmälan) modal -->
+<div class="modal fade" id="stfSlotModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="stfSlotTitle">Lägg till pass</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stfSlotId" value="0">
+                <div class="row g-2">
+                    <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Datum</label><input type="text" class="form-control" id="stfSlotDate" placeholder="2026-08-02"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="stfSlotFrom" placeholder="06:00"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="stfSlotTo" placeholder="22:00"></div>
+                </div>
+                <div class="mb-2"><label class="form-label fw-semibold">Rubrik</label><input type="text" class="form-control" id="stfSlotHeadline" placeholder="t.ex. Tävlingsdag 1 · Kansliet"></div>
+                <div class="mb-1"><label class="form-label fw-semibold">Kort beskrivning (valfritt)</label><textarea class="form-control" id="stfSlotDesc" rows="2" placeholder="t.ex. Personal till kansliet"></textarea></div>
+                <div class="text-danger small mt-2" id="stfSlotError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="stfSaveSlot()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Skicka funktionärsförfrågan modal -->
+<div class="modal fade" id="stfRequestModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-send me-2"></i>Skicka funktionärsförfrågan</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-muted small mb-2" id="stfReqAudience"></div>
+                <div class="mb-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="stfReqMode" id="stfReqRelay" value="Relay" checked onchange="stfReqModeChanged()">
+                        <label class="form-check-label" for="stfReqRelay"><strong>Till klubb-/kretsansvariga</strong> — de distribuerar vidare <span class="badge bg-light text-dark border" id="stfReqRelayCount"></span></label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="stfReqMode" id="stfReqDirect" value="Direct" onchange="stfReqModeChanged()">
+                        <label class="form-check-label" for="stfReqDirect"><strong>Direkt till medlemmar</strong> (push + e-post) <span class="badge bg-light text-dark border" id="stfReqDirectCount"></span></label>
+                        <div class="form-text" id="stfReqDirectNote"></div>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold">Meddelande (valfritt)</label>
+                    <textarea class="form-control" id="stfReqMessage" rows="2" placeholder="t.ex. Vi behöver markörer och kassa till lördagens tävling."></textarea>
+                </div>
+                <div class="small text-muted" id="stfReqLastSent"></div>
+                <div class="text-danger small mt-1" id="stfReqError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="stfReqSendBtn" onclick="stfSendRequest()"><i class="bi bi-send me-1"></i>Skicka</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var compId = @competitionId;
@@ -289,6 +368,7 @@
     var groups = [];       // current roster groups
     var modal = null;
     var searchTimer = null;
+    var collapsedGroups = {};  // roleKey -> true when a role group is manually collapsed (survives polls)
 
     var STATUS_LABEL = { Planned: 'Planerad', Invited: 'Inbjuden', Accepted: 'Accepterad', Declined: 'Avböjt', Confirmed: 'Bekräftad' };
     var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-primary', Declined: 'bg-danger', Confirmed: 'bg-success' };
@@ -296,6 +376,42 @@
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function roleByKey(k) { for (var i = 0; i < roles.length; i++) if (roles[i].roleKey === k) return roles[i]; return null; }
+
+    // Jump between the three sub-views (used by cross-links, e.g. the coverage summary on the roster tab).
+    window.bemGo = function (id) {
+        var el = document.querySelector('#bemSubNav [data-bs-target="#' + id + '"]');
+        if (el && window.bootstrap) bootstrap.Tab.getOrCreateInstance(el).show();
+    };
+
+    // ---- roster filtering + group collapse (keeps 100+ funktionärer manageable) ----
+    function activeFilter() {
+        function v(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+        return { q: v('stfFilter').trim().toLowerCase(), role: v('stfFilterRole'), pass: v('stfFilterPass'), status: v('stfFilterStatus') };
+    }
+    function filterActive(f) { return !!(f.q || f.role || f.pass || f.status); }
+    function matchesFilter(a, g, f) {
+        if (f.role && g.roleKey !== f.role) return false;
+        if (f.pass && String(a.passId || '') !== f.pass) return false;
+        if (f.status && a.status !== f.status) return false;
+        if (f.q) {
+            var hay = ((a.displayName || '') + ' ' + (a.functionTitle || '') + ' ' + (a.scopeLabel || '') + ' '
+                + (a.note || '') + ' ' + (a.phone || '') + ' ' + (a.passLabel || '') + ' ' + (g.roleName || '')).toLowerCase();
+            if (hay.indexOf(f.q) === -1) return false;
+        }
+        return true;
+    }
+    function populateFilterSelects() {
+        var rsel = document.getElementById('stfFilterRole');
+        if (rsel) { var cur = rsel.value; rsel.innerHTML = '<option value="">Alla roller</option>' + roles.map(function (g) { return '<option value="' + g.roleKey + '">' + esc(g.roleName) + '</option>'; }).join(''); rsel.value = cur; }
+        var psel = document.getElementById('stfFilterPass');
+        if (psel) { var curp = psel.value; psel.innerHTML = '<option value="">Alla skift</option>' + passes.map(function (p) { return '<option value="' + p.id + '">' + esc(p.displayLabel) + '</option>'; }).join(''); psel.value = curp; }
+    }
+    window.stfToggleGroup = function (key) { if (!key) return; collapsedGroups[key] = !collapsedGroups[key]; renderRoster(); };
+    window.stfExpandAll = function (expand) { groups.forEach(function (g) { if (g.roleKey) collapsedGroups[g.roleKey] = !expand; }); renderRoster(); };
+    window.stfClearFilter = function () {
+        ['stfFilter', 'stfFilterRole', 'stfFilterPass', 'stfFilterStatus'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+        renderRoster();
+    };
 
     // "Vad behövs" — the kit/briefing checklist for a role (P2 item 7), shown per role group + in the dialog.
     function needsHtml(g, isCatchAll) {
@@ -314,6 +430,7 @@
                           .map(function (g) { return g; });
             renderRoster();
             populateRoleSelect();
+            populateFilterSelects();
             renderNeedsEditor();   // roles now known → (re)render the crew-needs inputs
             loadCoverage();        // keep coverage live as assignments change
         } catch (e) {
@@ -323,27 +440,37 @@
 
     function renderRoster() {
         var host = document.getElementById('stfRoster');
-        var total = 0;
+        var f = activeFilter();
+        var isFiltering = filterActive(f);
+        var total = 0, shown = 0, shownGroups = 0;
         var html = groups.map(function (g) {
-            var items = g.assignments || [];
-            total += items.length;
             var isCatchAll = g.roleKey && g.roleKey.charAt(0) === '_';
+            var allItems = g.assignments || [];
+            total += allItems.length;
+            var items = allItems.filter(function (a) { return matchesFilter(a, g, f); });
+            // While filtering, hide role groups with no matching rows so the result set is tight.
+            if (isFiltering && !items.length) return '';
+            shown += items.length; shownGroups++;
+            var collapsed = !isFiltering && !!collapsedGroups[g.roleKey];   // filtering forces groups open
+            var chevron = '<i class="bi bi-chevron-' + (collapsed ? 'right' : 'down') + ' me-1 text-muted small"></i>';
             var addBtn = isCatchAll ? '' :
-                '<button type="button" class="btn btn-outline-primary btn-sm" onclick="stfOpenAdd(\'' + g.roleKey + '\')"><i class="bi bi-plus-lg me-1"></i>Lägg till ' + esc(g.roleName.toLowerCase()) + '</button>';
+                '<button type="button" class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation();stfOpenAdd(\'' + g.roleKey + '\')"><i class="bi bi-plus-lg me-1"></i>Lägg till ' + esc(g.roleName.toLowerCase()) + '</button>';
+            var countBadge = (isFiltering && items.length !== allItems.length) ? (items.length + '/' + allItems.length) : String(allItems.length);
             var body = items.length
                 ? items.map(rowHtml).join('')
                 : '<div class="text-muted small py-2">Ingen tilldelad ännu.</div>';
             return '<div class="card mb-3">'
-                + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
-                + '<span class="fw-semibold">' + esc(g.rolePlural || g.roleName) + ' <span class="badge bg-light text-dark ms-1">' + items.length + '</span></span>'
+                + '<div class="card-header d-flex justify-content-between align-items-center py-2" style="cursor:pointer" onclick="stfToggleGroup(\'' + g.roleKey + '\')" title="Klicka för att fälla ihop/expandera">'
+                + '<span class="fw-semibold">' + chevron + esc(g.rolePlural || g.roleName) + ' <span class="badge bg-light text-dark ms-1">' + countBadge + '</span></span>'
                 + addBtn
                 + '</div>'
-                + '<div class="card-body py-2">'
+                + '<div class="card-body py-2"' + (collapsed ? ' style="display:none"' : '') + '>'
                 + (g.description && !isCatchAll ? '<div class="text-muted small mb-1">' + esc(g.description) + '</div>' : '')
                 + needsHtml(g, isCatchAll)
                 + body
                 + '</div></div>';
         }).join('');
+        if (isFiltering && !shownGroups) html = '<div class="text-muted py-4 text-center"><i class="bi bi-search me-1"></i>Inga funktionärer matchar filtret.</div>';
         host.innerHTML = html || '<div class="text-muted">Inga roller för denna gren.</div>';
         var c = document.getElementById('stfCount');
         if (c) {
@@ -351,6 +478,12 @@
             c.innerHTML = '<span title="Flera kan bemanna samtidigt — uppdateras automatiskt"><i class="bi bi-people me-1"></i>'
                 + (total > 0 ? (total + ' tilldelade · ') : '') + 'uppdaterad ' + t + '</span>';
         }
+        var badge = document.getElementById('stfRosterBadge');
+        if (badge) { if (total > 0) { badge.textContent = total; badge.style.display = ''; } else { badge.style.display = 'none'; } }
+        var fc = document.getElementById('stfFilterCount');
+        if (fc) fc.textContent = isFiltering ? ('Visar ' + shown + ' av ' + total) : '';
+        var clr = document.getElementById('stfFilterClear');
+        if (clr) clr.style.display = isFiltering ? '' : 'none';
     }
 
     function rowHtml(a) {
@@ -680,13 +813,14 @@
         } catch (e) { passes = []; }
         renderPassList();
         populatePassSelect();
+        populateFilterSelects();
         await loadNeeds();
         await loadCoverage();
     }
 
     function renderPassList() {
         var host = document.getElementById('stfPassList'); if (!host) return;
-        if (!passes.length) { host.innerHTML = '<span class="text-muted small fst-italic">Inga pass ännu. Lägg till pass (t.ex. Lör FM 06–13, Lör EM 13–20).</span>'; return; }
+        if (!passes.length) { host.innerHTML = '<span class="text-muted small fst-italic">Inga skift ännu. Lägg till skift (t.ex. Lör FM 06–13, Lör EM 13–20).</span>'; return; }
         var badges = passes.map(function (p) {
             return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1 me-1 mb-1" style="font-weight:500">'
                 + '<i class="bi bi-calendar2-week me-1"></i>' + esc(p.displayLabel)
@@ -697,7 +831,7 @@
         var copyCtl = '';
         if (passes.length >= 2) {
             var opts = passes.map(function (p) { return '<option value="' + p.id + '">' + esc(p.displayLabel) + '</option>'; }).join('');
-            copyCtl = '<div class="input-group input-group-sm mt-1" style="max-width:520px" title="Kopiera bemanningen från ett pass till ett annat">'
+            copyCtl = '<div class="input-group input-group-sm mt-1" style="max-width:520px" title="Kopiera bemanningen från ett skift till ett annat">'
                 + '<span class="input-group-text">Kopiera bemanning</span>'
                 + '<select class="form-select" id="stfCopyFrom">' + opts + '</select>'
                 + '<span class="input-group-text">→</span>'
@@ -710,8 +844,8 @@
     window.stfCopyPass = async function () {
         var from = parseInt(document.getElementById('stfCopyFrom').value, 10) || 0;
         var to = parseInt(document.getElementById('stfCopyTo').value, 10) || 0;
-        if (!from || !to || from === to) { alert('Välj två olika pass.'); return; }
-        if (!confirm('Kopiera bemanningen till det andra passet? Personer som redan finns där hoppas över.')) return;
+        if (!from || !to || from === to) { alert('Välj två olika skift.'); return; }
+        if (!confirm('Kopiera bemanningen till det andra skiftet? Personer som redan finns där hoppas över.')) return;
         var r = await fetch('/umbraco/surface/Staffing/CopyPassAssignments', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify({ competitionId: compId, fromPassId: from, toPassId: to }) });
         var d = await r.json();
         if (d.success) { alert(d.copied + ' personer kopierade.'); await loadRoster(); await loadCoverage(); }
@@ -755,7 +889,7 @@
     };
 
     window.stfDeletePass = async function (id) {
-        if (!confirm('Ta bort passet? Personer kopplade till passet blir opasslagda.')) return;
+        if (!confirm('Ta bort skiftet? Personer kopplade till skiftet blir opasslagda.')) return;
         var r = await fetch('/umbraco/surface/Staffing/DeletePass', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify({ id: id, competitionId: compId }) });
         var d = await r.json();
         if (d.success) { await loadPasses(); await loadRoster(); }
@@ -814,10 +948,23 @@
         return 'bg-danger-subtle text-danger-emphasis';
     }
 
+    // Glanceable coverage line shown on the Funktionärer tab (deep-links into Behov & täckning).
+    function renderCovSummary(d) {
+        var sum = document.getElementById('stfCovSummary'); if (!sum) return;
+        if (d && d.hasNeeds && (d.passes || []).length && d.totalNeeded > 0) {
+            var cls = (d.totalFilled >= d.totalNeeded) ? 'text-success' : (d.totalFilled > 0 ? 'text-warning-emphasis' : 'text-danger');
+            sum.innerHTML = '<i class="bi bi-people-fill me-1"></i>Bemannat <span class="fw-semibold ' + cls + '">' + d.totalFilled + '/' + d.totalNeeded + '</span>'
+                + ' · <a href="#" onclick="bemGo(\'bem-behov\');return false;">täckning per skift</a>';
+        } else {
+            sum.innerHTML = '<a href="#" onclick="bemGo(\'bem-behov\');return false;"><i class="bi bi-sliders me-1"></i>Sätt skift &amp; bemanningsbehov</a>';
+        }
+    }
+
     function renderCoverage(d) {
+        renderCovSummary(d);
         var host = document.getElementById('stfCoverage');
-        if (!(d.passes || []).length) { host.innerHTML = '<div class="text-muted small fst-italic">Lägg till pass för att se täckning.</div>'; return; }
-        if (!d.hasNeeds) { host.innerHTML = '<div class="text-muted small fst-italic">Sätt bemanningsbehov ovan för att se täckning per pass.</div>'; return; }
+        if (!(d.passes || []).length) { host.innerHTML = '<div class="text-muted small fst-italic">Lägg till skift för att se täckning.</div>'; return; }
+        if (!d.hasNeeds) { host.innerHTML = '<div class="text-muted small fst-italic">Sätt bemanningsbehov ovan för att se täckning per skift.</div>'; return; }
         var html = '<div class="small mb-2">Totalt bemannat: <strong>' + d.totalFilled + '/' + d.totalNeeded + '</strong></div>';
         d.passes.forEach(function (p) {
             html += '<div class="mb-3"><div class="fw-semibold">' + esc(p.label || p.date) + (p.timeLabel ? ' <span class="text-muted">' + esc(p.timeLabel) + '</span>' : '') + ' <span class="badge bg-light text-dark border">' + p.filled + '/' + p.needed + '</span></div>';
@@ -1034,6 +1181,12 @@
         });
     }
     initPickers();
+
+    // Live-filter the roster as the admin types/picks (toolbar is static, so bind once).
+    ['stfFilter', 'stfFilterRole', 'stfFilterPass', 'stfFilterStatus'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) { el.addEventListener('input', renderRoster); el.addEventListener('change', renderRoster); }
+    });
 
     loadRoster();
     loadScopes();
