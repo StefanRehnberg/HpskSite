@@ -243,6 +243,9 @@
                 <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
                     <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
                 </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="showMergeAnalysisModal(event)" id="btnAnalyzeMerges">
+                    <i class="bi bi-intersect me-1"></i>Sammanfoga klasser
+                </button>
                 <span class="badge bg-warning fs-6 px-3 py-2" id="resultsListStatusBadge" style="display: none;">
                     <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
                 </span>
@@ -631,6 +634,50 @@ async function createResultsList(event) {
     } finally {
         button.innerHTML = originalText;
         button.disabled = false;
+    }
+}
+
+// Dedicated "Sammanfoga klasser" button. Unlike "Uppdatera" (which only pops the
+// merge modal automatically when a class has < 5 deltagare), this always opens the
+// modal so an admin can review/merge classes on demand — including manually merging
+// classes that each already have ≥ 5 participants.
+async function showMergeAnalysisModal(event) {
+    if (event) event.stopPropagation();
+
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) { alert('Ingen tävling vald.'); return; }
+
+    const button = event?.target?.closest('button');
+    const originalText = button ? button.innerHTML : '';
+    if (button) {
+        button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyserar...';
+        button.disabled = true;
+    }
+
+    try {
+        const resp = await fetch(`/umbraco/surface/CompetitionResults/AnalyzeClassMerges?competitionId=${competitionId}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            alert('Fel vid analys: ' + (data.message || 'Okänt fel'));
+            return;
+        }
+
+        if (!data.classes || data.classes.length === 0) {
+            alert('Det finns inga resultat att slå samman ännu. Klicka på "Uppdatera" för att skapa resultatlistan först.');
+            return;
+        }
+
+        renderMergeModal(data.classes, data.suggestions || []);
+        new bootstrap.Modal(document.getElementById('classMergeModal')).show();
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid analys av klasser.');
+    } finally {
+        if (button) {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
     }
 }
 
@@ -2588,6 +2635,13 @@ function handleShooterClick(e) {
 }
 
 function handleShooterKeydown(e) {
+    // Don't hijack keystrokes when the user is typing in an editable field
+    // (e.g. the "Mitt intervall" boxes in the settings modal). Without this
+    // guard the scoring keypad swallows every digit before it reaches the input.
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) {
+        return;
+    }
     // Handle number keys and X
     if (e.key >= '0' && e.key <= '9') {
         e.preventDefault();

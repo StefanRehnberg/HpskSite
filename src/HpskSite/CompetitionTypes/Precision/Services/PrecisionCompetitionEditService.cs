@@ -342,6 +342,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "allowSelfReporting" => "allowSelfReporting",
                 "allowTeams" => "allowTeams",
                 "teamRegistrationFee" => "teamRegistrationFee",
+                "teamResultSeriesCount" => "teamResultSeriesCount",
                 "allowStafett" => "allowStafett",
                 "stafettRegistrationFee" => "stafettRegistrationFee",
                 // Fältskytte fields
@@ -369,7 +370,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
             return fieldName switch
             {
-                "maxParticipants" or "numberOfSeriesOrStations" or "numberOfFinalSeries" or "clubId" =>
+                "maxParticipants" or "numberOfSeriesOrStations" or "numberOfFinalSeries" or "teamResultSeriesCount" or "clubId" =>
                     int.TryParse(value.ToString(), out var intVal) && intVal >= 0 ? intVal : (object)null,
 
                 "registrationFee" or "teamRegistrationFee" or "stafettRegistrationFee"

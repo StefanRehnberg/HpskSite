@@ -564,18 +564,26 @@ namespace HpskSite.Services
                     }
                     else
                     {
-                        // Standard: sum of individual scores (first min(7, numberOfSeries) series)
-                        var seriesToCount = Math.Min(7, numberOfSeries);
+                        // Standard: sum of individual scores over the first `numberOfSeries`
+                        // series (resolved by the controller from the organiser's
+                        // "Antal serier i lagresultat" setting, or the qualification series
+                        // count by default). Entries are ordered by SeriesNumber, so taking
+                        // the first N naturally excludes any finals series.
+                        var seriesToCount = numberOfSeries > 0 ? numberOfSeries : 7;
                         var memberResults = new List<TeamMemberResult>();
                         int totalScore = 0;
                         int totalXCount = 0;
                         bool allComplete = true;
 
+                        // Duell / Milsnabb / MagnumPrecision / NationellHelmatch store results
+                        // in their own tables (all inherit PrecisionResultEntry's schema), so a
+                        // hard-coded PrecisionResultEntry query zeroed their team totals.
+                        var resultTable = GetResultTableName(competitionType);
+
                         foreach (var member in coreMembers)
                         {
-                            // Query by competition type - use base PrecisionResultEntry for all standard types
                             var entries = await db.FetchAsync<PrecisionResultEntry>(
-                                $"WHERE CompetitionId = @0 AND MemberId = @1 ORDER BY SeriesNumber",
+                                $"SELECT * FROM {resultTable} WHERE CompetitionId = @0 AND MemberId = @1 ORDER BY SeriesNumber",
                                 competitionId, member.MemberId);
 
                             if (entries.Any())

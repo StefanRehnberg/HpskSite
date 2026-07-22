@@ -723,6 +723,7 @@ namespace HpskSite.Controllers
                     swishNumber = competition.GetValue<string>("swishNumber") ?? "",
                     allowTeams = competition.GetValue<bool>("allowTeams"),
                     teamRegistrationFee = competition.GetValue<string>("teamRegistrationFee") ?? "0",
+                    teamResultSeriesCount = competition.GetValue<int>("teamResultSeriesCount"),
                     allowStafett = competition.GetValue<bool>("allowStafett"),
                     stafettRegistrationFee = competition.GetValue<string>("stafettRegistrationFee") ?? "0",
                     competitionManagers = GetCompetitionManagerIds(competition),
@@ -983,7 +984,7 @@ namespace HpskSite.Controllers
                             }
                         }
                         else if ((field.Key == "maxParticipants" || field.Key == "numberOfSeriesOrStations" ||
-                                  field.Key == "numberOfFinalSeries" || field.Key == "clubId" || field.Key == "rangeId") && value != null)
+                                  field.Key == "numberOfFinalSeries" || field.Key == "teamResultSeriesCount" || field.Key == "clubId" || field.Key == "rangeId") && value != null)
                         {
                             // Handle JsonElement numbers
                             if (value is System.Text.Json.JsonElement jsonElement)

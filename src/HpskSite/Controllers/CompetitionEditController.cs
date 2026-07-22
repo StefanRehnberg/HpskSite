@@ -126,6 +126,7 @@ namespace HpskSite.Controllers
                     externalRegistrationEmail = content.GetValue<string>("externalRegistrationEmail") ?? "",
                     allowTeams = content.GetValue<bool>("allowTeams"),
                     teamRegistrationFee = content.GetValue<string>("teamRegistrationFee") ?? "0",
+                    teamResultSeriesCount = content.GetValue<int>("teamResultSeriesCount"),
                     allowStafett = content.GetValue<bool>("allowStafett"),
                     stafettRegistrationFee = content.GetValue<string>("stafettRegistrationFee") ?? "0",
                     seriesId = isInSeries ? parent!.Id : (int?)null,

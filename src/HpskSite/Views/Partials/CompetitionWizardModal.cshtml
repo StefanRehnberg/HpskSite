@@ -399,7 +399,7 @@
                         <hr class="my-3">
 
                         <div class="mb-3" id="wizard_teamFeeGroup">
-                            <div class="d-flex align-items-center gap-3 mb-2">
+                            <div class="d-flex align-items-center gap-3 mb-2 flex-wrap">
                                 <div class="form-check mb-0">
                                     <input type="checkbox" class="form-check-input" id="wizard_allowTeams" name="allowTeams" onchange="onWizardAllowTeamsChange()">
                                     <label class="form-check-label" for="wizard_allowTeams">
@@ -410,8 +410,14 @@
                                     <input type="number" class="form-control" id="wizard_teamRegistrationFee" name="teamRegistrationFee" min="0" value="0" disabled placeholder="Lagavgift">
                                     <span class="input-group-text">kr</span>
                                 </div>
+                                <div class="input-group" style="max-width: 260px;">
+                                    <span class="input-group-text">Serier i lagresultat</span>
+                                    <input type="number" class="form-control" id="wizard_teamResultSeriesCount" name="teamResultSeriesCount" min="0" step="1" disabled placeholder="auto">
+                                </div>
                             </div>
-                            <small class="form-text text-muted">0 för ingen lagavgift</small>
+                            <small class="form-text text-muted">
+                                0 för ingen lagavgift. Serier i lagresultat: lämna tomt för automatiskt (kvalseriernas antal — t.ex. 7 för en 7+3-tävling); ange ett värde för att styra det själv.
+                            </small>
                         </div>
 
                         <div class="mb-3 d-none" id="wizard_stafettFeeGroup">
@@ -1199,6 +1205,8 @@ function resetWizard() {
 
     // Reset team fee disabled state
     document.getElementById('wizard_teamRegistrationFee').disabled = true;
+    const wizardTeamSeries = document.getElementById('wizard_teamResultSeriesCount');
+    if (wizardTeamSeries) { wizardTeamSeries.disabled = true; wizardTeamSeries.value = ''; }
 
     // Reset stafett state
     document.getElementById('wizard_stafettRegistrationFee').disabled = true;
@@ -1428,6 +1436,11 @@ function onWizardAllowTeamsChange() {
     const feeInput = document.getElementById('wizard_teamRegistrationFee');
     feeInput.disabled = !checked;
     if (!checked) feeInput.value = '0';
+    const seriesInput = document.getElementById('wizard_teamResultSeriesCount');
+    if (seriesInput) {
+        seriesInput.disabled = !checked;
+        if (!checked) seriesInput.value = '';
+    }
 }
 
 function onWizardIsClubOnlyChange() {
@@ -1944,6 +1957,13 @@ function submitWizard() {
             fields[field] = false;
         }
     });
+
+    // Team result series count: empty = auto (send 0 so the int property stores cleanly)
+    if (!('teamResultSeriesCount' in fields) || String(fields.teamResultSeriesCount).trim() === '') {
+        fields.teamResultSeriesCount = 0;
+    } else {
+        fields.teamResultSeriesCount = parseInt(fields.teamResultSeriesCount, 10) || 0;
+    }
 
     // Competition type
     const typeSelect = document.getElementById('wizard_competitionType');

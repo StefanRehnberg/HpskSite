@@ -370,7 +370,7 @@ namespace HpskSite.Controllers
             try
             {
                 var competitionType = GetCompetitionType(competitionId);
-                var numberOfSeries = GetNumberOfSeries(competitionId);
+                var numberOfSeries = GetTeamResultSeriesCount(competitionId);
 
                 var results = await _teamService.CalculateTeamResultsAsync(
                     competitionId, competitionType, numberOfSeries);
@@ -520,7 +520,39 @@ namespace HpskSite.Controllers
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
                 {
                     var comp = ctx.Content.GetById(competitionId);
-                    return comp?.Value<int>("numberOfSeriesOrStations") ?? 7;
+                    // Value<int> returns 0 (not null) when the property is unset/empty,
+                    // so `?? 7` never fires. A 0 here caps the team sum at
+                    // Math.Min(7, 0) = 0 → team totals show as 0. Treat 0 as unset.
+                    var n = comp?.Value<int>("numberOfSeriesOrStations") ?? 0;
+                    return n > 0 ? n : 7;
+                }
+            }
+            catch { }
+            return 7;
+        }
+
+        /// <summary>
+        /// How many series count toward a team's total. Organiser can set this explicitly
+        /// via the "Antal serier i lagresultat" field (e.g. a 7+3 finals comp counts only the
+        /// 7 qualifying series). When unset (0) we default to the qualification series count
+        /// (numberOfSeriesOrStations is the TOTAL incl. finals — see Competition.cs
+        /// QualificationSeriesCount), so finals series never inflate team totals by default.
+        /// </summary>
+        private int GetTeamResultSeriesCount(int competitionId)
+        {
+            try
+            {
+                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
+                {
+                    var comp = ctx.Content.GetById(competitionId);
+                    var explicitCount = comp?.Value<int>("teamResultSeriesCount") ?? 0;
+                    if (explicitCount > 0) return explicitCount;
+
+                    var total = comp?.Value<int>("numberOfSeriesOrStations") ?? 0;
+                    var finals = comp?.Value<int>("numberOfFinalSeries") ?? 0;
+                    var qualifying = total - finals;
+                    if (qualifying > 0) return qualifying;
+                    if (total > 0) return total;
                 }
             }
             catch { }

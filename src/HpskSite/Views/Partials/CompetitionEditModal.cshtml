@@ -326,8 +326,11 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    @{
+                        var teamResultSeriesCount = competition?.Value<int>("teamResultSeriesCount") ?? 0;
+                    }
                     <div class="mb-3">
-                        <div class="d-flex align-items-center gap-3 mb-2">
+                        <div class="d-flex align-items-center gap-3 mb-2 flex-wrap">
                             <div class="form-check mb-0">
                                 <input class="form-check-input" type="checkbox" id="allowTeams" name="allowTeams" @(allowTeams ? "checked" : "") onchange="onEditAllowTeamsChange()">
                                 <label class="form-check-label" for="allowTeams">
@@ -338,7 +341,15 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <input type="number" class="form-control" id="teamRegistrationFee" name="teamRegistrationFee" value="@teamRegFee" min="0" step="0.01" @(!allowTeams ? "disabled" : "") placeholder="Lagavgift">
                                 <span class="input-group-text">kr</span>
                             </div>
+                            <div class="input-group" style="max-width: 260px;">
+                                <span class="input-group-text">Serier i lagresultat</span>
+                                <input type="number" class="form-control" id="teamResultSeriesCount" name="teamResultSeriesCount" value="@(teamResultSeriesCount > 0 ? teamResultSeriesCount.ToString() : "")" min="0" step="1" @(!allowTeams ? "disabled" : "") placeholder="auto">
+                            </div>
                         </div>
+                        <small class="form-text text-muted d-block">
+                            Antal serier som räknas in i lagresultatet. Lämna tomt för att använda kvalseriernas antal automatiskt
+                            (t.ex. en tävling med 7 kval + 3 finalserier ger 7). Ange ett värde för att styra det själv.
+                        </small>
                     </div>
 
                     <div class="mb-3 d-none" id="edit_stafettFeeGroup">
@@ -976,6 +987,7 @@ window.populateEditModal = function(competition) {
     setFieldValue('numberOfFinalSeries', competition.numberOfFinalSeries || 0);
     setFieldValue('swishNumber', competition.swishNumber || '');
     setFieldValue('teamRegistrationFee', competition.teamRegistrationFee || 0);
+    setFieldValue('teamResultSeriesCount', competition.teamResultSeriesCount > 0 ? competition.teamResultSeriesCount : '');
     setFieldValue('juniorRegistrationFee', competition.juniorRegistrationFee || 0);
     setFieldValue('edit_subCompetitionFee', competition.subCompetitionFee || 0);
     const subCompMode = competition.subCompetitionFeeMode || 'perClass';
@@ -1211,6 +1223,13 @@ function onEditAllowTeamsChange() {
             teamFeeField.value = 0;
         }
     }
+    const teamSeriesField = document.getElementById('teamResultSeriesCount');
+    if (teamSeriesField) {
+        teamSeriesField.disabled = !allowTeams;
+        if (!allowTeams) {
+            teamSeriesField.value = '';
+        }
+    }
 }
 
 function onEditAllowStafettChange() {
@@ -1339,6 +1358,14 @@ function saveCompetition() {
             fields[field] = false;
         }
     });
+
+    // Team result series count: empty = auto. Normalize to an int (0 = auto) so the
+    // int property stores cleanly and an emptied field clears back to auto.
+    if (!('teamResultSeriesCount' in fields) || String(fields.teamResultSeriesCount).trim() === '') {
+        fields.teamResultSeriesCount = 0;
+    } else {
+        fields.teamResultSeriesCount = parseInt(fields.teamResultSeriesCount, 10) || 0;
+    }
 
     const requiredDateFields = ['competitionDate', 'registrationOpenDate', 'registrationCloseDate'];
     for (let field of requiredDateFields) {
