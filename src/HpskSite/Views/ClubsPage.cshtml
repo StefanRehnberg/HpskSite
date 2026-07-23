@@ -176,8 +176,12 @@ function displayClubs(clubs) {
         // Always navigate to the club's page on pistol.nu, regardless of any
         // external "Webbplats" (clubUrl) the club may have entered. The external
         // URL is informational only and shown on the club page itself.
+        // Use the club node's canonical URL (resolves wherever the node actually lives —
+        // regional or legacy root). Only fall back to concatenating the current page path
+        // with the slug when the API didn't supply a URL, since that guess 404s for any club
+        // whose regionalFederation tag doesn't match its tree position.
         const clubSlug = club.urlSegment || club.name.toLowerCase().replace(/\s+/g, '-');
-        const navigationUrl = `${currentPageUrl}/${clubSlug}`;
+        const navigationUrl = club.url || `${currentPageUrl}/${clubSlug}`;
         const linkTarget = '';
 
         const logoHtml = club.logoUrl

@@ -1131,6 +1131,7 @@ namespace HpskSite.Controllers
                         contactEmail = c.ContactEmail,
                         contactPhone = c.ContactPhone,
                         urlSegment = c.UrlSegment,
+                        url = c.Url,
                         isActive = c.IsActive,
                         clubId = c.ClubId,
                         regionalFederation = c.RegionalFederation,
@@ -1734,6 +1735,9 @@ namespace HpskSite.Controllers
                         City = clubNode.Value<string>("city") ?? "",
                         PostalCode = clubNode.Value<string>("postalCode") ?? "",
                         UrlSegment = clubNode.UrlSegment,
+                        // Canonical URL from the node's real tree position (regional or legacy-root),
+                        // so club links resolve regardless of where the node physically lives.
+                        Url = clubNode.Url(),
                         IsActive = clubNode.IsPublished(),
                         MemberCount = 0,  // Not calculated for performance - load on demand
                         AdminCount = 0,   // Not calculated for performance - load on demand

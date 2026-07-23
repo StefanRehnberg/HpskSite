@@ -13,6 +13,7 @@ namespace HpskSite.Models.ViewModels
         public string City { get; set; } = "";
         public string PostalCode { get; set; } = "";
         public string UrlSegment { get; set; } = "";
+        public string Url { get; set; } = "";  // Canonical tree-derived URL of the club node (never string-concatenate this)
         public bool IsActive { get; set; } = true;
         public int MemberCount { get; set; } = 0;
         public int AdminCount { get; set; } = 0;
