@@ -237,6 +237,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string ListDate { get; set; } = "";  // Optional date (yyyy-MM-dd) — multi-day comps: same time on different days
         public List<string> CoveredClasses { get; set; } = new();  // Registration class patterns (e.g., ["A-D 21","A-H 35"])
         public List<SpringskytteStartListEntry> Starters { get; set; } = new();
+
+        // ===== Start-number assignment (per-list running sequence) =====
+        // Numbering is a single running sequence within each list (NOT per weapon class), and numbers
+        // are globally unique across the competition. StartNumberBase is where THIS list starts; when
+        // ContinueFromPrevious is true the base is derived from the previous list's last number instead
+        // (auto-follow-on). Field initializers double as the legacy-config defaults: an old list missing
+        // these keys deserializes to base 1 + follow-on, i.e. one continuous 1..N sequence across lists.
+        public int StartNumberBase { get; set; } = 1;
+        public bool ContinueFromPrevious { get; set; } = true;
     }
 
     public class SpringskytteStartListRequest
@@ -256,6 +265,24 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
     {
         public int CompetitionId { get; set; }
         public int NodeId { get; set; }
+    }
+
+    /// <summary>
+    /// Renumber all individual (non-stafett) start lists with a per-list running sequence.
+    /// The Lists are applied in the order given (which is the modal's display order = start-time order);
+    /// each list either starts at its own StartNumberBase or continues from the previous list's last number.
+    /// </summary>
+    public class SpringskytteRenumberRequest
+    {
+        public int CompetitionId { get; set; }
+        public List<SpringskytteRenumberListSetting> Lists { get; set; } = new();
+    }
+
+    public class SpringskytteRenumberListSetting
+    {
+        public int NodeId { get; set; }
+        public int StartNumberBase { get; set; } = 1;
+        public bool ContinueFromPrevious { get; set; }
     }
 
     /// <summary>Update ONLY a start list's name + date (never rebuilds/reshuffles the starters).</summary>

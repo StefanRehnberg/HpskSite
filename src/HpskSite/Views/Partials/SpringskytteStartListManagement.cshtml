@@ -21,17 +21,17 @@
                         <i class="bi bi-plus-lg me-1"></i>Ny startlista
                     </button>
                     <button class="btn btn-outline-secondary btn-sm" id="springNumberingBtn" style="display:none"
-                        onclick="springRenumberAll()" title="Tilldela löpande startnummer per vapengrupp över alla listor (unika nummer)">
+                        onclick="springOpenRenumberModal()" title="Sätt startnummer per lista — välj var varje lista börjar eller låt den fortsätta på föregående">
                         <i class="bi bi-sort-numeric-down me-1"></i>Numrera om
                     </button>
                 </div>
             </div>
         </div>
         <div class="card-body">
-            <!-- Duplicate start-number warning: a number must be unique within a weapon class. -->
+            <!-- Duplicate start-number warning: a number must be unique across the whole competition. -->
             <div class="alert alert-danger d-flex justify-content-between align-items-center d-none" id="springDupWarn">
                 <span id="springDupWarnText"></span>
-                <button class="btn btn-danger btn-sm ms-3" onclick="springRenumberAll()"><i class="bi bi-sort-numeric-down me-1"></i>Numrera om nu</button>
+                <button class="btn btn-danger btn-sm ms-3" onclick="springOpenRenumberModal()"><i class="bi bi-sort-numeric-down me-1"></i>Numrera om nu</button>
             </div>
             <div id="springListCardsContainer">
                 <div class="text-center py-4" id="springLoadingIndicator">
@@ -149,6 +149,36 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" id="springEditStarterSaveBtn" onclick="springSaveStarterEdit()">
                     <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Renumber modal: per-list start number + follow-on, with a live preview of the resulting ranges. -->
+<div class="modal fade" id="springRenumberModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-sort-numeric-down me-2"></i>Numrera om startlistor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Sätt vilket startnummer varje lista börjar på. Bocka i <em>Fortsätt från föregående</em>
+                    så fortsätter listan direkt på numret efter föregående lista. Numren blir unika i hela tävlingen.
+                </p>
+                <div id="springRenumberRows">
+                    <div class="text-center py-3 text-muted">
+                        <div class="spinner-border spinner-border-sm" role="status"></div> Laddar…
+                    </div>
+                </div>
+                <div class="alert alert-danger mt-2 mb-0 py-2 d-none" id="springRenumberError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="springRenumberApplyBtn" onclick="springApplyRenumber()">
+                    <i class="bi bi-check-lg me-1"></i>Tilldela startnummer
                 </button>
             </div>
         </div>
@@ -788,12 +818,12 @@ async function springSaveStarterEdit() {
     const makeDns = document.getElementById('springEditStarterDns').checked;
     if (isNaN(startOrder) || startOrder < 0) { fail('Ogiltigt startnummer.'); return; }
 
-    // Client-side duplicate-number guard: unique per weapon class ACROSS ALL lists (server also enforces).
+    // Client-side duplicate-number guard: numbers are GLOBALLY unique across all lists (server also enforces).
     if (startOrder !== springEditCtx.currentOrder) {
         const dup = springLocalCards.some(c => (c.starters || []).some(x =>
             !(x.memberId === springEditCtx.memberId && x.weaponClass === springEditCtx.weaponClass)
-            && x.weaponClass === springEditCtx.weaponClass && x.startOrder === startOrder));
-        if (dup) { fail(`Startnummer ${startOrder} används redan i vapengrupp ${springEditCtx.weaponClass}.`); return; }
+            && x.startOrder === startOrder));
+        if (dup) { fail(`Startnummer ${startOrder} används redan i tävlingen.`); return; }
     }
 
     btn.disabled = true;
@@ -887,40 +917,118 @@ async function springDeleteList(tempId) {
 
 // ===== Renumber & Reset =====
 
-async function springRenumberAll() {
+// Per-list numbering: each list either starts at its own number or continues on the previous one.
+// The modal shows every list in numbering order (by first start time) with a live range preview.
+let springRenumberPlan = [];
+
+async function springOpenRenumberModal() {
+    const rowsEl = document.getElementById('springRenumberRows');
+    const errEl = document.getElementById('springRenumberError');
+    errEl.classList.add('d-none'); errEl.textContent = '';
+    rowsEl.innerHTML = '<div class="text-center py-3 text-muted"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('springRenumberModal')).show();
+    try {
+        const d = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteRenumberPlan?competitionId=${springCompId}`).then(r => r.json());
+        if (!d.success) { rowsEl.innerHTML = `<div class="alert alert-warning mb-0">${escapeHtml(d.message) || 'Kunde inte ladda listor.'}</div>`; return; }
+        springRenumberPlan = d.lists || [];
+        if (!springRenumberPlan.length) { rowsEl.innerHTML = '<div class="alert alert-info mb-0">Inga genererade startlistor att numrera.</div>'; return; }
+        springRenderRenumberRows();
+    } catch (err) {
+        console.error('Error loading renumber plan:', err);
+        rowsEl.innerHTML = '<div class="alert alert-danger mb-0">Ett fel uppstod.</div>';
+    }
+}
+
+function springRenderRenumberRows() {
+    const rowsEl = document.getElementById('springRenumberRows');
+    rowsEl.innerHTML = springRenumberPlan.map((l, idx) => {
+        const meta = [];
+        if (l.firstStartTime) meta.push('första start ' + escapeHtml(String(l.firstStartTime).substring(0, 5)));
+        meta.push((l.starterCount || 0) + ' starter');
+        const cont = idx > 0 && l.continueFromPrevious;
+        return `
+        <div class="border rounded p-2 mb-2">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="flex-grow-1" style="min-width:180px">
+                    <div class="fw-bold">${escapeHtml(l.listName)}${l.listDate ? ' <span class="text-muted small">– ' + escapeHtml(l.listDate) + '</span>' : ''}</div>
+                    <div class="text-muted small">${meta.join(' · ')}</div>
+                </div>
+                <div class="d-flex align-items-center gap-1">
+                    <label class="small mb-0 me-1">Startnr</label>
+                    <input type="number" min="1" class="form-control form-control-sm" style="width:88px"
+                        id="springRnBase_${l.nodeId}" value="${l.startNumberBase || 1}" oninput="springRenumberRecalc()" ${cont ? 'disabled' : ''}>
+                </div>
+                ${idx > 0 ? `
+                <div class="form-check form-switch mb-0" style="min-width:190px">
+                    <input class="form-check-input" type="checkbox" id="springRnCont_${l.nodeId}" ${cont ? 'checked' : ''} onchange="springRenumberRecalc()">
+                    <label class="form-check-label small" for="springRnCont_${l.nodeId}">Fortsätt från föregående</label>
+                </div>` : '<div class="text-muted small fst-italic" style="min-width:190px">Första listan</div>'}
+                <span class="badge bg-secondary" id="springRnRange_${l.nodeId}" style="min-width:64px">—</span>
+            </div>
+        </div>`;
+    }).join('');
+    springRenumberRecalc();
+}
+
+// Walk the lists in order; a "follow-on" list starts one past the previous list's last number.
+function springRenumberRecalc() {
+    let running = 0;
+    springRenumberPlan.forEach((l, idx) => {
+        const contEl = document.getElementById('springRnCont_' + l.nodeId);
+        const baseEl = document.getElementById('springRnBase_' + l.nodeId);
+        const cont = idx > 0 && contEl && contEl.checked;
+        if (baseEl) baseEl.disabled = cont;
+        let base = cont ? running + 1 : Math.max(1, parseInt(baseEl && baseEl.value, 10) || 1);
+        if (cont && baseEl) baseEl.value = base;
+        const count = l.starterCount || 0;
+        const last = count > 0 ? base + count - 1 : base;
+        const rangeEl = document.getElementById('springRnRange_' + l.nodeId);
+        if (rangeEl) rangeEl.textContent = count > 0 ? (count === 1 ? String(base) : `${base}–${last}`) : '—';
+        if (count > 0) running = last;
+    });
+}
+
+async function springApplyRenumber() {
     if (!confirmIfResultsExist('Numrera om startlistor')) return;
-    if (!confirm('Tilldela löpande startnummer per vapengrupp över alla genererade listor?')) return;
+    const btn = document.getElementById('springRenumberApplyBtn');
+    const errEl = document.getElementById('springRenumberError');
+    errEl.classList.add('d-none'); errEl.textContent = '';
 
-    const btn = document.getElementById('springNumberingBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Numrerar...'; }
+    const lists = springRenumberPlan.map((l, idx) => {
+        const contEl = document.getElementById('springRnCont_' + l.nodeId);
+        const baseEl = document.getElementById('springRnBase_' + l.nodeId);
+        return {
+            nodeId: l.nodeId,
+            startNumberBase: Math.max(1, parseInt(baseEl && baseEl.value, 10) || 1),
+            continueFromPrevious: idx > 0 && !!(contEl && contEl.checked)
+        };
+    });
 
+    btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Numrerar...';
     try {
         const response = await fetch('/umbraco/surface/Springskytte/RenumberSpringskytteStartLists', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
-            },
-            body: JSON.stringify(springCompId)
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': springTokenEl() },
+            body: JSON.stringify({ competitionId: parseInt(springCompId, 10), lists })
         });
         const data = await response.json();
         if (data.success) {
-            alert(data.message);
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('springRenumberModal')).hide();
             await springLoadAll();
         } else {
-            alert(data.message || 'Fel vid numrering.');
+            errEl.textContent = data.message || 'Fel vid numrering.'; errEl.classList.remove('d-none');
         }
     } catch (err) {
         console.error('Error renumbering:', err);
-        alert('Ett fel uppstod.');
+        errEl.textContent = 'Ett fel uppstod.'; errEl.classList.remove('d-none');
     } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-numeric-down me-1"></i>Numrera om'; }
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Tilldela startnummer';
     }
 }
 
 async function springResetNumbers() {
     if (!confirmIfResultsExist('Återställ startnummer')) return;
-    if (!confirm('Återställ alla startnummer till listnumrering (1, 2, 3... per lista)?')) return;
+    if (!confirm('Återställ alla startnummer till en löpande följd (1, 2, 3… genom alla listor)?')) return;
 
     const btn = document.getElementById('springNumberingBtn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Återställer...'; }
@@ -956,7 +1064,8 @@ function springUpdateTopButtons() {
     springCheckDuplicateNumbers();
 }
 
-// Start numbers must be unique within a weapon class. Warn loudly if legacy data has duplicates.
+// Start numbers must be unique across the whole competition. Warn loudly if data has duplicates
+// (e.g. legacy per-weapon-class numbering where C#1 and A#1 both exist).
 async function springCheckDuplicateNumbers() {
     const warn = document.getElementById('springDupWarn');
     if (!warn) return;
@@ -964,9 +1073,9 @@ async function springCheckDuplicateNumbers() {
         const d = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStartNumberIssues?competitionId=${springCompId}`).then(r => r.json());
         const dups = (d.success && d.duplicates) ? d.duplicates : [];
         if (dups.length) {
-            const parts = dups.map(x => `vapengrupp ${x.weaponClass} nr ${x.startOrder} (${x.count} skyttar)`);
+            const parts = dups.map(x => `nr ${x.startOrder} (${x.count} skyttar)`);
             document.getElementById('springDupWarnText').innerHTML =
-                `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Dubbla startnummer!</strong> ${parts.join(', ')}. Startnummer måste vara unika inom en vapengrupp — klicka "Numrera om nu".`;
+                `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Dubbla startnummer!</strong> ${parts.join(', ')}. Startnummer måste vara unika i tävlingen — klicka "Numrera om nu".`;
             warn.classList.remove('d-none');
         } else {
             warn.classList.add('d-none');
