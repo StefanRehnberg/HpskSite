@@ -36,7 +36,7 @@
         <div class="card mt-3">
             <div class="card-header py-2 fw-semibold"><i class="bi bi-hand-thumbs-up me-1"></i>Kan du hjälpa till?</div>
             <div class="card-body py-2">
-                <p class="text-muted small mb-2">Bocka för de pass du kan hjälpa till med. Du kan (valfritt) ange vilka tider du kan — flera tider per pass går bra. Skriv gärna en kommentar om vad du kan bidra med, eller vad du inte kan göra.</p>
+                <p class="text-muted small mb-2">Alla pass är förkryssade — <strong>avmarkera de pass du inte kan</strong> hjälpa till med. Du kan (valfritt) ange vilka tider du kan — flera tider per pass går bra. Skriv gärna en kommentar om vad du kan bidra med, eller vad du inte kan göra.</p>
                 <div id="beSlots"><div class="text-muted small">Laddar…</div></div>
                 <div class="mb-2 mt-3">
                     <label class="form-label fw-semibold">Kommentar (valfritt)</label>
@@ -74,6 +74,10 @@
             if (d.mySignup) {
                 q('beComment').value = d.mySignup.comment || '';
                 (d.mySignup.slots || []).forEach(function (c) { checked[c.slotId] = (c.times || []).map(function (t) { return { from: t.from || '', to: t.to || '' }; }); });
+            } else {
+                // Opt-out model: a member who hasn't signed up yet sees every pass pre-checked and
+                // unchecks the ones that don't work (empty times = whole pass).
+                slots.forEach(function (s) { checked[s.id] = []; });
             }
             renderMine(d.assignments || []);
             renderSlots();
