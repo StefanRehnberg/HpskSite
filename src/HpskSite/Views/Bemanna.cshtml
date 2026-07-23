@@ -136,9 +136,13 @@
                 + '<button class="btn btn-outline-danger" type="button" onclick="beRemoveTime(' + slotId + ',' + i + ')"><i class="bi bi-x"></i></button>'
                 + '</div>';
         }).join('');
-        return '<div class="ms-4 mt-2"><div class="small text-muted mb-1">Jag kan (valfritt — lämna tomt = hela passet):</div>'
+        return '<div class="ms-4 mt-2">'
+            + '<div class="d-flex justify-content-between align-items-center gap-2 mb-1">'
+            + '<span class="small text-muted">Jag kan (valfritt — lämna tomt = hela passet):</span>'
+            + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0" type="button" onclick="beAddTime(' + slotId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tid</button>'
+            + '</div>'
             + rows
-            + '<button class="btn btn-sm btn-outline-secondary" type="button" onclick="beAddTime(' + slotId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tid</button></div>';
+            + '</div>';
     }
 
     // Read time inputs from the DOM into state before any re-render (preserve typed values).
