@@ -62,14 +62,15 @@
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
-    // Swedish weekday name for a yyyy-MM-dd date string (capitalised), '' if unparseable.
-    function dayName(dateStr) {
+    // Long Swedish date for a yyyy-MM-dd string, e.g. "Fredag 21 Augusti 2026" (raw string if unparseable).
+    function longDate(dateStr) {
         try {
             var d = new Date(dateStr + 'T00:00:00');
-            if (isNaN(d.getTime())) return '';
-            var n = d.toLocaleDateString('sv-SE', { weekday: 'long' });
-            return n.charAt(0).toUpperCase() + n.slice(1);
-        } catch (e) { return ''; }
+            if (isNaN(d.getTime())) return dateStr;
+            var cap = function (s) { return s.charAt(0).toUpperCase() + s.slice(1); };
+            return cap(d.toLocaleDateString('sv-SE', { weekday: 'long' })) + ' ' + d.getDate() + ' '
+                + cap(d.toLocaleDateString('sv-SE', { month: 'long' })) + ' ' + d.getFullYear();
+        } catch (e) { return dateStr; }
     }
 
     async function load() {
@@ -119,7 +120,7 @@
         if (!slots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Arrangören har inte lagt upp några pass att anmäla sig till ännu.</div>'; return; }
         var html = '', lastDate = null;
         slots.forEach(function (s) {
-            if (s.date !== lastDate) { var dn = dayName(s.date); html += '<div class="fw-semibold mt-2 mb-1"><i class="bi bi-calendar-event me-1"></i>' + esc(s.date) + (dn ? ' <span class="text-muted fw-normal">' + esc(dn) + '</span>' : '') + '</div>'; lastDate = s.date; }
+            if (s.date !== lastDate) { html += '<div class="fw-semibold mt-2 mb-1"><i class="bi bi-calendar-event me-1"></i>' + esc(longDate(s.date)) + '</div>'; lastDate = s.date; }
             var isOn = Object.prototype.hasOwnProperty.call(checked, s.id);
             var timeRange = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
             html += '<div class="border rounded p-2 mb-2">'

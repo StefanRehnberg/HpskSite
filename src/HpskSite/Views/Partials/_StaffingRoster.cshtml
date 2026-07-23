@@ -375,6 +375,16 @@
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function roleByKey(k) { for (var i = 0; i < roles.length; i++) if (roles[i].roleKey === k) return roles[i]; return null; }
+    // Long Swedish date for a yyyy-MM-dd string, e.g. "Fredag 21 Augusti 2026" (raw string if unparseable).
+    function longDate(dateStr) {
+        try {
+            var d = new Date(dateStr + 'T00:00:00');
+            if (isNaN(d.getTime())) return dateStr;
+            var cap = function (s) { return s.charAt(0).toUpperCase() + s.slice(1); };
+            return cap(d.toLocaleDateString('sv-SE', { weekday: 'long' })) + ' ' + d.getDate() + ' '
+                + cap(d.toLocaleDateString('sv-SE', { month: 'long' })) + ' ' + d.getFullYear();
+        } catch (e) { return dateStr; }
+    }
 
     // ---- roster filtering + group collapse (keeps 100+ funktionärer manageable) ----
     function activeFilter() {
@@ -1055,7 +1065,7 @@
         if (!helpSlots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Inga pass ännu. Lägg till minst ett pass så kan medlemmar anmäla sig.</div>'; return; }
         var html = '', lastDate = null;
         helpSlots.forEach(function (s) {
-            if (s.date !== lastDate) { html += '<div class="fw-semibold small mt-2"><i class="bi bi-calendar-event me-1"></i>' + esc(s.date) + '</div>'; lastDate = s.date; }
+            if (s.date !== lastDate) { html += '<div class="fw-semibold small mt-2"><i class="bi bi-calendar-event me-1"></i>' + esc(longDate(s.date)) + '</div>'; lastDate = s.date; }
             var tr = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
             html += '<div class="d-flex justify-content-between align-items-start border-bottom py-1 gap-2">'
                 + '<div><span class="fw-semibold">' + esc(s.headline) + '</span>' + tr + (s.description ? '<div class="text-muted small">' + esc(s.description) + '</div>' : '') + '</div>'
