@@ -62,6 +62,15 @@
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
+    // Swedish weekday name for a yyyy-MM-dd date string (capitalised), '' if unparseable.
+    function dayName(dateStr) {
+        try {
+            var d = new Date(dateStr + 'T00:00:00');
+            if (isNaN(d.getTime())) return '';
+            var n = d.toLocaleDateString('sv-SE', { weekday: 'long' });
+            return n.charAt(0).toUpperCase() + n.slice(1);
+        } catch (e) { return ''; }
+    }
 
     async function load() {
         try {
@@ -110,7 +119,7 @@
         if (!slots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Arrangören har inte lagt upp några pass att anmäla sig till ännu.</div>'; return; }
         var html = '', lastDate = null;
         slots.forEach(function (s) {
-            if (s.date !== lastDate) { html += '<div class="fw-semibold mt-2 mb-1"><i class="bi bi-calendar-event me-1"></i>' + esc(s.date) + '</div>'; lastDate = s.date; }
+            if (s.date !== lastDate) { var dn = dayName(s.date); html += '<div class="fw-semibold mt-2 mb-1"><i class="bi bi-calendar-event me-1"></i>' + esc(s.date) + (dn ? ' <span class="text-muted fw-normal">' + esc(dn) + '</span>' : '') + '</div>'; lastDate = s.date; }
             var isOn = Object.prototype.hasOwnProperty.call(checked, s.id);
             var timeRange = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
             html += '<div class="border rounded p-2 mb-2">'
@@ -139,7 +148,7 @@
         return '<div class="ms-4 mt-2">'
             + '<div class="d-flex justify-content-between align-items-center gap-2 mb-1">'
             + '<span class="small text-muted">Jag kan (valfritt — lämna tomt = hela passet):</span>'
-            + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0" type="button" onclick="beAddTime(' + slotId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tid</button>'
+            + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0" type="button" title="Lägg till tid" aria-label="Lägg till tid" onclick="beAddTime(' + slotId + ')"><i class="bi bi-clock"></i><i class="bi bi-plus-lg"></i></button>'
             + '</div>'
             + rows
             + '</div>';
