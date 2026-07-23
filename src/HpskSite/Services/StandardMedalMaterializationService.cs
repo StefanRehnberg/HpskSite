@@ -125,6 +125,20 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// True if any OnSite award already exists for this competition. Gates the one-time lazy
+        /// backfill of competitions that went official before this ledger existed (see
+        /// CompetitionResultsController.GetResultsList) so the upsert runs only when nothing is stored yet.
+        /// </summary>
+        public async Task<bool> HasOnSiteAwardsAsync(int competitionId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var counts = await db.FetchAsync<int>(
+                "SELECT COUNT(*) FROM StandardMedalAward WHERE CompetitionId = @0 AND Source = @1",
+                competitionId, StandardMedals.SourceOnSite);
+            return counts.FirstOrDefault() > 0;
+        }
+
+        /// <summary>
         /// Remove all OnSite awards for a competition (used when results are un-published / set
         /// back to preliminary). Awards consumed by a Guldmedalj application are left intact.
         /// </summary>

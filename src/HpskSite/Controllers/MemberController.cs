@@ -828,6 +828,17 @@ namespace HpskSite.Controllers
 
                 using (var db = _databaseFactory.CreateDatabase())
                 {
+                    // Canonicalize a class token to its display Name so the two sides of the medal
+                    // join agree: the ledger stores the display Name (e.g. "C Vet Y") while the
+                    // result rows below carry the raw class ID (e.g. "C_Vet_Y"). Without this,
+                    // every class whose Id != Name (Vet/Dam/Jun/Opt/AM/AP/AG/L Vet …) silently
+                    // loses its StM badge on Min sida even though the public result list shows it.
+                    static string NormalizeClassKey(string? cls)
+                    {
+                        if (string.IsNullOrEmpty(cls)) return "";
+                        return ShootingClasses.GetById(cls)?.Name ?? cls;
+                    }
+
                     // Won standard medals at our OWN competitions (materialized ledger), keyed by
                     // competition + class so each result row can show its StM (S/B).
                     var onSiteMedalLookup = new Dictionary<string, string>();
@@ -836,7 +847,7 @@ namespace HpskSite.Controllers
                         "SELECT CompetitionId, ShootingClass, MedalType, Status FROM StandardMedalAward WHERE MemberId = @0 AND Source = 'OnSite'",
                         memberId))
                     {
-                        var key = (int)m.CompetitionId + "|" + ((string)m.ShootingClass ?? "");
+                        var key = (int)m.CompetitionId + "|" + NormalizeClassKey((string)m.ShootingClass);
                         onSiteMedalLookup[key] = (string)m.MedalType;
                         onSiteStatusLookup[key] = (string)m.Status;
                     }
@@ -920,6 +931,9 @@ namespace HpskSite.Controllers
 
                         var averageScore = Math.Round((double)totalScore / seriesCount, 1);
 
+                        // Match the ledger on the canonical (Name-based) class key — see NormalizeClassKey.
+                        var medalKey = group.Key.CompetitionId + "|" + NormalizeClassKey(group.Key.ShootingClass);
+
                         results.Add(new
                         {
                             date = competitionDate,
@@ -931,10 +945,10 @@ namespace HpskSite.Controllers
                             seriesCount = seriesCount,
                             competitionId = group.Key.CompetitionId,
                             shootingClass = group.Key.ShootingClass,
-                            stdMedal = onSiteMedalLookup.GetValueOrDefault(group.Key.CompetitionId + "|" + group.Key.ShootingClass),
+                            stdMedal = onSiteMedalLookup.GetValueOrDefault(medalKey),
                             // pistol.nu-medaljer är belagda av tävlingens egen resultatlista.
-                            proofStatus = onSiteMedalLookup.ContainsKey(group.Key.CompetitionId + "|" + group.Key.ShootingClass) ? "has" : (string)null,
-                            verifyStatus = onSiteStatusLookup.GetValueOrDefault(group.Key.CompetitionId + "|" + group.Key.ShootingClass)
+                            proofStatus = onSiteMedalLookup.ContainsKey(medalKey) ? "has" : (string)null,
+                            verifyStatus = onSiteStatusLookup.GetValueOrDefault(medalKey)
                         });
                     }
 

@@ -2820,6 +2820,20 @@ namespace HpskSite.Controllers
                         // Apply class-name overrides on top of the snapshot so renaming doesn't
                         // require re-publishing the official result list.
                         ApplyClassNameOverrides(resultData, ReadClassNameOverrides(finalResultsList, subCompetitionOnly: false));
+
+                        // Self-heal: competitions made official BEFORE the Standardmedalj ledger
+                        // existed have no OnSite awards, so Min sida (which reads the ledger, since
+                        // it can't recompute the participant-count quota) shows no StM even though
+                        // this public snapshot does. Backfill once, from the very snapshot the public
+                        // page renders, so the two can never disagree. Guarded to run only when the
+                        // ledger is empty for this comp; the unique index UX_StdMedalAward_OnSite makes
+                        // a concurrent double-view safe, and MaterializeStandardMedalsAsync never throws.
+                        bool snapshotHasMedals = resultData.ClassGroups?.Any(g =>
+                            g.Shooters != null && g.Shooters.Any(s => StandardMedals.IsMedal(s.StandardMedal))) ?? false;
+                        if (snapshotHasMedals && !await _medalMaterialization.HasOnSiteAwardsAsync(competitionId))
+                        {
+                            await MaterializeStandardMedalsAsync(competition, resultData);
+                        }
                     }
                     else
                     {
