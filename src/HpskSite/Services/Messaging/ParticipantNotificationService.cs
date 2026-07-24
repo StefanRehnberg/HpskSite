@@ -73,6 +73,8 @@ namespace HpskSite.Services.Messaging
                     ScopeType = scope,
                     ScopeKey = key,
                     FromMemberId = fromMemberId,
+                    // Keep the real sender name — the organiser's outbox ("Senast skickade") shows who
+                    // sent it. The shooter-facing card shows "Från tävlingsledningen" instead (client-side).
                     FromName = string.IsNullOrWhiteSpace(fromName) ? "Arrangören" : fromName,
                     Body = text,
                     Urgency = urg,
