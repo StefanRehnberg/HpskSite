@@ -1478,6 +1478,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _contentService.Save(resultPage);
             _contentService.Publish(resultPage, new[] { "*" }, -1);
 
+            // Phase 2 auto-trigger: notify registered shooters that results are published. Opt-in per
+            // competition (autoNotifyParticipants, default off), main publish only, fire-and-forget.
+            if (!request.IsSubCompetition && request.IsOfficial && competition.GetValue<bool>("autoNotifyParticipants"))
+            {
+                try
+                {
+                    var notifier = HttpContext?.RequestServices?
+                        .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
+                        as HpskSite.Services.Messaging.ParticipantNotificationService;
+                    notifier?.Notify(request.CompetitionId, "All", null,
+                        "Resultatlistan är nu publicerad.", "Normal", 0, "");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Auto-notify participants failed for competition {CompetitionId}", request.CompetitionId);
+                }
+            }
+
             return Json(new { success = true });
         }
 

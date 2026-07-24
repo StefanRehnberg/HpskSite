@@ -3048,6 +3048,25 @@ namespace HpskSite.Controllers
                     request.IsSubCompetition ? "subCompetitionIsOfficial" : "isOfficial",
                     request.CompetitionId, newIsOfficial);
 
+                // Phase 2 auto-trigger: notify registered shooters that results are published.
+                // Opt-in per competition (autoNotifyParticipants, default off → no behaviour change);
+                // main publish only; fire-and-forget so it can never break publishing.
+                if (newIsOfficial && !request.IsSubCompetition && competition.GetValue<bool>("autoNotifyParticipants"))
+                {
+                    try
+                    {
+                        var notifier = HttpContext?.RequestServices?
+                            .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
+                            as HpskSite.Services.Messaging.ParticipantNotificationService;
+                        notifier?.Notify(request.CompetitionId, "All", null,
+                            "Resultatlistan är nu publicerad.", "Normal", 0, "");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Auto-notify participants failed for competition {CompetitionId}", request.CompetitionId);
+                    }
+                }
+
                 return Json(new
                 {
                     Success = true,
