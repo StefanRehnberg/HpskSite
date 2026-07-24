@@ -550,6 +550,7 @@ async function springRegSubmit() {
                                 <i class="bi bi-clock me-1"></i>Betala senare
                             </button>
                         </div>
+                        <div id="springRegNotisPrompt" style="display:none"></div>
                     </div>`;
                 successDiv.style.display = 'block';
             } else {
@@ -566,8 +567,15 @@ async function springRegSubmit() {
                         <button type="button" class="btn btn-secondary" onclick="springRegCloseAndReload()">
                             <i class="bi bi-x-circle me-1"></i>Stäng
                         </button>
+                        <div id="springRegNotisPrompt" style="display:none"></div>
                     </div>`;
                 successDiv.style.display = 'block';
+            }
+
+            // Nudge a self-registering shooter to enable notifications (suppressed if already subscribed).
+            if (window.HpskWebPush) {
+                var springNotisSelf = (!targetId || targetId === springRegConfig.memberId);
+                window.HpskWebPush.mountRegPrompt(document.getElementById('springRegNotisPrompt'), springNotisSelf);
             }
         } else {
             springRegShowError(data.message || 'Ett fel uppstod vid anmälan.');

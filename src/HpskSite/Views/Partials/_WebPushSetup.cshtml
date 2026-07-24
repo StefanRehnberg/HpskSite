@@ -38,7 +38,16 @@
 
     var supported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
     var wrap = document.getElementById('webPushSetup');
-    if (!supported || !wrap) return;
+    if (!supported || !wrap) {
+        // Still expose a minimal API so callers (e.g. the registration-success prompt) degrade gracefully.
+        window.HpskWebPush = window.HpskWebPush || {
+            isSupported: false,
+            getSubscription: function () { return Promise.resolve(null); },
+            subscribe: function () { return Promise.resolve(false); },
+            mountRegPrompt: function () {}
+        };
+        return;
+    }
     wrap.classList.remove('d-none');
 
     var btn = document.getElementById('webPushToggle');
@@ -101,13 +110,15 @@
         }).then(function (sub) { setState(!!sub); if (sub) loadPrefs(); }).catch(function () { });
     }
 
+    // Returns a promise resolving to true when the browser ended up subscribed, false otherwise,
+    // so external callers (registration-success prompt) can give their own feedback.
     function subscribe() {
         status.textContent = '';
         if (Notification.permission === 'denied') {
             status.textContent = 'Notiser är blockerade i webbläsaren.';
-            return;
+            return Promise.resolve(false);
         }
-        fetch('/umbraco/surface/WebPush/GetPublicKey', { credentials: 'same-origin' })
+        return fetch('/umbraco/surface/WebPush/GetPublicKey', { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 if (!j.success || !j.configured || !j.publicKey) { status.textContent = 'Notiser är inte aktiverade på servern än.'; throw 'no-key'; }
@@ -128,8 +139,8 @@
                     body: JSON.stringify(sub)
                 });
             })
-            .then(function () { setState(true); status.textContent = 'Klart! Du får nu notiser.'; loadPrefs(); })
-            .catch(function (e) { if (e !== 'no-key' && e !== 'denied') status.textContent = 'Kunde inte aktivera notiser.'; });
+            .then(function () { setState(true); status.textContent = 'Klart! Du får nu notiser.'; loadPrefs(); return true; })
+            .catch(function (e) { if (e !== 'no-key' && e !== 'denied') status.textContent = 'Kunde inte aktivera notiser.'; return false; });
     }
 
     function unsubscribe() {
@@ -156,5 +167,45 @@
     document.getElementById('wpRanking').addEventListener('change', savePrefs);
 
     refresh();
+
+    // Shared API so other surfaces (the registration-success prompt) can reuse this one control
+    // instead of duplicating the subscribe flow. There is a single _WebPushSetup per page.
+    window.HpskWebPush = {
+        isSupported: true,
+        getSubscription: function () { return getReg().then(function (r) { return r.pushManager.getSubscription(); }); },
+        subscribe: subscribe,
+        // Render an "Aktivera notiser" prompt into containerEl — but only for a shooter registering
+        // THEMSELVES (isSelf) who is NOT already subscribed on this device. A "Visa hur" tutorial
+        // button appears only when window.pnNotisTutorialId is set (i.e. the tutorial node exists).
+        mountRegPrompt: function (containerEl, isSelf) {
+            if (!isSelf || !containerEl) return;
+            getReg().then(function (r) { return r.pushManager.getSubscription(); }).then(function (sub) {
+                if (sub) return; // already opted in on this device — don't nag
+                var tutId = window.pnNotisTutorialId;
+                var tut = tutId
+                    ? ' <button type="button" class="btn btn-outline-secondary btn-sm" onclick="TutorialHelper.open(\'' + tutId + '\')"><i class="bi bi-play-circle me-1"></i>Visa hur</button>'
+                    : '';
+                containerEl.innerHTML =
+                    '<div class="alert alert-primary mt-4 text-start">' +
+                        '<h6 class="mb-1"><i class="bi bi-bell me-1"></i>Aktivera notiser</h6>' +
+                        '<p class="small mb-2">Få meddelanden från arrangören — schemaändringar, särskjutning och när resultatlistan publiceras — direkt i telefonen.</p>' +
+                        '<button type="button" class="btn btn-primary btn-sm" data-pn-enable><i class="bi bi-bell me-1"></i>Aktivera notiser</button>' + tut +
+                        '<p class="small text-body-secondary mt-2 mb-0"><i class="bi bi-apple me-1"></i>På iPhone lägger du först till pistol.nu på hemskärmen — det är ett krav från Apple, inte pistol.nu.</p>' +
+                        '<div class="small mt-2" data-pn-status></div>' +
+                    '</div>';
+                containerEl.style.display = '';
+                var b = containerEl.querySelector('[data-pn-enable]');
+                var st = containerEl.querySelector('[data-pn-status]');
+                b.addEventListener('click', function () {
+                    b.disabled = true;
+                    subscribe().then(function (ok) {
+                        b.disabled = false;
+                        if (ok) { st.textContent = 'Klart! Du får nu notiser.'; b.style.display = 'none'; }
+                        else { st.textContent = 'Kunde inte aktivera — kan vara blockerat i webbläsaren.'; }
+                    });
+                });
+            }).catch(function () {});
+        }
+    };
 })();
 </script>

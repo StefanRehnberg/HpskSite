@@ -2259,6 +2259,8 @@ function transformModalToSuccessState(result, competitionId, isAdminRegistration
                 </div>
             `}
 
+            ${!isAdminRegistration ? '<div id="regNotisPrompt" style="display:none"></div>' : ''}
+
             <div class="mt-4">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                     <i class="bi bi-x-circle"></i> Stäng
@@ -2268,6 +2270,11 @@ function transformModalToSuccessState(result, competitionId, isAdminRegistration
     `;
 
     modalBody.innerHTML = successContent;
+
+    // Nudge self-registering shooters to enable notifications (suppressed if already subscribed).
+    if (!isAdminRegistration && window.HpskWebPush) {
+        window.HpskWebPush.mountRegPrompt(document.getElementById('regNotisPrompt'), true);
+    }
 
     // Update footer if it exists
     if (modalFooter) {
