@@ -44,7 +44,10 @@
 
                 <h6 class="fw-bold"><i class="bi bi-bell me-1"></i>Notiser</h6>
                 <p class="small text-body-secondary mb-2">Få en notis i webbläsaren när det skapas nya matcher
-                    eller när din träningsform förbättras.</p>
+                    eller när din träningsform förbättras. Notiser gäller den här enheten för hela pistol.nu —
+                    aktiverar du dem här får du <strong>även notiser för tävlingar du är anmäld till</strong>.
+                    Du stänger av dem på Min sida.</p>
+                @{ ViewData["WebPushOptInOnly"] = true; }
                 @await Html.PartialAsync("_WebPushSetup")
 
                 <hr class="my-3">

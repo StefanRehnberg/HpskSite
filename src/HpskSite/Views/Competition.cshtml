@@ -1226,6 +1226,108 @@
 					</div>
 				</div>
 
+				@* Notiser card — between Anmälan and Information. Opt-in prompt when NOT subscribed;
+				   only "Meddelanden från arrangören" when subscribed. Training-match prefs never shown here. *@
+				@if (currentMember != null)
+				{
+					bool notisTutorialExists = false;
+					try
+					{
+						var homeNode = Umbraco.ContentAtRoot().FirstOrDefault();
+						var tutHub = homeNode?.Children?.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
+						notisTutorialExists = tutHub?.Children?.Any(t => t.ContentType.Alias == "tutorial"
+							&& (t.Value<string>("tutorialId") ?? "") == "tutorial-notiser") ?? false;
+					}
+					catch { }
+
+					<div class="card information-sidebar" id="pnShooterCard" data-comp="@Model.Id">
+						<div class="card-header">
+							<h5 class="mb-0"><i class="bi bi-bell me-2"></i>Notiser</h5>
+						</div>
+						<div class="card-body">
+							@* Opt-in prompt — shown only when NOT subscribed (JS decides). *@
+							<div id="pnOptIn" style="display:none">
+								<p class="small text-body-secondary mb-2">
+									Aktivera notiser så får du meddelanden från arrangören — schemaändringar,
+									särskjutning och när resultatlistan publiceras — direkt i telefonen.
+								</p>
+								@await Html.PartialAsync("_WebPushSetup", new ViewDataDictionary(ViewData) { { "WebPushShowMatchPrefs", false }, { "WebPushOptInOnly", true } })
+								@if (notisTutorialExists)
+								{
+									<script>window.pnNotisTutorialId = 'tutorial-notiser';</script>
+								}
+								<p id="pnCardApple" class="small text-body-secondary mt-2 mb-0" style="display:none">
+									<i class="bi bi-apple me-1"></i>
+									På iPhone kräver Apple ett extra steg: lägg först till pistol.nu på hemskärmen,
+									öppna appen därifrån och aktivera sedan notiser. Det är en begränsning i iOS, inte i pistol.nu.
+								</p>
+								@if (notisTutorialExists)
+								{
+									<div id="pnCardTut" class="mt-2" style="display:none">
+										<button type="button" class="btn btn-outline-secondary btn-sm" onclick="TutorialHelper.open('tutorial-notiser')">
+											<i class="bi bi-play-circle me-1"></i>Visa hur på iPhone
+										</button>
+									</div>
+								}
+							</div>
+							@* Messages — shown only when subscribed. *@
+							<div id="pnMessages" style="display:none">
+								<div id="pnShooterList" class="small"></div>
+							</div>
+						</div>
+					</div>
+
+					<script>
+					(function () {
+						var card = document.getElementById('pnShooterCard');
+						if (!card || window.__pnShooterInit) return;
+						window.__pnShooterInit = true;
+						var compId = parseInt(card.getAttribute('data-comp'), 10) || 0;
+						var optIn = document.getElementById('pnOptIn');
+						var mbox = document.getElementById('pnMessages');
+						var list = document.getElementById('pnShooterList');
+						function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+						function fmt(iso){try{return new Date(iso).toLocaleString('sv-SE',{dateStyle:'short',timeStyle:'short'});}catch(e){return '';}}
+						function loadMsgs(){
+							fetch('/umbraco/surface/ParticipantMessage/GetMyMessages?competitionId=' + compId, { headers: { 'Accept': 'application/json' } })
+								.then(function(r){return r.json();})
+								.then(function(j){
+									var head = '<div class="fw-semibold mb-1">Meddelanden från arrangören</div>';
+									if(!j||!j.success){ list.innerHTML=head; return; }
+									var msgs = j.messages || [];
+									if(!msgs.length){ list.innerHTML=head+'<div class="text-body-secondary">Inga meddelanden från arrangören ännu.</div>'; return; }
+									list.innerHTML = head + msgs.map(function(m){
+										var uc = m.urgency==='Safety' ? '#dc3545' : (m.urgency==='Urgent' ? '#fd7e14' : '#0d6efd');
+										var ul = m.urgency==='Safety' ? ' · Säkerhet' : (m.urgency==='Urgent' ? ' · Viktigt' : '');
+										var from = esc(m.fromName || 'Arrangören');
+										return '<div style="border:1px solid var(--bs-border-color);border-left:4px solid '+uc+';border-radius:8px;background:var(--bs-tertiary-bg);padding:8px 10px;margin-bottom:8px;">'+
+											'<div style="font-size:12px;color:var(--bs-secondary-color);"><strong style="color:var(--bs-body-color);">'+from+'</strong> · '+esc(fmt(m.createdDate))+ul+'</div>'+
+											'<div style="white-space:pre-wrap;word-break:break-word;">'+esc(m.body)+'</div></div>';
+									}).join('');
+								})
+								.catch(function(){});
+						}
+						function showOptIn(){
+							optIn.style.display=''; mbox.style.display='none';
+							if (window.HpskWebPush && window.HpskWebPush.isIOS) {
+								var a=document.getElementById('pnCardApple'); if(a) a.style.display='';
+								var t=document.getElementById('pnCardTut'); if(t) t.style.display='';
+							}
+						}
+						function showMsgs(){ optIn.style.display='none'; mbox.style.display=''; loadMsgs(); }
+						function decide(){
+							var api = window.HpskWebPush;
+							if(!api || !api.isSupported){ showOptIn(); return; }
+							api.getSubscription().then(function(sub){ if(sub) showMsgs(); else showOptIn(); }).catch(function(){ showOptIn(); });
+						}
+						decide();
+						// Re-evaluate shortly after the user toggles opt-in via the _WebPushSetup button.
+						document.addEventListener('click', function(e){ if(e.target && e.target.closest && e.target.closest('#webPushToggle')) setTimeout(decide, 1500); });
+						setInterval(function(){ if(!document.hidden && mbox.style.display!=='none') loadMsgs(); }, 60000);
+					})();
+					</script>
+				}
+
 				<div class="card information-sidebar">
 					<div class="card-header">
 						<h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Information</h5>
@@ -1465,98 +1567,6 @@
 				</div>
 			</div>
 
-			@* Notiser — participant web-push opt-in + in-app inbox. Logged-in members only.
-			   _WebPushSetup is a deployed shared partial (also used on TrainingMatch). *@
-			@if (currentMember != null && !isExternal)
-			{
-				@* "Visa hur" button appears only once a tutorial node with this id is published. *@
-				bool notisTutorialExists = false;
-				try
-				{
-					var homeNode = Umbraco.ContentAtRoot().FirstOrDefault();
-					var tutHub = homeNode?.Children?.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
-					notisTutorialExists = tutHub?.Children?.Any(t => t.ContentType.Alias == "tutorial"
-						&& (t.Value<string>("tutorialId") ?? "") == "tutorial-notiser") ?? false;
-				}
-				catch { }
-
-				<div class="card mt-4" id="pnShooterCard" data-comp="@Model.Id">
-					<div class="card-header">
-						<h5 class="mb-0"><i class="bi bi-bell me-2"></i>Notiser</h5>
-					</div>
-					<div class="card-body">
-						<p class="small text-body-secondary mb-2">
-							Aktivera notiser så får du meddelanden från arrangören — schemaändringar,
-							särskjutning och när resultatlistan publiceras — direkt i telefonen.
-						</p>
-						@await Html.PartialAsync("_WebPushSetup")
-						@if (notisTutorialExists)
-						{
-							<script>window.pnNotisTutorialId = 'tutorial-notiser';</script>
-						}
-						@* Apple's add-to-home-screen caveat + the tutorial button are iOS-only (Android/desktop
-						   web push is one tap). Hidden until JS confirms iOS. *@
-						<p id="pnCardApple" class="small text-body-secondary mt-2 mb-0" style="display:none">
-							<i class="bi bi-apple me-1"></i>
-							På iPhone kräver Apple ett extra steg: lägg först till pistol.nu på hemskärmen,
-							öppna appen därifrån och aktivera sedan notiser. Det är en begränsning i iOS, inte i pistol.nu.
-						</p>
-						@if (notisTutorialExists)
-						{
-							<div id="pnCardTut" class="mt-2" style="display:none">
-								<button type="button" class="btn btn-outline-secondary btn-sm" onclick="TutorialHelper.open('tutorial-notiser')">
-									<i class="bi bi-play-circle me-1"></i>Visa hur på iPhone
-								</button>
-							</div>
-						}
-						<script>
-						(function () {
-							try {
-								if (window.HpskWebPush && window.HpskWebPush.isIOS) {
-									var a = document.getElementById('pnCardApple'); if (a) a.style.display = '';
-									var t = document.getElementById('pnCardTut'); if (t) t.style.display = '';
-								}
-							} catch (e) { }
-						})();
-						</script>
-						<div id="pnShooterList" class="mt-3 small"></div>
-					</div>
-				</div>
-
-				<script>
-				(function () {
-					var card = document.getElementById('pnShooterCard');
-					if (!card || window.__pnShooterInit) return;
-					window.__pnShooterInit = true;
-					var compId = parseInt(card.getAttribute('data-comp'), 10) || 0;
-					var list = document.getElementById('pnShooterList');
-					function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-					function fmt(iso){try{return new Date(iso).toLocaleString('sv-SE',{dateStyle:'short',timeStyle:'short'});}catch(e){return '';}}
-					function load(){
-						fetch('/umbraco/surface/ParticipantMessage/GetMyMessages?competitionId=' + compId, { headers: { 'Accept': 'application/json' } })
-							.then(function(r){return r.json();})
-							.then(function(j){
-								if(!j||!j.success){ list.innerHTML=''; return; }
-								var msgs = j.messages || [];
-								if(!msgs.length){ list.innerHTML='<div class="text-body-secondary">Inga meddelanden från arrangören ännu.</div>'; return; }
-								// Shared message-card language with the staff console (4px urgency-coloured left
-								// border, tertiary bg, "from · time" header, body).
-								list.innerHTML = '<div class="fw-semibold mb-1">Meddelanden från arrangören</div>' + msgs.map(function(m){
-									var uc = m.urgency==='Safety' ? '#dc3545' : (m.urgency==='Urgent' ? '#fd7e14' : '#0d6efd');
-									var ul = m.urgency==='Safety' ? ' · Säkerhet' : (m.urgency==='Urgent' ? ' · Viktigt' : '');
-									var from = esc(m.fromName || 'Arrangören');
-									return '<div style="border:1px solid var(--bs-border-color);border-left:4px solid '+uc+';border-radius:8px;background:var(--bs-tertiary-bg);padding:8px 10px;margin-bottom:8px;">'+
-										'<div style="font-size:12px;color:var(--bs-secondary-color);"><strong style="color:var(--bs-body-color);">'+from+'</strong> · '+esc(fmt(m.createdDate))+ul+'</div>'+
-										'<div style="white-space:pre-wrap;word-break:break-word;">'+esc(m.body)+'</div></div>';
-								}).join('');
-							})
-							.catch(function(){});
-					}
-					load();
-					setInterval(function(){ if(!document.hidden) load(); }, 60000);
-				})();
-				</script>
-			}
 
 			@* Contact Information Card *@
 			<div class="card mt-4">

@@ -838,6 +838,23 @@
                             @{ ViewBag.memberId = memberData?.Id ?? 0; }
                             @await Html.PartialAsync("MemberCertificationsCard")
                             @await Html.PartialAsync("MemberRecordsCard")
+
+                            @* Notiser — global web-push on/off. The opt-out lives here (deliberately
+                               out-of-the-way; the comp page only prompts to turn them ON). Träningsmatch-
+                               prefs are suppressed — they belong on the Träningsmatch page. *@
+                            <div class="card mt-3">
+                                <div class="card-header">
+                                    <h5 class="mb-0"><i class="bi bi-bell me-2"></i>Notiser</h5>
+                                </div>
+                                <div class="card-body">
+                                    <p class="small text-body-secondary mb-2">
+                                        Notiser för tävlingar du är anmäld till (schemaändringar, särskjutning och
+                                        publicerade resultat) skickas till den här enheten. Du kan stänga av dem här.
+                                    </p>
+                                    @{ ViewData["WebPushShowMatchPrefs"] = false; }
+                                    @await Html.PartialAsync("_WebPushSetup")
+                                </div>
+                            </div>
                         </div>
                         @* End Profile Tab *@
 

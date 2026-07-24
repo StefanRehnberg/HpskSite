@@ -4,26 +4,37 @@
     Self-contained; safe to include on multiple pages (guards against double-init).
     Renders nothing if the browser doesn't support web push.
 *@
+@{
+    // The "Nya matcher" + "träningsform"-prefs are Träningsmatch-specific. Host pages opt in;
+    // competition pages + Min sida pass WebPushShowMatchPrefs=false (unrelated to competitions).
+    var wpShowMatchPrefs = (ViewData["WebPushShowMatchPrefs"] as bool?) ?? true;
+    // Opt-in only: hide the toggle once subscribed so this surface can't opt OUT. Opting out
+    // lives solely on Min sida → Profil (deliberately out-of-the-way). Default false = full toggle.
+    var wpOptInOnly = (ViewData["WebPushOptInOnly"] as bool?) ?? false;
+}
 <div id="webPushSetup" class="d-none">
     <button type="button" id="webPushToggle" class="btn btn-sm btn-outline-primary">
         <i class="bi bi-bell me-1"></i><span id="webPushToggleText">Aktivera notiser</span>
     </button>
     <span id="webPushStatus" class="small text-body-secondary ms-2"></span>
 
-    <div id="webPushPrefs" class="d-none mt-2 small">
-        <div class="mb-1 d-flex align-items-center gap-2">
-            <label for="wpMatchPref" class="mb-0">Nya matcher:</label>
-            <select id="wpMatchPref" class="form-select form-select-sm w-auto">
-                <option value="All">Alla matcher</option>
-                <option value="OpenMatchesOnly">Bara öppna matcher</option>
-                <option value="Off">Av</option>
-            </select>
+    @if (wpShowMatchPrefs)
+    {
+        <div id="webPushPrefs" class="d-none mt-2 small">
+            <div class="mb-1 d-flex align-items-center gap-2">
+                <label for="wpMatchPref" class="mb-0">Nya matcher:</label>
+                <select id="wpMatchPref" class="form-select form-select-sm w-auto">
+                    <option value="All">Alla matcher</option>
+                    <option value="OpenMatchesOnly">Bara öppna matcher</option>
+                    <option value="Off">Av</option>
+                </select>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="wpRanking" checked>
+                <label class="form-check-label" for="wpRanking">Notis när min träningsform förbättras</label>
+            </div>
         </div>
-        <div class="form-check">
-            <input class="form-check-input" type="checkbox" id="wpRanking" checked>
-            <label class="form-check-label" for="wpRanking">Notis när min träningsform förbättras</label>
-        </div>
-    </div>
+    }
 </div>
 
 <script>
@@ -54,6 +65,7 @@
     // is a single tap). iPadOS 13+ reports as MacIntel with touch, so detect that too.
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var optInOnly = @(wpOptInOnly ? "true" : "false"); // hide the toggle once subscribed (no opt-out here)
 
     var btn = document.getElementById('webPushToggle');
     var txt = document.getElementById('webPushToggleText');
@@ -73,12 +85,14 @@
         btn.classList.toggle('btn-outline-primary', !subscribed);
         btn.classList.toggle('btn-success', subscribed);
         btn.querySelector('i').className = subscribed ? 'bi bi-bell-fill me-1' : 'bi bi-bell me-1';
-        if (!subscribed) document.getElementById('webPushPrefs').classList.add('d-none');
+        btn.style.display = (subscribed && optInOnly) ? 'none' : '';   // opt-out only via Min sida
+        if (!subscribed) { var _pe = document.getElementById('webPushPrefs'); if (_pe) _pe.classList.add('d-none'); }
     }
 
     function getReg() { return navigator.serviceWorker.register('/sw-push.js'); }
 
     function loadPrefs() {
+        if (!document.getElementById('webPushPrefs')) return; // prefs suppressed on this host page
         getReg().then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) {
             if (!sub) { document.getElementById('webPushPrefs').classList.add('d-none'); return; }
             fetch('/umbraco/surface/WebPush/GetPreferences', {
@@ -168,8 +182,8 @@
             .then(function (sub) { if (sub) unsubscribe(); else subscribe(); });
     });
 
-    document.getElementById('wpMatchPref').addEventListener('change', savePrefs);
-    document.getElementById('wpRanking').addEventListener('change', savePrefs);
+    var _mp = document.getElementById('wpMatchPref'); if (_mp) _mp.addEventListener('change', savePrefs);
+    var _rk = document.getElementById('wpRanking'); if (_rk) _rk.addEventListener('change', savePrefs);
 
     refresh();
 
