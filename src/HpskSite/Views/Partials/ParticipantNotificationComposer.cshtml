@@ -1,0 +1,200 @@
+@*
+    Organizer → registered shooters composer ("Meddela deltagare").
+    Sends a web-push + in-app-inbox notification to shooters registered in this competition,
+    scoped to Alla deltagare / a class / an individual. Staff-gated by ParticipantMessageController.
+    Self-contained (own antiforgery token, Bootstrap classes, no top-level <style>).
+*@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    var pnCompId = 0;
+    int.TryParse((ViewData["CompetitionId"]?.ToString() ?? "0"), out pnCompId);
+    var pnTokens = Antiforgery.GetAndStoreTokens(Context);
+}
+
+<div class="card mt-3" id="pnComposerCard" data-comp="@pnCompId">
+    <div class="card-header d-flex align-items-center">
+        <i class="bi bi-megaphone me-2"></i>
+        <strong>Meddela deltagare</strong>
+        <span class="badge bg-secondary ms-2" id="pnTotalBadge" title="Antal anmälda">–</span>
+    </div>
+    <div class="card-body">
+        <p class="text-body-secondary small">
+            Skicka en notis till skyttar som är anmälda till tävlingen — t.ex. schemaändring,
+            särskjutning eller att resultatlistan är publicerad. Skyttar som aktiverat notiser får den
+            direkt i telefonen; alla anmälda ser den i tävlingens meddelanden när de öppnar sidan.
+        </p>
+
+        <form id="pnComposerForm" autocomplete="off">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-6">
+                    <label for="pnTo" class="form-label mb-1">Till</label>
+                    <select id="pnTo" class="form-select"></select>
+                </div>
+                <div class="col-md-3">
+                    <label for="pnUrgency" class="form-label mb-1">Prioritet</label>
+                    <select id="pnUrgency" class="form-select">
+                        <option value="Normal">Normal</option>
+                        <option value="Urgent">Viktigt</option>
+                        <option value="Safety">Säkerhet</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <span class="form-text" id="pnRecipientPreview">&nbsp;</span>
+                </div>
+            </div>
+            <div class="mt-2">
+                <label for="pnBody" class="form-label mb-1">Meddelande</label>
+                <textarea id="pnBody" class="form-control" rows="2" maxlength="2000"
+                          placeholder="Skriv ett meddelande till deltagarna…"></textarea>
+            </div>
+            <div class="mt-2 d-flex align-items-center gap-2">
+                <button type="submit" class="btn btn-primary" id="pnSend">
+                    <i class="bi bi-send me-1"></i>Skicka
+                </button>
+                <span id="pnSendStatus" class="small text-body-secondary"></span>
+            </div>
+        </form>
+
+        <hr>
+        <h6 class="mb-2">Senast skickade</h6>
+        <div id="pnLog" class="small">
+            <div class="text-body-secondary">Inga meddelanden skickade ännu.</div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__pnComposerInit) return;
+    window.__pnComposerInit = true;
+
+    var card = document.getElementById('pnComposerCard');
+    if (!card) return;
+    var compId = parseInt(card.getAttribute('data-comp'), 10) || 0;
+    var TOKEN = '@pnTokens.RequestToken';
+    if (!compId) return;
+
+    var el = {
+        to: document.getElementById('pnTo'),
+        urgency: document.getElementById('pnUrgency'),
+        body: document.getElementById('pnBody'),
+        send: document.getElementById('pnSend'),
+        status: document.getElementById('pnSendStatus'),
+        preview: document.getElementById('pnRecipientPreview'),
+        totalBadge: document.getElementById('pnTotalBadge'),
+        log: document.getElementById('pnLog'),
+        form: document.getElementById('pnComposerForm')
+    };
+
+    var classCounts = {};   // "Klass:C1" value -> count
+    var total = 0;
+
+    function esc(s) {
+        return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function fmtTime(iso) {
+        try { return new Date(iso).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' }); }
+        catch (e) { return ''; }
+    }
+
+    function loadAudience() {
+        fetch('/umbraco/surface/ParticipantMessage/GetParticipantAudience?competitionId=' + compId,
+            { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j || !j.success) return;
+                total = j.total || 0;
+                el.totalBadge.textContent = total;
+                var opts = ['<option value="All:">Alla deltagare (' + total + ')</option>'];
+                classCounts = {};
+                (j.classes || []).forEach(function (c) {
+                    var val = 'Klass:' + c.classId;
+                    classCounts[val] = c.count;
+                    opts.push('<option value="' + esc(val) + '">Klass ' + esc(c.classId) + ' (' + c.count + ')</option>');
+                });
+                el.to.innerHTML = opts.join('');
+                updatePreview();
+            })
+            .catch(function () { });
+    }
+
+    function updatePreview() {
+        var v = el.to.value || 'All:';
+        var n = v.indexOf('All:') === 0 ? total : (classCounts[v] || 0);
+        el.preview.textContent = '→ ' + n + ' mottagare';
+    }
+
+    function loadLog() {
+        fetch('/umbraco/surface/ParticipantMessage/GetMyMessages?competitionId=' + compId,
+            { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j || !j.success) return;
+                var msgs = j.messages || [];
+                if (!msgs.length) {
+                    el.log.innerHTML = '<div class="text-body-secondary">Inga meddelanden skickade ännu.</div>';
+                    return;
+                }
+                el.log.innerHTML = msgs.map(function (m) {
+                    var to = m.scopeType === 'All' ? 'Alla deltagare'
+                        : (m.scopeType === 'Klass' ? ('Klass ' + m.scopeKey)
+                        : (m.scopeType === 'Person' ? 'Enskild skytt' : m.scopeType));
+                    var urg = m.urgency === 'Safety' ? ' · <span class="text-danger">Säkerhet</span>'
+                        : (m.urgency === 'Urgent' ? ' · <span class="text-warning">Viktigt</span>' : '');
+                    return '<div class="border-start border-3 ps-2 mb-2">' +
+                        '<div class="text-body-secondary">' + esc(to) + ' · ' + esc(fmtTime(m.createdDate)) + urg + '</div>' +
+                        '<div style="white-space:pre-wrap;word-break:break-word;">' + esc(m.body) + '</div>' +
+                        '</div>';
+                }).join('');
+            })
+            .catch(function () { });
+    }
+
+    el.to.addEventListener('change', updatePreview);
+
+    el.form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var body = (el.body.value || '').trim();
+        if (!body) { el.body.focus(); return; }
+        var toVal = el.to.value || 'All:';
+        var i = toVal.indexOf(':');
+        var scopeType = i < 0 ? toVal : toVal.substring(0, i);
+        var scopeKey = i < 0 ? '' : toVal.substring(i + 1);
+
+        el.send.disabled = true;
+        el.status.textContent = 'Skickar…';
+        fetch('/umbraco/surface/ParticipantMessage/SendToParticipants', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+            body: JSON.stringify({
+                competitionId: compId,
+                scopeType: scopeType,
+                scopeKey: scopeKey || null,
+                body: body,
+                urgency: el.urgency.value
+            })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            el.send.disabled = false;
+            if (j && j.success) {
+                el.body.value = '';
+                el.status.textContent = 'Skickat till ' + (j.recipientCount || 0) + ' deltagare.';
+                loadLog();
+            } else {
+                el.status.textContent = (j && j.message) || 'Kunde inte skicka.';
+            }
+        })
+        .catch(function () {
+            el.send.disabled = false;
+            el.status.textContent = 'Kunde inte skicka.';
+        });
+    });
+
+    // Load when the tab is first shown (Bootstrap tab event) and once on ready.
+    var tabBtn = document.getElementById('deltagare-tab');
+    if (tabBtn) tabBtn.addEventListener('shown.bs.tab', function () { loadAudience(); loadLog(); });
+    loadAudience();
+    loadLog();
+})();
+</script>

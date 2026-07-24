@@ -513,6 +513,11 @@
                 <i class="bi bi-trophy me-1"></i>Resultat
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="deltagare-tab" data-bs-toggle="tab" data-bs-target="#deltagare" type="button" role="tab">
+                <i class="bi bi-megaphone me-1"></i>Meddela deltagare
+            </button>
+        </li>
     </ul>
 
     <!-- Tab content -->
@@ -695,6 +700,11 @@
                 </div>
             </div>
         }
+
+        <!-- Meddela deltagare Tab (organizer → registered shooters: web-push + in-app inbox) -->
+        <div class="tab-pane fade" id="deltagare" role="tabpanel">
+            @await Html.PartialAsync("ParticipantNotificationComposer", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+        </div>
 
     </div>
 </div>

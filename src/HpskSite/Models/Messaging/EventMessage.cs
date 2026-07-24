@@ -46,6 +46,11 @@ namespace HpskSite.Models.Messaging
         [MaxLength(20)]
         public string Urgency { get; set; } = MessageUrgency.Normal;   // Normal | Urgent | Safety
 
+        // Functionary (default/legacy NULL) vs Shooter (outward participant notification).
+        // Keeps the two feeds from leaking into each other; see MessageAudience.
+        [MaxLength(20)]
+        public string? Audience { get; set; }
+
         public DateTime CreatedDate { get; set; }
     }
 
@@ -80,6 +85,16 @@ namespace HpskSite.Models.Messaging
         public const string Normal = "Normal";
         public const string Urgent = "Urgent";
         public const string Safety = "Safety";
+    }
+
+    /// <summary>
+    /// Who a message is aimed at. NULL in the DB is treated as Functionary (legacy default).
+    /// Shooter messages are the outward participant notifications delivered over web-push.
+    /// </summary>
+    public static class MessageAudience
+    {
+        public const string Functionary = "Functionary";
+        public const string Shooter = "Shooter";
     }
 
     /// <summary>
@@ -123,6 +138,7 @@ namespace HpskSite.Models.Messaging
         public string? FromScopeKey { get; set; }
         public string Body { get; set; } = "";
         public string Urgency { get; set; } = MessageUrgency.Normal;
+        public string? Audience { get; set; }
         public DateTime CreatedDate { get; set; }
         public bool Mine { get; set; }
         public bool AckedByMe { get; set; }
@@ -160,5 +176,30 @@ namespace HpskSite.Models.Messaging
     {
         public int CompetitionId { get; set; }
         public int MessageId { get; set; }
+    }
+
+    // --- Participant (shooter-facing) notification DTOs ---
+
+    /// <summary>Organizer → registered shooters. Scope ∈ All (whole comp) / Klass / Person.</summary>
+    public class PostParticipantMessageRequest
+    {
+        public int CompetitionId { get; set; }
+        public string ScopeType { get; set; } = MessageScopeType.All;
+        public string? ScopeKey { get; set; }   // class id for Klass, member id for Person; null for All
+        public string Body { get; set; } = "";
+        public string? Urgency { get; set; }
+    }
+
+    /// <summary>One registered class + how many shooters are in it (composer dropdown + recipient preview).</summary>
+    public class ParticipantClassCount
+    {
+        public string ClassId { get; set; } = "";
+        public int Count { get; set; }
+    }
+
+    public class ParticipantAudienceSummary
+    {
+        public int Total { get; set; }                              // distinct registered members
+        public List<ParticipantClassCount> Classes { get; set; } = new();
     }
 }

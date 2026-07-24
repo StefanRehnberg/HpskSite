@@ -15,6 +15,8 @@ namespace HpskSite.Services.Messaging
 
         // Only show recent traffic on the live poll; the full log is available to the console.
         private static readonly TimeSpan DefaultWindow = TimeSpan.FromHours(12);
+        // Shooters aren't sitting on a poll — surface a comp's notifications over its whole run.
+        private static readonly TimeSpan ShooterWindow = TimeSpan.FromDays(4);
 
         public EventMessageService(IScopeProvider scopeProvider)
         {
@@ -38,9 +40,32 @@ namespace HpskSite.Services.Messaging
         public EventMessageFeed GetFeed(int competitionId, IEnumerable<EventMessageScope> scopes, int viewerMemberId, TimeSpan? window = null)
         {
             var selectors = BuildSelectors(scopes, viewerMemberId);
-            var all = FetchWindow(competitionId, window ?? DefaultWindow);
+            var all = FetchWindow(competitionId, window ?? DefaultWindow, MessageAudience.Functionary);
             var matched = all.Where(m => MatchesAny(m, selectors)).ToList();
             return BuildFeed(matched, viewerMemberId);
+        }
+
+        /// <summary>
+        /// A registered shooter's inbox for a competition: every Shooter-audience message matching an
+        /// All broadcast, one of the shooter's registered classes (Klass), or a Person:me direct message.
+        /// Window is longer than the functionary poll — a shooter isn't sitting on the screen.
+        /// </summary>
+        public EventMessageFeed GetParticipantFeed(int competitionId, IEnumerable<string> memberClasses, int viewerMemberId, TimeSpan? window = null)
+        {
+            var scopes = (memberClasses ?? Enumerable.Empty<string>())
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => new EventMessageScope(MessageScopeType.Klass, c));
+            var selectors = BuildSelectors(scopes, viewerMemberId);
+            var all = FetchWindow(competitionId, window ?? ShooterWindow, MessageAudience.Shooter);
+            var matched = all.Where(m => MatchesAny(m, selectors)).ToList();
+            return BuildFeed(matched, viewerMemberId);
+        }
+
+        /// <summary>The organizer's sent-log: every Shooter-audience message for the competition, unfiltered.</summary>
+        public EventMessageFeed GetParticipantLog(int competitionId, int viewerMemberId, TimeSpan? window = null)
+        {
+            var all = FetchWindow(competitionId, window ?? ShooterWindow, MessageAudience.Shooter);
+            return BuildFeed(all, viewerMemberId);
         }
 
         /// <summary>
@@ -49,7 +74,7 @@ namespace HpskSite.Services.Messaging
         /// </summary>
         public EventMessageFeed GetAll(int competitionId, int viewerMemberId, TimeSpan? window = null)
         {
-            var all = FetchWindow(competitionId, window ?? DefaultWindow);
+            var all = FetchWindow(competitionId, window ?? DefaultWindow, MessageAudience.Functionary);
             return BuildFeed(all, viewerMemberId);
         }
 
@@ -74,12 +99,18 @@ namespace HpskSite.Services.Messaging
 
         // --- internals ---
 
-        private List<EventMessage> FetchWindow(int competitionId, TimeSpan window)
+        private List<EventMessage> FetchWindow(int competitionId, TimeSpan window, string audience)
         {
             var since = DateTime.UtcNow - window;   // CreatedDate is stored UTC
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            // Legacy rows have NULL Audience → treated as Functionary. Shooter rows are the opt-in
+            // participant broadcasts and must never surface on functionary screens (and vice versa).
+            var audienceClause = string.Equals(audience, MessageAudience.Shooter, StringComparison.OrdinalIgnoreCase)
+                ? "Audience = 'Shooter'"
+                : "(Audience IS NULL OR Audience = 'Functionary')";
             return scope.Database.Fetch<EventMessage>(
-                "SELECT * FROM EventMessage WHERE CompetitionId = @0 AND CreatedDate >= @1 ORDER BY CreatedDate DESC, Id DESC",
+                "SELECT * FROM EventMessage WHERE CompetitionId = @0 AND CreatedDate >= @1 AND " + audienceClause +
+                " ORDER BY CreatedDate DESC, Id DESC",
                 competitionId, since);
         }
 
@@ -141,6 +172,7 @@ namespace HpskSite.Services.Messaging
                     FromScopeKey = m.FromScopeKey,
                     Body = m.Body,
                     Urgency = m.Urgency,
+                    Audience = m.Audience,
                     CreatedDate = m.CreatedDate,
                     Mine = m.FromMemberId == viewerMemberId,
                     AckedByMe = msgAcks.Any(a => a.MemberId == viewerMemberId),

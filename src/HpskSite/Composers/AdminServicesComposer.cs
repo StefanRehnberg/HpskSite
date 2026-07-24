@@ -152,6 +152,13 @@ namespace HpskSite.Composers
             // later shooter-facing web-push channel can reuse the same rows.
             builder.Services.AddScoped<HpskSite.Services.Messaging.EventMessageService>();
 
+            // Participant (shooter-facing) competition notifications — reuses the EventMessage store
+            // (Audience='Shooter') + the web-push pipe. ParticipantAudienceResolver reads registrations
+            // via IContentService (unpublished); ParticipantNotificationService composes resolve+post+push.
+            // Run add-audience-to-eventmessage.sql. See memory participant-push-notifications.
+            builder.Services.AddScoped<HpskSite.Services.Messaging.ParticipantAudienceResolver>();
+            builder.Services.AddScoped<HpskSite.Services.Messaging.ParticipantNotificationService>();
+
             // Competition planning & staffing (Tävlingsplanering) — Phase 1: day-of functionary roster
             // (StaffAssignment) + Phase 1b preparation work-breakdown (WorkArea/WorkItem). Run
             // create-staff-assignment-table.sql + create-work-breakdown-tables.sql. See
