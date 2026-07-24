@@ -1494,23 +1494,31 @@
 						{
 							<script>window.pnNotisTutorialId = 'tutorial-notiser';</script>
 						}
-						<p class="small text-body-secondary mt-2 mb-0">
+						@* Apple's add-to-home-screen caveat + the tutorial button are iOS-only (Android/desktop
+						   web push is one tap). Hidden until JS confirms iOS. *@
+						<p id="pnCardApple" class="small text-body-secondary mt-2 mb-0" style="display:none">
 							<i class="bi bi-apple me-1"></i>
 							På iPhone kräver Apple ett extra steg: lägg först till pistol.nu på hemskärmen,
 							öppna appen därifrån och aktivera sedan notiser. Det är en begränsning i iOS, inte i pistol.nu.
 						</p>
 						@if (notisTutorialExists)
 						{
-							@* Tutorial is iOS-only (Android/desktop web push is one tap). Hidden until JS confirms iOS. *@
 							<div id="pnCardTut" class="mt-2" style="display:none">
 								<button type="button" class="btn btn-outline-secondary btn-sm" onclick="TutorialHelper.open('tutorial-notiser')">
 									<i class="bi bi-play-circle me-1"></i>Visa hur på iPhone
 								</button>
 							</div>
-							<script>
-							(function () { try { if (window.HpskWebPush && window.HpskWebPush.isIOS) { var e = document.getElementById('pnCardTut'); if (e) e.style.display = ''; } } catch (e) { } })();
-							</script>
 						}
+						<script>
+						(function () {
+							try {
+								if (window.HpskWebPush && window.HpskWebPush.isIOS) {
+									var a = document.getElementById('pnCardApple'); if (a) a.style.display = '';
+									var t = document.getElementById('pnCardTut'); if (t) t.style.display = '';
+								}
+							} catch (e) { }
+						})();
+						</script>
 						<div id="pnShooterList" class="mt-3 small"></div>
 					</div>
 				</div>
