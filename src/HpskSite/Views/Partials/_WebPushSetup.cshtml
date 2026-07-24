@@ -50,6 +50,11 @@
     }
     wrap.classList.remove('d-none');
 
+    // iOS is the only platform that needs the add-to-home-screen tutorial (Android/desktop web push
+    // is a single tap). iPadOS 13+ reports as MacIntel with touch, so detect that too.
+    var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
     var btn = document.getElementById('webPushToggle');
     var txt = document.getElementById('webPushToggleText');
     var status = document.getElementById('webPushStatus');
@@ -172,6 +177,7 @@
     // instead of duplicating the subscribe flow. There is a single _WebPushSetup per page.
     window.HpskWebPush = {
         isSupported: true,
+        isIOS: isIOS,
         getSubscription: function () { return getReg().then(function (r) { return r.pushManager.getSubscription(); }); },
         subscribe: subscribe,
         // Render an "Aktivera notiser" prompt into containerEl — but only for a shooter registering
@@ -182,15 +188,19 @@
             getReg().then(function (r) { return r.pushManager.getSubscription(); }).then(function (sub) {
                 if (sub) return; // already opted in on this device — don't nag
                 var tutId = window.pnNotisTutorialId;
-                var tut = tutId
-                    ? ' <button type="button" class="btn btn-outline-secondary btn-sm" onclick="TutorialHelper.open(\'' + tutId + '\')"><i class="bi bi-play-circle me-1"></i>Visa hur</button>'
+                // Tutorial (add-to-home-screen) is iOS-only; Android/desktop web push is one tap.
+                var iosNote = isIOS
+                    ? '<p class="small text-body-secondary mt-2 mb-0"><i class="bi bi-apple me-1"></i>På iPhone lägger du först till pistol.nu på hemskärmen — det är ett krav från Apple, inte pistol.nu.</p>'
+                    : '';
+                var tut = (tutId && isIOS)
+                    ? '<div class="mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="TutorialHelper.open(\'' + tutId + '\')"><i class="bi bi-play-circle me-1"></i>Visa hur på iPhone</button></div>'
                     : '';
                 containerEl.innerHTML =
                     '<div class="alert alert-primary mt-4 text-start">' +
                         '<h6 class="mb-1"><i class="bi bi-bell me-1"></i>Aktivera notiser</h6>' +
                         '<p class="small mb-2">Få meddelanden från arrangören — schemaändringar, särskjutning och när resultatlistan publiceras — direkt i telefonen.</p>' +
-                        '<button type="button" class="btn btn-primary btn-sm" data-pn-enable><i class="bi bi-bell me-1"></i>Aktivera notiser</button>' + tut +
-                        '<p class="small text-body-secondary mt-2 mb-0"><i class="bi bi-apple me-1"></i>På iPhone lägger du först till pistol.nu på hemskärmen — det är ett krav från Apple, inte pistol.nu.</p>' +
+                        '<button type="button" class="btn btn-primary btn-sm" data-pn-enable><i class="bi bi-bell me-1"></i>Aktivera notiser</button>' +
+                        iosNote + tut +
                         '<div class="small mt-2" data-pn-status></div>' +
                     '</div>';
                 containerEl.style.display = '';
