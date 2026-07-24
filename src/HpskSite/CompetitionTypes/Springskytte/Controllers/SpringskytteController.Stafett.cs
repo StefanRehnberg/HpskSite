@@ -475,6 +475,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
                 int by = currentMember != null ? int.Parse(currentMember.Id) : 0;
 
+                // Capture prior state so the auto-notify fires only on the transition to official.
+                var wasOfficial = await GetStafettResultsOfficialAsync(request.CompetitionId);
+
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 await db.ExecuteAsync(@"
                     MERGE INTO [SpringskytteStafettResultPublish] AS target
@@ -484,6 +487,30 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     WHEN NOT MATCHED THEN INSERT (CompetitionId, IsOfficial, PublishedDate, PublishedBy)
                         VALUES (@0, @1, @2, @3);",
                     request.CompetitionId, request.IsOfficial, request.IsOfficial ? (object)DateTime.Now : DBNull.Value, by);
+
+                // Phase 2 auto-trigger: notify registered shooters when stafett results flip to official.
+                // Opt-in per comp (autoNotifyParticipants, default off); transition-only; fire-and-forget.
+                // Audience is the comp's registered individuals (relay members are normally registered too);
+                // a stafett-only comp with no individual registrations simply reaches no one.
+                if (request.IsOfficial && !wasOfficial)
+                {
+                    try
+                    {
+                        var comp = _contentService.GetById(request.CompetitionId);
+                        if (comp != null && comp.GetValue<bool>("autoNotifyParticipants"))
+                        {
+                            var notifier = HttpContext?.RequestServices?
+                                .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
+                                as HpskSite.Services.Messaging.ParticipantNotificationService;
+                            notifier?.Notify(request.CompetitionId, "All", null,
+                                "Stafettresultaten är nu publicerade.", "Normal", 0, "");
+                        }
+                    }
+                    catch (Exception notifyEx)
+                    {
+                        _logger.LogWarning(notifyEx, "Auto-notify participants (stafett) failed for {Comp}", request.CompetitionId);
+                    }
+                }
 
                 return Json(new
                 {

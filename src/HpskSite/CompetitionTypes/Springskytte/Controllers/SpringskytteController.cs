@@ -738,6 +738,25 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     {
                         _logger.LogError(medalEx, "Failed to materialize Springskytte standard medals for CompetitionId={CompetitionId}", competitionId);
                     }
+
+                    // Phase 2 auto-trigger: notify registered shooters when the list flips to official
+                    // (transition only — never re-fires on a recompute of an already-published list).
+                    // Opt-in per comp (autoNotifyParticipants, default off); fire-and-forget.
+                    if (official && !existingOfficial && competition.GetValue<bool>("autoNotifyParticipants"))
+                    {
+                        try
+                        {
+                            var notifier = HttpContext?.RequestServices?
+                                .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
+                                as HpskSite.Services.Messaging.ParticipantNotificationService;
+                            notifier?.Notify(competitionId, "All", null,
+                                "Resultatlistan är nu publicerad.", "Normal", 0, "");
+                        }
+                        catch (Exception notifyEx)
+                        {
+                            _logger.LogWarning(notifyEx, "Auto-notify participants failed for CompetitionId={CompetitionId}", competitionId);
+                        }
+                    }
                 }
 
                 return Json(new
