@@ -61,6 +61,7 @@
 <script>
 (function () {
     var TOKEN = '@token';
+    var GRACE_DAYS = @HpskSite.Services.StaffHubService.RecentGraceDays;
     var groups = [];
     var availModal = null;
 
@@ -80,19 +81,51 @@
         } catch (e) { q('muGroups').innerHTML = '<div class="alert alert-warning">Kunde inte läsa dina uppdrag.</div>'; }
     }
 
-    function render() {
-        if (!groups.length) {
-            q('muGroups').innerHTML = '<div class="card"><div class="card-body text-center text-muted py-5"><i class="bi bi-inbox fs-2 d-block mb-2"></i>Du har inga uppdrag ännu. När en arrangör bjuder in dig dyker det upp här.</div></div>';
-            return;
-        }
-        q('muGroups').innerHTML = groups.map(groupHtml).join('');
+    // Competition day is over. Undated comps count as kommande — we can't tell, and burying a real
+    // commitment under "Tidigare" is worse than the reverse. Same rule as the home-page card.
+    function dayStr(d) {
+        var m = d.getMonth() + 1, day = d.getDate();
+        return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+    }
+    function isPast(g) { return !!g.compDate && g.compDate < dayStr(new Date()); }
+    // Just-finished comps get looked up in the days after, so open the section instead of hiding them
+    // behind a click. Window shared with the home card (StaffHubService.RecentGraceDays).
+    function isRecent(g) {
+        var c = new Date(); c.setDate(c.getDate() - GRACE_DAYS);
+        return isPast(g) && g.compDate >= dayStr(c);
     }
 
-    function groupHtml(g) {
+    function render() {
+        var upcoming = groups.filter(function (g) { return !isPast(g); });
+        var past = groups.filter(isPast).sort(function (a, b) {
+            return a.compDate < b.compDate ? 1 : (a.compDate > b.compDate ? -1 : 0);   // newest first
+        });
+        var openPast = past.some(isRecent);
+
+        var html = upcoming.length
+            ? upcoming.map(function (g) { return groupHtml(g, false); }).join('')
+            : '<div class="card mb-3"><div class="card-body text-center text-muted py-5"><i class="bi bi-inbox fs-2 d-block mb-2"></i>'
+              + (past.length ? 'Du har inga kommande uppdrag.' : 'Du har inga uppdrag ännu. När en arrangör bjuder in dig dyker det upp här.')
+              + '</div></div>';
+
+        if (past.length) {
+            html += '<div class="card mb-3">'
+                + '<div class="card-header py-2 d-flex justify-content-between align-items-center">'
+                + '<span class="text-muted"><i class="bi bi-clock-history me-2"></i>Tidigare uppdrag <span class="badge bg-secondary ms-1">' + past.length + '</span></span>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#muPast" aria-expanded="' + (openPast ? 'true' : 'false') + '">Visa/dölj</button>'
+                + '</div>'
+                + '<div class="collapse' + (openPast ? ' show' : '') + '" id="muPast"><div class="card-body py-2">'
+                + past.map(function (g) { return groupHtml(g, true); }).join('')
+                + '</div></div></div>';
+        }
+        q('muGroups').innerHTML = html;
+    }
+
+    function groupHtml(g, readOnly) {
         var when = g.compDate ? '<span class="text-muted small ms-2"><i class="bi bi-calendar-event me-1"></i>' + esc(g.compDate) + '</span>' : '';
-        var assignments = (g.assignments || []).map(assignmentHtml).join('') || '<div class="text-muted small py-2">Inga roller.</div>';
-        var avail = availHtml(g);
-        return '<div class="card mb-3">'
+        var assignments = (g.assignments || []).map(function (a) { return assignmentHtml(a, readOnly); }).join('') || '<div class="text-muted small py-2">Inga roller.</div>';
+        var avail = availHtml(g, readOnly);
+        return '<div class="card mb-3' + (readOnly ? ' bg-body-tertiary' : '') + '">'
             + '<div class="card-header py-2"><span class="fw-semibold">' + esc(g.compName) + '</span>' + when + '</div>'
             + '<div class="card-body py-2">'
             + assignments
@@ -101,7 +134,7 @@
             + '</div></div>';
     }
 
-    function assignmentHtml(a) {
+    function assignmentHtml(a, readOnly) {
         var star = a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" title="Ansvarig"></i>' : '';
         var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
@@ -109,7 +142,7 @@
         var statusBadge = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
         var accepted = a.status === 'Accepted';
         var declined = a.status === 'Declined';
-        var actions = '<div class="btn-group btn-group-sm">'
+        var actions = readOnly ? '' : '<div class="btn-group btn-group-sm">'
             + '<button type="button" class="btn ' + (accepted ? 'btn-success' : 'btn-outline-success') + '" onclick="muRespond(' + a.id + ',\'Accepted\')"><i class="bi bi-check-lg"></i> Tacka ja</button>'
             + '<button type="button" class="btn ' + (declined ? 'btn-danger' : 'btn-outline-danger') + '" onclick="muRespond(' + a.id + ',\'Declined\')"><i class="bi bi-x-lg"></i> Tacka nej</button>'
             + '</div>';
@@ -121,17 +154,17 @@
             + '</div>';
     }
 
-    function availHtml(g) {
+    function availHtml(g, readOnly) {
         var chips = (g.availability || []).map(function (w) {
             return '<span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1" style="font-weight:500">'
                 + '<i class="bi bi-clock-history me-1"></i>' + esc(w.label) + (w.note ? ' — ' + esc(w.note) : '')
-                + '<button type="button" class="btn-close" style="font-size:.6rem" title="Ta bort" onclick="muDeleteAvail(' + w.id + ')"></button>'
+                + (readOnly ? '' : '<button type="button" class="btn-close" style="font-size:.6rem" title="Ta bort" onclick="muDeleteAvail(' + w.id + ')"></button>')
                 + '</span>';
         }).join(' ');
         return '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">'
             + '<div><span class="text-muted small me-2"><i class="bi bi-calendar-week me-1"></i>Min tillgänglighet:</span>'
             + (chips || '<span class="text-muted small fst-italic">Ingen angiven (antas heldag)</span>') + '</div>'
-            + '<button type="button" class="btn btn-outline-primary btn-sm" onclick="muOpenAvail(' + g.competitionId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tillgänglighet</button>'
+            + (readOnly ? '' : '<button type="button" class="btn btn-outline-primary btn-sm" onclick="muOpenAvail(' + g.competitionId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tillgänglighet</button>')
             + '</div>';
     }
 
