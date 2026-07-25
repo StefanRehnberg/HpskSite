@@ -454,6 +454,30 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // Exclude the demo/test club Ankeborg — its members are fake test users
+                // that shouldn't appear in the exported member list. Match by primaryClubId
+                // (same approach as the admin statistics exclusion), resolving the club id(s)
+                // whose name contains "ankeborg" (case-insensitive). Uses the unfiltered club
+                // list so the demo club is caught even if it's currently unpublished.
+                var ankeborgClubIds = GetClubsFromStorage()
+                    .Where(c => (c.Name ?? "").Contains("ankeborg", StringComparison.OrdinalIgnoreCase))
+                    .Select(c => c.Id ?? 0)
+                    .Where(id => id > 0)
+                    .ToHashSet();
+
+                if (ankeborgClubIds.Any())
+                {
+                    regularMembers = regularMembers.Where(m =>
+                    {
+                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        if (int.TryParse(memberClubIdStr, out var memberClubId))
+                        {
+                            return !ankeborgClubIds.Contains(memberClubId);
+                        }
+                        return true; // no/invalid primary club → keep
+                    });
+                }
+
                 // Build CSV
                 var csv = new StringBuilder();
                 csv.AppendLine("Namn,E-post,Telefon,Klubb,Krets,Grupper,Status,Senast aktiv (webb),Senast aktiv (app)");
