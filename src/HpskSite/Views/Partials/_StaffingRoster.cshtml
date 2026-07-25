@@ -55,6 +55,17 @@
             </button>
         </div>
 
+        @*
+            Schemakvalitet — what the funktionärer will actually SEE in their personal schedule
+            (/mitt-schema), surfaced here while it's still cheap to fix:
+              • assignments with no shift and no pass render as "Heldag" for the person, which is a
+                thin answer to "when should I be there";
+              • two overlapping shifts for the same person is a clash that's far cheaper to catch now
+                than on the morning of the competition.
+            Hidden entirely when there's nothing to report.
+        *@
+        <div id="stfQuality" class="mb-3"></div>
+
         @* Filter/search toolbar — keeps the roster usable when there are 100+ funktionärer. *@
         <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="stfFilterBar">
             <div class="position-relative flex-grow-1" style="min-width:170px;max-width:280px">
@@ -436,6 +447,7 @@
             populateFilterSelects();
             renderNeedsEditor();   // roles now known → (re)render the crew-needs inputs
             loadCoverage();        // keep coverage live as assignments change
+            loadScheduleQuality(); // ...and re-check missing times / clashes after every roster change
         } catch (e) {
             document.getElementById('stfRoster').innerHTML = '<div class="alert alert-warning">Kunde inte läsa bemanningen.</div>';
         }
@@ -950,6 +962,38 @@
             if (!d.success) { host.innerHTML = '<div class="text-muted small">Kunde inte läsa täckning.</div>'; return; }
             renderCoverage(d);
         } catch (e) { host.innerHTML = '<div class="text-muted small">Kunde inte läsa täckning.</div>'; }
+    }
+
+    // Schemakvalitet — see the #stfQuality block above for why this lives on the roster tab.
+    async function loadScheduleQuality() {
+        var host = document.getElementById('stfQuality'); if (!host) return;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetScheduleQuality?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { host.innerHTML = ''; return; }
+
+            var html = '';
+            if (d.untimed > 0) {
+                html += '<div class="alert alert-light border py-2 mb-2 small">'
+                    + '<i class="bi bi-clock-history me-1"></i>'
+                    + '<strong>' + d.untimed + ' av ' + d.total + ' uppdrag saknar tid.</strong> '
+                    + 'De funktionärerna ser bara "Heldag" i sitt schema. Sätt ett skift eller ett arbetspass '
+                    + 'så vet de när de ska vara på plats.'
+                    + '</div>';
+            }
+            if ((d.clashes || []).length) {
+                html += '<div class="alert alert-warning py-2 mb-0 small">'
+                    + '<i class="bi bi-exclamation-triangle-fill me-1"></i>'
+                    + '<strong>' + d.clashes.length + ' krock' + (d.clashes.length === 1 ? '' : 'ar')
+                    + ' i bemanningen</strong> — samma person är bokad på två håll samtidigt:'
+                    + '<ul class="mb-0 mt-1">'
+                    + d.clashes.map(function (c) {
+                        return '<li>' + esc(c.name) + ': ' + esc(c.a) + ' &amp; ' + esc(c.b) + '</li>';
+                    }).join('')
+                    + '</ul></div>';
+            }
+            host.innerHTML = html;
+        } catch (e) { host.innerHTML = ''; }
     }
 
     function covClass(filled, needed) {

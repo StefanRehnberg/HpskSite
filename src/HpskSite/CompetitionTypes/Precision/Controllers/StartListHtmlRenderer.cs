@@ -71,7 +71,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         ? ""
                         : $" — {System.Net.WebUtility.HtmlEncode(team.Label)}";
                     var teamWord = isFinals ? "Final" : "Skjutlag";
-                    html.AppendLine($"<h3>{teamWord}: {team.TeamNumber}{labelSuffix} Tid (ca): {team.StartTime}-{team.EndTime}");
+                    // Explicit day (multi-day comps). Rendered as "lör 8 aug" ahead of the clock time so
+                    // "Tid (ca)" always reads as a complete moment. Empty on single-day comps + legacy lists.
+                    var dateSuffix = FormatTeamDate(team.Date);
+                    html.AppendLine($"<h3>{teamWord}: {team.TeamNumber}{labelSuffix} Tid (ca): {dateSuffix}{team.StartTime}-{team.EndTime}");
 
                     if (!isFinals && config.Settings?.Format == "En vapengrupp per Skjutlag" && team.WeaponClasses.Any())
                     {
@@ -153,6 +156,21 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             var shootingClass = ShootingClasses.GetById(classId);
             return shootingClass?.Name ?? classId;
+        }
+
+        /// <summary>
+        /// "lör 8 aug " for a team carrying an explicit Date, or "" when it has none (single-day comps
+        /// and every list generated before the field existed). Kept in sync with the same formatting in
+        /// Views/PrecisionStartList.cshtml — see the dual-renderer warning on StartListTeam.Date.
+        /// </summary>
+        internal static string FormatTeamDate(string? date)
+        {
+            if (string.IsNullOrWhiteSpace(date)) return "";
+            return System.DateTime.TryParseExact(date.Trim(), "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d)
+                ? d.ToString("ddd d MMM ", System.Globalization.CultureInfo.GetCultureInfo("sv-SE"))
+                : "";
         }
 
         public string GetTeamFormatDisplay(string format)

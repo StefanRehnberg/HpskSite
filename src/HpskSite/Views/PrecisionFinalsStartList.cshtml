@@ -170,9 +170,14 @@
                         {
                             string teamLabel = "";
                             try { teamLabel = (string)team.Label ?? ""; } catch { teamLabel = ""; }
+                            // Third renderer of the same StartListTeam shape — see the dual-renderer
+                            // warning on StartListTeam.Date. Missing on legacy lists, hence the try/catch.
+                            string teamDateRaw = "";
+                            try { teamDateRaw = (string)team.Date ?? ""; } catch { teamDateRaw = ""; }
+                            var teamDateLabel = HpskSite.CompetitionTypes.Precision.Controllers.StartListHtmlRenderer.FormatTeamDate(teamDateRaw);
                             <div class="team-section">
                                 <div class="team-header">
-                                    Final: @team.TeamNumber@(string.IsNullOrWhiteSpace(teamLabel) ? "" : $" — {teamLabel}") - Tid (ca): @team.StartTime-@team.EndTime (@team.ShooterCount st)
+                                    Final: @team.TeamNumber@(string.IsNullOrWhiteSpace(teamLabel) ? "" : $" — {teamLabel}") - Tid (ca): @teamDateLabel@team.StartTime-@team.EndTime (@team.ShooterCount st)
                                 </div>
                                 <table class="start-list-table">
                                     <thead>

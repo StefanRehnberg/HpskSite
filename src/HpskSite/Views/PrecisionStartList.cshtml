@@ -250,9 +250,15 @@
                         {
                             string teamLabel = "";
                             try { teamLabel = (string)team.Label ?? ""; } catch { teamLabel = ""; }
+                            // Explicit shooting day (multi-day comps). This is the PUBLIC half of the
+                            // dual-renderer pair — StartListHtmlRenderer.FormatTeamDate is the other.
+                            // Missing on legacy lists, so the dynamic read needs the try/catch.
+                            string teamDateRaw = "";
+                            try { teamDateRaw = (string)team.Date ?? ""; } catch { teamDateRaw = ""; }
+                            var teamDateLabel = HpskSite.CompetitionTypes.Precision.Controllers.StartListHtmlRenderer.FormatTeamDate(teamDateRaw);
                             <div class="team-section">
                                 <div class="team-header">
-                                    Skjutlag: @team.TeamNumber@(string.IsNullOrWhiteSpace(teamLabel) ? "" : $" — {teamLabel}") - Tid (ca): @team.StartTime-@team.EndTime (@team.ShooterCount st)
+                                    Skjutlag: @team.TeamNumber@(string.IsNullOrWhiteSpace(teamLabel) ? "" : $" — {teamLabel}") - Tid (ca): @teamDateLabel@team.StartTime-@team.EndTime (@team.ShooterCount st)
 </div>
                                 <table class="start-list-table">
                                     <thead>

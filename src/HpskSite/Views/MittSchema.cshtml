@@ -1,0 +1,134 @@
+@using System.Globalization
+@using HpskSite.Models.Schedule
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = ViewData["Title"]?.ToString() ?? "Mitt schema";
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+    var mode = ViewData["Mode"]?.ToString() ?? "list";
+    var single = ViewData["Schedule"] as MySchedule;
+    var all = ViewData["Schedules"] as List<MySchedule> ?? new List<MySchedule>();
+}
+
+<div class="container mt-4 mb-5">
+    @if (mode == "single" && single != null)
+    {
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div>
+                <h1 class="mb-1"><i class="bi bi-calendar2-week me-2"></i>Mitt schema</h1>
+                <p class="text-muted mb-0">
+                    <strong>@single.CompName</strong>
+                    @* NB: plain null-checks, not `is { } x` — a `{` inside a Razor @if condition trips
+                       the brace-balancing parser and fails view compilation at runtime. *@
+                    @if (single.CompDate != null)
+                    {
+                        var d = single.CompDate.Value;
+                        <text> · @d.ToString("d MMMM yyyy", sv)</text>
+                        @if (single.CompEndDate != null && single.CompEndDate.Value.Date > d.Date)
+                        {
+                            <text>–@single.CompEndDate.Value.ToString("d MMMM yyyy", sv)</text>
+                        }
+                    }
+                </p>
+            </div>
+            <div class="d-flex gap-2 flex-wrap d-print-none">
+                @if (single.HasAny)
+                {
+                    <a href="/mitt-schema/kalender.ics?c=@single.CompetitionId" class="btn btn-outline-primary">
+                        <i class="bi bi-calendar-plus"></i> Lägg i kalendern
+                    </a>
+                    <button type="button" class="btn btn-outline-secondary" onclick="window.print()">
+                        <i class="bi bi-printer"></i> Skriv ut
+                    </button>
+                }
+                @if (!string.IsNullOrWhiteSpace(single.CompetitionUrl))
+                {
+                    <a href="@single.CompetitionUrl" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> Till tävlingen
+                    </a>
+                }
+            </div>
+        </div>
+
+        @* Calendar caveat, stated once. The export is a snapshot by design; the honest thing is to say so. *@
+        @if (single.HasAny)
+        {
+            <p class="text-muted small d-print-none" style="max-width:720px">
+                <i class="bi bi-info-circle me-1"></i>
+                Kalenderfilen är en <strong>kopia</strong> av schemat som det ser ut nu, med påminnelse 30 minuter
+                före varje pass. Flyttar arrangören en tid får du en avisering — hämta då filen igen.
+            </p>
+        }
+
+        @await Html.PartialAsync("_MittSchema", single)
+    }
+    else
+    {
+        <h1 class="mb-1"><i class="bi bi-calendar2-week me-2"></i>Mitt schema</h1>
+        <p class="text-muted" style="max-width:720px">
+            Här ser du hur dina tävlingsdagar ser ut — när du skjuter, när du arbetar som funktionär och
+            vad som händer runt omkring. Allt i tidsordning.
+        </p>
+
+        @if (all.Count == 0)
+        {
+            <div class="card">
+                <div class="card-body">
+                    <p class="mb-2">Du har inget inplanerat just nu.</p>
+                    <p class="text-muted small mb-0">
+                        Schemat fylls i automatiskt när du anmäler dig till en tävling och arrangören
+                        publicerar startlistan, eller när du får ett funktionärsuppdrag.
+                    </p>
+                </div>
+            </div>
+        }
+        else
+        {
+            foreach (var s in all)
+            {
+                var isPast = s.CompEndDate?.Date < DateTime.Today
+                             || (s.CompEndDate == null && s.CompDate?.Date < DateTime.Today);
+                <div class="card mb-3 @(s.IsToday ? "border-primary" : "")">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 @(s.IsToday ? "bg-primary-subtle" : "")">
+                        <span class="fw-semibold">
+                            @s.CompName
+                            @if (s.CompDate != null)
+                            {
+                                <span class="text-muted small ms-1">· @s.CompDate.Value.ToString("d MMM yyyy", sv)</span>
+                            }
+                            @if (s.IsToday)
+                            {
+                                <span class="badge bg-primary ms-1">Idag</span>
+                            }
+                            else if (isPast)
+                            {
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-1">Genomförd</span>
+                            }
+                            @if (s.ConflictCount > 0)
+                            {
+                                <span class="badge bg-warning text-dark ms-1">
+                                    <i class="bi bi-exclamation-triangle"></i> @s.ConflictCount krock@(s.ConflictCount == 1 ? "" : "ar")
+                                </span>
+                            }
+                        </span>
+                        <a href="/mitt-schema?c=@s.CompetitionId" class="small text-decoration-none">Hela schemat →</a>
+                    </div>
+                    <div class="card-body">
+                        @{
+                            var vd = new ViewDataDictionary(ViewData) { ["Compact"] = true, ["MaxRows"] = 4 };
+                        }
+                        @await Html.PartialAsync("_MittSchema", s, vd)
+                    </div>
+                </div>
+            }
+        }
+    }
+</div>
+
+<style>
+    @@media print {
+        .btn, .navbar, footer, .d-print-none { display: none !important; }
+        .container { max-width: 100% !important; }
+        .list-group-item { break-inside: avoid; }
+    }
+</style>

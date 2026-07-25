@@ -600,6 +600,54 @@
         </div>
     </div>
 
+    @*
+        "Ditt schema" — this visitor's own itinerary for this competition, merging what they shoot with
+        what they work. Rendered by the SAME partial as /mitt-schema, so the two can't drift.
+
+        Placed directly under the breadcrumb because the competition page is where people already come
+        looking; /mitt-schema is the bookmark/print/notification target. Only shown when the member
+        actually has something here (or is registered and waiting for the start list) — for everyone
+        else the block is absent, not empty.
+    *@
+    @if (regMemberId > 0)
+    {
+        var myScheduleSvc = Context.RequestServices.GetService(typeof(HpskSite.Services.Schedule.MyScheduleService))
+            as HpskSite.Services.Schedule.MyScheduleService;
+        var mySchedule = myScheduleSvc?.GetSchedule(regMemberId, Model.Id);
+        if (mySchedule != null && (mySchedule.HasAny || mySchedule.StartListPending))
+        {
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card @(mySchedule.IsToday ? "border-primary" : "border-primary-subtle")">
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 @(mySchedule.IsToday ? "bg-primary-subtle" : "")">
+                            <span class="fw-semibold">
+                                <i class="bi bi-calendar2-week me-2 text-primary"></i>Ditt schema
+                                @if (mySchedule.IsToday)
+                                {
+                                    <span class="badge bg-primary ms-1">Idag</span>
+                                }
+                                @if (mySchedule.ConflictCount > 0)
+                                {
+                                    <span class="badge bg-warning text-dark ms-1">
+                                        <i class="bi bi-exclamation-triangle"></i>
+                                        @mySchedule.ConflictCount krock@(mySchedule.ConflictCount == 1 ? "" : "ar")
+                                    </span>
+                                }
+                            </span>
+                            <a href="/mitt-schema?c=@Model.Id" class="small text-decoration-none">Hela schemat, utskrift och kalender →</a>
+                        </div>
+                        <div class="card-body">
+                            @{
+                                var schedVd = new ViewDataDictionary(ViewData) { ["Compact"] = true, ["MaxRows"] = 6 };
+                            }
+                            @await Html.PartialAsync("_MittSchema", mySchedule, schedVd)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+
     @* Series Information Banner (when competition is part of a series) *@
     @if (Model.Parent?.ContentType.Alias == "competitionSeries")
     {

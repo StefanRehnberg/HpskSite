@@ -676,6 +676,15 @@
                 </div>
 
                 <div class="mb-3">
+                    <label for="editTeamDate" class="form-label">Datum (valfritt):</label>
+                    <input type="text" class="form-control" id="editTeamDate" placeholder="Tävlingens datum">
+                    <div class="form-text">
+                        Fyll i på <strong>flerdagarstävlingar</strong> så skyttarna ser rätt dag i sitt schema
+                        och i kalenderexporten. Lämna tomt på endagstävlingar — då används tävlingens datum.
+                    </div>
+                </div>
+
+                <div class="mb-3">
                     <label for="editTeamStartTime" class="form-label">Starttid:</label>
                     <input type="text" class="form-control" id="editTeamStartTime" required>
                 </div>
@@ -2146,16 +2155,27 @@ function openEditTeamTimesModal(startListId, teamNumber, currentStart, currentEn
     // Look up the current label from the in-memory config (avoids HTML-attribute
     // escaping headaches that come with passing freeform text via onclick=).
     let currentLabel = '';
+    let currentDate = '';
     if (currentStartListConfig && Array.isArray(currentStartListConfig.teams)) {
         const t = currentStartListConfig.teams.find(x => (x.teamNumber || x.TeamNumber) === teamNumber);
         if (t) currentLabel = t.label || t.Label || '';
+        // GetStartListForEditing returns config with inconsistent casing — same dual-casing read as
+        // label/club elsewhere in this file.
+        if (t) currentDate = t.date || t.Date || '';
     }
 
     // Set current values
     document.getElementById('editTeamNumber').textContent = teamNumber;
     document.getElementById('editTeamLabel').value = currentLabel;
+    document.getElementById('editTeamDate').value = currentDate;
     document.getElementById('editTeamStartTime').value = currentStart;
     document.getElementById('editTeamEndTime').value = currentEnd;
+
+    flatpickr('#editTeamDate', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d',
+        allowInput: true
+    });
 
     // Initialize Flatpickr
     flatpickr('#editTeamStartTime', {
@@ -2203,7 +2223,8 @@ function confirmUpdateTeamTimes() {
             teamNumber: currentEditTeamNumber,
             startTime: startTime,
             endTime: endTime,
-            label: document.getElementById('editTeamLabel').value || ''
+            label: document.getElementById('editTeamLabel').value || '',
+            date: document.getElementById('editTeamDate').value || ''
         })
     })
     .then(response => response.json())

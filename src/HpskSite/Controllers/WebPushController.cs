@@ -1,4 +1,4 @@
-using HpskSite.Models.WebPush;
+﻿using HpskSite.Models.WebPush;
 using HpskSite.Services;
 using HpskSite.Services.Notifications;
 using Microsoft.AspNetCore.Mvc;
@@ -78,7 +78,9 @@ namespace HpskSite.Controllers
             {
                 success = true,
                 matchPref = prefs?.MatchPref ?? "OpenMatchesOnly",
-                rankingEnabled = prefs?.RankingEnabled ?? true
+                rankingEnabled = prefs?.RankingEnabled ?? true,
+                // Start-time reminders default OFF - participant-facing pushes are opt-in only.
+                scheduleRemindersEnabled = prefs?.ScheduleRemindersEnabled ?? false
             });
         }
 
@@ -88,7 +90,7 @@ namespace HpskSite.Controllers
             var memberId = await GetMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Du måste vara inloggad." });
             if (string.IsNullOrEmpty(request?.Endpoint)) return Json(new { success = false, message = "Saknar prenumeration." });
-            _webPush.SavePreferences(request.Endpoint!, request.MatchPref, request.RankingEnabled);
+            _webPush.SavePreferences(request.Endpoint!, request.MatchPref, request.RankingEnabled, request.ScheduleRemindersEnabled);
             return Json(new { success = true });
         }
 

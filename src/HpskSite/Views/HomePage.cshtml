@@ -7,6 +7,7 @@
 @inject HpskSite.Services.BoardHubService BoardHub
 @inject HpskSite.Services.RangeHubService RangeHub
 @inject HpskSite.Services.StaffHubService StaffHub
+@inject HpskSite.Services.Schedule.ScheduleHubService ScheduleHub
 @{
     Layout = "Master.cshtml";
     var sv = new CultureInfo("sv-SE");
@@ -52,6 +53,7 @@
     HpskSite.Services.BoardHubSummary? board = null;
     HpskSite.Services.RangeHubSummary? range = null;
     HpskSite.Services.StaffHubSummary? staff = null;
+    HpskSite.Models.Schedule.ScheduleHubSummary? schedule = null;
     if (isLoggedIn)
     {
         var member = MemberService.GetByEmail(cm!.Email ?? "");
@@ -68,8 +70,18 @@
             board = BoardHub.GetSummary(member.Id);
             range = await RangeHub.GetSummaryAsync(member.Id);
             staff = StaffHub.GetSummary(member.Id);
+            schedule = ScheduleHub.GetSummary(member.Id);
         }
     }
+
+    // Functionary rows to actually render: the "Ditt schema" card below takes over any competition it
+    // shows, so those rows are dropped here to avoid listing the same competition twice — unless a
+    // response is still owed, which must never be hidden behind a timeline. Computed HERE rather than in
+    // a mid-markup @ block: a code block placed between the markup sections further down breaks this
+    // view's runtime compilation (messageless UmbracoCompilationException).
+    var staffVisibleRows = staff?.VisibleRows(schedule?.ShownCompetitionIds);
+    var staffVisibleCount = staffVisibleRows?.Count ?? 0;
+    var showStaffCard = staff != null && (staffVisibleCount > 0 || staff.OpenCount > 0);
 
     var welcomeTitle = "pistol.nu – allt för pistolskytten";
     ViewBag.Title = isLoggedIn ? "Min startsida" : welcomeTitle;
@@ -252,6 +264,109 @@ else
         <a class="btn btn-lg btn-outline-secondary" href="@competitionsUrl"><i class="bi bi-trophy me-1"></i>Tävlingar</a>
     </div>
 
+    @*
+        "Ditt schema" — the member's own itinerary for competitions within the next week, merging what
+        they shoot with what they work. Placed FIRST among the personal blocks on purpose: on the morning
+        of a competition this is the only thing on the page anyone cares about.
+
+        It shares subject matter with "Dina funktionärsuppdrag" further down, and the split is by TIME
+        HORIZON, not by role: far from a competition that card says "answer this / sign up for this";
+        close to it, this one says "here's your day, in order".
+
+        NOTE: no `@@{ }` code blocks inside this markup — one placed in this part of the file breaks the
+        view's runtime compilation with a messageless UmbracoCompilationException. Anything that needs
+        computing goes in the top code block.
+    *@
+    @if (schedule?.HasAny == true)
+    {
+        <div class="card mb-4 @(schedule.AnyToday ? "border-primary" : "border-primary-subtle")">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 @(schedule.AnyToday ? "bg-primary-subtle" : "")">
+                <span class="fw-semibold"><i class="bi bi-calendar2-week me-2 text-primary"></i>Ditt schema</span>
+                <div class="d-flex align-items-center gap-2">
+                    @if (schedule.TotalConflicts > 0)
+                    {
+                        <span class="badge bg-warning text-dark">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            @schedule.TotalConflicts krock@(schedule.TotalConflicts == 1 ? "" : "ar")
+                        </span>
+                    }
+                    <a href="/mitt-schema" class="small text-decoration-none">Alla mina tävlingar →</a>
+                </div>
+            </div>
+            <div class="card-body">
+                @foreach (var sc in schedule.Items)
+                {
+                    <div class="@(sc.CompetitionId == schedule.Items[0].CompetitionId ? "" : "mt-3 pt-3 border-top")">
+                        <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2 mb-2">
+                            <span>
+                                <span class="fw-semibold">@sc.CompName</span>
+                                <span class="text-muted small ms-1">· @sc.DateLabel</span>
+                                @if (sc.IsToday)
+                                {
+                                    <span class="badge bg-primary ms-1">Idag</span>
+                                }
+                            </span>
+                            <a href="/mitt-schema?c=@sc.CompetitionId" class="small text-decoration-none">Hela dagen →</a>
+                        </div>
+
+                        @if (sc.NextItem != null)
+                        {
+                            <div class="d-flex align-items-baseline gap-2 flex-wrap mb-2">
+                                <span class="text-uppercase text-muted small fw-semibold">Nästa</span>
+                                <span class="fw-bold">@sc.NextItem.TimeLabel</span>
+                                <span>@sc.NextItem.Title</span>
+                                @if (!string.IsNullOrWhiteSpace(sc.NextItem.Where))
+                                {
+                                    <span class="text-muted small">· @sc.NextItem.Where</span>
+                                }
+                            </div>
+                        }
+
+                        @if (sc.StartListPending)
+                        {
+                            <div class="text-muted small mb-2">
+                                <i class="bi bi-hourglass-split me-1"></i>Startlistan är inte publicerad än.
+                            </div>
+                        }
+
+                        <div class="list-group list-group-flush">
+                            @foreach (var it in sc.Preview)
+                            {
+                                <div class="list-group-item px-0 py-1 border-0">
+                                    <div class="d-flex gap-2 small">
+                                        <span class="fw-semibold text-nowrap" style="min-width:5rem;">
+                                            <i class="bi @(string.IsNullOrWhiteSpace(it.Icon) ? "bi-dot" : it.Icon) me-1"></i>@it.TimeLabel
+                                        </span>
+                                        <span class="flex-grow-1">
+                                            @it.Title
+                                            @if (!string.IsNullOrWhiteSpace(it.Where))
+                                            {
+                                                <span class="text-muted">· @it.Where</span>
+                                            }
+                                            @if (it.NeedsResponse)
+                                            {
+                                                <span class="badge bg-warning text-dark ms-1">Svara</span>
+                                            }
+                                            @if (it.HasConflict)
+                                            {
+                                                <span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>
+                                            }
+                                        </span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        @if (sc.ItemCount > sc.Preview.Count)
+                        {
+                            <div class="small text-muted mt-1">+ @(sc.ItemCount - sc.Preview.Count) fler</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
     @* Board-member section — only for members who sit on a board (any club/krets). Spans all their boards. *@
     @if (board?.HasBoards == true)
     {
@@ -317,8 +432,10 @@ else
         </div>
     }
 
-    @* Functionary commitments — invitations to respond to + comps you're signed up for + open sign-ups. *@
-    @if (staff?.HasAny == true)
+    @* Functionary commitments — invitations to respond to + comps you're signed up for + open sign-ups.
+       Rows the "Ditt schema" card above already shows are filtered out (staffVisibleRows, computed in
+       the top code block) so a competition never appears twice — except when a response is still owed. *@
+    @if (showStaffCard)
     {
         <div class="card mb-4 border-success-subtle">
             <div class="card-header bg-success-subtle d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -329,10 +446,10 @@ else
                 }
             </div>
             <div class="card-body">
-                @if (staff.Assignments.Any())
+                @if (staffVisibleCount > 0)
                 {
                     <div class="list-group list-group-flush mb-2">
-                        @foreach (var it in staff.Assignments)
+                        @foreach (var it in staffVisibleRows)
                         {
                             <a href="/bemanna?c=@it.CompetitionId" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0">
                                 <span>

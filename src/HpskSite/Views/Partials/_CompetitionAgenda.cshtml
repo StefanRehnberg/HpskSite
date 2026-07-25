@@ -1,0 +1,298 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    // Dagsprogram — the competition's day programme (CompetitionAgendaItem).
+    //
+    // Start lists answer "when do I shoot" and the Bemanning roster answers "when do I work". This tab
+    // is for everything else on the day — anmälan öppnar, upprop, lunch, prisutdelning — so a member's
+    // personal itinerary on /mitt-schema reads like a programme instead of a sparse list.
+    //
+    // Audience per row matters: a "Städning och avrigg" line is noise for a shooter, and "Prisutdelning"
+    // is not. Rows marked Endast funktionärer only reach people with an uppdrag; Endast skyttar only
+    // reach registered participants.
+    var competitionId = ViewData["CompetitionId"];
+    var agToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+
+<p class="text-muted small mb-3" style="max-width:760px">
+    <i class="bi bi-signpost-2 me-1"></i>
+    <strong>Så gör du:</strong> lägg in dagens hållpunkter här. De hamnar i skyttarnas och funktionärernas
+    personliga schema (<em>Mitt schema</em>) tillsammans med deras starttider och pass — så alla ser samma
+    program. Har du en typisk tävlingsdag kan du börja från en färdig mall och stryka det som inte gäller.
+</p>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <h3 class="h5 mb-0"><i class="bi bi-calendar2-event me-2"></i>Dagsprogram</h3>
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="agSeedBtn" onclick="agSeed()">
+            <i class="bi bi-magic"></i> Lägg till standardpunkter
+        </button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="agOpenNew()">
+            <i class="bi bi-plus-lg"></i> Lägg till punkt
+        </button>
+    </div>
+</div>
+
+<div id="agList">
+    <div class="text-muted py-4"><div class="spinner-border spinner-border-sm"></div> Laddar…</div>
+</div>
+
+<!-- Add/edit modal -->
+<div class="modal fade" id="agItemModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="agModalTitle">Lägg till punkt</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="agItemId" value="0">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="agTitle">Vad händer?</label>
+                    <input type="text" class="form-control" id="agTitle" maxlength="200" placeholder="T.ex. Prisutdelning">
+                </div>
+                <div class="row g-2">
+                    <div class="col-sm-4 mb-3">
+                        <label class="form-label fw-semibold" for="agDate">Datum</label>
+                        <input type="text" class="form-control" id="agDate" placeholder="Tävlingsdagen">
+                        <div class="form-text">Lämna tomt på endagstävlingar.</div>
+                    </div>
+                    <div class="col-sm-4 mb-3">
+                        <label class="form-label fw-semibold" for="agStart">Från</label>
+                        <input type="text" class="form-control" id="agStart" placeholder="Ingen tid">
+                    </div>
+                    <div class="col-sm-4 mb-3">
+                        <label class="form-label fw-semibold" for="agEnd">Till</label>
+                        <input type="text" class="form-control" id="agEnd" placeholder="Valfritt">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="agAudience">Vem ska se punkten?</label>
+                    <select class="form-select" id="agAudience">
+                        <option value="All">Alla</option>
+                        <option value="Shooters">Endast skyttar</option>
+                        <option value="Staff">Endast funktionärer</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="agLocation">Var? (valfritt)</label>
+                    <input type="text" class="form-control" id="agLocation" maxlength="200" placeholder="T.ex. Klubbstugan">
+                </div>
+                <div class="mb-1">
+                    <label class="form-label fw-semibold" for="agNote">Kommentar (valfritt)</label>
+                    <input type="text" class="form-control" id="agNote" maxlength="500">
+                </div>
+                <div class="text-danger small mt-2" id="agError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="agSave()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const AG_COMP = @competitionId;
+    const AG_TOKEN = '@agToken';
+    let agModal = null;
+    let agCompDate = null;
+
+    function esc(s) {
+        return (s == null ? '' : String(s))
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function timeLabel(it) {
+        if (!it.startTime) return 'Under dagen';
+        return it.endTime ? (it.startTime + '–' + it.endTime) : it.startTime;
+    }
+
+    function audienceBadge(it) {
+        if (it.audience === 'Staff') return '<span class="badge bg-success-subtle text-success-emphasis border ms-1">Funktionärer</span>';
+        if (it.audience === 'Shooters') return '<span class="badge bg-primary-subtle text-primary-emphasis border ms-1">Skyttar</span>';
+        return '';
+    }
+
+    function render(items) {
+        const wrap = document.getElementById('agList');
+        if (!items.length) {
+            wrap.innerHTML = '<div class="alert alert-light border mb-0">' +
+                'Inget dagsprogram än. Skyttarnas schema visar då bara deras starttider och pass.' +
+                '</div>';
+            return;
+        }
+
+        // Group by day so multi-day competitions read correctly.
+        const byDay = {};
+        items.forEach(it => {
+            const k = it.itemDate || '';
+            (byDay[k] = byDay[k] || []).push(it);
+        });
+
+        let html = '';
+        Object.keys(byDay).sort().forEach(day => {
+            const heading = day
+                ? new Date(day + 'T00:00:00').toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })
+                : 'Tävlingsdagen';
+            html += '<div class="fw-semibold text-muted small text-uppercase mt-3 mb-1">' + esc(heading) + '</div>';
+            html += '<div class="list-group list-group-flush">';
+            byDay[day].forEach(it => {
+                html += '<div class="list-group-item px-0 d-flex gap-3 align-items-start">' +
+                    '<span class="fw-semibold text-nowrap" style="min-width:6.5rem;">' + esc(timeLabel(it)) + '</span>' +
+                    '<span class="flex-grow-1">' +
+                        '<span class="fw-semibold">' + esc(it.title) + '</span>' + audienceBadge(it) +
+                        (it.location ? '<span class="text-muted small d-block">' + esc(it.location) + '</span>' : '') +
+                        (it.note ? '<span class="text-muted small d-block">' + esc(it.note) + '</span>' : '') +
+                    '</span>' +
+                    '<span class="text-nowrap">' +
+                        '<button type="button" class="btn btn-sm btn-outline-secondary agEdit" data-id="' + it.id + '" title="Redigera"><i class="bi bi-pencil"></i></button> ' +
+                        '<button type="button" class="btn btn-sm btn-outline-danger agDel" data-id="' + it.id + '" title="Ta bort"><i class="bi bi-trash"></i></button>' +
+                    '</span>' +
+                '</div>';
+            });
+            html += '</div>';
+        });
+        wrap.innerHTML = html;
+
+        // id-only handlers — never pass freeform text through inline onclick attributes.
+        wrap.querySelectorAll('.agEdit').forEach(b =>
+            b.addEventListener('click', () => agOpenEdit(parseInt(b.dataset.id, 10))));
+        wrap.querySelectorAll('.agDel').forEach(b =>
+            b.addEventListener('click', () => agDelete(parseInt(b.dataset.id, 10))));
+    }
+
+    let agItems = [];
+
+    function load() {
+        fetch('/umbraco/surface/Staffing/GetAgenda?competitionId=' + AG_COMP)
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) {
+                    document.getElementById('agList').innerHTML =
+                        '<div class="alert alert-warning mb-0">' + esc(d.message || 'Kunde inte läsa dagsprogrammet.') + '</div>';
+                    return;
+                }
+                agItems = d.items || [];
+                agCompDate = d.competitionDate || null;
+                render(agItems);
+                document.getElementById('agSeedBtn').classList.toggle('d-none', agItems.length > 0);
+            })
+            .catch(() => {
+                document.getElementById('agList').innerHTML =
+                    '<div class="alert alert-warning mb-0">Kunde inte läsa dagsprogrammet.</div>';
+            });
+    }
+
+    function pickers() {
+        if (typeof flatpickr !== 'function') return;
+        flatpickr('#agDate', { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+        flatpickr('#agStart', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, allowInput: true });
+        flatpickr('#agEnd', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, allowInput: true });
+    }
+
+    function show() {
+        if (!agModal) agModal = new bootstrap.Modal(document.getElementById('agItemModal'));
+        document.getElementById('agError').textContent = '';
+        pickers();
+        agModal.show();
+    }
+
+    window.agOpenNew = function () {
+        document.getElementById('agModalTitle').textContent = 'Lägg till punkt';
+        document.getElementById('agItemId').value = '0';
+        ['agTitle', 'agDate', 'agStart', 'agEnd', 'agLocation', 'agNote'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('agAudience').value = 'All';
+        show();
+    };
+
+    function agOpenEdit(id) {
+        const it = agItems.find(x => x.id === id);
+        if (!it) return;
+        document.getElementById('agModalTitle').textContent = 'Redigera punkt';
+        document.getElementById('agItemId').value = String(it.id);
+        document.getElementById('agTitle').value = it.title || '';
+        document.getElementById('agDate').value = it.itemDate || '';
+        document.getElementById('agStart').value = it.startTime || '';
+        document.getElementById('agEnd').value = it.endTime || '';
+        document.getElementById('agAudience').value = it.audience || 'All';
+        document.getElementById('agLocation').value = it.location || '';
+        document.getElementById('agNote').value = it.note || '';
+        show();
+    }
+
+    window.agSave = function () {
+        const title = document.getElementById('agTitle').value.trim();
+        if (!title) {
+            document.getElementById('agError').textContent = 'Skriv vad som händer.';
+            return;
+        }
+        fetch('/umbraco/surface/Staffing/SaveAgendaItem', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': AG_TOKEN },
+            body: JSON.stringify({
+                id: parseInt(document.getElementById('agItemId').value, 10) || 0,
+                competitionId: AG_COMP,
+                title: title,
+                itemDate: document.getElementById('agDate').value || null,
+                startTime: document.getElementById('agStart').value || null,
+                endTime: document.getElementById('agEnd').value || null,
+                audience: document.getElementById('agAudience').value,
+                location: document.getElementById('agLocation').value || null,
+                note: document.getElementById('agNote').value || null
+            })
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) {
+                document.getElementById('agError').textContent = d.message || 'Kunde inte spara.';
+                return;
+            }
+            agModal.hide();
+            load();
+        })
+        .catch(() => document.getElementById('agError').textContent = 'Ett oväntat fel uppstod.');
+    };
+
+    function agDelete(id) {
+        const it = agItems.find(x => x.id === id);
+        if (!it) return;
+        if (!confirm('Ta bort "' + it.title + '" från dagsprogrammet?')) return;
+        fetch('/umbraco/surface/Staffing/DeleteAgendaItem', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': AG_TOKEN },
+            body: JSON.stringify({ id: id, competitionId: AG_COMP })
+        })
+        .then(r => r.json())
+        .then(() => load())
+        .catch(() => {});
+    }
+
+    window.agSeed = function () {
+        if (!confirm('Lägg till en standarddag (anmälan, upprop, första start, lunch, prisutdelning, avrigg)? Du kan ändra och ta bort punkter efteråt.')) return;
+        fetch('/umbraco/surface/Staffing/SeedAgenda', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': AG_TOKEN },
+            body: JSON.stringify({ competitionId: AG_COMP })
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) { alert(d.message || 'Kunde inte skapa standardprogrammet.'); return; }
+            load();
+        })
+        .catch(() => {});
+    };
+
+    // Lazy-load when the tab is first shown, like the other planning tabs.
+    const tabBtn = document.getElementById('plan-dagsprogram-tab');
+    if (tabBtn) {
+        tabBtn.addEventListener('shown.bs.tab', function once() {
+            tabBtn.removeEventListener('shown.bs.tab', once);
+            load();
+        });
+    } else {
+        load();
+    }
+})();
+</script>

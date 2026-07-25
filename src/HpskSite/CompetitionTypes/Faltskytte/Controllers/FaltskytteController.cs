@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
@@ -2972,6 +2972,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
+            // Already published? Distinguishes a first publish from a re-publish, which say different
+            // things to a shooter ("dina tider finns nu" vs "tiderna kan ha ändrats").
+            var wasPublished = competition.HasProperty("faltskyttePatrolsPublished")
+                && competition.GetValue<bool>("faltskyttePatrolsPublished");
+
             competition.SetValue("faltskyttePatrolsPublished", request.Publish);
             _contentService.Save(competition);
             var pub = _contentService.Publish(competition, new[] { "*" }, -1);
@@ -2987,6 +2992,31 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 _logger.LogWarning("PublishPatrolList: node publish failed for comp {CompetitionId}: {Result}{Invalid}",
                     request.CompetitionId, pub.Result, invalid);
                 return Json(new { success = false, message = $"Patrullistan sparades men tävlingen kunde inte publiceras ({pub.Result}).{invalid} Åtgärda detta i tävlingens inställningar och publicera igen." });
+            }
+
+            // Shooter-facing "patrullistan är publicerad / tiderna har ändrats". Opt-in per competition
+            // (autoNotifyParticipants), best-effort. Matters because the calendar export from
+            // /mitt-schema is a one-shot snapshot — this is what tells a shooter to fetch it again.
+            if (request.Publish)
+            {
+                try
+                {
+                    if (competition.GetValue<bool>("autoNotifyParticipants"))
+                    {
+                        var notifier = HttpContext?.RequestServices
+                            .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
+                            as HpskSite.Services.Messaging.ParticipantNotificationService;
+                        notifier?.Notify(request.CompetitionId, "All", null,
+                            wasPublished
+                                ? "Patrullistan har uppdaterats — kontrollera din starttid. Du ser dina tider under Mitt schema."
+                                : "Patrullistan är publicerad. Du ser din patrull och starttid under Mitt schema.",
+                            null, 0, "Arrangören");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Patrol publish notification failed for comp {CompetitionId}", request.CompetitionId);
+                }
             }
 
             return Json(new { success = true, published = request.Publish });

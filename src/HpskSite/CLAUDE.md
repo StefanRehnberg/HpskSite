@@ -1493,6 +1493,87 @@ No state machine — every command button is tappable any time so the chief can 
 
 **All four pages are routed MVC `Controller`s — no Umbraco node/doctype needed** (pattern from `FaltskytteConfigurationEditorController`; chromeless `Layout = null` + a typed `@model`, except the Stationer tab which is a partial in CompetitionManagement). Build is green on these but Razor views are **runtime-compiled** — `dotnet build` does NOT validate them (a named-tuple bug once shipped that way; now `int[]`), so load each page once after deploy. Adds C# → full rebuild.
 
+## Mitt schema — personal competition itinerary (2026-07-25)
+
+A member's own competition day in one timeline: what they **shoot** + what they **work** + the day's
+**programme**. `Services/Schedule/MyScheduleService.cs` is the single source of truth; every surface
+renders what it returns and none of them read start lists themselves.
+
+**Sources it fans out over** (per discipline, because start times live in different places):
+- Precision-family / Direktplacering / **Springskytte** → a `precisionStartList` child node's
+  `configurationData`. All three share the doctype — the JSON **shape** is the discriminator
+  (precision `Teams` / springskytte `Starters` / stafett `Teams` tagged `TeamFormat`).
+- Championship finals → `finalsStartList` (same precision shape).
+- Fältskytte / MagnumFält → `FaltskyttePatrol` + `FaltskyttePatrolMember` (SQL).
+- Working, all disciplines → `StaffAssignment` (+ `StaffPass` for structured shifts).
+- Everyone's programme → `CompetitionAgendaItem` (new table).
+
+**Three invariants (don't relax):** (1) only PUBLISHED/official start lists count — otherwise the
+member is told "startlistan är inte publicerad än"; (2) a funktionär row says "Station 3" and nothing
+more — **station layouts stay secret**, reachable only via the station QR; (3) absolute times are never
+invented — `ScheduleItem.StartsAt` is null when the data doesn't pin a moment down, and conflict
+detection / reminders / .ics all skip those rather than guess.
+
+**Surfaces:** `/mitt-schema` (+ `?c=<id>`, routed controller, no Umbraco node) · "Ditt schema" card on
+`Competition.cshtml` · "Ditt schema" card on `HomePage.cshtml` · `/mitt-schema/kalender.ics?c=` ·
+Planering → **Dagsprogram** tab · schedule-quality panel on the Bemanning tab.
+
+**Home-page card vs "Dina funktionärsuppdrag" — split by TIME HORIZON, not role.** The schedule card
+only appears for competitions within 7 days (`ScheduleHubService.WindowDays`). Competitions it shows are
+suppressed on the funktionär card via `StaffHubSummary.VisibleRows(schedule.ShownCompetitionIds)` —
+**except rows still needing a response**, because an unanswered invitation is a to-do and must never be
+hidden behind a timeline. That exception is what keeps `NeedsResponseCount` consistent with the screen.
+
+**Conflict detection** is deliberately conservative and never invents a duration: a pair clashes only
+when one item has a real end and the other starts inside it, or when two open-ended items start on the
+same minute. `Praktiskt` rows are excluded (a two-hour "Anmälan öppen" band would flag every start).
+The same overlap check is surfaced to the organiser via `Staffing/GetScheduleQuality` (missing times +
+per-person clashes) on the Bemanning tab.
+
+**`StartListTeam.Date` (new, optional "yyyy-MM-dd").** Precision skjutlag only carried `"HH:mm"`, so a
+two-day competition's Sunday lag couldn't be ordered after Saturday's. Empty = fall back to the
+competition date, but **only on a single-day comp**; on a multi-day comp an undated lag groups under its
+freeform `Label` and claims no absolute time (plus a "saknar datum" warning). Generators were left
+alone on purpose — `ResolveDay` already resolves single-day comps, so the field is purely a multi-day
+override set via the skjutlag edit modal. **DUAL-RENDERER (really triple):** wired in
+`StartListHtmlRenderer` (cached blob) + `PrecisionStartList.cshtml` + `PrecisionFinalsStartList.cshtml`.
+`UpdateTeamTimes` now sorts by **date then time** before renumbering — time-only sorting interleaved days.
+
+**Reminders** — `ScheduleReminderHostedService` (mirrors `RankingSnapshotHostedService`) sweeps every
+5 min, 30 min lead. Opted-in members are filtered FIRST (`WebPushSubscription.ScheduleRemindersEnabled`,
+**DEFAULT 0** — participant pushes are opt-in only; toggle in `_WebPushSetup.cshtml`), then itineraries
+are rebuilt with `useCache:false`. `ScheduleReminderLog` + its unique index is what prevents duplicate
+sends: **claim (insert) then send**, so a crash costs one missed reminder rather than spam.
+
+**Change notifications** — `.ics` is a one-shot snapshot by design, so it depends on the member being
+told when times move: `PrecisionStartList/PublishStartList` and `Faltskytte/PublishPatrolList` now fire
+a participant notification (first publish vs re-publish wording), gated on the existing
+`autoNotifyParticipants` property, best-effort.
+
+### Razor gotchas learned building this (cost hours — don't repeat)
+`UmbracoCompilationException` carries **no message and no diagnostics**, so these fail at runtime with
+nothing to go on; bisecting is the only way. In `HomePage.cshtml`:
+- **A `@{ }` code block placed mid-markup broke the view.** Hoist computed values into the file's TOP
+  code block instead.
+- **Explicit generic type arguments in a Razor code block** (`new HashSet<int>()`,
+  `new List<StaffHubItem>()`) are parsed as HTML tags. Inferred generics (`.Where`/`.ToList`) are fine —
+  or move the logic into C# (which is why `StaffHubSummary.VisibleRows` exists).
+- **`is { } x` property patterns** in an `@if` condition are also a brace-balancing hazard — use plain
+  null checks.
+- Local helper functions in a partial's `@{ }` block: same class of problem. `ScheduleItem` therefore
+  exposes `IconClass` / `AccentClass` / `KindLabel` / `IsPast` / `ConflictText` / `MinutesUntil` so
+  `_MittSchema.cshtml` stays markup-only.
+
+**`Value<DateTime?>` on an unset date property returns `DateTime.MinValue`, not null** (`RealDate()`
+guards it). Taking it at face value made every competition look like it ended in year 1 and silently
+emptied the cross-competition lookup. The window filter tests **overlap** (`start <= to && end >= from`),
+not "start date inside window" — otherwise a comp running 1–31 Aug, or one already under way, drops out.
+
+**Operator steps:** run `Migrations/create-competition-agenda-table.sql`,
+`create-schedule-reminder-log-table.sql`, `add-schedulereminders-to-webpushsubscription.sql`. No doctype
+properties, no Umbraco nodes. Adds C# → full rebuild. Verified end-to-end 33/33 via
+`C:\Repos\hpsk-verify\schema-verify.mjs`. KB: `KnowledgeBase/docs/mitt-schema.md`.
+
 ## Board Work (Styrelsearbete) — dedicated /styrelse page
 
 Senior-friendly board workspace for clubs & regions, built on the existing `BoardRoles` table.

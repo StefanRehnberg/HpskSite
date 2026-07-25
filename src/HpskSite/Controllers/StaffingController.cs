@@ -1,3 +1,4 @@
+﻿using HpskSite.Models.Schedule;
 using HpskSite.Models.Staffing;
 using HpskSite.Services;
 using HpskSite.Services.Notifications;
@@ -5,6 +6,7 @@ using HpskSite.Services.Staffing;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -40,6 +42,7 @@ namespace HpskSite.Controllers
         private readonly StaffHelpService _help;
         private readonly StaffPassService _pass;
         private readonly PrepDocumentStorage _docs;
+        private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
         private readonly IDataProtectionProvider _dataProtection;
@@ -65,6 +68,7 @@ namespace HpskSite.Controllers
             StaffHelpService help,
             StaffPassService pass,
             PrepDocumentStorage docs,
+            HpskSite.Services.Schedule.CompetitionAgendaService agenda,
             EmailService email,
             WebPushService webPush,
             IDataProtectionProvider dataProtection,
@@ -85,6 +89,7 @@ namespace HpskSite.Controllers
             _help = help;
             _pass = pass;
             _docs = docs;
+            _agenda = agenda;
             _email = email;
             _webPush = webPush;
             _dataProtection = dataProtection;
@@ -1097,6 +1102,164 @@ namespace HpskSite.Controllers
                     StationCount = stationCount,
                     AttachedConfigId = attachedConfigId,
                 };
+            }
+            catch { return null; }
+        }
+
+        // ======================= Dagsprogram (day programme) =======================
+
+        [HttpGet]
+        public async Task<IActionResult> GetAgenda(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var rows = _agenda.GetForCompetition(competitionId);
+            return Json(new
+            {
+                success = true,
+                items = rows.Select(r => new
+                {
+                    id = r.Id,
+                    itemDate = r.ItemDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    startTime = r.StartTime,
+                    endTime = r.EndTime,
+                    title = r.Title,
+                    location = r.Location,
+                    note = r.Note,
+                    audience = r.Audience,
+                    audienceLabel = AgendaAudience.Label(r.Audience),
+                    icon = r.Icon,
+                }),
+                competitionDate = GetCompetitionDate(competitionId)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveAgendaItem([FromBody] SaveAgendaItemRequest request)
+        {
+            if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var (ok, msg, id) = _agenda.Save(request, (await ResolveViewerAsync())?.Id ?? 0);
+            return Json(new { success = ok, message = msg, id });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteAgendaItem([FromBody] DeleteAgendaItemRequest request)
+        {
+            if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var ok = _agenda.Delete(request.Id, request.CompetitionId);
+            return Json(new { success = ok, message = ok ? null : "Kunde inte ta bort." });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SeedAgenda([FromBody] SeedAgendaRequest request)
+        {
+            if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var (ok, msg, created) = _agenda.SeedDefaults(
+                request.CompetitionId, GetCompetitionDate(request.CompetitionId), (await ResolveViewerAsync())?.Id ?? 0);
+            return Json(new { success = ok, message = msg, created });
+        }
+
+        /// <summary>
+        /// Schedule quality for the organiser: how many assignments a functionary would see as "Heldag"
+        /// because they carry neither a shift nor a pass, plus overlapping commitments per person.
+        ///
+        /// This is the same overlap logic the member sees on /mitt-schema, surfaced here on purpose —
+        /// a clash is cheap to fix while planning and expensive to discover on the day.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetScheduleQuality(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            try
+            {
+                var assignments = _staffing.BuildRoster(competitionId, GetDiscipline(competitionId), canEdit: true).Groups
+                    .SelectMany(g => g.Assignments)
+                    .Where(a => !a.ReadOnly)
+                    .ToList();
+
+                var total = assignments.Count;
+                var untimed = assignments.Count(a => string.IsNullOrWhiteSpace(a.ShiftLabel) && a.PassId == null);
+
+                // Per-member overlap. Only members can be checked — a free-text helper has no identity
+                // to collide with, and their rows carry no MemberId.
+                var clashes = new List<object>();
+                foreach (var grp in assignments.Where(a => a.MemberId is > 0).GroupBy(a => a.MemberId!.Value))
+                {
+                    var named = grp.ToList();
+                    for (var i = 0; i < named.Count; i++)
+                    {
+                        for (var j = i + 1; j < named.Count; j++)
+                        {
+                            if (!ShiftsOverlap(named[i], named[j])) continue;
+                            clashes.Add(new
+                            {
+                                memberId = grp.Key,
+                                name = named[i].DisplayName,
+                                a = $"{named[i].RoleName} {named[i].ScopeLabel} ({named[i].ShiftLabel ?? named[i].PassLabel})",
+                                b = $"{named[j].RoleName} {named[j].ScopeLabel} ({named[j].ShiftLabel ?? named[j].PassLabel})",
+                            });
+                        }
+                    }
+                }
+
+                return Json(new { success = true, total, untimed, clashes });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Schedule quality check failed for comp {Comp}", competitionId);
+                return Json(new { success = false, message = "Kunde inte läsa schemat." });
+            }
+        }
+
+        /// <summary>
+        /// True when two assignments for the same person demonstrably collide. Conservative: two rows in
+        /// the same pass clash, and two parsed time ranges that intersect clash. Untimed ("heldag") rows
+        /// never clash — a person can legitimately hold two whole-day roles, and guessing otherwise would
+        /// bury the real clashes in noise.
+        /// </summary>
+        private static bool ShiftsOverlap(StaffAssignmentView a, StaffAssignmentView b)
+        {
+            if (a.PassId != null && b.PassId != null) return a.PassId == b.PassId;
+
+            var ra = ParseShiftRange(a.ShiftLabel);
+            var rb = ParseShiftRange(b.ShiftLabel);
+            if (ra == null || rb == null) return false;
+            return ra.Value.start < rb.Value.end && rb.Value.start < ra.Value.end;
+        }
+
+        /// <summary>Parses the "13:00–16:00" shape BuildShiftLabel emits. Anything else → null.</summary>
+        private static (TimeSpan start, TimeSpan end)? ParseShiftRange(string? label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return null;
+            var parts = label.Split('–', '-');
+            if (parts.Length != 2) return null;
+            if (!TimeSpan.TryParse(parts[0].Trim(), CultureInfo.InvariantCulture, out var s)) return null;
+            if (!TimeSpan.TryParse(parts[1].Trim(), CultureInfo.InvariantCulture, out var e)) return null;
+            return e <= s ? null : (s, e);
+        }
+
+        private DateTime? GetCompetitionDate(int competitionId)
+        {
+            try
+            {
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return null;
+                var d = ctx.Content.GetById(competitionId)?.Value<DateTime>("competitionDate");
+                return d == default ? null : d;
             }
             catch { return null; }
         }

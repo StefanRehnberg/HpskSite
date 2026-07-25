@@ -77,6 +77,26 @@ namespace HpskSite.Services
         public int OpenCount { get; set; }
         public int? OpenFirstCompetitionId { get; set; }
         public int NeedsResponseCount => Assignments.Count(a => a.NeedsResponse);
+
+        /// <summary>
+        /// The rows this card should still show once the home page's "Ditt schema" card has taken over
+        /// some competitions — pass it that card's <c>ShownCompetitionIds</c> (null = suppress nothing).
+        ///
+        /// A row where the member still owes a response is NEVER suppressed: an unanswered invitation is
+        /// a to-do, and hiding it behind a timeline is how it gets forgotten. Because only
+        /// already-answered rows drop out, <see cref="NeedsResponseCount"/> stays consistent with what's
+        /// on screen.
+        ///
+        /// Lives here rather than in the view on purpose: the equivalent Razor needed explicit generic
+        /// type arguments, which Razor mis-parses as HTML tags inside an @ code block.
+        /// </summary>
+        public List<StaffHubItem> VisibleRows(HashSet<int>? suppressedCompetitionIds)
+        {
+            if (suppressedCompetitionIds == null || suppressedCompetitionIds.Count == 0) return Assignments;
+            return Assignments
+                .Where(a => a.NeedsResponse || !suppressedCompetitionIds.Contains(a.CompetitionId))
+                .ToList();
+        }
     }
 
     public class StaffHubItem

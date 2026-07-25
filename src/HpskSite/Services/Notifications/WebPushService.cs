@@ -1,4 +1,4 @@
-using HpskSite.Models.WebPush;
+﻿using HpskSite.Models.WebPush;
 using Microsoft.Extensions.Configuration;
 using Umbraco.Cms.Infrastructure.Scoping;
 using WebPush;
@@ -80,6 +80,44 @@ namespace HpskSite.Services.Notifications
         }
 
         /// <summary>
+        /// Start-time reminder ("Du börjar om 30 min…"). Goes ONLY to this member's browsers that have
+        /// explicitly opted in via ScheduleRemindersEnabled — participant-facing pushes on this site are
+        /// opt-in only, and the column defaults to 0 precisely so an existing subscriber never starts
+        /// receiving these without asking. Returns how many browsers were reached.
+        /// </summary>
+        public async Task<int> SendScheduleReminderAsync(int memberId, string title, string body, string url, string? tag = null)
+        {
+            List<WebPushSubscriptionRow> subs;
+            using (var scope = _scopeProvider.CreateScope())
+            {
+                subs = scope.Database.Fetch<WebPushSubscriptionRow>(
+                    "SELECT * FROM WebPushSubscription WHERE MemberId = @0 AND ScheduleRemindersEnabled = 1", memberId);
+                scope.Complete();
+            }
+            return await SendToSubscriptionsAsync(subs, title, body, url, tag);
+        }
+
+        /// <summary>Member ids with at least one browser opted in to start-time reminders. The reminder
+        /// sweep uses this to avoid building itineraries for members who'd get nothing anyway.</summary>
+        public List<int> GetScheduleReminderMemberIds()
+        {
+            try
+            {
+                using var scope = _scopeProvider.CreateScope();
+                var ids = scope.Database.Fetch<int>(
+                    "SELECT DISTINCT MemberId FROM WebPushSubscription WHERE ScheduleRemindersEnabled = 1");
+                scope.Complete();
+                return ids;
+            }
+            catch (Exception ex)
+            {
+                // Column missing = migration not run yet → the feature is simply off.
+                _logger.LogDebug(ex, "WebPush: schedule-reminder opt-in lookup failed (migration pending?)");
+                return new List<int>();
+            }
+        }
+
+        /// <summary>
         /// Broadcasts a "ny träningsmatch" push to every subscriber whose MatchPref matches — mirrors the
         /// FCM rule: open match → 'OpenMatchesOnly' + 'All'; closed match → 'All' only. Skips the creator.
         /// </summary>
@@ -141,20 +179,31 @@ namespace HpskSite.Services.Notifications
             return sent;
         }
 
-        public (string MatchPref, bool RankingEnabled)? GetPreferences(string endpoint)
+        public (string MatchPref, bool RankingEnabled, bool ScheduleRemindersEnabled)? GetPreferences(string endpoint)
         {
             using var scope = _scopeProvider.CreateScope();
             var row = scope.Database.FirstOrDefault<WebPushSubscriptionRow>("SELECT * FROM WebPushSubscription WHERE Endpoint = @0", endpoint);
             scope.Complete();
-            return row == null ? null : (row.MatchPref, row.RankingEnabled);
+            return row == null ? null : (row.MatchPref, row.RankingEnabled, row.ScheduleRemindersEnabled);
         }
 
-        public void SavePreferences(string endpoint, string? matchPref, bool rankingEnabled)
+        public void SavePreferences(string endpoint, string? matchPref, bool rankingEnabled, bool scheduleRemindersEnabled = false)
         {
             var mp = matchPref switch { "All" => "All", "Off" => "Off", _ => "OpenMatchesOnly" };
             using var scope = _scopeProvider.CreateScope();
-            scope.Database.Execute("UPDATE WebPushSubscription SET MatchPref = @0, RankingEnabled = @1 WHERE Endpoint = @2",
-                mp, rankingEnabled, endpoint);
+            try
+            {
+                scope.Database.Execute(
+                    "UPDATE WebPushSubscription SET MatchPref = @0, RankingEnabled = @1, ScheduleRemindersEnabled = @2 WHERE Endpoint = @3",
+                    mp, rankingEnabled, scheduleRemindersEnabled, endpoint);
+            }
+            catch
+            {
+                // add-schedulereminders-to-webpushsubscription.sql not run yet - still save the prefs
+                // that DO exist rather than losing the member's whole change.
+                scope.Database.Execute("UPDATE WebPushSubscription SET MatchPref = @0, RankingEnabled = @1 WHERE Endpoint = @2",
+                    mp, rankingEnabled, endpoint);
+            }
             scope.Complete();
         }
 

@@ -123,6 +123,22 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public string StartTime { get; set; } = "";
         public string EndTime { get; set; } = "";
         public string Label { get; set; } = "";
+
+        /// <summary>
+        /// Which calendar day this skjutlag shoots on, "yyyy-MM-dd". Optional — empty on every list
+        /// generated before 2026-07 and on single-day competitions, where the competition's own date
+        /// is the safe fallback.
+        ///
+        /// It exists because StartTime is a bare "HH:mm": without a date, a two-day competition's
+        /// Sunday skjutlag cannot be ordered after Saturday's, which broke personal itineraries
+        /// (/mitt-schema) and calendar export. The freeform <see cref="Label"/> is a HUMAN hint
+        /// ("Lördag fm"), never a machine-readable day — don't parse it.
+        ///
+        /// DUAL-RENDERER WARNING: anything user-visible on a team must be wired in BOTH
+        /// StartListHtmlRenderer.GenerateStartListHtml (the cached startListContent blob) AND
+        /// Views/PrecisionStartList.cshtml (the public page, which reads this JSON via dynamic).
+        /// </summary>
+        public string Date { get; set; } = "";
         public List<string> WeaponClasses { get; set; } = new List<string>();
         public int ShooterCount { get; set; }
         public List<StartListShooter>? Shooters { get; set; }

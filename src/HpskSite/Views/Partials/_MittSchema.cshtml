@@ -1,0 +1,152 @@
+@using System.Globalization
+@using HpskSite.Models.Schedule
+@model HpskSite.Models.Schedule.MySchedule
+@*
+    Shared timeline renderer. Mounted by:
+      Views/MittSchema.cshtml    (full page)          — Compact = false
+      Views/Competition.cshtml   ("Ditt schema" card) — Compact = true
+      Views/HomePage.cshtml renders its own compact summary from ScheduleHubItem instead.
+    Keeping one renderer is the point: the day the rows change, they change everywhere.
+
+    Deliberately markup-only. No local helper functions and no mid-markup @@{ } code blocks — both are
+    reliable ways to break runtime Razor compilation with a messageless UmbracoCompilationException.
+    Anything that needs computing is a property on ScheduleItem / MySchedule.
+*@
+@{
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+    var compact = ViewData["Compact"] as bool? ?? false;
+    var maxRows = ViewData["MaxRows"] as int? ?? int.MaxValue;
+    var shown = 0;
+}
+
+@if (Model.ConflictCount > 0)
+{
+    <div class="alert alert-warning d-flex align-items-start gap-2 py-2 mb-3">
+        <i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
+        <div>
+            <strong>@Model.ConflictCount @(Model.ConflictCount == 1 ? "krock" : "krockar") i ditt schema.</strong>
+            Två saker ligger på samma tid — hör av dig till tävlingsledningen så de kan flytta något.
+        </div>
+    </div>
+}
+
+@foreach (var w in Model.Warnings)
+{
+    <div class="alert alert-info d-flex align-items-start gap-2 py-2 mb-3">
+        <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+        <div>@w</div>
+    </div>
+}
+
+@if (!Model.HasAny)
+{
+    <p class="text-muted mb-0">
+        Inget schema att visa än.
+        @if (Model.IsRegistered)
+        {
+            <text>Du är anmäld — dina tider dyker upp här så snart startlistan är publicerad.</text>
+        }
+    </p>
+}
+else
+{
+    @* The hero line. On competition day this is the only thing most people actually read. *@
+    @if (Model.NextItem != null && !compact)
+    {
+        <div class="card border-primary-subtle mb-3">
+            <div class="card-body py-3">
+                <div class="text-uppercase text-muted small fw-semibold mb-1">Nästa</div>
+                <div class="d-flex align-items-baseline gap-2 flex-wrap">
+                    <span class="fs-4 fw-bold">@Model.NextItem.TimeLabel</span>
+                    <span class="fs-5">@Model.NextItem.Title</span>
+                    @if (!string.IsNullOrWhiteSpace(Model.NextItem.Where))
+                    {
+                        <span class="text-muted">· @Model.NextItem.Where</span>
+                    }
+                </div>
+                @if (Model.NextItem.StartsAt != null)
+                {
+                    <div class="text-muted small mt-1">
+                        @Model.NextItem.StartsAt.Value.ToString("dddd d MMMM 'kl.' HH:mm", sv)
+                        @if (Model.NextItem.MinutesUntil != null && Model.NextItem.MinutesUntil < 60)
+                        {
+                            <text>· om @Model.NextItem.MinutesUntil min</text>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    foreach (var day in Model.Days)
+    {
+        if (shown >= maxRows) { break; }
+
+        @if (!compact || Model.Days.Count > 1)
+        {
+            <div class="d-flex align-items-center gap-2 @(compact ? "mt-2 mb-1" : "mt-4 mb-2")">
+                <h3 class="@(compact ? "h6" : "h5") mb-0">@day.DayLabel</h3>
+                @if (day.IsToday)
+                {
+                    <span class="badge bg-primary">Idag</span>
+                }
+            </div>
+        }
+
+        <div class="list-group list-group-flush">
+            @foreach (var item in day.Items)
+            {
+                if (shown >= maxRows) { break; }
+                shown++;
+                <div class="list-group-item px-0 @(item.IsPast ? "opacity-50" : "")">
+                    <div class="d-flex gap-3">
+                        <div class="text-nowrap fw-semibold" style="min-width:5.5rem;">
+                            <i class="bi @item.IconClass me-1 @item.AccentClass"></i>@item.TimeLabel
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold">
+                                @item.Title
+                                @if (item.IsResponsible)
+                                {
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-1">Ansvarig</span>
+                                }
+                                @if (item.NeedsResponse)
+                                {
+                                    <span class="badge bg-warning text-dark ms-1">Svara</span>
+                                }
+                                @if (item.HasConflict)
+                                {
+                                    <span class="badge bg-warning text-dark ms-1" title="@item.ConflictText">
+                                        <i class="bi bi-exclamation-triangle"></i> Krock
+                                    </span>
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(item.Where))
+                            {
+                                <div class="text-muted small">@item.Where</div>
+                            }
+                            @if (!compact && !string.IsNullOrWhiteSpace(item.Detail))
+                            {
+                                <div class="text-muted small">@item.Detail</div>
+                            }
+                            @if (!compact && item.HasConflict)
+                            {
+                                <div class="small text-warning-emphasis">Krockar med: @item.ConflictText</div>
+                            }
+                            @if (!compact && !string.IsNullOrWhiteSpace(item.Link))
+                            {
+                                <a href="@item.Link" class="small text-decoration-none d-print-none">@(item.LinkText ?? "Öppna") →</a>
+                            }
+                        </div>
+                        <div class="text-muted small text-nowrap d-none d-sm-block">@item.KindLabel</div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (shown < Model.ItemCount)
+    {
+        <div class="small text-muted mt-2">+ @(Model.ItemCount - shown) fler i schemat</div>
+    }
+}

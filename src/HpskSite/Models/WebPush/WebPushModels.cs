@@ -1,4 +1,4 @@
-namespace HpskSite.Models.WebPush
+﻿namespace HpskSite.Models.WebPush
 {
     /// <summary>Mirrors the WebPushSubscription table.</summary>
     public class WebPushSubscriptionRow
@@ -11,6 +11,8 @@ namespace HpskSite.Models.WebPush
         public string? UserAgent { get; set; }
         public string MatchPref { get; set; } = "OpenMatchesOnly"; // All | OpenMatchesOnly | Off
         public bool RankingEnabled { get; set; } = true;
+        /// <summary>Opt-in for start-time reminders ("du borjar om 30 min"). Defaults OFF by design.</summary>
+        public bool ScheduleRemindersEnabled { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? LastUsedAt { get; set; }
     }
@@ -38,5 +40,6 @@ namespace HpskSite.Models.WebPush
         public string? Endpoint { get; set; }
         public string? MatchPref { get; set; }
         public bool RankingEnabled { get; set; } = true;
+        public bool ScheduleRemindersEnabled { get; set; }
     }
 }

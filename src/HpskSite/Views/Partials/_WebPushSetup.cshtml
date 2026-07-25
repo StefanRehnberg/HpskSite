@@ -33,6 +33,13 @@
                 <input class="form-check-input" type="checkbox" id="wpRanking" checked>
                 <label class="form-check-label" for="wpRanking">Notis när min träningsform förbättras</label>
             </div>
+            @* Opt-in, unchecked by default — matches ScheduleRemindersEnabled DEFAULT 0 in the migration. *@
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="wpScheduleReminders">
+                <label class="form-check-label" for="wpScheduleReminders">
+                    Påminnelse 30 min innan jag skjuter eller börjar ett funktionärspass
+                </label>
+            </div>
         </div>
     }
 </div>
@@ -103,6 +110,7 @@
                 if (!j.success) return;
                 document.getElementById('wpMatchPref').value = j.matchPref || 'OpenMatchesOnly';
                 document.getElementById('wpRanking').checked = j.rankingEnabled !== false;
+                document.getElementById('wpScheduleReminders').checked = j.scheduleRemindersEnabled === true;
                 document.getElementById('webPushPrefs').classList.remove('d-none');
             }).catch(function () { });
         });
@@ -117,7 +125,8 @@
                 body: JSON.stringify({
                     endpoint: sub.endpoint,
                     matchPref: document.getElementById('wpMatchPref').value,
-                    rankingEnabled: document.getElementById('wpRanking').checked
+                    rankingEnabled: document.getElementById('wpRanking').checked,
+                    scheduleRemindersEnabled: document.getElementById('wpScheduleReminders').checked
                 })
             }).catch(function () { });
         });
@@ -184,6 +193,7 @@
 
     var _mp = document.getElementById('wpMatchPref'); if (_mp) _mp.addEventListener('change', savePrefs);
     var _rk = document.getElementById('wpRanking'); if (_rk) _rk.addEventListener('change', savePrefs);
+    var _sr = document.getElementById('wpScheduleReminders'); if (_sr) _sr.addEventListener('change', savePrefs);
 
     refresh();
 

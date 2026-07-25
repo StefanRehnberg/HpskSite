@@ -6,6 +6,7 @@ using HpskSite.CompetitionTypes.Precision.Services;
 using HpskSite.CompetitionTypes.Common.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
+using System.Globalization;
 using System.Text;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -532,6 +533,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Startlista hittades inte." });
                 }
 
+                // Was it already official? Distinguishes a first publish ("dina tider finns nu") from a
+                // re-publish ("tiderna kan ha ändrats"), which are different messages to a shooter.
+                var isRepublish = startList.GetValue<bool>("isOfficialStartList");
+
                 // Check if user has permission to manage this start list
                 var competitionId = startList.GetValue<int>("competitionId");
                 if (competitionId > 0)
@@ -573,7 +578,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                     _logger.LogInformation("{Action} start list {StartListId} by user {UserId}",
                                          request.IsPublished ? "Published" : "Unpublished", request.StartListId, memberData.Id);
-                    
+
+                    // Tell the shooters their times are up (or have changed). Opt-in per competition via
+                    // autoNotifyParticipants, same gate the results-publish notification uses.
+                    //
+                    // This matters more than it looks: a member's calendar export (/mitt-schema) is a
+                    // one-shot .ics snapshot, so a re-publish that MOVES a start time would otherwise
+                    // leave stale alarms on their phone with nothing to tell them. This is that signal.
+                    if (request.IsPublished)
+                    {
+                        NotifyStartListPublished(competitionId, isRepublish);
+                    }
+
                     var actionText = request.IsPublished ? "publicerad" : "avpublicerad";
                     return Json(new { success = true, message = $"Startlistan har {actionText}." });
                 }
@@ -590,6 +606,39 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 _logger.LogError(ex, "Error {Action} start list {StartListId}", 
                                request.IsPublished ? "publishing" : "unpublishing", request.StartListId);
                 return Json(new { success = false, message = "Ett oväntat fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Fires the shooter-facing "startlistan är publicerad / tiderna har ändrats" notification.
+        ///
+        /// Opt-in per competition (autoNotifyParticipants, default off → no behaviour change for existing
+        /// competitions) and entirely best-effort: publishing a start list must never fail because a push
+        /// couldn't go out. Resolved from the service provider rather than the constructor so this
+        /// already-large controller doesn't grow another required dependency.
+        /// </summary>
+        private void NotifyStartListPublished(int competitionId, bool isRepublish)
+        {
+            try
+            {
+                if (competitionId <= 0) return;
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || !competition.GetValue<bool>("autoNotifyParticipants")) return;
+
+                var notifier = HttpContext?.RequestServices
+                    .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
+                    as HpskSite.Services.Messaging.ParticipantNotificationService;
+                if (notifier == null) return;
+
+                var body = isRepublish
+                    ? "Startlistan har uppdaterats — kontrollera din starttid. Du ser dina tider under Mitt schema."
+                    : "Startlistan är publicerad. Du ser din starttid och plats under Mitt schema.";
+
+                notifier.Notify(competitionId, "All", null, body, null, 0, "Arrangören");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Start-list publish notification failed for competition {CompetitionId}", competitionId);
             }
         }
 
@@ -1274,6 +1323,24 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
+        /// Accepts what Flatpickr sends and stores the canonical "yyyy-MM-dd", or "" when the field was
+        /// left blank. Anything unparseable becomes "" rather than being stored as junk that would then
+        /// break day grouping and calendar export downstream.
+        /// </summary>
+        private static string NormalizeTeamDate(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return "";
+            var txt = raw.Trim();
+            if (DateTime.TryParseExact(txt, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var exact))
+                return exact.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (DateTime.TryParse(txt, CultureInfo.GetCultureInfo("sv-SE"), DateTimeStyles.None, out var sv))
+                return sv.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (DateTime.TryParse(txt, CultureInfo.InvariantCulture, DateTimeStyles.None, out var inv))
+                return inv.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            return "";
+        }
+
+        /// <summary>
         /// Update start and end times for a specific team
         /// </summary>
         [HttpPost]
@@ -1312,11 +1379,17 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 team.StartTime = request.StartTime;
                 team.EndTime = request.EndTime;
                 team.Label = request.Label ?? "";
+                team.Date = NormalizeTeamDate(request.Date);
 
                 // Sort teams by start time and renumber them
-                // Teams should always be ordered from first start to last, with Skjutlag 1 being the first to start
+                // Teams should always be ordered from first start to last, with Skjutlag 1 being the first to start.
+                // Date FIRST, then time: on a multi-day competition, sorting by clock time alone would put
+                // Sunday 09:00 ahead of Saturday 13:00 and then renumber the skjutlag into that wrong order.
+                // Dates are "yyyy-MM-dd" so an ordinal string sort is chronological; undated teams (every
+                // single-day comp, and legacy lists) sort first as a group, preserving today's behaviour.
                 configuration.Teams = configuration.Teams
-                    .OrderBy(t => TimeSpan.TryParse(t.StartTime, out var ts) ? ts : TimeSpan.MaxValue)
+                    .OrderBy(t => t.Date ?? "", StringComparer.Ordinal)
+                    .ThenBy(t => TimeSpan.TryParse(t.StartTime, out var ts) ? ts : TimeSpan.MaxValue)
                     .ToList();
 
                 // Renumber teams based on new sort order
@@ -3342,6 +3415,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public string StartTime { get; set; } = "";
         public string EndTime { get; set; } = "";
         public string? Label { get; set; }
+        /// <summary>"yyyy-MM-dd" for multi-day competitions; empty = the competition's own date.</summary>
+        public string? Date { get; set; }
     }
 
     public class MoveShooterRequest
