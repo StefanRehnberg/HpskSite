@@ -163,7 +163,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// and every list generated before the field existed). Kept in sync with the same formatting in
         /// Views/PrecisionStartList.cshtml — see the dual-renderer warning on StartListTeam.Date.
         /// </summary>
-        internal static string FormatTeamDate(string? date)
+        // MUST stay public: the two public start-list views (PrecisionStartList.cshtml /
+        // PrecisionFinalsStartList.cshtml) call this, and Razor views are compiled into a SEPARATE
+        // assembly at runtime — `internal` compiles fine here but fails the view compilation, which
+        // surfaces only as a 500 on the public page.
+        public static string FormatTeamDate(string? date)
         {
             if (string.IsNullOrWhiteSpace(date)) return "";
             return System.DateTime.TryParseExact(date.Trim(), "yyyy-MM-dd",
