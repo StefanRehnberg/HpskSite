@@ -537,6 +537,22 @@
     // Results URL (used in sidebar and JavaScript)
     var resultsUrl = Model.Url().TrimEnd('/') + "/resultat/";
     var subResultsUrl = resultsUrl + "?sub=true";
+
+    // "Ditt schema" — resolved here, in the top code block, and surfaced further down as a LINK in the
+    // start-list block rather than as a card. It used to render a full card directly under the breadcrumb,
+    // which put a personal block above the competition's own identity for exactly the people who least
+    // need the intro, and made this file a THIRD renderer of the same itinerary (HomePage.cshtml has its
+    // own, /mitt-schema uses _MittSchema) — which duly drifted: different row selection, different cap, and
+    // the "Nästa" hero shown on the home page but suppressed here. The link keeps a competition beyond the
+    // home card's window from being a dead end without spending the page's best real estate.
+    HpskSite.Models.Schedule.MySchedule? mySchedule = null;
+    if (regMemberId > 0)
+    {
+        var myScheduleSvc = Context.RequestServices.GetService(typeof(HpskSite.Services.Schedule.MyScheduleService))
+            as HpskSite.Services.Schedule.MyScheduleService;
+        mySchedule = myScheduleSvc?.GetSchedule(regMemberId, Model.Id);
+    }
+    var showMyScheduleLink = mySchedule != null && (mySchedule.HasAny || mySchedule.StartListPending);
 }
 
 <div class="container-fluid mt-4">
@@ -600,53 +616,7 @@
         </div>
     </div>
 
-    @*
-        "Ditt schema" — this visitor's own itinerary for this competition, merging what they shoot with
-        what they work. Rendered by the SAME partial as /mitt-schema, so the two can't drift.
-
-        Placed directly under the breadcrumb because the competition page is where people already come
-        looking; /mitt-schema is the bookmark/print/notification target. Only shown when the member
-        actually has something here (or is registered and waiting for the start list) — for everyone
-        else the block is absent, not empty.
-    *@
-    @if (regMemberId > 0)
-    {
-        var myScheduleSvc = Context.RequestServices.GetService(typeof(HpskSite.Services.Schedule.MyScheduleService))
-            as HpskSite.Services.Schedule.MyScheduleService;
-        var mySchedule = myScheduleSvc?.GetSchedule(regMemberId, Model.Id);
-        if (mySchedule != null && (mySchedule.HasAny || mySchedule.StartListPending))
-        {
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card @(mySchedule.IsToday ? "border-primary" : "border-primary-subtle")">
-                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 @(mySchedule.IsToday ? "bg-primary-subtle" : "")">
-                            <span class="fw-semibold">
-                                <i class="bi bi-calendar2-week me-2 text-primary"></i>Ditt schema
-                                @if (mySchedule.IsToday)
-                                {
-                                    <span class="badge bg-primary ms-1">Idag</span>
-                                }
-                                @if (mySchedule.ConflictCount > 0)
-                                {
-                                    <span class="badge bg-warning text-dark ms-1">
-                                        <i class="bi bi-exclamation-triangle"></i>
-                                        @mySchedule.ConflictCount krock@(mySchedule.ConflictCount == 1 ? "" : "ar")
-                                    </span>
-                                }
-                            </span>
-                            <a href="/mitt-schema?c=@Model.Id" class="small text-decoration-none">Hela schemat, utskrift och kalender →</a>
-                        </div>
-                        <div class="card-body">
-                            @{
-                                var schedVd = new ViewDataDictionary(ViewData) { ["Compact"] = true, ["MaxRows"] = 6 };
-                            }
-                            @await Html.PartialAsync("_MittSchema", mySchedule, schedVd)
-                        </div>
-                    </div>
-                </div>
-            </div>
-        }
-    }
+    @* "Ditt schema" is a link in the start-list block further down, not a card here — see the top code block. *@
 
     @* Series Information Banner (when competition is part of a series) *@
     @if (Model.Parent?.ContentType.Alias == "competitionSeries")
@@ -1539,6 +1509,33 @@
 							{
 								<a href="@finalsStartListPageUrl" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('finalsstartlistan'); }">
 									<i class="bi bi-trophy me-1"></i> Visa finalsstartlista
+								</a>
+							}
+
+							@*
+								The member's own times, in context — a link, not a card. This is what keeps a
+								competition further out than the home card's window from being a dead end: the
+								full itinerary (shooting + funktionärsuppdrag + dagsprogram, with print and
+								.ics) lives on /mitt-schema. Only rendered when they actually have something
+								here, so it never shows an empty promise.
+							*@
+							@if (showMyScheduleLink)
+							{
+								<a href="/mitt-schema?c=@Model.Id" class="btn btn-outline-primary w-100 mt-2">
+									<i class="bi bi-calendar2-week me-1"></i> Ditt schema
+									@if (mySchedule!.IsToday)
+									{
+										<span class="badge bg-primary ms-1">Idag</span>
+									}
+									@if (mySchedule.ConflictCount > 0)
+									{
+										@* Spelled out: a bare "⚠ 2" on a button next to neutral "Visa …" buttons reads as
+										   a count of nothing in particular. The word is what makes it actionable. *@
+										<span class="badge bg-warning text-dark ms-1" title="Två saker ligger på samma tid — hör av dig till tävlingsledningen">
+											<i class="bi bi-exclamation-triangle"></i>
+											@mySchedule.ConflictCount krock@(mySchedule.ConflictCount == 1 ? "" : "ar")
+										</span>
+									}
 								</a>
 							}
 						</div>
