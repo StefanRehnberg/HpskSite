@@ -34,6 +34,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _auth;
         private readonly ClubService _clubService;
         private readonly StaffingService _staffing;
+        private readonly CompetitionPeopleService _people;
         private readonly WorkBreakdownService _work;
         private readonly StaffingTemplateService _templates;
         private readonly MaterielEstimateService _materiel;
@@ -60,6 +61,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService auth,
             ClubService clubService,
             StaffingService staffing,
+            CompetitionPeopleService people,
             WorkBreakdownService work,
             StaffingTemplateService templates,
             MaterielEstimateService materiel,
@@ -81,6 +83,7 @@ namespace HpskSite.Controllers
             _auth = auth;
             _clubService = clubService;
             _staffing = staffing;
+            _people = people;
             _work = work;
             _templates = templates;
             _materiel = materiel;
@@ -139,6 +142,34 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// THE PEOPLE VIEW: everyone connected to this competition, once each, with their roles, their
+        /// sign-up, their availability and their prep ownership on the same row. This is the endpoint that
+        /// makes the planning surfaces stop contradicting each other — see CompetitionPeopleService.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPeople(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var p = _people.Build(competitionId, GetDiscipline(competitionId), canEdit: true);
+            return Json(new
+            {
+                success = true,
+                canEdit = p.CanEdit,
+                discipline = p.Discipline,
+                totalPeople = p.TotalPeople,
+                assignedCount = p.AssignedCount,
+                unassignedVolunteerCount = p.UnassignedVolunteerCount,
+                needsResponseCount = p.NeedsResponseCount,
+                declinedCount = p.DeclinedCount,
+                externalCount = p.ExternalCount,
+                leadership = p.Leadership,
+                people = p.People,
+            });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveAssignment([FromBody] SaveStaffAssignmentRequest request)
@@ -173,6 +204,24 @@ namespace HpskSite.Controllers
             }
             if (string.IsNullOrWhiteSpace(request.DisplayName))
                 return Json(new { success = false, message = "Ange en person (medlem eller namn)." });
+
+            // Same person, same role, same scope, same pass = a duplicate the organiser almost never wants.
+            // Refuse unless they explicitly confirmed it (the dialog re-posts with AllowDuplicate) — the old
+            // behaviour silently created a second identical row, which is how one person ended up listed
+            // twice on the same skjutlag.
+            if (!request.AllowDuplicate)
+            {
+                var dup = _people.FindDuplicate(request.CompetitionId, discipline, request.MemberId,
+                    request.DisplayName, request.RoleKey, request.FunctionTitle,
+                    request.ScopeType, request.ScopeKey, request.PassId, request.Id);
+                if (dup != null)
+                    return Json(new
+                    {
+                        success = false,
+                        duplicate = true,
+                        message = $"{request.DisplayName} har redan uppdraget \"{dup.Label}\". Lägg till ändå?",
+                    });
+            }
 
             try
             {
@@ -256,6 +305,15 @@ namespace HpskSite.Controllers
             wb.DaysUntilComp = daysUntil;
             wb.StationSeed = GetStationSeed(competitionId, discipline);
 
+            // Tävlingsledning READ-THROUGH. The roster owns who leads the competition (those rows are what
+            // mirror into competitionManagers). Förberedelser used to carry a *second*, unconnected copy of
+            // the same fact — a "Tävlingsledning" område whose "Utse tävlingsledare"-task sat unassigned
+            // even after a Tävlingsledare had been appointed in Bemanning. It now reads the roster instead
+            // of owning anything, so there is one answer to "who leads this competition".
+            var leadership = new List<CompetitionPersonAssignment>();
+            try { leadership = _people.Build(competitionId, discipline, canEdit: false, includePrep: false).Leadership; }
+            catch (Exception ex) { _logger.LogWarning(ex, "Prep: leadership read-through failed for {CompetitionId}", competitionId); }
+
             return Json(new
             {
                 success = true,
@@ -268,6 +326,7 @@ namespace HpskSite.Controllers
                 totalActualCost = wb.TotalActualCost,
                 compLinks = wb.CompLinks,
                 areas = wb.Areas,
+                leadership,
             });
         }
 
@@ -590,12 +649,45 @@ namespace HpskSite.Controllers
             return Json(new { success = true });
         }
 
+        /// <summary>
+        /// The volunteers, each carrying what they have ALREADY been given in the roster. Without the
+        /// assignment join a volunteer stayed visually "unassigned" forever, so the organiser's queue never
+        /// emptied and the same person got offered up for assignment again and again.
+        /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetHelpSignups(int competitionId)
         {
             if (!await HasCompetitionAccessAsync(competitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
-            return Json(new { success = true, signups = _help.GetReview(competitionId) });
+
+            var people = _people.Build(competitionId, GetDiscipline(competitionId), canEdit: true, includePrep: false);
+            var byKey = people.People.ToDictionary(p => p.Key, p => p, StringComparer.Ordinal);
+
+            var signups = _help.GetReview(competitionId).Select(v =>
+            {
+                byKey.TryGetValue(CompetitionPeopleService.KeyFor(v.MemberId, v.MemberName), out var person);
+                return new
+                {
+                    memberId = v.MemberId,
+                    memberName = v.MemberName,
+                    comment = v.Comment,
+                    updated = v.Updated,
+                    slots = v.Slots,
+                    // --- the join that was missing ---
+                    isAssigned = person != null && person.Assignments.Count > 0,
+                    assignmentCount = person?.Assignments.Count ?? 0,
+                    assignments = person?.Assignments ?? new List<CompetitionPersonAssignment>(),
+                    roleSummary = person == null ? "" : string.Join(" · ", person.RoleLabels),
+                    state = person?.State ?? PersonState.Anmald,
+                };
+            }).ToList();
+
+            return Json(new
+            {
+                success = true,
+                signups,
+                unassignedCount = signups.Count(s => !s.isAssigned),
+            });
         }
 
         // ---- Phase 3: sourcing scope (organiser opens the comp for self-sign-up) ----
@@ -940,6 +1032,30 @@ namespace HpskSite.Controllers
         }
 
         // ======================= Shared: member picker =======================
+
+        /// <summary>
+        /// The competition's OWN crew, for the "föreslagna" block that now heads every member picker here.
+        /// Prep owners used to be picked out of a site-wide member search with no reference to the roster,
+        /// which is how a person could own half the preparation without ever appearing in the crew list.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetCrewCandidates(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var candidates = _people.Candidates(competitionId, GetDiscipline(competitionId)).Select(p => new
+            {
+                memberId = p.MemberId,
+                memberName = p.DisplayName,
+                clubName = p.ClubName,
+                phone = p.Phone,
+                roleSummary = string.Join(" · ", p.RoleLabels),
+                state = p.State,
+                prepOpenCount = p.PrepOpenCount,
+            });
+            return Json(new { success = true, members = candidates });
+        }
 
         [HttpGet]
         public async Task<IActionResult> SearchMembers(int competitionId, string query)

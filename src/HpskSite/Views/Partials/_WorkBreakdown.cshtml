@@ -36,6 +36,16 @@
 </div>
 
 <div id="wbContext" class="mb-2"></div>
+
+@*
+    Tävlingsledning — a READ-THROUGH of the Bemanning roster, not a second place to appoint people.
+    The roster's tävlingsledning rows are what mirror into the competition's competitionManagers (i.e. they
+    are what actually grants access), so they are the single source of truth. Before this, the prep list
+    carried its own unconnected "Tävlingsledning" område whose "Utse tävlingsledare"-task sat unassigned
+    even after a Tävlingsledare had been appointed under Bemanning — two answers to one question.
+*@
+<div id="wbLeadership" class="mb-3"></div>
+
 <div id="wbCompDocs" class="mb-3"></div>
 
 <div id="wbAreas">
@@ -278,6 +288,7 @@
     var areas = [];
     var templates = [];
     var compLinks = [];
+    var leadership = [];   // tävlingsledning rows read through from the Bemanning roster (never written here)
     var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null, totalEstimatedCost: 0, totalActualCost: 0 };
     var areaModal = null, itemModal = null, linkModal = null, threadModal = null, templateModal = null;
 
@@ -306,6 +317,8 @@
             if (!d.success) { q('wbAreas').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa förberedelserna.') + '</div>'; return; }
             areas = d.areas || [];
             compLinks = d.compLinks || [];
+            leadership = d.leadership || [];
+            crewCache = null;   // roster may have changed → re-fetch the crew list on the next picker focus
             ctx = { discipline: d.discipline || '', compDate: d.compDate || null, daysUntilComp: d.daysUntilComp, stationSeed: d.stationSeed || null, totalEstimatedCost: d.totalEstimatedCost || 0, totalActualCost: d.totalActualCost || 0 };
             lastUpdated = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
             render();
@@ -326,6 +339,7 @@
 
     function render() {
         renderContext();
+        renderLeadership();
         renderStationSeedBtn();
         renderCompDocs();
         if (!areas.length) {
@@ -353,6 +367,45 @@
         parts.push('<span class="text-muted small" id="wbUpdated" title="Uppdateras automatiskt — flera kan planera samtidigt"><i class="bi bi-people me-1"></i>Flera kan arbeta samtidigt' + (lastUpdated ? ' · uppdaterad ' + lastUpdated : '') + '</span>');
         host.innerHTML = '<div class="d-flex flex-wrap align-items-center gap-2">' + parts.join('') + '</div>';
     }
+
+    // Who leads this competition, read from the Bemanning roster. Editing happens there — this card only
+    // reports, so the two surfaces can never disagree about who the Tävlingsledare is.
+    function renderLeadership() {
+        var host = q('wbLeadership'); if (!host) return;
+        var bem = '/tavlingsplanering?c=' + compId;
+        if (!leadership.length) {
+            host.innerHTML = '<div class="alert alert-light border py-2 mb-0 small d-flex justify-content-between align-items-center flex-wrap gap-2">'
+                + '<div><i class="bi bi-person-badge me-1"></i><strong>Ingen tävlingsledning utsedd än.</strong> '
+                + 'Tävlingsledare, säkerhetschef och sekreterare läggs till under <strong>Bemanning</strong> — '
+                + 'de som får appbehörighet där blir också tävlingsansvariga i pistol.nu.</div>'
+                + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbGoToBemanning()">'
+                + '<i class="bi bi-person-plus me-1"></i>Utse tävlingsledning</button></div>';
+            return;
+        }
+        // NAME first — this card answers "who leads this competition", so the person, then their function.
+        var rows = leadership.map(function (a) {
+            return '<li>'
+                + (a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" title="Ansvarig"></i>' : '')
+                + '<strong>' + esc(a.personName || '(namn saknas)') + '</strong>'
+                + ' <span class="text-muted">· ' + esc(a.functionTitle || a.roleName) + '</span>'
+                + (a.hasAdminAccess ? ' <span class="badge bg-warning text-dark">appbehörighet</span>' : '')
+                + '</li>';
+        }).join('');
+        host.innerHTML = '<div class="card border-primary-subtle"><div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">'
+            + '<span class="fw-semibold"><i class="bi bi-person-badge me-1"></i>Tävlingsledning <span class="badge bg-light text-dark ms-1">' + leadership.length + '</span></span>'
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbGoToBemanning()" title="Tävlingsledningen hanteras under Bemanning">'
+            + '<i class="bi bi-pencil me-1"></i>Hantera under Bemanning</button>'
+            + '</div><div class="card-body py-2">'
+            + '<ul class="small mb-0">' + rows + '</ul>'
+            + '</div></div>';
+    }
+
+    // Same page — just switch to the Bemanning pill (and its Personer sub-tab).
+    window.wbGoToBemanning = function () {
+        var t = document.getElementById('plan-bemanning-tab');
+        if (t && window.bootstrap) { bootstrap.Tab.getOrCreateInstance(t).show(); return; }
+        window.location = '/tavlingsplanering?c=' + compId;
+    };
 
     function renderStationSeedBtn() {
         var slot = q('wbStationSeedSlot');
@@ -478,10 +531,58 @@
         return null;
     }
 
-    // ---- generic member search (used by both modals) ----
+    // ---- member search (used by both modals) ----
+    // The competition's OWN crew is offered first (from the people layer), then a site-wide search. Prep
+    // owners used to be picked purely out of a global member list with no reference to the roster, which is
+    // how someone could own half the preparation while never appearing among the funktionärer.
+    var crewCache = null;
+    async function loadCrew() {
+        if (crewCache) return crewCache;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetCrewCandidates?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            crewCache = (d && d.success) ? (d.members || []) : [];
+        } catch (e) { crewCache = []; }
+        return crewCache;
+    }
+
+    function memberButtonHtml(m, isCrew) {
+        return '<button type="button" class="list-group-item list-group-item-action" data-id="' + m.memberId + '" data-name="' + esc(m.memberName) + '">'
+            + esc(m.memberName)
+            + (m.clubName ? ' <span class="text-muted small">· ' + esc(m.clubName) + '</span>' : '')
+            + (isCrew && m.roleSummary ? '<div class="text-muted small">' + esc(m.roleSummary) + '</div>' : '')
+            + (isCrew && !m.roleSummary && m.state ? '<div class="text-muted small">' + esc(m.state) + '</div>' : '')
+            + '</button>';
+    }
+
     function wireSearch(searchId, resultsId, idField, nameField) {
         var box = q(searchId), results = q(resultsId);
         var timer = null;
+
+        function bindPicks() {
+            results.querySelectorAll('button[data-id]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    q(idField).value = this.getAttribute('data-id');
+                    q(nameField).value = this.getAttribute('data-name');
+                    box.value = this.getAttribute('data-name');
+                    results.style.display = 'none';
+                });
+            });
+        }
+
+        // Focusing the empty box shows the crew — no typing needed to pick someone already involved.
+        box.addEventListener('focus', async function () {
+            if (this.value.trim().length >= 2) return;
+            var crew = await loadCrew();
+            if (!crew.length) return;
+            results.innerHTML = '<div class="list-group-item small text-muted fw-semibold bg-body-tertiary">'
+                + '<i class="bi bi-people me-1"></i>Funktionärer på den här tävlingen</div>'
+                + crew.map(function (m) { return memberButtonHtml(m, true); }).join('')
+                + '<div class="list-group-item small text-muted">Skriv för att söka bland alla medlemmar…</div>';
+            results.style.display = 'block';
+            bindPicks();
+        });
+
         box.addEventListener('input', function () {
             var val = this.value.trim();
             if (timer) clearTimeout(timer);
@@ -493,24 +594,28 @@
         });
         async function run(val) {
             try {
+                var crew = (await loadCrew()).filter(function (m) {
+                    return (m.memberName || '').toLowerCase().indexOf(val.toLowerCase()) > -1;
+                });
                 var r = await fetch('/umbraco/surface/Staffing/SearchMembers?competitionId=' + compId + '&query=' + encodeURIComponent(val), { headers: { 'Accept': 'application/json' } });
                 var d = await r.json();
                 if (!d.success) { results.style.display = 'none'; return; }
-                var list = d.members || [];
-                if (!list.length) { results.innerHTML = '<div class="list-group-item small text-muted">Inga träffar</div>'; results.style.display = 'block'; return; }
-                results.innerHTML = list.map(function (m) {
-                    return '<button type="button" class="list-group-item list-group-item-action" data-id="' + m.memberId + '" data-name="' + esc(m.memberName) + '">'
-                        + esc(m.memberName) + (m.clubName ? ' <span class="text-muted small">· ' + esc(m.clubName) + '</span>' : '') + '</button>';
-                }).join('');
+                var crewIds = {};
+                crew.forEach(function (m) { crewIds[m.memberId] = 1; });
+                var others = (d.members || []).filter(function (m) { return !crewIds[m.memberId]; });
+                if (!crew.length && !others.length) { results.innerHTML = '<div class="list-group-item small text-muted">Inga träffar</div>'; results.style.display = 'block'; return; }
+                var html = '';
+                if (crew.length) {
+                    html += '<div class="list-group-item small text-muted fw-semibold bg-body-tertiary"><i class="bi bi-people me-1"></i>Redan på tävlingen</div>'
+                        + crew.map(function (m) { return memberButtonHtml(m, true); }).join('');
+                }
+                if (others.length) {
+                    html += '<div class="list-group-item small text-muted fw-semibold bg-body-tertiary"><i class="bi bi-search me-1"></i>Övriga medlemmar</div>'
+                        + others.map(function (m) { return memberButtonHtml(m, false); }).join('');
+                }
+                results.innerHTML = html;
                 results.style.display = 'block';
-                results.querySelectorAll('button').forEach(function (btn) {
-                    btn.addEventListener('click', function () {
-                        q(idField).value = this.getAttribute('data-id');
-                        q(nameField).value = this.getAttribute('data-name');
-                        box.value = this.getAttribute('data-name');
-                        results.style.display = 'none';
-                    });
-                });
+                bindPicks();
             } catch (e) { results.style.display = 'none'; }
         }
         q(nameField).addEventListener('input', function () { q(idField).value = '0'; });

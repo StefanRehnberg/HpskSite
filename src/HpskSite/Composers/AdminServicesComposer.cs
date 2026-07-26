@@ -179,6 +179,10 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffPassService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
+            // THE PEOPLE LAYER: one row per human across roster + sign-ups + availability + prep ownership.
+            // Every people-facing planning surface projects this, so they can't disagree with each other.
+            // No table of its own — it composes the services above. See CompetitionPeopleService.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.CompetitionPeopleService>();
 
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");

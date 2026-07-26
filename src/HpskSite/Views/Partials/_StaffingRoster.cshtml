@@ -5,10 +5,16 @@
     // search (autofills name/phone) or free text. Shifts, target ranges, responsible, status, and the
     // Tävlingsledning app-access mirror all live here. See COMPETITION_STAFFING_SYSTEM.md §6.
     //
-    // The tab is split into three focused sub-views so it stops being one overwhelming scroll:
-    //   1. Funktionärer   — the roster (the core, default view) + a glanceable coverage line
-    //   2. Behov & täckning — arbetspass (skift), bemanningsbehov, coverage grid
-    //   3. Värvning        — open-for-signup scopes, mail-out request, /bemanna signup page + anmälda
+    // The tab is split into four focused sub-views, ordered by the question the organiser is asking —
+    // NOT by which table the data happens to live in (that was the old split, and it made the same person
+    // look different depending on which tab you were standing on):
+    //   1. Personer        — WHO is involved and what does each of them do (the people layer, default view).
+    //                        Roster rows + self-sign-ups + availability + prep ownership on ONE row per human.
+    //   2. Roller          — the same people grouped BY ROLE ("who is on skjutlag 3") — a projection, not a
+    //                        second source of truth.
+    //   3. Behov & täckning — arbetspass (skift), bemanningsbehov, coverage grid.
+    //   4. Värvning        — how to GET more people: sourcing scopes, mail-out, the /bemanna sign-up page.
+    //                        Reviewing who signed up happens under Personer, where the roles are.
     var competitionId = ViewData["CompetitionId"];
     var stfToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
 }
@@ -24,8 +30,15 @@
 
 <ul class="nav nav-tabs mb-3" id="bemSubNav" role="tablist">
     <li class="nav-item" role="presentation">
-        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#bem-roster" type="button" role="tab">
-            <i class="bi bi-person-lines-fill me-1"></i>Funktionärer
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#bem-personer" type="button" role="tab">
+            <i class="bi bi-people-fill me-1"></i>Personer
+            <span class="badge bg-secondary ms-1" id="stfPeopleBadge" style="display:none"></span>
+            <span class="badge bg-warning text-dark ms-1" id="stfQueueBadge" style="display:none" title="Anmälda som inte fått något uppdrag"></span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-roster" type="button" role="tab">
+            <i class="bi bi-person-lines-fill me-1"></i>Roller
             <span class="badge bg-secondary ms-1" id="stfRosterBadge" style="display:none"></span>
         </button>
     </li>
@@ -36,15 +49,74 @@
     </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-varvning" type="button" role="tab">
-            <i class="bi bi-megaphone me-1"></i>Värvning &amp; anmälningar
+            <i class="bi bi-megaphone me-1"></i>Värvning
         </button>
     </li>
 </ul>
 
 <div class="tab-content" id="bemSubContent">
 
-    @* ---- TAB 1: Funktionärer (the roster — default) ---- *@
-    <div class="tab-pane fade show active" id="bem-roster" role="tabpanel">
+    @*
+        ---- TAB 1: Personer (default) — the people layer ----
+        One row per human, whatever store they came from: a roster assignment, a self-sign-up on /bemanna,
+        a declared availability window, or ownership of preparation work. Rendered as a TABLE (~40 px/row,
+        sticky header) rather than cards, because a krets/SM comp has hundreds of people and the old card
+        list cost ~120 px each — twelve screens of scrolling for a hundred helpers.
+        Sorted so the organiser's queue floats to the top (anmälda utan uppdrag, then avböjt, then inbjudna).
+    *@
+    <div class="tab-pane fade show active" id="bem-personer" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div class="small" id="stfPeopleSummary"></div>
+            <button type="button" class="btn btn-primary" onclick="stfOpenAdd('')">
+                <i class="bi bi-person-plus me-1"></i>Lägg till funktionär
+            </button>
+        </div>
+
+        @* The volunteer queue: the one action this tab exists to make obvious. Hidden when empty. *@
+        <div id="stfQueueBanner" class="mb-3"></div>
+
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2" id="stfPplFilterBar">
+            <div class="position-relative flex-grow-1" style="min-width:170px;max-width:280px">
+                <i class="bi bi-search position-absolute text-muted" style="left:.65rem;top:50%;transform:translateY(-50%)"></i>
+                <input type="text" class="form-control form-control-sm ps-4" id="stfPplFilter" placeholder="Sök namn, roll, klubb…" autocomplete="off">
+            </div>
+            <select class="form-select form-select-sm" id="stfPplView" style="width:auto" title="Vilka personer som visas">
+                <option value="">Alla personer</option>
+                <option value="queue">Att tilldela (anmälda utan uppdrag)</option>
+                <option value="assigned">Har uppdrag</option>
+                <option value="invited">Väntar på svar</option>
+                <option value="declined">Har avböjt</option>
+                <option value="prep">Förberedelseansvariga</option>
+                <option value="external">Externa hjälpare</option>
+            </select>
+            <select class="form-select form-select-sm" id="stfPplRole" style="width:auto"><option value="">Alla roller</option></select>
+            <select class="form-select form-select-sm" id="stfPplPass" style="width:auto"><option value="">Alla skift</option></select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="stfPplClear" onclick="stfPplClearFilter()" style="display:none"><i class="bi bi-x-lg me-1"></i>Rensa</button>
+            <span class="text-muted small ms-auto" id="stfPplCount"></span>
+        </div>
+
+        <div class="table-responsive border rounded" style="max-height:70vh;overflow:auto">
+            <table class="table table-sm table-hover align-middle mb-0" id="stfPeopleTable">
+                <thead class="table-light" style="position:sticky;top:0;z-index:2">
+                    <tr>
+                        <th style="min-width:180px">Person</th>
+                        <th style="min-width:220px">Uppdrag på tävlingen</th>
+                        <th style="min-width:120px">Tid</th>
+                        <th class="text-center" style="width:110px" title="Uppgifter i Förberedelser">Förb.</th>
+                        <th style="width:120px">Status</th>
+                        <th class="text-end" style="width:150px"></th>
+                    </tr>
+                </thead>
+                <tbody id="stfPeopleBody">
+                    <tr><td colspan="6" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="mt-2" id="stfPeopleMore"></div>
+    </div>
+
+    @* ---- TAB 2: Roller — the same people, grouped by role (a projection of the people layer) ---- *@
+    <div class="tab-pane fade" id="bem-roster" role="tabpanel">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
             <div>
                 <span class="text-muted small" id="stfCount"></span>
@@ -95,7 +167,7 @@
         </div>
     </div>
 
-    @* ---- TAB 2: Behov & täckning (arbetspass/skift + behov + coverage) ---- *@
+    @* ---- TAB 3: Behov & täckning (arbetspass/skift + behov + coverage) ---- *@
     <div class="tab-pane fade" id="bem-behov" role="tabpanel">
         <p class="text-muted small mb-3" style="max-width:680px">
             Lägg upp <strong>skift</strong> (t.ex. Lör FM 06–13) och hur många ni behöver per roll.
@@ -117,12 +189,19 @@
         </div>
     </div>
 
-    @* ---- TAB 3: Värvning & anmälningar (sourcing + mail-out + signup page) ---- *@
+    @*
+        ---- TAB 4: Värvning — how to GET more people ----
+        Recruitment only. Reviewing and assigning the people who signed up happens under **Personer**,
+        together with everyone else — keeping a second person-list here is exactly what made a volunteer
+        look "unassigned" on this tab after they had been given a role on another one.
+    *@
     <div class="tab-pane fade" id="bem-varvning" role="tabpanel">
         <p class="text-muted small mb-3" style="max-width:680px">
             <i class="bi bi-megaphone me-1"></i>Saknas funktionärer? Öppna tävlingen för självanmälan, skicka
             en förfrågan till klubben/kretsen, och lägg upp en <strong>anmälningssida</strong> där medlemmar
             bockar för de pass de kan hjälpa till med.
+            <strong>De som anmält sig hanterar du under <a href="#" onclick="stfGoToPeople(event)">Personer</a></strong>
+            — där ser du dem tillsammans med alla andra och vad de redan har fått.
         </p>
 
         <div class="card mb-3" id="stfSourceCard">
@@ -140,8 +219,8 @@
             <div class="card-body py-2">
                 <div class="text-muted small mb-2">Lägg upp de <strong>pass</strong> ni behöver hjälp med (datum, tid, rubrik, kort beskrivning — flera per datum går bra). Medlemmar bockar för de pass de kan hjälpa till med på sidan <code>/bemanna</code> och skriver en kommentar.</div>
                 <div id="stfHelpSlots" class="mb-3"><div class="text-muted small">Laddar…</div></div>
-                <div class="fw-semibold small mb-1"><i class="bi bi-people me-1"></i>Anmälda</div>
-                <div id="stfHelpSignups"><div class="text-muted small">Laddar…</div></div>
+                @* Just the tally + a way in — the volunteers themselves are listed under Personer. *@
+                <div id="stfHelpTally"></div>
             </div>
         </div>
     </div>
@@ -160,6 +239,13 @@
             <div class="modal-body">
                 <input type="hidden" id="stfId" value="0">
                 <input type="hidden" id="stfMemberId" value="0">
+
+                @*
+                    What this person ALREADY has on this competition. Shown as soon as a person is picked,
+                    because the old dialog was blind to it: you could hand someone a third markörpass without
+                    ever being told about the first two, or re-assign a volunteer you had already assigned.
+                *@
+                <div id="stfExisting" class="mb-3" style="display:none"></div>
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Person</label>
@@ -446,11 +532,355 @@
             populateRoleSelect();
             populateFilterSelects();
             renderNeedsEditor();   // roles now known → (re)render the crew-needs inputs
+            populatePeopleFilterSelects();
             loadCoverage();        // keep coverage live as assignments change
             loadScheduleQuality(); // ...and re-check missing times / clashes after every roster change
         } catch (e) {
             document.getElementById('stfRoster').innerHTML = '<div class="alert alert-warning">Kunde inte läsa bemanningen.</div>';
         }
+    }
+
+    // ======================================================================================
+    // THE PEOPLE LAYER (tab 1). One row per human, unioned server-side across the roster,
+    // self-sign-ups, availability and prep ownership — so this tab and every other one agree
+    // about what a given person is doing. See CompetitionPeopleService.
+    // ======================================================================================
+    var people = [];
+    var peopleMeta = {};
+    var expandedPeople = {};      // person key -> true when their detail row is open (survives polls)
+    var peopleShown = 0;          // progressive render cap; "visa fler" raises it
+    var PEOPLE_PAGE = 100;        // never paint more than this at once — hundreds of DOM rows is the old bug
+
+    var STATE_CLS = {
+        'Anmäld': 'bg-warning text-dark', 'Avböjt': 'bg-danger', 'Inbjuden': 'bg-info text-dark',
+        'Planerad': 'bg-secondary', 'Accepterad': 'bg-primary', 'Bekräftad': 'bg-success',
+        'Förberedelser': 'bg-light text-dark border'
+    };
+
+    async function loadPeople() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetPeople?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) {
+                document.getElementById('stfPeopleBody').innerHTML = '<tr><td colspan="6" class="text-muted py-3">' + esc(d.message || 'Kunde inte läsa personerna.') + '</td></tr>';
+                return;
+            }
+            people = d.people || [];
+            peopleMeta = d;
+            renderPeople();
+            renderQueueBanner();
+            renderHelpTally();
+        } catch (e) {
+            document.getElementById('stfPeopleBody').innerHTML = '<tr><td colspan="6" class="text-muted py-3">Kunde inte läsa personerna.</td></tr>';
+        }
+    }
+
+    function personByKey(k) { for (var i = 0; i < people.length; i++) if (people[i].key === k) return people[i]; return null; }
+
+    function pplFilter() {
+        function v(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+        return { q: v('stfPplFilter').trim().toLowerCase(), view: v('stfPplView'), role: v('stfPplRole'), pass: v('stfPplPass') };
+    }
+
+    function pplMatches(p, f) {
+        // Mirror of CompetitionPeopleService.UnassignedVolunteerCount — offered to help, holds no uppdrag.
+        if (f.view === 'queue' && !((p.volunteer || (p.availabilityLabels || []).length) && (p.assignments || []).length === 0)) return false;
+        if (f.view === 'assigned' && (p.assignments || []).length === 0) return false;
+        if (f.view === 'invited' && !(p.assignments || []).some(function (a) { return a.status === 'Invited'; })) return false;
+        if (f.view === 'declined' && !(p.assignments || []).some(function (a) { return a.status === 'Declined'; })) return false;
+        if (f.view === 'prep' && !(p.prep || []).length) return false;
+        if (f.view === 'external' && !p.isExternal) return false;
+        if (f.role && !(p.assignments || []).some(function (a) { return a.roleKey === f.role; })) return false;
+        if (f.pass && !(p.assignments || []).some(function (a) { return String(a.passId || '') === f.pass; })) return false;
+        if (f.q) {
+            var hay = ((p.displayName || '') + ' ' + (p.clubName || '') + ' ' + (p.roleLabels || []).join(' ')
+                + ' ' + (p.state || '') + ' ' + (p.phone || '')
+                + ' ' + ((p.volunteer && p.volunteer.comment) || '')
+                + ' ' + (p.prep || []).map(function (x) { return (x.areaName || '') + ' ' + (x.itemTitle || ''); }).join(' ')).toLowerCase();
+            if (hay.indexOf(f.q) === -1) return false;
+        }
+        return true;
+    }
+
+    function renderPeople() {
+        var body = document.getElementById('stfPeopleBody');
+        if (!body) return;
+        var f = pplFilter();
+        var matching = people.filter(function (p) { return pplMatches(p, f); });
+        if (!peopleShown || peopleShown < PEOPLE_PAGE) peopleShown = PEOPLE_PAGE;
+        var slice = matching.slice(0, peopleShown);
+
+        body.innerHTML = slice.length
+            ? slice.map(personRowHtml).join('')
+            : '<tr><td colspan="6" class="text-muted text-center py-4"><i class="bi bi-people me-1"></i>'
+              + (people.length ? 'Ingen person matchar filtret.' : 'Ingen är kopplad till tävlingen än. Lägg till en funktionär, eller öppna för självanmälan under Värvning.')
+              + '</td></tr>';
+
+        var more = document.getElementById('stfPeopleMore');
+        if (more) {
+            more.innerHTML = matching.length > slice.length
+                ? '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfShowMorePeople()">Visa ' + Math.min(PEOPLE_PAGE, matching.length - slice.length) + ' fler (' + (matching.length - slice.length) + ' kvar)</button>'
+                : '';
+        }
+        var cnt = document.getElementById('stfPplCount');
+        if (cnt) cnt.textContent = matching.length === people.length
+            ? (people.length + ' personer')
+            : ('Visar ' + matching.length + ' av ' + people.length);
+        var clr = document.getElementById('stfPplClear');
+        if (clr) clr.style.display = (f.q || f.view || f.role || f.pass) ? '' : 'none';
+
+        var sum = document.getElementById('stfPeopleSummary');
+        if (sum) {
+            var t = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+            sum.innerHTML = '<span class="text-muted"><i class="bi bi-people me-1"></i>'
+                + '<strong>' + (peopleMeta.totalPeople || 0) + '</strong> personer · '
+                + (peopleMeta.assignedCount || 0) + ' med uppdrag'
+                + ((peopleMeta.needsResponseCount || 0) ? ' · ' + peopleMeta.needsResponseCount + ' väntar på svar' : '')
+                + ((peopleMeta.externalCount || 0) ? ' · ' + peopleMeta.externalCount + ' externa' : '')
+                + ' · uppdaterad ' + t + '</span>';
+        }
+        var badge = document.getElementById('stfPeopleBadge');
+        if (badge) { if (peopleMeta.totalPeople) { badge.textContent = peopleMeta.totalPeople; badge.style.display = ''; } else badge.style.display = 'none'; }
+        var qb = document.getElementById('stfQueueBadge');
+        if (qb) { if (peopleMeta.unassignedVolunteerCount) { qb.textContent = peopleMeta.unassignedVolunteerCount; qb.style.display = ''; } else qb.style.display = 'none'; }
+    }
+
+    window.stfShowMorePeople = function () { peopleShown += PEOPLE_PAGE; renderPeople(); };
+
+    // Person keys are passed through inline handlers URL-ENCODED, never HTML-escaped. A free-text helper
+    // called O'Brien produces the key "n:o'brien"; html-escaping it yields &#39;, which the browser decodes
+    // back to a quote BEFORE the JS is parsed — breaking the handler with "missing ) after argument list".
+    // encodeURIComponent alone is NOT enough: it deliberately leaves ! ' ( ) * unencoded, so the apostrophe
+    // survives and still closes the JS string. Encode the quote explicitly; decodeURIComponent restores it.
+    function keyArg(key) { return encodeURIComponent(key).replace(/'/g, '%27'); }
+    function fromKeyArg(a) { try { return decodeURIComponent(a); } catch (e) { return a; } }
+
+    function personRowHtml(p) {
+        var open = !!expandedPeople[p.key];
+        var keyEsc = keyArg(p.key);
+        var asg = p.assignments || [];
+
+        // Uppdrag: at most two chips inline, the rest behind "+N" — keeps the row one line high.
+        var chips = asg.slice(0, 2).map(function (a) {
+            return '<span class="badge bg-light text-dark border fw-normal me-1">'
+                + (a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1"></i>' : '')
+                + esc(a.roleName) + (a.scopeLabel && a.scopeLabel !== 'Hela tävlingen' ? ' <span class="text-muted">· ' + esc(a.scopeLabel) + '</span>' : '')
+                + '</span>';
+        }).join('');
+        if (asg.length > 2) chips += '<span class="badge bg-secondary-subtle text-secondary-emphasis border fw-normal">+' + (asg.length - 2) + '</span>';
+        if (!asg.length) {
+            chips = p.volunteer
+                ? '<span class="text-warning-emphasis small"><i class="bi bi-hand-thumbs-up me-1"></i>Anmäld — inget uppdrag än</span>'
+                : ((p.availabilityLabels || []).length
+                    ? '<span class="text-warning-emphasis small"><i class="bi bi-calendar-week me-1"></i>Har angett tider — inget uppdrag än</span>'
+                    : ((p.prep || []).length ? '<span class="text-muted small">Endast förberedelser</span>' : '<span class="text-muted small">—</span>'));
+        }
+
+        // Tid: pass/shift labels, deduped. A person on three markörpass in the same skift shows it once.
+        var times = {};
+        asg.forEach(function (a) { var t = a.passLabel || a.shiftLabel; if (t) times[t] = 1; });
+        var timeHtml = Object.keys(times).length
+            ? Object.keys(times).slice(0, 2).map(function (t) { return '<span class="badge bg-primary-subtle text-primary-emphasis border fw-normal me-1">' + esc(t) + '</span>'; }).join('')
+              + (Object.keys(times).length > 2 ? '<span class="text-muted small">+' + (Object.keys(times).length - 2) + '</span>' : '')
+            : (asg.length ? '<span class="text-muted small" title="Personen ser bara &quot;Heldag&quot; i sitt schema">Heldag</span>' : '');
+
+        var prepCell = (p.prep || []).length
+            ? '<span class="badge ' + (p.prepOverdueCount ? 'bg-danger' : (p.prepOpenCount ? 'bg-warning text-dark' : 'bg-success')) + '" title="' + esc((p.prep || []).map(function (x) { return x.isAreaLead ? ('Ansvarig: ' + x.areaName) : x.itemTitle; }).join(' · ')) + '">'
+              + (p.prep.length - p.prepOpenCount) + '/' + p.prep.length + '</span>'
+            : '<span class="text-muted">—</span>';
+
+        var stateBadge = '<span class="badge ' + (STATE_CLS[p.state] || 'bg-secondary') + '">' + esc(p.state) + '</span>';
+        var adminBadge = p.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Har appbehörighet"></i>' : '';
+        var extBadge = p.isExternal ? ' <span class="badge bg-light text-secondary border fw-normal" title="Extern hjälpare utan konto">extern</span>' : '';
+
+        var actions = '';
+        if (!p.readOnly) {
+            actions += '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfAssignPerson(\'' + keyEsc + '\')" title="Ge ett uppdrag"><i class="bi bi-plus-lg"></i></button>';
+            if (p.memberId || p.email) actions += '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfNotifyPerson(\'' + keyEsc + '\')" title="Bjud in / notifiera"><i class="bi bi-envelope"></i></button>';
+        }
+        if (p.phone) actions += '<a class="btn btn-sm btn-outline-success" href="tel:' + esc(p.phone) + '" title="Ring"><i class="bi bi-telephone"></i></a>';
+
+        var main = '<tr class="' + (open ? 'table-active' : '') + '">'
+            + '<td style="cursor:pointer" onclick="stfTogglePerson(\'' + keyEsc + '\')">'
+            + '<i class="bi bi-chevron-' + (open ? 'down' : 'right') + ' text-muted small me-1"></i>'
+            + '<span class="fw-semibold">' + esc(p.displayName) + '</span>' + adminBadge + extBadge
+            + (p.clubName ? '<div class="text-muted small ms-3">' + esc(p.clubName) + '</div>' : '')
+            + '</td>'
+            + '<td>' + chips + '</td>'
+            + '<td>' + timeHtml + '</td>'
+            + '<td class="text-center">' + prepCell + '</td>'
+            + '<td>' + stateBadge + '</td>'
+            + '<td class="text-end"><div class="d-flex gap-1 justify-content-end">' + actions + '</div></td>'
+            + '</tr>';
+
+        return open ? main + personDetailHtml(p, keyEsc) : main;
+    }
+
+    // The expanded row is where the cross-surface picture lives: every uppdrag (editable), what they
+    // volunteered for, when they said they're available, and what they own in Förberedelser.
+    function personDetailHtml(p, keyEsc) {
+        var h = '<tr class="table-active"><td colspan="6" class="pt-0">';
+        h += '<div class="row g-3 py-2">';
+
+        // --- uppdrag (editable rows) ---
+        h += '<div class="col-lg-6"><div class="fw-semibold small mb-1"><i class="bi bi-person-badge me-1"></i>Uppdrag på tävlingen</div>';
+        if ((p.assignments || []).length) {
+            h += (p.assignments).map(function (a) {
+                var acts = a.readOnly
+                    ? '<span class="badge bg-secondary-subtle text-secondary-emphasis border" title="Tilldelad på Stationer-fliken">' + esc(p.sourceLabel || 'annan flik') + '</span>'
+                    : '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
+                      + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDeletePersonAssignment(' + a.id + ',\'' + keyEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>';
+                return '<div class="d-flex justify-content-between align-items-center border-top py-1 gap-2">'
+                    + '<div class="small">' + esc(a.label)
+                    + ' <span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>'
+                    + (a.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Appbehörighet"></i>' : '')
+                    + '</div><div class="d-flex gap-1 flex-shrink-0">' + acts + '</div></div>';
+            }).join('');
+        } else {
+            h += '<div class="text-muted small fst-italic">Inget uppdrag än.</div>';
+        }
+        h += '<button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="stfAssignPerson(\'' + keyEsc + '\')"><i class="bi bi-plus-lg me-1"></i>Ge ett uppdrag</button>';
+        h += '</div>';
+
+        // --- what they offered (sign-up + availability) ---
+        h += '<div class="col-lg-6">';
+        if (p.volunteer) {
+            h += '<div class="fw-semibold small mb-1"><i class="bi bi-hand-thumbs-up me-1"></i>Anmäld till <span class="text-muted fw-normal">· ' + esc(p.volunteer.updated) + '</span></div>';
+            h += (p.volunteer.slots || []).length
+                ? '<ul class="small mb-1">' + p.volunteer.slots.map(function (s) {
+                    return '<li>' + esc(s.label) + (s.timesText ? ' — <span class="text-primary">' + esc(s.timesText) + '</span>' : ' <span class="text-muted">(hela passet)</span>') + '</li>';
+                  }).join('') + '</ul>'
+                : '<div class="text-muted small">Inga pass valda.</div>';
+            if (p.volunteer.comment) h += '<div class="small border-start border-2 ps-2 mb-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(p.volunteer.comment) + '</div>';
+        }
+        if ((p.availabilityLabels || []).length) {
+            h += '<div class="text-success small mb-1"><i class="bi bi-calendar-week me-1"></i>Tillgänglig: ' + p.availabilityLabels.map(esc).join(' · ') + '</div>';
+        }
+        if ((p.prep || []).length) {
+            h += '<div class="fw-semibold small mb-1 mt-2"><i class="bi bi-list-check me-1"></i>Förberedelser</div><ul class="small mb-0">'
+                + p.prep.map(function (x) {
+                    return '<li>' + (x.isAreaLead ? '<strong>Ansvarig: ' + esc(x.areaName) + '</strong>' : esc(x.itemTitle) + ' <span class="text-muted">(' + esc(x.areaName) + ')</span>')
+                        + (x.dueDate ? ' <span class="text-muted">· senast ' + esc(x.dueDate) + '</span>' : '')
+                        + (x.isOverdue ? ' <span class="badge bg-danger">försenad</span>' : '')
+                        + '</li>';
+                }).join('') + '</ul>';
+        }
+        if (!p.volunteer && !(p.availabilityLabels || []).length && !(p.prep || []).length) {
+            h += '<div class="text-muted small fst-italic">Har inte anmält sig och äger inga förberedelser.</div>';
+        }
+        h += '</div></div></td></tr>';
+        return h;
+    }
+
+    // NB: handlers receive the URL-encoded key (see keyArg) — always decode before comparing to p.key.
+    window.stfTogglePerson = function (k) { var key = fromKeyArg(k); expandedPeople[key] = !expandedPeople[key]; renderPeople(); };
+    window.stfPplClearFilter = function () {
+        ['stfPplFilter', 'stfPplView', 'stfPplRole', 'stfPplPass'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+        peopleShown = PEOPLE_PAGE; renderPeople();
+    };
+    window.stfGoToPeople = function (ev) {
+        if (ev) ev.preventDefault();
+        var btn = document.querySelector('#bemSubNav button[data-bs-target="#bem-personer"]');
+        if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+    };
+
+    // The organiser's queue, stated as an action rather than buried in a list.
+    function renderQueueBanner() {
+        var host = document.getElementById('stfQueueBanner'); if (!host) return;
+        var n = peopleMeta.unassignedVolunteerCount || 0;
+        var declined = peopleMeta.declinedCount || 0;
+        var html = '';
+        if (n > 0) {
+            html += '<div class="alert alert-warning py-2 mb-2 d-flex justify-content-between align-items-center flex-wrap gap-2">'
+                + '<div><i class="bi bi-hand-thumbs-up me-1"></i><strong>' + n + ' ' + (n === 1 ? 'person har' : 'personer har') + ' anmält sig utan att få ett uppdrag.</strong> '
+                + 'De väntar på att du fördelar rollerna.</div>'
+                + '<button type="button" class="btn btn-sm btn-warning" onclick="stfFilterQueue()">Visa dem</button></div>';
+        }
+        if (declined > 0) {
+            html += '<div class="alert alert-danger py-2 mb-0 small"><i class="bi bi-x-circle me-1"></i>'
+                + declined + ' ' + (declined === 1 ? 'person har' : 'personer har') + ' avböjt ett uppdrag — platsen behöver fyllas.'
+                + ' <a href="#" onclick="stfFilterDeclined(event)">Visa</a></div>';
+        }
+        host.innerHTML = html;
+    }
+    window.stfFilterQueue = function () { var s = document.getElementById('stfPplView'); if (s) { s.value = 'queue'; peopleShown = PEOPLE_PAGE; renderPeople(); } };
+    window.stfFilterDeclined = function (ev) { if (ev) ev.preventDefault(); var s = document.getElementById('stfPplView'); if (s) { s.value = 'declined'; peopleShown = PEOPLE_PAGE; renderPeople(); } };
+
+    // Värvning tab: the tally only — the people themselves live under Personer.
+    function renderHelpTally() {
+        var host = document.getElementById('stfHelpTally'); if (!host) return;
+        var total = people.filter(function (p) { return !!p.volunteer; }).length;
+        var un = peopleMeta.unassignedVolunteerCount || 0;
+        if (!total) { host.innerHTML = '<div class="text-muted small fst-italic">Ingen har anmält sig ännu.</div>'; return; }
+        host.innerHTML = '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 border-top pt-2">'
+            + '<div class="small"><i class="bi bi-people me-1"></i><strong>' + total + '</strong> har anmält sig'
+            + (un ? ' — <span class="text-warning-emphasis fw-semibold">' + un + ' väntar på uppdrag</span>' : ' — alla har fått uppdrag')
+            + '</div>'
+            + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfGoToPeople()"><i class="bi bi-arrow-right me-1"></i>Hantera under Personer</button></div>';
+    }
+
+    function populatePeopleFilterSelects() {
+        var rsel = document.getElementById('stfPplRole');
+        if (rsel) { var cur = rsel.value; rsel.innerHTML = '<option value="">Alla roller</option>' + roles.map(function (g) { return '<option value="' + g.roleKey + '">' + esc(g.roleName) + '</option>'; }).join(''); rsel.value = cur; }
+        var psel = document.getElementById('stfPplPass');
+        if (psel) { var curp = psel.value; psel.innerHTML = '<option value="">Alla skift</option>' + passes.map(function (p) { return '<option value="' + p.id + '">' + esc(p.displayLabel) + '</option>'; }).join(''); psel.value = curp; }
+    }
+
+    // Give a person an uppdrag straight from their row: the dialog opens pre-filled AND showing what they
+    // already have, so "is this person already booked?" is answered before you pick a role, not after.
+    window.stfAssignPerson = function (k) {
+        var p = personByKey(fromKeyArg(k));
+        if (!p) return;
+        stfOpenAdd('');
+        document.getElementById('stfMemberId').value = p.memberId || 0;
+        document.getElementById('stfName').value = p.displayName || '';
+        document.getElementById('stfMemberSearch').value = p.displayName || '';
+        if (p.phone) document.getElementById('stfPhone').value = p.phone;
+        // Prefill the pass from what they volunteered for, when the sign-up slot maps to exactly one skift.
+        var sug = (p.volunteer && (p.volunteer.slots || []).map(function (s) { return s.suggestedPassId; }).filter(Boolean)) || [];
+        if (sug.length) { var sel = document.getElementById('stfPass'); if (sel) sel.value = String(sug[0]); }
+        renderExistingPanel(p);
+    };
+
+    window.stfNotifyPerson = function (k) {
+        var p = personByKey(fromKeyArg(k));
+        if (!p) return;
+        var target = (p.assignments || []).filter(function (a) { return !a.readOnly; })[0];
+        if (!target) { alert('Ge personen ett uppdrag först — notisen handlar om ett uppdrag.'); return; }
+        stfNotify(target.id, p.displayName);
+    };
+
+    // Delete one of a person's uppdrag from their expanded detail row. Keyed rather than name-passed so a
+    // name containing an apostrophe can't break the inline handler.
+    window.stfDeletePersonAssignment = function (id, k) {
+        var p = personByKey(fromKeyArg(k));
+        stfDelete(id, p ? p.displayName : 'funktionären');
+    };
+
+    // The "already has" panel inside the add/edit dialog.
+    function renderExistingPanel(p) {
+        var host = document.getElementById('stfExisting');
+        if (!host) return;
+        if (!p || (!(p.assignments || []).length && !p.volunteer)) { host.style.display = 'none'; host.innerHTML = ''; return; }
+        var h = '<div class="border rounded p-2 bg-body-tertiary">';
+        h += '<div class="fw-semibold small mb-1">' + esc(p.displayName) + ' på den här tävlingen</div>';
+        if ((p.assignments || []).length) {
+            h += '<div class="small mb-1"><i class="bi bi-person-badge me-1"></i>Har redan: '
+                + p.assignments.map(function (a) { return '<span class="badge bg-light text-dark border fw-normal me-1">' + esc(a.label) + '</span>'; }).join('')
+                + '</div>';
+        } else {
+            h += '<div class="small text-muted mb-1">Inget uppdrag än.</div>';
+        }
+        if (p.volunteer) {
+            h += '<div class="small text-success"><i class="bi bi-hand-thumbs-up me-1"></i>Anmäld till: ' + esc(p.volunteer.slotsSummary || '—') + '</div>';
+            if (p.volunteer.comment) h += '<div class="small text-muted fst-italic">"' + esc(p.volunteer.comment) + '"</div>';
+        }
+        if ((p.prep || []).length) {
+            h += '<div class="small text-muted"><i class="bi bi-list-check me-1"></i>' + p.prep.length + ' uppgift(er) i Förberedelser</div>';
+        }
+        h += '</div>';
+        host.innerHTML = h;
+        host.style.display = '';
     }
 
     function renderRoster() {
@@ -627,6 +1057,7 @@
                     if (ph) document.getElementById('stfPhone').value = ph;
                     searchBox.value = this.getAttribute('data-name');
                     hideResults();
+                    showExistingForPicked();   // "har redan …" before a role is chosen, not after saving
                 });
             });
         } catch (e) { hideResults(); }
@@ -663,7 +1094,17 @@
         document.getElementById('stfAdminAccess').checked = false;
         document.getElementById('stfNote').value = '';
         document.getElementById('stfError').textContent = '';
+        var ex = document.getElementById('stfExisting');
+        if (ex) { ex.style.display = 'none'; ex.innerHTML = ''; }
         hideResults();
+    }
+
+    /// Look the picked person up in the people layer and show what they already hold.
+    function showExistingForPicked() {
+        var mid = parseInt(document.getElementById('stfMemberId').value, 10) || 0;
+        var name = document.getElementById('stfName').value.trim();
+        var key = mid > 0 ? ('m:' + mid) : ('n:' + name.toLowerCase());
+        renderExistingPanel(personByKey(key));
     }
 
     window.stfOpenAdd = function (roleKey) {
@@ -709,6 +1150,7 @@
         }
         applyRoleFields();
         applyScopeFields();
+        renderExistingPanel(personByKey(a.memberId ? ('m:' + a.memberId) : ('n:' + (a.displayName || '').trim().toLowerCase())));
         ensureModal().show();
     };
 
@@ -746,9 +1188,24 @@
                 body: JSON.stringify(payload)
             });
             var d = await r.json();
+            // Server refused a same-person/same-role/same-scope/same-pass duplicate. Ask once, then repeat
+            // the save with the override — silently creating the second row is what produced people listed
+            // twice on one skjutlag.
+            if (!d.success && d.duplicate) {
+                btn.disabled = false;
+                if (!confirm(d.message)) { err.textContent = ''; return; }
+                payload.allowDuplicate = true;
+                btn.disabled = true;
+                r = await fetch('/umbraco/surface/Staffing/SaveAssignment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                    body: JSON.stringify(payload)
+                });
+                d = await r.json();
+            }
             if (!d.success) { err.textContent = d.message || 'Kunde inte spara.'; btn.disabled = false; return; }
             ensureModal().hide();
-            await loadRoster();
+            await Promise.all([loadRoster(), loadPeople()]);
         } catch (e) { err.textContent = 'Nätverksfel.'; }
         btn.disabled = false;
     };
@@ -829,6 +1286,7 @@
         renderPassList();
         populatePassSelect();
         populateFilterSelects();
+        populatePeopleFilterSelects();
         await loadNeeds();
         await loadCoverage();
     }
@@ -1089,17 +1547,14 @@
     var slotModal = null, helpSlots = [];
     (function () { var b = document.getElementById('stfPreviewBtn'); if (b) b.href = '/bemanna?c=' + compId + '&preview=1'; })();
 
+    // Only the organiser's slot configuration lives here now. The volunteers themselves are rendered from
+    // the people layer (loadPeople → renderHelpTally), so there is no second list to fall out of sync.
     async function loadHelp() {
         try {
             var rs = await fetch('/umbraco/surface/Staffing/GetHelpSlots?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
             var ds = await rs.json();
             helpSlots = (ds && ds.success) ? (ds.slots || []) : [];
             renderHelpSlots();
-        } catch (e) { }
-        try {
-            var rp = await fetch('/umbraco/surface/Staffing/GetHelpSignups?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
-            var dp = await rp.json();
-            renderHelpSignups((dp && dp.success) ? (dp.signups || []) : []);
         } catch (e) { }
     }
 
@@ -1120,34 +1575,6 @@
         });
         host.innerHTML = html;
     }
-
-    function renderHelpSignups(list) {
-        var host = document.getElementById('stfHelpSignups');
-        if (!host) return;
-        if (!list.length) { host.innerHTML = '<div class="text-muted small fst-italic">Ingen har anmält sig ännu.</div>'; return; }
-        host.innerHTML = list.map(function (v) {
-            var slots = (v.slots || []).map(function (s) {
-                return '<li>' + esc(s.label) + (s.timesText ? ' — <span class="text-primary">' + esc(s.timesText) + '</span>' : ' <span class="text-muted">(hela passet)</span>') + '</li>';
-            }).join('');
-            var nm = esc(v.memberName).replace(/'/g, "\\'");
-            return '<div class="border rounded p-2 mb-2">'
-                + '<div class="d-flex justify-content-between align-items-start gap-2">'
-                + '<span class="fw-semibold">' + esc(v.memberName) + ' <span class="text-muted small">· ' + esc(v.updated) + '</span></span>'
-                + '<button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" onclick="stfAssignFromPool(' + v.memberId + ',\'' + nm + '\')" title="Lägg till som funktionär"><i class="bi bi-person-plus me-1"></i>Tilldela</button>'
-                + '</div>'
-                + (slots ? '<ul class="small mb-1 mt-1">' + slots + '</ul>' : '<div class="text-muted small">Inga pass valda.</div>')
-                + (v.comment ? '<div class="small"><i class="bi bi-chat-left-text me-1"></i>' + esc(v.comment) + '</div>' : '')
-                + '</div>';
-        }).join('');
-    }
-
-    // Assign a volunteer from the "Anmälda" pool: open the add-funktionär dialog pre-filled with the person.
-    window.stfAssignFromPool = function (memberId, name) {
-        stfOpenAdd('');
-        document.getElementById('stfMemberId').value = memberId || 0;
-        document.getElementById('stfName').value = name || '';
-        document.getElementById('stfMemberSearch').value = name || '';
-    };
 
     window.stfOpenSlot = function (id) {
         if (!slotModal) slotModal = new bootstrap.Modal(document.getElementById('stfSlotModal'));
@@ -1210,7 +1637,7 @@
                 body: JSON.stringify({ id: id, competitionId: compId })
             });
             var d = await r.json();
-            if (d.success) await loadRoster();
+            if (d.success) await Promise.all([loadRoster(), loadPeople()]);
             else alert(d.message || 'Kunde inte ta bort.');
         } catch (e) { alert('Nätverksfel.'); }
     };
@@ -1218,10 +1645,21 @@
     // Live refresh so several people can build the roster in parallel (planning meeting) and see each
     // other's assignments. Skip while a modal is open (don't disrupt an in-progress edit) or the tab is
     // hidden. Assignments are independent rows, so parallel edits to different roles never clobber.
+    // Poll only what is on screen. Personer and Roller are two projections of the same server-side data, so
+    // refreshing both every 12 s doubles the DB work for no visible benefit — and GetPeople is the heavier of
+    // the two (it also builds the prep breakdown for the "Förb." column). Both are still loaded once at init
+    // so the filter selects and role list are populated whichever tab you land on.
+    function activeSubTab() {
+        var pane = document.querySelector('#bemSubContent .tab-pane.active');
+        return pane ? pane.id : 'bem-personer';
+    }
     function poll() {
         if (document.hidden) return;
         if (document.querySelector('.modal.show')) return;
-        loadRoster();
+        var t = activeSubTab();
+        if (t === 'bem-roster') loadRoster();
+        else if (t === 'bem-personer') loadPeople();
+        else { /* Behov & täckning + Värvning have their own lighter refreshes */ loadCoverage(); }
     }
     function startTimer() { if (!timer) timer = setInterval(poll, REFRESH); }
     function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
@@ -1241,7 +1679,28 @@
         var el = document.getElementById(id);
         if (el) { el.addEventListener('input', renderRoster); el.addEventListener('change', renderRoster); }
     });
+    // Same for the people table. Any filter change resets the progressive-render cap so a narrow filter
+    // doesn't hide matches behind a "visa fler" left over from a wider one.
+    ['stfPplFilter', 'stfPplView', 'stfPplRole', 'stfPplPass'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var h = function () { peopleShown = PEOPLE_PAGE; renderPeople(); };
+        el.addEventListener('input', h); el.addEventListener('change', h);
+    });
 
+    // Switching sub-tab refreshes what you just switched to, so you never look at a view that is up to one
+    // poll-interval stale after editing on the other one.
+    document.querySelectorAll('#bemSubNav button[data-bs-toggle="tab"]').forEach(function (btn) {
+        btn.addEventListener('shown.bs.tab', function () {
+            var t = activeSubTab();
+            if (t === 'bem-roster') loadRoster();
+            else if (t === 'bem-personer') loadPeople();
+            else if (t === 'bem-behov') { loadPasses(); }
+            else if (t === 'bem-varvning') { loadScopes(); loadHelp(); }
+        });
+    });
+
+    loadPeople();
     loadRoster();
     loadScopes();
     loadHelp();

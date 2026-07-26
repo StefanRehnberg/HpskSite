@@ -211,6 +211,9 @@ namespace HpskSite.Models.Staffing
         public bool HasAdminAccess { get; set; }
         public string? Status { get; set; }
         public string? Note { get; set; }
+        /// <summary>Set by the dialog's "lägg till ändå" confirmation to bypass the same-person-same-role-
+        /// same-scope-same-pass duplicate guard in StaffingController.SaveAssignment.</summary>
+        public bool AllowDuplicate { get; set; }
     }
 
     public class DeleteStaffAssignmentRequest
