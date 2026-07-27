@@ -1,0 +1,131 @@
+@*
+ * Springskytte LAG (team) results — Resultat tab, between the individual results and the
+ * stafett card. Read-only: a Lag result is DERIVED from its members' individual results
+ * (sum of each member's total time, lowest wins per class), so there is nothing to enter
+ * here — it updates as the individual results are registered.
+ *
+ * Why this partial exists: Precision-family and Fältskytte embed the public /resultat/ page
+ * in an <iframe> on their Resultat tabs, so they inherit its "Lagresultat" tab for free.
+ * Springskytte renders its results inline (the tab is a live data-entry surface), so it never
+ * inherited that — team results were only reachable via the public page or the print view.
+ *
+ * Relay teams are EXCLUDED here. They live in the same CompetitionTeam table but are scored
+ * on one elapsed clock per team (SpringskytteStafettResultEntry) rather than by summing member
+ * rows, so CalculateTeamResultsAsync always reports them as incomplete. They get their own
+ * card — SpringskytteStafettResults — directly below this one.
+ *
+ * Card hides itself when the competition has no non-relay teams.
+ *@
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    var lagResultPageUrl = ViewData["ResultPageUrl"]?.ToString() ?? "";
+}
+
+<div class="card mb-3" id="lagResultsCard" style="display:none;">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0">
+            <i class="bi bi-people me-2"></i>Lag – resultat
+        </h5>
+        <div class="d-flex align-items-center gap-2">
+            @if (!string.IsNullOrEmpty(lagResultPageUrl))
+            {
+                <a class="btn btn-outline-secondary btn-sm" href="@lagResultPageUrl" target="_blank" rel="noopener"
+                   title="Öppna den publika resultatsidan (fliken Lagresultat) för visning och utskrift">
+                    <i class="bi bi-printer me-1"></i>Skriv ut
+                </a>
+            }
+            <button class="btn btn-outline-primary btn-sm" onclick="slrReload()" title="Uppdatera lagresultaten">
+                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            <i class="bi bi-info-circle me-1"></i>
+            Lagets tid är <strong>summan av medlemmarnas totaltider</strong>. Lägsta tid vinner.
+            Resultatet räknas fram automatiskt från de individuella resultaten — ett lag får en
+            placering först när <strong>alla</strong> dess ordinarie medlemmar har ett godkänt resultat.
+            Reserver räknas inte in.
+        </p>
+        <div id="slrResults"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const compId = parseInt('@competitionId');
+    const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+
+    // Drop relay teams (they have their own card), then drop any class group left empty —
+    // stafett classes are their own TeamClass values, so those groups vanish entirely.
+    function lagGroupsOnly(groups) {
+        return (groups || [])
+            .map(g => ({ teamClass: g.teamClass, teams: (g.teams || []).filter(t => !t.isRelay) }))
+            .filter(g => g.teams.length > 0);
+    }
+
+    async function slrLoad() {
+        const card = document.getElementById('lagResultsCard');
+        if (!card) return;
+
+        let data;
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/GetTeamResults?competitionId=' + compId);
+            data = await resp.json();
+        } catch (e) {
+            card.style.display = 'none';
+            return;
+        }
+
+        if (!data || !data.success) { card.style.display = 'none'; return; }
+
+        const groups = lagGroupsOnly(data.classGroups);
+        if (!groups.length) { card.style.display = 'none'; return; }
+
+        card.style.display = '';
+        renderResults(groups);
+    }
+
+    window.slrInit = slrLoad;
+    window.slrReload = slrLoad;
+
+    function memberLine(m) {
+        if (!m.hasResult) {
+            return esc(m.name) + ' <span class="text-muted">(' + esc(m.status || 'inget resultat') + ')</span>';
+        }
+        return esc(m.name) + ' <span class="text-muted">(' + esc(m.timeDisplay) + ')</span>';
+    }
+
+    function renderResults(groups) {
+        const wrap = document.getElementById('slrResults');
+        wrap.innerHTML = groups.map(g => `
+            <div class="mb-3">
+                <div class="fw-bold border-bottom pb-1 mb-2">${esc(g.teamClass)} <span class="text-muted fw-normal small">(${g.teams.length} lag)</span></div>
+                <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr class="small text-muted">
+                        <th style="width:44px">#</th><th>Lag</th><th>Förening</th>
+                        <th>Medlemmar</th><th style="width:120px" class="text-end">Total tid</th>
+                    </tr></thead>
+                    <tbody>
+                    ${g.teams.map(t => `
+                        <tr${t.isComplete ? '' : ' class="text-muted"'}>
+                            <td>${t.rank > 0 ? '<span class="badge bg-primary">' + t.rank + '</span>' : '<span class="text-muted">–</span>'}</td>
+                            <td><strong>${esc(t.teamName)}</strong></td>
+                            <td class="small">${esc(t.clubName)}</td>
+                            <td class="small">${(t.members || []).map(memberLine).join('<br>')}</td>
+                            <td class="text-end"><strong>${esc(t.totalTimeDisplay)}</strong></td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+                </div>
+                ${g.teams.some(t => !t.isComplete)
+                    ? '<div class="small text-muted mt-1"><i class="bi bi-hourglass-split me-1"></i>Gråmarkerade lag saknar resultat för en eller flera medlemmar och får ingen placering ännu.</div>'
+                    : ''}
+            </div>`).join('');
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', slrLoad);
+    else slrLoad();
+})();
+</script>

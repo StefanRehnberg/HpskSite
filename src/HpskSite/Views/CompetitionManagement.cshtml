@@ -661,6 +661,7 @@
                 @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
                 {
                     @await Html.PartialAsync("SpringskytteResultsManagement", resultsViewData)
+                    @await Html.PartialAsync("SpringskytteLagResults", resultsViewData)
                     @await Html.PartialAsync("SpringskytteStafettResults", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
                 }
                 else if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")

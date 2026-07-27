@@ -396,6 +396,7 @@ namespace HpskSite.Controllers
                                 ? FormatTime(t.TotalTimeSeconds.Value)
                                 : "-",
                             isComplete = t.IsComplete,
+                            isRelay = t.IsRelay,
                             members = t.MemberResults.Select(m => new
                             {
                                 name = m.Name,

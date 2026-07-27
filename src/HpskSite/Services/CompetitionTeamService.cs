@@ -502,6 +502,31 @@ namespace HpskSite.Services
             var isSpringskytte = competitionType == "Springskytte";
             var resultGroups = new List<TeamResultGroup>();
 
+            // Springskytte range-master penalties/reductions live in their own ledger and are folded
+            // into a shooter's total by SpringskytteController.ApplyTimeAdjustmentsAsync — the raw
+            // SpringskytteResultEntry.TotalTimeSeconds does NOT include them. Reading the entry alone
+            // therefore understated a team whose member picked up a straff (the individual result list
+            // showed 21:15 while the Lag total counted 19:15). Load the same ledger and apply the same
+            // net delta, keyed (MemberId|WeaponClass) exactly as the individual path keys it.
+            var netAdjustmentByKey = new Dictionary<string, int>();
+            if (isSpringskytte)
+            {
+                try
+                {
+                    var adjustments = await db.FetchAsync<SpringskytteTimeAdjustment>(
+                        "SELECT * FROM SpringskytteTimeAdjustment WHERE CompetitionId = @0", competitionId);
+                    netAdjustmentByKey = adjustments
+                        .GroupBy(a => $"{a.MemberId}|{a.WeaponClass}")
+                        .ToDictionary(g => g.Key, g => g.Sum(a => a.Seconds));
+                }
+                catch (Exception ex)
+                {
+                    // Same posture as the individual path: a missing/unmigrated table must not take
+                    // the whole team result list down.
+                    _logger.LogWarning(ex, "Could not load Springskytte time adjustments for comp {Comp}", competitionId);
+                }
+            }
+
             // Group teams by class
             var teamsByClass = teams.GroupBy(t => t.Team.TeamClass);
 
@@ -509,10 +534,28 @@ namespace HpskSite.Services
             {
                 var teamResults = new List<TeamResult>();
 
+                // Springskytte team classes are weapon-group scoped ("C-Herrar", "A-Damer", …) and at a
+                // two-day competition most shooters register in BOTH A and C, so a member can hold two
+                // result entries. Pin the lookup to this team's weapon group — an unscoped
+                // FirstOrDefault could score a C team off the member's A run.
+                var teamWeaponClass =
+                    classGroup.Key.StartsWith("A-", StringComparison.OrdinalIgnoreCase) ? "A" :
+                    classGroup.Key.StartsWith("C-", StringComparison.OrdinalIgnoreCase) ? "C" : null;
+
                 foreach (var teamWithMembers in classGroup)
                 {
                     // Only count non-spare members
                     var coreMembers = teamWithMembers.Members.Where(m => !m.IsSpare).ToList();
+
+                    // An UNDER-STRENGTH team is NOT complete. Springskytte lets a team be created
+                    // name-only with the roster deferred until just before the start, so a short
+                    // roster is a normal intermediate state — but the loops below only iterate the
+                    // members that ARE named, so a 0-of-3 team kept allComplete=true with a total of
+                    // 0 and sorted FIRST (rank 1, "0:00.00") ahead of every team that actually shot,
+                    // and a 2-of-3 team was ranked on two runners' time against rivals who ran three.
+                    // A team only places once its full core roster is named and has results.
+                    var (requiredCore, _) = TeamClassHelper.GetTeamSize(classGroup.Key);
+                    var rosterComplete = coreMembers.Count >= requiredCore;
 
                     if (isSpringskytte)
                     {
@@ -522,19 +565,26 @@ namespace HpskSite.Services
 
                         foreach (var member in coreMembers)
                         {
-                            var entry = await db.FirstOrDefaultAsync<SpringskytteResultEntry>(
-                                "WHERE CompetitionId = @0 AND MemberId = @1",
-                                competitionId, member.MemberId);
+                            var entry = teamWeaponClass != null
+                                ? await db.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                                    "WHERE CompetitionId = @0 AND MemberId = @1 AND WeaponClass = @2",
+                                    competitionId, member.MemberId, teamWeaponClass)
+                                : await db.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                                    "WHERE CompetitionId = @0 AND MemberId = @1",
+                                    competitionId, member.MemberId);
 
                             if (entry?.TotalTimeSeconds != null && string.IsNullOrEmpty(entry.Status))
                             {
-                                totalTime += entry.TotalTimeSeconds.Value;
+                                var memberTime = entry.TotalTimeSeconds.Value
+                                    + (netAdjustmentByKey.TryGetValue($"{member.MemberId}|{entry.WeaponClass}", out var net) ? net : 0);
+
+                                totalTime += memberTime;
                                 memberResults.Add(new TeamMemberResult
                                 {
                                     MemberId = member.MemberId,
                                     Name = member.Name,
                                     Score = 0,
-                                    TimeSeconds = entry.TotalTimeSeconds.Value,
+                                    TimeSeconds = memberTime,
                                     HasResult = true
                                 });
                             }
@@ -557,9 +607,10 @@ namespace HpskSite.Services
                             TeamName = teamWithMembers.Team.TeamName,
                             ClubName = teamWithMembers.ClubName,
                             TotalScore = 0,
-                            TotalTimeSeconds = allComplete ? totalTime : null,
+                            TotalTimeSeconds = (allComplete && rosterComplete) ? totalTime : null,
                             MemberResults = memberResults,
-                            IsComplete = allComplete
+                            IsComplete = allComplete && rosterComplete,
+                            IsRelay = teamWithMembers.Team.IsRelay
                         });
                     }
                     else
@@ -644,7 +695,8 @@ namespace HpskSite.Services
                             TotalScore = totalScore,
                             TotalXCount = totalXCount,
                             MemberResults = memberResults,
-                            IsComplete = allComplete
+                            IsComplete = allComplete && rosterComplete,
+                            IsRelay = teamWithMembers.Team.IsRelay
                         });
                     }
                 }
@@ -1195,6 +1247,13 @@ namespace HpskSite.Services
         public decimal? TotalTimeSeconds { get; set; }
         public List<TeamMemberResult> MemberResults { get; set; } = new();
         public bool IsComplete { get; set; }
+
+        /// <summary>
+        /// True for stafett (relay) teams. Relay is scored on ONE elapsed clock per team
+        /// (see SpringskytteStafettResultEntry), NOT by summing member rows the way this
+        /// calculation does — so consumers must not present a relay row as a Lag result.
+        /// </summary>
+        public bool IsRelay { get; set; }
     }
 
     public class TeamMemberResult
