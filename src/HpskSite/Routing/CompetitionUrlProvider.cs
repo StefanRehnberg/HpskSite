@@ -133,7 +133,14 @@ namespace HpskSite.Routing
                     if (region?.ContentType.Alias == "regionalPage" && !string.IsNullOrWhiteSpace(region.UrlSegment))
                         return Compose(year.Value, region.UrlSegment, club.UrlSegment, seriesSlug, compSlug);
                 }
-                // Club exists but isn't under a regional page → no shape, fall through.
+
+                // A club is set but we can't resolve it to a published `club` under a
+                // `regionalPage` (unpublished, deleted, moved out of regionalPage > clubsPage, or
+                // a stale id). Bail out to Umbraco's tree URL rather than falling through to the
+                // region-hosted shape below: CompetitionUrlContentFinder.FindByRegionShape rejects
+                // any competition with clubId > 0, so that URL could never resolve back and the
+                // backoffice would report "published but its URL cannot be routed".
+                return null;
             }
 
             // ── 4. Region-hosted via regionalFederation ──────────────────────────────
