@@ -33,7 +33,8 @@ namespace HpskSite.Models.Staffing
         /// <summary>Compact "Markör · Skjutlag 2 · tavlor 1–8" summary of every roster row, for one-line display.</summary>
         public List<string> RoleLabels { get; set; } = new();
 
-        /// <summary>True when at least one roster row carries the Tävlingsledning app-access mirror.</summary>
+        /// <summary>True when at least one roster row (any role) grants them the right to manage the
+        /// competition in pistol.nu.</summary>
         public bool HasAdminAccess { get; set; }
 
         /// <summary>True when they lead a role/område (IsResponsible on any row, or an områdesansvarig).</summary>

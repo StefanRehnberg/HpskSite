@@ -10,9 +10,17 @@ namespace HpskSite.Services.Staffing
     /// <summary>
     /// Data + orchestration for the day-of functionary roster (Bemanning). Competition-scoped;
     /// scope/shift grouping is done in memory (per-competition volume is tiny). Authorization is the
-    /// controller's job. Also owns the Tävlingsledning ↔ competitionManagers mirror: a Tävlingsledning
-    /// row with HasAdminAccess=true grants app admin by writing the competition's competitionManagers
-    /// int[] (the permission source of truth — no auth rework). See COMPETITION_STAFFING_SYSTEM.md §4.
+    /// controller's job.
+    ///
+    /// <para><b>App access ≠ tävlingsansvarig.</b> ANY roster row (Kassa, Sekretariat, Stationschef, …)
+    /// may carry <c>HasAdminAccess=true</c>, which grants that person the right to manage the competition
+    /// in pistol.nu (<c>/competitionmanagement</c> and every staff screen under it) — see
+    /// <see cref="HasRosterAdminAccess"/>, which <c>AdminAuthorizationService.IsCompetitionManager</c>
+    /// unions with the competition's <c>competitionManagers</c> list. The mirror INTO
+    /// <c>competitionManagers</c> stays deliberately limited to <b>Tävlingsledning</b> rows
+    /// (<see cref="SyncCompetitionManagers"/>), because that property is also the public
+    /// "Tävlingsansvariga" list on the competition page — a cashier with app access must not be
+    /// published as a competition official. See COMPETITION_STAFFING_SYSTEM.md §4.</para>
     /// </summary>
     public class StaffingService
     {
@@ -53,6 +61,32 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.ExecuteScalar<int?>(
                 "SELECT CompetitionId FROM StaffAssignment WHERE Id = @0", id);
+        }
+
+        /// <summary>
+        /// True when this member holds at least one roster row on this competition that was granted app
+        /// access ("Ge behörighet att hantera tävlingen"). Role-agnostic on purpose: sekretariat, kassa,
+        /// stationschef and tävlingsledning all reach the same management page, so the grant is a property
+        /// of the assignment, not of the role. Status is NOT considered — the organiser ticking the box is
+        /// the explicit grant; an unanswered or declined invitation doesn't silently revoke it.
+        /// Returns false (never throws) if the table isn't there yet, so auth degrades to the legacy
+        /// competitionManagers list rather than locking everyone out.
+        /// </summary>
+        public bool HasRosterAdminAccess(int competitionId, int memberId)
+        {
+            if (competitionId <= 0 || memberId <= 0) return false;
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                return scope.Database.ExecuteScalar<int>(
+                    "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1 AND HasAdminAccess = 1",
+                    competitionId, memberId) > 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Staffing: roster app-access lookup failed for competition {CompetitionId}", competitionId);
+                return false;
+            }
         }
 
         /// <summary>
@@ -241,7 +275,10 @@ namespace HpskSite.Services.Staffing
                 row.EndsAt = ParseDateTime(req.EndsAt);
                 row.PassId = req.PassId is > 0 ? req.PassId : null;
                 row.IsResponsible = req.IsResponsible;
-                row.HasAdminAccess = req.HasAdminAccess && string.Equals(row.RoleKey, TavlingsledningRole, StringComparison.OrdinalIgnoreCase);
+                // App access is role-agnostic (a Kassa- or Sekretariatsansvarig needs the same management
+                // page as the tävlingsledare). It does require a linked member, though — access is granted
+                // to a pistol.nu login, so a free-text helper row can never carry it.
+                row.HasAdminAccess = req.HasAdminAccess && row.MemberId is > 0;
                 row.Status = NormalizeStatus(req.Status);
                 row.Note = string.IsNullOrWhiteSpace(req.Note) ? null : req.Note.Trim();
                 row.ModifiedDate = now;
@@ -619,10 +656,14 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
-        /// Recompute the competition's competitionManagers int[] from the Tävlingsledning rows that carry
-        /// HasAdminAccess=true (+ a member id), and write it back to the content node (Save + Publish so the
-        /// published cache IsCompetitionManager reads sees it). The roster is authoritative once reconcile
-        /// has run, so this never drops a manager the reconcile hasn't already captured as a row.
+        /// Recompute the competition's competitionManagers int[] from the <b>Tävlingsledning</b> rows that
+        /// carry HasAdminAccess=true (+ a member id), and write it back to the content node (Save + Publish
+        /// so the published cache reads see it). The roster is authoritative once reconcile has run, so this
+        /// never drops a manager the reconcile hasn't already captured as a row.
+        ///
+        /// <para>Deliberately Tävlingsledning-only: competitionManagers doubles as the <i>public</i>
+        /// "Tävlingsansvariga" list on the competition page, so rows from other roles must not land here even
+        /// though they carry app access. Their access comes from <see cref="HasRosterAdminAccess"/> instead.</para>
         /// </summary>
         private void SyncCompetitionManagers(int competitionId)
         {

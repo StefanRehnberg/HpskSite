@@ -98,12 +98,14 @@
 
             if (competition != null)
             {
-                // Check competition manager from the competition's managerIds JSON
+                // Competition management access: the tävlingsansvariga list OR any Bemanning roster row
+                // (any role — sekretariat, kassa, stationschef …) that was granted app access.
                 var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
                 int[] cmIds;
                 try { cmIds = Newtonsoft.Json.JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
                 catch { cmIds = Array.Empty<int>(); }
-                bool isCompetitionManager = cmIds.Contains(memberData.Id);
+                bool isCompetitionManager = cmIds.Contains(memberData.Id)
+                    || AuthService.HasRosterAppAccess(competition.Id, memberData.Id);
 
                 // Check club admin from roles + regional admin from club's region
                 bool isClubAdminForCompetition = false;

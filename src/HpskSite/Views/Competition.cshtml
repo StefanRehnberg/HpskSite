@@ -335,8 +335,10 @@
             bool isClubAdmin = roles.Any(r => r.StartsWith("ClubAdmin_"));
             bool isSkjutledare = roles.Any(r => r.StartsWith("Skjutledare_"));
 
-            // Competition manager role (managerIds from line 23, memberData.Id available here)
-            bool isCompetitionManager = managerIds.Contains(memberData.Id);
+            // Competition management access (managerIds from line 23, memberData.Id available here):
+            // the tävlingsansvariga list OR any Bemanning roster row — any role — granted app access.
+            bool isCompetitionManager = managerIds.Contains(memberData.Id)
+                || AuthService.HasRosterAppAccess(Model.Id, memberData.Id);
 
             if (isSiteAdmin) regRole = "admin";
             else if (isClubAdmin) regRole = "clubAdmin";

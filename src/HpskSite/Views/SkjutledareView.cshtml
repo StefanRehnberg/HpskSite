@@ -2,6 +2,7 @@
 @using Newtonsoft.Json
 @inject Umbraco.Cms.Core.Services.IMemberService MemberService
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject HpskSite.Services.AdminAuthorizationService AuthService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -52,11 +53,13 @@
             var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
             bool isSiteAdmin = roles.Contains("Administrators");
 
+            // Tävlingsansvariga list OR a Bemanning roster row of ANY role granted app access.
             var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
             int[] cmIds;
             try { cmIds = JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
             catch { cmIds = Array.Empty<int>(); }
-            bool isCompetitionManager = cmIds.Contains(memberData.Id);
+            bool isCompetitionManager = cmIds.Contains(memberData.Id)
+                || AuthService.HasRosterAppAccess(competition.Id, memberData.Id);
 
             int competitionClubId = competition.Value<int>("clubId");
             bool isClubStaff = competitionClubId > 0

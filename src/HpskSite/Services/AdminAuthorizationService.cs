@@ -18,17 +18,24 @@ namespace HpskSite.Services
         private readonly IMemberManager _memberManager;
         private readonly IMemberGroupService _memberGroupService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly HpskSite.Services.Staffing.StaffingService _staffingService;
+
+        // Per-request memo for the roster app-access lookup (this service is scoped). A page can ask
+        // "may this person manage the competition?" several times; the answer can't change mid-request.
+        private readonly Dictionary<(int competitionId, int memberId), bool> _rosterAccessCache = new();
 
         public AdminAuthorizationService(
             IMemberService memberService,
             IMemberManager memberManager,
             IMemberGroupService memberGroupService,
-            IUmbracoContextAccessor umbracoContextAccessor)
+            IUmbracoContextAccessor umbracoContextAccessor,
+            HpskSite.Services.Staffing.StaffingService staffingService)
         {
             _memberService = memberService;
             _memberManager = memberManager;
             _memberGroupService = memberGroupService;
             _umbracoContextAccessor = umbracoContextAccessor;
+            _staffingService = staffingService;
         }
 
         /// <summary>
@@ -631,10 +638,22 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Checks if the current user is a competition manager for a specific competition
-        /// Site administrators have access to all competitions
+        /// Does the current user have <b>competition management access</b> — i.e. may they use
+        /// <c>/competitionmanagement</c> and the staff screens under it for this competition?
+        /// Site administrators have access to all competitions.
+        ///
+        /// <para>Two independent grants, unioned:</para>
+        /// <list type="number">
+        ///   <item>the competition's <c>competitionManagers</c> list — the tävlingsansvariga (also shown
+        ///   publicly on the competition page, and settable in the edit modal), and</item>
+        ///   <item>any Bemanning roster row for this competition with app access ticked, <b>regardless of
+        ///   role</b> — a Sekretariat- or Kassaansvarig needs the same page without being appointed
+        ///   tävlingsledare. See <c>StaffingService.HasRosterAdminAccess</c>.</item>
+        /// </list>
+        /// <para>The historical name of this right is "competition manager"; read it as "may manage the
+        /// competition", not "is a competition official".</para>
         /// </summary>
-        public async Task<bool> IsCompetitionManager(int competitionId)
+        public async Task<bool> HasCompetitionManagementAccess(int competitionId)
         {
             try
             {
@@ -655,15 +674,37 @@ namespace HpskSite.Services
                     var json = competition.Value<string>("competitionManagers") ?? "[]";
                     var managerIds = JsonConvert.DeserializeObject<int[]>(json) ?? Array.Empty<int>();
 
-                    return managerIds.Contains(member.Id);
+                    if (managerIds.Contains(member.Id)) return true;
                 }
 
-                return false;
+                return HasRosterAppAccess(competitionId, member.Id);
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Legacy name for <see cref="HasCompetitionManagementAccess"/>, kept because ~45 call sites use it.
+        /// It has never meant "is listed as a competition official" — it is the app-permission check.
+        /// </summary>
+        public Task<bool> IsCompetitionManager(int competitionId) => HasCompetitionManagementAccess(competitionId);
+
+        /// <summary>
+        /// Roster-granted app access for an explicit member id, memoised per request. Public so the
+        /// perf-sensitive views that resolve <c>competitionManagers</c> inline (Competition,
+        /// CompetitionManagement, StationPage, SkjutledareView) can union in the roster grant without
+        /// re-running the whole member/role lookup.
+        /// </summary>
+        public bool HasRosterAppAccess(int competitionId, int memberId)
+        {
+            if (competitionId <= 0 || memberId <= 0) return false;
+            var key = (competitionId, memberId);
+            if (_rosterAccessCache.TryGetValue(key, out var cached)) return cached;
+            var granted = _staffingService.HasRosterAdminAccess(competitionId, memberId);
+            _rosterAccessCache[key] = granted;
+            return granted;
         }
 
         /// <summary>

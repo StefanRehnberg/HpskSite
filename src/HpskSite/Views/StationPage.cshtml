@@ -7,6 +7,7 @@
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.ClubService ClubService
+@inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DataProtection
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
@@ -121,12 +122,14 @@
             var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
             bool isSiteAdmin = roles.Contains("Administrators");
 
-            // Competition manager
+            // Competition management access: tävlingsansvariga list OR a Bemanning roster row of ANY
+            // role (stationschef, sekretariat, kassa …) that was granted app access.
             var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
             int[] cmIds;
             try { cmIds = JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
             catch { cmIds = Array.Empty<int>(); }
-            bool isCompetitionManager = cmIds.Contains(memberData.Id);
+            bool isCompetitionManager = cmIds.Contains(memberData.Id)
+                || AuthService.HasRosterAppAccess(competition.Id, memberData.Id);
 
             // Club admin or skjutledare for competition's club
             bool isClubStaff = false;

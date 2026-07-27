@@ -343,12 +343,16 @@
                     <input class="form-check-input" type="checkbox" id="stfResponsible">
                     <label class="form-check-label" for="stfResponsible">Ansvarig för rollen/området</label>
                 </div>
-                <div class="form-check mb-3" id="stfAdminAccessWrap" style="display:none">
+                <div class="form-check mb-3" id="stfAdminAccessWrap">
                     <input class="form-check-input" type="checkbox" id="stfAdminAccess">
                     <label class="form-check-label" for="stfAdminAccess">
-                        Ge appbehörighet (kan hantera tävlingen i pistol.nu)
+                        Ge behörighet att hantera tävlingen i pistol.nu
                     </label>
-                    <div class="form-text text-warning-emphasis">Endast för Tävlingsledning. Personen läggs till som tävlingsansvarig.</div>
+                    <div class="form-text" id="stfAdminAccessHelp">
+                        Personen kommer åt tävlingens administration (anmälningar, startlistor, resultat och
+                        funktionärssidorna). Behövs t.ex. för sekretariat, kassa och stationschefer — det gör
+                        dem <strong>inte</strong> till tävlingsledare. Kräver att personen är vald som medlem ovan.
+                    </div>
                 </div>
 
                 <div class="mb-1">
@@ -690,7 +694,7 @@
             : '<span class="text-muted">—</span>';
 
         var stateBadge = '<span class="badge ' + (STATE_CLS[p.state] || 'bg-secondary') + '">' + esc(p.state) + '</span>';
-        var adminBadge = p.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Har appbehörighet"></i>' : '';
+        var adminBadge = p.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Kan hantera tävlingen i pistol.nu"></i>' : '';
         var extBadge = p.isExternal ? ' <span class="badge bg-light text-secondary border fw-normal" title="Extern hjälpare utan konto">extern</span>' : '';
 
         var actions = '';
@@ -733,7 +737,7 @@
                 return '<div class="d-flex justify-content-between align-items-center border-top py-1 gap-2">'
                     + '<div class="small">' + esc(a.label)
                     + ' <span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>'
-                    + (a.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Appbehörighet"></i>' : '')
+                    + (a.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Kan hantera tävlingen i pistol.nu"></i>' : '')
                     + '</div><div class="d-flex gap-1 flex-shrink-0">' + acts + '</div></div>';
             }).join('');
         } else {
@@ -933,7 +937,7 @@
 
     function rowHtml(a) {
         var star = a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" title="Ansvarig"></i>' : '';
-        var adminBadge = a.hasAdminAccess ? '<span class="badge bg-warning text-dark ms-1" title="Har appbehörighet"><i class="bi bi-shield-lock"></i> Behörighet</span>' : '';
+        var adminBadge = a.hasAdminAccess ? '<span class="badge bg-warning text-dark ms-1" title="Kan hantera tävlingen i pistol.nu"><i class="bi bi-shield-lock"></i> Behörighet</span>' : '';
         var statusBadge = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + ' ms-1">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
         var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
@@ -998,8 +1002,27 @@
                 : '';
         }
         document.getElementById('stfFunctionTitleWrap').style.display = (role && role.supportsFunctionTitle) ? '' : 'none';
-        document.getElementById('stfAdminAccessWrap').style.display = (role && role.roleKey === 'tavlingsledning') ? '' : 'none';
         document.getElementById('stfTargetWrap').style.display = (role && role.supportsTargetRange) ? '' : 'none';
+        // App access is offered for EVERY role — a sekretariat- or kassaansvarig needs the management page
+        // just as much as the tävlingsledare. The only requirement is a real pistol.nu member to grant it to.
+        syncAdminAccessAvailability();
+    }
+
+    // The grant targets a login, so it needs a picked member. Free-text helper rows can't carry it —
+    // say so in place instead of silently dropping the flag server-side.
+    var ADMIN_ACCESS_HELP = document.getElementById('stfAdminAccessHelp').innerHTML;
+    function syncAdminAccessAvailability() {
+        var box = document.getElementById('stfAdminAccess');
+        var help = document.getElementById('stfAdminAccessHelp');
+        var mid = parseInt(document.getElementById('stfMemberId').value, 10) || 0;
+        if (mid > 0) {
+            box.disabled = false;
+            help.innerHTML = ADMIN_ACCESS_HELP;
+        } else {
+            box.disabled = true;
+            box.checked = false;
+            help.innerHTML = 'Behörighet kan bara ges till en vald pistol.nu-medlem — sök upp personen i fältet ovan.';
+        }
     }
 
     function applyScopeFields() {
@@ -1057,6 +1080,7 @@
                     if (ph) document.getElementById('stfPhone').value = ph;
                     searchBox.value = this.getAttribute('data-name');
                     hideResults();
+                    syncAdminAccessAvailability();
                     showExistingForPicked();   // "har redan …" before a role is chosen, not after saving
                 });
             });
@@ -1067,6 +1091,7 @@
     // If the admin edits the name manually after picking, treat it as free text (drop the member link).
     document.getElementById('stfName').addEventListener('input', function () {
         document.getElementById('stfMemberId').value = '0';
+        syncAdminAccessAvailability();
     });
 
     // ---- open / edit / save / delete ----

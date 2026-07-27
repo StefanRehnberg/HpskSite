@@ -34,7 +34,9 @@ namespace HpskSite.Models.Staffing
         public int? PassId { get; set; }                 // structured shift (StaffPass); NULL = ad-hoc
 
         public bool IsResponsible { get; set; }
-        public bool HasAdminAccess { get; set; }        // Tävlingsledning: mirror into competitionManagers
+        // May manage the competition in pistol.nu. Allowed on ANY role (needs a MemberId); only
+        // Tävlingsledning rows additionally mirror into the competition's competitionManagers list.
+        public bool HasAdminAccess { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public string? Note { get; set; }
         public DateTime? CheckedInAt { get; set; }      // roll-call/upprop: set when the person shows up on the day
