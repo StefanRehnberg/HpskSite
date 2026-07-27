@@ -313,6 +313,13 @@ else
                         {
                             <div class="d-flex align-items-baseline gap-2 flex-wrap mb-2">
                                 <span class="text-uppercase text-muted small fw-semibold">Nästa</span>
+                                @* The header carries the COMPETITION date. When the next thing is on another
+                                   day (a build day weeks earlier), print its day or "09:00" reads as 09:00 on
+                                   competition day. *@
+                                @if (sc.PreviewSpansOtherDays && !string.IsNullOrWhiteSpace(sc.NextItem.DayLabel))
+                                {
+                                    <span class="badge bg-primary-subtle text-primary-emphasis border">@sc.NextItem.DayLabel</span>
+                                }
                                 <span class="fw-bold">@sc.NextItem.TimeLabel</span>
                                 <span>@sc.NextItem.Title</span>
                                 @if (!string.IsNullOrWhiteSpace(sc.NextItem.Where))
@@ -337,6 +344,10 @@ else
                                         <span class="fw-semibold text-nowrap" style="min-width:5rem;">
                                             <i class="bi @(string.IsNullOrWhiteSpace(it.Icon) ? "bi-dot" : it.Icon) me-1"></i>@it.TimeLabel
                                         </span>
+                                        @if (sc.PreviewSpansOtherDays && !string.IsNullOrWhiteSpace(it.DayLabel))
+                                        {
+                                            <span class="text-muted text-nowrap">@it.DayLabel</span>
+                                        }
                                         <span class="flex-grow-1">
                                             @it.Title
                                             @if (!string.IsNullOrWhiteSpace(it.Where))

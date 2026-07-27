@@ -52,6 +52,12 @@ namespace HpskSite.Services.Schedule
                     var isToday = sched.CompDate?.Date == today || sched.IsToday;
                     var isTomorrow = sched.CompDate?.Date == today.AddDays(1);
 
+                    var preview = BuildPreview(sched);
+                    // Does anything in the preview sit on a day other than the competition's own? A build
+                    // day or a pre-comp pass does, and the card header only carries the competition date.
+                    var spansOtherDays = sched.CompDate != null
+                        && preview.Any(i => i.StartsAt != null && i.StartsAt.Value.Date != sched.CompDate.Value.Date);
+
                     s.Items.Add(new ScheduleHubItem
                     {
                         CompetitionId = compId,
@@ -64,7 +70,8 @@ namespace HpskSite.Services.Schedule
                         ConflictCount = sched.ConflictCount,
                         StartListPending = sched.StartListPending,
                         NextItem = sched.NextItem,
-                        Preview = BuildPreview(sched),
+                        Preview = preview,
+                        PreviewSpansOtherDays = spansOtherDays,
                     });
                     s.ShownCompetitionIds.Add(compId);
                 }

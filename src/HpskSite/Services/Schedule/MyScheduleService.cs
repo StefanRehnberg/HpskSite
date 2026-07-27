@@ -116,6 +116,26 @@ namespace HpskSite.Services.Schedule
                     if (start == null || (start.Value.Date <= toDate.Date && (end ?? start).Value.Date >= fromDate.Date))
                         result.Add(id);
                 }
+
+                // ...AND the competitions where THIS MEMBER has a commitment inside the window, whatever the
+                // competition's own date. A funktionär's work starts long before the shooting does: bygga
+                // banan, hämta materiel, a pre-comp pass. Those carry their own date — StaffAssignment.StartsAt,
+                // or the linked StaffPass.PassDate — and filtering on the competition date alone hid every one
+                // of them. A competition on 11 October with a build day next Saturday belongs on a "next 7
+                // days" card; asking "is the competition soon?" instead of "do I have something soon?" is what
+                // made it disappear. Declined rows are excluded, exactly as BuildSchedule skips them.
+                foreach (var id in scope.Database.Fetch<int>(@"
+                    SELECT DISTINCT sa.CompetitionId
+                    FROM StaffAssignment sa
+                    LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
+                    WHERE sa.MemberId = @0
+                      AND (sa.Status IS NULL OR sa.Status <> @3)
+                      AND ( (sa.StartsAt IS NOT NULL AND CAST(sa.StartsAt AS date) BETWEEN @1 AND @2)
+                         OR (sa.StartsAt IS NULL AND sp.PassDate IS NOT NULL AND CAST(sp.PassDate AS date) BETWEEN @1 AND @2) )",
+                    memberId, fromDate.Date, toDate.Date, StaffAssignmentStatus.Declined))
+                {
+                    result.Add(id);
+                }
             }
             catch (Exception ex)
             {

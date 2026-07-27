@@ -174,6 +174,15 @@ namespace HpskSite.Models.Schedule
         /// <summary>Up to a handful of rows for the home card preview.</summary>
         public List<ScheduleItem> Preview { get; set; } = new();
         public ScheduleItem? NextItem { get; set; }
+
+        /// <summary>
+        /// True when a preview row sits on a different day than the competition itself — a funktionär's
+        /// build day weeks before the shooting, typically. The card header shows the COMPETITION date, so
+        /// without this the rows must print their own day or "Nästa 09:00" reads as 09:00 on competition
+        /// day. Computed in the service, not the view: the equivalent Razor comparison inside HomePage's
+        /// markup is the kind of code block that breaks its runtime compilation.
+        /// </summary>
+        public bool PreviewSpansOtherDays { get; set; }
     }
 
     public class ScheduleHubSummary
