@@ -51,6 +51,10 @@ appsettings.Development.json
 /src/HpskSite/wwwroot/assets/illustrations/
 /src/HpskSite/KnowledgeBase/docs/
 /src/HpskSite/Documentation/
+# All docs belong under src/HpskSite/Documentation/ (above). A Documentation/ folder at the
+# repo root is not ignored by that rule, so ignore it too — otherwise a doc written there
+# silently becomes tracked/published.
+/Documentation/
 
 # Course / Utbildning lesson material is proprietary content and lives under App_Data/utbildning
 # (already covered by the App_Data/ ignore above) — served only via the gated /innehall route,
