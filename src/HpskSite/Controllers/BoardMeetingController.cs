@@ -425,6 +425,18 @@ namespace HpskSite.Controllers
             return Json(new { success = ok });
         }
 
+        /// <summary>Move an agenda item one step up (direction=-1) or down (direction=1).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveAgendaItem(int agendaItemId, int direction)
+        {
+            var mid = _meetingService.GetAgendaItemMeetingId(agendaItemId);
+            if (mid == null || !await CanAccessMeeting(mid.Value))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var ok = _meetingService.MoveAgendaItem(agendaItemId, direction);
+            return Json(new { success = ok });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RemoveAgendaItem(int agendaItemId)

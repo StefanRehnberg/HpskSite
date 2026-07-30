@@ -365,7 +365,7 @@
         // Agenda / protokoll
         html += `<div class="sv-card">
             <h2><i class="bi bi-list-ol me-2"></i>Dagordning och beslut</h2>`;
-        d.agenda.forEach((it, i) => html += agendaCard(it, i + 1, locked, d.links || [], d.attendees));
+        d.agenda.forEach((it, i) => html += agendaCard(it, i + 1, locked, d.links || [], d.attendees, d.agenda.length));
         if (!locked) {
             html += `<div class="mt-3 sv-noprint"><label class="sv-label">Lägg till en punkt</label>
                 <div class="row g-2" style="max-width:640px;">
@@ -424,9 +424,16 @@
         window._mType = m.meetingType || '';
         window._mAgenda = d.agenda || [];
         window._mYear = parseInt((m.meetingDate || '').slice(0, 4), 10) || new Date().getFullYear();
+
+        // Keep a just-moved agenda point in view so the board can keep tapping the arrow.
+        if (window._agFocus) {
+            const f = $('ag_h_' + window._agFocus);
+            window._agFocus = null;
+            if (f) f.scrollIntoView({ block: 'center' });
+        }
     }
 
-    function agendaCard(it, num, locked, allLinks, attendees) {
+    function agendaCard(it, num, locked, allLinks, attendees, total) {
         const links = (allLinks || []).filter(l => l.agendaItemId === it.id);
         const linksHtml = links.map(l => linkChip(l, locked)).join('');
         const type = it.itemType || 'text';
@@ -450,10 +457,15 @@
             </div>`;
         }
 
+        const n = total || num;
         const head = `<div class="d-flex align-items-center mb-2">
                 <span class="sv-agenda-num">${num}</span>
                 <input type="text" class="form-control" style="font-weight:600;" value="${esc(it.heading)}" id="ag_h_${it.id}" onchange="saveAgenda(${it.id})">
-                <button class="btn btn-sm btn-outline-danger ms-2 sv-noprint" onclick="removeAgenda(${it.id})" title="Ta bort punkt">Ta bort</button>
+                <span class="d-flex gap-1 ms-2 sv-noprint">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="moveAgenda(${it.id},-1)" ${num === 1 ? 'disabled' : ''} title="Flytta upp"><i class="bi bi-arrow-up"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="moveAgenda(${it.id},1)" ${num === n ? 'disabled' : ''} title="Flytta ner"><i class="bi bi-arrow-down"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeAgenda(${it.id})" title="Ta bort punkt">Ta bort</button>
+                </span>
             </div>`;
 
         let fields;
@@ -594,6 +606,10 @@
         if (key === 'ovrigt') { heading = $('newAgendaHeading').value.trim(); if (!heading) { alert('Skriv en rubrik'); return; } }
         post('BoardMeeting', 'AddAgendaItem', { meetingId: mid, heading, itemType, electionRole, electionCount, electionSource })
             .then(r => { if (r.success) openMeeting(mid); });
+    };
+    window.moveAgenda = function (id, dir) {
+        post('BoardMeeting', 'MoveAgendaItem', { agendaItemId: id, direction: dir })
+            .then(r => { if (r.success) { window._agFocus = id; openMeeting(window._mId); } });
     };
     window.removeAgenda = function (id) {
         if (!confirm('Ta bort den här punkten?')) return;

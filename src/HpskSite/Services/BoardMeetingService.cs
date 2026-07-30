@@ -301,6 +301,37 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Move an agenda item one step up (direction &lt; 0) or down (direction &gt; 0). A newly added point
+        /// always lands last — after "Mötet avslutas" — so the board needs to be able to pull it back up.
+        /// Normalizes SortOrder to 0..n-1 while it's at it (legacy rows can share values).
+        /// </summary>
+        public bool MoveAgendaItem(int agendaItemId, int direction)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var item = db.SingleOrDefaultById<BoardMeetingAgendaItem>(agendaItemId);
+            if (item == null) return false;
+
+            var list = db.Fetch<BoardMeetingAgendaItem>(
+                "SELECT * FROM BoardMeetingAgendaItems WHERE MeetingId = @0 AND IsActive = 1 ORDER BY SortOrder, Id",
+                item.MeetingId);
+
+            var idx = list.FindIndex(x => x.Id == agendaItemId);
+            var target = idx + (direction < 0 ? -1 : 1);
+            if (idx < 0 || target < 0 || target >= list.Count) return false;
+
+            (list[idx], list[target]) = (list[target], list[idx]);
+
+            for (var i = 0; i < list.Count; i++)
+            {
+                if (list[i].SortOrder == i) continue;
+                list[i].SortOrder = i;
+                db.Update(list[i]);
+            }
+            return true;
+        }
+
+        /// <summary>
         /// Record the persons chosen in an election agenda item. For role-mapped elections
         /// (chairman/secretary/adjuster) this also sets the matching attendee flag — which is what drives
         /// the protokoll signatures and (Phase 2) the justering approver set. Clears the flag on others first.
