@@ -208,8 +208,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let stafettIsSpringskytteComp = false;
 
     // ==================== Region/Club dropdowns ====================
-    const stafettRegionSelect = document.getElementById('stafettRegionSelect');
-    const stafettClubSelect = document.getElementById('stafettClubSelect');
+    // let, not const: the create tab's HTML is restored after payment options replace it,
+    // which detaches these nodes - stafettRebindCreateTab() re-resolves them.
+    let stafettRegionSelect = document.getElementById('stafettRegionSelect');
+    let stafettClubSelect = document.getElementById('stafettClubSelect');
 
     function stafettInitDropdowns() {
         stafettRegionSelect.innerHTML = '<option value="">Alla kretsar</option>';
@@ -263,11 +265,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    stafettRegionSelect.addEventListener('change', function() {
-        stafettPopulateClubDropdown(this.value);
-        stafettOnClubChanged();
-    });
-    stafettClubSelect.addEventListener('change', stafettOnClubChanged);
+    function stafettBindRegionClubSelects() {
+        stafettRegionSelect = document.getElementById('stafettRegionSelect');
+        stafettClubSelect = document.getElementById('stafettClubSelect');
+        stafettRegionSelect.addEventListener('change', function() {
+            stafettPopulateClubDropdown(this.value);
+            stafettOnClubChanged();
+        });
+        stafettClubSelect.addEventListener('change', stafettOnClubChanged);
+    }
+    stafettBindRegionClubSelects();
 
     async function stafettOnClubChanged() {
         stafettClearAllAlerts();
@@ -464,6 +471,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const teamName = nameEl.value.trim();
         const tc = teamClass ? stafettTeamClasses.find(t => t.teamClass === teamClass) : null;
 
+        if (!stafettClubSelect.value) { stafettMarkInvalid(stafettClubSelect, 'Välj en förening'); valid = false; }
         if (!teamName) { stafettMarkInvalid(nameEl, 'Ange ett lagnamn'); valid = false; }
         if (!teamClass || !tc) { stafettMarkInvalid(classEl, 'Välj en stafettklass'); valid = false; }
 
@@ -499,6 +507,7 @@ document.addEventListener('DOMContentLoaded', function() {
     stafettBindCreateTabEvents();
 
     function stafettRebindCreateTab() {
+        stafettBindRegionClubSelects();
         stafettBindClassSelect();
         stafettBindCreateTabEvents();
         stafettSelectedMembers.clear();

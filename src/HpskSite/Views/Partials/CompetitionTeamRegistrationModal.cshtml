@@ -220,8 +220,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let isSpringskytteComp = false;
 
     // ==================== Region/Club dropdowns ====================
-    const regionSelect = document.getElementById('teamRegionSelect');
-    const clubSelect = document.getElementById('teamClubSelect');
+    // let, not const: the create tab's HTML is restored after payment options replace it,
+    // which detaches these nodes - rebindCreateTab() re-resolves them.
+    let regionSelect = document.getElementById('teamRegionSelect');
+    let clubSelect = document.getElementById('teamClubSelect');
 
     function initDropdowns() {
         regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
@@ -275,11 +277,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    regionSelect.addEventListener('change', function() {
-        populateClubDropdown(this.value);
-        onClubChanged();
-    });
-    clubSelect.addEventListener('change', onClubChanged);
+    function bindRegionClubSelects() {
+        regionSelect = document.getElementById('teamRegionSelect');
+        clubSelect = document.getElementById('teamClubSelect');
+        regionSelect.addEventListener('change', function() {
+            populateClubDropdown(this.value);
+            onClubChanged();
+        });
+        clubSelect.addEventListener('change', onClubChanged);
+    }
+    bindRegionClubSelects();
 
     async function onClubChanged() {
         clearAllAlerts();
@@ -509,6 +516,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const teamName = teamNameEl.value.trim();
         const tc = teamClass ? availableTeamClasses.find(t => t.teamClass === teamClass) : null;
 
+        if (!clubSelect.value) { markInvalid(clubSelect, 'Välj en förening'); valid = false; }
         if (!teamName) { markInvalid(teamNameEl, 'Ange ett lagnamn'); valid = false; }
         if (!teamClass || !tc) { markInvalid(teamClassEl, 'Välj en lagklass'); valid = false; }
 
@@ -548,6 +556,7 @@ document.addEventListener('DOMContentLoaded', function() {
     bindCreateTabEvents();
 
     function rebindCreateTab() {
+        bindRegionClubSelects();
         bindTeamClassSelect();
         bindCreateTabEvents();
         selectedMembers.clear();

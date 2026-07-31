@@ -54,6 +54,10 @@ namespace HpskSite.Controllers
         {
             try
             {
+                // Null when the JSON body failed to bind (e.g. clubId sent as null from parseInt("") => NaN)
+                if (request == null || request.ClubId <= 0)
+                    return Json(new { success = false, message = "Välj en förening för laget." });
+
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
                 if (currentMember == null)
                     return Json(new { success = false, message = "Du måste vara inloggad." });
@@ -466,6 +470,10 @@ namespace HpskSite.Controllers
         {
             try
             {
+                // Null when the JSON body failed to bind (e.g. clubId sent as null from parseInt("") => NaN)
+                if (request == null || request.ClubId <= 0)
+                    return Json(new { success = false, message = "Välj en förening för laget." });
+
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
                 if (currentMember == null)
                     return Json(new { success = false, message = "Du måste vara inloggad." });
