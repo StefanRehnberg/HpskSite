@@ -440,6 +440,32 @@
         return tokenInput ? tokenInput.value : '';
     }
 
+    // POST a FormData; if the anti-forgery token was rejected (empty 400) fetch a fresh one
+    // and retry once. A stale token is what produced the bare "det gick fel" alert.
+    async function regionPostFormWithTokenRetry(url, formData) {
+        var send = async function() {
+            var r = await fetch(url, { method: 'POST', body: formData });
+            return { status: r.status, text: await r.text() };
+        };
+
+        var res = await send();
+        if (res.status === 400 && !res.text) {
+            try {
+                var tr = await fetch('/umbraco/surface/Club/GetFormToken', { cache: 'no-store' });
+                if (tr.ok) {
+                    var td = await tr.json();
+                    if (td && td.token) {
+                        document.querySelectorAll('input[name="__RequestVerificationToken"]')
+                            .forEach(function(i) { i.value = td.token; });
+                        formData.set('__RequestVerificationToken', td.token);
+                        res = await send();
+                    }
+                }
+            } catch (e) { /* keep the original response */ }
+        }
+        return res;
+    }
+
     // Initialize Flatpickr for region event date
     flatpickr('#regionEventDate', {
         locale: 'sv',
@@ -636,25 +662,30 @@
         formData.append('regionId', regionContentId);
         formData.append('__RequestVerificationToken', getAntiForgeryToken());
 
-        fetch(url, {
-            method: 'POST',
-            body: formData
-        })
-        .then(function(response) { return response.json(); })
-        .then(function(data) {
-            if (data.success) {
+        regionPostFormWithTokenRetry(url, formData)
+        .then(function(res) {
+            var data = null;
+            try { data = JSON.parse(res.text); } catch (e) { /* not JSON — server error page */ }
+            if (data && data.success) {
                 bootstrap.Modal.getInstance(document.getElementById('regionEventModal')).hide();
                 loadRegionEvents();
                 alert('Händelse sparad!');
-            } else {
+            } else if (data) {
                 alert('Fel: ' + data.message);
+            } else if (res.status === 400 || res.status === 401 || res.status === 403) {
+                alert('Din inloggning verkar ha gått ut. Ladda om sidan (F5), logga in igen och spara på nytt '
+                    + '— dina uppgifter i formuläret försvinner då, så kopiera gärna texten först.');
+            } else {
+                alert('Fel vid sparande av händelse (HTTP ' + res.status + '). Försök igen om en liten stund. '
+                    + 'Om felet återkommer, rapportera koden ovan.');
             }
             saveBtn.disabled = false;
             saveBtn.innerHTML = originalBtnText;
         })
         .catch(function(error) {
             console.error('Error saving event:', error);
-            alert('Fel vid sparande av händelse.');
+            alert('Fel vid sparande av händelse: ' + (error && error.message ? error.message : 'nätverksfel')
+                + '. Kontrollera din uppkoppling och försök igen.');
             saveBtn.disabled = false;
             saveBtn.innerHTML = originalBtnText;
         });

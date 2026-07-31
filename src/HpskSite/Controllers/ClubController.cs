@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -32,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMediaService _mediaService;
         private readonly MemberDataPresenceService _presenceService;
+        private readonly IAntiforgery _antiforgery;
 
         public ClubController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -45,15 +47,33 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             AdminAuthorizationService authorizationService,
             IMediaService mediaService,
-            MemberDataPresenceService presenceService)
+            MemberDataPresenceService presenceService,
+            IAntiforgery antiforgery)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _antiforgery = antiforgery;
             _contentService = contentService;
             _memberService = memberService;
             _memberManager = memberManager;
             _authorizationService = authorizationService;
             _mediaService = mediaService;
             _presenceService = presenceService;
+        }
+
+        /// <summary>
+        /// Issues a fresh anti-forgery token (and re-sets the matching cookie).
+        ///
+        /// The token baked into a page at render time goes stale if the member logs out and
+        /// in again in another tab, or if the anti-forgery session cookie is dropped while the
+        /// 30-day auth cookie survives. Posting a stale token gets rejected with an empty
+        /// HTTP 400 — which is what a club admin saw as the bare "Fel vid sparande av
+        /// händelse". Clients call this and retry once instead of losing the form.
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetFormToken()
+        {
+            var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
+            return Ok(new { success = true, token = tokens.RequestToken });
         }
 
         /// <summary>
@@ -485,9 +505,35 @@ namespace HpskSite.Controllers
                 }
                 newEvent.SetValue("isActive", true);
 
-                // Save and publish
-                _contentService.Save(newEvent);
-                _contentService.Publish(newEvent, new[] { "*" }, -1);
+                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
+                var (published, publishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, newEvent);
+                if (!published)
+                {
+                    // Don't leave a saved-but-unpublished orphan behind: it is invisible on the
+                    // club page, so a retry from the admin would silently create duplicates.
+                    // Re-read first — a client-side timeout can hide a publish that did commit.
+                    var persisted = _contentService.GetById(newEvent.Id);
+                    if (persisted != null && !persisted.Published)
+                    {
+                        try { _contentService.Delete(persisted); } catch { /* best effort */ }
+                    }
+                    else if (persisted != null)
+                    {
+                        // It actually published after all.
+                        return Ok(new
+                        {
+                            success = true,
+                            message = "Event created successfully",
+                            data = new { id = newEvent.Id, name = eventName, date = eventDate, type = eventType }
+                        });
+                    }
+
+                    return Ok(new
+                    {
+                        success = false,
+                        message = $"Kunde inte spara händelsen: {publishError} Ingenting sparades — försök igen om en liten stund."
+                    });
+                }
 
                 return Ok(new
                 {
@@ -726,9 +772,16 @@ namespace HpskSite.Controllers
                     eventContent.SetValue("eventDate", null);
                 }
 
-                // Save and publish
-                _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, new[] { "*" }, -1);
+                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
+                var (published, publishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, eventContent);
+                if (!published)
+                {
+                    return Ok(new
+                    {
+                        success = false,
+                        message = $"Kunde inte publicera ändringen: {publishError} Ändringen ligger kvar som utkast — spara igen om en liten stund."
+                    });
+                }
 
                 return Ok(new { success = true, message = "Event updated successfully" });
             }
@@ -1979,8 +2032,21 @@ namespace HpskSite.Controllers
                 }
                 newEvent.SetValue("isActive", true);
 
-                _contentService.Save(newEvent);
-                _contentService.Publish(newEvent, new[] { "*" }, -1);
+                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
+                var (regionPublished, regionPublishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, newEvent);
+                if (!regionPublished)
+                {
+                    var persisted = _contentService.GetById(newEvent.Id);
+                    if (persisted != null && !persisted.Published)
+                    {
+                        try { _contentService.Delete(persisted); } catch { /* best effort */ }
+                        return Ok(new
+                        {
+                            success = false,
+                            message = $"Kunde inte spara händelsen: {regionPublishError} Ingenting sparades — försök igen om en liten stund."
+                        });
+                    }
+                }
 
                 return Ok(new
                 {
@@ -2063,8 +2129,16 @@ namespace HpskSite.Controllers
                     eventContent.SetValue("eventDate", null);
                 }
 
-                _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, new[] { "*" }, -1);
+                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
+                var (regionPublished, regionPublishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, eventContent);
+                if (!regionPublished)
+                {
+                    return Ok(new
+                    {
+                        success = false,
+                        message = $"Kunde inte publicera ändringen: {regionPublishError} Ändringen ligger kvar som utkast — spara igen om en liten stund."
+                    });
+                }
 
                 return Ok(new { success = true, message = "Event updated successfully" });
             }

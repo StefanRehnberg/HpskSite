@@ -1639,6 +1639,43 @@ function getAntiForgeryToken() {
     return tokenInput ? tokenInput.value : '';
 }
 
+// Fetch a fresh anti-forgery token and update the token input on the page.
+// The token rendered into the page goes stale if the member re-authenticates in another
+// tab or the anti-forgery session cookie is dropped — posting it then yields an empty
+// HTTP 400 that used to surface as a bare "det gick fel".
+async function refreshAntiForgeryToken() {
+    try {
+        const r = await fetch('/umbraco/surface/Club/GetFormToken', { cache: 'no-store' });
+        if (!r.ok) return null;
+        const d = await r.json();
+        if (!d || !d.token) return null;
+        document.querySelectorAll('input[name="__RequestVerificationToken"]')
+            .forEach(i => { i.value = d.token; });
+        return d.token;
+    } catch (e) {
+        return null;
+    }
+}
+
+// POST a FormData, and if the anti-forgery token was rejected (empty 400), refresh the
+// token and retry once. Returns { status, text }.
+async function postFormWithTokenRetry(url, formData) {
+    const send = async () => {
+        const r = await fetch(url, { method: 'POST', body: formData });
+        return { status: r.status, text: await r.text() };
+    };
+
+    let res = await send();
+    if (res.status === 400 && !res.text) {
+        const fresh = await refreshAntiForgeryToken();
+        if (fresh) {
+            formData.set('__RequestVerificationToken', fresh);
+            res = await send();
+        }
+    }
+    return res;
+}
+
 // Load events when tabs are clicked
 document.getElementById('events-tab').addEventListener('shown.bs.tab', function () {
     loadEvents();
@@ -3318,30 +3355,32 @@ function saveEvent() {
     formData.append('clubId', clubId);
     formData.append('__RequestVerificationToken', getAntiForgeryToken());
 
-    fetch(url, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
+    postFormWithTokenRetry(url, formData)
+    .then(res => {
+        let data = null;
+        try { data = JSON.parse(res.text); } catch (e) { /* not JSON — server error page */ }
+        if (data && data.success) {
             bootstrap.Modal.getInstance(document.getElementById('eventModal')).hide();
             loadEvents();
             alert('Händelse sparad!');
-            // Reset button (modal will close, so this is cleanup)
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = originalBtnText;
-        } else {
+        } else if (data) {
             alert('Fel: ' + data.message);
-            // Re-enable button on error
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = originalBtnText;
+        } else if (res.status === 400 || res.status === 401 || res.status === 403) {
+            alert('Din inloggning verkar ha gått ut. Ladda om sidan (F5), logga in igen och spara på nytt '
+                + '— dina uppgifter i formuläret försvinner då, så kopiera gärna texten först.');
+        } else {
+            // Non-JSON response (timeout, proxy error) — show the status so the admin can
+            // report something actionable instead of a bare "det gick fel".
+            alert('Fel vid sparande av händelse (HTTP ' + res.status + '). Försök igen om en liten stund. '
+                + 'Om felet återkommer, rapportera koden ovan.');
         }
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalBtnText;
     })
     .catch(error => {
         console.error('Error saving event:', error);
-        alert('Fel vid sparande av händelse.');
-        // Re-enable button on error
+        alert('Fel vid sparande av händelse: ' + (error && error.message ? error.message : 'nätverksfel')
+            + '. Kontrollera din uppkoppling och försök igen.');
         saveBtn.disabled = false;
         saveBtn.innerHTML = originalBtnText;
     });
