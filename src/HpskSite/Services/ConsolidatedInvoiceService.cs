@@ -617,6 +617,182 @@ namespace HpskSite.Services
             return (paid, skipped, failed);
         }
 
+        // ── kreditfaktura ────────────────────────────────────────────────────────────────────────
+
+        public sealed class CreditNoteResult
+        {
+            public bool Success { get; init; }
+            public string Message { get; init; } = "";
+            public int? CreditNoteId { get; init; }
+            public string CreditNoteNumber { get; init; } = "";
+            public decimal Amount { get; init; }
+            public decimal RemainingDue { get; init; }
+            public bool ParentClosed { get; init; }
+            public bool AwaitingRefund { get; init; }
+        }
+
+        /// <summary>
+        /// Issue a kreditfaktura against a samlingsfaktura (Stefan, 2026-08-03: once a parent has been
+        /// issued we never alter it — a correction is a credit note the payer subtracts).
+        ///
+        /// Two cases, and they are genuinely different:
+        ///   * parent still UNPAID — the credit reduces what is left to pay, and the covered invoice is
+        ///     cancelled along with it. If the credits reach the full total the parent closes as
+        ///     Cancelled, since there is nothing left to collect.
+        ///   * parent already PAID — nothing left to subtract from; the organiser owes money back. The
+        ///     credit note is still issued (the accounting is identical) and flagged as att återbetala.
+        ///     The covered invoice STAYS Paid: it was paid, and rewriting history would be a lie.
+        ///
+        /// The note carries its own invoice number, points at the invoice it credits via
+        /// creditsInvoiceId, and records the credited registration invoice in coveredInvoiceIds so the
+        /// reason is traceable from the document itself.
+        /// </summary>
+        public async Task<CreditNoteResult> CreateCreditNoteAsync(
+            int parentInvoiceId, int creditedInvoiceId, decimal? explicitAmount, string reason,
+            int? actorMemberId, string? actorMemberName)
+        {
+            var missing = _paymentService.MissingInvoiceProperties();
+            if (missing.Count > 0)
+                return new CreditNoteResult { Message = "Kreditfakturor är inte aktiverade — egenskaper saknas: " + string.Join(", ", missing) };
+
+            var parent = _contentService.GetById(parentInvoiceId);
+            if (parent == null || parent.ContentType.Alias != "registrationInvoice")
+                return new CreditNoteResult { Message = "Fakturan finns inte." };
+            if ((parent.GetValue<string>("invoiceKind") ?? "") != KindConsolidated)
+                return new CreditNoteResult { Message = "Kreditfakturor kan bara skapas mot en samlingsfaktura." };
+
+            var parentStatus = parent.GetValue<string>("paymentStatus") ?? "";
+            if (string.Equals(parentStatus, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                return new CreditNoteResult { Message = "Samlingsfakturan är makulerad — det finns inget att kreditera." };
+
+            var covered = ReadCoveredIds(parent);
+            IContent? credited = null;
+            if (creditedInvoiceId > 0)
+            {
+                if (!covered.Contains(creditedInvoiceId))
+                    return new CreditNoteResult { Message = "Den fakturan ingår inte i samlingsfakturan." };
+                credited = _contentService.GetById(creditedInvoiceId);
+                if (credited == null)
+                    return new CreditNoteResult { Message = "Fakturan som ska krediteras kunde inte läsas." };
+            }
+
+            var amount = explicitAmount ?? (credited != null ? ReadDecimal(credited, "totalAmount") : 0m);
+            if (amount <= 0m)
+                return new CreditNoteResult { Message = "Kreditbeloppet måste vara större än noll." };
+
+            // Over-crediting would make the parent's balance negative, i.e. claim the organiser owes
+            // more than was ever invoiced.
+            var total = ReadDecimal(parent, "totalAmount");
+            var alreadyCredited = SumCreditNotesAgainst(parentInvoiceId);
+            if (alreadyCredited + amount > total)
+            {
+                return new CreditNoteResult
+                {
+                    Message = $"Kan inte kreditera {amount:0.##} kr — högst {(total - alreadyCredited):0.##} kr "
+                            + $"återstår att kreditera av {total:0.##} kr."
+                };
+            }
+
+            var parentWasPaid = string.Equals(parentStatus, "Paid", StringComparison.OrdinalIgnoreCase);
+            var competitionId = ReadInt(parent, "competitionId");
+            var payerClubId = ReadInt(parent, "payerClubId");
+            var payerName = parent.GetValue<string>("memberName") ?? "";
+            var parentNumber = parent.GetValue<string>("invoiceNumber") ?? parentInvoiceId.ToString();
+
+            var noteLines = new List<string>
+            {
+                $"KREDITFAKTURA mot samlingsfaktura {parentNumber}.",
+                $"Belopp: {amount:0.##} kr."
+            };
+            if (credited != null)
+                noteLines.Add($"Avser {credited.GetValue<string>("invoiceNumber")} – {credited.GetValue<string>("memberName")}.");
+            if (!string.IsNullOrWhiteSpace(reason)) noteLines.Add($"Orsak: {reason.Trim()}");
+            noteLines.Add(parentWasPaid
+                ? "Samlingsfakturan är redan betald – beloppet ska ÅTERBETALAS till betalaren."
+                : "Beloppet dras av från samlingsfakturans kvarvarande belopp.");
+
+            var extra = new Dictionary<string, object?>
+            {
+                ["invoiceKind"] = KindCreditNote,
+                ["creditsInvoiceId"] = parentInvoiceId.ToString(),
+                ["payerClubId"] = payerClubId.ToString(),
+                // Reuse coveredInvoiceIds for "what this note credits" — no extra property needed.
+                ["coveredInvoiceIds"] = JsonSerializer.Serialize(
+                    creditedInvoiceId > 0 ? new[] { creditedInvoiceId } : Array.Empty<int>()),
+                ["notes"] = string.Join(Environment.NewLine, noteLines)
+            };
+
+            var note = await _paymentService.CreateStandaloneInvoiceAsync(
+                competitionId: competitionId,
+                memberId: $"club-{payerClubId}",
+                memberName: payerName,
+                totalAmount: amount,
+                paymentMethod: "Swish",
+                extraProperties: extra,
+                auditNote: $"Kreditfaktura {amount:0.##} kr mot {parentNumber}");
+
+            if (note == null)
+                return new CreditNoteResult { Message = "Kunde inte skapa kreditfakturan." };
+
+            // A credit note is not something to PAY. "Refunded" keeps it out of the payable lists while
+            // still counting toward the credited sum (only a Cancelled note is treated as void).
+            if (note.HasProperty("paymentStatus"))
+            {
+                note.SetValue("paymentStatus", "Refunded");
+                _contentService.Save(note);
+                _contentService.Publish(note, new[] { "*" }, -1);
+            }
+
+            // The covered invoice: cancel it when nothing has been paid yet. When the parent was
+            // already paid it STAYS Paid — it genuinely was, and the credit note is the correction.
+            if (credited != null && !parentWasPaid)
+            {
+                var creditedStatus = credited.GetValue<string>("paymentStatus") ?? "";
+                if (!string.Equals(creditedStatus, "Paid", StringComparison.OrdinalIgnoreCase))
+                {
+                    await _paymentService.UpdatePaymentStatusAsync(
+                        invoiceId: creditedInvoiceId,
+                        paymentStatus: "Cancelled",
+                        paymentDate: null,
+                        transactionId: null,
+                        notes: $"Makulerad – krediterad via {note.GetValue<string>("invoiceNumber")}",
+                        paymentMethod: null,
+                        actorMemberId: actorMemberId,
+                        actorMemberName: actorMemberName,
+                        actualAmount: null,
+                        sendReceiptOnPaid: false);
+                }
+            }
+
+            // Fully credited and never paid → there is nothing left to collect, so close the parent.
+            var creditedNow = SumCreditNotesAgainst(parentInvoiceId);
+            var remaining = Math.Max(0m, total - creditedNow);
+            var parentClosed = false;
+            if (!parentWasPaid && remaining <= 0m)
+            {
+                if (parent.HasProperty("paymentStatus")) parent.SetValue("paymentStatus", "Cancelled");
+                _contentService.Save(parent);
+                _contentService.Publish(parent, new[] { "*" }, -1);
+                parentClosed = true;
+            }
+
+            return new CreditNoteResult
+            {
+                Success = true,
+                CreditNoteId = note.Id,
+                CreditNoteNumber = note.GetValue<string>("invoiceNumber") ?? "",
+                Amount = amount,
+                RemainingDue = parentWasPaid ? 0m : remaining,
+                ParentClosed = parentClosed,
+                AwaitingRefund = parentWasPaid,
+                Message = parentWasPaid
+                    ? $"Kreditfaktura på {amount:0.##} kr skapad. Samlingsfakturan var redan betald — beloppet ska återbetalas till betalaren."
+                    : parentClosed
+                        ? $"Kreditfaktura på {amount:0.##} kr skapad. Samlingsfakturan är nu helt krediterad och makulerad."
+                        : $"Kreditfaktura på {amount:0.##} kr skapad. Kvar att betala: {remaining:0.##} kr."
+            };
+        }
+
         /// <summary>The invoice ids a parent covers. Empty for anything that isn't a parent.</summary>
         public List<int> ReadCoveredIds(IContent parent)
         {

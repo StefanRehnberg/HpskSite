@@ -335,6 +335,40 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Issue a kreditfaktura against a samlingsfaktura. This is the ORGANISER's act — they are the
+        /// one reducing what they claim, or acknowledging they owe money back — so it is gated to the
+        /// organiser, not the payer.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> CreateCreditNote([FromBody] CreditNoteRequest request)
+        {
+            if (request == null || request.ParentInvoiceId <= 0)
+                return Json(new { success = false, message = "Ingen samlingsfaktura angiven." });
+
+            if (!await _authService.CanManageCompetitionInvoice(request.ParentInvoiceId))
+                return Json(new { success = false, message = "Bara arrangören kan skapa en kreditfaktura." });
+
+            var (actorId, actorName) = await GetCurrentActorAsync();
+            var result = await _consolidatedService.CreateCreditNoteAsync(
+                request.ParentInvoiceId, request.CreditedInvoiceId, request.Amount,
+                request.Reason ?? "", actorId, actorName);
+
+            if (result.Success) InvalidateInvoiceCaches();
+
+            return Json(new
+            {
+                success = result.Success,
+                message = result.Message,
+                creditNoteId = result.CreditNoteId,
+                creditNoteNumber = result.CreditNoteNumber,
+                amount = result.Amount,
+                remainingDue = result.RemainingDue,
+                parentClosed = result.ParentClosed,
+                awaitingRefund = result.AwaitingRefund
+            });
+        }
+
+        /// <summary>
         /// May the current user pay on behalf of this club? Site admin, or a club/regional admin for
         /// it (IsClubAdminForClub covers regional admins of the club's region).
         /// </summary>
@@ -1509,6 +1543,17 @@ namespace HpskSite.Controllers
     public class InvoiceActionRequest
     {
         public int InvoiceId { get; set; }
+    }
+
+    /// <summary>Issue a credit note against a samlingsfaktura.</summary>
+    public class CreditNoteRequest
+    {
+        public int ParentInvoiceId { get; set; }
+        /// <summary>The covered invoice being credited. 0 for a free-standing amount.</summary>
+        public int CreditedInvoiceId { get; set; }
+        /// <summary>Explicit amount; when null the credited invoice's own total is used.</summary>
+        public decimal? Amount { get; set; }
+        public string? Reason { get; set; }
     }
 
     /// <summary>A club paying a set of invoices in one go ("samlingsfaktura").</summary>
