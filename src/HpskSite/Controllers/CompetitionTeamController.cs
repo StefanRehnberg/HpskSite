@@ -131,13 +131,18 @@ namespace HpskSite.Controllers
                 if (memberData == null)
                     return Json(new { success = false, message = "Kunde inte hitta din profil." });
 
-                // Members can leave themselves; admins can remove anyone
+                // Members can leave themselves; removing SOMEONE ELSE needs the same authority as
+                // editing the roster (site admin / club+regional admin for the team's club / a member
+                // whose primary club owns it) — the roster editor and the "already in a team" warning
+                // both need a club admin to be able to do this, not only a site admin.
                 var memberId = request.MemberId > 0 ? request.MemberId : memberData.Id;
                 if (memberId != memberData.Id)
                 {
-                    var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                    if (!isSiteAdmin)
-                        return Json(new { success = false, message = "Bara administratörer kan ta bort andra medlemmar." });
+                    var leaveTeamClubId = await _teamService.GetTeamClubIdAsync(request.TeamId);
+                    if (leaveTeamClubId == 0)
+                        return Json(new { success = false, message = "Laget hittades inte." });
+                    if (!await CanManageTeamAsync(leaveTeamClubId, memberData.GetValue<string>("primaryClubId")))
+                        return Json(new { success = false, message = "Du har inte behörighet att ta bort andra medlemmar ur laget." });
                 }
 
                 var (success, message) = await _teamService.LeaveTeamAsync(request.TeamId, memberId);
@@ -213,6 +218,50 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Error updating team");
                 return Json(new { success = false, message = "Ett fel uppstod vid uppdatering av lag." });
+            }
+        }
+
+        /// <summary>
+        /// Pre-save check for the registration modals: which of these members already sit in another
+        /// team competing for the same slot? Advisory for Springskytte (one lag per weapon class plus
+        /// one stafett is legal) — the caller warns and lets the user continue anyway.
+        /// </summary>
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> CheckTeamMembership([FromBody] CheckTeamMembershipRequest request)
+        {
+            try
+            {
+                if (request == null || string.IsNullOrWhiteSpace(request.TeamClass))
+                    return Json(new { success = true, conflicts = Array.Empty<object>() });
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var conflicts = await _teamService.GetMembershipConflictsAsync(
+                    request.CompetitionId, request.TeamClass,
+                    request.MemberIds ?? Array.Empty<int>(), request.ExcludeTeamId);
+
+                return Json(new
+                {
+                    success = true,
+                    conflicts = conflicts.Select(c => new
+                    {
+                        memberId = c.MemberId,
+                        memberName = c.MemberName,
+                        teamId = c.TeamId,
+                        teamName = c.TeamName,
+                        teamClass = c.TeamClass,
+                        isSpare = c.IsSpare
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking team membership conflicts");
+                // Never let the advisory check block a registration.
+                return Json(new { success = true, conflicts = Array.Empty<object>() });
             }
         }
 
@@ -453,7 +502,8 @@ namespace HpskSite.Controllers
                     members = members.Select(m => new
                     {
                         memberId = m.MemberId,
-                        name = m.Name
+                        name = m.Name,
+                        gender = m.Gender
                     })
                 });
             }
@@ -622,6 +672,15 @@ namespace HpskSite.Controllers
     {
         public int TeamId { get; set; }
         public int MemberId { get; set; }
+    }
+
+    public class CheckTeamMembershipRequest
+    {
+        public int CompetitionId { get; set; }
+        public string TeamClass { get; set; } = "";
+        public int[]? MemberIds { get; set; }
+        /// <summary>Set when editing an existing roster, so the team itself isn't reported.</summary>
+        public int? ExcludeTeamId { get; set; }
     }
 
     public class DeleteTeamRequest

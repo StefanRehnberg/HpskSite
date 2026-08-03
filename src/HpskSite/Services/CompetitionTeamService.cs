@@ -84,6 +84,12 @@ namespace HpskSite.Services
                     else
                         memberNameLookup[memberId] = $"Medlem #{memberId}";
                 }
+
+                // With no registration class to read a gender from, the stafett class restriction is
+                // the only gate — a Dam relay must stay Dam-only.
+                var genderError = ValidateStafettGender(teamClass, memberIds, memberNameLookup);
+                if (genderError != null)
+                    return (false, genderError, null);
             }
             else
             {
@@ -106,19 +112,19 @@ namespace HpskSite.Services
 
             string GetName(int id) => memberNameLookup.GetValueOrDefault(id, $"Medlem #{id}");
 
-            // Check none are already in a team for this team class
             using var db = _databaseFactory.CreateDatabase();
-            var existingTeamMembers = await db.FetchAsync<CompetitionTeamMemberDto>(
-                @"SELECT ctm.* FROM CompetitionTeamMember ctm
-                  INNER JOIN CompetitionTeam ct ON ct.Id = ctm.TeamId
-                  WHERE ct.CompetitionId = @0 AND ct.TeamClass = @1",
-                competitionId, teamClass);
 
-            var alreadyInTeam = existingTeamMembers.Select(m => m.MemberId).ToHashSet();
-            foreach (var memberId in memberIds)
+            // Already in another team? For Springskytte this is a WARNING, not a refusal — a shooter
+            // may legitimately hold one lag per weapon class plus one stafett, and blocking mid
+            // registration is the worse failure. Other disciplines keep the original hard block.
+            var conflicts = await FetchMembershipConflictsAsync(
+                db, competitionId, teamClass, memberIds, isSpringskytteComp, excludeTeamId: null);
+            string? conflictWarning = null;
+            if (conflicts.Count > 0)
             {
-                if (alreadyInTeam.Contains(memberId))
-                    return (false, $"{GetName(memberId)} är redan med i ett lag i klassen {teamClass}.", null);
+                if (!isSpringskytteComp)
+                    return (false, $"{GetName(conflicts[0].MemberId)} är redan med i ett lag i klassen {conflicts[0].TeamClass}.", null);
+                conflictWarning = BuildConflictWarning(conflicts);
             }
 
             // Create team
@@ -176,7 +182,9 @@ namespace HpskSite.Services
                 _logger.LogError(ex, "Failed to create eager team invoice for team {TeamId}, continuing anyway", teamId);
             }
 
-            return (true, "Laget har skapats.", teamId);
+            // The warning rides along on the success message so it surfaces even for callers that
+            // skipped the CheckTeamMembership pre-flight the modal uses.
+            return (true, conflictWarning == null ? "Laget har skapats." : $"Laget har skapats. {conflictWarning}", teamId);
         }
 
         public async Task<(bool success, string message)> JoinTeamAsync(int teamId, int memberId, bool isSpare)
@@ -295,6 +303,37 @@ namespace HpskSite.Services
             if (spareIds.Length > maxSpares)
                 return (false, $"Max {maxSpares} reserv(er) tillåtna.");
 
+            // Re-validate eligibility on roster edit — creation checks this, editing used not to, so
+            // a Herr could be swapped into a Damlag (or a man into a Dam-stafett) after the fact.
+            if (team.IsRelay)
+            {
+                var relayNames = memberIds.ToDictionary(id => id, id => GetMemberDisplayName(id));
+                var genderError = ValidateStafettGender(team.TeamClass, memberIds, relayNames);
+                if (genderError != null)
+                    return (false, genderError);
+            }
+            else if (memberIds.Length > 0)
+            {
+                var compatible = TeamClassHelper.GetCompatibleIndividualClasses(team.TeamClass, isSpringskytteComp);
+                var eligible = GetRegisteredMembersInClasses(team.CompetitionId, compatible, isSpringskytteComp);
+                var eligibleIds = eligible.Select(r => r.MemberId).ToHashSet();
+                var eligibleNames = eligible.ToDictionary(r => r.MemberId, r => r.Name);
+                foreach (var memberId in memberIds)
+                {
+                    if (!eligibleIds.Contains(memberId))
+                    {
+                        var who = eligibleNames.GetValueOrDefault(memberId, GetMemberDisplayName(memberId));
+                        return (false, $"{who} är inte anmäld i en kompatibel klass för {team.TeamClass}.");
+                    }
+                }
+            }
+
+            // Same advisory as creation — a shooter added to this roster who already holds a
+            // same-bucket team elsewhere is reported, never refused.
+            var editConflicts = await FetchMembershipConflictsAsync(
+                db, team.CompetitionId, team.TeamClass, memberIds, isSpringskytteComp, excludeTeamId: teamId);
+            var editWarning = editConflicts.Count > 0 ? BuildConflictWarning(editConflicts) : null;
+
             // Update team name
             if (!string.IsNullOrWhiteSpace(teamName))
             {
@@ -362,7 +401,7 @@ namespace HpskSite.Services
                 _logger.LogError(ex, "Failed to update team registration doc for team {TeamId}", teamId);
             }
 
-            return (true, "Laget har uppdaterats.");
+            return (true, editWarning == null ? "Laget har uppdaterats." : $"Laget har uppdaterats. {editWarning}");
         }
 
         public async Task<(bool success, string message)> SetSpareStatusAsync(int teamId, int memberId, bool isSpare)
@@ -476,7 +515,12 @@ namespace HpskSite.Services
             // Filter to members from the specified club
             var clubMembers = registeredMembers.Where(r => r.ClubId == clubId).ToList();
 
-            // Exclude members already in a team for this class
+            // Springskytte: being in another team is a WARNING at save time, not a bar to entry, so
+            // those members must stay SELECTABLE here — hiding them would make the rule a silent
+            // block again. Other disciplines still hard-block on create, so keep hiding them there.
+            if (isSpringskytte)
+                return clubMembers;
+
             using var db = _databaseFactory.CreateDatabase();
             var existingTeamMemberIds = (await db.FetchAsync<CompetitionTeamMemberDto>(
                 @"SELECT ctm.* FROM CompetitionTeamMember ctm
@@ -845,7 +889,12 @@ namespace HpskSite.Services
                     result.Add(new ClubMemberInfo
                     {
                         MemberId = member.Id,
-                        Name = $"{firstName} {lastName}".Trim()
+                        Name = $"{firstName} {lastName}".Trim(),
+                        // Lets the stafett picker grey out members the class can't take. Empty =
+                        // unknown, which the server treats as allowed (see ValidateStafettGender).
+                        Gender = GenderFromValues(
+                            member.GetValue<string>("gender"),
+                            member.GetValue<string>("personNumber")) ?? ""
                     });
                 }
             }
@@ -860,6 +909,175 @@ namespace HpskSite.Services
         #region Helpers
 
         private const string TeamSelectCols = "Id, CompetitionId, TeamName, TeamClass, ClubId, CreatedBy, CreatedAt, IsRelay";
+
+        /// <summary>
+        /// Other teams in the competition that already hold one of <paramref name="memberIds"/> in the
+        /// SAME bucket as <paramref name="teamClass"/>. Public entry point for the pre-save check the
+        /// registration modals do so they can warn before writing anything.
+        /// </summary>
+        public async Task<List<TeamMembershipConflict>> GetMembershipConflictsAsync(
+            int competitionId, string teamClass, int[] memberIds, int? excludeTeamId = null)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var isSpringskytte = GetCompetitionType(competitionId) == "Springskytte";
+            return await FetchMembershipConflictsAsync(db, competitionId, teamClass, memberIds, isSpringskytte, excludeTeamId);
+        }
+
+        private async Task<List<TeamMembershipConflict>> FetchMembershipConflictsAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            int competitionId, string teamClass, int[] memberIds, bool isSpringskytte, int? excludeTeamId)
+        {
+            var result = new List<TeamMembershipConflict>();
+            if (memberIds == null || memberIds.Length == 0) return result;
+
+            var rows = await db.FetchAsync<MembershipRow>(
+                @"SELECT ctm.MemberId, ctm.IsSpare, ct.Id AS TeamId, ct.TeamName, ct.TeamClass
+                  FROM CompetitionTeamMember ctm
+                  INNER JOIN CompetitionTeam ct ON ct.Id = ctm.TeamId
+                  WHERE ct.CompetitionId = @0",
+                competitionId);
+
+            var wanted = memberIds.ToHashSet();
+            foreach (var row in rows)
+            {
+                if (!wanted.Contains(row.MemberId)) continue;
+                if (excludeTeamId.HasValue && row.TeamId == excludeTeamId.Value) continue;
+                if (!SharesTeamBucket(teamClass, row.TeamClass, isSpringskytte)) continue;
+
+                result.Add(new TeamMembershipConflict
+                {
+                    MemberId = row.MemberId,
+                    MemberName = GetMemberDisplayName(row.MemberId),
+                    TeamId = row.TeamId,
+                    TeamName = row.TeamName,
+                    TeamClass = row.TeamClass,
+                    IsSpare = row.IsSpare
+                });
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Do two team classes compete for the same slot on a shooter?
+        /// Springskytte (Stefan, 2026-08-03): one lag PER WEAPON CLASS plus one stafett is fine, so
+        /// the bucket is (kind, weapon class) — A-Herrar collides with A-Damer but not with C-Herrar
+        /// and never with a stafett. Every stafett collides with every other stafett (always class C).
+        /// Other disciplines keep their original, narrower rule: the exact same team class.
+        /// </summary>
+        private static bool SharesTeamBucket(string a, string b, bool isSpringskytte)
+        {
+            if (!isSpringskytte)
+                return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+            var aRelay = TeamClassHelper.IsStafettClass(a);
+            var bRelay = TeamClassHelper.IsStafettClass(b);
+            if (aRelay != bRelay) return false;   // a lag and a stafett never collide
+            if (aRelay) return true;              // stafett is always weapon class C
+
+            var wa = TeamClassHelper.GetSpringskytteWeaponGroup(a);
+            var wb = TeamClassHelper.GetSpringskytteWeaponGroup(b);
+            return wa.Length > 0 && string.Equals(wa, wb, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildConflictWarning(List<TeamMembershipConflict> conflicts)
+        {
+            var parts = conflicts.Select(c =>
+                $"{c.MemberName} är även med i {c.TeamName} ({c.TeamClass})");
+            return "OBS: " + string.Join("; ", parts) + ".";
+        }
+
+        private class MembershipRow
+        {
+            public int MemberId { get; set; }
+            public bool IsSpare { get; set; }
+            public int TeamId { get; set; }
+            public string TeamName { get; set; } = "";
+            public string TeamClass { get; set; } = "";
+        }
+
+        private string GetMemberDisplayName(int memberId)
+        {
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member != null)
+                    return $"{member.GetValue<string>("firstName")} {member.GetValue<string>("lastName")}".Trim();
+            }
+            catch { }
+            return $"Medlem #{memberId}";
+        }
+
+        /// <summary>
+        /// Resolves a member's gender as "M" / "F", or null when it cannot be determined.
+        /// The `gender` member property is authoritative ("Man"/"Kvinna" from the profile dropdown,
+        /// or whatever a member CSV import wrote); personnummer is the fallback, since the
+        /// second-to-last digit is odd for men and even for women.
+        /// </summary>
+        public string? ResolveMemberGender(int memberId)
+        {
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null) return null;
+
+                return GenderFromValues(
+                    member.GetValue<string>("gender"),
+                    member.GetValue<string>("personNumber"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve gender for member {MemberId}", memberId);
+            }
+            return null;
+        }
+
+        /// <summary>Gender ("M"/"F"/null) from the raw property values. See ResolveMemberGender.</summary>
+        internal static string? GenderFromValues(string? gender, string? personNumber)
+        {
+            var raw = (gender ?? "").Trim();
+            if (raw.Length > 0)
+            {
+                // "Kvinna" / "Kvinnligt" / "F(emale)" / "Dam"
+                if (raw.StartsWith("K", StringComparison.OrdinalIgnoreCase) ||
+                    raw.StartsWith("F", StringComparison.OrdinalIgnoreCase) ||
+                    raw.StartsWith("D", StringComparison.OrdinalIgnoreCase))
+                    return "F";
+                // "Man" / "Male" / "Herr"
+                if (raw.StartsWith("M", StringComparison.OrdinalIgnoreCase) ||
+                    raw.StartsWith("H", StringComparison.OrdinalIgnoreCase))
+                    return "M";
+            }
+
+            var digits = new string((personNumber ?? "").Where(char.IsDigit).ToArray());
+            if (digits.Length >= 10)
+                return (digits[digits.Length - 2] - '0') % 2 == 1 ? "M" : "F";
+
+            return null;
+        }
+
+        /// <summary>
+        /// Enforces a stafett class's gender restriction. Returns an error message, or null when OK.
+        /// A member whose gender cannot be determined is ALLOWED through — refusing on missing data
+        /// would block legitimate registrations for every member without a gender or personnummer on
+        /// file, which is a worse failure than a wrongly-entered relay the organiser can correct.
+        /// </summary>
+        private string? ValidateStafettGender(string teamClass, int[] memberIds, Dictionary<int, string> nameLookup)
+        {
+            var restriction = TeamClassHelper.GetStafettGenderRestriction(teamClass);
+            if (restriction == null || memberIds.Length == 0) return null;
+
+            foreach (var memberId in memberIds)
+            {
+                var gender = ResolveMemberGender(memberId);
+                if (gender == null || gender == restriction) continue;
+
+                var who = nameLookup.GetValueOrDefault(memberId, GetMemberDisplayName(memberId));
+                return restriction == "F"
+                    ? $"{who} kan inte ingå i {teamClass} – klassen är endast för damer."
+                    : $"{who} kan inte ingå i {teamClass}.";
+            }
+            return null;
+        }
 
         private string GetCompetitionType(int competitionId)
         {
@@ -1267,10 +1485,27 @@ namespace HpskSite.Services
         public string? Status { get; set; }
     }
 
+    /// <summary>
+    /// A member already sitting in another team that competes for the same slot. Advisory only for
+    /// Springskytte — see SharesTeamBucket.
+    /// </summary>
+    public class TeamMembershipConflict
+    {
+        public int MemberId { get; set; }
+        public string MemberName { get; set; } = "";
+        public int TeamId { get; set; }
+        public string TeamName { get; set; } = "";
+        public string TeamClass { get; set; } = "";
+        public bool IsSpare { get; set; }
+    }
+
     public class ClubMemberInfo
     {
         public int MemberId { get; set; }
         public string Name { get; set; } = "";
+
+        /// <summary>"M", "F", or "" when unknown.</summary>
+        public string Gender { get; set; } = "";
     }
 
     #endregion

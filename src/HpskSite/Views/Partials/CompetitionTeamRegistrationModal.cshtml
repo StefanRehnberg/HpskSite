@@ -565,6 +565,109 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('memberSelectionArea').style.display = 'none';
     }
 
+    // ==================== "Redan med i ett lag"-varning ====================
+    // A shooter MAY hold one lag per weapon class plus one stafett, so this is advisory: we tell the
+    // user and let them continue. Server agrees (it only warns) — this just makes it visible before
+    // anything is written, and offers to free the shooter from the other team as a convenience.
+    async function checkMembershipConflicts(teamClass, memberIds, excludeTeamId) {
+        if (!memberIds.length) return [];
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/CheckTeamMembership', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ competitionId, teamClass, memberIds, excludeTeamId: excludeTeamId || null })
+            });
+            const data = await resp.json();
+            return (data && data.conflicts) ? data.conflicts : [];
+        } catch (e) {
+            return [];   // an advisory check must never block a registration
+        }
+    }
+
+    // Resolves to 'continue' | 'cancel'. Any "ta bort ur det andra laget" happens before resolving.
+    function confirmMembershipConflicts(conflicts) {
+        return new Promise(resolve => {
+            const list = conflicts.map(c => {
+                const cls = window.formatAgeSpan ? window.formatAgeSpan(c.teamClass) : c.teamClass;
+                return `<li class="mb-1">
+                            <strong>${escapeHtmlLocal(c.memberName)}</strong> är redan med i
+                            <strong>${escapeHtmlLocal(c.teamName)}</strong> (${escapeHtmlLocal(cls)})${c.isSpare ? ' — som reserv' : ''}
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-2 conflict-remove-btn"
+                                    data-team="${c.teamId}" data-member="${c.memberId}">
+                                Ta bort därifrån
+                            </button>
+                        </li>`;
+            }).join('');
+
+            const wrap = document.createElement('div');
+            wrap.className = 'modal fade';
+            wrap.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-exclamation-triangle text-warning me-2"></i>Redan med i ett lag</h5>
+                        </div>
+                        <div class="modal-body">
+                            <ul class="mb-2 ps-3">${list}</ul>
+                            <p class="small text-muted mb-0">
+                                Det är tillåtet att vara med i flera lag. Vill du fortsätta ändå?
+                            </p>
+                            <div class="alert alert-success d-none mt-2 py-2 small" data-role="removed"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-role="cancel">Avbryt</button>
+                            <button type="button" class="btn btn-primary" data-role="continue">Fortsätt ändå</button>
+                        </div>
+                    </div>
+                </div>`;
+            // Nested modal: Bootstrap gives the second one the SAME z-index as the first, which
+            // renders it washed out and blended into the team list behind it. Lift this dialog and
+            // its backdrop above the already-open Laganmälan modal (defaults: modal 1055, backdrop 1050).
+            wrap.style.zIndex = '1080';
+            document.body.appendChild(wrap);
+            const bs = new bootstrap.Modal(wrap, { backdrop: 'static' });
+            wrap.addEventListener('shown.bs.modal', () => {
+                const backdrops = document.querySelectorAll('.modal-backdrop');
+                const newest = backdrops[backdrops.length - 1];
+                if (newest) newest.style.zIndex = '1075';
+            });
+
+            let answer = 'cancel';
+            wrap.querySelector('[data-role="continue"]').addEventListener('click', () => { answer = 'continue'; bs.hide(); });
+            wrap.querySelector('[data-role="cancel"]').addEventListener('click', () => { answer = 'cancel'; bs.hide(); });
+
+            wrap.querySelectorAll('.conflict-remove-btn').forEach(b => {
+                b.addEventListener('click', async () => {
+                    b.disabled = true;
+                    try {
+                        const r = await fetch('/umbraco/surface/CompetitionTeam/LeaveTeam', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ teamId: parseInt(b.dataset.team), memberId: parseInt(b.dataset.member) })
+                        });
+                        const d = await r.json();
+                        const note = wrap.querySelector('[data-role="removed"]');
+                        note.textContent = d.success ? 'Borttagen ur det andra laget.' : (d.message || 'Kunde inte ta bort.');
+                        note.classList.remove('d-none', 'alert-success', 'alert-danger');
+                        note.classList.add(d.success ? 'alert-success' : 'alert-danger');
+                        if (d.success) b.closest('li').classList.add('text-decoration-line-through', 'text-muted');
+                        else b.disabled = false;
+                    } catch (e) {
+                        b.disabled = false;
+                    }
+                });
+            });
+
+            wrap.addEventListener('hidden.bs.modal', () => { wrap.remove(); resolve(answer); });
+            bs.show();
+        });
+    }
+
+    function escapeHtmlLocal(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    }
+
     // ==================== Create team ====================
     async function handleCreateTeam() {
         if (!validateCreateForm()) return;
@@ -572,6 +675,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const errorEl = document.getElementById('createTeamError');
         const successEl = document.getElementById('createTeamSuccess');
         errorEl.classList.add('d-none'); successEl.classList.add('d-none');
+
+        const chosenClass = document.getElementById('teamClassSelect').value;
+        const chosenMembers = Array.from(selectedMembers);
+        const conflicts = await checkMembershipConflicts(chosenClass, chosenMembers, null);
+        if (conflicts.length) {
+            const answer = await confirmMembershipConflicts(conflicts);
+            if (answer !== 'continue') { btn.disabled = false; return; }
+        }
 
         try {
             const resp = await fetch('/umbraco/surface/CompetitionTeam/CreateTeam', {
@@ -828,6 +939,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const errorEl = document.getElementById('editTeamError');
         const successEl = document.getElementById('editTeamSuccess');
         errorEl.classList.add('d-none'); successEl.classList.add('d-none');
+
+        const editTeamIdVal = parseInt(document.getElementById('editTeamId').value);
+        const editConflicts = await checkMembershipConflicts(
+            document.getElementById('editTeamClass').value, Array.from(editSelectedMembers), editTeamIdVal);
+        if (editConflicts.length) {
+            const answer = await confirmMembershipConflicts(editConflicts);
+            if (answer !== 'continue') { btn.disabled = false; return; }
+        }
 
         try {
             const resp = await fetch('/umbraco/surface/CompetitionTeam/UpdateTeam', {

@@ -394,6 +394,21 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // "F" = damer only, null = mixed. Mirrors TeamClassHelper.GetStafettGenderRestriction; the
+    // server re-checks on save, this only stops the mistake being made in the first place.
+    function stafettGenderRestriction(teamClass) {
+        const tc = teamClass ? stafettTeamClasses.find(t => t.teamClass === teamClass) : null;
+        return (tc && tc.genderRestriction) ? tc.genderRestriction : null;
+    }
+
+    // Unknown gender ('') passes — same lenient rule as the server, so members without a gender or
+    // personnummer on file are never silently locked out of a relay.
+    function stafettMemberAllowed(m, restriction) {
+        if (!restriction) return true;
+        const g = (m.gender || '').trim();
+        return g === '' || g === restriction;
+    }
+
     function stafettRenderMembersTable() {
         const tbody = document.getElementById('stafettMembersTableBody');
         const teamClass = document.getElementById('stafettClassSelect').value;
@@ -405,19 +420,25 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         tbody.innerHTML = '';
+        const restriction = stafettGenderRestriction(teamClass);
         stafettClubMembers.forEach(m => {
             const row = document.createElement('tr');
             const isSelected = stafettSelectedMembers.has(m.memberId);
+            const isEligible = stafettMemberAllowed(m, restriction);
 
             const tdCheck = document.createElement('td');
             const cb = document.createElement('input');
             cb.type = 'checkbox'; cb.className = 'form-check-input'; cb.value = m.memberId;
-            cb.checked = isSelected; cb.disabled = !teamClass;
+            cb.checked = isSelected; cb.disabled = !teamClass || !isEligible;
             tdCheck.appendChild(cb);
             row.appendChild(tdCheck);
 
             const tdName = document.createElement('td');
             tdName.textContent = m.name;
+            if (!isEligible) {
+                row.classList.add('text-muted');
+                tdName.title = 'Klassen är endast för damer';
+            }
             row.appendChild(tdName);
 
             cb.addEventListener('change', function() {
@@ -515,6 +536,31 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('stafettMemberSelectionArea').style.display = 'none';
     }
 
+    // ==================== "Redan med i en stafett"-varning ====================
+    // A shooter may be in a lag AND a stafett, but not two stafetter. Advisory only — the server
+    // agrees and merely warns, so this is about making it visible before anything is written.
+    async function stafettCheckConflicts(teamClass, memberIds) {
+        if (!memberIds.length) return [];
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/CheckTeamMembership', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ competitionId: stafettCompetitionId, teamClass, memberIds, excludeTeamId: null })
+            });
+            const d = await resp.json();
+            return (d && d.conflicts) ? d.conflicts : [];
+        } catch (e) { return []; }
+    }
+
+    function stafettConfirmConflicts(conflicts) {
+        const lines = conflicts
+            .map(c => `• ${c.memberName} är redan med i ${c.teamName} (${c.teamClass})${c.isSpare ? ' — som reserv' : ''}`)
+            .join('\n');
+        return window.confirm(
+            `Redan med i en stafett:\n\n${lines}\n\n` +
+            `Det är tillåtet att vara med i flera lag. Vill du fortsätta ändå?`);
+    }
+
     // ==================== Create stafett team ====================
     async function stafettHandleCreate() {
         if (!stafettValidateCreateForm()) return;
@@ -522,6 +568,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const errorEl = document.getElementById('createStafettError');
         const successEl = document.getElementById('createStafettSuccess');
         errorEl.classList.add('d-none'); successEl.classList.add('d-none');
+
+        const relayConflicts = await stafettCheckConflicts(
+            document.getElementById('stafettClassSelect').value, Array.from(stafettSelectedMembers));
+        if (relayConflicts.length && !stafettConfirmConflicts(relayConflicts)) { btn.disabled = false; return; }
 
         try {
             const resp = await fetch('/umbraco/surface/CompetitionTeam/CreateStafettTeam', {
