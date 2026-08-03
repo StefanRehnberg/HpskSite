@@ -161,6 +161,15 @@
                         <h4 class="card-title mb-0" id="summaryNoInvoiceCount">0</h4>
                         <small class="text-muted">st</small>
                     </div>
+                    @* An anmälan without an invoice cannot be paid at all — not by the shooter and not
+                       through a club's samlingsfaktura, because there is nothing to select. The eager
+                       invoice is created by a background job a few seconds after registration and is
+                       best-effort, so a recycle or a burst of registrations can lose one silently, and
+                       re-registering does NOT retry it. This repairs them in one go; it is idempotent. *@
+                    <button class="btn btn-sm btn-outline-secondary w-100 mt-2 d-none" id="fixMissingInvoicesBtn"
+                            onclick="fixMissingInvoices()" title="Skapar fakturor för anmälningar som saknar en">
+                        <i class="bi bi-wrench-adjustable me-1"></i>Skapa saknade fakturor
+                    </button>
                 </div>
             </div>
         </div>
@@ -1551,7 +1560,37 @@ function updatePaymentSummary() {
     document.getElementById('summaryPendingCount').textContent = pendingCount;
     document.getElementById('summaryPendingAmount').textContent = `${Math.round(pendingAmount)} kr`;
     document.getElementById('summaryNoInvoiceCount').textContent = noInvoiceCount;
+    // Only offer the repair when there is actually something to repair.
+    document.getElementById('fixMissingInvoicesBtn')?.classList.toggle('d-none', noInvoiceCount === 0);
     cards.style.display = '';
+}
+
+// Mint the invoices for registrations that lost theirs. Idempotent — the endpoint skips anything
+// already invoiced and reports what it did, so a partial repair is never silent.
+async function fixMissingInvoices() {
+    const btn = document.getElementById('fixMissingInvoicesBtn');
+    if (!btn) return;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar...';
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        // currentCompetitionId is scoped inside loadCompetitionRegistrations, so read the same source.
+        const competitionId = $('.competition-registration-management').data('competition-id');
+        const r = await fetch('/umbraco/surface/RegistrationAdmin/EnsureMissingInvoices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId })
+        });
+        const d = await r.json();
+        alert(d.message || (d.success ? 'Klart.' : 'Kunde inte skapa fakturor.'));
+        if (d.success) await loadCompetitionRegistrations();
+    } catch (e) {
+        alert('Nätverksfel när saknade fakturor skulle skapas.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+    }
 }
 
 function populateCompetitionClubFilter() {

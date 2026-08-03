@@ -1336,6 +1336,144 @@ namespace HpskSite.Controllers
         /// returned as-is rather than creating a duplicate.
         /// Auth: same four-tier rule as the rest of the per-competition surface.
         /// </summary>
+        /// <summary>
+        /// Find every registration on a competition that SHOULD have an invoice but doesn't, and mint
+        /// the missing ones. Idempotent — it calls the same single source of truth as
+        /// <see cref="EnsureInvoice"/> per registration, so re-running it is harmless.
+        ///
+        /// Why this needs to exist: the eager invoice for a new registration is created by a BACKGROUND
+        /// job (CompetitionController enqueues it ~12 s after the registration publishes) and it is
+        /// best-effort — if the app pool recycles inside that window, or content locks are contended
+        /// during a registration burst, the job is lost silently. Re-registering does NOT retry it: an
+        /// update only reconciles the invoice when the FEE changed, so a registration that lost its
+        /// invoice stays without one permanently. Such a registration cannot be paid at all — not
+        /// individually and not through a samlingsfaktura, because there is no invoice to select.
+        ///
+        /// Observed on dev while testing the SM flow: five Springskytte registrations reported their fee
+        /// but ended up with no invoice, and no amount of re-registering fixed them.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> EnsureMissingInvoices([FromBody] EnsureMissingInvoicesRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "competitionId krävs." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                // Same four-tier rule as the rest of the per-competition surface, plus the region path
+                // (a region-hosted competition's organiser is the krets).
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(request.CompetitionId);
+                if (!authorized)
+                {
+                    var clubId = competition.GetValue<int>("clubId");
+                    if (clubId > 0)
+                    {
+                        authorized = await _authService.IsClubAdminForClub(clubId)
+                                  || await _authService.IsSkjutledareForClub(clubId);
+                    }
+                    else
+                    {
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                    }
+                }
+                if (!authorized) return Json(new { success = false, message = "Access denied" });
+
+                var children = _contentService.GetPagedChildren(request.CompetitionId, 0, 200, out _).ToList();
+                var regsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+                var invoicesHub = children.FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+
+                var registrations = regsHub == null
+                    ? new List<IContent>()
+                    : _contentService.GetPagedChildren(regsHub.Id, 0, 2000, out _)
+                        .Where(c => c.ContentType.Alias == "competitionRegistration").ToList();
+
+                // A registration counts as covered when ANY non-cancelled invoice references it, either
+                // by registrationId or via the legacy relatedRegistrationIds list.
+                var covered = new HashSet<int>();
+                if (invoicesHub != null)
+                {
+                    foreach (var inv in _contentService.GetPagedChildren(invoicesHub.Id, 0, 5000, out _)
+                                 .Where(c => c.ContentType.Alias == "registrationInvoice"))
+                    {
+                        var status = (inv.GetValue<string>("paymentStatus") ?? "").Trim().Trim('[', ']').Trim('"');
+                        if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase)) continue;
+
+                        var rid = inv.GetValue<int>("registrationId");
+                        if (rid > 0) covered.Add(rid);
+
+                        var related = inv.GetValue<string>("relatedRegistrationIds") ?? "";
+                        foreach (System.Text.RegularExpressions.Match m in
+                                 System.Text.RegularExpressions.Regex.Matches(related, @"\d+"))
+                            if (int.TryParse(m.Value, out var legacyId)) covered.Add(legacyId);
+                    }
+                }
+
+                int created = 0, alreadyOk = 0, noFee = 0, failed = 0;
+                var createdList = new List<object>();
+                foreach (var reg in registrations)
+                {
+                    if (covered.Contains(reg.Id)) { alreadyOk++; continue; }
+                    try
+                    {
+                        var invoice = await _paymentService.EnsureRegistrationInvoiceAsync(request.CompetitionId, reg.Id);
+                        if (invoice == null) { noFee++; continue; }   // free registration — nothing owed
+                        created++;
+                        createdList.Add(new
+                        {
+                            registrationId = reg.Id,
+                            memberName = reg.GetValue<string>("memberName") ?? "",
+                            invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? "",
+                            amount = invoice.GetValue<decimal>("totalAmount")
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        // No ILogger on this controller; the count is reported to the caller instead so a
+                        // partial repair is never silent.
+                        Console.WriteLine($"EnsureMissingInvoices: registration {reg.Id} failed: {ex.Message}");
+                        failed++;
+                    }
+                }
+
+                InvalidateInvoiceCachesForCompetition();
+
+                var msg = created == 0
+                    ? (failed > 0
+                        ? $"Inga fakturor kunde skapas ({failed} misslyckades)."
+                        : $"Alla anmälningar har redan faktura ({alreadyOk} st"
+                          + (noFee > 0 ? $", {noFee} avgiftsfria" : "") + ").")
+                    : $"{created} saknad(e) faktura(or) skapades."
+                      + (alreadyOk > 0 ? $" {alreadyOk} hade redan." : "")
+                      + (noFee > 0 ? $" {noFee} är avgiftsfria." : "")
+                      + (failed > 0 ? $" {failed} MISSLYCKADES." : "");
+
+                return Json(new
+                {
+                    success = true, message = msg,
+                    registrations = registrations.Count,
+                    created, alreadyOk, noFee, failed,
+                    createdInvoices = createdList
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>Drop the admin invoice-list cache so a repaired competition shows up at once.</summary>
+        private void InvalidateInvoiceCachesForCompetition()
+        {
+            try { AppCaches.RuntimeCache.ClearByRegex("^admin_invoices_"); } catch { }
+        }
+
         [HttpPost]
         public async Task<IActionResult> EnsureInvoice([FromBody] EnsureInvoiceRequest request)
         {
@@ -1841,6 +1979,12 @@ namespace HpskSite.Controllers
         /// Request model for ensuring a registration has an invoice (Swish-independent
         /// payment recording).
         /// </summary>
+        /// <summary>Repair every registration on a competition that lost its eager invoice.</summary>
+        public class EnsureMissingInvoicesRequest
+        {
+            public int CompetitionId { get; set; }
+        }
+
         public class EnsureInvoiceRequest
         {
             public int RegistrationId { get; set; }
