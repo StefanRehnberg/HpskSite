@@ -92,10 +92,33 @@
     </div>
 
     <!-- Invoices Table -->
+    @* Betala flera — only meaningful in the PAYER views (the club pays its own fees, or pays on its
+       members' behalf). In "att få betalt för" the club is the recipient, so there is nothing to pay.
+       Hidden until the doctype properties exist (see GetConsolidationReadiness). *@
+    <div class="alert alert-primary d-none align-items-center justify-content-between flex-wrap gap-2"
+         id="clubPayBar" role="region" aria-label="Betala flera fakturor">
+        <div>
+            <i class="bi bi-check2-square me-2"></i>
+            <strong id="clubPayBarCount">0 valda</strong>
+            <span class="ms-2" id="clubPayBarTotal"></span>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="clubPayBarClear">Avmarkera alla</button>
+            <button type="button" class="btn btn-sm btn-primary" id="clubPayBarPay">
+                <i class="bi bi-receipt me-1"></i>Betala valda
+            </button>
+        </div>
+    </div>
+    <div class="alert alert-warning d-none small" id="clubConsolidationUnavailable"></div>
+
     <div class="table-responsive" id="clubInvoicesTableContainer">
         <table class="table table-hover table-sm">
             <thead class="table-light">
                 <tr>
+                    <th class="d-none" id="clubInvoiceSelectAllCell" style="width:36px;">
+                        <input type="checkbox" class="form-check-input" id="clubInvoiceSelectAll"
+                               title="Markera alla på denna sida" aria-label="Markera alla på denna sida">
+                    </th>
                     <th>Fakturanummer</th>
                     <th>Tävling</th>
                     <th>Medlem</th>
@@ -108,7 +131,7 @@
             </thead>
             <tbody id="clubInvoicesTableBody">
                 <tr class="text-muted">
-                    <td colspan="8" class="text-center py-4">Laddar fakturor...</td>
+                    <td colspan="9" class="text-center py-4">Laddar fakturor...</td>
                 </tr>
             </tbody>
         </table>
@@ -141,9 +164,52 @@
 <!-- Include Swish Payment Modal Partial -->
 @await Html.PartialAsync("SwishPaymentModal")
 
+@* Confirmation for "Betala valda". Shows what will actually be created BEFORE anything is written:
+   one faktura per tävling, who receives each payment, and anything that had to be dropped. A
+   selection spanning tävlingar/mottagare can never be one payment, so that is stated plainly. *@
+<div class="modal fade" id="clubConsolidateModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-receipt me-2"></i>Betala flera fakturor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="clubConsolidateLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="ms-2">Kontrollerar valda fakturor...</span>
+                </div>
+                <div id="clubConsolidateBody" class="d-none">
+                    <div class="alert alert-warning d-none" id="clubConsolidateWarning"></div>
+                    <div id="clubConsolidateGroups"></div>
+                    <div class="d-none" id="clubConsolidateRejectedWrap">
+                        <hr>
+                        <h6 class="text-muted"><i class="bi bi-exclamation-circle me-1"></i>Kan inte betalas nu</h6>
+                        <ul class="small mb-0" id="clubConsolidateRejected"></ul>
+                    </div>
+                </div>
+                <div class="alert alert-danger d-none" id="clubConsolidateError"></div>
+                <div class="alert alert-success d-none" id="clubConsolidateSuccess"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="clubConsolidateConfirm" disabled>
+                    Skapa faktura(-or)
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- HTML Template for Invoice Row -->
 <script type="text/html" id="club-invoice-row-template">
     <tr data-invoice-id="{id}">
+        <td class="club-invoice-select-cell d-none">
+            @* data-status must be the RAW status: {paymentStatus} is substituted with the translated
+               Swedish label ("Väntande"), which would never match the "Pending" test. *@
+            <input type="checkbox" class="form-check-input club-invoice-select" value="{id}"
+                   data-amount="{totalAmount}" data-status="{rawStatus}" aria-label="Välj faktura {invoiceNumber}">
+        </td>
         <td><strong>{invoiceNumber}</strong></td>
         <td>{competitionName}</td>
         <td>{memberName}</td>
@@ -190,11 +256,33 @@ const clubInvoicesPerPage = 50;
 
 function changeClubInvoiceViewType() {
     currentClubInvoicePage = 1;
+    // Switching view changes WHICH invoices are on screen, and in "att få betalt för" selection is
+    // meaningless — so drop any ticks rather than carry them across.
+    clubResetSelection();
     loadClubInvoices();
 }
 
+// Ask once whether samlingsfakturor are usable, and wire the pay bar. Runs on include; the readiness
+// probe is cheap and read-only, and the checkbox column stays hidden until it answers yes.
+(function clubInitConsolidation() {
+    function start() {
+        clubBindPayBar();
+        clubCheckConsolidationReady();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+})();
+
+// Every load gets a sequence number and only the NEWEST response is allowed to render. Without this
+// a slow earlier request (this list walks the content tree and can take 20-30 s) lands after a newer
+// one and repaints the table with the previous view's rows — while the checkboxes keep the selection
+// made against what is now on screen. That is the difference between a cosmetic flicker and a club
+// paying the wrong invoices.
+let clubInvoiceLoadSeq = 0;
+
 // Load club invoices function
 function loadClubInvoices() {
+    const mySeq = ++clubInvoiceLoadSeq;
     const spinner = document.getElementById('clubInvoicesLoadingSpinner');
     const tableContainer = document.getElementById('clubInvoicesTableContainer');
     const tbody = document.getElementById('clubInvoicesTableBody');
@@ -238,12 +326,13 @@ function loadClubInvoices() {
     })
         .then(response => response.json())
         .then(data => {
+            if (mySeq !== clubInvoiceLoadSeq) return;   // a newer load already owns the table
             spinner.classList.add('d-none');
 
             if (!data.success) {
                 errorMessage.textContent = data.message || 'Kunde inte ladda fakturor';
                 errorAlert.classList.remove('d-none');
-                tbody.innerHTML = '<tr class="text-muted"><td colspan="8" class="text-center py-4">Fel vid laddning av fakturor</td></tr>';
+                tbody.innerHTML = '<tr class="text-muted"><td colspan="9" class="text-center py-4">Fel vid laddning av fakturor</td></tr>';
                 return;
             }
 
@@ -271,12 +360,252 @@ function loadClubInvoices() {
                 renderClubInvoices(invoices);
                 renderClubPagination(metadata);
             }
+            // The rows just changed, so any prior tick refers to rows that may be gone.
+            clubResetSelection();
+            clubApplySelectionMode();
         })
         .catch(error => {
+            if (mySeq !== clubInvoiceLoadSeq) return;
             spinner.classList.add('d-none');
             errorMessage.textContent = error.message || 'Nätverksfel';
             errorAlert.classList.remove('d-none');
         });
+}
+
+// ==================== Betala flera (samlingsfaktura) ====================
+// Selection lives here rather than on the DOM so it survives a re-render; the ids are re-checked
+// against the visible rows on every render, and the server re-validates everything again at POST.
+const clubSelectedInvoices = new Set();
+let clubConsolidationReady = null;   // null = not asked yet
+
+// Only the payer views: in "att få betalt för" the club is the RECIPIENT, so there is nothing to pay.
+function clubSelectionAllowed() {
+    const vt = document.getElementById('clubInvoiceViewType')?.value || 'outgoing';
+    return (vt === 'outgoing' || vt === 'members') && clubConsolidationReady === true;
+}
+
+function clubResetSelection() {
+    clubSelectedInvoices.clear();
+    const all = document.getElementById('clubInvoiceSelectAll');
+    if (all) { all.checked = false; all.indeterminate = false; }
+    clubUpdatePayBar();
+}
+
+// Show/hide the checkbox column and keep the ticks in sync with what is actually on screen.
+function clubApplySelectionMode() {
+    const allowed = clubSelectionAllowed();
+    document.getElementById('clubInvoiceSelectAllCell')?.classList.toggle('d-none', !allowed);
+    document.querySelectorAll('.club-invoice-select-cell').forEach(td => td.classList.toggle('d-none', !allowed));
+
+    if (!allowed) { clubSelectedInvoices.clear(); clubUpdatePayBar(); return; }
+
+    document.querySelectorAll('.club-invoice-select').forEach(cb => {
+        // Only unpaid invoices can be consolidated; the server says so too, but a disabled box is
+        // clearer than a rejection after the fact.
+        const payable = (cb.dataset.status || '') === 'Pending';
+        cb.disabled = !payable;
+        if (!payable) { cb.checked = false; clubSelectedInvoices.delete(parseInt(cb.value)); }
+        else cb.checked = clubSelectedInvoices.has(parseInt(cb.value));
+        cb.onchange = () => {
+            const id = parseInt(cb.value);
+            if (cb.checked) clubSelectedInvoices.add(id); else clubSelectedInvoices.delete(id);
+            clubUpdatePayBar();
+        };
+    });
+    clubUpdatePayBar();
+}
+
+function clubUpdatePayBar() {
+    const bar = document.getElementById('clubPayBar');
+    if (!bar) return;
+    const allowed = clubSelectionAllowed();
+    const n = clubSelectedInvoices.size;
+    bar.classList.toggle('d-none', !allowed || n === 0);
+    if (!allowed || n === 0) return;
+
+    bar.classList.add('d-flex');
+    let sum = 0;
+    document.querySelectorAll('.club-invoice-select').forEach(cb => {
+        if (clubSelectedInvoices.has(parseInt(cb.value))) sum += parseFloat(cb.dataset.amount || '0') || 0;
+    });
+    document.getElementById('clubPayBarCount').textContent = `${n} valda`;
+    // Only the ticks on THIS page can be summed, so say so rather than showing a misleading total.
+    document.getElementById('clubPayBarTotal').textContent = `· ${sum.toFixed(2)} kr på denna sida`;
+
+    const boxes = Array.from(document.querySelectorAll('.club-invoice-select:not(:disabled)'));
+    const all = document.getElementById('clubInvoiceSelectAll');
+    if (all && boxes.length) {
+        const checked = boxes.filter(cb => cb.checked).length;
+        all.checked = checked === boxes.length;
+        all.indeterminate = checked > 0 && checked < boxes.length;
+    }
+}
+
+async function clubCheckConsolidationReady() {
+    try {
+        const r = await fetch('/umbraco/surface/InvoiceAdmin/GetConsolidationReadiness',
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const d = await r.json();
+        clubConsolidationReady = d.success === true && d.ready === true;
+        const warn = document.getElementById('clubConsolidationUnavailable');
+        if (warn && d.success && !d.ready) {
+            warn.textContent = d.message || 'Samlingsfakturor är inte aktiverade.';
+            warn.classList.remove('d-none');
+        }
+    } catch (e) {
+        clubConsolidationReady = false;
+    }
+    clubApplySelectionMode();
+}
+
+function clubBindPayBar() {
+    document.getElementById('clubInvoiceSelectAll')?.addEventListener('change', function () {
+        document.querySelectorAll('.club-invoice-select:not(:disabled)').forEach(cb => {
+            cb.checked = this.checked;
+            const id = parseInt(cb.value);
+            if (this.checked) clubSelectedInvoices.add(id); else clubSelectedInvoices.delete(id);
+        });
+        clubUpdatePayBar();
+    });
+    document.getElementById('clubPayBarClear')?.addEventListener('click', () => {
+        document.querySelectorAll('.club-invoice-select').forEach(cb => { cb.checked = false; });
+        clubResetSelection();
+    });
+    document.getElementById('clubPayBarPay')?.addEventListener('click', clubOpenConsolidateModal);
+    document.getElementById('clubConsolidateConfirm')?.addEventListener('click', clubDoConsolidate);
+}
+
+function clubEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+let clubConsolidatePlan = null;
+
+async function clubOpenConsolidateModal() {
+    const ids = Array.from(clubSelectedInvoices);
+    if (!ids.length) return;
+
+    const modalEl = document.getElementById('clubConsolidateModal');
+    const modal = new bootstrap.Modal(modalEl);
+    document.getElementById('clubConsolidateLoading').classList.remove('d-none');
+    document.getElementById('clubConsolidateBody').classList.add('d-none');
+    document.getElementById('clubConsolidateError').classList.add('d-none');
+    document.getElementById('clubConsolidateSuccess').classList.add('d-none');
+    document.getElementById('clubConsolidateConfirm').disabled = true;
+    modal.show();
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    let data;
+    try {
+        const r = await fetch('/umbraco/surface/InvoiceAdmin/PreviewConsolidation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ payerClubId: clubId, invoiceIds: ids })
+        });
+        data = await r.json();
+    } catch (e) {
+        document.getElementById('clubConsolidateLoading').classList.add('d-none');
+        const err = document.getElementById('clubConsolidateError');
+        err.textContent = 'Nätverksfel vid kontroll av fakturor.';
+        err.classList.remove('d-none');
+        return;
+    }
+
+    document.getElementById('clubConsolidateLoading').classList.add('d-none');
+    if (!data.success) {
+        const err = document.getElementById('clubConsolidateError');
+        err.textContent = data.message || 'Kunde inte kontrollera fakturorna.';
+        err.classList.remove('d-none');
+        return;
+    }
+
+    clubConsolidatePlan = ids;
+    document.getElementById('clubConsolidateBody').classList.remove('d-none');
+
+    const warnEl = document.getElementById('clubConsolidateWarning');
+    warnEl.classList.toggle('d-none', !data.warning);
+    if (data.warning) warnEl.textContent = data.warning;
+
+    const groups = data.groups || [];
+    // A group with no resolvable recipient is refused by the server (a payment claim needs someone to
+    // pay), so say that HERE rather than letting the user press Skapa and get a failure back.
+    const payableGroups = groups.filter(g => g.payeeKey && g.payeeKey.length > 0);
+    document.getElementById('clubConsolidateGroups').innerHTML = groups.length === 0
+        ? '<p class="text-muted mb-0">Inga av de valda fakturorna kan betalas nu.</p>'
+        : groups.map(g => {
+            const blocked = !g.payeeKey || g.payeeKey.length === 0;
+            return `
+            <div class="card mb-2 ${blocked ? 'border-danger' : ''}">
+                <div class="card-body py-2">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong>${clubEsc(g.competitionName)}</strong><br>
+                            <span class="small text-muted">
+                                Betalas till ${clubEsc(g.payeeName)}
+                                ${g.hasSwishNumber || blocked ? '' : ' <span class="text-danger">(inget Swish-nummer angivet)</span>'}
+                            </span>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-bold">${Number(g.total).toFixed(2)} kr</div>
+                            <div class="small text-muted">${g.invoices.length} anmälningar</div>
+                        </div>
+                    </div>
+                    <div class="small mt-2">
+                        ${blocked
+                            ? '<span class="badge bg-danger">Ingen tydlig mottagare — kan inte betalas här</span>'
+                            : g.needsParent
+                                ? '<span class="badge bg-primary">En samlingsfaktura skapas</span>'
+                                : '<span class="badge bg-secondary">Endast en faktura — betalas direkt, ingen samlingsfaktura</span>'}
+                    </div>
+                    <ul class="small text-muted mb-0 mt-2">
+                        ${g.invoices.map(i => `<li>${clubEsc(i.invoiceNumber)} · ${clubEsc(i.memberName)} · ${Number(i.amount).toFixed(2)} kr</li>`).join('')}
+                    </ul>
+                </div>
+            </div>`; }).join('');
+
+    const rejected = data.rejected || [];
+    document.getElementById('clubConsolidateRejectedWrap').classList.toggle('d-none', rejected.length === 0);
+    document.getElementById('clubConsolidateRejected').innerHTML = rejected
+        .map(r => `<li>${clubEsc(r.invoiceNumber || '')} ${clubEsc(r.memberName || '')} — ${clubEsc(r.reason || '')}</li>`).join('');
+
+    document.getElementById('clubConsolidateConfirm').disabled = payableGroups.length === 0;
+}
+
+async function clubDoConsolidate() {
+    const btn = document.getElementById('clubConsolidateConfirm');
+    btn.disabled = true;
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    try {
+        const r = await fetch('/umbraco/surface/InvoiceAdmin/CreateConsolidatedInvoices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ payerClubId: clubId, invoiceIds: clubConsolidatePlan || [] })
+        });
+        const d = await r.json();
+        if (!d.success) {
+            const err = document.getElementById('clubConsolidateError');
+            err.textContent = d.message || 'Kunde inte skapa samlingsfakturan.';
+            err.classList.remove('d-none');
+            btn.disabled = false;
+            return;
+        }
+        const okEl = document.getElementById('clubConsolidateSuccess');
+        const failedGroups = (d.parents || []).filter(x => x.error);
+        okEl.innerHTML = clubEsc(d.message)
+            + (failedGroups.length
+                ? '<ul class="mb-0 mt-2">' + failedGroups.map(x => `<li>${clubEsc(x.competitionName)}: ${clubEsc(x.error)}</li>`).join('') + '</ul>'
+                : '');
+        okEl.classList.remove('d-none');
+        document.getElementById('clubConsolidateBody').classList.add('d-none');
+        clubResetSelection();
+        loadClubInvoices();
+    } catch (e) {
+        const err = document.getElementById('clubConsolidateError');
+        err.textContent = 'Nätverksfel.';
+        err.classList.remove('d-none');
+        btn.disabled = false;
+    }
 }
 
 function updateClubSummaryCards(metadata) {
@@ -340,6 +669,7 @@ function renderClubInvoices(invoices) {
             .replace(/{memberName}/g, escapeClubHtml(invoice.memberName))
             .replace(/{totalAmount}/g, invoice.totalAmount.toFixed(2))
             .replace(/{paymentStatus}/g, escapeClubHtml(statusText))
+            .replace(/{rawStatus}/g, escapeClubHtml(invoice.paymentStatus || ''))
             .replace(/{statusClass}/g, statusClass)
             .replace(/{sentBadge}/g, sentBadge)
             .replace(/{markAction}/g, markAction)
