@@ -198,6 +198,36 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Is the consolidated-payment ("samlingsfaktura") flow usable on this installation?
+        /// The parent invoice needs properties on the `registrationInvoice` doctype that an operator
+        /// has to create by hand, and SetValue on a missing property is a SILENT no-op — a parent
+        /// would save and publish with no link to the invoices it covers, i.e. money collected
+        /// against nothing. So the UI asks first and blocks the feature rather than half-write.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetConsolidationReadiness()
+        {
+            var isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedClubs = await _authService.GetManagedClubIds();
+            var managedRegions = await _authService.GetManagedRegions();
+            if (!isSiteAdmin && !managedClubs.Any() && !managedRegions.Any())
+                return Json(new { success = false, message = "Access denied" });
+
+            var missing = _paymentService.MissingInvoiceProperties();
+            return Json(new
+            {
+                success = true,
+                ready = missing.Count == 0,
+                missingProperties = missing,
+                // Deliberately actionable: a club admin who sees this can't fix it themselves.
+                message = missing.Count == 0
+                    ? ""
+                    : "Samlingsfakturor är inte aktiverade än — egenskaper saknas på fakturatypen. "
+                      + "Kontakta sajtadministratören och ange: " + string.Join(", ", missing)
+            });
+        }
+
+        /// <summary>
         /// Get active competitions for filter dropdown
         /// Optionally filtered by region
         /// </summary>

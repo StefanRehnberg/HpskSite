@@ -455,6 +455,147 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Create an invoice that is NOT tied to a single registration — a consolidated
+        /// ("samlingsfaktura") invoice covering many registrations, or a credit note against one.
+        /// Same hub / numbering / audit path as <see cref="CreateInvoiceAsync"/>; the caller owns the
+        /// extra properties (invoiceKind, coveredInvoiceIds, …) via <paramref name="extraProperties"/>
+        /// so this method stays agnostic about what kind of document it is minting.
+        ///
+        /// Returns null if the invoice could not be created. Callers MUST check
+        /// <see cref="MissingInvoiceProperties"/> first — a property that doesn't exist on the
+        /// doctype makes SetValue a silent no-op, which would produce a parent invoice with no link
+        /// to its children.
+        /// </summary>
+        public Task<IContent?> CreateStandaloneInvoiceAsync(
+            int competitionId,
+            string memberId,
+            string memberName,
+            decimal totalAmount,
+            string paymentMethod,
+            IDictionary<string, object?> extraProperties,
+            string auditNote)
+        {
+            try
+            {
+                _umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext);
+                var competition = umbracoContext?.Content?.GetById(competitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                {
+                    _logger.LogError("CreateStandaloneInvoiceAsync: {CompetitionId} is not a competition", competitionId);
+                    return Task.FromResult<IContent?>(null);
+                }
+                if (competition.Value<bool>("isExternal"))
+                {
+                    _logger.LogWarning("CreateStandaloneInvoiceAsync: competition {CompetitionId} is external — no invoices", competitionId);
+                    return Task.FromResult<IContent?>(null);
+                }
+
+                var hubId = competition.Children()
+                    .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub")?.Id;
+                if (hubId == null)
+                {
+                    // The consolidated flow always runs against a competition that already has
+                    // invoices (that's what is being consolidated), so a missing hub means something
+                    // is wrong — don't silently create one here.
+                    _logger.LogError("CreateStandaloneInvoiceAsync: competition {CompetitionId} has no registrationInvoicesHub", competitionId);
+                    return Task.FromResult<IContent?>(null);
+                }
+
+                var invoiceName = $"{memberName} - {DateTime.Now:yyyy-MM-dd}";
+                var invoice = _contentService.Create(invoiceName, hubId.Value, "registrationInvoice");
+                if (invoice == null)
+                {
+                    _logger.LogError("CreateStandaloneInvoiceAsync: could not create node for competition {CompetitionId}", competitionId);
+                    return Task.FromResult<IContent?>(null);
+                }
+
+                var contentType = _contentTypeService.Get(invoice.ContentType.Id);
+                if (contentType == null)
+                {
+                    _contentService.Delete(invoice);
+                    return Task.FromResult<IContent?>(null);
+                }
+                var propertyTypes = contentType.PropertyTypes;
+
+                SetInvoicePropertySafely(invoice, "competitionId", competitionId, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "memberId", memberId, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "memberName", memberName, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "totalAmount", totalAmount, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "paymentMethod", paymentMethod, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "paymentStatus", "Pending", propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "createdDate", DateTime.Now, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "isActive", true, propertyTypes, _logger);
+
+                foreach (var (alias, value) in extraProperties)
+                    SetInvoicePropertySafely(invoice, alias, value!, propertyTypes, _logger);
+
+                var invoiceNumber = GenerateInvoiceNumber(competitionId, memberId, invoice.Id);
+                SetInvoicePropertySafely(invoice, "invoiceNumber", invoiceNumber, propertyTypes, _logger);
+
+                if (!_contentService.Save(invoice).Success)
+                {
+                    _logger.LogError("CreateStandaloneInvoiceAsync: save failed for {InvoiceId}", invoice.Id);
+                    _contentService.Delete(invoice);
+                    return Task.FromResult<IContent?>(null);
+                }
+                if (!_contentService.Publish(invoice, new[] { "*" }, -1).Success)
+                {
+                    _logger.LogError("CreateStandaloneInvoiceAsync: publish failed for {InvoiceId}", invoice.Id);
+                    _contentService.Delete(invoice);
+                    return Task.FromResult<IContent?>(null);
+                }
+
+                _ = _auditService.LogAsync(
+                    invoiceId: invoice.Id,
+                    competitionId: competitionId,
+                    eventType: InvoicePaymentEventTypes.Created,
+                    byMemberId: null,
+                    byMemberName: null,
+                    paymentMethod: null,
+                    amount: totalAmount,
+                    reference: invoiceNumber,
+                    notes: auditNote);
+
+                return Task.FromResult<IContent?>(invoice);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in CreateStandaloneInvoiceAsync for competition {CompetitionId}", competitionId);
+                return Task.FromResult<IContent?>(null);
+            }
+        }
+
+        /// <summary>
+        /// Properties the consolidated-invoice / credit-note flow needs on the `registrationInvoice`
+        /// doctype. Missing ones must be reported to the operator, never written through: SetValue on
+        /// a non-existent property is a silent no-op, so a parent invoice would save "successfully"
+        /// with no link to the invoices it covers.
+        /// </summary>
+        public static readonly string[] ConsolidatedInvoiceProperties =
+        {
+            "invoiceKind", "coveredInvoiceIds", "settledByInvoiceId", "creditsInvoiceId", "payerClubId"
+        };
+
+        /// <summary>Which of <see cref="ConsolidatedInvoiceProperties"/> are missing from the doctype.</summary>
+        public List<string> MissingInvoiceProperties()
+        {
+            var missing = new List<string>();
+            try
+            {
+                var contentType = _contentTypeService.Get("registrationInvoice");
+                if (contentType == null) return ConsolidatedInvoiceProperties.ToList();
+
+                var aliases = contentType.CompositionPropertyTypes.Select(pt => pt.Alias).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                missing.AddRange(ConsolidatedInvoiceProperties.Where(a => !aliases.Contains(a)));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not inspect registrationInvoice property types");
+            }
+            return missing;
+        }
+
+        /// <summary>
         /// Ensure a registration has a (Pending) invoice — the eager-creation entry point so
         /// every fee-bearing registration carries an invoice from the moment it's created,
         /// instead of one being lazily minted when a payment option is first chosen.
