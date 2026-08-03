@@ -7,29 +7,55 @@
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @{
     var currentMember = await MemberManager.GetCurrentMemberAsync();
+
+    // Mounted in two places (2026-08-03):
+    //   - each region's own admin panel, with the region LOCKED (LockedRegionCode set) — the krets
+    //     picker is pointless there and its absence is what keeps a region to its own invoices;
+    //   - historically the general admin page, which forced you to pick a krets anyway.
+    // TabButtonId is the tab button whose shown.bs.tab triggers the (slow) first load.
+    var lockedRegionCode = ViewData["LockedRegionCode"] as string ?? "";
+    var lockedRegionName = ViewData["LockedRegionName"] as string ?? "";
+    var invoicesTabButtonId = ViewData["TabButtonId"] as string ?? "invoices-tab";
+    var isRegionLocked = !string.IsNullOrWhiteSpace(lockedRegionCode);
 }
 
-<div class="admin-invoices-list">
-    <!-- Region Filter -->
-    <div class="card mb-3 border-primary">
-        <div class="card-body py-2">
-            <div class="row align-items-center">
-                <div class="col-md-4">
-                    <label class="form-label fw-bold mb-1">
-                        <i class="bi bi-funnel me-1"></i>Filtrera på krets
-                    </label>
-                    <select class="form-select" id="invoicesRegionFilter" onchange="onInvoicesRegionChange()">
-                        <option value="">Laddar kretsar...</option>
-                    </select>
-                </div>
-                <div class="col-md-8">
-                    <small class="text-muted">
-                        Filtrerar fakturor efter tävlingar i vald krets
-                    </small>
+<div class="admin-invoices-list"
+     data-locked-region="@lockedRegionCode"
+     data-tab-button-id="@invoicesTabButtonId">
+    @if (isRegionLocked)
+    {
+        <div class="alert alert-light border d-flex align-items-center py-2 mb-3">
+            <i class="bi bi-funnel me-2"></i>
+            <span class="small mb-0">
+                Visar fakturor för tävlingar i
+                <strong>@(string.IsNullOrWhiteSpace(lockedRegionName) ? lockedRegionCode : lockedRegionName)</strong>
+                — både kretsens egna tävlingar och föreningarnas.
+            </span>
+        </div>
+    }
+    else
+    {
+        <!-- Region Filter -->
+        <div class="card mb-3 border-primary">
+            <div class="card-body py-2">
+                <div class="row align-items-center">
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold mb-1">
+                            <i class="bi bi-funnel me-1"></i>Filtrera på krets
+                        </label>
+                        <select class="form-select" id="invoicesRegionFilter" onchange="onInvoicesRegionChange()">
+                            <option value="">Laddar kretsar...</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <small class="text-muted">
+                            Filtrerar fakturor efter tävlingar i vald krets
+                        </small>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    }
 
     <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -230,16 +256,31 @@ let currentInvoicePage = 1;
 const invoicesPerPage = 50;
 let currentInvoicesRegion = '';
 
-// Load invoices list when tab is shown
+// Set when the partial is mounted with the region locked (a region's own admin panel). Then there is
+// no krets picker to populate, and the region can never be widened from the client.
+const invoicesLockedRegion = document.querySelector('.admin-invoices-list')?.dataset.lockedRegion || '';
+
+// Load invoices list when tab is shown. Deliberately lazy: the first load walks the content tree and
+// is slow, so it must not run for everyone who opens the admin page.
 document.addEventListener('DOMContentLoaded', function() {
-    const invoicesTab = document.getElementById('invoices-tab');
+    const container = document.querySelector('.admin-invoices-list');
+    const tabButtonId = container?.dataset.tabButtonId || 'invoices-tab';
+    const invoicesTab = document.getElementById(tabButtonId);
+
+    if (invoicesLockedRegion) currentInvoicesRegion = invoicesLockedRegion;
 
     // Load when tab is clicked
     if (invoicesTab) {
         invoicesTab.addEventListener('shown.bs.tab', function() {
             if (!invoicesListLoaded) {
-                // populateInvoicesRegionFilter will call loadInvoicesList and loadActiveCompetitionsFilter after regions are loaded
-                populateInvoicesRegionFilter();
+                if (invoicesLockedRegion) {
+                    // Region is fixed — go straight to the data.
+                    loadActiveCompetitionsFilter();
+                    loadInvoicesList();
+                } else {
+                    // populateInvoicesRegionFilter will call loadInvoicesList and loadActiveCompetitionsFilter after regions are loaded
+                    populateInvoicesRegionFilter();
+                }
                 invoicesListLoaded = true;
             }
         });

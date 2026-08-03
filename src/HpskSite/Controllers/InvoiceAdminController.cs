@@ -34,7 +34,9 @@ namespace HpskSite.Controllers
         private readonly AppCaches _appCaches;
 
         // Cache configuration
-        private const string InvoicesListCacheKey = "admin_invoices_{0}_{1}_{2}_{3}_{4}_{5}"; // competitionId, clubId, excludePaid, activeOnly, page, viewType
+        // NB `region` MUST be part of the key: it's a filter on the result set, so leaving it out
+        // served one krets's invoice list to another (and made the krets dropdown show stale data).
+        private const string InvoicesListCacheKey = "admin_invoices_{0}_{1}_{2}_{3}_{4}_{5}_{6}"; // competitionId, clubId, excludePaid, activeOnly, page, viewType, region
         private static readonly TimeSpan InvoiceCacheDuration = TimeSpan.FromMinutes(5);
 
         /// <summary>
@@ -127,13 +129,28 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Access denied" });
             }
 
+            // A regional admin may only ever read their OWN krets. `region` arrives from the client,
+            // so without this a Blekinge admin could simply ask for region=Halland. Club admins are
+            // already scoped by clubId, and site admins may read any krets.
+            if (!isSiteAdmin && !isClubAdmin && isRegionalAdmin)
+            {
+                if (string.IsNullOrWhiteSpace(region))
+                {
+                    region = managedRegions.First();
+                }
+                else if (!managedRegions.Any(r => string.Equals(r, region, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return Json(new { success = false, message = "Access denied" });
+                }
+            }
+
             try
             {
                 // Check cache first (only for simple queries without text search)
                 string? cacheKey = null;
                 if (string.IsNullOrEmpty(memberSearch) && string.IsNullOrEmpty(invoiceNumberSearch) && string.IsNullOrEmpty(paymentStatus))
                 {
-                    cacheKey = string.Format(InvoicesListCacheKey, competitionId ?? 0, clubId ?? 0, excludePaid, activeCompetitionsOnly, page, viewType ?? "");
+                    cacheKey = string.Format(InvoicesListCacheKey, competitionId ?? 0, clubId ?? 0, excludePaid, activeCompetitionsOnly, page, viewType ?? "", region ?? "");
                     var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                     if (cachedResult != null)
                     {
@@ -195,6 +212,15 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Access denied" });
             }
 
+            // Same scoping as GetInvoices: a regional admin only ever sees their own krets.
+            if (!isSiteAdmin && isRegionalAdmin)
+            {
+                if (string.IsNullOrWhiteSpace(region))
+                    region = managedRegions.First();
+                else if (!managedRegions.Any(r => string.Equals(r, region, StringComparison.OrdinalIgnoreCase)))
+                    return Json(new { success = false, message = "Access denied" });
+            }
+
             try
             {
                 var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
@@ -209,8 +235,8 @@ namespace HpskSite.Controllers
                         .ToList();
                     foreach (var club in clubs)
                     {
-                        var clubRegion = club.Value<string>("regionalFederation") ?? "";
-                        clubRegions[club.Id] = clubRegion;
+                        clubRegions[club.Id] = InvoiceAdminService.NormalizeRegionCode(
+                            club.Value<string>("regionalFederation"));
                     }
                 }
 
@@ -221,10 +247,20 @@ namespace HpskSite.Controllers
                 // Filter by region if specified
                 if (!string.IsNullOrEmpty(region) && clubRegions != null)
                 {
+                    // A competition is hosted EITHER by a club in the region OR by the region itself
+                    // (clubId unset, region code on the competition's own regionalFederation). The old
+                    // `clubId > 0` requirement dropped every region-hosted competition, so a region's
+                    // own competitions never appeared in this filter. Mirrors
+                    // InvoiceAdminService.ResolveCompetitionRegion.
+                    var wantedRegion = InvoiceAdminService.NormalizeRegionCode(region);
                     competitionsQuery = competitionsQuery.Where(comp =>
                     {
                         var clubId = comp.Value<int>("clubId");
-                        return clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion == region;
+                        if (clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion.Length > 0)
+                            return clubRegion == wantedRegion;
+
+                        return InvoiceAdminService.NormalizeRegionCode(
+                            comp.Value<string>("regionalFederation")) == wantedRegion;
                     });
                 }
 

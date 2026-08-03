@@ -124,6 +124,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionInvoices-tab" data-bs-toggle="tab" data-bs-target="#regionInvoicesTab" type="button">
+                <i class="bi bi-receipt me-2"></i>Fakturor
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button">
                 <i class="bi bi-gear me-2"></i>Inställningar
             </button>
@@ -173,6 +178,21 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        @* Invoices Sub-Tab — each krets sees its OWN invoices (region locked, no krets picker).
+           Covers both the krets's own competitions and its clubs' competitions; see
+           InvoiceAdminService.ResolveCompetitionRegion. Loads lazily on first tab click. *@
+        <div class="tab-pane fade" id="regionInvoicesTab">
+            @{
+                var regionInvoicesVD = new ViewDataDictionary(ViewData)
+                {
+                    ["LockedRegionCode"] = ViewBag.regionCode as string ?? "",
+                    ["LockedRegionName"] = regionName,
+                    ["TabButtonId"] = "regionInvoices-tab"
+                };
+            }
+            @await Html.PartialAsync("AdminInvoicesList", regionInvoicesVD)
         </div>
 
         <!-- Competitions Sub-Tab -->

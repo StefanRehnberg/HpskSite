@@ -128,9 +128,10 @@
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="clubs-tab" data-bs-toggle="tab" data-bs-target="#clubs" type="button" role="tab">Klubbar</button>
         </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoices" type="button" role="tab">Fakturor</button>
-        </li>
+        @* Fakturor moved to each krets's own admin page (RegionalAdminPanel -> Fakturor) 2026-08-03.
+           It always forced you to pick a krets here anyway — there was never an "Alla kretsar" view —
+           so it belonged on the krets. Site admins still reach every krets's invoices via that
+           krets's page (IsRegionalAdminForRegion returns true for site admins). *@
         @if (isSiteAdmin)
         {
             <li class="nav-item" role="presentation">
@@ -212,13 +213,7 @@
             </div>
         </div>
 
-        <div class="tab-pane fade" id="invoices" role="tabpanel" data-user-default-region="@userDefaultRegion" data-managed-regions="@managedRegionsJson" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
-            <div class="card mt-3">
-                <div class="card-body">
-                    @await Html.PartialAsync("AdminInvoicesList")
-                </div>
-            </div>
-        </div>
+        @* Fakturor pane removed with its tab (see above) — now on each krets's admin page. *@
 
         @if (isSiteAdmin)
         {

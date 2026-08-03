@@ -99,7 +99,8 @@ namespace HpskSite.Services
                     }
                 }
 
-                // If filtering by region, narrow down to competitions belonging to clubs in that region
+                // If filtering by region, keep competitions hosted in that region — EITHER by a club
+                // that belongs to it, OR by the region itself.
                 if (!string.IsNullOrEmpty(filters.Region))
                 {
                     // Build club regions lookup
@@ -111,15 +112,13 @@ namespace HpskSite.Services
                     }
                     var clubRegions = allClubs.ToDictionary(
                         club => club.Id,
-                        club => club.GetValue<string>("regionalFederation") ?? ""
+                        club => NormalizeRegionCode(club.GetValue<string>("regionalFederation"))
                     );
 
+                    var wantedRegion = NormalizeRegionCode(filters.Region);
+
                     filteredCompetitions = filteredCompetitions
-                        .Where(comp =>
-                        {
-                            var clubId = comp.GetValue<int>("clubId");
-                            return clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion == filters.Region;
-                        })
+                        .Where(comp => ResolveCompetitionRegion(comp, clubRegions) == wantedRegion)
                         .ToList();
 
                     _logger.LogInformation("Filtered to {RegionCount} competitions for region {Region}",
@@ -307,6 +306,52 @@ namespace HpskSite.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Which region hosts this competition? A competition is hosted EITHER by a club (clubId set,
+        /// region comes from the club) OR by the region itself (clubId unset, region code sits on the
+        /// competition's own `regionalFederation`) — the same two host states
+        /// <see cref="Routing.CompetitionUrlProvider"/> builds URLs for.
+        ///
+        /// This used to require `clubId > 0`, which silently hid EVERY region-hosted competition's
+        /// invoices from the admin Fakturor tab (and there is no "Alla kretsar" option to fall back
+        /// on, so they were invisible everywhere). Reported after the 2026-08 SM dress rehearsal.
+        /// Returns "" when neither host resolves.
+        /// </summary>
+        private static string ResolveCompetitionRegion(IContent competition, Dictionary<int, string> clubRegions)
+        {
+            // NB Value<int>/GetValue<int> yields 0 (not null) for an unset property, so test > 0.
+            var clubId = competition.GetValue<int>("clubId");
+            if (clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion.Length > 0)
+                return clubRegion;
+
+            return NormalizeRegionCode(competition.GetValue<string>("regionalFederation"));
+        }
+
+        /// <summary>
+        /// Region codes are compared as plain strings, but a dropdown-backed property can be stored
+        /// as a JSON array (["Halland"]) rather than a bare value — normalize both to "halland".
+        /// </summary>
+        public static string NormalizeRegionCode(string? raw)
+        {
+            var value = (raw ?? "").Trim();
+            if (value.Length == 0) return "";
+
+            if (value.StartsWith("[") && value.EndsWith("]"))
+            {
+                try
+                {
+                    var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(value);
+                    value = (parsed != null && parsed.Length > 0 ? parsed[0] : "").Trim();
+                }
+                catch
+                {
+                    value = value.Trim('[', ']', '"', ' ');
+                }
+            }
+
+            return value.Trim('"').Trim().ToLowerInvariant();
         }
 
         /// <summary>
