@@ -222,10 +222,19 @@ namespace HpskSite.Controllers
                 ready = preview.Ready,
                 missingProperties = preview.MissingProperties,
                 grandTotal = preview.GrandTotal,
+                // One parent = one payment to one recipient. The client must show these before the
+                // user commits: a selection spanning competitions/payees can never be one payment.
+                payeeCount = preview.PayeeCount,
+                spansMultipleCompetitions = preview.SpansMultipleCompetitions,
+                spansMultiplePayees = preview.SpansMultiplePayees,
+                warning = preview.Warning,
                 groups = preview.Groups.Select(g => new
                 {
                     competitionId = g.CompetitionId,
                     competitionName = g.CompetitionName,
+                    payeeKey = g.Payee.Key,
+                    payeeName = g.Payee.Name,
+                    hasSwishNumber = !string.IsNullOrWhiteSpace(g.Payee.SwishNumber),
                     total = g.Total,
                     needsParent = g.NeedsParent,
                     invoices = g.Invoices.Select(i => new

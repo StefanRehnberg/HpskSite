@@ -114,6 +114,60 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Who gets paid for this competition: the hosting club, or the region when it hosts its own
+        /// (clubId unset, regionalFederation set) — the same two host states CompetitionUrlProvider and
+        /// InvoiceAdminService.ResolveCompetitionRegion deal with. The Swish number is read from the
+        /// COMPETITION, since that is where it lives and it can differ between a club's competitions.
+        /// </summary>
+        public Payee ResolvePayee(int competitionId)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return new Payee();
+
+            var swish = (competition.GetValue<string>("swishNumber") ?? "").Trim();
+
+            var clubId = ReadInt(competition, "clubId");
+            if (clubId > 0)
+            {
+                return new Payee
+                {
+                    Key = $"club:{clubId}",
+                    Name = _clubService.GetClubNameById(clubId) ?? $"Förening #{clubId}",
+                    SwishNumber = swish
+                };
+            }
+
+            var region = InvoiceAdminService.NormalizeRegionCode(competition.GetValue<string>("regionalFederation"));
+            if (region.Length > 0)
+            {
+                return new Payee
+                {
+                    Key = $"region:{region}",
+                    Name = ResolveRegionName(region),
+                    SwishNumber = swish
+                };
+            }
+
+            return new Payee { Key = "", Name = "Okänd mottagare", SwishNumber = swish };
+        }
+
+        /// <summary>
+        /// A competition stores a region CODE ("Halland"); the readable name ("Hallands
+        /// Pistolskyttekrets") is the enum's Description — the same source
+        /// MemberAdminController.GetRegionsForUserManagement uses, so the two can't drift. This name
+        /// goes on a money document and into a warning the user reads, so don't show a bare code.
+        /// </summary>
+        private static string ResolveRegionName(string regionCode)
+        {
+            foreach (var federation in Enum.GetValues<Federations.RegionalFederations>())
+            {
+                if (string.Equals(federation.ToString(), regionCode, StringComparison.OrdinalIgnoreCase))
+                    return federation.GetDescription();
+            }
+            return regionCode;
+        }
+
+        /// <summary>
         /// A child pointing at a Cancelled parent is free again — otherwise a mistaken consolidation
         /// that was later makulerad would lock those invoices out of ever being paid.
         /// </summary>
@@ -127,10 +181,24 @@ namespace HpskSite.Services
 
         // ── preview ──────────────────────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Who receives the money. A competition is organised EITHER by a club or by a region, and the
+        /// Swish number is a per-COMPETITION property — so two competitions run by the same club can
+        /// still collect to different Swish numbers. One parent invoice produces ONE QR, so the payee
+        /// and the Swish number both have to be single-valued for a parent to be legitimate.
+        /// </summary>
+        public sealed class Payee
+        {
+            public string Key { get; init; } = "";        // "club:1098" / "region:Halland" / "" when unresolved
+            public string Name { get; init; } = "";
+            public string SwishNumber { get; init; } = "";
+        }
+
         public sealed class PreviewGroup
         {
             public int CompetitionId { get; init; }
             public string CompetitionName { get; init; } = "";
+            public Payee Payee { get; init; } = new();
             public List<Candidate> Invoices { get; init; } = new();
             public decimal Total { get; init; }
             /// <summary>A single invoice needs no parent — the club just pays that invoice.</summary>
@@ -144,6 +212,24 @@ namespace HpskSite.Services
             public decimal GrandTotal { get; init; }
             public List<string> MissingProperties { get; init; } = new();
             public bool Ready => MissingProperties.Count == 0;
+
+            /// <summary>Distinct payees in the selection — each one is a SEPARATE payment.</summary>
+            public int PayeeCount => Groups.Select(g => g.Payee.Key).Distinct().Count();
+            public bool SpansMultipleCompetitions => Groups.Count > 1;
+            public bool SpansMultiplePayees => PayeeCount > 1;
+
+            /// <summary>
+            /// Plain-language warning for the confirmation dialog. Money going to more than one
+            /// recipient can never be one payment, so the user must see that before committing.
+            /// </summary>
+            public string? Warning =>
+                !SpansMultipleCompetitions ? null
+                : SpansMultiplePayees
+                    ? $"Ditt val gäller {Groups.Count} tävlingar hos {PayeeCount} olika mottagare "
+                      + $"({string.Join(", ", Groups.Select(g => g.Payee.Name).Distinct())}). "
+                      + "Det blir en separat faktura och en separat betalning för varje tävling."
+                    : $"Ditt val gäller {Groups.Count} tävlingar. Det blir en separat faktura och "
+                      + "betalning per tävling, eftersom varje tävling har sitt eget Swish-nummer.";
         }
 
         /// <summary>
@@ -164,11 +250,12 @@ namespace HpskSite.Services
                 {
                     CompetitionId = g.Key,
                     CompetitionName = g.First().CompetitionName,
+                    Payee = ResolvePayee(g.Key),
                     Invoices = g.OrderBy(c => c.MemberName).ToList(),
                     Total = g.Sum(c => c.Amount),
                     NeedsParent = g.Count() > 1
                 })
-                .OrderBy(g => g.CompetitionName)
+                .OrderBy(g => g.Payee.Name).ThenBy(g => g.CompetitionName)
                 .ToList();
 
             return new PreviewResult
@@ -239,6 +326,22 @@ namespace HpskSite.Services
                     continue;
                 }
 
+                // A parent invoice is a claim for one payment to ONE recipient. If we cannot say who
+                // that is, we must not issue it — money would be collected with no identifiable payee.
+                if (string.IsNullOrEmpty(group.Payee.Key))
+                {
+                    parents.Add(new CreatedParent
+                    {
+                        CompetitionId = group.CompetitionId,
+                        CompetitionName = group.CompetitionName,
+                        Total = group.Total,
+                        CoveredCount = group.Invoices.Count,
+                        Error = $"{group.CompetitionName} har ingen tydlig mottagare (varken förening eller krets) "
+                              + "— ingen samlingsfaktura kan skapas."
+                    });
+                    continue;
+                }
+
                 try
                 {
                     var covered = group.Invoices.Select(i => i.InvoiceId).ToList();
@@ -249,6 +352,8 @@ namespace HpskSite.Services
                         ["payerClubId"] = payerClubId.ToString(),
                         // Stefan: the invoice must state that it is for N registrations and list them.
                         ["notes"] = BuildParentNotes(payerName, group)
+                        // NB no swishNumber here — the QR is generated from the COMPETITION's
+                        // swishNumber, which is exactly why a parent may never span competitions.
                     };
 
                     var parent = await _paymentService.CreateStandaloneInvoiceAsync(
@@ -409,7 +514,7 @@ namespace HpskSite.Services
             var lines = group.Invoices
                 .Select(i => $"  {i.InvoiceNumber}  {i.MemberName}  {i.Amount:0.##} kr");
             return $"Samlingsfaktura – {payerName} betalar {group.Invoices.Count} anmälningar "
-                 + $"till {group.CompetitionName}:{Environment.NewLine}"
+                 + $"till {group.CompetitionName} (mottagare: {group.Payee.Name}):{Environment.NewLine}"
                  + string.Join(Environment.NewLine, lines);
         }
 
