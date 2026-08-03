@@ -795,6 +795,16 @@ namespace HpskSite.Services
                     if (await IsClubAdminForClub(clubId)) return true;   // includes regional admin
                     if (await IsSkjutledareForClub(clubId)) return true;
                 }
+                else if (competition != null)
+                {
+                    // REGION-HOSTED competition (no club): the krets is the organiser, so its admins are
+                    // the ones entitled to mark payments received. Without this a region-organised
+                    // competition — which is what an SM is — has no organiser who can confirm a payment
+                    // unless someone was separately named a competition manager on it.
+                    var regionCode = (competition.Value<string>("regionalFederation") ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(regionCode) && await IsRegionalAdminForRegion(regionCode))
+                        return true;
+                }
 
                 return false;
             }

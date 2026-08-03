@@ -1347,6 +1347,15 @@ namespace HpskSite.Controllers
                     authorized = await _authService.IsClubAdminForClub(competitionClubId)
                               || await _authService.IsSkjutledareForClub(competitionClubId);
                 }
+                else
+                {
+                    // Region-hosted competition: the krets organises it, so its admins own the books.
+                    // Same club-hosted-only assumption that hid region-organised competitions from the
+                    // invoice filter and locked them out of receipts — an SM is region-hosted.
+                    var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(regionCode))
+                        authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                }
             }
             if (!authorized) return Forbid();
 

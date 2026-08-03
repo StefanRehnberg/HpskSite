@@ -207,8 +207,12 @@
         <td class="club-invoice-select-cell d-none">
             @* data-status must be the RAW status: {paymentStatus} is substituted with the translated
                Swedish label ("Väntande"), which would never match the "Pending" test. *@
+            @* data-settled: an invoice already covered by a samlingsfaktura stays PENDING until that
+               parent is paid, so a status test alone would still offer it — and the user would only
+               find out from the confirmation dialog. *@
             <input type="checkbox" class="form-check-input club-invoice-select" value="{id}"
-                   data-amount="{totalAmount}" data-status="{rawStatus}" aria-label="Välj faktura {invoiceNumber}">
+                   data-amount="{totalAmount}" data-status="{rawStatus}" data-settled="{settledBy}"
+                   aria-label="Välj faktura {invoiceNumber}">
         </td>
         <td><strong>{invoiceNumber}</strong></td>
         <td>{competitionName}</td>
@@ -400,10 +404,16 @@ function clubApplySelectionMode() {
     if (!allowed) { clubSelectedInvoices.clear(); clubUpdatePayBar(); return; }
 
     document.querySelectorAll('.club-invoice-select').forEach(cb => {
-        // Only unpaid invoices can be consolidated; the server says so too, but a disabled box is
-        // clearer than a rejection after the fact.
-        const payable = (cb.dataset.status || '') === 'Pending';
+        // Only unpaid invoices can be consolidated, AND not ones already covered by a samlingsfaktura
+        // (those stay Pending until their parent is paid, so the status alone would still offer them).
+        // The server rejects both anyway; a disabled box is clearer than a rejection after the fact.
+        const alreadySettled = parseInt(cb.dataset.settled || '0') > 0;
+        const payable = (cb.dataset.status || '') === 'Pending' && !alreadySettled;
         cb.disabled = !payable;
+        if (alreadySettled) {
+            cb.title = 'Ingår redan i en samlingsfaktura';
+            cb.closest('tr')?.classList.add('text-muted');
+        }
         if (!payable) { cb.checked = false; clubSelectedInvoices.delete(parseInt(cb.value)); }
         else cb.checked = clubSelectedInvoices.has(parseInt(cb.value));
         cb.onchange = () => {
@@ -670,6 +680,7 @@ function renderClubInvoices(invoices) {
             .replace(/{totalAmount}/g, invoice.totalAmount.toFixed(2))
             .replace(/{paymentStatus}/g, escapeClubHtml(statusText))
             .replace(/{rawStatus}/g, escapeClubHtml(invoice.paymentStatus || ''))
+            .replace(/{settledBy}/g, String(invoice.settledByInvoiceId || 0))
             .replace(/{statusClass}/g, statusClass)
             .replace(/{sentBadge}/g, sentBadge)
             .replace(/{markAction}/g, markAction)
