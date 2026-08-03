@@ -127,17 +127,22 @@ namespace HpskSite.Services
                 conflictWarning = BuildConflictWarning(conflicts);
             }
 
-            // Lagnamnet måste vara unikt per TÄVLING (UX_CompetitionTeam_Name is (CompetitionId,
-            // TeamName) — not per class, not per club). Since a shooter may now hold one lag per
-            // weapon class PLUS one stafett, reusing the club's own name across those teams is the
-            // natural thing to type — and it used to surface as a raw unique-key SqlException that
+            // Lagnamn are unique per competition in the database (UX_CompetitionTeam_Name), and a
+            // club naming every one of its teams after itself is exactly what happens in practice —
+            // "Västerås Pistolskyttar" as both A-lag and stafett raised a raw SqlException 2627 that
             // the modal could only report as "Ett fel uppstod vid skapande av stafettlag".
+            //
+            // Only a same-CLASS collision is rejected up front: that one is wrong under any index
+            // shape. A different-class collision is left to the INSERT, so this code is correct both
+            // before and after the index is relaxed to (CompetitionId, TeamClass, TeamName) — the DB
+            // decides, and either way the user gets the same readable message instead of a stack
+            // trace's worth of nothing.
             var trimmedName = (teamName ?? "").Trim();
-            var nameClash = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
-                $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE CompetitionId = @0 AND TeamName = @1",
-                competitionId, trimmedName);
-            if (nameClash != null)
-                return (false, DuplicateTeamNameMessage(trimmedName, nameClash), null);
+            var sameClassClash = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
+                $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE CompetitionId = @0 AND TeamName = @1 AND TeamClass = @2",
+                competitionId, trimmedName, teamClass);
+            if (sameClassClash != null)
+                return (false, DuplicateTeamNameMessage(trimmedName, sameClassClash), null);
 
             // Create team
             int teamId;
@@ -150,9 +155,8 @@ namespace HpskSite.Services
             }
             catch (Exception ex) when (IsUniqueKeyViolation(ex))
             {
-                // Someone else claimed the name between the check above and this insert.
                 _logger.LogWarning(ex, "Duplicate team name '{TeamName}' in competition {CompetitionId}", trimmedName, competitionId);
-                return (false, DuplicateTeamNameMessage(trimmedName, null), null);
+                return (false, DuplicateTeamNameMessage(trimmedName, await FindTeamByNameAsync(db, competitionId, trimmedName, null)), null);
             }
 
             // Add members
@@ -356,13 +360,14 @@ namespace HpskSite.Services
                 db, team.CompetitionId, team.TeamClass, memberIds, isSpringskytteComp, excludeTeamId: teamId);
             var editWarning = editConflicts.Count > 0 ? BuildConflictWarning(editConflicts) : null;
 
-            // Update team name — same per-competition uniqueness as creation (see CreateTeamAsync).
+            // Update team name — same uniqueness story as creation (see CreateTeamAsync): reject a
+            // same-class clash up front, let the DB rule on the rest.
             if (!string.IsNullOrWhiteSpace(teamName))
             {
                 var newName = teamName.Trim();
                 var renameClash = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
-                    $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE CompetitionId = @0 AND TeamName = @1 AND Id <> @2",
-                    team.CompetitionId, newName, teamId);
+                    $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE CompetitionId = @0 AND TeamName = @1 AND TeamClass = @2 AND Id <> @3",
+                    team.CompetitionId, newName, team.TeamClass, teamId);
                 if (renameClash != null)
                     return (false, DuplicateTeamNameMessage(newName, renameClash));
 
@@ -375,7 +380,7 @@ namespace HpskSite.Services
                 catch (Exception ex) when (IsUniqueKeyViolation(ex))
                 {
                     _logger.LogWarning(ex, "Duplicate team name '{TeamName}' on rename of team {TeamId}", newName, teamId);
-                    return (false, DuplicateTeamNameMessage(newName, null));
+                    return (false, DuplicateTeamNameMessage(newName, await FindTeamByNameAsync(db, team.CompetitionId, newName, teamId)));
                 }
             }
 
@@ -963,8 +968,23 @@ namespace HpskSite.Services
                     ? $" ({existing.TeamClass})"
                     : $" ({existing.TeamClass}, {clubName})";
             }
+            // The advice is deliberately "add the class or a number", not "use the club name" —
+            // the name that collides is usually the club's own name already.
             return $"Det finns redan ett lag som heter \"{teamName}\" i tävlingen{who}. " +
-                   "Lagnamn måste vara unika inom hela tävlingen — lägg till klubbnamnet eller en siffra.";
+                   $"Välj ett annat lagnamn, t.ex. \"{teamName} 2\" eller med lagklassen i namnet.";
+        }
+
+        /// <summary>The team holding <paramref name="teamName"/> in the competition, for the message above.</summary>
+        private static async Task<CompetitionTeamDto?> FindTeamByNameAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId, string teamName, int? excludeTeamId)
+        {
+            try
+            {
+                return await db.FirstOrDefaultAsync<CompetitionTeamDto>(
+                    $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE CompetitionId = @0 AND TeamName = @1 AND Id <> @2",
+                    competitionId, teamName, excludeTeamId ?? 0);
+            }
+            catch { return null; }
         }
 
         /// <summary>
