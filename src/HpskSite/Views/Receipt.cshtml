@@ -81,7 +81,18 @@
     </style>
 </head>
 <body>
-    @if (!Model.IsPaid)
+    @if (Model.AccessDenied)
+    {
+        @* Forbid() redirects to /Account/AccessDenied, which is not an Umbraco document — the user got a
+           raw "Page Not Found" quoting an internal path. Say it plainly instead. *@
+        <div class="sheet">
+            <h1 style="font-size:22px;margin-top:0;">Kvittot tillhör någon annan</h1>
+            <p>Det här kvittot hör till en annan betalare. Du kan bara öppna kvitton för dina egna
+               betalningar, eller för din förenings betalningar om du är föreningsadministratör.</p>
+            <p><a class="btn" href="/user-profile-page#tavlingar"><i class="bi bi-arrow-left"></i> Till Mina tävlingar</a></p>
+        </div>
+    }
+    else if (!Model.IsPaid)
     {
         <div class="sheet">
             <h1 style="font-size:22px;margin-top:0;">Kvitto ej tillgängligt</h1>

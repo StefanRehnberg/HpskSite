@@ -668,8 +668,20 @@ namespace HpskSite.Controllers
             {
                 var (actorId, actorName) = await GetCurrentActorAsync();
 
+                // An invoice a samlingsfaktura is still charging for must not be cancelled from here:
+                // the parent is never recalculated, so the club would keep paying for a registration
+                // that no longer exists. Say what to do instead rather than failing opaquely.
+                if (_paymentService.IsCoveredByOpenConsolidation(request.InvoiceId, out var coverParent, out var coverPaid))
+                {
+                    return Json(new
+                    {
+                        success = false,
+                        message = PaymentService.CoveredByConsolidationMessage(coverParent, coverPaid)
+                    });
+                }
+
                 // Update invoice status to Cancelled (logs Cancelled audit event)
-                await _paymentService.UpdatePaymentStatusAsync(
+                var cancelled = await _paymentService.UpdatePaymentStatusAsync(
                     invoiceId: request.InvoiceId,
                     paymentStatus: "Cancelled",
                     paymentDate: null,
@@ -679,6 +691,10 @@ namespace HpskSite.Controllers
                     actorMemberId: actorId,
                     actorMemberName: actorName
                 );
+                if (!cancelled)
+                {
+                    return Json(new { success = false, message = "Fakturan kunde inte makuleras." });
+                }
 
                 // Invalidate cache
                 InvalidateInvoiceCaches();

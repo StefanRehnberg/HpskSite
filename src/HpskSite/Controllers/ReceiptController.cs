@@ -62,7 +62,12 @@ namespace HpskSite.Controllers
             // be locked out of its own receipt), or staff for the hosting competition.
             var isOwner = int.TryParse(current.Id, out var currentId) && currentId == model.MemberId;
             if (!isOwner && !await IsPayingClubAdmin(invoiceId) && !await IsStaffForCompetition(model.CompetitionId))
-                return Forbid();
+            {
+                // Not Forbid(): that redirects to /Account/AccessDenied, which isn't an Umbraco
+                // document, so the visitor gets a raw 404 quoting an internal path.
+                model.AccessDenied = true;
+                return View("~/Views/Receipt.cshtml", model);
+            }
 
             return View("~/Views/Receipt.cshtml", model);
         }

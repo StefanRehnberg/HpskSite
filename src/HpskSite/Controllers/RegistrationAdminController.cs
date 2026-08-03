@@ -434,7 +434,17 @@ namespace HpskSite.Controllers
                             // Already fully covered. If there's a leftover Pending invoice
                             // (e.g. a previous top-up that's no longer needed because a class
                             // was removed), cancel it so the row stops nagging the operator.
-                            if (existingPending != null)
+                            // Not if a samlingsfaktura is still charging for it: the parent's total
+                            // includes this invoice and is never recalculated, so silently cancelling it
+                            // here would leave the paying club covering a fee that has been written off.
+                            if (existingPending != null
+                                && _paymentService.IsCoveredByOpenConsolidation(existingPending.Id, out var pendCover, out var pendPaid))
+                            {
+                                feeChangeNote = $"Klassändringen täcks av befintliga betalningar ({sumPaid:0} kr), "
+                                    + $"men den väntande tilläggsfakturan ingår i samlingsfaktura {pendCover} och har "
+                                    + (pendPaid ? "INTE makulerats — skapa en kreditfaktura." : "INTE makulerats.");
+                            }
+                            else if (existingPending != null)
                             {
                                 existingPending.SetValue("paymentStatus", "Cancelled");
                                 _contentService.Save(existingPending);

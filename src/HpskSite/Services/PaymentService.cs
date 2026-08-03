@@ -21,6 +21,7 @@ namespace HpskSite.Services
         private readonly InvoiceAuditService _auditService;
         private readonly EmailService _emailService;
         private readonly ClubService _clubService;
+        private readonly Umbraco.Cms.Core.Cache.AppCaches _appCaches;
 
         public PaymentService(ILogger<PaymentService> logger,
             IContentService contentService,
@@ -29,8 +30,10 @@ namespace HpskSite.Services
             IMemberService memberService,
             InvoiceAuditService auditService,
             EmailService emailService,
-            ClubService clubService)
+            ClubService clubService,
+            Umbraco.Cms.Core.Cache.AppCaches appCaches)
         {
+            _appCaches = appCaches;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
             _umbracoContextAccessor = umbracoContextAccessor ?? throw new ArgumentNullException(nameof(umbracoContextAccessor));
@@ -420,6 +423,7 @@ namespace HpskSite.Services
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Invoice {InvoiceId} saved and published successfully.", invoice.Id);
+                        InvalidateInvoiceListCaches();
 
                         // Log a Created event in the audit table. Fire-and-forget; the audit
                         // service swallows its own exceptions and the invoice is already saved.
@@ -549,6 +553,7 @@ namespace HpskSite.Services
                     _contentService.Delete(invoice);
                     return Task.FromResult<IContent?>(null);
                 }
+                InvalidateInvoiceListCaches();
 
                 _ = _auditService.LogAsync(
                     invoiceId: invoice.Id,
@@ -569,6 +574,67 @@ namespace HpskSite.Services
                 return Task.FromResult<IContent?>(null);
             }
         }
+
+        /// <summary>
+        /// Is this invoice currently covered by a samlingsfaktura that is still open (not makulerad)?
+        ///
+        /// Such an invoice must NOT be quietly cancelled or re-priced: the parent was issued for a
+        /// total that includes it, the club is about to pay (or has paid) that total, and nothing
+        /// recalculates a parent — by design, since an issued invoice is never altered. Cancelling the
+        /// child silently would leave the club paying for a registration that no longer exists.
+        /// The correction is a kreditfaktura.
+        ///
+        /// Deliberately reads raw properties instead of taking a dependency on
+        /// ConsolidatedInvoiceService, which already depends on this class.
+        /// </summary>
+        public bool IsCoveredByOpenConsolidation(int invoiceId, out string parentInvoiceNumber, out bool parentIsPaid)
+        {
+            parentInvoiceNumber = "";
+            parentIsPaid = false;
+            try
+            {
+                var invoice = _contentService.GetById(invoiceId);
+                if (invoice == null || !invoice.HasProperty("settledByInvoiceId")) return false;
+
+                var raw = (invoice.GetValue<string>("settledByInvoiceId") ?? "").Trim();
+                if (!int.TryParse(raw, out var parentId) || parentId <= 0) return false;
+
+                var parent = _contentService.GetById(parentId);
+                if (parent == null) return false;
+
+                var status = (parent.GetValue<string>("paymentStatus") ?? "").Trim();
+                if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase)) return false;
+
+                parentInvoiceNumber = parent.GetValue<string>("invoiceNumber") ?? parentId.ToString();
+                parentIsPaid = string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not check consolidation cover for invoice {InvoiceId}", invoiceId);
+                return false;   // never block a normal operation because this check failed
+            }
+        }
+
+        /// <summary>
+        /// Drop the admin invoice-list cache. GetInvoices caches for 5 minutes whenever no status or
+        /// search filter is set, and nothing invalidated it when an invoice was CREATED — so a cashier
+        /// who had just registered someone could not see their invoice for minutes, and neither could
+        /// the club admin about to pay it. Same key prefix InvoiceAdminController clears.
+        /// </summary>
+        private void InvalidateInvoiceListCaches()
+        {
+            try { _appCaches.RuntimeCache.ClearByRegex("^admin_invoices_"); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Could not clear the admin invoice cache"); }
+        }
+
+        /// <summary>Swedish explanation for a refused cancel/repricing of a covered invoice.</summary>
+        public static string CoveredByConsolidationMessage(string parentInvoiceNumber, bool parentIsPaid) =>
+            parentIsPaid
+                ? $"Fakturan ingår i samlingsfaktura {parentInvoiceNumber} som redan är betald. "
+                + "Skapa en kreditfaktura istället för att makulera."
+                : $"Fakturan ingår i samlingsfaktura {parentInvoiceNumber}. Makulera samlingsfakturan först "
+                + "(då frigörs fakturorna), eller skapa en kreditfaktura.";
 
         /// <summary>
         /// Properties the consolidated-invoice / credit-note flow needs on the `registrationInvoice`
@@ -949,12 +1015,30 @@ namespace HpskSite.Services
             // Opt-out: every Paid transition tries to email the shooter their receipt unless
             // the caller explicitly suppresses it. Failures here never fail the underlying
             // status update — receipt is a best-effort side effect, just like the audit log.
-            bool sendReceiptOnPaid = true)
+            bool sendReceiptOnPaid = true,
+            // Cancelling an invoice that a samlingsfaktura still charges for is refused by default.
+            // The kreditfaktura flow is the ONE legitimate exception: it cancels the covered invoice
+            // precisely because it has just issued the credit that compensates for it.
+            bool allowCancelWhenConsolidated = false)
         {
             try
             {
                 var invoice = _contentService.GetById(invoiceId);
                 if (invoice == null) return false;
+
+                // Refuse to cancel an invoice a samlingsfaktura is still charging for. The parent is
+                // never recalculated (an issued invoice is not altered), so cancelling the child here
+                // would leave the club paying for a registration that no longer exists. The caller is
+                // expected to surface CoveredByConsolidationMessage.
+                if (!allowCancelWhenConsolidated
+                    && string.Equals(paymentStatus, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                    && IsCoveredByOpenConsolidation(invoiceId, out var blockingParent, out var blockingPaid))
+                {
+                    _logger.LogWarning(
+                        "Refused to cancel invoice {InvoiceId}: covered by open samlingsfaktura {Parent} (paid={Paid})",
+                        invoiceId, blockingParent, blockingPaid);
+                    return false;
+                }
 
                 invoice.SetValue("paymentStatus", paymentStatus);
 
@@ -981,6 +1065,9 @@ namespace HpskSite.Services
                 if (!saveResult.Success) return false;
 
                 _contentService.Publish(invoice, new[] { "*" }, -1);
+                // Status just changed, so any cached list is wrong. Controllers that call this already
+                // clear the cache, but the Swish self-pay and cascade paths do not.
+                InvalidateInvoiceListCaches();
 
                 // Log audit event for this state transition. Best effort — the underlying
                 // status update already succeeded and we don't want to fail it on audit issues.

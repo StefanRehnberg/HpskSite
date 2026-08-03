@@ -59,6 +59,13 @@ namespace HpskSite.Models
         public string ReceiptNumber { get; set; } = "";
         public DateTime PaidAt { get; set; }
         public bool IsPaid { get; set; }
+
+        /// <summary>
+        /// The receipt exists but belongs to someone else. Rendered as a plain explanation rather than
+        /// Forbid(), which redirects to /Account/AccessDenied — not an Umbraco document, so the visitor
+        /// got a raw "Page Not Found" quoting an internal path.
+        /// </summary>
+        public bool AccessDenied { get; set; }
     }
 
     /// <summary>One itemised line on a consolidated receipt — a single covered registration.</summary>

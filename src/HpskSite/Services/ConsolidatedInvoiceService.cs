@@ -760,7 +760,10 @@ namespace HpskSite.Services
                         actorMemberId: actorMemberId,
                         actorMemberName: actorMemberName,
                         actualAmount: null,
-                        sendReceiptOnPaid: false);
+                        sendReceiptOnPaid: false,
+                        // The one legitimate cancel of a covered invoice: the credit note that
+                        // compensates for it has just been issued.
+                        allowCancelWhenConsolidated: true);
                 }
             }
 

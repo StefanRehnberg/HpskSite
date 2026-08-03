@@ -214,7 +214,7 @@
                    data-amount="{totalAmount}" data-status="{rawStatus}" data-settled="{settledBy}"
                    aria-label="Välj faktura {invoiceNumber}">
         </td>
-        <td><strong>{invoiceNumber}</strong></td>
+        <td><strong>{invoiceNumber}</strong>{kindBadge}</td>
         <td>{competitionName}</td>
         <td>{memberName}</td>
         <td class="text-end">{totalAmount} kr</td>
@@ -648,6 +648,18 @@ function renderClubInvoices(invoices) {
         const createdDate = invoice.createdDate ? new Date(invoice.createdDate).toLocaleDateString('sv-SE') : '-';
         const paymentDate = invoice.paymentDate ? new Date(invoice.paymentDate).toLocaleDateString('sv-SE') : '-';
 
+        // A samlingsfaktura and a kreditfaktura are NOT ordinary fees. Unlabelled, a parent reads as a
+        // duplicate demand for money the club is already paying per shooter, and a credit note reads as
+        // yet another charge instead of a deduction.
+        let kindBadge = '';
+        if (invoice.invoiceKind === 'consolidated') {
+            kindBadge = ' <span class="badge bg-primary" title="Samlar flera anmälningar i en betalning">Samlingsfaktura</span>';
+        } else if (invoice.invoiceKind === 'creditNote') {
+            kindBadge = ' <span class="badge bg-dark" title="Avdrag / återbetalning – ingen ny avgift">Kreditfaktura</span>';
+        } else if (invoice.settledByInvoiceId > 0) {
+            kindBadge = ' <span class="badge bg-secondary" title="Betalas via en samlingsfaktura">Ingår i samlingsfaktura</span>';
+        }
+
         const isSettled = invoice.paymentStatus === 'Paid' || invoice.paymentStatus === 'Cancelled';
         const alreadySent = !!invoice.paymentSentDate;
         const sentDateStr = alreadySent ? new Date(invoice.paymentSentDate).toLocaleDateString('sv-SE') : '';
@@ -681,6 +693,7 @@ function renderClubInvoices(invoices) {
             .replace(/{paymentStatus}/g, escapeClubHtml(statusText))
             .replace(/{rawStatus}/g, escapeClubHtml(invoice.paymentStatus || ''))
             .replace(/{settledBy}/g, String(invoice.settledByInvoiceId || 0))
+            .replace(/{kindBadge}/g, kindBadge)
             .replace(/{statusClass}/g, statusClass)
             .replace(/{sentBadge}/g, sentBadge)
             .replace(/{markAction}/g, markAction)
