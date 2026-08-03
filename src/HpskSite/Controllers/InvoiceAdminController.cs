@@ -1362,12 +1362,38 @@ namespace HpskSite.Controllers
                     .ToList()
                 : new List<IContent>();
 
-            var invoices = invoicesHub != null
+            var allInvoiceNodes = invoicesHub != null
                 ? _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
                     .Where(c => c.ContentType.Alias == "registrationInvoice")
                     .OrderBy(c => c.GetValue<DateTime?>("paymentDate") ?? c.GetValue<DateTime?>("createdDate") ?? DateTime.MinValue)
                     .ToList()
                 : new List<IContent>();
+
+            // A samlingsfaktura carries the SAME money as the invoices it covers, so including it here
+            // would double every consolidated payment in PaidTotal/PendingTotal — and inflate allRows,
+            // which NoInvoiceCount subtracts from, hiding genuinely un-invoiced registrations. Drop the
+            // parents; the children carry the per-registration detail the books actually need.
+            //
+            // Credit notes are kept ONLY when they credit an invoice that was already PAID, i.e. money
+            // genuinely went back. A credit against an UNPAID parent is a discount, not a refund: the
+            // covered invoice was cancelled and no income was ever recognised, so counting it as
+            // refunded would invent a repayment that never happened.
+            var creditedStatusById = allInvoiceNodes.ToDictionary(
+                c => c.Id, c => (c.GetValue<string>("paymentStatus") ?? "").Trim());
+
+            var invoices = allInvoiceNodes.Where(c =>
+            {
+                var kind = c.GetValue<string>("invoiceKind") ?? "";
+                if (kind == ConsolidatedInvoiceService.KindConsolidated) return false;
+                if (kind == ConsolidatedInvoiceService.KindCreditNote)
+                {
+                    var creditsId = int.TryParse((c.GetValue<string>("creditsInvoiceId") ?? "").Trim(), out var cid) ? cid : 0;
+                    return creditsId > 0
+                        && creditedStatusById.TryGetValue(creditsId, out var st)
+                        && string.Equals(st, "Paid", StringComparison.OrdinalIgnoreCase);
+                }
+                return true;
+            }).ToList();
 
             // Pull operator info for the footer
             var (actorId, actorName) = await GetCurrentActorAsync();

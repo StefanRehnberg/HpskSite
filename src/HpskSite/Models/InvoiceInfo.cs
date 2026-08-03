@@ -43,6 +43,17 @@ namespace HpskSite.Models
         public decimal TotalAmount { get; set; }
 
         /// <summary>
+        /// "" for an ordinary registration invoice, "consolidated" for a samlingsfaktura, "creditNote"
+        /// for a credit note. Exposed because a samlingsfaktura carries the SAME money as the invoices
+        /// it covers — so anything summing money must exclude it or it double-counts, and any list
+        /// showing it should label it rather than let it read as another fee.
+        /// </summary>
+        public string InvoiceKind { get; set; } = string.Empty;
+
+        /// <summary>The samlingsfaktura that settles this invoice, if any.</summary>
+        public int SettledByInvoiceId { get; set; }
+
+        /// <summary>
         /// Payment status: "Pending", "Paid", "Cancelled", "Failed", "Refunded"
         /// </summary>
         public string PaymentStatus { get; set; } = "Pending";

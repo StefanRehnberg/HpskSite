@@ -338,6 +338,15 @@ namespace HpskSite.Services
         /// Region codes are compared as plain strings, but a dropdown-backed property can be stored
         /// as a JSON array (["Halland"]) rather than a bare value — normalize both to "halland".
         /// </summary>
+        /// <summary>
+        /// The invoices that represent MONEY EARNED, for any sum. Drops samlingsfakturor (a payment
+        /// instrument duplicating its children's amounts) and credit notes (stored positive, so they
+        /// would add to income rather than reduce it). Everything else is untouched, so a competition
+        /// with no consolidated payments sums exactly as it always did.
+        /// </summary>
+        public static IEnumerable<InvoiceInfo> MoneyRows(IEnumerable<InvoiceInfo> invoices) =>
+            invoices.Where(i => i.InvoiceKind != "consolidated" && i.InvoiceKind != "creditNote");
+
         public static string NormalizeRegionCode(string? raw)
         {
             var value = (raw ?? "").Trim();
@@ -479,6 +488,9 @@ namespace HpskSite.Services
                 MemberId = invoiceNode.GetValue<string>("memberId") ?? "",
                 MemberName = invoiceNode.GetValue<string>("memberName") ?? "",
                 TotalAmount = invoiceNode.GetValue<decimal>("totalAmount"),
+                InvoiceKind = invoiceNode.GetValue<string>("invoiceKind") ?? "",
+                SettledByInvoiceId = int.TryParse(
+                    (invoiceNode.GetValue<string>("settledByInvoiceId") ?? "").Trim(), out var settledBy) ? settledBy : 0,
                 PaymentStatus = paymentStatus,
                 PaymentMethod = invoiceNode.GetValue<string>("paymentMethod") ?? "Swish",
                 CreatedDate = invoiceNode.GetValue<DateTime?>("createdDate") ?? invoiceNode.CreateDate,
@@ -548,9 +560,14 @@ namespace HpskSite.Services
                 PageSize = filters.PageSize,
                 TotalPages = totalPages,
                 ActiveCompetitions = activeCompetitionsCount,
-                TotalAmount = allInvoices.Sum(inv => inv.TotalAmount),
-                PaidAmount = allInvoices.Where(inv => inv.PaymentStatus == "Paid").Sum(inv => inv.TotalAmount),
-                PendingAmount = allInvoices.Where(inv => inv.PaymentStatus == "Pending").Sum(inv => inv.TotalAmount)
+                // Money sums EXCLUDE samlingsfakturor: a parent carries the same money as the invoices
+                // it covers, so counting both doubles every consolidated payment. The children are kept
+                // because they hold the per-registration detail (fee breakdown, deltävling split) that
+                // the parent has none of. Credit notes are excluded too — they are stored as a positive
+                // amount and would otherwise ADD to income instead of reducing it.
+                TotalAmount = MoneyRows(allInvoices).Sum(inv => inv.TotalAmount),
+                PaidAmount = MoneyRows(allInvoices).Where(inv => inv.PaymentStatus == "Paid").Sum(inv => inv.TotalAmount),
+                PendingAmount = MoneyRows(allInvoices).Where(inv => inv.PaymentStatus == "Pending").Sum(inv => inv.TotalAmount)
             };
         }
     }
