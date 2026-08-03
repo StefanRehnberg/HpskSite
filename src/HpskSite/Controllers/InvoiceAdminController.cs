@@ -810,8 +810,24 @@ namespace HpskSite.Controllers
 
                 // Get invoice details
                 var invoiceNumber = invoice.GetValue<string>("invoiceNumber");
-                var totalAmount = invoice.GetValue<decimal>("totalAmount");
                 var message = $"Betalning: {invoiceNumber}";
+
+                // The QR must collect what is OUTSTANDING, not the issued total. For a samlingsfaktura
+                // an issued invoice is never edited, so a correction is a credit note and the amount to
+                // pay is derived (total − credits). Reading totalAmount here would collect the
+                // pre-credit amount — i.e. overcharge the club by the credited sum.
+                var balance = _consolidatedService.GetBalance(invoiceId);
+                var totalAmount = balance.AmountDue;
+                if (totalAmount <= 0)
+                {
+                    return Json(new
+                    {
+                        success = false,
+                        message = balance.Credited > 0 && balance.Total > 0 && balance.Status != "Paid"
+                            ? "Ingenting kvar att betala – fakturan är helt krediterad."
+                            : "Ingenting kvar att betala på den här fakturan."
+                    });
+                }
 
                 // Generate QR code
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
@@ -826,7 +842,12 @@ namespace HpskSite.Controllers
                     swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message),
                     amount = amountString,
                     invoiceNumber = invoiceNumber,
-                    competitionName = competition.Name
+                    competitionName = competition.Name,
+                    // So a payment dialog can explain why the QR is for less than the invoice says.
+                    issuedTotal = balance.Total,
+                    credited = balance.Credited,
+                    isConsolidated = balance.IsParent,
+                    coveredCount = balance.CoveredCount
                 });
             }
             catch (Exception ex)

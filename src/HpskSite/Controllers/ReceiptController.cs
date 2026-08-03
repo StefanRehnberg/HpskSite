@@ -23,17 +23,20 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly IMemberManager _memberManager;
         private readonly AdminAuthorizationService _auth;
+        private readonly ConsolidatedInvoiceService _consolidated;
 
         public ReceiptController(
             ReceiptModelBuilder builder,
             IContentService contentService,
             IMemberManager memberManager,
-            AdminAuthorizationService auth)
+            AdminAuthorizationService auth,
+            ConsolidatedInvoiceService consolidated)
         {
             _builder = builder;
             _contentService = contentService;
             _memberManager = memberManager;
             _auth = auth;
+            _consolidated = consolidated;
         }
 
         [HttpGet("{invoiceId:int}")]
@@ -54,12 +57,25 @@ namespace HpskSite.Controllers
             if (!model.IsPaid)
                 return View("~/Views/Receipt.cshtml", model); // view shows a "not paid yet" notice
 
-            // Authorization: the buyer themselves, or staff for the hosting competition.
+            // Authorization: the buyer themselves, an admin of the club that PAID (a samlingsfaktura is
+            // billed to "club-<id>", which never parses as a member, so the paying club would otherwise
+            // be locked out of its own receipt), or staff for the hosting competition.
             var isOwner = int.TryParse(current.Id, out var currentId) && currentId == model.MemberId;
-            if (!isOwner && !await IsStaffForCompetition(model.CompetitionId))
+            if (!isOwner && !await IsPayingClubAdmin(invoiceId) && !await IsStaffForCompetition(model.CompetitionId))
                 return Forbid();
 
             return View("~/Views/Receipt.cshtml", model);
+        }
+
+        /// <summary>
+        /// The club a samlingsfaktura was issued to. That club paid, so its admins get the receipt —
+        /// and they are frequently NOT staff for the competition, since a club may pay invoices on
+        /// another club's or the krets's competition.
+        /// </summary>
+        private async Task<bool> IsPayingClubAdmin(int invoiceId)
+        {
+            var payerClubId = _consolidated.ReadPayerClubId(invoiceId);
+            return payerClubId > 0 && await _auth.IsClubAdminForClub(payerClubId);
         }
 
         private async Task<bool> IsStaffForCompetition(int competitionId)
@@ -70,6 +86,17 @@ namespace HpskSite.Controllers
             var clubId = comp?.GetValue<int>("clubId") ?? 0;
             if (clubId > 0 && (await _auth.IsClubAdminForClub(clubId) || await _auth.IsSkjutledareForClub(clubId)))
                 return true;
+
+            // Region-hosted competition (clubId unset): the KRETS is the organiser, so its admins are
+            // the staff. Without this a region-organised competition — which is what an SM is — has no
+            // organiser who can open a receipt.
+            if (clubId == 0 && comp != null)
+            {
+                var regionCode = comp.GetValue<string>("regionalFederation") ?? "";
+                if (!string.IsNullOrWhiteSpace(regionCode)
+                    && await _auth.IsRegionalAdminForRegion(regionCode.Trim()))
+                    return true;
+            }
             return false;
         }
     }
