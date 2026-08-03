@@ -78,4 +78,52 @@ namespace HpskSite.Tests
             Assert.Equal("Paid", ConsolidatedInvoiceService.NormalizeStatus("[\"Paid\",\"Pending\"]"));
         }
     }
+
+    /// <summary>
+    /// Amounts decide what a club is asked to pay, so a misread is the most expensive failure in this
+    /// feature. The property is a Decimal, but the value that comes back is whatever was stored — a
+    /// boxed decimal or double normally, a string on older or hand-edited rows, and a Swedish-formatted
+    /// string carries a decimal comma and possibly a (non-breaking) space as thousands separator.
+    /// Parsing that with invariant rules returns 0, which would silently under-bill.
+    /// </summary>
+    public class ConsolidatedInvoiceAmountTests
+    {
+        [Fact]
+        public void BoxedNumericTypesPassThrough()
+        {
+            Assert.Equal(150m, ConsolidatedInvoiceService.ParseAmount(150m));
+            Assert.Equal(150.5m, ConsolidatedInvoiceService.ParseAmount(150.5d));
+        }
+
+        [Theory]
+        [InlineData("150", 150)]
+        [InlineData("150.00", 150)]
+        [InlineData("150,00", 150)]
+        [InlineData(" 150,50 ", 150.5)]
+        [InlineData("1050", 1050)]
+        [InlineData("1 050,00", 1050)]      // space as thousands separator
+        public void SwedishAndPlainStringsParse(string raw, double expected)
+        {
+            Assert.Equal((decimal)expected, ConsolidatedInvoiceService.ParseAmount(raw));
+        }
+
+
+        [Fact]
+        public void NonBreakingSpaceThousandsSeparatorParses()
+        {
+            // What a copy-paste out of a formatted report or Excel actually contains: U+00A0.
+            Assert.Equal(1050m, ConsolidatedInvoiceService.ParseAmount("1 050,00"));
+        }
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData("gratis")]
+        public void UnreadableValuesAreZeroNotAGuess(string? raw)
+        {
+            // Zero is the honest answer for "no amount stored"; such an invoice is then reported as
+            // having nothing to pay rather than being billed an invented figure.
+            Assert.Equal(0m, ConsolidatedInvoiceService.ParseAmount(raw));
+        }
+    }
 }

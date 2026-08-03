@@ -130,8 +130,27 @@ namespace HpskSite.Services
                         filteredCompetitions.Count, filters.Region, filters.RegionOwnCompetitionsOnly);
                 }
 
-                // Step 3: Group invoice hubs by competition ID for O(1) lookup
-                var hubsByCompetition = allInvoicesHubs.ToDictionary(hub => hub.ParentId);
+                // Step 3: Group invoice hubs by competition ID for O(1) lookup.
+                //
+                // A competition is SUPPOSED to have exactly one invoice hub, but nothing enforces it:
+                // both create sites (PaymentService.EnsureInvoicesHub / CreateStandaloneInvoiceAsync)
+                // look the hub up and create it when absent, with no lock between the two steps. Two
+                // registrations landing at the same moment — i.e. a registration burst, exactly what a
+                // competition opening looks like — can therefore mint two hubs. ToDictionary THREW on
+                // that, which took out the whole invoice list for every competition and every admin,
+                // not just the affected one. Group instead, and read invoices from every hub, so a
+                // duplicate degrades to a log line rather than an outage or invisible invoices.
+                var hubsByCompetition = allInvoicesHubs
+                    .GroupBy(hub => hub.ParentId)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+
+                foreach (var dup in hubsByCompetition.Where(kv => kv.Value.Count > 1))
+                {
+                    _logger.LogWarning(
+                        "Competition {CompetitionId} has {HubCount} registrationInvoicesHub nodes ({HubIds}). " +
+                        "Invoices are read from all of them, but the duplicate should be merged and removed.",
+                        dup.Key, dup.Value.Count, string.Join(", ", dup.Value.Select(h => h.Id)));
+                }
 
                 // Step 4: Aggregate invoices based on view type
                 var allInvoices = new List<InvoiceInfo>();
@@ -152,10 +171,12 @@ namespace HpskSite.Services
                     // "Fakturor att få betalt för" (incoming) or no view type — current behavior
                     foreach (var competition in filteredCompetitions)
                     {
-                        if (hubsByCompetition.TryGetValue(competition.Id, out var hub))
+                        if (hubsByCompetition.TryGetValue(competition.Id, out var hubs))
                         {
-                            var invoices = GetInvoicesFromHub(hub, competition);
-                            allInvoices.AddRange(invoices);
+                            foreach (var hub in hubs)
+                            {
+                                allInvoices.AddRange(GetInvoicesFromHub(hub, competition));
+                            }
                         }
                     }
                 }
@@ -200,7 +221,7 @@ namespace HpskSite.Services
         /// </summary>
         private List<InvoiceInfo> GetOutgoingTeamInvoices(
             List<IContent> competitions,
-            Dictionary<int, IContent> hubsByCompetition,
+            Dictionary<int, List<IContent>> hubsByCompetition,
             List<IContent> allTeamRegDocs,
             List<IContent> allRegistrationHubs,
             int clubId)
@@ -237,10 +258,10 @@ namespace HpskSite.Services
             // Get team invoices from those competitions
             foreach (var compId in teamCompetitionIds)
             {
-                if (hubsByCompetition.TryGetValue(compId, out var hub)
+                if (hubsByCompetition.TryGetValue(compId, out var hubs)
                     && competitionLookup.TryGetValue(compId, out var comp))
                 {
-                    var invoices = GetInvoicesFromHub(hub, comp);
+                    var invoices = hubs.SelectMany(hub => GetInvoicesFromHub(hub, comp));
                     foreach (var inv in invoices)
                     {
                         if (inv.MemberId.StartsWith("team-")
@@ -262,7 +283,7 @@ namespace HpskSite.Services
         /// </summary>
         private List<InvoiceInfo> GetMemberInvoices(
             List<IContent> competitions,
-            Dictionary<int, IContent> hubsByCompetition,
+            Dictionary<int, List<IContent>> hubsByCompetition,
             int clubId)
         {
             var result = new List<InvoiceInfo>();
@@ -295,9 +316,9 @@ namespace HpskSite.Services
             // Get individual invoices (non-team) for these members from all competitions
             foreach (var competition in competitions)
             {
-                if (hubsByCompetition.TryGetValue(competition.Id, out var hub))
+                if (hubsByCompetition.TryGetValue(competition.Id, out var hubs))
                 {
-                    var invoices = GetInvoicesFromHub(hub, competition);
+                    var invoices = hubs.SelectMany(hub => GetInvoicesFromHub(hub, competition));
                     foreach (var inv in invoices)
                     {
                         // Skip team invoices, only include individual member invoices

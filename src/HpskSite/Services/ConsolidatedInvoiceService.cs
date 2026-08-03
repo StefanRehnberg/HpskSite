@@ -1017,11 +1017,24 @@ namespace HpskSite.Services
         }
 
         internal static decimal ReadDecimal(IContent content, string alias)
+            => ParseAmount(content.GetValue(alias));
+
+        /// <summary>
+        /// Turn whatever is stored in a money property into a decimal. Split out from
+        /// <see cref="ReadDecimal"/> so the odd shapes can be tested without an IContent.
+        /// </summary>
+        public static decimal ParseAmount(object? raw)
         {
-            var raw = content.GetValue(alias);
             if (raw is decimal d) return d;
             if (raw is double dbl) return (decimal)dbl;
-            var s = raw?.ToString()?.Trim().Replace(',', '.') ?? "";
+            // A stringly-stored amount can carry a Swedish decimal comma and a space or non-breaking
+            // space as thousands separator ("1 050,00"). Invariant parsing would reject that outright
+            // and this method would return 0 — a silently wrong AMOUNT, the worst failure available
+            // here. Strip the grouping whitespace before parsing rather than trusting the format.
+            var s = new string((raw?.ToString() ?? "")
+                    .Where(c => !char.IsWhiteSpace(c))
+                    .ToArray())
+                .Replace(',', '.');
             return decimal.TryParse(s, System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : 0m;
         }

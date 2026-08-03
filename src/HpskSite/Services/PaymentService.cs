@@ -1,4 +1,5 @@
 using Umbraco.Cms.Core;
+using System.Collections.Concurrent;
 using System.Globalization;
 using HpskSite.Models;
 using Umbraco.Cms.Core.Models;
@@ -277,6 +278,80 @@ namespace HpskSite.Services
         /// Create an invoice for a registration
         /// NEW: Updated to accept single registrationId instead of list
         /// </summary>
+        // A competition must have exactly ONE registrationInvoicesHub - every other lookup in the
+        // codebase resolves it with FirstOrDefault, so invoices under a second hub are invisible to
+        // payment, receipts, consolidation and the repair sweep alike. Two things conspired against
+        // that invariant here: the existence check read the PUBLISHED cache, which lags behind a hub
+        // the background eager-invoice job created moments earlier, and two registrations could run
+        // check-then-create concurrently with nothing in between. A registration burst - exactly what
+        // a competition opening is - could therefore mint a duplicate. Serialize per competition and
+        // re-check against the DB, which is authoritative and has no cache lag.
+        private static readonly ConcurrentDictionary<int, object> _invoiceHubGates = new();
+
+        /// <summary>
+        /// The id of this competition's invoice hub, creating it once if it is genuinely missing.
+        /// Returns null only when the hub could not be created.
+        /// </summary>
+        private int? EnsureInvoicesHubId(int competitionId)
+        {
+            var gate = _invoiceHubGates.GetOrAdd(competitionId, _ => new object());
+            lock (gate)
+            {
+                var existing = FindInvoicesHubIdFromDb(competitionId);
+                if (existing.HasValue) return existing;
+
+                _logger.LogInformation("No invoices hub found for competition {CompetitionId}. Creating it automatically.", competitionId);
+                try
+                {
+                    var competitionContent = _contentService.GetById(competitionId);
+                    if (competitionContent == null)
+                    {
+                        _logger.LogError("Could not get writable competition content node {CompetitionId}", competitionId);
+                        return null;
+                    }
+
+                    var hub = _contentService.Create("Fakturor", competitionContent.Id, "registrationInvoicesHub");
+                    if (hub == null)
+                    {
+                        _logger.LogError("Failed to create registrationInvoicesHub for competition {CompetitionId}", competitionId);
+                        return null;
+                    }
+
+                    if (!_contentService.Save(hub).Success)
+                    {
+                        _logger.LogError("Failed to save registrationInvoicesHub for competition {CompetitionId}", competitionId);
+                        return null;
+                    }
+
+                    if (!_contentService.Publish(hub, new[] { "*" }, -1).Success)
+                    {
+                        _logger.LogError("Failed to publish registrationInvoicesHub for competition {CompetitionId}", competitionId);
+                        _contentService.Delete(hub);
+                        return null;
+                    }
+
+                    _logger.LogInformation("Successfully created and published registrationInvoicesHub {HubId} for competition {CompetitionId}", hub.Id, competitionId);
+                    return hub.Id;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error creating registrationInvoicesHub for competition {CompetitionId}", competitionId);
+                    return null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reads the hub straight from the DB rather than the published cache. A competition has a
+        /// handful of children, so one page covers it.
+        /// </summary>
+        private int? FindInvoicesHubIdFromDb(int competitionId)
+        {
+            var children = _contentService.GetPagedChildren(competitionId, 0, 500, out _);
+            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            return hub?.Id;
+        }
+
         public Task<IContent?> CreateInvoiceAsync(
             int competitionId,
             string memberId,
@@ -318,70 +393,15 @@ namespace HpskSite.Services
                     return Task.FromResult<IContent?>(null);
                 }
 
-                var allChildren = competition.Children().ToList();
-                var invoicesHub = allChildren
-                    .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub");
-
-                if (invoicesHub == null)
+                var invoicesHubId = EnsureInvoicesHubId(competitionId);
+                if (invoicesHubId == null)
                 {
-                    _logger.LogInformation("No invoices hub found for competition {CompetitionId}. Creating it automatically.", competitionId);
-
-                    try
-                    {
-                        // Get the writable competition node
-                        var competitionContent = _contentService.GetById(competitionId);
-                        if (competitionContent == null)
-                        {
-                            _logger.LogError("Could not get writable competition content node {CompetitionId}", competitionId);
-                            return Task.FromResult<IContent?>(null);
-                        }
-
-                        // Create the invoices hub
-                        var hubName = "Fakturor";
-                        var hub = _contentService.Create(hubName, competitionContent.Id, "registrationInvoicesHub");
-
-                        if (hub == null)
-                        {
-                            _logger.LogError("Failed to create registrationInvoicesHub for competition {CompetitionId}", competitionId);
-                            return Task.FromResult<IContent?>(null);
-                        }
-
-                        // Save and publish the hub
-                        var hubSaveResult = _contentService.Save(hub);
-                        if (!hubSaveResult.Success)
-                        {
-                            _logger.LogError("Failed to save registrationInvoicesHub for competition {CompetitionId}", competitionId);
-                            return Task.FromResult<IContent?>(null);
-                        }
-
-                        var hubPublishResult = _contentService.Publish(hub, new[] { "*" }, -1);
-                        if (!hubPublishResult.Success)
-                        {
-                            _logger.LogError("Failed to publish registrationInvoicesHub for competition {CompetitionId}", competitionId);
-                            _contentService.Delete(hub);
-                            return Task.FromResult<IContent?>(null);
-                        }
-
-                        _logger.LogInformation("Successfully created and published registrationInvoicesHub {HubId} for competition {CompetitionId}", hub.Id, competitionId);
-
-                        // Re-fetch to get the published version
-                        invoicesHub = umbracoContext.Content.GetById(hub.Id);
-                        if (invoicesHub == null)
-                        {
-                            _logger.LogError("Could not retrieve newly created invoices hub {HubId}", hub.Id);
-                            return Task.FromResult<IContent?>(null);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error creating registrationInvoicesHub for competition {CompetitionId}", competitionId);
-                        return Task.FromResult<IContent?>(null);
-                    }
+                    return Task.FromResult<IContent?>(null);
                 }
 
                 // Create the invoice content item
                 var invoiceName = $"{memberName} - {DateTime.Now:yyyy-MM-dd}";
-                var invoice = _contentService.Create(invoiceName, invoicesHub.Id, "registrationInvoice");
+                var invoice = _contentService.Create(invoiceName, invoicesHubId.Value, "registrationInvoice");
 
                 if (invoice == null)
                 {
@@ -1391,41 +1411,14 @@ namespace HpskSite.Services
                     return Task.FromResult<IContent?>(null);
                 }
 
-                var allChildren = competition.Children().ToList();
-                var invoicesHub = allChildren
-                    .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub");
-
-                if (invoicesHub == null)
-                {
-                    _logger.LogInformation("No invoices hub found for competition {CompetitionId}. Creating it automatically.", competitionId);
-                    var competitionContent = _contentService.GetById(competitionId);
-                    if (competitionContent == null)
-                        return Task.FromResult<IContent?>(null);
-
-                    var hub = _contentService.Create("Fakturor", competitionContent.Id, "registrationInvoicesHub");
-                    if (hub == null)
-                        return Task.FromResult<IContent?>(null);
-
-                    var hubSaveResult = _contentService.Save(hub);
-                    if (!hubSaveResult.Success)
-                        return Task.FromResult<IContent?>(null);
-
-                    var hubPublishResult = _contentService.Publish(hub, new[] { "*" }, -1);
-                    if (!hubPublishResult.Success)
-                    {
-                        _contentService.Delete(hub);
-                        return Task.FromResult<IContent?>(null);
-                    }
-
-                    invoicesHub = umbracoContext.Content.GetById(hub.Id);
-                    if (invoicesHub == null)
-                        return Task.FromResult<IContent?>(null);
-                }
+                var invoicesHubId = EnsureInvoicesHubId(competitionId);
+                if (invoicesHubId == null)
+                    return Task.FromResult<IContent?>(null);
 
                 // Use "team-{teamId}" as memberId to distinguish from individual invoices
                 var teamMemberId = $"team-{teamId}";
                 var invoiceName = $"Lag: {teamName} ({clubName}) - {DateTime.Now:yyyy-MM-dd}";
-                var invoice = _contentService.Create(invoiceName, invoicesHub.Id, "registrationInvoice");
+                var invoice = _contentService.Create(invoiceName, invoicesHubId.Value, "registrationInvoice");
                 if (invoice == null)
                     return Task.FromResult<IContent?>(null);
 
