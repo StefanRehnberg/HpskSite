@@ -551,7 +551,9 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error creating stafett team");
+                _logger.LogError(ex,
+                    "Error creating stafett team (competition {CompetitionId}, class {TeamClass}, club {ClubId}, name '{TeamName}', {MemberCount} members)",
+                    request?.CompetitionId, request?.TeamClass, request?.ClubId, request?.TeamName, request?.MemberIds?.Length ?? 0);
                 return Json(new { success = false, message = "Ett fel uppstod vid skapande av stafettlag." });
             }
         }

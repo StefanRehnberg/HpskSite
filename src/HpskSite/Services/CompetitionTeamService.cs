@@ -127,11 +127,33 @@ namespace HpskSite.Services
                 conflictWarning = BuildConflictWarning(conflicts);
             }
 
+            // Lagnamnet måste vara unikt per TÄVLING (UX_CompetitionTeam_Name is (CompetitionId,
+            // TeamName) — not per class, not per club). Since a shooter may now hold one lag per
+            // weapon class PLUS one stafett, reusing the club's own name across those teams is the
+            // natural thing to type — and it used to surface as a raw unique-key SqlException that
+            // the modal could only report as "Ett fel uppstod vid skapande av stafettlag".
+            var trimmedName = (teamName ?? "").Trim();
+            var nameClash = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
+                $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE CompetitionId = @0 AND TeamName = @1",
+                competitionId, trimmedName);
+            if (nameClash != null)
+                return (false, DuplicateTeamNameMessage(trimmedName, nameClash), null);
+
             // Create team
-            var teamId = await db.ExecuteScalarAsync<int>(
-                @"INSERT INTO CompetitionTeam (CompetitionId, TeamName, TeamClass, ClubId, CreatedBy, CreatedAt, IsRelay)
-                  VALUES (@0, @1, @2, @3, @4, @5, @6); SELECT SCOPE_IDENTITY();",
-                competitionId, teamName.Trim(), teamClass, clubId, createdByMemberId, DateTime.UtcNow, isRelay);
+            int teamId;
+            try
+            {
+                teamId = await db.ExecuteScalarAsync<int>(
+                    @"INSERT INTO CompetitionTeam (CompetitionId, TeamName, TeamClass, ClubId, CreatedBy, CreatedAt, IsRelay)
+                      VALUES (@0, @1, @2, @3, @4, @5, @6); SELECT SCOPE_IDENTITY();",
+                    competitionId, trimmedName, teamClass, clubId, createdByMemberId, DateTime.UtcNow, isRelay);
+            }
+            catch (Exception ex) when (IsUniqueKeyViolation(ex))
+            {
+                // Someone else claimed the name between the check above and this insert.
+                _logger.LogWarning(ex, "Duplicate team name '{TeamName}' in competition {CompetitionId}", trimmedName, competitionId);
+                return (false, DuplicateTeamNameMessage(trimmedName, null), null);
+            }
 
             // Add members
             foreach (var memberId in nonSpareIds)
@@ -163,7 +185,7 @@ namespace HpskSite.Services
                 var memberNames = nonSpareIds.Select(id => GetName(id)).ToList();
                 if (spareIds.Length > 0) memberNames.AddRange(spareIds.Select(id => $"{GetName(id)} (reserv)"));
 
-                CreateTeamRegistrationDoc(competitionId, teamId, teamName, teamClass, clubId, clubName, memberNames, isRelay);
+                CreateTeamRegistrationDoc(competitionId, teamId, trimmedName, teamClass, clubId, clubName, memberNames, isRelay);
             }
             catch (Exception ex)
             {
@@ -175,7 +197,7 @@ namespace HpskSite.Services
             // — instead of one being lazily minted only when "Betala med Swish" is clicked.
             try
             {
-                await EnsureTeamInvoiceCoreAsync(competitionId, teamId, teamName.Trim(), clubId, isRelay);
+                await EnsureTeamInvoiceCoreAsync(competitionId, teamId, trimmedName, clubId, isRelay);
             }
             catch (Exception ex)
             {
@@ -334,12 +356,27 @@ namespace HpskSite.Services
                 db, team.CompetitionId, team.TeamClass, memberIds, isSpringskytteComp, excludeTeamId: teamId);
             var editWarning = editConflicts.Count > 0 ? BuildConflictWarning(editConflicts) : null;
 
-            // Update team name
+            // Update team name — same per-competition uniqueness as creation (see CreateTeamAsync).
             if (!string.IsNullOrWhiteSpace(teamName))
             {
-                await db.ExecuteAsync(
-                    "UPDATE CompetitionTeam SET TeamName = @0 WHERE Id = @1",
-                    teamName.Trim(), teamId);
+                var newName = teamName.Trim();
+                var renameClash = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
+                    $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE CompetitionId = @0 AND TeamName = @1 AND Id <> @2",
+                    team.CompetitionId, newName, teamId);
+                if (renameClash != null)
+                    return (false, DuplicateTeamNameMessage(newName, renameClash));
+
+                try
+                {
+                    await db.ExecuteAsync(
+                        "UPDATE CompetitionTeam SET TeamName = @0 WHERE Id = @1",
+                        newName, teamId);
+                }
+                catch (Exception ex) when (IsUniqueKeyViolation(ex))
+                {
+                    _logger.LogWarning(ex, "Duplicate team name '{TeamName}' on rename of team {TeamId}", newName, teamId);
+                    return (false, DuplicateTeamNameMessage(newName, null));
+                }
             }
 
             // Replace all members: delete existing, insert new
@@ -909,6 +946,41 @@ namespace HpskSite.Services
         #region Helpers
 
         private const string TeamSelectCols = "Id, CompetitionId, TeamName, TeamClass, ClubId, CreatedBy, CreatedAt, IsRelay";
+
+        /// <summary>
+        /// The one message for a team-name collision. Says WHO holds the name (class + club) when
+        /// we know it: the constraint spans the whole competition, so the clashing team is usually
+        /// invisible from the modal the user is standing in — another club that took a generic
+        /// "Lag 1", or the same club's lagtävling team rather than their stafett.
+        /// </summary>
+        private string DuplicateTeamNameMessage(string teamName, CompetitionTeamDto? existing)
+        {
+            var who = "";
+            if (existing != null)
+            {
+                var clubName = existing.ClubId > 0 ? _clubService.GetClubNameById(existing.ClubId) : null;
+                who = string.IsNullOrWhiteSpace(clubName)
+                    ? $" ({existing.TeamClass})"
+                    : $" ({existing.TeamClass}, {clubName})";
+            }
+            return $"Det finns redan ett lag som heter \"{teamName}\" i tävlingen{who}. " +
+                   "Lagnamn måste vara unika inom hela tävlingen — lägg till klubbnamnet eller en siffra.";
+        }
+
+        /// <summary>
+        /// True for SQL Server unique index/constraint violations (2601 / 2627). NPoco wraps driver
+        /// exceptions, so walk the inner chain rather than matching only the outermost type.
+        /// </summary>
+        private static bool IsUniqueKeyViolation(Exception? ex)
+        {
+            for (var e = ex; e != null; e = e.InnerException)
+            {
+                if (e is Microsoft.Data.SqlClient.SqlException sqlEx &&
+                    (sqlEx.Number == 2601 || sqlEx.Number == 2627))
+                    return true;
+            }
+            return false;
+        }
 
         /// <summary>
         /// Other teams in the competition that already hold one of <paramref name="memberIds"/> in the
