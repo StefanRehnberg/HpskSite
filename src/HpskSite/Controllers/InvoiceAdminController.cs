@@ -335,6 +335,53 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// What a samlingsfaktura charges for, what has been credited, and which covered registrations
+        /// are still creditable — the credit-note dialog's data. Readable by the organiser (who issues
+        /// credits) and by the paying club (who needs to see what it is being charged for).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetConsolidationDetail(int invoiceId)
+        {
+            if (invoiceId <= 0) return Json(new { success = false, message = "Ingen faktura angiven." });
+
+            var payerClubId = _consolidatedService.ReadPayerClubId(invoiceId);
+            var isPayer = payerClubId > 0 && await CanPayForClubAsync(payerClubId);
+            var isOrganiser = await _authService.CanManageCompetitionInvoice(invoiceId);
+            if (!isPayer && !isOrganiser)
+                return Json(new { success = false, message = "Access denied" });
+
+            var d = _consolidatedService.GetDetail(invoiceId);
+            if (!d.Found) return Json(new { success = false, message = "Det här är inte en samlingsfaktura." });
+
+            return Json(new
+            {
+                success = true,
+                // Only the organiser may issue a credit, so the dialog hides the actions for a payer.
+                canCredit = isOrganiser,
+                invoiceId = d.InvoiceId,
+                invoiceNumber = d.InvoiceNumber,
+                competitionName = d.CompetitionName,
+                payerName = d.PayerName,
+                status = d.Status,
+                isPaid = d.IsPaid,
+                total = d.Total,
+                credited = d.Credited,
+                amountDue = d.AmountDue,
+                maxCreditable = d.MaxCreditable,
+                covered = d.Covered.Select(c => new
+                {
+                    invoiceId = c.InvoiceId, invoiceNumber = c.InvoiceNumber, memberName = c.MemberName,
+                    amount = c.Amount, paymentStatus = c.PaymentStatus, alreadyCredited = c.AlreadyCredited
+                }),
+                creditNotes = d.CreditNotes.Select(c => new
+                {
+                    invoiceId = c.InvoiceId, invoiceNumber = c.InvoiceNumber,
+                    amount = c.Amount, paymentStatus = c.PaymentStatus
+                })
+            });
+        }
+
+        /// <summary>
         /// Issue a kreditfaktura against a samlingsfaktura. This is the ORGANISER's act — they are the
         /// one reducing what they claim, or acknowledging they owe money back — so it is gated to the
         /// organiser, not the payer.

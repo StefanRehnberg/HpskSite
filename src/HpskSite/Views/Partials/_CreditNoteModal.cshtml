@@ -1,0 +1,240 @@
+@*
+ * Kreditfaktura dialog — shared by the krets Fakturor tab (AdminInvoicesList) and the club's own
+ * Fakturor tab (ClubAdminInvoicesList), because BOTH kinds of organiser issue credits: a club for its
+ * own competitions, a krets for the ones it hosts (an SM).
+ *
+ * Self-contained on purpose: the two host lists have differently named helpers (escapeHtml vs
+ * escapeClubHtml, translateStatus vs translateClubStatus), so this partial brings its own rather than
+ * depending on whichever page it happens to land in.
+ *
+ * A host page opts in by:
+ *   - rendering a button that calls openCreditNoteModal(invoiceId), and
+ *   - setting window.__creditNoteRefresh to its own list-reload function.
+*@
+
+@* Kreditfaktura against a samlingsfaktura. An issued invoice is never altered, so this is how the
+   organiser corrects one: pick the withdrawn registration (or enter an amount), and the credit reduces
+   what is left to pay — or, if the payment already arrived, records what must be repaid. *@
+<div class="modal fade" id="creditNoteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-receipt-cutoff me-2"></i>Kreditfaktura</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="creditNoteLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="ms-2">Hämtar samlingsfakturan...</span>
+                </div>
+                <div id="creditNoteBody" class="d-none">
+                    <div class="card mb-3">
+                        <div class="card-body py-2">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <strong id="cnNumber"></strong>
+                                    <div class="small text-muted"><span id="cnComp"></span> · betald av <span id="cnPayer"></span></div>
+                                </div>
+                                <div class="text-end small">
+                                    <div>Fakturerat: <strong id="cnTotal"></strong></div>
+                                    <div>Krediterat: <strong id="cnCredited"></strong></div>
+                                    <div>Kvar att betala: <strong id="cnDue"></strong></div>
+                                </div>
+                            </div>
+                            <div class="alert alert-warning py-2 mb-0 mt-2 d-none small" id="cnPaidNotice">
+                                <i class="bi bi-exclamation-triangle me-1"></i>
+                                Samlingsfakturan är redan betald. En kreditfaktura kan inte dras av — beloppet
+                                måste <strong>återbetalas</strong> till den betalande föreningen.
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6>Kreditera en anmälan</h6>
+                    <p class="small text-muted mb-2">Välj den anmälan som ska krediteras – beloppet fylls i automatiskt.</p>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light">
+                                <tr><th style="width:36px;"></th><th>Faktura</th><th>Anmäld</th><th class="text-end">Belopp</th><th>Status</th></tr>
+                            </thead>
+                            <tbody id="cnCoveredBody"></tbody>
+                        </table>
+                    </div>
+
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1" for="cnAmount">Belopp att kreditera (kr)</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="cnAmount">
+                            <div class="form-text" id="cnMaxHint"></div>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small mb-1" for="cnReason">Orsak (visas på kreditfakturan)</label>
+                            <input type="text" class="form-control form-control-sm" id="cnReason"
+                                   placeholder="T.ex. Skytten avanmäld" maxlength="200">
+                        </div>
+                    </div>
+
+                    <div class="d-none mt-3" id="cnExistingWrap">
+                        <hr>
+                        <h6 class="text-muted small">Tidigare kreditfakturor</h6>
+                        <ul class="small mb-0" id="cnExisting"></ul>
+                    </div>
+                </div>
+                <div class="alert alert-danger d-none mt-3" id="creditNoteError"></div>
+                <div class="alert alert-success d-none mt-3" id="creditNoteSuccess"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-dark" id="creditNoteConfirm" disabled>Skapa kreditfaktura</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script>
+
+// Self-contained helpers — see the header comment.
+function cnEsc(text) {
+    return String(text == null ? '' : text).replace(/[&<>"']/g, function (c) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+}
+function cnStatusText(status) {
+    switch (status) {
+        case 'Pending': return 'Väntande';
+        case 'Paid': return 'Betald';
+        case 'Cancelled': return 'Makulerad';
+        case 'Failed': return 'Misslyckad';
+        case 'Refunded': return 'Återbetald';
+        default: return status || '';
+    }
+}
+
+// ==================== Kreditfaktura ====================
+// An issued samlingsfaktura is never altered; a correction is a credit note. Picking a covered
+// registration prefills its amount, but the amount stays editable for a partial credit.
+let cnParentId = 0, cnMax = 0, cnSelectedInvoiceId = 0;
+
+function cnKr(v) { return Number(v || 0).toFixed(2) + ' kr'; }
+
+async function openCreditNoteModal(invoiceId) {
+    cnParentId = invoiceId; cnSelectedInvoiceId = 0;
+    const modal = new bootstrap.Modal(document.getElementById('creditNoteModal'));
+    document.getElementById('creditNoteLoading').classList.remove('d-none');
+    document.getElementById('creditNoteBody').classList.add('d-none');
+    document.getElementById('creditNoteError').classList.add('d-none');
+    document.getElementById('creditNoteSuccess').classList.add('d-none');
+    document.getElementById('creditNoteConfirm').disabled = true;
+    modal.show();
+
+    let d;
+    try {
+        const r = await fetch(`/umbraco/surface/InvoiceAdmin/GetConsolidationDetail?invoiceId=${invoiceId}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        d = await r.json();
+    } catch (e) {
+        document.getElementById('creditNoteLoading').classList.add('d-none');
+        cnShowError('Nätverksfel vid hämtning av samlingsfakturan.');
+        return;
+    }
+    document.getElementById('creditNoteLoading').classList.add('d-none');
+    if (!d.success) { cnShowError(d.message || 'Kunde inte hämta samlingsfakturan.'); return; }
+
+    document.getElementById('creditNoteBody').classList.remove('d-none');
+    document.getElementById('cnNumber').textContent = d.invoiceNumber;
+    document.getElementById('cnComp').textContent = d.competitionName;
+    document.getElementById('cnPayer').textContent = d.payerName;
+    document.getElementById('cnTotal').textContent = cnKr(d.total);
+    document.getElementById('cnCredited').textContent = cnKr(d.credited);
+    document.getElementById('cnDue').textContent = cnKr(d.amountDue);
+    document.getElementById('cnPaidNotice').classList.toggle('d-none', !d.isPaid);
+
+    cnMax = Number(d.maxCreditable || 0);
+    const amountEl = document.getElementById('cnAmount');
+    amountEl.max = cnMax;
+    amountEl.value = '';
+    document.getElementById('cnMaxHint').textContent = `Högst ${cnKr(cnMax)} kan krediteras.`;
+    document.getElementById('cnReason').value = '';
+
+    // Already-credited rows are shown but not selectable — offering them again would only over-credit,
+    // which the server refuses anyway.
+    document.getElementById('cnCoveredBody').innerHTML = (d.covered || []).map(c => `
+        <tr class="${c.alreadyCredited ? 'text-muted' : ''}">
+            <td><input type="radio" name="cnPick" class="form-check-input" value="${c.invoiceId}"
+                       data-amount="${c.amount}" ${c.alreadyCredited ? 'disabled' : ''}></td>
+            <td>${cnEsc(c.invoiceNumber)}</td>
+            <td>${cnEsc(c.memberName)}</td>
+            <td class="text-end">${cnKr(c.amount)}</td>
+            <td>${c.alreadyCredited ? '<span class="badge bg-dark">Krediterad</span>'
+                                    : '<span class="badge bg-secondary">' + cnEsc(cnStatusText(c.paymentStatus)) + '</span>'}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="text-muted small">Inga underliggande fakturor.</td></tr>';
+
+    document.querySelectorAll('input[name="cnPick"]').forEach(r => {
+        r.addEventListener('change', () => {
+            cnSelectedInvoiceId = parseInt(r.value);
+            amountEl.value = Number(r.dataset.amount).toFixed(2);
+            cnValidate();
+        });
+    });
+
+    const existing = d.creditNotes || [];
+    document.getElementById('cnExistingWrap').classList.toggle('d-none', existing.length === 0);
+    document.getElementById('cnExisting').innerHTML = existing
+        .map(c => `<li>${cnEsc(c.invoiceNumber)} · ${cnKr(c.amount)} · ${cnEsc(cnStatusText(c.paymentStatus))}</li>`).join('');
+
+    // A payer may open this for transparency but must not be able to issue anything.
+    document.getElementById('creditNoteConfirm').classList.toggle('d-none', !d.canCredit);
+    if (!d.canCredit) cnShowError('Bara arrangören kan skapa en kreditfaktura. Du ser uppgifterna som betalare.');
+
+    amountEl.oninput = cnValidate;
+    cnValidate();
+}
+
+function cnValidate() {
+    const amount = parseFloat(document.getElementById('cnAmount').value || '0');
+    const valid = amount > 0 && amount <= cnMax + 0.0001;
+    document.getElementById('creditNoteConfirm').disabled = !valid;
+    document.getElementById('cnMaxHint').className = 'form-text' + (amount > cnMax ? ' text-danger' : '');
+    document.getElementById('cnMaxHint').textContent = amount > cnMax
+        ? `För högt — högst ${cnKr(cnMax)} kan krediteras.`
+        : `Högst ${cnKr(cnMax)} kan krediteras.`;
+}
+
+function cnShowError(msg) {
+    const el = document.getElementById('creditNoteError');
+    el.textContent = msg; el.classList.remove('d-none');
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    const btn = document.getElementById('creditNoteConfirm');
+    if (!btn) return;
+    btn.addEventListener('click', async function () {
+        btn.disabled = true;
+        document.getElementById('creditNoteError').classList.add('d-none');
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        try {
+            const r = await fetch('/umbraco/surface/InvoiceAdmin/CreateCreditNote', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({
+                    parentInvoiceId: cnParentId,
+                    creditedInvoiceId: cnSelectedInvoiceId,
+                    amount: parseFloat(document.getElementById('cnAmount').value),
+                    reason: document.getElementById('cnReason').value.trim()
+                })
+            });
+            const d = await r.json();
+            if (!d.success) { cnShowError(d.message || 'Kunde inte skapa kreditfakturan.'); btn.disabled = false; return; }
+            const okEl = document.getElementById('creditNoteSuccess');
+            okEl.textContent = d.message;
+            okEl.classList.remove('d-none');
+            document.getElementById('creditNoteBody').classList.add('d-none');
+            if (typeof window.__creditNoteRefresh === 'function') window.__creditNoteRefresh();
+        } catch (e) {
+            cnShowError('Nätverksfel.');
+            btn.disabled = false;
+        }
+    });
+});
+
+</script>

@@ -164,6 +164,9 @@
 <!-- Include Swish Payment Modal Partial -->
 @await Html.PartialAsync("SwishPaymentModal")
 
+@* Shared kreditfaktura dialog (also used by the krets Fakturor tab). *@
+@await Html.PartialAsync("_CreditNoteModal")
+
 @* Confirmation for "Betala valda". Shows what will actually be created BEFORE anything is written:
    one faktura per tävling, who receives each payment, and anything that had to be dropped. A
    selection spanning tävlingar/mottagare can never be one payment, so that is stated plainly. *@
@@ -230,6 +233,12 @@
                     <i class="bi bi-envelope"></i>
                 </button>
                 {markAction}
+                @* Only on a samlingsfaktura, and only for the ORGANISER view: a club correcting an
+                   invoice it issued does it with a kreditfaktura, never by altering the invoice. *@
+                <button class="btn btn-outline-dark {hideIfNotCreditable}" onclick="openCreditNoteModal({id})"
+                        title="Skapa kreditfaktura">
+                    <i class="bi bi-receipt-cutoff"></i>
+                </button>
                 <button class="btn btn-outline-danger {hideIfCancelled}" onclick="cancelClubInvoice({id}, '{invoiceNumber}')" title="Makulera">
                     <i class="bi bi-x-circle"></i>
                 </button>
@@ -283,6 +292,9 @@ function changeClubInvoiceViewType() {
 // made against what is now on screen. That is the difference between a cosmetic flicker and a club
 // paying the wrong invoices.
 let clubInvoiceLoadSeq = 0;
+
+// The shared kreditfaktura dialog reloads whatever list it was opened from.
+window.__creditNoteRefresh = function () { loadClubInvoices(); };
 
 // Load club invoices function
 function loadClubInvoices() {
@@ -660,6 +672,11 @@ function renderClubInvoices(invoices) {
             kindBadge = ' <span class="badge bg-secondary" title="Betalas via en samlingsfaktura">Ingår i samlingsfaktura</span>';
         }
 
+        // Crediting belongs to the ORGANISER, so offer it in the "att få betalt för" view only — in the
+        // payer views the club is paying this invoice, not issuing it. The server refuses either way.
+        const hideIfNotCreditable = (invoice.invoiceKind === 'consolidated'
+            && invoice.paymentStatus !== 'Cancelled' && !isPayerView) ? '' : 'd-none';
+
         const isSettled = invoice.paymentStatus === 'Paid' || invoice.paymentStatus === 'Cancelled';
         const alreadySent = !!invoice.paymentSentDate;
         const sentDateStr = alreadySent ? new Date(invoice.paymentSentDate).toLocaleDateString('sv-SE') : '';
@@ -694,6 +711,7 @@ function renderClubInvoices(invoices) {
             .replace(/{rawStatus}/g, escapeClubHtml(invoice.paymentStatus || ''))
             .replace(/{settledBy}/g, String(invoice.settledByInvoiceId || 0))
             .replace(/{kindBadge}/g, kindBadge)
+            .replace(/{hideIfNotCreditable}/g, hideIfNotCreditable)
             .replace(/{statusClass}/g, statusClass)
             .replace(/{sentBadge}/g, sentBadge)
             .replace(/{markAction}/g, markAction)

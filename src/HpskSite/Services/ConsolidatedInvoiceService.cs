@@ -617,6 +617,109 @@ namespace HpskSite.Services
             return (paid, skipped, failed);
         }
 
+        // ── detail (for the kreditfaktura UI) ────────────────────────────────────────────────────
+
+        public sealed class CoveredLine
+        {
+            public int InvoiceId { get; init; }
+            public string InvoiceNumber { get; init; } = "";
+            public string MemberName { get; init; } = "";
+            public decimal Amount { get; init; }
+            public string PaymentStatus { get; init; } = "";
+            /// <summary>Already credited in full, so offering it again would only over-credit.</summary>
+            public bool AlreadyCredited { get; init; }
+        }
+
+        public sealed class ConsolidationDetail
+        {
+            public bool Found { get; init; }
+            public int InvoiceId { get; init; }
+            public string InvoiceNumber { get; init; } = "";
+            public string CompetitionName { get; init; } = "";
+            public string PayerName { get; init; } = "";
+            public int PayerClubId { get; init; }
+            public string Status { get; init; } = "";
+            public decimal Total { get; init; }
+            public decimal Credited { get; init; }
+            public decimal AmountDue { get; init; }
+            /// <summary>Highest credit that can still be issued without exceeding the issued total.</summary>
+            public decimal MaxCreditable { get; init; }
+            public bool IsPaid { get; init; }
+            public List<CoveredLine> Covered { get; init; } = new();
+            public List<CoveredLine> CreditNotes { get; init; } = new();
+        }
+
+        /// <summary>
+        /// Everything the credit-note dialog needs: what the parent charges, what has already been
+        /// credited, and which covered registrations are still creditable.
+        /// </summary>
+        public ConsolidationDetail GetDetail(int parentInvoiceId)
+        {
+            var parent = _contentService.GetById(parentInvoiceId);
+            if (parent == null || parent.ContentType.Alias != "registrationInvoice"
+                || (parent.GetValue<string>("invoiceKind") ?? "") != KindConsolidated)
+                return new ConsolidationDetail();
+
+            var balance = GetBalance(parentInvoiceId);
+            var competitionId = ReadInt(parent, "competitionId");
+
+            // Which covered invoices does an existing credit note already point at?
+            var creditNotes = new List<CoveredLine>();
+            var creditedInvoiceIds = new HashSet<int>();
+            foreach (var sibling in _contentService.GetPagedChildren(parent.ParentId, 0, 1000, out _))
+            {
+                if (sibling.ContentType.Alias != "registrationInvoice") continue;
+                if ((sibling.GetValue<string>("invoiceKind") ?? "") != KindCreditNote) continue;
+                if (ReadInt(sibling, "creditsInvoiceId") != parentInvoiceId) continue;
+
+                var status = sibling.GetValue<string>("paymentStatus") ?? "";
+                var voided = string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+                creditNotes.Add(new CoveredLine
+                {
+                    InvoiceId = sibling.Id,
+                    InvoiceNumber = sibling.GetValue<string>("invoiceNumber") ?? "",
+                    MemberName = sibling.GetValue<string>("memberName") ?? "",
+                    Amount = ReadDecimal(sibling, "totalAmount"),
+                    PaymentStatus = status
+                });
+                if (!voided) foreach (var id in ReadCoveredIds(sibling)) creditedInvoiceIds.Add(id);
+            }
+
+            var covered = new List<CoveredLine>();
+            foreach (var childId in ReadCoveredIds(parent))
+            {
+                var child = _contentService.GetById(childId);
+                if (child == null) continue;
+                covered.Add(new CoveredLine
+                {
+                    InvoiceId = childId,
+                    InvoiceNumber = child.GetValue<string>("invoiceNumber") ?? "",
+                    MemberName = child.GetValue<string>("memberName") ?? "",
+                    Amount = ReadDecimal(child, "totalAmount"),
+                    PaymentStatus = child.GetValue<string>("paymentStatus") ?? "",
+                    AlreadyCredited = creditedInvoiceIds.Contains(childId)
+                });
+            }
+
+            return new ConsolidationDetail
+            {
+                Found = true,
+                InvoiceId = parentInvoiceId,
+                InvoiceNumber = parent.GetValue<string>("invoiceNumber") ?? "",
+                CompetitionName = competitionId > 0 ? (_contentService.GetById(competitionId)?.Name ?? "") : "",
+                PayerName = parent.GetValue<string>("memberName") ?? "",
+                PayerClubId = balance.PayerClubId,
+                Status = balance.Status,
+                Total = balance.Total,
+                Credited = balance.Credited,
+                AmountDue = balance.AmountDue,
+                MaxCreditable = Math.Max(0m, balance.Total - balance.Credited),
+                IsPaid = string.Equals(balance.Status, "Paid", StringComparison.OrdinalIgnoreCase),
+                Covered = covered.OrderBy(c => c.MemberName).ToList(),
+                CreditNotes = creditNotes
+            };
+        }
+
         // ── kreditfaktura ────────────────────────────────────────────────────────────────────────
 
         public sealed class CreditNoteResult
