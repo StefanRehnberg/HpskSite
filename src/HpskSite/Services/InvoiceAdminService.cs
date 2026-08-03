@@ -118,11 +118,16 @@ namespace HpskSite.Services
                     var wantedRegion = NormalizeRegionCode(filters.Region);
 
                     filteredCompetitions = filteredCompetitions
-                        .Where(comp => ResolveCompetitionRegion(comp, clubRegions) == wantedRegion)
+                        .Where(comp =>
+                        {
+                            if (ResolveCompetitionRegion(comp, clubRegions) != wantedRegion) return false;
+                            // Region's own competitions only = no host club.
+                            return !filters.RegionOwnCompetitionsOnly || comp.GetValue<int>("clubId") <= 0;
+                        })
                         .ToList();
 
-                    _logger.LogInformation("Filtered to {RegionCount} competitions for region {Region}",
-                        filteredCompetitions.Count, filters.Region);
+                    _logger.LogInformation("Filtered to {RegionCount} competitions for region {Region} (ownOnly={OwnOnly})",
+                        filteredCompetitions.Count, filters.Region, filters.RegionOwnCompetitionsOnly);
                 }
 
                 // Step 3: Group invoice hubs by competition ID for O(1) lookup

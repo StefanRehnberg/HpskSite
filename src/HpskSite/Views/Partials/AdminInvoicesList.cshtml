@@ -24,12 +24,16 @@
      data-tab-button-id="@invoicesTabButtonId">
     @if (isRegionLocked)
     {
+        @* The krets's OWN competitions only. A club's invoices are between the club and its payers
+           (the club is the controller of that member data), and a regional admin already has club-admin
+           authority over every club in the krets — so they open that club's own Fakturor tab instead of
+           getting a duplicate copy here. *@
         <div class="alert alert-light border d-flex align-items-center py-2 mb-3">
             <i class="bi bi-funnel me-2"></i>
             <span class="small mb-0">
-                Visar fakturor för tävlingar i
+                Visar fakturor för
                 <strong>@(string.IsNullOrWhiteSpace(lockedRegionName) ? lockedRegionCode : lockedRegionName)</strong>
-                — både kretsens egna tävlingar och föreningarnas.
+                egna tävlingar. Föreningarnas fakturor hanteras på respektive förenings sida.
             </span>
         </div>
     }
@@ -386,6 +390,13 @@ function populateInvoicesRegionFilter() {
         });
 }
 
+// A locked region (a krets's own tab) always means the krets's OWN competitions — its clubs' invoices
+// belong on the clubs' own pages. Not a permission boundary: a regional admin already has club-admin
+// authority over those clubs, this just avoids duplicating their invoices here.
+function invoicesRegionOwnOnly() {
+    return !!invoicesLockedRegion;
+}
+
 function onInvoicesRegionChange() {
     const select = document.getElementById('invoicesRegionFilter');
     currentInvoicesRegion = select?.value || '';
@@ -401,7 +412,10 @@ function onInvoicesRegionChange() {
 
 function loadActiveCompetitionsFilter() {
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
-    const regionParam = currentInvoicesRegion ? `?region=${encodeURIComponent(currentInvoicesRegion)}` : '';
+    const compFilterParams = new URLSearchParams();
+    if (currentInvoicesRegion) compFilterParams.append('region', currentInvoicesRegion);
+    if (invoicesRegionOwnOnly()) compFilterParams.append('regionOwnCompetitionsOnly', 'true');
+    const regionParam = compFilterParams.toString() ? `?${compFilterParams}` : '';
 
     fetch(`/umbraco/surface/InvoiceAdmin/GetActiveCompetitionsForFilter${regionParam}`, {
         method: 'GET',
@@ -454,6 +468,7 @@ function loadInvoicesList() {
     });
 
     if (currentInvoicesRegion) params.append('region', currentInvoicesRegion);
+    if (invoicesRegionOwnOnly()) params.append('regionOwnCompetitionsOnly', 'true');
     if (competitionId) params.append('competitionId', competitionId);
     if (paymentStatus) params.append('paymentStatus', paymentStatus);
     if (memberSearch) params.append('memberSearch', memberSearch);

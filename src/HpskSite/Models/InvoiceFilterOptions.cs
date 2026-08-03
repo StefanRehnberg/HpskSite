@@ -17,9 +17,18 @@ namespace HpskSite.Models
         public int? ClubId { get; set; }
 
         /// <summary>
-        /// Filter by region (shows invoices from competitions belonging to clubs in this region)
+        /// Filter by region — keeps competitions hosted in this region, whether hosted by the region
+        /// itself or by one of its clubs. See <see cref="RegionOwnCompetitionsOnly"/> to narrow it.
         /// </summary>
         public string? Region { get; set; }
+
+        /// <summary>
+        /// With <see cref="Region"/> set, keep ONLY the region's own competitions (clubId unset) and
+        /// drop its clubs'. Default for a krets's own Fakturor tab: a club's invoices are between the
+        /// club and its payers — the club is the controller of that member data, and a regional admin
+        /// who genuinely needs them can open that club's own Fakturor tab. Opt in to include them.
+        /// </summary>
+        public bool RegionOwnCompetitionsOnly { get; set; }
 
         /// <summary>
         /// Filter by payment status: "Pending", "Paid", "Cancelled", "Failed", "Refunded"

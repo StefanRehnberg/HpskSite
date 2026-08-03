@@ -116,7 +116,8 @@ namespace HpskSite.Controllers
             bool excludePaid = true,
             int page = 1,
             int pageSize = 50,
-            string? viewType = null)
+            string? viewType = null,
+            bool regionOwnCompetitionsOnly = false)
         {
             // Authorization: Site admin OR club admin for specified club OR regional admin
             bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
@@ -150,7 +151,7 @@ namespace HpskSite.Controllers
                 string? cacheKey = null;
                 if (string.IsNullOrEmpty(memberSearch) && string.IsNullOrEmpty(invoiceNumberSearch) && string.IsNullOrEmpty(paymentStatus))
                 {
-                    cacheKey = string.Format(InvoicesListCacheKey, competitionId ?? 0, clubId ?? 0, excludePaid, activeCompetitionsOnly, page, viewType ?? "", region ?? "");
+                    cacheKey = string.Format(InvoicesListCacheKey, competitionId ?? 0, clubId ?? 0, excludePaid, activeCompetitionsOnly, page, viewType ?? "", $"{region ?? ""}|{regionOwnCompetitionsOnly}");
                     var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                     if (cachedResult != null)
                     {
@@ -171,7 +172,8 @@ namespace HpskSite.Controllers
                     ExcludePaid = excludePaid,
                     Page = page,
                     PageSize = pageSize,
-                    ViewType = viewType
+                    ViewType = viewType,
+                    RegionOwnCompetitionsOnly = regionOwnCompetitionsOnly
                 };
 
                 // Call service to aggregate and filter invoices
@@ -200,7 +202,7 @@ namespace HpskSite.Controllers
         /// Optionally filtered by region
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetActiveCompetitionsForFilter(string? region = null)
+        public async Task<IActionResult> GetActiveCompetitionsForFilter(string? region = null, bool regionOwnCompetitionsOnly = false)
         {
             // Allow site admins and regional admins
             bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
@@ -256,8 +258,13 @@ namespace HpskSite.Controllers
                     competitionsQuery = competitionsQuery.Where(comp =>
                     {
                         var clubId = comp.Value<int>("clubId");
-                        if (clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion.Length > 0)
-                            return clubRegion == wantedRegion;
+                        if (clubId > 0)
+                        {
+                            // The krets's own Fakturor tab defaults to the krets's own competitions.
+                            if (regionOwnCompetitionsOnly) return false;
+                            return clubRegions.TryGetValue(clubId, out var clubRegion)
+                                && clubRegion.Length > 0 && clubRegion == wantedRegion;
+                        }
 
                         return InvoiceAdminService.NormalizeRegionCode(
                             comp.Value<string>("regionalFederation")) == wantedRegion;
