@@ -494,13 +494,33 @@ namespace HpskSite.Controllers
                     actorMemberName: actorName
                 );
 
+                // A samlingsfaktura settles everything it covers: the organiser received ONE payment
+                // for N registrations, so those registrations must not keep showing as unpaid.
+                // Idempotent, and each child gets its own audit row + betalningsbekräftelse — the club
+                // paid, but the shooter still needs to know their registration is settled.
+                var cascade = await _consolidatedService.CascadePaidToChildrenAsync(
+                    parentInvoiceId: request.InvoiceId,
+                    paymentDate: DateTime.Now,
+                    paymentMethod: null,
+                    actorMemberId: actorId,
+                    actorMemberName: actorName);
+
                 // Invalidate cache
                 InvalidateInvoiceCaches();
+
+                var extra = cascade.paid > 0 || cascade.skipped > 0 || cascade.failed > 0
+                    ? $" {cascade.paid} underliggande fakturor markerades som betalda"
+                      + (cascade.skipped > 0 ? $", {cascade.skipped} var redan betalda" : "")
+                      + (cascade.failed > 0 ? $", {cascade.failed} MISSLYCKADES" : "") + "."
+                    : "";
 
                 return Json(new
                 {
                     success = true,
-                    message = "Invoice marked as paid"
+                    message = "Invoice marked as paid" + extra,
+                    cascadedPaid = cascade.paid,
+                    cascadedSkipped = cascade.skipped,
+                    cascadedFailed = cascade.failed
                 });
             }
             catch (Exception ex)
@@ -511,6 +531,35 @@ namespace HpskSite.Controllers
                     message = "Error marking invoice as paid: " + ex.Message
                 });
             }
+        }
+
+        /// <summary>
+        /// What is actually left to pay on an invoice. For a samlingsfaktura the issued total is never
+        /// edited, so the outstanding amount is DERIVED (total − credit notes) — anything generating a
+        /// QR or showing "att betala" must read this rather than totalAmount.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetInvoiceBalance(int invoiceId)
+        {
+            if (invoiceId <= 0) return Json(new { success = false, message = "Ingen faktura angiven." });
+
+            var payerClubId = _consolidatedService.ReadPayerClubId(invoiceId);
+            var isPayer = payerClubId > 0 && await CanPayForClubAsync(payerClubId);
+            if (!isPayer && !await _authService.CanManageCompetitionInvoice(invoiceId))
+                return Json(new { success = false, message = "Access denied" });
+
+            var b = _consolidatedService.GetBalance(invoiceId);
+            return Json(new
+            {
+                success = true,
+                isParent = b.IsParent,
+                total = b.Total,
+                credited = b.Credited,
+                amountDue = b.AmountDue,
+                status = b.Status,
+                coveredCount = b.CoveredCount,
+                payerClubId = b.PayerClubId
+            });
         }
 
         /// <summary>

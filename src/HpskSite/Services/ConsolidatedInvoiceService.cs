@@ -486,6 +486,137 @@ namespace HpskSite.Services
                 covered.Count, payerClubId, "Cancelled");
         }
 
+        // ── balance & paid cascade ───────────────────────────────────────────────────────────────
+
+        public sealed class ParentBalance
+        {
+            public bool IsParent { get; init; }
+            public decimal Total { get; init; }
+            public decimal Credited { get; init; }
+            /// <summary>What is actually left to pay: total − credits, or 0 once settled.</summary>
+            public decimal AmountDue { get; init; }
+            public string Status { get; init; } = "";
+            public int CoveredCount { get; init; }
+            public int PayerClubId { get; init; }
+        }
+
+        /// <summary>
+        /// The parent DOCUMENT keeps its issued total forever; what is left to pay is DERIVED
+        /// (total − credit notes), because an issued invoice must never be edited. That is the whole
+        /// reason corrections are kreditfakturor. Anything that asks "how much should this QR be for"
+        /// has to come through here, or it will collect the pre-credit amount.
+        /// </summary>
+        public ParentBalance GetBalance(int invoiceId)
+        {
+            var invoice = _contentService.GetById(invoiceId);
+            if (invoice == null) return new ParentBalance();
+
+            var kind = invoice.GetValue<string>("invoiceKind") ?? "";
+            var total = ReadDecimal(invoice, "totalAmount");
+            var status = invoice.GetValue<string>("paymentStatus") ?? "";
+            if (kind != KindConsolidated)
+            {
+                return new ParentBalance
+                {
+                    IsParent = false, Total = total, Credited = 0m,
+                    AmountDue = IsSettled(status) ? 0m : total,
+                    Status = status
+                };
+            }
+
+            var credited = SumCreditNotesAgainst(invoiceId);
+            var due = IsSettled(status) ? 0m : Math.Max(0m, total - credited);
+
+            return new ParentBalance
+            {
+                IsParent = true,
+                Total = total,
+                Credited = credited,
+                AmountDue = due,
+                Status = status,
+                CoveredCount = ReadCoveredIds(invoice).Count,
+                PayerClubId = ReadInt(invoice, "payerClubId")
+            };
+        }
+
+        private static bool IsSettled(string status) =>
+            string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Total of the credit notes issued against an invoice. Credit notes live in the same hub, so
+        /// this is a sibling scan rather than a query.
+        /// </summary>
+        private decimal SumCreditNotesAgainst(int invoiceId)
+        {
+            var invoice = _contentService.GetById(invoiceId);
+            if (invoice == null) return 0m;
+
+            decimal sum = 0m;
+            foreach (var sibling in _contentService.GetPagedChildren(invoice.ParentId, 0, 1000, out _))
+            {
+                if (sibling.ContentType.Alias != "registrationInvoice") continue;
+                if ((sibling.GetValue<string>("invoiceKind") ?? "") != KindCreditNote) continue;
+                if (ReadInt(sibling, "creditsInvoiceId") != invoiceId) continue;
+                if (string.Equals(sibling.GetValue<string>("paymentStatus") ?? "", "Cancelled",
+                        StringComparison.OrdinalIgnoreCase)) continue;   // a voided credit doesn't reduce anything
+                sum += ReadDecimal(sibling, "totalAmount");
+            }
+            return sum;
+        }
+
+        /// <summary>
+        /// The organiser marked the parent Paid, so every invoice it covers is paid too. Idempotent:
+        /// children already Paid are skipped, so re-running (or a second Paid transition) can't double
+        /// up. Each child goes through PaymentService so it gets its own audit row and the shooter gets
+        /// their betalningsbekräftelse — the club paid, but the shooter still needs to know.
+        /// </summary>
+        public async Task<(int paid, int skipped, int failed)> CascadePaidToChildrenAsync(
+            int parentInvoiceId, DateTime? paymentDate, string? paymentMethod,
+            int? actorMemberId, string? actorMemberName, bool notifyShooters = true)
+        {
+            var parent = _contentService.GetById(parentInvoiceId);
+            if (parent == null || (parent.GetValue<string>("invoiceKind") ?? "") != KindConsolidated)
+                return (0, 0, 0);
+
+            int paid = 0, skipped = 0, failed = 0;
+            foreach (var childId in ReadCoveredIds(parent))
+            {
+                try
+                {
+                    var child = _contentService.GetById(childId);
+                    if (child == null) { failed++; continue; }
+
+                    var status = child.GetValue<string>("paymentStatus") ?? "";
+                    if (string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase)) { skipped++; continue; }
+
+                    var ok = await _paymentService.UpdatePaymentStatusAsync(
+                        invoiceId: childId,
+                        paymentStatus: "Paid",
+                        paymentDate: paymentDate ?? DateTime.Now,
+                        transactionId: null,
+                        notes: $"Betald via samlingsfaktura {parent.GetValue<string>("invoiceNumber")}",
+                        paymentMethod: paymentMethod,
+                        actorMemberId: actorMemberId,
+                        actorMemberName: actorMemberName,
+                        actualAmount: null,
+                        sendReceiptOnPaid: notifyShooters);
+
+                    if (ok) paid++; else failed++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Cascade: could not mark child invoice {ChildId} paid via parent {ParentId}",
+                        childId, parentInvoiceId);
+                    failed++;
+                }
+            }
+
+            _logger.LogInformation("Cascade from parent {ParentId}: {Paid} paid, {Skipped} already paid, {Failed} failed",
+                parentInvoiceId, paid, skipped, failed);
+            return (paid, skipped, failed);
+        }
+
         /// <summary>The invoice ids a parent covers. Empty for anything that isn't a parent.</summary>
         public List<int> ReadCoveredIds(IContent parent)
         {
