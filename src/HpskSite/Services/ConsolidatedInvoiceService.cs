@@ -93,8 +93,8 @@ namespace HpskSite.Services
                 reason = kind == KindConsolidated
                     ? "Detta är redan en samlingsfaktura."
                     : "Detta är en kreditfaktura.";
-            else if (!string.Equals(status, "Pending", StringComparison.OrdinalIgnoreCase))
-                reason = $"Fakturan har status {status} — bara obetalda fakturor kan samlas.";
+            else if (!StatusIs(status, "Pending"))
+                reason = $"Fakturan har status {NormalizeStatus(status)} — bara obetalda fakturor kan samlas.";
             else if (settledBy > 0 && !IsSettlementVoid(settledBy))
                 reason = "Fakturan ingår redan i en samlingsfaktura.";
             else if (amount <= 0) reason = "Fakturan har inget belopp.";
@@ -176,7 +176,7 @@ namespace HpskSite.Services
             var parent = _contentService.GetById(parentInvoiceId);
             if (parent == null) return true;
             var status = parent.GetValue<string>("paymentStatus") ?? "";
-            return string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+            return StatusIs(status, "Cancelled");
         }
 
         // ── preview ──────────────────────────────────────────────────────────────────────────────
@@ -460,9 +460,9 @@ namespace HpskSite.Services
             var status = parent.GetValue<string>("paymentStatus") ?? "";
             var payerClubId = ReadInt(parent, "payerClubId");
 
-            if (string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase))
+            if (StatusIs(status, "Paid"))
                 return (false, "Samlingsfakturan är betald — använd kreditfaktura istället.", 0, payerClubId, status);
-            if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            if (StatusIs(status, "Cancelled"))
                 return (false, "Samlingsfakturan är redan makulerad.", 0, payerClubId, status);
 
             var covered = ReadCoveredIds(parent);
@@ -540,8 +540,7 @@ namespace HpskSite.Services
         }
 
         private static bool IsSettled(string status) =>
-            string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+            StatusIs(status, "Paid") || StatusIs(status, "Cancelled");
 
         /// <summary>
         /// Total of the credit notes issued against an invoice. Credit notes live in the same hub, so
@@ -558,8 +557,7 @@ namespace HpskSite.Services
                 if (sibling.ContentType.Alias != "registrationInvoice") continue;
                 if ((sibling.GetValue<string>("invoiceKind") ?? "") != KindCreditNote) continue;
                 if (ReadInt(sibling, "creditsInvoiceId") != invoiceId) continue;
-                if (string.Equals(sibling.GetValue<string>("paymentStatus") ?? "", "Cancelled",
-                        StringComparison.OrdinalIgnoreCase)) continue;   // a voided credit doesn't reduce anything
+                if (StatusIs(sibling.GetValue<string>("paymentStatus"), "Cancelled")) continue;   // a voided credit doesn't reduce anything
                 sum += ReadDecimal(sibling, "totalAmount");
             }
             return sum;
@@ -588,7 +586,7 @@ namespace HpskSite.Services
                     if (child == null) { failed++; continue; }
 
                     var status = child.GetValue<string>("paymentStatus") ?? "";
-                    if (string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase)) { skipped++; continue; }
+                    if (StatusIs(status, "Paid")) { skipped++; continue; }
 
                     var ok = await _paymentService.UpdatePaymentStatusAsync(
                         invoiceId: childId,
@@ -673,7 +671,7 @@ namespace HpskSite.Services
                 if (ReadInt(sibling, "creditsInvoiceId") != parentInvoiceId) continue;
 
                 var status = sibling.GetValue<string>("paymentStatus") ?? "";
-                var voided = string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+                var voided = StatusIs(status, "Cancelled");
                 creditNotes.Add(new CoveredLine
                 {
                     InvoiceId = sibling.Id,
@@ -714,7 +712,7 @@ namespace HpskSite.Services
                 Credited = balance.Credited,
                 AmountDue = balance.AmountDue,
                 MaxCreditable = Math.Max(0m, balance.Total - balance.Credited),
-                IsPaid = string.Equals(balance.Status, "Paid", StringComparison.OrdinalIgnoreCase),
+                IsPaid = StatusIs(balance.Status, "Paid"),
                 Covered = covered.OrderBy(c => c.MemberName).ToList(),
                 CreditNotes = creditNotes
             };
@@ -765,7 +763,7 @@ namespace HpskSite.Services
                 return new CreditNoteResult { Message = "Kreditfakturor kan bara skapas mot en samlingsfaktura." };
 
             var parentStatus = parent.GetValue<string>("paymentStatus") ?? "";
-            if (string.Equals(parentStatus, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            if (StatusIs(parentStatus, "Cancelled"))
                 return new CreditNoteResult { Message = "Samlingsfakturan är makulerad — det finns inget att kreditera." };
 
             var covered = ReadCoveredIds(parent);
@@ -796,7 +794,7 @@ namespace HpskSite.Services
                 };
             }
 
-            var parentWasPaid = string.Equals(parentStatus, "Paid", StringComparison.OrdinalIgnoreCase);
+            var parentWasPaid = StatusIs(parentStatus, "Paid");
             var competitionId = ReadInt(parent, "competitionId");
             var payerClubId = ReadInt(parent, "payerClubId");
             var payerName = parent.GetValue<string>("memberName") ?? "";
@@ -851,7 +849,7 @@ namespace HpskSite.Services
             if (credited != null && !parentWasPaid)
             {
                 var creditedStatus = credited.GetValue<string>("paymentStatus") ?? "";
-                if (!string.Equals(creditedStatus, "Paid", StringComparison.OrdinalIgnoreCase))
+                if (!StatusIs(creditedStatus, "Paid"))
                 {
                     await _paymentService.UpdatePaymentStatusAsync(
                         invoiceId: creditedInvoiceId,
@@ -980,6 +978,37 @@ namespace HpskSite.Services
         // ── shared readers ───────────────────────────────────────────────────────────────────────
         // The invoice doctype stores ids/amounts as Textstring in places, so parse defensively rather
         // than trusting GetValue<int>/<decimal> (which yields 0 for an unparseable value).
+
+        /// <summary>
+        /// paymentStatus is NOT always a bare string in older data — some of it is stored JSON-wrapped
+        /// as ["Paid"]. InvoiceAdminService.MapInvoice and two separate CleanStatus helpers already
+        /// defend against it, which is the evidence that such rows exist. Comparing the raw value would
+        /// make a legacy invoice look neither Pending nor Paid: it would be reported as
+        /// un-consolidatable, and the paid-cascade would fail to skip a child that is already settled
+        /// (re-sending its betalningsbekräftelse). Every status comparison in this service goes through
+        /// here.
+        /// </summary>
+        public static string NormalizeStatus(string? raw)
+        {
+            var s = (raw ?? "").Trim();
+            if (s.Length == 0) return "Pending";          // unset means unpaid, as elsewhere
+            if (s.StartsWith("[") && s.EndsWith("]"))
+            {
+                try
+                {
+                    var arr = JsonSerializer.Deserialize<string[]>(s);
+                    if (arr != null && arr.Length > 0) s = arr[0];
+                }
+                catch
+                {
+                    s = s.Trim('[', ']');
+                }
+            }
+            return s.Trim('"', '\'', ' ');
+        }
+
+        private static bool StatusIs(string? raw, string expected) =>
+            string.Equals(NormalizeStatus(raw), expected, StringComparison.OrdinalIgnoreCase);
 
         internal static int ReadInt(IContent content, string alias)
         {

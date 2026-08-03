@@ -602,7 +602,10 @@ namespace HpskSite.Services
                 var parent = _contentService.GetById(parentId);
                 if (parent == null) return false;
 
-                var status = (parent.GetValue<string>("paymentStatus") ?? "").Trim();
+                // Older data stores paymentStatus JSON-wrapped as ["Paid"], so compare the normalised
+                // value — a raw comparison would read a cancelled parent as still open (blocking a
+                // legitimate cancel) or a paid one as unpaid (offering the wrong correction).
+                var status = ConsolidatedInvoiceService.NormalizeStatus(parent.GetValue<string>("paymentStatus"));
                 if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase)) return false;
 
                 parentInvoiceNumber = parent.GetValue<string>("invoiceNumber") ?? parentId.ToString();
