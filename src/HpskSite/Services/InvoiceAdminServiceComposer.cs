@@ -13,6 +13,10 @@ namespace HpskSite.Services
         {
             // Register as singleton - service is stateless and can be reused
             builder.Services.AddSingleton<InvoiceAdminService>();
+
+            // Consolidated invoices ("samlingsfaktura"). Scoped, not singleton: it writes content via
+            // IContentService and depends on PaymentService, which is itself request-scoped.
+            builder.Services.AddScoped<ConsolidatedInvoiceService>();
         }
     }
 }

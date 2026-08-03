@@ -120,8 +120,13 @@ namespace HpskSite.Services
                 string invoiceNumString = invoice.Value<string>("invoiceNumber");
                 if (!string.IsNullOrEmpty(invoiceNumString))
                 {
+                    // Invoice numbers are "{competitionId}-{memberId}-{sequence}", so the sequence is
+                    // the LAST segment — not parts[2]. A memberId can itself contain a hyphen
+                    // ("team-13", "club-2604"), and reading parts[2] then picked up the team/club id
+                    // as the previous sequence: club-2604's second invoice came out as
+                    // "2576-club-2604-2605" instead of "-2". Plain member ids are unaffected.
                     var parts = invoiceNumString.Split('-');
-                    if (parts.Length > 2 && int.TryParse(parts[2], out int num))
+                    if (parts.Length > 2 && int.TryParse(parts[^1], out int num))
                     {
                         if (num > maxInvoiceNum)
                         {

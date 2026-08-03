@@ -32,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly AppCaches _appCaches;
+        private readonly ConsolidatedInvoiceService _consolidatedService;
 
         // Cache configuration
         // NB `region` MUST be part of the key: it's a filter on the result set, so leaving it out
@@ -63,9 +64,11 @@ namespace HpskSite.Controllers
             ClubService clubService,
             IContentService contentService,
             IMemberService memberService,
-            IMemberManager memberManager)
+            IMemberManager memberManager,
+            ConsolidatedInvoiceService consolidatedService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _consolidatedService = consolidatedService;
             _authService = authService;
             _invoiceService = invoiceService;
             _paymentService = paymentService;
@@ -195,6 +198,142 @@ namespace HpskSite.Controllers
                     message = "Error loading invoices: " + ex.Message
                 });
             }
+        }
+
+        /// <summary>
+        /// Dry run: group the selected invoices per competition and say which are payable and why the
+        /// rest are not. Read-only — nothing is written, so the UI can show a confirmation safely.
+        /// </summary>
+        // Antiforgery deliberately NOT ignored: every state-changing endpoint in this controller
+        // (MarkAsPaid, CancelInvoice, …) requires the token, and these move money too.
+        [HttpPost]
+        public async Task<IActionResult> PreviewConsolidation([FromBody] ConsolidationRequest request)
+        {
+            if (request == null || request.InvoiceIds == null || request.InvoiceIds.Length == 0)
+                return Json(new { success = false, message = "Inga fakturor valda." });
+
+            if (!await CanPayForClubAsync(request.PayerClubId))
+                return Json(new { success = false, message = "Du har inte behörighet att betala för den föreningen." });
+
+            var preview = _consolidatedService.Preview(request.InvoiceIds);
+            return Json(new
+            {
+                success = true,
+                ready = preview.Ready,
+                missingProperties = preview.MissingProperties,
+                grandTotal = preview.GrandTotal,
+                groups = preview.Groups.Select(g => new
+                {
+                    competitionId = g.CompetitionId,
+                    competitionName = g.CompetitionName,
+                    total = g.Total,
+                    needsParent = g.NeedsParent,
+                    invoices = g.Invoices.Select(i => new
+                    {
+                        invoiceId = i.InvoiceId, invoiceNumber = i.InvoiceNumber,
+                        memberName = i.MemberName, amount = i.Amount
+                    })
+                }),
+                rejected = preview.Rejected.Select(r => new
+                {
+                    invoiceId = r.InvoiceId, invoiceNumber = r.InvoiceNumber,
+                    memberName = r.MemberName, reason = r.Reason
+                })
+            });
+        }
+
+        /// <summary>
+        /// Create one parent invoice per competition for the selected invoices. Re-validates
+        /// server-side — the client's list can be stale, and paying the wrong invoices is precisely
+        /// the failure this must not allow.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> CreateConsolidatedInvoices([FromBody] ConsolidationRequest request)
+        {
+            if (request == null || request.InvoiceIds == null || request.InvoiceIds.Length == 0)
+                return Json(new { success = false, message = "Inga fakturor valda." });
+
+            if (!await CanPayForClubAsync(request.PayerClubId))
+                return Json(new { success = false, message = "Du har inte behörighet att betala för den föreningen." });
+
+            var actor = await _memberManager.GetCurrentMemberAsync();
+            var actorData = actor == null ? null : _memberService.GetByEmail(actor.Email ?? "");
+
+            var (success, message, parents, rejected) = await _consolidatedService.CreateAsync(
+                request.PayerClubId, request.InvoiceIds, actorData?.Id ?? 0);
+
+            if (success) InvalidateInvoiceCaches();
+
+            return Json(new
+            {
+                success,
+                message,
+                parents = parents.Select(p => new
+                {
+                    competitionId = p.CompetitionId,
+                    competitionName = p.CompetitionName,
+                    parentInvoiceId = p.ParentInvoiceId,
+                    parentInvoiceNumber = p.ParentInvoiceNumber,
+                    total = p.Total,
+                    coveredCount = p.CoveredCount,
+                    payDirectlyInvoiceId = p.PayDirectlyInvoiceId,
+                    error = p.Error
+                }),
+                rejected = rejected.Select(r => new
+                {
+                    invoiceId = r.InvoiceId, invoiceNumber = r.InvoiceNumber,
+                    memberName = r.MemberName, reason = r.Reason
+                })
+            });
+        }
+
+        /// <summary>
+        /// Undo an unpaid samlingsfaktura. Allowed for the PAYING club as well as the organiser: the
+        /// payer can consolidate invoices on another club's competition, and the organiser-scoped
+        /// CancelInvoice would refuse them — leaving a club that ticked the wrong boxes stuck.
+        /// Refused once Paid; that correction is a kreditfaktura.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> CancelConsolidatedInvoice([FromBody] InvoiceActionRequest request)
+        {
+            if (request == null || request.InvoiceId <= 0)
+                return Json(new { success = false, message = "Ingen faktura angiven." });
+
+            var payerClubId = _consolidatedService.ReadPayerClubId(request.InvoiceId);
+            var isPayer = payerClubId > 0 && await CanPayForClubAsync(payerClubId);
+            var isOrganiser = await _authService.CanManageCompetitionInvoice(request.InvoiceId);
+            if (!isPayer && !isOrganiser)
+                return Json(new { success = false, message = "Du har inte behörighet att makulera den fakturan." });
+
+            var (success, message, freed, _, status) = _consolidatedService.CancelUnpaidParent(request.InvoiceId);
+            if (success)
+            {
+                InvalidateInvoiceCaches();
+                var (actorId, actorName) = await GetCurrentActorAsync();
+                _ = _auditService.LogAsync(
+                    invoiceId: request.InvoiceId,
+                    competitionId: 0,
+                    eventType: InvoicePaymentEventTypes.Cancelled,
+                    byMemberId: actorId,
+                    byMemberName: actorName,
+                    paymentMethod: null,
+                    amount: null,
+                    reference: null,
+                    notes: $"Samlingsfaktura makulerad – {freed} fakturor frigjorda");
+            }
+
+            return Json(new { success, message, freedCount = freed, parentStatus = status });
+        }
+
+        /// <summary>
+        /// May the current user pay on behalf of this club? Site admin, or a club/regional admin for
+        /// it (IsClubAdminForClub covers regional admins of the club's region).
+        /// </summary>
+        private async Task<bool> CanPayForClubAsync(int payerClubId)
+        {
+            if (payerClubId <= 0) return false;
+            if (await _authService.IsCurrentUserAdminAsync()) return true;
+            return await _authService.IsClubAdminForClub(payerClubId);
         }
 
         /// <summary>
@@ -1285,5 +1424,13 @@ namespace HpskSite.Controllers
     public class InvoiceActionRequest
     {
         public int InvoiceId { get; set; }
+    }
+
+    /// <summary>A club paying a set of invoices in one go ("samlingsfaktura").</summary>
+    public class ConsolidationRequest
+    {
+        /// <summary>The club that will pay — not necessarily the club that issued the invoices.</summary>
+        public int PayerClubId { get; set; }
+        public int[]? InvoiceIds { get; set; }
     }
 }
