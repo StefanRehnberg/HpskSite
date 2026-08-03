@@ -147,19 +147,48 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr>
-                        <td>
-                            @Model.CompetitionName
-                            <div class="item-sub">
-                                Anmälningsavgift@(string.IsNullOrWhiteSpace(compDate) ? "" : $" · {compDate}")
-                                @if (!string.IsNullOrWhiteSpace(Model.ShootingClasses))
-                                {
-                                    <text><br>Klasser: @Model.ShootingClasses</text>
-                                }
-                            </div>
-                        </td>
-                        <td class="amt">@Kr(Model.AmountPaid)</td>
-                    </tr>
+                    @if (Model.IsConsolidated)
+                    {
+                        @* One payment covering several registrations: itemise them, or the club has a
+                           lump sum its bookkeeping cannot reconcile. *@
+                        <tr>
+                            <td>
+                                <strong>@Model.CompetitionName</strong>
+                                <div class="item-sub">
+                                    Samlad betalning för @Model.CoveredLines.Count anmälningar@(string.IsNullOrWhiteSpace(compDate) ? "" : $" · {compDate}")
+                                </div>
+                            </td>
+                            <td class="amt"></td>
+                        </tr>
+                        @foreach (var line in Model.CoveredLines)
+                        {
+                            <tr>
+                                <td style="padding-left:1.5rem;">
+                                    @line.MemberName
+                                    <div class="item-sub">
+                                        @line.InvoiceNumber@(string.IsNullOrWhiteSpace(line.ShootingClasses) ? "" : $" · Klasser: {line.ShootingClasses}")
+                                    </div>
+                                </td>
+                                <td class="amt">@Kr(line.Amount)</td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td>
+                                @Model.CompetitionName
+                                <div class="item-sub">
+                                    Anmälningsavgift@(string.IsNullOrWhiteSpace(compDate) ? "" : $" · {compDate}")
+                                    @if (!string.IsNullOrWhiteSpace(Model.ShootingClasses))
+                                    {
+                                        <text><br>Klasser: @Model.ShootingClasses</text>
+                                    }
+                                </div>
+                            </td>
+                            <td class="amt">@Kr(Model.AmountPaid)</td>
+                        </tr>
+                    }
                 </tbody>
             </table>
 

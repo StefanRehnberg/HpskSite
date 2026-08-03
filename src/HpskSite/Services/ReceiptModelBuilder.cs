@@ -38,6 +38,25 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// The invoice ids a samlingsfaktura covers. Parsed locally rather than reaching into
+        /// ConsolidatedInvoiceService so the receipt builder keeps no dependency on it; the JSON is a
+        /// plain int array, written in exactly one place.
+        /// </summary>
+        private static List<int> ParseCoveredInvoiceIds(IContent parent)
+        {
+            var raw = parent.GetValue<string>("coveredInvoiceIds") ?? "";
+            if (string.IsNullOrWhiteSpace(raw)) return new List<int>();
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<List<int>>(raw) ?? new List<int>();
+            }
+            catch
+            {
+                return new List<int>();
+            }
+        }
+
+        /// <summary>
         /// Build the receipt model for an invoice id. Returns null when the invoice or its
         /// competition can't be resolved. Sets <see cref="ReceiptModel.IsPaid"/> from the
         /// aggregate of Paid invoices for the registration.
@@ -95,6 +114,41 @@ namespace HpskSite.Services
                 }
             }
 
+            // --- Consolidated payment: itemise what the one payment covered. ---
+            // A club paying for N shooters cannot reconcile a single lump-sum "Anmälningsavgift" line,
+            // so the covered registrations are listed individually. Amounts come from the CHILD
+            // invoices as issued, matching how the parent's total was summed in the first place.
+            var coveredLines = new List<ReceiptLine>();
+            if ((invoice.GetValue<string>("invoiceKind") ?? "") == "consolidated")
+            {
+                foreach (var childId in ParseCoveredInvoiceIds(invoice))
+                {
+                    var child = _contentService.GetById(childId);
+                    if (child == null || child.ContentType.Alias != "registrationInvoice") continue;
+
+                    var childRegId = child.GetValue<int>("registrationId");
+                    var childClasses = "";
+                    if (childRegId > 0)
+                    {
+                        var childReg = _contentService.GetById(childRegId);
+                        var childJson = childReg?.GetValue<string>("shootingClasses") ?? "";
+                        if (!string.IsNullOrWhiteSpace(childJson))
+                        {
+                            var childEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(childJson);
+                            childClasses = string.Join(", ", childEntries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)));
+                        }
+                    }
+
+                    coveredLines.Add(new ReceiptLine
+                    {
+                        InvoiceNumber = child.GetValue<string>("invoiceNumber") ?? "",
+                        MemberName = child.GetValue<string>("memberName") ?? "",
+                        ShootingClasses = childClasses,
+                        Amount = child.GetValue<decimal?>("actualPaidAmount") ?? child.GetValue<decimal>("totalAmount")
+                    });
+                }
+            }
+
             // --- Issuer (club or region). ---
             var issuerClubId = competition.GetValue<int>("clubId");
             IContent? issuerNode = null;
@@ -137,6 +191,8 @@ namespace HpskSite.Services
                 IssuerCity = issuerNode?.GetValue<string>("city") ?? "",
                 IssuerContactEmail = ResolveReceiptEmail(issuerNode),
                 IssuerLogoUrl = issuerNode != null ? ResolveLogoUrl(issuerNode.Id) : "",
+
+                CoveredLines = coveredLines,
 
                 AmountPaid = totalPaid,
                 PaymentMethod = paymentMethod,

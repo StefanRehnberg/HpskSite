@@ -27,6 +27,16 @@ namespace HpskSite.Models
         public DateTime? CompetitionDate { get; set; }
         public string ShootingClasses { get; set; } = "";
 
+        /// <summary>
+        /// For a samlingsfaktura: the registrations this one payment covered. A club paying for N
+        /// shooters needs them itemised for its own bookkeeping — a single "Anmälningsavgift" line for
+        /// a lump sum is not something an accountant can reconcile. Empty for a normal receipt.
+        /// </summary>
+        public List<ReceiptLine> CoveredLines { get; set; } = new();
+
+        /// <summary>True when this receipt is for a consolidated payment covering several people.</summary>
+        public bool IsConsolidated => CoveredLines.Count > 0;
+
         // Issuer / seller (utställare / säljare) — the hosting club, or the region
         // for region-hosted competitions.
         public string IssuerName { get; set; } = "";
@@ -49,5 +59,14 @@ namespace HpskSite.Models
         public string ReceiptNumber { get; set; } = "";
         public DateTime PaidAt { get; set; }
         public bool IsPaid { get; set; }
+    }
+
+    /// <summary>One itemised line on a consolidated receipt — a single covered registration.</summary>
+    public class ReceiptLine
+    {
+        public string InvoiceNumber { get; set; } = "";
+        public string MemberName { get; set; } = "";
+        public string ShootingClasses { get; set; } = "";
+        public decimal Amount { get; set; }
     }
 }

@@ -778,7 +778,13 @@ namespace HpskSite.Controllers
             // Same four-tier auth as the rest of the per-competition surface — was
             // site-admin only, breaking the cashier's "show QR for this specific
             // invoice" flow when used by a club admin.
-            if (!await _authService.CanManageCompetitionInvoice(invoiceId))
+            //
+            // PLUS the club a samlingsfaktura was issued to: it is routinely paying a competition run
+            // by another club or by the krets, so the organiser-scoped check refuses it — and without
+            // a QR the club has no way to actually pay the invoice it was just handed.
+            var qrPayerClubId = _consolidatedService.ReadPayerClubId(invoiceId);
+            var qrIsPayer = qrPayerClubId > 0 && await CanPayForClubAsync(qrPayerClubId);
+            if (!qrIsPayer && !await _authService.CanManageCompetitionInvoice(invoiceId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
