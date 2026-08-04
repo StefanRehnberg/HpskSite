@@ -506,13 +506,19 @@ async function springTimeLookup(){
         await springTimeAutoSaveFinish();
         springTimeLogRecent(springTimeActive);
     }
-    if (matches.length===1){ springTimeActive=matches[0]; springTimeRenderActive(); return; }
+    if (matches.length===1){ springTimeActive=matches[0]; springTimeRenderActive(); springTimeClearPicker(); return; }
     const card=document.getElementById('springTimeActiveCard'); card.style.display='block';
     card.innerHTML=`<div class="card border-warning"><div class="card-body"><div class="fw-bold mb-2">Flera skyttar med nr ${n} – välj vapengrupp:</div>`+
         matches.map((s,i)=>`<button class="btn btn-outline-primary w-100 mb-2" onclick="springTimePick(${i})">${s.weaponClass} · ${springTimeEsc(s.name)} (${springTimeEsc(s.ageGenderClass)})</button>`).join('')+`</div></div>`;
     window._springTimeMatches=matches;
 }
-function springTimePick(i){ springTimeActive=window._springTimeMatches[i]; springTimeRenderActive(); }
+function springTimePick(i){ springTimeActive=window._springTimeMatches[i]; springTimeRenderActive(); springTimeClearPicker(); }
+// Empty the picker and keep the caret in it, so the next number can be typed with no deleting.
+// Safe only because the loaded shooter is named in the banner rather than read off this field.
+function springTimeClearPicker(){
+    const el=document.getElementById('springTimeStartNumber');
+    if(el){ el.value=''; el.focus(); }
+}
 function springTimeRenderActive(){
     const s=springTimeActive, card=document.getElementById('springTimeActiveCard');
     springRenderCurrentShooterBanner('springTimeCurrentBanner', s);
@@ -1425,6 +1431,10 @@ async function springCLookup() {
 
     springCActiveShooter = shooter;
     springCRenderActiveCard(shooter);
+    // Empty the picker and keep the caret in it, so the next number can be typed straight away with
+    // no deleting. Safe only because the loaded shooter is named in the banner, not read off here.
+    // A FAILED lookup keeps its value (selected) so a mistyped number can be corrected.
+    if (input) { input.value = ''; input.focus(); }
 }
 
 function springCRenderActiveCard(shooter) {
