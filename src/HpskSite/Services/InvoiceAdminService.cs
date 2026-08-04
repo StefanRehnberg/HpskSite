@@ -455,6 +455,18 @@ namespace HpskSite.Services
                         _logger.LogWarning(ex, "Failed to map invoice {InvoiceId}", invoiceNode.Id);
                     }
                 }
+
+                // Name the samlingsfaktura each covered invoice belongs to, so its tag can link there.
+                // Resolved from the batch we already loaded (a parent always lives in the same hub as
+                // its children) — this list is slow enough without a lookup per row.
+                var numberById = invoices
+                    .GroupBy(i => i.Id).ToDictionary(g => g.Key, g => g.First().InvoiceNumber);
+                foreach (var invoice in invoices)
+                {
+                    if (invoice.SettledByInvoiceId > 0
+                        && numberById.TryGetValue(invoice.SettledByInvoiceId, out var parentNumber))
+                        invoice.SettledByInvoiceNumber = parentNumber;
+                }
             }
             catch (Exception ex)
             {
@@ -462,6 +474,24 @@ namespace HpskSite.Services
             }
 
             return invoices;
+        }
+
+        /// <summary>
+        /// How many invoices a samlingsfaktura covers, from its own JSON array — no extra lookups.
+        /// 0 for an ordinary invoice or a credit note.
+        /// </summary>
+        private static int CountCoveredInvoices(IContent invoiceNode)
+        {
+            var raw = invoiceNode.GetValue<string>("coveredInvoiceIds") ?? "";
+            if (string.IsNullOrWhiteSpace(raw)) return 0;
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<List<int>>(raw)?.Count ?? 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         /// <summary>
@@ -512,6 +542,7 @@ namespace HpskSite.Services
                 InvoiceKind = invoiceNode.GetValue<string>("invoiceKind") ?? "",
                 SettledByInvoiceId = int.TryParse(
                     (invoiceNode.GetValue<string>("settledByInvoiceId") ?? "").Trim(), out var settledBy) ? settledBy : 0,
+                CoveredCount = CountCoveredInvoices(invoiceNode),
                 PaymentStatus = paymentStatus,
                 PaymentMethod = invoiceNode.GetValue<string>("paymentMethod") ?? "Swish",
                 CreatedDate = invoiceNode.GetValue<DateTime?>("createdDate") ?? invoiceNode.CreateDate,

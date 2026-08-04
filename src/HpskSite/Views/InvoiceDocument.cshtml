@@ -252,7 +252,7 @@
             {
                 <div class="notice">
                     <strong>Betalas inte separat.</strong> Den här fakturan ingår i samlingsfakturan
-                    @(string.IsNullOrWhiteSpace(Model.SettledByInvoiceNumber) ? "" : Model.SettledByInvoiceNumber)
+                    <a href="/faktura/@Model.SettledByInvoiceId" target="_blank" rel="noopener">@(string.IsNullOrWhiteSpace(Model.SettledByInvoiceNumber) ? "(visa)" : Model.SettledByInvoiceNumber)</a>
                     och betalas genom den.
                 </div>
             }

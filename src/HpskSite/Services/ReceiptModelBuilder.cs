@@ -264,6 +264,7 @@ namespace HpskSite.Services
                 IsCreditNote = kind == "creditNote",
                 IsCancelled = status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase),
                 IsSettledByParent = settledBy > 0,
+                SettledByInvoiceId = settledBy,
                 SettledByInvoiceNumber = settledByNumber,
                 SwishNumber = (competition?.GetValue<string>("swishNumber") ?? "").Trim(),
                 PaymentReference = basis.ReceiptNumber,

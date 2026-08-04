@@ -33,6 +33,7 @@ namespace HpskSite.Models
         /// separately, and the document says so instead of showing payment details.
         /// </summary>
         public bool IsSettledByParent { get; set; }
+        public int SettledByInvoiceId { get; set; }
         public string SettledByInvoiceNumber { get; set; } = "";
 
         // ── How to pay. Swish is per competition, bankgiro per organisation (see the payee resolver).

@@ -561,9 +561,19 @@ function renderInvoices(invoices) {
         const isConsolidated = invoice.invoiceKind === 'consolidated';
         const isCreditNote = invoice.invoiceKind === 'creditNote';
         let kindBadge = '';
-        if (isConsolidated) kindBadge = ' <span class="badge bg-primary" title="Samlar flera anmälningar i en betalning">Samlingsfaktura</span>';
+        if (isConsolidated) {
+            const n = invoice.coveredCount || 0;
+            kindBadge = ` <span class="badge bg-primary" title="Samlar flera anmälningar i en betalning">Samlingsfaktura${n ? ' · ' + n + ' anmälningar' : ''}</span>`;
+        }
         else if (isCreditNote) kindBadge = ' <span class="badge bg-dark" title="Avdrag / återbetalning – ingen ny avgift">Kreditfaktura</span>';
-        else if (invoice.settledByInvoiceId > 0) kindBadge = ' <span class="badge bg-secondary" title="Betalas via en samlingsfaktura">Ingår i samlingsfaktura</span>';
+        else if (invoice.settledByInvoiceId > 0) {
+            // Named + clickable: the parent lives in another view (it is billed to the paying club), so
+            // an unnamed tag left the reader hunting for a row that isn't in this list.
+            const parentNr = invoice.settledByInvoiceNumber || '';
+            kindBadge = ` <a class="badge bg-secondary text-decoration-none" href="/faktura/${invoice.settledByInvoiceId}"
+                             target="_blank" rel="noopener"
+                             title="Betalas via en samlingsfaktura – öppna den">Ingår i samlingsfaktura${parentNr ? ' ' + escapeHtml(parentNr) : ''}</a>`;
+        }
         const hideIfNotConsolidated = (isConsolidated && invoice.paymentStatus !== 'Cancelled') ? '' : 'd-none';
 
         return template

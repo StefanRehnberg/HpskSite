@@ -672,11 +672,18 @@ function renderClubInvoices(invoices) {
         // yet another charge instead of a deduction.
         let kindBadge = '';
         if (invoice.invoiceKind === 'consolidated') {
-            kindBadge = ' <span class="badge bg-primary" title="Samlar flera anmälningar i en betalning">Samlingsfaktura</span>';
+            const n = invoice.coveredCount || 0;
+            kindBadge = ` <span class="badge bg-primary" title="Samlar flera anmälningar i en betalning">Samlingsfaktura${n ? ' · ' + n + ' anmälningar' : ''}</span>`;
         } else if (invoice.invoiceKind === 'creditNote') {
             kindBadge = ' <span class="badge bg-dark" title="Avdrag / återbetalning – ingen ny avgift">Kreditfaktura</span>';
         } else if (invoice.settledByInvoiceId > 0) {
-            kindBadge = ' <span class="badge bg-secondary" title="Betalas via en samlingsfaktura">Ingår i samlingsfaktura</span>';
+            // Name the parent and LINK to it. The parent is billed to the paying club, so it sits in a
+            // different view from its children — an unnamed tag sent people hunting for a
+            // "Samlingsfaktura" row that isn't in the list they are looking at (Stefan, 2026-08-04).
+            const parentNr = invoice.settledByInvoiceNumber || '';
+            kindBadge = ` <a class="badge bg-secondary text-decoration-none" href="/faktura/${invoice.settledByInvoiceId}"
+                             target="_blank" rel="noopener"
+                             title="Betalas via en samlingsfaktura – öppna den">Ingår i samlingsfaktura${parentNr ? ' ' + clubEsc(parentNr) : ''}</a>`;
         }
 
         // Crediting belongs to the ORGANISER, so offer it in the "att få betalt för" view only — in the

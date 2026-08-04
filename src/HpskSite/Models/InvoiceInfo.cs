@@ -54,6 +54,16 @@ namespace HpskSite.Models
         public int SettledByInvoiceId { get; set; }
 
         /// <summary>
+        /// Invoice number of that samlingsfaktura. Carried so the "Ingår i samlingsfaktura" tag can
+        /// NAME and link to the parent: the parent is billed to the paying club and therefore sits in a
+        /// different view from its children, which made the tag a dead end (Stefan, 2026-08-04).
+        /// </summary>
+        public string SettledByInvoiceNumber { get; set; } = string.Empty;
+
+        /// <summary>How many invoices a samlingsfaktura covers; 0 for anything else.</summary>
+        public int CoveredCount { get; set; }
+
+        /// <summary>
         /// Payment status: "Pending", "Paid", "Cancelled", "Failed", "Refunded"
         /// </summary>
         public string PaymentStatus { get; set; } = "Pending";
