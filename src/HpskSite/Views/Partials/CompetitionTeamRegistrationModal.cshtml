@@ -42,6 +42,10 @@
 
                     @* ====== Tab 2: Create Team ====== *@
                     <div class="tab-pane fade" id="createTeamTab" role="tabpanel">
+                        @* Payment options for the team just created land HERE, above a freshly cleared
+                           form — they used to replace the whole tab, which left the form unusable until
+                           the modal was closed and reopened (SM rehearsal 2026-08-03). *@
+                        <div id="teamPaymentPanel"></div>
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <label for="teamRegionSelect" class="form-label">Krets</label>
@@ -337,6 +341,14 @@ document.addEventListener('DOMContentLoaded', function() {
         allRegisteredMembers = [];
         document.getElementById('memberSelectionArea').style.display = 'none';
         document.getElementById('membersTableBody').innerHTML = '';
+        // …and the rest of the form + any leftover payment panel, so a reopen is always pristine.
+        const nameOnOpen = document.getElementById('teamName');
+        if (nameOnOpen) nameOnOpen.value = '';
+        const classOnOpen = document.getElementById('teamClassSelect');
+        if (classOnOpen) classOnOpen.value = '';
+        const infoOnOpen = document.getElementById('teamClassInfo');
+        if (infoOnOpen) infoOnOpen.textContent = '';
+        clearTeamPaymentPanel();
         clearAllAlerts();
         initDropdowns();
         loadTeamClasses();
@@ -697,17 +709,14 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             const data = await resp.json();
             if (data.success) {
+                const savedName = document.getElementById('teamName').value.trim();
                 showSuccessAlert(successEl, data.message);
-                document.getElementById('teamName').value = '';
-                document.getElementById('teamClassSelect').value = '';
-                document.getElementById('teamClassInfo').textContent = '';
-                selectedMembers.clear(); selectedSpare = null;
+                await clearCreateForm();
                 btn.disabled = false;
-                if (clubSelect.value) await loadRegisteredMembers(parseInt(clubSelect.value), 'membersTableBody', 'teamClassSelect');
                 loadExistingTeams();
-                // Show payment options if configured
+                // Payment options ride above the (now empty) form — see showTeamPaymentOptions.
                 if (teamHasSwish && data.teamId) {
-                    showTeamPaymentOptions(data.teamId);
+                    showTeamPaymentOptions(data.teamId, savedName);
                 }
             } else {
                 errorEl.textContent = data.message; errorEl.classList.remove('d-none'); btn.disabled = false;
@@ -972,51 +981,77 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     // ==================== Team Payment Options ====================
-    function showTeamPaymentOptions(teamId) {
-        // Replace create tab content with payment options screen
-        const createTab = document.getElementById('createTeamTab');
-        createTab.innerHTML = `
-            <div class="text-center py-4">
-                <div class="text-success mb-3">
-                    <i class="bi bi-check-circle" style="font-size: 4rem;"></i>
-                </div>
-                <h4 class="mb-3">Laget har skapats!</h4>
-                <div class="alert alert-info mt-4 text-start">
-                    <h5 class="mb-3"><i class="bi bi-wallet2"></i> Betala lagavgift</h5>
-                    <p class="mb-3">Slutför laganmälan genom att betala lagavgiften (${teamRegistrationFee} kr) med Swish.</p>
-                    <div class="d-flex flex-column gap-2 align-items-center">
-                        <button type="button" class="btn btn-primary w-75" id="teamPayNowBtn">
-                            <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
-                        </button>
-                        <button type="button" class="btn btn-outline-primary w-75" id="teamEmailQrBtn">
-                            <i class="bi bi-envelope me-1"></i>Skicka QR-kod via e-post
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary w-75" id="teamPayLaterBtn">
-                            <i class="bi bi-clock me-1"></i>Betala senare
-                        </button>
-                    </div>
+    // Rendered ABOVE the create form, never over it: the form is already cleared and must stay
+    // usable so a club can register its next team without closing the modal.
+    function showTeamPaymentOptions(teamId, teamName) {
+        const panel = document.getElementById('teamPaymentPanel');
+        if (!panel) return;
+        panel.innerHTML = `
+            <div class="alert alert-info alert-dismissible mb-3">
+                <h5 class="mb-2"><i class="bi bi-check-circle-fill text-success me-1"></i>${escapeHtmlLocal(teamName || 'Laget')} har skapats</h5>
+                <p class="mb-3">Slutför laganmälan genom att betala lagavgiften (${teamRegistrationFee} kr) med Swish. Du kan betala nu eller senare — formuläret nedan är redan tomt för nästa lag.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-primary" id="teamPayNowBtn">
+                        <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
+                    </button>
+                    <button type="button" class="btn btn-outline-primary" id="teamEmailQrBtn">
+                        <i class="bi bi-envelope me-1"></i>Skicka QR-kod via e-post
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="teamPayLaterBtn">
+                        <i class="bi bi-clock me-1"></i>Betala senare
+                    </button>
                 </div>
             </div>
         `;
-
         document.getElementById('teamPayNowBtn').addEventListener('click', () => showTeamSwishQR(teamId));
         document.getElementById('teamEmailQrBtn').addEventListener('click', () => sendTeamSwishQREmail(teamId));
-        document.getElementById('teamPayLaterBtn').addEventListener('click', resetCreateTab);
+        document.getElementById('teamPayLaterBtn').addEventListener('click', clearTeamPaymentPanel);
+        panel.scrollIntoView({ block: 'nearest' });
+    }
+
+    function clearTeamPaymentPanel() {
+        const panel = document.getElementById('teamPaymentPanel');
+        if (panel) panel.innerHTML = '';
+    }
+
+    // Empty the create form in place so it is immediately reusable for the next team.
+    async function clearCreateForm() {
+        clearValidation();
+        const nameEl = document.getElementById('teamName');
+        if (nameEl) nameEl.value = '';
+        const classEl = document.getElementById('teamClassSelect');
+        if (classEl) classEl.value = '';
+        const infoEl = document.getElementById('teamClassInfo');
+        if (infoEl) infoEl.textContent = '';
+        selectedMembers.clear();
+        selectedSpare = null;
+        // Re-render the member table so no tick survives (club/krets are deliberately kept).
+        if (clubSelect && clubSelect.value) {
+            await loadRegisteredMembers(parseInt(clubSelect.value), 'membersTableBody', 'teamClassSelect');
+        } else {
+            const tb = document.getElementById('membersTableBody');
+            if (tb) tb.innerHTML = '';
+        }
+        updateMemberCountInfo();
     }
 
     function resetCreateTab() {
-        createTabEl.innerHTML = createTabOriginalHtml;
-        rebindCreateTab();
-        initDropdowns();
-        loadTeamClasses();
-        if (clubSelect.value) onClubChanged();
+        // The tab markup is no longer swapped out, so this is just "clear everything".
+        clearTeamPaymentPanel();
+        clearCreateForm();
     }
 
     function showTeamSwishQR(teamId) {
         const swishModalEl = document.getElementById('swishPaymentModal');
         if (!swishModalEl) return;
 
-        // Hide team registration modal first
+        // Hide team registration modal first — and come back to it when the QR is dismissed, so the
+        // club lands on the (already cleared) form instead of on a page with nothing open.
+        // One-shot listener, flag-guarded: swishPaymentModal is shared with individual registration.
+        swishModalEl.addEventListener('hidden.bs.modal', function backToTeams() {
+            swishModalEl.removeEventListener('hidden.bs.modal', backToTeams);
+            bootstrap.Modal.getOrCreateInstance(mainModal).show();
+        });
         bootstrap.Modal.getOrCreateInstance(mainModal).hide();
 
         const modalBody = document.getElementById('swishPaymentModalBody');

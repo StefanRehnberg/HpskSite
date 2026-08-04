@@ -42,6 +42,9 @@
 
                     @* ====== Tab 2: Create Stafett Team ====== *@
                     <div class="tab-pane fade" id="createStafettTab" role="tabpanel">
+                        @* Payment options for the relay team just created land HERE, above a freshly
+                           cleared form - they used to replace the whole tab (SM rehearsal 2026-08-03). *@
+                        <div id="stafettPaymentPanel"></div>
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <label for="stafettRegionSelect" class="form-label">Krets</label>
@@ -322,6 +325,14 @@ document.addEventListener('DOMContentLoaded', function() {
         stafettClubMembers = [];
         document.getElementById('stafettMemberSelectionArea').style.display = 'none';
         document.getElementById('stafettMembersTableBody').innerHTML = '';
+        // ...and the rest of the form + any leftover payment panel, so a reopen is always pristine.
+        const stfNameOnOpen = document.getElementById('stafettTeamName');
+        if (stfNameOnOpen) stfNameOnOpen.value = '';
+        const stfClassOnOpen = document.getElementById('stafettClassSelect');
+        if (stfClassOnOpen) stfClassOnOpen.value = '';
+        const stfInfoOnOpen = document.getElementById('stafettClassInfo');
+        if (stfInfoOnOpen) stfInfoOnOpen.textContent = '';
+        stafettClearPaymentPanel();
         stafettClearAllAlerts();
         stafettInitDropdowns();
         stafettLoadTeamClasses();
@@ -587,17 +598,14 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             const data = await resp.json();
             if (data.success) {
+                const savedName = document.getElementById('stafettTeamName').value.trim();
                 stafettShowSuccessAlert(successEl, data.message);
-                document.getElementById('stafettTeamName').value = '';
-                document.getElementById('stafettClassSelect').value = '';
-                document.getElementById('stafettClassInfo').textContent = '';
-                stafettSelectedMembers.clear();
+                await stafettClearCreateForm();
                 btn.disabled = false;
-                if (stafettClubSelect.value) await stafettLoadClubMembers(parseInt(stafettClubSelect.value));
                 stafettLoadExistingTeams();
-                // Show payment options if configured
+                // Payment options ride above the (now empty) form - see stafettShowPaymentOptions.
                 if (stafettHasSwish && data.teamId) {
-                    stafettShowPaymentOptions(data.teamId);
+                    stafettShowPaymentOptions(data.teamId, savedName);
                 }
             } else {
                 errorEl.textContent = data.message; errorEl.classList.remove('d-none'); btn.disabled = false;
@@ -842,28 +850,53 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // ==================== Payment Options ====================
-    function stafettShowPaymentOptions(teamId) {
-        const createTab = document.getElementById('createStafettTab');
-        createTab.innerHTML = `
-            <div class="text-center py-4">
-                <div class="text-success mb-3">
-                    <i class="bi bi-check-circle" style="font-size: 4rem;"></i>
-                </div>
-                <h4 class="mb-3">Stafettlaget har skapats!</h4>
-                <div class="alert alert-info mt-4 text-start">
-                    <h5 class="mb-3"><i class="bi bi-wallet2"></i> Betala stafettavgift</h5>
-                    <p class="mb-3">Slutför stafettanmälan genom att betala avgiften (${stafettRegistrationFee} kr) med Swish.</p>
-                    <div class="d-flex flex-column gap-2 align-items-center">
-                        <button type="button" class="btn btn-primary w-75" id="stafettPayNowBtn">
-                            <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary w-75" data-bs-dismiss="modal">
-                            <i class="bi bi-clock me-1"></i>Betala senare
-                        </button>
-                    </div>
+    // Rendered ABOVE the create form, never over it: the form is already cleared and must stay usable
+    // so a club can register its next relay team without closing the modal.
+    function stafettShowPaymentOptions(teamId, teamName) {
+        const panel = document.getElementById('stafettPaymentPanel');
+        if (!panel) return;
+        const safeName = String(teamName || 'Stafettlaget').replace(/[&<>"']/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+        panel.innerHTML = `
+            <div class="alert alert-info mb-3">
+                <h5 class="mb-2"><i class="bi bi-check-circle-fill text-success me-1"></i>${safeName} har skapats</h5>
+                <p class="mb-3">Slutför stafettanmälan genom att betala avgiften (${stafettRegistrationFee} kr) med Swish. Du kan betala nu eller senare — formuläret nedan är redan tomt för nästa lag.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-primary" id="stafettPayNowBtn">
+                        <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="stafettPayLaterBtn">
+                        <i class="bi bi-clock me-1"></i>Betala senare
+                    </button>
                 </div>
             </div>`;
         document.getElementById('stafettPayNowBtn').addEventListener('click', () => showStafettSwishQR(teamId));
+        document.getElementById('stafettPayLaterBtn').addEventListener('click', stafettClearPaymentPanel);
+        panel.scrollIntoView({ block: 'nearest' });
+    }
+
+    function stafettClearPaymentPanel() {
+        const panel = document.getElementById('stafettPaymentPanel');
+        if (panel) panel.innerHTML = '';
+    }
+
+    // Empty the create form in place so it is immediately reusable for the next relay team.
+    async function stafettClearCreateForm() {
+        stafettClearValidation();
+        const nameEl = document.getElementById('stafettTeamName');
+        if (nameEl) nameEl.value = '';
+        const classEl = document.getElementById('stafettClassSelect');
+        if (classEl) classEl.value = '';
+        const infoEl = document.getElementById('stafettClassInfo');
+        if (infoEl) infoEl.textContent = '';
+        stafettSelectedMembers.clear();
+        if (stafettClubSelect && stafettClubSelect.value) {
+            await stafettLoadClubMembers(parseInt(stafettClubSelect.value));
+        } else {
+            const tb = document.getElementById('stafettMembersTableBody');
+            if (tb) tb.innerHTML = '';
+        }
+        stafettUpdateMemberCountInfo();
     }
 
     // ==================== Swish QR Code ====================
@@ -871,7 +904,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const swishModalEl = document.getElementById('swishPaymentModal');
         if (!swishModalEl) return;
 
-        // Hide stafett registration modal first
+        // Hide stafett registration modal first - and come back to it when the QR is dismissed, so the
+        // club lands on the (already cleared) form instead of on a page with nothing open.
+        // One-shot listener: swishPaymentModal is shared with individual registration.
+        swishModalEl.addEventListener('hidden.bs.modal', function backToStafett() {
+            swishModalEl.removeEventListener('hidden.bs.modal', backToStafett);
+            bootstrap.Modal.getOrCreateInstance(stafettModal).show();
+        });
         bootstrap.Modal.getOrCreateInstance(stafettModal).hide();
 
         const modalBody = document.getElementById('swishPaymentModalBody');

@@ -57,10 +57,19 @@
         .ledig-row td { background:#fafbfc; color:#8a94a0; font-style:italic; font-size:12px; }
         .ledig-row td.time { color:#8a94a0; font-weight:normal; }
         .list-header { border-left:4px solid #0d6efd; background:#eef2f7; padding:8px 12px; font-weight:600; margin-bottom:0; }
+        /* Delays happen, and the new time often can't be typed into /station in the moment — so the
+           printed Starttid column is wide enough to pen a new time next to the printed one, with a
+           dotted write-in rule that appears on PAPER ONLY (SM rehearsal 2026-08-03). */
+        .start-list-table th.col-time { width:150px; }
+        .start-list-table td.time { white-space:nowrap; }
+        .write-in { display:none; }
         @@media print {
             body { background:#fff; padding:0; }
             .no-print { display:none !important; }
             a { text-decoration:none; color:#000; }
+            .start-list-table th.col-time { width:42mm; }
+            .start-list-table th, .start-list-table td { padding:7px 8px; }
+            .write-in { display:inline-block; width:18mm; border-bottom:1px dotted #6c757d; margin-left:7px; }
         }
     </style>
 </head>
@@ -137,7 +146,7 @@
             <thead>
                 <tr>
                     <th style="width:48px" class="text-center">#</th>
-                    <th style="width:110px">Starttid</th>
+                    <th style="width:150px" class="col-time">Starttid</th>
                     <th>Lag</th>
                     <th>Förening</th>
                     <th style="width:150px">Klass</th>
@@ -152,7 +161,7 @@
                     var spares = team.Members.Where(m => m.IsSpare).Select(m => m.Name).ToList();
                     <tr class="@rowClass">
                         <td class="text-center">@team.StartOrder</td>
-                        <td class="time">@team.StartTime</td>
+                        <td class="time">@team.StartTime<span class="write-in"></span></td>
                         <td><strong>@team.TeamName</strong></td>
                         <td>@HpskSite.Helpers.ClubNameHelper.Shorten(team.Club)</td>
                         <td>@team.StafettClass</td>
@@ -172,7 +181,7 @@
             <thead>
                 <tr>
                     <th style="width:48px" class="text-center">#</th>
-                    <th style="width:110px">Starttid</th>
+                    <th style="width:150px" class="col-time">Starttid</th>
                     <th>Namn</th>
                     <th>Förening</th>
                     <th style="width:70px" class="text-center">Vapen</th>
@@ -205,7 +214,7 @@
                                 {
                                     <tr class="ledig-row">
                                         <td></td>
-                                        <td class="time">@FmtSec(pSec + k * intervalSec)</td>
+                                        <td class="time">@FmtSec(pSec + k * intervalSec)<span class="write-in"></span></td>
                                         <td colspan="4"><i class="bi bi-dash-circle me-1"></i>Ledig tid</td>
                                     </tr>
                                 }
@@ -219,7 +228,7 @@
                         rowClass = "same-club";
                     <tr class="@rowClass">
                         <td class="text-center">@s.StartOrder</td>
-                        <td class="time">@s.StartTime</td>
+                        <td class="time">@s.StartTime<span class="write-in"></span></td>
                         <td>@s.Name</td>
                         <td>@HpskSite.Helpers.ClubNameHelper.Shorten(s.Club)</td>
                         <td class="text-center">@s.WeaponClass</td>
