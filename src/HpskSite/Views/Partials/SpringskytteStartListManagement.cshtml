@@ -165,8 +165,12 @@
             </div>
             <div class="modal-body">
                 <p class="text-muted small mb-3">
-                    Sätt vilket startnummer varje lista börjar på. Bocka i <em>Fortsätt från föregående</em>
-                    så fortsätter listan direkt på numret efter föregående lista. Numren blir unika i hela tävlingen.
+                    <strong>Bara listor du bockar i <em>Numrera om</em> ändras.</strong> Övriga listor behåller
+                    sina startnummer precis som de är. Sätt vilket startnummer en ikryssad lista börjar på, eller
+                    bocka i <em>Fortsätt från föregående</em> så fortsätter den på numret efter föregående lista.
+                    Numren är unika i hela tävlingen — krockar en plan med en lista du lämnat orörd får du ett
+                    felmeddelande i stället för dubbla nummer. Listor som är numrerade för hand är omarkerade
+                    från början.
                 </p>
                 <div id="springRenumberRows">
                     <div class="text-center py-3 text-muted">
@@ -945,12 +949,23 @@ function springRenderRenumberRows() {
         const meta = [];
         if (l.firstStartTime) meta.push('första start ' + escapeHtml(String(l.firstStartTime).substring(0, 5)));
         meta.push((l.starterCount || 0) + ' starter');
+        meta.push('nu: ' + escapeHtml(l.currentNumbers || '—'));
         const cont = idx > 0 && l.continueFromPrevious;
+        // A list whose numbers were typed in by hand stays UNTICKED by default — the whole point of
+        // this screen after the SM rehearsal is that nothing overwrites those numbers by surprise.
+        const sel = !l.manualNumbering;
+        const hist = (l.history || []).map(h =>
+            `<div>${escapeHtml(h.at)} · ${escapeHtml(springRnActionLabel(h.action))}${h.by ? ' · ' + escapeHtml(h.by) : ''} · ${escapeHtml(h.detail)}</div>`).join('');
         return `
-        <div class="border rounded p-2 mb-2">
+        <div class="border rounded p-2 mb-2 ${l.manualNumbering ? 'border-warning' : ''}">
             <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="form-check mb-0" style="min-width:150px">
+                    <input class="form-check-input" type="checkbox" id="springRnDo_${l.nodeId}" ${sel ? 'checked' : ''} onchange="springRenumberRecalc()">
+                    <label class="form-check-label small fw-bold" for="springRnDo_${l.nodeId}">Numrera om</label>
+                </div>
                 <div class="flex-grow-1" style="min-width:180px">
-                    <div class="fw-bold">${escapeHtml(l.listName)}${l.listDate ? ' <span class="text-muted small">– ' + escapeHtml(l.listDate) + '</span>' : ''}</div>
+                    <div class="fw-bold">${escapeHtml(l.listName)}${l.listDate ? ' <span class="text-muted small">– ' + escapeHtml(l.listDate) + '</span>' : ''}
+                        ${l.manualNumbering ? '<span class="badge bg-warning text-dark ms-1" title="Startnumren är ändrade för hand">Manuellt numrerad</span>' : ''}</div>
                     <div class="text-muted small">${meta.join(' · ')}</div>
                 </div>
                 <div class="d-flex align-items-center gap-1">
@@ -965,25 +980,58 @@ function springRenderRenumberRows() {
                 </div>` : '<div class="text-muted small fst-italic" style="min-width:190px">Första listan</div>'}
                 <span class="badge bg-secondary" id="springRnRange_${l.nodeId}" style="min-width:64px">—</span>
             </div>
+            ${hist ? `<div class="mt-2"><a class="small text-decoration-none" data-bs-toggle="collapse" href="#springRnHist_${l.nodeId}">
+                        <i class="bi bi-clock-history me-1"></i>Historik för startnummer</a>
+                      <div class="collapse" id="springRnHist_${l.nodeId}">
+                        <div class="text-muted small font-monospace mt-1">${hist}</div></div></div>` : ''}
         </div>`;
     }).join('');
     springRenumberRecalc();
 }
 
-// Walk the lists in order; a "follow-on" list starts one past the previous list's last number.
+function springRnActionLabel(a) {
+    switch (a) {
+        case 'generate': return 'genererad';
+        case 'regenerate': return 'omgenererad';
+        case 'manual': return 'ändrad för hand';
+        case 'renumber': return 'numrerad om';
+        case 'reset': return 'återställd';
+        case 'walk-in': return 'efteranmälan';
+        default: return a || '';
+    }
+}
+
+// Walk the lists in order. A ticked list gets fresh numbers (from its own base, or following on from
+// wherever the previous list actually ends); an unticked list is shown with the numbers it already has
+// and is left alone by the server.
 function springRenumberRecalc() {
     let running = 0;
     springRenumberPlan.forEach((l, idx) => {
+        const doEl = document.getElementById('springRnDo_' + l.nodeId);
         const contEl = document.getElementById('springRnCont_' + l.nodeId);
         const baseEl = document.getElementById('springRnBase_' + l.nodeId);
-        const cont = idx > 0 && contEl && contEl.checked;
-        if (baseEl) baseEl.disabled = cont;
+        const rangeEl = document.getElementById('springRnRange_' + l.nodeId);
+        const selected = !doEl || doEl.checked;
+        const cont = selected && idx > 0 && contEl && contEl.checked;
+        if (contEl) contEl.disabled = !selected;
+        if (baseEl) baseEl.disabled = !selected || cont;
+        const count = l.starterCount || 0;
+
+        if (!selected) {
+            // Keeps what it has; it still occupies those numbers for the lists after it.
+            if (rangeEl) { rangeEl.textContent = l.currentNumbers || '—'; rangeEl.className = 'badge bg-light text-muted border'; }
+            const nums = String(l.currentNumbers || '').match(/\d+/g);
+            if (nums) running = Math.max(running, ...nums.map(Number));
+            return;
+        }
+
         let base = cont ? running + 1 : Math.max(1, parseInt(baseEl && baseEl.value, 10) || 1);
         if (cont && baseEl) baseEl.value = base;
-        const count = l.starterCount || 0;
         const last = count > 0 ? base + count - 1 : base;
-        const rangeEl = document.getElementById('springRnRange_' + l.nodeId);
-        if (rangeEl) rangeEl.textContent = count > 0 ? (count === 1 ? String(base) : `${base}–${last}`) : '—';
+        if (rangeEl) {
+            rangeEl.textContent = count > 0 ? (count === 1 ? String(base) : `${base}–${last}`) : '—';
+            rangeEl.className = 'badge bg-secondary';
+        }
         if (count > 0) running = last;
     });
 }
@@ -995,14 +1043,27 @@ async function springApplyRenumber() {
     errEl.classList.add('d-none'); errEl.textContent = '';
 
     const lists = springRenumberPlan.map((l, idx) => {
+        const doEl = document.getElementById('springRnDo_' + l.nodeId);
         const contEl = document.getElementById('springRnCont_' + l.nodeId);
         const baseEl = document.getElementById('springRnBase_' + l.nodeId);
         return {
             nodeId: l.nodeId,
+            renumber: !doEl || doEl.checked,
             startNumberBase: Math.max(1, parseInt(baseEl && baseEl.value, 10) || 1),
             continueFromPrevious: idx > 0 && !!(contEl && contEl.checked)
         };
     });
+
+    const picked = lists.filter(x => x.renumber);
+    if (!picked.length) {
+        errEl.textContent = 'Markera minst en lista att numrera om.'; errEl.classList.remove('d-none');
+        return;
+    }
+    // Overwriting hand-typed numbers is exactly the surprise this screen exists to prevent — so say it.
+    const manual = springRenumberPlan.filter(l => l.manualNumbering && picked.some(x => x.nodeId === l.nodeId));
+    if (manual.length && !confirm('Följande listor är numrerade för hand och skrivs över:\n\n'
+        + manual.map(l => `• ${l.listName} (nu ${l.currentNumbers || '—'})`).join('\n')
+        + '\n\nFortsätt?')) return;
 
     btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Numrerar...';
     try {

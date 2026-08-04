@@ -244,8 +244,39 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         // ContinueFromPrevious is true the base is derived from the previous list's last number instead
         // (auto-follow-on). Field initializers double as the legacy-config defaults: an old list missing
         // these keys deserializes to base 1 + follow-on, i.e. one continuous 1..N sequence across lists.
+        //
+        // ContinueFromPrevious is an INTENT flag read ONLY by the explicit "Numrera om" modal.
+        // Generating a list must never re-derive another list's numbers from it — that is exactly the
+        // 2026-08-03 SM-rehearsal fault (a manually numbered C list silently came back renumbered when
+        // the A list was generated). StartNumberBase is written back with the numbers actually applied,
+        // so the stored settings always describe what is on the list.
         public int StartNumberBase { get; set; } = 1;
         public bool ContinueFromPrevious { get; set; } = true;
+
+        /// <summary>
+        /// True once a human has edited a start number on this list by hand. Sticky: automatic
+        /// numbering (generation, regeneration, follow-on) must never overwrite a flagged list —
+        /// only an explicit, per-list opt-in in the "Numrera om" modal may.
+        /// </summary>
+        public bool ManualNumbering { get; set; }
+
+        /// <summary>
+        /// Append-only audit trail of every start-number change on this list, newest last, capped at
+        /// <see cref="MaxNumberingHistory"/>. Lives in the config JSON on purpose — no migration, so
+        /// it cannot be dead-on-arrival through an unrun SQL script before SM.
+        /// </summary>
+        public List<SpringskytteNumberingEvent> NumberingHistory { get; set; } = new();
+
+        public const int MaxNumberingHistory = 60;
+    }
+
+    /// <summary>One entry in a start list's start-number audit trail.</summary>
+    public class SpringskytteNumberingEvent
+    {
+        public string At { get; set; } = "";      // yyyy-MM-dd HH:mm:ss
+        public string By { get; set; } = "";      // member name (or "" when unresolved)
+        public string Action { get; set; } = "";  // generate | regenerate | manual | renumber | reset | walk-in
+        public string Detail { get; set; } = "";  // human-readable, e.g. "1–3 → 120–122"
     }
 
     public class SpringskytteStartListRequest
@@ -283,6 +314,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public int NodeId { get; set; }
         public int StartNumberBase { get; set; } = 1;
         public bool ContinueFromPrevious { get; set; }
+
+        /// <summary>
+        /// Whether the user actually asked for THIS list to be renumbered. Lists left unticked keep
+        /// every number they have and are treated as fixed occupants when checking uniqueness.
+        /// Defaults to false so an omitted flag can never renumber a list by accident.
+        /// </summary>
+        public bool Renumber { get; set; }
     }
 
     /// <summary>Update ONLY a start list's name + date (never rebuilds/reshuffles the starters).</summary>

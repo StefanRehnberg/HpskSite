@@ -972,9 +972,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     Starters = starters
                 };
 
-                // Regenerate rebuilds the config from scratch, so carry over this list's numbering
-                // settings (base + follow-on) from the existing node — otherwise a regen would silently
-                // reset them to the defaults and shift the whole running sequence.
+                // Regenerate rebuilds the config from scratch, so carry over everything about this list's
+                // numbering from the existing node — settings, the manual-edit flag and the audit trail.
+                // Otherwise a regen would silently reset them to the defaults and shift the sequence.
+                SpringskytteStartListConfig? previousConfig = null;
                 if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
                 {
                     var oldNode = _contentService.GetById(request.ExistingNodeId.Value);
@@ -983,11 +984,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     {
                         try
                         {
-                            var oldCfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(oldJson);
-                            if (oldCfg != null)
+                            previousConfig = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(oldJson);
+                            if (previousConfig != null)
                             {
-                                config.StartNumberBase = oldCfg.StartNumberBase;
-                                config.ContinueFromPrevious = oldCfg.ContinueFromPrevious;
+                                config.StartNumberBase = previousConfig.StartNumberBase;
+                                config.ContinueFromPrevious = previousConfig.ContinueFromPrevious;
+                                config.ManualNumbering = previousConfig.ManualNumbering;
+                                config.NumberingHistory = previousConfig.NumberingHistory ?? new List<SpringskytteNumberingEvent>();
                             }
                         }
                         catch { /* keep defaults */ }
@@ -1046,6 +1049,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                     if (startListContent != null)
                     {
+                        // Assign start numbers for THIS list only. Generating a list must never rewrite
+                        // numbers on another list, and a shooter who was already on this list keeps the
+                        // number they had — including one an organiser typed in by hand.
+                        var numberingDetail = ApplyNumbersToGeneratedList(
+                            competition, startListContent.Id, config, previousConfig);
+                        AppendNumberingEvent(config, isNewNode ? "generate" : "regenerate", numberingDetail,
+                            await CurrentMemberNameAsync());
+
                         startListContent.Name = listName;
                         startListContent.SetValue("configurationData", JsonConvert.SerializeObject(config));
                         startListContent.SetValue("teamFormat", "Springskytte");
@@ -1075,11 +1086,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         _logger.LogWarning(dbEx, "Failed to update StartOrder/StartTime in SpringskytteResultEntry for CompetitionId={CompetitionId} (non-critical)", request.CompetitionId);
                     }
 
-                    // Re-apply the running-sequence numbering across ALL lists using each list's stored
-                    // base/follow-on settings, so a newly generated (or regenerated) list slots into the
-                    // sequence and numbers stay globally unique. A brand-new list defaults to follow-on,
-                    // so it appends after the existing lists.
-                    await ApplyRunningSequenceNumberingAsync(request.CompetitionId);
+                    // DELIBERATELY NOT re-numbering the other lists here. This used to call
+                    // ApplyRunningSequenceNumberingAsync(competitionId), which walked EVERY individual list
+                    // and rewrote each starter's number from that list's stored base/follow-on settings.
+                    // Because a manual per-row edit never updated those settings, generating a second list
+                    // silently rewrote the first one's hand-typed numbers (SM rehearsal 2026-08-03: a C list
+                    // set to 120+ came back at 5+, "continuing" after 4 A-class shooters). Numbers on an
+                    // existing list now change ONLY through the explicit, per-list "Numrera om" opt-in.
 
                     _logger.LogInformation("Generated Springskytte start list '{ListName}' for CompetitionId={CompetitionId}, {Count} starters, NodeId={NodeId}",
                         listName, request.CompetitionId, starters.Count, startListContent?.Id);
@@ -1440,7 +1453,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     firstStartTime = nc.config.FirstStartTime ?? "",
                     starterCount = nc.config.Starters?.Count ?? 0,
                     startNumberBase = nc.config.StartNumberBase,
-                    continueFromPrevious = nc.config.ContinueFromPrevious
+                    continueFromPrevious = nc.config.ContinueFromPrevious,
+                    // The modal needs to show what the list HAS (not only what its settings claim) and
+                    // warn before overwriting hand-typed numbers.
+                    manualNumbering = nc.config.ManualNumbering,
+                    currentNumbers = DescribeNumbers(nc.config.Starters?.Select(s => s.StartOrder)),
+                    history = (nc.config.NumberingHistory ?? new List<SpringskytteNumberingEvent>())
+                        .AsEnumerable().Reverse().Take(6)
+                        .Select(h => new { at = h.At, by = h.By, action = h.Action, detail = h.Detail }).ToList()
                 }).ToList();
 
                 return Json(new { success = true, lists });
@@ -1453,9 +1473,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         }
 
         /// <summary>
-        /// Persists each individual list's base + follow-on settings from the modal, then re-applies the
-        /// running-sequence numbering. The request's Lists carry the modal's display order (= start-time
-        /// order); the numbering itself re-derives that order canonically via GetOrderedIndividualStartLists.
+        /// Renumbers ONLY the lists the user ticked in the "Numrera om" modal. This is the one and only
+        /// path that may change a start number on an existing list — generation never does (see the note
+        /// in GenerateSpringskytteStartList). Unticked lists keep their numbers and are treated as fixed
+        /// occupants, so a plan that would duplicate a number is refused instead of applied.
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -1473,29 +1494,119 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                // Persist each list's base + follow-on (config-only; the numbering pass rewrites StartOrder).
-                if (request.Lists != null)
+                var settingByNode = (request.Lists ?? new List<SpringskytteRenumberListSetting>())
+                    .Where(l => l.NodeId > 0)
+                    .GroupBy(l => l.NodeId).ToDictionary(g => g.Key, g => g.Last());
+
+                var ordered = GetOrderedIndividualStartLists(competition);
+                if (ordered.Count == 0)
+                    return Json(new { success = false, message = "Inga startlistor hittades." });
+
+                if (!ordered.Any(nc => settingByNode.TryGetValue(nc.node.Id, out var s) && s.Renumber))
+                    return Json(new { success = false, message = "Ingen lista var markerad för omnumrering." });
+
+                // Plan first, write second. Walk the lists in numbering order: a list the user ticked gets
+                // fresh numbers from its base (or follows on from whatever the previous list actually ends
+                // at — ticked or not); a list left unticked keeps every number it has and merely occupies
+                // them. Nothing is written until the whole plan is known to be collision-free.
+                var planned = new Dictionary<int, List<int>>();   // nodeId -> numbers, ticked lists only
+                var frozen = new Dictionary<int, List<int>>();    // nodeId -> numbers, untouched lists
+                int running = 0;
+                foreach (var (node, config) in ordered)
                 {
-                    var settingByNode = request.Lists.Where(l => l.NodeId > 0)
-                        .GroupBy(l => l.NodeId).ToDictionary(g => g.Key, g => g.Last());
-                    foreach (var (node, config) in GetOrderedIndividualStartLists(competition))
+                    bool selected = settingByNode.TryGetValue(node.Id, out var setting) && setting.Renumber;
+                    if (selected)
                     {
-                        if (!settingByNode.TryGetValue(node.Id, out var setting)) continue;
-                        config.StartNumberBase = Math.Max(1, setting.StartNumberBase);
-                        config.ContinueFromPrevious = setting.ContinueFromPrevious;
-                        node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                        _contentService.Save(node);  // numbering pass publishes; save is enough here
+                        int baseNum = setting!.ContinueFromPrevious
+                            ? running + 1
+                            : Math.Max(1, setting.StartNumberBase);
+                        var nums = Enumerable.Range(baseNum, config.Starters.Count).ToList();
+                        planned[node.Id] = nums;
+                        if (nums.Count > 0) running = nums[^1];
+                    }
+                    else
+                    {
+                        var nums = config.Starters.Select(s => s.StartOrder).ToList();
+                        frozen[node.Id] = nums;
+                        if (nums.Count > 0) running = Math.Max(running, nums.Max());
                     }
                 }
 
-                var (totalStarters, listCount) = await ApplyRunningSequenceNumberingAsync(request.CompetitionId);
-                if (listCount == 0)
-                    return Json(new { success = false, message = "Inga startlistor hittades." });
+                var nameOf = ordered.ToDictionary(nc => nc.node.Id,
+                    nc => !string.IsNullOrWhiteSpace(nc.config.ListName) ? nc.config.ListName : (nc.node.Name ?? "Startlista"));
+
+                // Start numbers are globally unique across the competition, so refuse rather than create
+                // a duplicate that would send two shooters onto the same patch.
+                var occupied = new Dictionary<int, string>();
+                foreach (var (nodeId, nums) in frozen)
+                    foreach (var n in nums.Where(n => n > 0))
+                        occupied[n] = nameOf[nodeId];
+                foreach (var (nodeId, nums) in planned)
+                {
+                    foreach (var n in nums)
+                    {
+                        if (occupied.TryGetValue(n, out var holder))
+                            return Json(new
+                            {
+                                success = false,
+                                message = $"Startnummer {n} används redan i listan \"{holder}\". "
+                                        + $"Välj ett annat startnummer för \"{nameOf[nodeId]}\", eller markera \"{holder}\" för omnumrering också."
+                            });
+                        occupied[n] = nameOf[nodeId];
+                    }
+                }
+
+                var by = await CurrentMemberNameAsync();
+                int totalStarters = 0, listCount = 0;
+                var touched = new List<(SpringskytteStartListConfig config, List<int> nums)>();
+
+                foreach (var (node, config) in ordered)
+                {
+                    if (!planned.TryGetValue(node.Id, out var nums)) continue;  // untouched — not even saved
+
+                    var before = config.Starters.Select(s => s.StartOrder).ToList();
+                    for (int i = 0; i < config.Starters.Count; i++)
+                        config.Starters[i].StartOrder = nums[i];
+
+                    var setting = settingByNode[node.Id];
+                    config.StartNumberBase = nums.Count > 0 ? nums[0] : Math.Max(1, setting.StartNumberBase);
+                    config.ContinueFromPrevious = setting.ContinueFromPrevious;
+                    config.ManualNumbering = false;  // the organiser just chose to overwrite by hand-off
+                    AppendNumberingEvent(config, "renumber",
+                        $"{DescribeNumbers(before)} → {DescribeNumbers(nums)}", by);
+
+                    node.SetValue("configurationData", JsonConvert.SerializeObject(config));
+                    node.SetValue("startListContent", BuildStartListHtml(config.Starters));
+                    _contentService.Save(node);
+                    var publishResult = _contentService.Publish(node, new[] { "*" });
+                    if (!publishResult.Success)
+                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
+
+                    totalStarters += config.Starters.Count;
+                    listCount++;
+                    touched.Add((config, nums));
+                }
+
+                using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                {
+                    foreach (var (config, _) in touched)
+                        foreach (var starter in config.Starters)
+                            await db.ExecuteAsync(
+                                @"UPDATE SpringskytteResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
+                                  WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                                starter.StartOrder, starter.StartTime, DateTime.Now,
+                                request.CompetitionId, starter.MemberId, starter.WeaponClass);
+                }
+
+                _logger.LogInformation("Renumbered {Lists} of {Total} Springskytte start lists for CompetitionId={CompetitionId} ({Count} starters) by {By}",
+                    listCount, ordered.Count, request.CompetitionId, totalStarters, by);
 
                 return Json(new
                 {
                     success = true,
-                    message = $"Startnummer tilldelade för {totalStarters} startande i {listCount} listor."
+                    message = $"Startnummer tilldelade för {totalStarters} startande i {listCount} "
+                            + (listCount == 1 ? "lista." : "listor.")
+                            + (ordered.Count > listCount ? $" {ordered.Count - listCount} lista/listor lämnades orörda." : "")
                 });
             }
             catch (Exception ex)
@@ -1503,6 +1614,136 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 _logger.LogError(ex, "Error renumbering Springskytte start lists");
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
+        }
+
+        // ===== Start-number helpers (single source of truth for who may change a number) =====
+
+        /// <summary>Display name of the acting member, for the numbering audit trail ("" if unresolved).</summary>
+        private async Task<string> CurrentMemberNameAsync()
+        {
+            try
+            {
+                var m = await _memberManager.GetCurrentMemberAsync();
+                if (m == null) return "";
+                if (!int.TryParse(m.Id, out var mid)) return m.Name ?? "";
+                var member = _memberService.GetById(mid);
+                var first = member?.GetValue<string>("firstName") ?? "";
+                var last = member?.GetValue<string>("lastName") ?? "";
+                var full = $"{first} {last}".Trim();
+                return !string.IsNullOrWhiteSpace(full) ? full : (member?.Name ?? m.Name ?? "");
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>Appends one entry to a list's numbering audit trail, keeping only the newest ones.</summary>
+        private static void AppendNumberingEvent(SpringskytteStartListConfig config, string action, string detail, string by)
+        {
+            if (string.IsNullOrWhiteSpace(detail)) return;
+            config.NumberingHistory ??= new List<SpringskytteNumberingEvent>();
+            config.NumberingHistory.Add(new SpringskytteNumberingEvent
+            {
+                At = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                By = by ?? "",
+                Action = action,
+                Detail = detail
+            });
+            int overflow = config.NumberingHistory.Count - SpringskytteStartListConfig.MaxNumberingHistory;
+            if (overflow > 0) config.NumberingHistory.RemoveRange(0, overflow);
+        }
+
+        /// <summary>"120–122" / "3, 7, 120–122" / "—" — compact range text for the audit trail.</summary>
+        private static string DescribeNumbers(IEnumerable<int>? numbers)
+        {
+            var list = (numbers ?? Enumerable.Empty<int>()).Where(n => n > 0).Distinct().OrderBy(n => n).ToList();
+            if (list.Count == 0) return "—";
+            var parts = new List<string>();
+            int start = list[0], prev = list[0];
+            foreach (var n in list.Skip(1))
+            {
+                if (n == prev + 1) { prev = n; continue; }
+                parts.Add(start == prev ? $"{start}" : $"{start}–{prev}");
+                start = prev = n;
+            }
+            parts.Add(start == prev ? $"{start}" : $"{start}–{prev}");
+            return string.Join(", ", parts);
+        }
+
+        /// <summary>
+        /// Every start number in use by the competition's individual start lists, optionally excluding one
+        /// node (the list being generated/renumbered). Stafett lists carry Teams, not Starters, and number
+        /// separately — they are not part of this pool.
+        /// </summary>
+        private HashSet<int> CollectUsedStartNumbers(Umbraco.Cms.Core.Models.IContent competition, int excludeNodeId)
+        {
+            var used = new HashSet<int>();
+            foreach (var (node, cfg) in GetOrderedIndividualStartLists(competition))
+            {
+                if (excludeNodeId > 0 && node.Id == excludeNodeId) continue;
+                foreach (var s in cfg.Starters)
+                    if (s.StartOrder > 0) used.Add(s.StartOrder);
+            }
+            return used;
+        }
+
+        /// <summary>
+        /// Assigns start numbers to a freshly generated/regenerated list WITHOUT touching any other list.
+        /// A shooter who was already on this list keeps their exact number (that is what makes a manually
+        /// typed number sticky through a regeneration); everyone else takes the next free numbers after
+        /// every number already in use in the competition, so numbers stay globally unique and are never
+        /// reused. Returns a human-readable summary for the audit trail.
+        /// </summary>
+        private string ApplyNumbersToGeneratedList(
+            Umbraco.Cms.Core.Models.IContent competition,
+            int nodeId,
+            SpringskytteStartListConfig config,
+            SpringskytteStartListConfig? previousConfig)
+        {
+            var used = CollectUsedStartNumbers(competition, nodeId);
+            var before = previousConfig?.Starters?.Select(s => s.StartOrder).ToList() ?? new List<int>();
+
+            var kept = new Dictionary<string, int>();
+            if (previousConfig?.Starters != null)
+                foreach (var s in previousConfig.Starters)
+                    if (s.StartOrder > 0) kept[$"{s.MemberId}|{s.WeaponClass}"] = s.StartOrder;
+
+            int keptCount = 0;
+            foreach (var st in config.Starters)
+            {
+                if (kept.TryGetValue($"{st.MemberId}|{st.WeaponClass}", out var n) && n > 0 && !used.Contains(n))
+                {
+                    st.StartOrder = n;
+                    used.Add(n);
+                    keptCount++;
+                }
+                else
+                {
+                    st.StartOrder = 0;  // gets a fresh number below
+                }
+            }
+
+            int next = (used.Count > 0 ? used.Max() : 0) + 1;
+            int fresh = 0;
+            foreach (var st in config.Starters.Where(s => s.StartOrder == 0))
+            {
+                while (used.Contains(next)) next++;
+                st.StartOrder = next;
+                used.Add(next);
+                next++;
+                fresh++;
+            }
+
+            // Store the numbers actually applied so the stored settings always describe the list
+            // (they used to claim base 1 on a list numbered from 120, which made the renumber
+            // modal's preview lie and hid the drift).
+            config.StartNumberBase = config.Starters.Count > 0 ? config.Starters.Min(s => s.StartOrder) : 1;
+
+            var after = config.Starters.Select(s => s.StartOrder).ToList();
+            var note = $"{DescribeNumbers(before)} → {DescribeNumbers(after)}";
+            if (keptCount > 0) note += $" (behöll {keptCount} befintliga";
+            if (keptCount > 0 && fresh > 0) note += $", {fresh} nya)";
+            else if (keptCount > 0) note += ")";
+            else if (fresh > 0) note += $" ({fresh} nya)";
+            return note;
         }
 
         /// <summary>
@@ -1536,11 +1777,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// Assigns start numbers as a per-list RUNNING SEQUENCE (not per weapon class): each list either
         /// starts at its own StartNumberBase or, when ContinueFromPrevious is set, continues from the
         /// previous list's last number. Numbers are therefore globally unique across the competition.
-        /// This is the single source of truth for numbering — generation and the "Numrera om" modal both
-        /// run it (after persisting each list's base/follow-on settings), so the stored settings always
-        /// reproduce the same numbering.
+        ///
+        /// This rewrites EVERY individual list, so it is reserved for "Återställ startnummer" — the one
+        /// action whose stated purpose is a clean 1..N across the whole competition. Generation must never
+        /// call it (that was the SM-rehearsal fault) and the "Numrera om" modal plans per ticked list
+        /// instead. It clears each list's manual-numbering flag, because after a reset nothing is manual.
         /// </summary>
-        private async Task<(int totalStarters, int listCount)> ApplyRunningSequenceNumberingAsync(int competitionId)
+        private async Task<(int totalStarters, int listCount)> ApplyRunningSequenceNumberingAsync(int competitionId, string by = "")
         {
             var competition = _contentService.GetById(competitionId);
             if (competition == null) return (0, 0);
@@ -1552,10 +1795,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             foreach (var (node, config) in nodeConfigs)
             {
                 int baseNum = config.ContinueFromPrevious ? running + 1 : Math.Max(1, config.StartNumberBase);
+                var before = config.Starters.Select(s => s.StartOrder).ToList();
                 int i = 0;
                 foreach (var starter in config.Starters)
                     starter.StartOrder = baseNum + i++;
                 running = baseNum + config.Starters.Count - 1;
+                config.StartNumberBase = baseNum;
+                config.ManualNumbering = false;
+                AppendNumberingEvent(config, "reset",
+                    $"{DescribeNumbers(before)} → {DescribeNumbers(config.Starters.Select(s => s.StartOrder))}", by);
 
                 node.SetValue("configurationData", JsonConvert.SerializeObject(config));
                 node.SetValue("startListContent", BuildStartListHtml(config.Starters));
@@ -1635,7 +1883,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     _contentService.Save(node);
                 }
 
-                var (totalReset, _) = await ApplyRunningSequenceNumberingAsync(competitionId);
+                var (totalReset, _) = await ApplyRunningSequenceNumberingAsync(competitionId, await CurrentMemberNameAsync());
 
                 _logger.LogInformation("Reset Springskytte start numbers for CompetitionId={CompetitionId}, {Count} starters",
                     competitionId, totalReset);
@@ -1723,7 +1971,19 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 {
                     if (request.StartOrder.Value < 0)
                         return Json(new { success = false, message = "Ogiltigt startnummer." });
+                    int oldOrder = starter.StartOrder;
                     starter.StartOrder = request.StartOrder.Value;
+
+                    if (oldOrder != starter.StartOrder)
+                    {
+                        // Flag the list as hand-numbered and record it. Automatic numbering must never
+                        // silently undo this (SM rehearsal 2026-08-03) — only an explicit per-list tick
+                        // in the "Numrera om" modal, or "Återställ startnummer", may overwrite it.
+                        config.ManualNumbering = true;
+                        config.StartNumberBase = config.Starters.Min(s => s.StartOrder);
+                        AppendNumberingEvent(config, "manual",
+                            $"#{oldOrder} → #{starter.StartOrder} ({starter.Name})", await CurrentMemberNameAsync());
+                    }
                 }
 
                 // Keep the array in start-time order so the public list, paus detection and
@@ -2576,9 +2836,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 }
                 else
                 {
-                    // Next start number for this weapon class across the whole competition (never reused,
-                    // never renumbers others) — same "global max + 1" approach as Fältskytte patrols.
-                    startOrder = tl.Rows.Where(r => r.WeaponClass == weaponClass).Select(r => r.StartOrder).DefaultIfEmpty(0).Max() + 1;
+                    // Next start number across the WHOLE competition (never reused, never renumbers others)
+                    // — same "global max + 1" approach as Fältskytte patrols. Deliberately not scoped to
+                    // the weapon class: numbering is one globally-unique sequence, so a per-class max+1
+                    // could hand out a number another class already holds.
+                    startOrder = tl.Rows.Select(r => r.StartOrder).DefaultIfEmpty(0).Max() + 1;
                     targetConfig.Starters.Add(new SpringskytteStartListEntry
                     {
                         StartOrder = startOrder,
@@ -2597,6 +2859,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .OrderBy(s => ParseStartTimeSeconds(s.StartTime))
                     .ThenBy(s => s.StartOrder)
                     .ToList();
+
+                if (existing == null)
+                    AppendNumberingEvent(targetConfig, "walk-in",
+                        $"#{startOrder} tilldelat {name}", await CurrentMemberNameAsync());
 
                 targetNode.SetValue("configurationData", JsonConvert.SerializeObject(targetConfig));
                 targetNode.SetValue("startListContent", BuildStartListHtml(targetConfig.Starters));
