@@ -1356,13 +1356,32 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         }
 
         [HttpGet]
-        public IActionResult GetSpringskytteStartLists(int competitionId)
+        public async Task<IActionResult> GetSpringskytteStartLists(int competitionId)
         {
             try
             {
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
+
+                // A shooter's DNS/DNF lives in SpringskytteResultEntry, NOT in the start list's
+                // configurationData — so without this the admin cards had no way to show it and
+                // marking someone DNS through the row's pen icon looked like it did nothing.
+                var statusByShooter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    using var statusDb = _umbracoDatabaseFactory.CreateDatabase();
+                    var rows = await statusDb.FetchAsync<SpringskytteResultEntry>(
+                        "WHERE CompetitionId = @0", competitionId);
+                    foreach (var r in rows)
+                        if (!string.IsNullOrWhiteSpace(r.Status))
+                            statusByShooter[$"{r.MemberId}|{r.WeaponClass}"] = r.Status!;
+                }
+                catch (Exception statusEx)
+                {
+                    // Non-critical: the lists must still render without status decoration.
+                    _logger.LogWarning(statusEx, "Could not read Springskytte statuses for {Comp}", competitionId);
+                }
 
                 var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
                     .Where(c => c.ContentType.Alias == "precisionStartList")
@@ -1410,7 +1429,21 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         defaultInterval = config?.DefaultInterval ?? "01:00",
                         breakAfterEvery = config?.BreakAfterEvery ?? 10,
                         breakDuration = config?.BreakDuration ?? "05:00",
-                        starters = config?.Starters ?? new List<SpringskytteStartListEntry>(),
+                        // Projected (not the raw POCO) so each row carries its status. Every field the
+                        // admin JS reads is kept — adding one, not replacing the shape.
+                        starters = (config?.Starters ?? new List<SpringskytteStartListEntry>())
+                            .Select(s => new
+                            {
+                                startOrder = s.StartOrder,
+                                startTime = s.StartTime,
+                                memberId = s.MemberId,
+                                name = s.Name,
+                                club = s.Club,
+                                weaponClass = s.WeaponClass,
+                                ageGenderClass = s.AgeGenderClass,
+                                status = statusByShooter.TryGetValue($"{s.MemberId}|{s.WeaponClass}", out var stt) ? stt : null
+                            })
+                            .ToList(),
                         starterCount,
                         generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
                         isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList")

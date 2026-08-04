@@ -196,6 +196,9 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <style>
+    /* A DNS/DNF starter stays on the list (their number is theirs) but must read as out. */
+    .spring-starters-table tr.spring-starter-out td:not(:last-child) { opacity: .55; }
+    .spring-starters-table tr.spring-starter-out td:nth-child(3) { text-decoration: line-through; }
     .spring-list-card {
         border: 1px solid var(--bs-border-color);
         border-radius: 0.5rem;
@@ -471,10 +474,17 @@ function springBuildStartersTable(card) {
                    onclick="springEditStarter('${card.tempId}', ${s.memberId}, '${s.weaponClass}')"
                    title="Redigera startnummer och starttid"><i class="bi bi-pencil"></i></button></td>`
             : '';
-        html += `<tr>
+        // DNS/DNF is stored with the RESULT, not in the start list, so it has to be decorated here —
+        // otherwise marking a shooter DNS through the pen icon changed nothing the user could see.
+        const st = (s.status || '').toUpperCase();
+        const isDns = st === 'DNS';
+        const statusBadge = st
+            ? ` <span class="badge ${isDns ? 'bg-dark' : 'bg-secondary'} ms-1">${escapeHtml(st)}</span>`
+            : '';
+        html += `<tr class="${st ? 'spring-starter-out' : ''}">
             <td>${s.startOrder}</td>
-            <td class="fw-bold" style="font-family:monospace">${s.startTime}</td>
-            <td>${escapeHtml(s.name)}</td>
+            <td class="fw-bold" style="font-family:monospace">${s.startTime}${isDns ? '<div class="small fw-normal text-success">tiden är ledig</div>' : ''}</td>
+            <td>${escapeHtml(s.name)}${statusBadge}</td>
             <td>${escapeHtml(s.club)}</td>
             <td><span class="badge bg-secondary">${s.weaponClass}</span></td>
             <td>${formatAgeSpan(s.ageGenderClass)}</td>

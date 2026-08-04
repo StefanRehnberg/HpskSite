@@ -454,7 +454,6 @@ function escapeHtml(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&':'&amp;'
 
 // ---------- RM move tool ----------
 function buildMovePickers() {
-    const n = nowSec();
     const shooterSel = document.getElementById('moveShooter');
     const slotSel = document.getElementById('moveSlot');
     // candidate shooters: everyone with a time, ordered by time; DNS + not-checked-in flagged
@@ -473,19 +472,30 @@ function buildMovePickers() {
 
 // Slots are restricted to the selected shooter's weapon class — classes are never mixed
 // (separate sequences, often different days).
+//
+// Two things this gets right that the first version didn't:
+//  1. it measures against effNow(), the LINE's clock, not the wall clock. When the line runs late the
+//     operator nudges the offset; a start that has "passed" on the wall clock is still ahead of the
+//     line, and a slot freed by a DNS there is exactly the one the starter wants to reuse.
+//  2. slots the line HAS passed are still listed, disabled and marked "passerad", instead of silently
+//     disappearing — a DNS whose opening vanished from this list read as "the DNS did nothing".
 function buildSlotOptions() {
-    const n = nowSec();
+    const n = effNow();
     const slotSel = document.getElementById('moveSlot');
     const sel = selectedMoveShooter();
     const wc = sel ? sel.weaponClass : null;
-    const slotList = (state.freeSlots || [])
+    const all = (state.freeSlots || [])
         .filter(f => !wc || f.weaponClass === wc)
-        .filter(f => hmsToSec(f.time) >= n - 5)
         .sort((a, b) => hmsToSec(a.time) - hmsToSec(b.time));
-    slotSel.innerHTML = slotList.map(f => {
-        const label = f.kind === 'dns' ? ('ledig – ' + (f.freedFrom || 'DNS')) : (f.kind === 'efter' ? 'efter sista' : 'paus');
-        return `<option value="${f.time}">${f.time.substring(0,5)} – ${label}</option>`;
-    }).join('') || '<option value="">Inga lediga luckor</option>';
+    const label = f => f.kind === 'dns' ? ('ledig – ' + (f.freedFrom || 'DNS')) : (f.kind === 'efter' ? 'efter sista' : 'paus');
+    const upcoming = all.filter(f => hmsToSec(f.time) >= n - 5);
+    const passed = all.filter(f => hmsToSec(f.time) < n - 5);
+    let html = upcoming.map(f => `<option value="${f.time}">${f.time.substring(0,5)} – ${label(f)}</option>`).join('');
+    if (passed.length) {
+        html += '<option value="" disabled>── passerade ──</option>'
+            + passed.map(f => `<option value="" disabled>${f.time.substring(0,5)} – ${label(f)} (passerad)</option>`).join('');
+    }
+    slotSel.innerHTML = html || '<option value="">Inga lediga luckor</option>';
 }
 
 function selectedMoveShooter() {

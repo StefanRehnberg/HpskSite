@@ -673,26 +673,55 @@ function springTimeAdjBadges(m,w){
     return list.map(a=>{ const isPen=a.adjustmentType==='Penalty'; let label; if(isPen) label='+'+a.points+' min'; else {const mag=Math.abs(a.seconds); label='−'+(mag%60===0?(mag/60)+' min':mag+' s');}
         return `<span class="badge ${isPen?'bg-danger':'bg-success'} me-1 mb-1" title="${springTimeEsc(a.reason||'')}">${label} <a href="#" class="text-white ms-1" onclick="springTimeDelAdj(${a.id});return false;">&times;</a></span>`; }).join('');
 }
-// Log a shooter (with a recorded måltid) into the "Nyss sparade" list when we leave them.
-// There's no longer a "Spara tid" button — måltid auto-saves, so switching shooter is the cue.
+// Log a shooter into the "Nyss sparade" list when we leave them: a recorded måltid, or a DNS/DNF
+// (no time, but very much something the timekeeper just did and must see confirmed).
 function springTimeLogRecent(s){
-    if(!s || s.sprintTimeSeconds == null) return;
-    springTimeRecent.unshift({ n:s.startOrder, name:s.name, wc:s.weaponClass, sprint:springTimeFmtDur(Number(s.sprintTimeSeconds)) });
+    if(!s) return;
+    const st=(s.status||'').toUpperCase();
+    if(s.sprintTimeSeconds == null && !st) return;
+    springTimeRecent.unshift({ n:s.startOrder, name:s.name, wc:s.weaponClass,
+        sprint: st ? st : springTimeFmtDur(Number(s.sprintTimeSeconds)) });
     springTimeRecent = springTimeRecent.slice(0,6);
     springTimeRenderRecent();
+}
+// Feedback for the DNS/DNF buttons. Both used to throw the server's answer away — a refusal looked
+// exactly like a success — and DNF additionally hid the card and cleared the picker, so the screen
+// just went blank and the whole action read as "nothing happened".
+function springTimeStatusMsg(html){
+    const el=document.getElementById('springTimeLookupMsg');
+    if(el) el.innerHTML=html;
 }
 async function springTimeSetDns(makeDns){
     if(!springTimeActive) return;
     if(makeDns && !confirm('Markera som DNS? Starttiden frigörs.')) return;
-    await fetch('/umbraco/surface/Springskytte/SetSpringskytteDns',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:springTimeActive.memberId,weaponClass:springTimeActive.weaponClass,isDns:makeDns})});
-    await springTimeLoad();
+    const who=springTimeActive;
+    try{
+        const d=await fetch('/umbraco/surface/Springskytte/SetSpringskytteDns',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:who.memberId,weaponClass:who.weaponClass,isDns:makeDns})}).then(r=>r.json());
+        if(!d.success){ springTimeStatusMsg(`<span class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> ${springTimeEsc(d.message||'Kunde inte ändra DNS.')}</span>`); return; }
+        await springTimeLoad();
+        if(makeDns){
+            springTimeLogRecent({ ...who, status:'DNS' });
+            springTimeStatusMsg(`<span class="text-success"><i class="bi bi-check-circle-fill"></i> #${who.startOrder} ${springTimeEsc(who.name)} är markerad <strong>DNS</strong> – starttiden ${springTimeEsc((who.startTime||'').substring(0,5))} är nu ledig.</span>`);
+        } else {
+            springTimeStatusMsg(`<span class="text-success"><i class="bi bi-check-circle-fill"></i> DNS ångrad för #${who.startOrder} ${springTimeEsc(who.name)}.</span>`);
+        }
+    }catch(e){ springTimeStatusMsg('<span class="text-danger">Kunde inte ändra DNS – försök igen.</span>'); }
 }
 async function springTimeSetDnf(){
     if(!springTimeActive) return;
     if(!confirm('Markera som DNF (bröt)?')) return;
-    await fetch('/umbraco/surface/Springskytte/SaveSpringskytteFinishTime',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:springTimeActive.memberId,weaponClass:springTimeActive.weaponClass,status:'DNF'})});
-    springTimeActive=null; const c=document.getElementById('springTimeActiveCard'); c.style.display='none'; c.innerHTML='';
-    const sn=document.getElementById('springTimeStartNumber'); sn.value=''; sn.focus();
+    const who=springTimeActive;
+    try{
+        const d=await fetch('/umbraco/surface/Springskytte/SaveSpringskytteFinishTime',{method:'POST',headers:{'Content-Type':'application/json','RequestVerificationToken':springTimeToken()},body:JSON.stringify({competitionId:springCompetitionId,memberId:who.memberId,weaponClass:who.weaponClass,status:'DNF'})}).then(r=>r.json());
+        if(!d.success){ springTimeStatusMsg(`<span class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> ${springTimeEsc(d.message||'Kunde inte markera DNF.')}</span>`); return; }
+        springTimeLogRecent({ ...who, status:'DNF' });
+        springTimeStatusMsg(`<span class="text-success"><i class="bi bi-check-circle-fill"></i> #${who.startOrder} ${springTimeEsc(who.name)} är markerad <strong>DNF (bröt)</strong>.</span>`);
+        springTimeActive=null;
+        springRenderCurrentShooterBanner('springTimeCurrentBanner', null);
+        const c=document.getElementById('springTimeActiveCard'); c.style.display='none'; c.innerHTML='';
+        const sn=document.getElementById('springTimeStartNumber'); if(sn){ sn.value=''; sn.focus(); }
+        await springTimeLoad();
+    }catch(e){ springTimeStatusMsg('<span class="text-danger">Kunde inte markera DNF – försök igen.</span>'); }
 }
 // Straff/tidsavdrag modal is shared by the timing view AND the scoring pads — it targets an
 // explicit shooter + an onSaved callback, so both roles use the same ledger.
@@ -2042,97 +2071,11 @@ function springStatusBadge(shooter) {
         : '<span class="badge bg-secondary">Inget resultat</span>';
 }
 
-async function springPostStatus(shooter, status) {
-    const requestData = {
-        competitionId: springCompetitionId,
-        memberId: shooter.memberId,
-        weaponClass: shooter.weaponClass,
-        ageGenderClass: shooter.ageGenderClass,
-        finishTimeInput: null,
-        shotSeries: [],
-        penaltyMultiplier: 1,
-        status: status
-    };
-    return await springFetchWithRetry('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
-        },
-        body: JSON.stringify(requestData)
-    });
-}
-
-function springApplyStatusToShooter(shooter, status) {
-    shooter.hasResult = true;
-    shooter.existingResult = {
-        status: status,
-        shootingScore: null,
-        sprintTimeSeconds: null,
-        totalTimeSeconds: null,
-        totalTimeDisplay: springStatusLabel(status),
-        penaltyMultiplier: 1,
-        shots: []
-    };
-}
-
-// Class A entry (single-shooter navigator)
-async function springASetStatus(status) {
-    const shooter = springFilteredShooters[springCurrentIndex];
-    if (!shooter) return;
-    if (!confirm(`Markera ${shooter.memberName} som "${springStatusLabel(status)}"? Tid och skjutresultat sparas tomt.`)) return;
-    try {
-        const data = await springPostStatus(shooter, status);
-        if (data.success) {
-            springApplyStatusToShooter(shooter, status);
-            showSpringMessage(`${shooter.memberName} markerad som ${springStatusLabel(status)}.`, 'success');
-            springRenderEntry();
-            springASnapshot = springATakeSnapshot();
-            if (springCurrentIndex < springFilteredShooters.length - 1) {
-                setTimeout(() => { springNextShooter(); }, 500);
-            }
-        } else {
-            showSpringMessage(data.message || 'Fel vid sparning.', 'danger');
-        }
-    } catch (err) {
-        console.error('Error setting DNS/DNF status:', err);
-        showSpringMessage('Ett fel uppstod.', 'danger');
-    }
-}
-
-// Class C entry (range-officer card)
-async function springCSetStatus(status) {
-    const shooter = springCActiveShooter;
-    if (!shooter) return;
-    if (!confirm(`Markera ${shooter.memberName} som "${springStatusLabel(status)}"?`)) return;
-    try {
-        const data = await springPostStatus(shooter, status);
-        if (data.success) {
-            springApplyStatusToShooter(shooter, status);
-            springCRecentEntries.unshift({
-                startOrder: shooter.startOrder,
-                name: shooter.memberName,
-                registeredClass: shooter.registeredClass,
-                totalTimeDisplay: springStatusLabel(status),
-                shootingScore: '-'
-            });
-            if (springCRecentEntries.length > 5) springCRecentEntries.pop();
-            springCRenderRecentList();
-            showSpringCToast(`${shooter.memberName} markerad som ${springStatusLabel(status)}.`, 'success');
-            springCSnapshot = null;
-            document.getElementById('springCActiveCard').style.display = 'none';
-            springRenderCurrentShooterBanner('springCCurrentBanner', null);
-            springCActiveShooter = null;
-            const input = document.getElementById('springCStartNumber');
-            if (input) { input.value = ''; input.focus(); }
-        } else {
-            showSpringCToast(data.message || 'Fel vid sparning.', 'danger');
-        }
-    } catch (err) {
-        console.error('Error setting DNS/DNF status:', err);
-        showSpringCToast('Ett fel uppstod.', 'danger');
-    }
-}
+// NOTE: the scoring pads have NO DNS/DNF buttons on purpose. Since the 2026-07 range-role split,
+// status and time belong to the "Tidtagning & straff" view (/station?...&mode=tid) — the pads are
+// shots only. The unreferenced springPostStatus / springApplyStatusToShooter / springASetStatus /
+// springCSetStatus helpers were removed with this comment so the code stops implying otherwise;
+// springStatusBadge above still renders a stored DNS/DNF on the Class A header.
 
 // ===== RESULTS LIST =====
 
