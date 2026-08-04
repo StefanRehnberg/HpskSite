@@ -168,9 +168,10 @@
                     <strong>Bara listor du bockar i <em>Numrera om</em> ändras.</strong> Övriga listor behåller
                     sina startnummer precis som de är. Sätt vilket startnummer en ikryssad lista börjar på, eller
                     bocka i <em>Fortsätt från föregående</em> så fortsätter den på numret efter föregående lista.
-                    Numren är unika i hela tävlingen — krockar en plan med en lista du lämnat orörd får du ett
-                    felmeddelande i stället för dubbla nummer. Listor som är numrerade för hand är omarkerade
-                    från början.
+                    <strong>Varje vapengrupp numreras för sig</strong> — A kan gå 1–4 medan C går 1–20.
+                    Numren är unika inom vapengruppen; krockar en plan med en lista du lämnat orörd får du
+                    ett felmeddelande i stället för dubbla nummer. Listor som är numrerade för hand är
+                    omarkerade från början.
                 </p>
                 <div id="springRenumberRows">
                     <div class="text-center py-3 text-muted">
@@ -949,7 +950,9 @@ function springRenderRenumberRows() {
         const meta = [];
         if (l.firstStartTime) meta.push('första start ' + escapeHtml(String(l.firstStartTime).substring(0, 5)));
         meta.push((l.starterCount || 0) + ' starter');
-        meta.push('nu: ' + escapeHtml(l.currentNumbers || '—'));
+        meta.push('nu: ' + escapeHtml((l.weaponClasses && l.weaponClasses.length
+            ? l.weaponClasses.map(c => (c.weaponClass ? c.weaponClass + ' ' : '') + (c.currentNumbers || '—')).join(' · ')
+            : (l.currentNumbers || '—'))));
         const cont = idx > 0 && l.continueFromPrevious;
         // A list whose numbers were typed in by hand stays UNTICKED by default — the whole point of
         // this screen after the SM rehearsal is that nothing overwrites those numbers by surprise.
@@ -1001,11 +1004,12 @@ function springRnActionLabel(a) {
     }
 }
 
-// Walk the lists in order. A ticked list gets fresh numbers (from its own base, or following on from
-// wherever the previous list actually ends); an unticked list is shown with the numbers it already has
-// and is left alone by the server.
+// Walk the lists in order, ONE SEQUENCE PER WEAPON CLASS (A and C are numbered independently, so A can
+// run 1–4 while C runs 1–20). A ticked list gets fresh numbers per class (from its own base, or following
+// on from wherever the previous list ends in that class); an unticked list is shown with the numbers it
+// already has and is left alone by the server.
 function springRenumberRecalc() {
-    let running = 0;
+    const running = {};   // weapon class -> last number handed out
     springRenumberPlan.forEach((l, idx) => {
         const doEl = document.getElementById('springRnDo_' + l.nodeId);
         const contEl = document.getElementById('springRnCont_' + l.nodeId);
@@ -1015,26 +1019,44 @@ function springRenumberRecalc() {
         const cont = selected && idx > 0 && contEl && contEl.checked;
         if (contEl) contEl.disabled = !selected;
         if (baseEl) baseEl.disabled = !selected || cont;
-        const count = l.starterCount || 0;
+        const classes = (l.weaponClasses && l.weaponClasses.length)
+            ? l.weaponClasses
+            : [{ weaponClass: '', starterCount: l.starterCount || 0, currentNumbers: l.currentNumbers }];
 
         if (!selected) {
-            // Keeps what it has; it still occupies those numbers for the lists after it.
-            if (rangeEl) { rangeEl.textContent = l.currentNumbers || '—'; rangeEl.className = 'badge bg-light text-muted border'; }
-            const nums = String(l.currentNumbers || '').match(/\d+/g);
-            if (nums) running = Math.max(running, ...nums.map(Number));
+            // Keeps what it has; it still occupies those numbers in its own class.
+            if (rangeEl) {
+                rangeEl.textContent = classes.map(c => springRnClassLabel(c.weaponClass) + (c.currentNumbers || '—')).join(' · ');
+                rangeEl.className = 'badge bg-light text-muted border';
+            }
+            classes.forEach(c => {
+                const nums = String(c.currentNumbers || '').match(/\d+/g);
+                if (nums) running[c.weaponClass] = Math.max(running[c.weaponClass] || 0, ...nums.map(Number));
+            });
             return;
         }
 
-        let base = cont ? running + 1 : Math.max(1, parseInt(baseEl && baseEl.value, 10) || 1);
-        if (cont && baseEl) baseEl.value = base;
-        const last = count > 0 ? base + count - 1 : base;
-        if (rangeEl) {
-            rangeEl.textContent = count > 0 ? (count === 1 ? String(base) : `${base}–${last}`) : '—';
-            rangeEl.className = 'badge bg-secondary';
-        }
-        if (count > 0) running = last;
+        const parts = [];
+        let lowest = null;
+        classes.forEach(c => {
+            const run = running[c.weaponClass] || 0;
+            const base = cont ? run + 1 : Math.max(1, parseInt(baseEl && baseEl.value, 10) || 1);
+            const count = c.starterCount || 0;
+            const last = count > 0 ? base + count - 1 : base;
+            parts.push(springRnClassLabel(c.weaponClass) + (count > 0 ? (count === 1 ? String(base) : `${base}–${last}`) : '—'));
+            if (count > 0) {
+                running[c.weaponClass] = last;
+                lowest = lowest === null ? base : Math.min(lowest, base);
+            }
+        });
+        // The base field shows the lowest number this list will actually start at.
+        if (cont && baseEl && lowest !== null) baseEl.value = lowest;
+        if (rangeEl) { rangeEl.textContent = parts.join(' · ') || '—'; rangeEl.className = 'badge bg-secondary'; }
     });
 }
+
+// "A: " prefix per weapon class. Goes into textContent, so no escaping (and it's only A/B/C/R).
+function springRnClassLabel(wc) { return wc ? wc + ': ' : ''; }
 
 async function springApplyRenumber() {
     if (!confirmIfResultsExist('Numrera om startlistor')) return;

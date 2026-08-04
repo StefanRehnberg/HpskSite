@@ -168,6 +168,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public DateTime UpdatedAt { get; set; }
         public bool IsOfficial { get; set; } = true;
         public List<SpringskytteClassGroup> ClassGroups { get; set; } = new();
+
+        /// <summary>
+        /// Weapon groups whose results are PUBLIC. A and C finish at different times and are published
+        /// independently (Stefan, 2026-08-04), so "official" is a set, not a boolean. Kept inside this
+        /// blob — which the result node already stores — on purpose: no new doctype property means no
+        /// operator step that can be left unrun before SM, and `IsOfficial` still answers "is anything
+        /// public?" for every older consumer. Empty on a legacy blob → fall back to IsOfficial.
+        /// </summary>
+        public List<string> OfficialWeaponClasses { get; set; } = new();
     }
 
     // --- Request/Response models ---
@@ -321,6 +330,17 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         /// Defaults to false so an omitted flag can never renumber a list by accident.
         /// </summary>
         public bool Renumber { get; set; }
+    }
+
+    /// <summary>
+    /// Calculate / publish / unpublish a Springskytte result list. WeaponClass scopes the action to one
+    /// weapon group (A and C publish independently); empty means the whole competition, which is the
+    /// pre-2026-08 behaviour and still what the fallback path uses when the per-class property is absent.
+    /// </summary>
+    public class SpringskytteResultsActionRequest
+    {
+        public int CompetitionId { get; set; }
+        public string WeaponClass { get; set; } = "";
     }
 
     /// <summary>Update ONLY a start list's name + date (never rebuilds/reshuffles the starters).</summary>

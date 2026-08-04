@@ -337,7 +337,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         // ===== RESULTS LIST & CALCULATION =====
 
         [HttpGet]
-        public async Task<IActionResult> GetSpringskytteResults(int competitionId, bool subCompetitionOnly = false)
+        /// <param name="publicOnly">
+        /// Set by the public /resultat page: drop weapon classes that are not published yet, so an
+        /// organiser can publish A while C is still being scored without C leaking. Admin surfaces and
+        /// the live board leave it off — they are meant to show preliminary results.
+        /// </param>
+        public async Task<IActionResult> GetSpringskytteResults(int competitionId, bool subCompetitionOnly = false, bool publicOnly = false)
         {
             try
             {
@@ -459,11 +464,32 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var resultNode = competition == null ? null : _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
                     .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
                 bool resultsExist = resultNode != null;
-                bool resultsOfficial = resultNode != null && (subCompetitionOnly
-                    ? (resultNode.HasProperty("subCompetitionIsOfficial") && resultNode.GetValue<bool>("subCompetitionIsOfficial"))
-                    : (resultNode.HasProperty("isOfficial") && resultNode.GetValue<bool>("isOfficial")));
 
-                return Json(new { success = true, classGroups, isAwardingStandardMedals, resultsExist, resultsOfficial });
+                // A and C publish independently, so "official" is per weapon class. resultsOfficial stays
+                // as "at least one class is public" for the callers that only ask the yes/no question.
+                var officialClasses = subCompetitionOnly
+                    ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    : ReadOfficialWeaponClasses(resultNode, competitionId);
+                bool resultsOfficial = subCompetitionOnly
+                    ? (resultNode != null && resultNode.HasProperty("subCompetitionIsOfficial") && resultNode.GetValue<bool>("subCompetitionIsOfficial"))
+                    : officialClasses.Count > 0;
+
+                if (publicOnly && !subCompetitionOnly)
+                    classGroups = classGroups.Where(g => officialClasses.Contains(g.weaponClass ?? "")).ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    classGroups,
+                    isAwardingStandardMedals,
+                    resultsExist,
+                    resultsOfficial,
+                    officialWeaponClasses = officialClasses.OrderBy(s => s).ToList(),
+                    // All weapon classes that have results, so the admin card can render one card each
+                    // even for a class that has no published list yet.
+                    weaponClassesWithResults = WeaponClassesWithResults(competitionId),
+                    supportsPerClassPublish = true
+                });
             }
             catch (Exception ex)
             {
@@ -581,26 +607,31 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             }
         }
 
-        // "Uppdatera" — recompute the result snapshot from current data, PRESERVING the current
-        // published/preliminary state (a brand-new list starts preliminary, i.e. not public).
+        // "Uppdatera" — recompute the result snapshot from current data, PRESERVING which weapon classes
+        // are published (a brand-new list starts preliminary, i.e. not public).
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public Task<IActionResult> CalculateSpringskytteFinalResults([FromBody] int competitionId)
-            => ComputeStoreSpringskytteResultsAsync(competitionId, null);
+        public Task<IActionResult> CalculateSpringskytteFinalResults([FromBody] SpringskytteResultsActionRequest request)
+            => ComputeStoreSpringskytteResultsAsync(request?.CompetitionId ?? 0, false, request?.WeaponClass);
 
-        // "Publicera" — recompute AND mark the list official (public). Materializes medals.
+        // "Publicera" — recompute AND publish. With a WeaponClass only that class becomes public; without
+        // one, every class that has results does (the old whole-competition behaviour).
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public Task<IActionResult> PublishSpringskytteResults([FromBody] int competitionId)
-            => ComputeStoreSpringskytteResultsAsync(competitionId, true);
+        public Task<IActionResult> PublishSpringskytteResults([FromBody] SpringskytteResultsActionRequest request)
+            => ComputeStoreSpringskytteResultsAsync(request?.CompetitionId ?? 0, true, request?.WeaponClass);
 
-        // "Gör preliminär" — just flip the official flag off (keeps the computed snapshot).
+        // "Gör preliminär" — flip a weapon class (or the whole list) back to preliminary. The computed
+        // snapshot is kept; only visibility changes.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SetSpringskytteResultsPreliminary([FromBody] int competitionId)
+        public async Task<IActionResult> SetSpringskytteResultsPreliminary([FromBody] SpringskytteResultsActionRequest request)
         {
             try
             {
+                int competitionId = request?.CompetitionId ?? 0;
+                if (competitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
                 var competition = _contentService.GetById(competitionId);
@@ -608,22 +639,166 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
                 if (resultPage == null)
                     return Json(new { success = false, message = "Ingen resultatlista att avpublicera." });
-                resultPage.SetValue("isOfficial", false);
+
+                var wc = (request?.WeaponClass ?? "").Trim();
+                var official = ReadOfficialWeaponClasses(resultPage, competitionId);
+                if (string.IsNullOrEmpty(wc)) official.Clear();
+                else official.Remove(wc);
+
+                if (!WriteOfficialWeaponClasses(resultPage, official))
+                    return Json(new { success = false, message = "Resultatlistan är inte beräknad ännu — klicka Uppdatera först." });
+                resultPage.SetValue("isOfficial", official.Count > 0);
                 _contentService.Save(resultPage);
                 _contentService.Publish(resultPage, new[] { "*" });
-                return Json(new { success = true, isOfficial = false, message = "Resultatlistan är nu preliminär (inte publik)." });
+
+                // The medal ledger reconciles against the whole competition, so re-materialize from
+                // whatever is still official — otherwise unpublishing one class would leave its medals
+                // in the ledger (or publishing A would delete C's).
+                await MaterializeSpringskytteMedalsAsync(competitionId, official);
+
+                return Json(new
+                {
+                    success = true,
+                    isOfficial = official.Count > 0,
+                    officialWeaponClasses = official.ToList(),
+                    message = string.IsNullOrEmpty(wc)
+                        ? "Resultatlistan är nu preliminär (inte publik)."
+                        : $"Vapengrupp {wc} är nu preliminär (inte publik)."
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error setting Springskytte results preliminary for CompetitionId={CompetitionId}", competitionId);
+                _logger.LogError(ex, "Error setting Springskytte results preliminary for CompetitionId={CompetitionId}", request?.CompetitionId);
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }
 
-        private async Task<IActionResult> ComputeStoreSpringskytteResultsAsync(int competitionId, bool? forceOfficial)
+        // ===== Per-weapon-class publishing =====
+        // A and C are separate lists that finish at different times, so each is calculated and published
+        // on its own (Stefan, 2026-08-04): A can be OFFICIELL while C is still preliminär. The published
+        // set is stored in `OfficialWeaponClasses` inside the result node's EXISTING `resultData` blob —
+        // deliberately not a new doctype property, so there is no operator step to leave unrun before SM.
+        // `isOfficial` is kept in sync as "at least one class is public", so every existing consumer
+        // (competition page button, Resultat link, live board badge) keeps working unchanged.
+
+        /// <summary>
+        /// The weapon classes whose results are public. Falls back to "every class that has results" for a
+        /// legacy node published before per-class publishing existed, so nothing that was public goes dark.
+        /// </summary>
+        private HashSet<string> ReadOfficialWeaponClasses(Umbraco.Cms.Core.Models.IContent? resultPage, int competitionId)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (resultPage == null) return set;
+
+            var stored = ReadStoredResults(resultPage);
+            if (stored?.OfficialWeaponClasses != null && stored.OfficialWeaponClasses.Count > 0)
+            {
+                foreach (var s in stored.OfficialWeaponClasses)
+                    if (!string.IsNullOrWhiteSpace(s)) set.Add(s.Trim());
+                return set;
+            }
+
+            // Nothing per-class stored: a published legacy list means every class is public.
+            bool legacyOfficial = resultPage.HasProperty("isOfficial") && resultPage.GetValue<bool>("isOfficial");
+            if (legacyOfficial)
+                foreach (var wc in WeaponClassesWithResults(competitionId)) set.Add(wc);
+            return set;
+        }
+
+        /// <summary>The stored result snapshot, or null when the list has never been calculated.</summary>
+        private SpringskytteFinalResults? ReadStoredResults(Umbraco.Cms.Core.Models.IContent? resultPage)
+        {
+            var raw = resultPage?.GetValue<string>("resultData");
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            try { return JsonConvert.DeserializeObject<SpringskytteFinalResults>(raw); }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Rewrites the official-class set inside the stored snapshot without recomputing it — used by
+        /// "Gör preliminär", which must change visibility only.
+        /// </summary>
+        private bool WriteOfficialWeaponClasses(Umbraco.Cms.Core.Models.IContent resultPage, HashSet<string> official)
+        {
+            var stored = ReadStoredResults(resultPage);
+            if (stored == null) return false;
+            stored.OfficialWeaponClasses = official.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+            stored.IsOfficial = official.Count > 0;
+            resultPage.SetValue("resultData", JsonConvert.SerializeObject(stored));
+            return true;
+        }
+
+        /// <summary>Weapon classes that actually have entered results for this competition.</summary>
+        private List<string> WeaponClassesWithResults(int competitionId)
         {
             try
             {
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                return db.Fetch<string>(
+                    "SELECT DISTINCT WeaponClass FROM SpringskytteResultEntry WHERE CompetitionId = @0 AND WeaponClass IS NOT NULL",
+                    competitionId).Where(s => !string.IsNullOrWhiteSpace(s)).OrderBy(s => s).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read Springskytte weapon classes for CompetitionId={CompetitionId}", competitionId);
+                return new List<string>();
+            }
+        }
+
+        /// <summary>
+        /// Reconciles the standard-medal ledger with the medals of the currently OFFICIAL weapon classes.
+        /// Must always pass the full official set: UpsertOnSiteMedalsAsync deletes on-site medals for the
+        /// competition that aren't in the batch, so publishing A alone with only A's medals would wipe C's.
+        /// </summary>
+        private async Task MaterializeSpringskytteMedalsAsync(int competitionId, HashSet<string> officialClasses)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return;
+            try
+            {
+                var awarding = (competition.GetValue<bool>("isAwardingStandardMedals"))
+                    && !(competition.GetValue<bool>("isClubOnly"));
+
+                var medals = new List<OnSiteMedal>();
+                if (awarding && officialClasses.Count > 0)
+                {
+                    using var db = _umbracoDatabaseFactory.CreateDatabase();
+                    var entries = await db.FetchAsync<SpringskytteResultEntry>("WHERE CompetitionId = @0", competitionId);
+                    var memberDict = LoadMemberInfo(entries.Select(e => e.MemberId).Distinct().ToList());
+                    var shooters = entries.Select(e =>
+                    {
+                        var (name, club) = memberDict.TryGetValue(e.MemberId, out var info) ? info : ($"Skytt {e.MemberId}", "Okänd klubb");
+                        return _scoringService.BuildShooterResult(e, name, club);
+                    }).ToList();
+                    await ApplyTimeAdjustmentsAsync(shooters, competitionId);
+                    new SpringskytteMedalService().CalculateStandardMedals(shooters);
+
+                    medals = shooters
+                        .Where(s => officialClasses.Contains(s.WeaponClass ?? "")
+                                    && (s.StandardMedal == "S" || s.StandardMedal == "B"))
+                        .Select(s => new OnSiteMedal(s.MemberId, $"{s.WeaponClass}-{s.AgeGenderClass}", s.StandardMedal!))
+                        .ToList();
+                }
+
+                var competitionDate = competition.GetValue<DateTime?>("competitionDate");
+                var competitionName = competition.GetValue<string>("competitionName");
+                if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
+                await _medalMaterialization.UpsertOnSiteMedalsAsync(
+                    competitionId, "Springskytte", competitionDate?.Year ?? DateTime.Now.Year,
+                    competitionName, competitionDate, medals);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to materialize Springskytte standard medals for CompetitionId={CompetitionId}", competitionId);
+            }
+        }
+
+        private async Task<IActionResult> ComputeStoreSpringskytteResultsAsync(int competitionId, bool publish, string? weaponClass)
+        {
+            try
+            {
+                if (competitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
@@ -682,28 +857,36 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // Store results on competitionResult child node (same pattern as Precision)
                 var competition = _contentService.GetById(competitionId);
                 bool official = false;
+                var officialClasses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (competition != null)
                 {
                     var resultPage = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
                         .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
 
-                    // Preserve the current published/preliminary state unless we're explicitly publishing.
-                    // A brand-new list defaults to preliminary (not public) — matches Precision/Fältskytte.
-                    var existingOfficial = resultPage != null && resultPage.HasProperty("isOfficial") && resultPage.GetValue<bool>("isOfficial");
-                    official = forceOfficial ?? existingOfficial;
+                    if (resultPage == null)
+                        resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
+
+                    // Preserve which classes are already public; publishing adds, never removes.
+                    var existingOfficial = ReadOfficialWeaponClasses(resultPage, competitionId);
+                    bool wasOfficial = existingOfficial.Count > 0;
+                    officialClasses = new HashSet<string>(existingOfficial, StringComparer.OrdinalIgnoreCase);
+                    if (publish)
+                    {
+                        if (!string.IsNullOrWhiteSpace(weaponClass)) officialClasses.Add(weaponClass.Trim());
+                        else foreach (var wc in classGroups
+                                 .Select(g => g.Shooters.FirstOrDefault()?.WeaponClass)
+                                 .Where(wc => !string.IsNullOrWhiteSpace(wc))) officialClasses.Add(wc!);
+                    }
+                    official = officialClasses.Count > 0;
 
                     var finalResults = new SpringskytteFinalResults
                     {
                         CompetitionId = competitionId,
                         UpdatedAt = DateTime.Now,
                         IsOfficial = official,
-                        ClassGroups = classGroups
+                        ClassGroups = classGroups,
+                        OfficialWeaponClasses = officialClasses.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList()
                     };
-
-                    if (resultPage == null)
-                    {
-                        resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                    }
 
                     resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
                     resultPage.SetValue("lastUpdated", DateTime.Now);
@@ -712,45 +895,28 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                     _contentService.Save(resultPage);
                     _contentService.Publish(resultPage, new[] { "*" });
+                    _logger.LogInformation("Stored Springskytte results for CompetitionId={CompetitionId}, {Count} shooters, official classes=[{Official}]",
+                        competitionId, shooterResults.Count, string.Join(",", officialClasses));
 
-                    _logger.LogInformation("Stored Springskytte results for CompetitionId={CompetitionId}, {Count} shooters, official={Official}",
-                        competitionId, shooterResults.Count, official);
+                    // Reconcile the medal ledger with every currently-official class (preliminary classes
+                    // never reach the ledger). Always the full official set — see the helper's remarks.
+                    await MaterializeSpringskytteMedalsAsync(competitionId, officialClasses);
 
-                    // Materialize won Standard medals into the ledger only when the list is official —
-                    // preliminary lists must not write to the medal ledger. Springskytte has no
-                    // Riksmästarklass, but its medals still count toward the pooled Guldmedalj.
-                    if (official)
-                    try
-                    {
-                        var competitionDate = competition.GetValue<DateTime?>("competitionDate");
-                        var year = competitionDate?.Year ?? DateTime.Now.Year;
-                        var competitionName = competition.GetValue<string>("competitionName");
-                        if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
-
-                        var medals = shooterResults
-                            .Where(s => s.StandardMedal == "S" || s.StandardMedal == "B")
-                            .Select(s => new OnSiteMedal(s.MemberId, $"{s.WeaponClass}-{s.AgeGenderClass}", s.StandardMedal!));
-
-                        await _medalMaterialization.UpsertOnSiteMedalsAsync(
-                            competitionId, "Springskytte", year, competitionName, competitionDate, medals);
-                    }
-                    catch (Exception medalEx)
-                    {
-                        _logger.LogError(medalEx, "Failed to materialize Springskytte standard medals for CompetitionId={CompetitionId}", competitionId);
-                    }
-
-                    // Phase 2 auto-trigger: notify registered shooters when the list flips to official
-                    // (transition only — never re-fires on a recompute of an already-published list).
+                    // Phase 2 auto-trigger: notify registered shooters when a class flips to official
+                    // (transition only — never re-fires on a recompute of an already-published class).
                     // Opt-in per comp (autoNotifyParticipants, default off); fire-and-forget.
-                    if (official && !existingOfficial && competition.GetValue<bool>("autoNotifyParticipants"))
+                    var newlyPublished = officialClasses.Except(existingOfficial, StringComparer.OrdinalIgnoreCase).ToList();
+                    if (newlyPublished.Count > 0 && competition.GetValue<bool>("autoNotifyParticipants"))
                     {
                         try
                         {
                             var notifier = HttpContext?.RequestServices?
                                 .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
                                 as HpskSite.Services.Messaging.ParticipantNotificationService;
-                            notifier?.Notify(competitionId, "All", null,
-                                "Resultatlistan är nu publicerad.", "Normal", 0, "");
+                            var what = string.IsNullOrWhiteSpace(weaponClass)
+                                ? "Resultatlistan är nu publicerad."
+                                : $"Resultatlistan för vapengrupp {string.Join(", ", newlyPublished.OrderBy(s => s))} är nu publicerad.";
+                            notifier?.Notify(competitionId, "All", null, what, "Normal", 0, "");
                         }
                         catch (Exception notifyEx)
                         {
@@ -759,13 +925,18 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }
                 }
 
+                var scope = string.IsNullOrWhiteSpace(weaponClass) ? "" : $" i vapengrupp {weaponClass.Trim()}";
+                int scopedShooters = string.IsNullOrWhiteSpace(weaponClass)
+                    ? shooterResults.Count
+                    : shooterResults.Count(s => string.Equals(s.WeaponClass, weaponClass.Trim(), StringComparison.OrdinalIgnoreCase));
                 return Json(new
                 {
                     success = true,
                     isOfficial = official,
-                    message = official
-                        ? $"Resultat beräknade och publicerade för {shooterResults.Count} skyttar i {classGroups.Count} klasser."
-                        : $"Resultat uppdaterade (preliminära) för {shooterResults.Count} skyttar i {classGroups.Count} klasser.",
+                    officialWeaponClasses = officialClasses.OrderBy(s => s).ToList(),
+                    message = publish
+                        ? $"Resultat beräknade och publicerade för {scopedShooters} skyttar{scope}."
+                        : $"Resultat uppdaterade (preliminära) för {scopedShooters} skyttar{scope}.",
                     classGroups = classGroups.Select(g => new
                     {
                         className = g.ClassName,
@@ -1458,6 +1629,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     // warn before overwriting hand-typed numbers.
                     manualNumbering = nc.config.ManualNumbering,
                     currentNumbers = DescribeNumbers(nc.config.Starters?.Select(s => s.StartOrder)),
+                    // Numbering is per weapon class, so the modal previews one range per class.
+                    weaponClasses = (nc.config.Starters ?? new List<SpringskytteStartListEntry>())
+                        .GroupBy(s => s.WeaponClass ?? "").OrderBy(g => g.Key)
+                        .Select(g => new
+                        {
+                            weaponClass = g.Key,
+                            starterCount = g.Count(),
+                            currentNumbers = DescribeNumbers(g.Select(s => s.StartOrder))
+                        }).ToList(),
                     history = (nc.config.NumberingHistory ?? new List<SpringskytteNumberingEvent>())
                         .AsEnumerable().Reverse().Take(6)
                         .Select(h => new { at = h.At, by = h.By, action = h.Action, detail = h.Detail }).ToList()
@@ -1505,71 +1685,91 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!ordered.Any(nc => settingByNode.TryGetValue(nc.node.Id, out var s) && s.Renumber))
                     return Json(new { success = false, message = "Ingen lista var markerad för omnumrering." });
 
-                // Plan first, write second. Walk the lists in numbering order: a list the user ticked gets
-                // fresh numbers from its base (or follows on from whatever the previous list actually ends
-                // at — ticked or not); a list left unticked keeps every number it has and merely occupies
-                // them. Nothing is written until the whole plan is known to be collision-free.
-                var planned = new Dictionary<int, List<int>>();   // nodeId -> numbers, ticked lists only
-                var frozen = new Dictionary<int, List<int>>();    // nodeId -> numbers, untouched lists
-                int running = 0;
+                // Plan first, write second. Walk the lists in numbering order, per WEAPON CLASS (A and C
+                // have separate number ledgers): a list the user ticked gets fresh numbers from its base
+                // (or follows on from wherever the previous list ends in that class — ticked or not); a
+                // list left unticked keeps every number it has and merely occupies them. Nothing is
+                // written until the whole plan is known to be collision-free.
+                var planned = new Dictionary<int, Dictionary<int, int>>();  // nodeId -> (starter index -> number)
+                var frozen = new Dictionary<int, List<(string wc, int num)>>();
+                var runningPerClass = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var (node, config) in ordered)
                 {
                     bool selected = settingByNode.TryGetValue(node.Id, out var setting) && setting.Renumber;
                     if (selected)
                     {
-                        int baseNum = setting!.ContinueFromPrevious
-                            ? running + 1
-                            : Math.Max(1, setting.StartNumberBase);
-                        var nums = Enumerable.Range(baseNum, config.Starters.Count).ToList();
-                        planned[node.Id] = nums;
-                        if (nums.Count > 0) running = nums[^1];
+                        var assignment = new Dictionary<int, int>();
+                        foreach (var classGroup in config.Starters
+                                     .Select((s, i) => (s, i))
+                                     .GroupBy(x => x.s.WeaponClass ?? "")
+                                     .OrderBy(g => g.Key))
+                        {
+                            runningPerClass.TryGetValue(classGroup.Key, out var runClass);
+                            int baseNum = setting!.ContinueFromPrevious
+                                ? runClass + 1
+                                : Math.Max(1, setting.StartNumberBase);
+                            int n = baseNum;
+                            foreach (var (_, idx) in classGroup) assignment[idx] = n++;
+                            runningPerClass[classGroup.Key] = Math.Max(runClass, n - 1);
+                        }
+                        planned[node.Id] = assignment;
                     }
                     else
                     {
-                        var nums = config.Starters.Select(s => s.StartOrder).ToList();
+                        var nums = config.Starters.Select(s => (wc: s.WeaponClass ?? "", num: s.StartOrder)).ToList();
                         frozen[node.Id] = nums;
-                        if (nums.Count > 0) running = Math.Max(running, nums.Max());
+                        foreach (var g in nums.Where(x => x.num > 0).GroupBy(x => x.wc))
+                        {
+                            runningPerClass.TryGetValue(g.Key, out var runClass);
+                            runningPerClass[g.Key] = Math.Max(runClass, g.Max(x => x.num));
+                        }
                     }
                 }
 
                 var nameOf = ordered.ToDictionary(nc => nc.node.Id,
                     nc => !string.IsNullOrWhiteSpace(nc.config.ListName) ? nc.config.ListName : (nc.node.Name ?? "Startlista"));
+                var configOf = ordered.ToDictionary(nc => nc.node.Id, nc => nc.config);
 
-                // Start numbers are globally unique across the competition, so refuse rather than create
-                // a duplicate that would send two shooters onto the same patch.
-                var occupied = new Dictionary<int, string>();
+                // Numbers are unique WITHIN a weapon class, so refuse rather than create a duplicate that
+                // would send two shooters in the same class onto the same patch. Across classes the same
+                // number is legitimate and must not be reported as a clash.
+                var occupied = new Dictionary<(string wc, int num), string>();
                 foreach (var (nodeId, nums) in frozen)
-                    foreach (var n in nums.Where(n => n > 0))
-                        occupied[n] = nameOf[nodeId];
-                foreach (var (nodeId, nums) in planned)
+                    foreach (var (wc, num) in nums.Where(x => x.num > 0))
+                        occupied[(wc.ToUpperInvariant(), num)] = nameOf[nodeId];
+                foreach (var (nodeId, assignment) in planned)
                 {
-                    foreach (var n in nums)
+                    var starters = configOf[nodeId].Starters;
+                    foreach (var (idx, num) in assignment)
                     {
-                        if (occupied.TryGetValue(n, out var holder))
+                        var key = ((starters[idx].WeaponClass ?? "").ToUpperInvariant(), num);
+                        if (occupied.TryGetValue(key, out var holder))
                             return Json(new
                             {
                                 success = false,
-                                message = $"Startnummer {n} används redan i listan \"{holder}\". "
+                                message = $"Startnummer {num} i vapengrupp {starters[idx].WeaponClass} används redan i listan \"{holder}\". "
                                         + $"Välj ett annat startnummer för \"{nameOf[nodeId]}\", eller markera \"{holder}\" för omnumrering också."
                             });
-                        occupied[n] = nameOf[nodeId];
+                        occupied[key] = nameOf[nodeId];
                     }
                 }
 
                 var by = await CurrentMemberNameAsync();
                 int totalStarters = 0, listCount = 0;
-                var touched = new List<(SpringskytteStartListConfig config, List<int> nums)>();
+                var touched = new List<SpringskytteStartListConfig>();
 
                 foreach (var (node, config) in ordered)
                 {
-                    if (!planned.TryGetValue(node.Id, out var nums)) continue;  // untouched — not even saved
+                    if (!planned.TryGetValue(node.Id, out var assignment)) continue;  // untouched — not even saved
 
                     var before = config.Starters.Select(s => s.StartOrder).ToList();
                     for (int i = 0; i < config.Starters.Count; i++)
-                        config.Starters[i].StartOrder = nums[i];
+                        config.Starters[i].StartOrder = assignment[i];
+                    var nums = config.Starters.Select(s => s.StartOrder).ToList();
 
                     var setting = settingByNode[node.Id];
-                    config.StartNumberBase = nums.Count > 0 ? nums[0] : Math.Max(1, setting.StartNumberBase);
+                    config.StartNumberBase = nums.Count > 0 ? nums.Min() : Math.Max(1, setting.StartNumberBase);
                     config.ContinueFromPrevious = setting.ContinueFromPrevious;
                     config.ManualNumbering = false;  // the organiser just chose to overwrite by hand-off
                     AppendNumberingEvent(config, "renumber",
@@ -1584,12 +1784,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                     totalStarters += config.Starters.Count;
                     listCount++;
-                    touched.Add((config, nums));
+                    touched.Add(config);
                 }
 
                 using (var db = _umbracoDatabaseFactory.CreateDatabase())
                 {
-                    foreach (var (config, _) in touched)
+                    foreach (var config in touched)
                         foreach (var starter in config.Starters)
                             await db.ExecuteAsync(
                                 @"UPDATE SpringskytteResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
@@ -1669,18 +1869,22 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         }
 
         /// <summary>
-        /// Every start number in use by the competition's individual start lists, optionally excluding one
-        /// node (the list being generated/renumbered). Stafett lists carry Teams, not Starters, and number
-        /// separately — they are not part of this pool.
+        /// Start numbers are scoped to the WEAPON CLASS: A and C each have their own ledger, so A may run
+        /// 1–4 while C runs 1–20 (Stefan, 2026-08-04 — the classes are separate competitions in practice
+        /// and each has its own set of physical number patches). Every start-number decision therefore
+        /// goes through this: the numbers in use for ONE weapon class across the competition's individual
+        /// start lists, optionally excluding one node (the list being generated/renumbered). Stafett lists
+        /// carry Teams, not Starters, and number separately — they are not part of this pool.
         /// </summary>
-        private HashSet<int> CollectUsedStartNumbers(Umbraco.Cms.Core.Models.IContent competition, int excludeNodeId)
+        private HashSet<int> CollectUsedStartNumbers(Umbraco.Cms.Core.Models.IContent competition, int excludeNodeId, string weaponClass)
         {
             var used = new HashSet<int>();
             foreach (var (node, cfg) in GetOrderedIndividualStartLists(competition))
             {
                 if (excludeNodeId > 0 && node.Id == excludeNodeId) continue;
                 foreach (var s in cfg.Starters)
-                    if (s.StartOrder > 0) used.Add(s.StartOrder);
+                    if (s.StartOrder > 0 && string.Equals(s.WeaponClass, weaponClass, StringComparison.OrdinalIgnoreCase))
+                        used.Add(s.StartOrder);
             }
             return used;
         }
@@ -1688,9 +1892,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// <summary>
         /// Assigns start numbers to a freshly generated/regenerated list WITHOUT touching any other list.
         /// A shooter who was already on this list keeps their exact number (that is what makes a manually
-        /// typed number sticky through a regeneration); everyone else takes the next free numbers after
-        /// every number already in use in the competition, so numbers stay globally unique and are never
-        /// reused. Returns a human-readable summary for the audit trail.
+        /// typed number sticky through a regeneration); everyone else takes the next free number in THEIR
+        /// OWN weapon class, so numbers are unique per weapon class and never reused within it. A list that
+        /// happens to cover several weapon classes gets one independent sequence per class.
+        /// Returns a human-readable summary for the audit trail.
         /// </summary>
         private string ApplyNumbersToGeneratedList(
             Umbraco.Cms.Core.Models.IContent competition,
@@ -1698,7 +1903,6 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             SpringskytteStartListConfig config,
             SpringskytteStartListConfig? previousConfig)
         {
-            var used = CollectUsedStartNumbers(competition, nodeId);
             var before = previousConfig?.Starters?.Select(s => s.StartOrder).ToList() ?? new List<int>();
 
             var kept = new Dictionary<string, int>();
@@ -1706,39 +1910,46 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 foreach (var s in previousConfig.Starters)
                     if (s.StartOrder > 0) kept[$"{s.MemberId}|{s.WeaponClass}"] = s.StartOrder;
 
-            int keptCount = 0;
-            foreach (var st in config.Starters)
-            {
-                if (kept.TryGetValue($"{st.MemberId}|{st.WeaponClass}", out var n) && n > 0 && !used.Contains(n))
-                {
-                    st.StartOrder = n;
-                    used.Add(n);
-                    keptCount++;
-                }
-                else
-                {
-                    st.StartOrder = 0;  // gets a fresh number below
-                }
-            }
+            int keptCount = 0, fresh = 0;
+            var perClassNotes = new List<string>();
 
-            int next = (used.Count > 0 ? used.Max() : 0) + 1;
-            int fresh = 0;
-            foreach (var st in config.Starters.Where(s => s.StartOrder == 0))
+            foreach (var classGroup in config.Starters.GroupBy(s => s.WeaponClass ?? "").OrderBy(g => g.Key))
             {
-                while (used.Contains(next)) next++;
-                st.StartOrder = next;
-                used.Add(next);
-                next++;
-                fresh++;
+                var used = CollectUsedStartNumbers(competition, nodeId, classGroup.Key);
+
+                foreach (var st in classGroup)
+                {
+                    if (kept.TryGetValue($"{st.MemberId}|{st.WeaponClass}", out var n) && n > 0 && !used.Contains(n))
+                    {
+                        st.StartOrder = n;
+                        used.Add(n);
+                        keptCount++;
+                    }
+                    else
+                    {
+                        st.StartOrder = 0;  // gets a fresh number below
+                    }
+                }
+
+                int next = (used.Count > 0 ? used.Max() : 0) + 1;
+                foreach (var st in classGroup.Where(s => s.StartOrder == 0))
+                {
+                    while (used.Contains(next)) next++;
+                    st.StartOrder = next;
+                    used.Add(next);
+                    next++;
+                    fresh++;
+                }
+
+                perClassNotes.Add($"{classGroup.Key}: {DescribeNumbers(classGroup.Select(s => s.StartOrder))}");
             }
 
             // Store the numbers actually applied so the stored settings always describe the list
             // (they used to claim base 1 on a list numbered from 120, which made the renumber
-            // modal's preview lie and hid the drift).
+            // modal's preview lie and hid the drift). On a mixed-class list this is the lowest.
             config.StartNumberBase = config.Starters.Count > 0 ? config.Starters.Min(s => s.StartOrder) : 1;
 
-            var after = config.Starters.Select(s => s.StartOrder).ToList();
-            var note = $"{DescribeNumbers(before)} → {DescribeNumbers(after)}";
+            var note = $"{DescribeNumbers(before)} → {string.Join(" · ", perClassNotes)}";
             if (keptCount > 0) note += $" (behöll {keptCount} befintliga";
             if (keptCount > 0 && fresh > 0) note += $", {fresh} nya)";
             else if (keptCount > 0) note += ")";
@@ -1791,16 +2002,20 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             var nodeConfigs = GetOrderedIndividualStartLists(competition);
             if (!nodeConfigs.Any()) return (0, 0);
 
-            int running = 0;  // last number handed out so far (0 = none yet)
+            // One running sequence PER WEAPON CLASS (A restarts at 1 independently of C).
+            var running = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var (node, config) in nodeConfigs)
             {
-                int baseNum = config.ContinueFromPrevious ? running + 1 : Math.Max(1, config.StartNumberBase);
                 var before = config.Starters.Select(s => s.StartOrder).ToList();
-                int i = 0;
-                foreach (var starter in config.Starters)
-                    starter.StartOrder = baseNum + i++;
-                running = baseNum + config.Starters.Count - 1;
-                config.StartNumberBase = baseNum;
+                foreach (var classGroup in config.Starters.GroupBy(s => s.WeaponClass ?? "").OrderBy(g => g.Key))
+                {
+                    running.TryGetValue(classGroup.Key, out var runClass);
+                    int baseNum = config.ContinueFromPrevious ? runClass + 1 : Math.Max(1, config.StartNumberBase);
+                    int n = baseNum;
+                    foreach (var starter in classGroup) starter.StartOrder = n++;
+                    running[classGroup.Key] = Math.Max(runClass, n - 1);
+                }
+                config.StartNumberBase = config.Starters.Count > 0 ? config.Starters.Min(s => s.StartOrder) : 1;
                 config.ManualNumbering = false;
                 AppendNumberingEvent(config, "reset",
                     $"{DescribeNumbers(before)} → {DescribeNumbers(config.Starters.Select(s => s.StartOrder))}", by);
@@ -1834,16 +2049,22 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             try
             {
                 if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
-                // Start numbers are a single running sequence, globally unique across the whole
-                // competition — so a duplicate is the same number appearing on two shooters in ANY list,
-                // regardless of weapon class (unlike the old per-weapon-class model).
+                // Start numbers are one running sequence PER WEAPON CLASS, unique within that class across
+                // every list. So a duplicate is the same number on two shooters in the SAME weapon class;
+                // #5 in A and #5 in C are two different shooters wearing two different patch sets.
                 var tl = await BuildTimelineAsync(competitionId);
                 var duplicates = tl.Rows
                     .Where(r => r.StartOrder > 0)
-                    .GroupBy(r => r.StartOrder)
+                    .GroupBy(r => new { r.WeaponClass, r.StartOrder })
                     .Where(g => g.Count() > 1)
-                    .Select(g => new { startOrder = g.Key, count = g.Count(), names = g.Select(x => x.Name).ToList() })
-                    .OrderBy(x => x.startOrder)
+                    .Select(g => new
+                    {
+                        weaponClass = g.Key.WeaponClass,
+                        startOrder = g.Key.StartOrder,
+                        count = g.Count(),
+                        names = g.Select(x => x.Name).ToList()
+                    })
+                    .OrderBy(x => x.weaponClass).ThenBy(x => x.startOrder)
                     .ToList();
                 return Json(new { success = true, duplicates });
             }
@@ -1938,8 +2159,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var currentSec = ParseStartTimeSeconds(starter.StartTime);
                 SpringTimeline? tl = null;  // built lazily, reused by both guards
 
-                // Guard: start number must be GLOBALLY unique across every start list in the competition
-                // (numbering is one running sequence, not per weapon class).
+                // Guard: a start number must be unique within its WEAPON CLASS across every start list in
+                // the competition. The same number in another weapon class is legitimate — A and C have
+                // separate ledgers and separate number patches.
                 if (request.StartOrder.HasValue && request.StartOrder.Value != starter.StartOrder)
                 {
                     if (request.StartOrder.Value < 0)
@@ -1947,9 +2169,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     tl ??= await BuildTimelineAsync(request.CompetitionId);
                     bool numTaken = tl.Rows.Any(r =>
                         !(r.MemberId == request.MemberId && r.WeaponClass == request.WeaponClass)
+                        && string.Equals(r.WeaponClass, starter.WeaponClass, StringComparison.OrdinalIgnoreCase)
                         && r.StartOrder == request.StartOrder.Value);
                     if (numTaken)
-                        return Json(new { success = false, message = $"Startnummer {request.StartOrder.Value} används redan i tävlingen." });
+                        return Json(new { success = false, message = $"Startnummer {request.StartOrder.Value} används redan i vapengrupp {starter.WeaponClass}." });
                 }
 
                 // Guard: don't move onto a time already reserved by another (non-DNS) shooter (same class).
@@ -2836,11 +3059,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 }
                 else
                 {
-                    // Next start number across the WHOLE competition (never reused, never renumbers others)
-                    // — same "global max + 1" approach as Fältskytte patrols. Deliberately not scoped to
-                    // the weapon class: numbering is one globally-unique sequence, so a per-class max+1
-                    // could hand out a number another class already holds.
-                    startOrder = tl.Rows.Select(r => r.StartOrder).DefaultIfEmpty(0).Max() + 1;
+                    // Next start number in THIS weapon class (never reused within the class, never
+                    // renumbers others) — same "max + 1" approach as Fältskytte patrols. Scoped to the
+                    // class because A and C have separate number ledgers.
+                    startOrder = tl.Rows
+                        .Where(r => string.Equals(r.WeaponClass, weaponClass, StringComparison.OrdinalIgnoreCase))
+                        .Select(r => r.StartOrder).DefaultIfEmpty(0).Max() + 1;
                     targetConfig.Starters.Add(new SpringskytteStartListEntry
                     {
                         StartOrder = startOrder,

@@ -208,11 +208,15 @@
                         <i class="bi bi-printer me-1"></i>Skriv ut
                     </a>
                 }
-                <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event)"
+                @* Each weapon group is calculated and published on its own, so the per-group blocks below
+                   (rendered by springLoadResultsList) carry the action buttons. These whole-competition
+                   buttons stay as the "no results calculated yet" entry point and for a competition with
+                   a single weapon group. *@
+                <button class="btn btn-outline-primary btn-sm" id="springUpdateAllBtn" onclick="springCreateResultsList(event)"
                     title="Räknar om resultatlistan från alla registrerade resultat. Ändrar inte om listan är publik.">
                     <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
                 </button>
-                <button class="btn btn-success btn-sm" id="springPublishBtn" onclick="springPublishResults(event)"
+                <button class="btn btn-success btn-sm" id="springPublishBtn" style="display:none" onclick="springPublishResults(event)"
                     title="Räknar om och publicerar listan som officiell — den blir synlig publikt på tävlingssidan.">
                     <i class="bi bi-check-circle me-1"></i>Publicera
                 </button>
@@ -1988,65 +1992,105 @@ async function springCSetStatus(status) {
 
 // ===== RESULTS LIST =====
 
-// Reflect the stored list's published/preliminary state in the badge + which publish button shows.
-function springSetResultsStatus(resultsExist, isOfficial) {
+// A and C are separate lists that finish at different times, so each weapon group is published on its
+// own. The header badge summarises ("A publicerad · C preliminär") and the per-class blocks below carry
+// the buttons. springPerClassPublish is false on installs missing the doctype property — then the old
+// whole-competition buttons in the header are used instead.
+let springPerClassPublish = false;
+let springOfficialClasses = [];
+
+function springSetResultsStatus(resultsExist, isOfficial, official, classes) {
     const badge = document.getElementById('springResultsStatusBadge');
+    const updAll = document.getElementById('springUpdateAllBtn');
     const pub = document.getElementById('springPublishBtn');
     const unpub = document.getElementById('springUnpublishBtn');
     const printBtn = document.getElementById('springPrintBtn');
     if (printBtn) printBtn.style.display = resultsExist ? '' : 'none';
+
+    // "Uppdatera" stays in the header (it's how you calculate the list in the first place). Publish and
+    // unpublish live in the per-group blocks whenever there are groups to publish; with no groups yet the
+    // whole-competition buttons are the only sensible affordance.
+    const perClassBlocks = (classes || []).length > 0;
+    if (updAll) updAll.style.display = '';
+    if (pub) pub.style.display = (!perClassBlocks && !isOfficial) ? '' : 'none';
+    if (unpub) unpub.style.display = (!perClassBlocks && isOfficial) ? '' : 'none';
+
     if (!badge) return;
     if (!resultsExist) {
         badge.className = 'badge bg-secondary ms-2'; badge.textContent = 'Ej skapad';
-        if (pub) pub.style.display = ''; if (unpub) unpub.style.display = 'none';
+        return;
+    }
+    if (springPerClassPublish && (classes || []).length) {
+        const parts = classes.map(wc => (official || []).includes(wc)
+            ? `${wc} publicerad` : `${wc} preliminär`);
+        badge.className = 'badge ms-2 ' + ((official || []).length === classes.length ? 'bg-success'
+            : (official || []).length ? 'bg-info text-dark' : 'bg-warning text-dark');
+        badge.textContent = parts.join(' · ');
     } else if (isOfficial) {
         badge.className = 'badge bg-success ms-2'; badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
-        if (pub) pub.style.display = 'none'; if (unpub) unpub.style.display = '';
     } else {
         badge.className = 'badge bg-warning text-dark ms-2'; badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
-        if (pub) pub.style.display = ''; if (unpub) unpub.style.display = 'none';
     }
 }
 
-// "Uppdatera" — recompute the list, preserving its published/preliminary state (never auto-publishes).
-async function springCreateResultsList(event) {
+// "Uppdatera" — recompute, preserving what is published (never auto-publishes). weaponClass '' = all.
+async function springCreateResultsList(event, weaponClass) {
     if (event) event.stopPropagation();
     const btn = event?.target?.closest('button');
+    const label = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Uppdaterar...'; }
     try {
-        const data = await springResultsPost('CalculateSpringskytteFinalResults');
+        const data = await springResultsPostClass('CalculateSpringskytteFinalResults', weaponClass);
         if (data.success) { showSpringMessage(data.message, 'success'); springLoadResultsList(); }
         else { alert(data.message || 'Fel vid beräkning.'); }
     } catch (err) { alert('Ett fel uppstod.'); }
-    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; } }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = label || '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; } }
 }
 
-// "Publicera" — recompute AND make the list official (public).
-async function springPublishResults(event) {
+// "Publicera" — recompute AND make it official (public). weaponClass '' = the whole competition.
+async function springPublishResults(event, weaponClass) {
     if (event) event.stopPropagation();
-    if (!confirm('Publicera resultatlistan? Den blir synlig publikt på tävlingssidan.')) return;
+    if (!confirm(weaponClass
+        ? `Publicera resultatlistan för vapengrupp ${weaponClass}? Den blir synlig publikt på tävlingssidan. Övriga vapengrupper påverkas inte.`
+        : 'Publicera resultatlistan? Den blir synlig publikt på tävlingssidan.')) return;
     const btn = event?.target?.closest('button');
+    const label = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Publicerar...'; }
     try {
-        const data = await springResultsPost('PublishSpringskytteResults');
+        const data = await springResultsPostClass('PublishSpringskytteResults', weaponClass);
         if (data.success) { showSpringMessage(data.message, 'success'); springLoadResultsList(); }
         else { alert(data.message || 'Fel vid publicering.'); }
     } catch (err) { alert('Ett fel uppstod.'); }
-    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicera'; } }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = label || '<i class="bi bi-check-circle me-1"></i>Publicera'; } }
 }
 
-// "Gör preliminär" — hide the list publicly again (keeps the computed snapshot).
-async function springUnpublishResults(event) {
+// "Gör preliminär" — hide it publicly again (keeps the computed snapshot).
+async function springUnpublishResults(event, weaponClass) {
     if (event) event.stopPropagation();
-    if (!confirm('Gör resultatlistan preliminär? Den döljs då publikt.')) return;
+    if (!confirm(weaponClass
+        ? `Gör vapengrupp ${weaponClass} preliminär? Den döljs då publikt. Övriga vapengrupper påverkas inte.`
+        : 'Gör resultatlistan preliminär? Den döljs då publikt.')) return;
     const btn = event?.target?.closest('button');
+    const label = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>...'; }
     try {
-        const data = await springResultsPost('SetSpringskytteResultsPreliminary');
+        const data = await springResultsPostClass('SetSpringskytteResultsPreliminary', weaponClass);
         if (data.success) { showSpringMessage(data.message, 'success'); springLoadResultsList(); }
         else { alert(data.message || 'Kunde inte ändra status.'); }
     } catch (err) { alert('Ett fel uppstod.'); }
-    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-eye-slash me-1"></i>Gör preliminär'; } }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = label || '<i class="bi bi-eye-slash me-1"></i>Gör preliminär'; } }
+}
+
+// Per-class endpoints take {competitionId, weaponClass}; the Deltävling ones still take a bare id.
+function springResultsPostClass(action, weaponClass) {
+    return fetch('/umbraco/surface/Springskytte/' + action, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+        },
+        body: JSON.stringify({ competitionId: parseInt(springCompetitionId, 10), weaponClass: weaponClass || '' })
+    }).then(r => r.json());
 }
 
 function springResultsPost(action) {
@@ -2069,7 +2113,14 @@ async function springLoadResultsList() {
         const content = document.getElementById('springResultsContent');
         if (!content) return; // results list isn't on the chromeless /station scoring page
 
-        springSetResultsStatus(data.resultsExist === true, data.resultsOfficial === true);
+        springPerClassPublish = data.supportsPerClassPublish === true;
+        springOfficialClasses = data.officialWeaponClasses || [];
+        // Every weapon class that has results — even one whose list isn't published yet.
+        const classesWithResults = (data.weaponClassesWithResults && data.weaponClassesWithResults.length)
+            ? data.weaponClassesWithResults
+            : [...new Set((data.classGroups || []).map(g => g.weaponClass))].filter(Boolean).sort();
+        springSetResultsStatus(data.resultsExist === true, data.resultsOfficial === true,
+            springOfficialClasses, classesWithResults);
 
         if (data.success && data.classGroups?.length > 0) {
             if (body) body.style.display = 'block';
@@ -2094,7 +2145,40 @@ async function springLoadResultsList() {
                 </div>`;
             }
 
-            for (const group of data.classGroups) {
+            // One block per weapon group, each with its own status + publish actions, so A can be
+            // OFFICIELL while C is still being scored. The tables inside are unchanged.
+            for (const wc of classesWithResults) {
+            const wcGroups = (data.classGroups || []).filter(g => g.weaponClass === wc);
+            if (!wcGroups.length) continue;
+            const isOff = springOfficialClasses.includes(wc);
+            const wcShooters = wcGroups.reduce((n, g) => n + (g.shooters?.length || 0), 0);
+            html += `
+                <div class="border rounded p-3 mb-4 ${isOff ? 'border-success' : ''}">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <div>
+                            <span class="fw-bold fs-6">Vapengrupp ${wc}</span>
+                            <span class="badge ${isOff ? 'bg-success' : 'bg-warning text-dark'} ms-2">${isOff ? 'Publicerad' : 'Preliminär'}</span>
+                            <span class="text-muted small ms-2">${wcShooters} skyttar i ${wcGroups.length} klasser</span>
+                        </div>
+                        ${springPerClassPublish ? `
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event,'${wc}')"
+                                title="Räknar om resultaten. Ändrar inte om listan är publik.">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                            </button>
+                            ${isOff ? `
+                            <button class="btn btn-outline-secondary btn-sm" onclick="springUnpublishResults(event,'${wc}')"
+                                title="Döljer vapengruppens resultat publikt igen.">
+                                <i class="bi bi-eye-slash me-1"></i>Gör preliminär
+                            </button>` : `
+                            <button class="btn btn-success btn-sm" onclick="springPublishResults(event,'${wc}')"
+                                title="Publicerar vapengruppens resultat som officiella. Övriga vapengrupper påverkas inte.">
+                                <i class="bi bi-check-circle me-1"></i>Publicera
+                            </button>`}
+                        </div>` : ''}
+                    </div>`;
+
+            for (const group of wcGroups) {
                 html += `
                 <div class="mb-4">
                     <h6 class="border-bottom pb-1">${group.className}</h6>
@@ -2135,6 +2219,8 @@ async function springLoadResultsList() {
                     </div>
                 </div>`;
             }
+            html += `</div>`;   // close this weapon group's block
+            }  // end weapon-group loop
             content.innerHTML = html;
         } else {
             content.innerHTML = `<div class="text-center py-4 text-muted"><i class="bi bi-list-check fs-3 d-block mb-2"></i>Ingen resultatlista ännu — klicka <strong>Uppdatera</strong> för att räkna ut den, och <strong>Publicera</strong> när den ska bli synlig publikt.</div>`;

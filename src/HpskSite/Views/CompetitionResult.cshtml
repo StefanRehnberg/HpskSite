@@ -829,22 +829,34 @@
         // Springskytte results rendering
         async function loadSpringskytteResults(container) {
             try {
-                const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}${subQs}`);
+                // publicOnly: each weapon group is published on its own, so this page shows only the
+                // groups the organiser has made official — A can be up while C is still being scored.
+                const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}${subQs}&publicOnly=true`);
                 const data = await response.json();
 
                 if (!data.success || !data.classGroups?.length) {
                     container.innerHTML = `
                         <div class="alert alert-info">
                             <h4 class="alert-heading">Inga resultat ännu</h4>
-                            <p class="mb-0">Det finns inga registrerade resultat för denna tävling ännu.</p>
+                            <p class="mb-0">Det finns inga publicerade resultat för denna tävling ännu.</p>
                         </div>`;
                     return;
                 }
+
+                // Say which groups are still missing, so a shooter doesn't read a partial list as final.
+                const springPending = (data.weaponClassesWithResults || [])
+                    .filter(wc => !(data.officialWeaponClasses || []).includes(wc));
 
                 const springAwardingMedals = data.isAwardingStandardMedals === true;
                 // Only show the manual Straff/Avdrag columns when the competition actually has any.
                 const springAnyAdjust = data.classGroups.some(g => g.shooters.some(s => (s.penaltyPoints || 0) > 0 || (s.reductionSeconds || 0) > 0));
                 let html = '';
+                if (springPending.length) {
+                    html += `<div class="alert alert-info">
+                        <i class="bi bi-hourglass-split me-1"></i>
+                        Resultaten för vapengrupp ${springPending.join(', ')} är inte publicerade ännu.
+                    </div>`;
+                }
                 data.classGroups.forEach(group => {
                     html += `
                         <div class="class-results-section">
