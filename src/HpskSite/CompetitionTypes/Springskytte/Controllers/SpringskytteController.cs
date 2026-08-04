@@ -2124,7 +2124,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
         /// <summary>
         /// Edit ONE starter's start number and/or start time in place, preserving every other
-        /// starter's number and time (unlike Generate/Regenerate which reshuffles the whole list).
+        /// starter's number and time. This and RenumberSpringskytteStartLists ("Numrera om") are the
+        /// ONLY two ways a start number changes from the admin screen — Generate/Regenerate recomputes
+        /// the TIMES but keeps every existing number (see ApplyNumbersToGeneratedList).
         /// Keeps the Starters array in start-time order and mirrors the change to the DB row.
         /// </summary>
         [HttpPost]

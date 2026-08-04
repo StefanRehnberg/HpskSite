@@ -515,10 +515,10 @@ function springOpenSettings(tempId) {
     const warn = document.getElementById('springRebuildWarn');
     const warnText = document.getElementById('springRebuildWarnText');
     if (isExisting && card.isOfficial) {
-        warnText.textContent = 'Denna startlista är PUBLICERAD som officiell. Att generera om ger alla skyttar nya startnummer och tider och skriver över eventuella manuella ändringar. Ändra bara namn/datum ovan om det är det du vill.';
+        warnText.innerHTML = 'Denna startlista är <strong>PUBLICERAD som officiell</strong>. Att generera om räknar om <strong>starttiderna</strong> och bygger listan på nytt från anmälningarna — publicerade tider ändras alltså för alla. <strong>Startnumren behålls</strong> (även handskrivna). Ändra bara namn/datum ovan om det är det du vill.';
         warn.classList.remove('d-none');
     } else if (isExisting) {
-        warnText.textContent = 'Att generera om ger alla skyttar nya startnummer och tider och skriver över eventuella manuella ändringar. Vill du bara byta namn eller datum använder du "Spara namn & datum" ovan.';
+        warnText.innerHTML = 'Att generera om räknar om <strong>starttiderna</strong> från inställningarna nedan och bygger listan på nytt från anmälningarna. <strong>Startnumren påverkas inte</strong> — varje skytt behåller sitt nummer, också ett du skrivit in för hand, och nya skyttar får nästa lediga nummer i sin vapengrupp. Startnummer ändras bara när <em>du</em> ändrar dem: med pennan på en rad eller med knappen <em>Numrera om</em>. Vill du bara byta namn eller datum använder du "Spara namn & datum" ovan.';
         warn.classList.remove('d-none');
     } else {
         warn.classList.add('d-none');
@@ -678,8 +678,8 @@ async function springGenerateFromModal() {
     // Guard the destructive rebuild. Published list = extra-strong confirm.
     if (wasExisting) {
         const warn = card.isOfficial
-            ? `"${card.listName}" är PUBLICERAD som officiell. Att generera om ger ALLA skyttar nya startnummer och tider och skriver över manuella ändringar.\n\nÄr du helt säker?`
-            : `Generera om "${card.listName}"? Alla skyttar får nya startnummer och tider och manuella ändringar skrivs över.`;
+            ? `"${card.listName}" är PUBLICERAD som officiell.\n\nAtt generera om räknar om STARTTIDERNA för alla skyttar och bygger listan på nytt från anmälningarna. Startnumren behålls.\n\nÄr du helt säker?`
+            : `Generera om "${card.listName}"?\n\nStarttiderna räknas om från inställningarna och listan byggs på nytt från anmälningarna.\n\nStartnumren behålls — varje skytt behåller sitt nummer (även handskrivet). Använd pennan på en rad eller "Numrera om" för att ändra nummer.`;
         if (!confirm(warn)) return;
     }
     if (!confirmIfResultsExist(wasExisting ? 'Generera om startlista' : 'Generera startlista')) return;
@@ -1117,37 +1117,6 @@ async function springApplyRenumber() {
     }
 }
 
-async function springResetNumbers() {
-    if (!confirmIfResultsExist('Återställ startnummer')) return;
-    if (!confirm('Återställ alla startnummer till en löpande följd (1, 2, 3… genom alla listor)?')) return;
-
-    const btn = document.getElementById('springNumberingBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Återställer...'; }
-
-    try {
-        const response = await fetch('/umbraco/surface/Springskytte/ResetSpringskytteStartNumbers', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
-            },
-            body: JSON.stringify(springCompId)
-        });
-        const data = await response.json();
-        if (data.success) {
-            alert(data.message);
-            await springLoadAll();
-        } else {
-            alert(data.message || 'Fel vid återställning.');
-        }
-    } catch (err) {
-        console.error('Error resetting:', err);
-        alert('Ett fel uppstod.');
-    } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-numeric-down me-1"></i>Numrera om'; }
-    }
-}
-
 function springUpdateTopButtons() {
     const hasGenerated = springLocalCards.some(c => c.starters && c.starters.length > 0);
     const btn = document.getElementById('springNumberingBtn');
@@ -1155,8 +1124,14 @@ function springUpdateTopButtons() {
     springCheckDuplicateNumbers();
 }
 
-// Start numbers must be unique across the whole competition. Warn loudly if data has duplicates
-// (e.g. legacy per-weapon-class numbering where C#1 and A#1 both exist).
+// NOTE: there is no client caller for Springskytte/ResetSpringskytteStartNumbers (renumber ALL lists
+// into one running sequence). The per-list "Numrera om" modal replaced it, and the SM rehearsal lesson
+// is that nothing may renumber by surprise — so the only two ways a start number changes from this
+// screen are the pen icon on a row (UpdateSpringskytteStarter) and the "Numrera om" modal
+// (RenumberSpringskytteStartLists). The endpoint is kept as a deliberate manual escape hatch.
+
+// Start numbers are one sequence PER WEAPON CLASS (A#5 and C#5 are two different shooters), so a
+// duplicate means the same number twice within one weapon class. The server groups by (class, number).
 async function springCheckDuplicateNumbers() {
     const warn = document.getElementById('springDupWarn');
     if (!warn) return;
@@ -1164,9 +1139,9 @@ async function springCheckDuplicateNumbers() {
         const d = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStartNumberIssues?competitionId=${springCompId}`).then(r => r.json());
         const dups = (d.success && d.duplicates) ? d.duplicates : [];
         if (dups.length) {
-            const parts = dups.map(x => `nr ${x.startOrder} (${x.count} skyttar)`);
+            const parts = dups.map(x => `${x.weaponClass ? x.weaponClass + ' ' : ''}nr ${x.startOrder} (${x.count} skyttar)`);
             document.getElementById('springDupWarnText').innerHTML =
-                `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Dubbla startnummer!</strong> ${parts.join(', ')}. Startnummer måste vara unika i tävlingen — klicka "Numrera om nu".`;
+                `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Dubbla startnummer!</strong> ${parts.join(', ')}. Startnummer måste vara unika inom vapengruppen — rätta med pennan på raden, eller klicka "Numrera om nu".`;
             warn.classList.remove('d-none');
         } else {
             warn.classList.add('d-none');
