@@ -932,6 +932,14 @@ async function springOpenRenumberModal() {
     errEl.classList.add('d-none'); errEl.textContent = '';
     rowsEl.innerHTML = '<div class="text-center py-3 text-muted"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('springRenumberModal')).show();
+    // The cards BEHIND this modal were rendered when the page loaded, while the plan below is fetched
+    // fresh — so if the lists changed since (another functionary, another tab, a regenerate) the two
+    // contradicted each other on screen, which reads as "the renumbering is wrong". Refresh the cards
+    // first so they can't disagree. Skipped while an unsaved "Ny startlista" card is open, because
+    // reloading would discard it.
+    try {
+        if (!(springLocalCards || []).some(c => !c.nodeId)) await springLoadAll();
+    } catch (e) { /* stale cards are not worth blocking the modal for */ }
     try {
         const d = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteRenumberPlan?competitionId=${springCompId}`).then(r => r.json());
         if (!d.success) { rowsEl.innerHTML = `<div class="alert alert-warning mb-0">${escapeHtml(d.message) || 'Kunde inte ladda listor.'}</div>`; return; }
