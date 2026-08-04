@@ -802,6 +802,10 @@ function springRenderEntry() {
                         ${existing?.shootingScore ?? 0}
                     </div>
                 </div>
+                <div class="col-md-4" data-shotcount-wrap>
+                    <label class="form-label fw-bold"><i class="bi bi-123 me-1"></i>Skott registrerade</label>
+                    <div class="time-display"><span id="springShotCount" class="fw-bold text-warning">0/30</span></div>
+                </div>
             </div>
 
             <!-- Penalty Multiplier -->
@@ -1033,6 +1037,7 @@ function springRecalcClassC() {
     const shootingScore = totalMisses * multiplier;
     const scoreEl = document.getElementById('springShootingScore');
     if (scoreEl) scoreEl.textContent = shootingScore;
+    springPaintShotCountBadge('springShotCount', springShotCounts(springCollectClassCShots(), true));
     springUpdateTotalTimeA(shootingScore, multiplier);
 }
 
@@ -1067,6 +1072,7 @@ function springRecalcClassA() {
 
     const scoreEl = document.getElementById('springShootingScore');
     if (scoreEl) scoreEl.textContent = totalScore;
+    springPaintShotCountBadge('springShotCount', springShotCounts(null, false));
     springUpdateTotalTimeA(totalScore, 1);
 }
 
@@ -1118,13 +1124,15 @@ async function springSaveResult() {
     const isClassC = shooter.weaponClass === 'C';
     const finishInput = document.getElementById('springFinishTime')?.value?.trim() || null;
 
-    // Collect and validate shots
+    // Collect shots. A partial grid saves (see springShotCounts); only an impossible count blocks.
     const shotSeries = isClassC ? springCollectClassCShots() : springCollectClassAShots();
-    const incomplete = springValidateShotsComplete(shotSeries, isClassC);
-    if (incomplete) {
-        showSpringMessage(incomplete, 'warning');
+    const counts = springShotCounts(shotSeries, isClassC);
+    const overcount = springShotOvercount(counts);
+    if (overcount) {
+        showSpringMessage(overcount, 'danger');
         return;
     }
+    const partialNote = springPartialNote(counts);
 
     const multiplier = isClassC
         ? parseInt(document.querySelector('input[name="springMultiplier"]:checked')?.value || '1')
@@ -1165,23 +1173,34 @@ async function springSaveResult() {
             };
 
             // Client-side verification: compare sent shots with server-verified shots
+            let verifyFailed = false;
             if (data.verificationShots) {
                 const sentJson = JSON.stringify(shotSeries);
                 const storedJson = JSON.stringify(data.verificationShots);
                 if (sentJson !== storedJson) {
+                    verifyFailed = true;
                     showSpringMessage('⚠ VARNING: Verifieringsfel — sparade skott skiljer sig från inskickade. Kontrollera resultatet!', 'danger');
                     console.error('Shot verification mismatch!', { sent: shotSeries, stored: data.verificationShots });
-                } else {
-                    showSpringMessage(`✓ Resultat verifierat och sparat: ${data.totalTimeDisplay || '-'}`, 'success');
                 }
-            } else {
-                showSpringMessage(`Resultat sparat: ${data.totalTimeDisplay || '-'}`, 'success');
+            }
+            if (!verifyFailed) {
+                const verified = data.verificationShots ? '✓ Verifierat och sparat' : 'Sparat';
+                if (partialNote) {
+                    // Amber, and it names what's missing: skjutpoängen only counts entered shots,
+                    // so a half-entered result must never read as a finished one.
+                    showSpringMessage(`${verified} som DELRESULTAT: ${partialNote}. Skjutpoängen räknas bara på registrerade skott.`, 'warning');
+                } else {
+                    showSpringMessage(`${verified}: ${data.totalTimeDisplay || '-'}`, 'success');
+                }
             }
 
             // Re-take snapshot so current state is now the "saved" baseline
             springASnapshot = springATakeSnapshot();
+            springPaintShotCountBadge('springShotCount', counts);
 
-            if (springCurrentIndex < springFilteredShooters.length - 1) {
+            // Only auto-advance on a COMPLETE result — a partial save means the functionary
+            // is coming back to this shooter, so jumping away would lose their place.
+            if (!partialNote && springCurrentIndex < springFilteredShooters.length - 1) {
                 setTimeout(() => { springNextShooter(); }, 500);
             }
         } else {
@@ -1352,6 +1371,7 @@ function springCRenderActiveCard(shooter) {
             <!-- Shooting score summary + auto-save status (each toggle saves automatically) -->
             <div class="d-flex align-items-center gap-3 my-3 p-2 rounded" style="background: var(--bs-tertiary-bg);">
                 <span class="fw-bold">Skjutpoäng: <span id="cTotalMisses" class="text-danger fs-5">0</span></span>
+                <span class="fw-bold" data-shotcount-wrap>Skott: <span id="cShotCount" class="fw-bold text-warning">0/30</span></span>
                 <span class="ms-auto small" id="cSaveStatus"></span>
             </div>
 
@@ -1699,6 +1719,7 @@ function springCRecalc() {
     }
 
     document.getElementById('cTotalMisses').textContent = totalMisses;
+    springPaintShotCountBadge('cShotCount', springShotCounts(springCCollectShots(), true));
 
     const shooter = springCActiveShooter;
     const finishInput = document.getElementById('cFinishTime')?.value;
@@ -1758,12 +1779,14 @@ async function springCSave() {
     const finishInput = document.getElementById('cFinishTime')?.value?.trim() || null;
     const shotSeries = springCCollectShots();
 
-    // Validate completeness: all 6 stations must have 5 shots each
-    const incomplete = springValidateShotsComplete(shotSeries, true);
-    if (incomplete) {
-        showSpringCToast(incomplete, 'warning');
+    // A partial grid saves (the pad banks stations as they're shot); only an impossible count blocks.
+    const counts = springShotCounts(shotSeries, true);
+    const overcount = springShotOvercount(counts);
+    if (overcount) {
+        showSpringCToast(overcount, 'danger');
         return;
     }
+    const partialNote = springPartialNote(counts);
 
     const requestData = {
         competitionId: springCompetitionId,
@@ -1828,14 +1851,20 @@ async function springCSave() {
             if (springCRecentEntries.length > 5) springCRecentEntries.pop();
             springCRenderRecentList();
 
-            showSpringCToast(verifiedMsg, 'success');
+            if (partialNote) {
+                showSpringCToast(`${verifiedMsg} — DELRESULTAT: ${partialNote}`, 'warning');
+                // Keep the card open: a partial save means this shooter isn't finished.
+                springCSnapshot = springCTakeSnapshot();
+            } else {
+                showSpringCToast(verifiedMsg, 'success');
 
-            // Clear state and refocus
-            springCSnapshot = null;
-            document.getElementById('springCActiveCard').style.display = 'none';
-            springCActiveShooter = null;
-            const input = document.getElementById('springCStartNumber');
-            if (input) { input.value = ''; input.focus(); }
+                // Clear state and refocus
+                springCSnapshot = null;
+                document.getElementById('springCActiveCard').style.display = 'none';
+                springCActiveShooter = null;
+                const input = document.getElementById('springCStartNumber');
+                if (input) { input.value = ''; input.focus(); }
+            }
         } else {
             showSpringCToast(data.message || 'Fel vid sparning.', 'danger');
         }
@@ -2421,41 +2450,76 @@ function formatSecondsToTime(totalSeconds) {
     return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-// Validate that all shots are filled in every station/series.
-// Checks DOM elements directly to distinguish empty from valid values.
-// Returns error message string if incomplete, null if OK.
-function springValidateShotsComplete(shotSeries, isClassC) {
+// ===== Shot-count status =====
+// A PARTIAL score must be savable: the functionary at the pad banks the first target/station
+// and comes back for the rest (SM dress rehearsal 2026-08-03 — entering only target 1's shots
+// was refused, which forced a paper detour). So a missing shot only WARNS.
+// The only hard block is an IMPOSSIBLE count — more shots on a target than the target holds —
+// because that can't be a work-in-progress, it's a typo that would corrupt the score.
+// Returns { per, entered, expected, over, isPartial }.
+function springShotCounts(shotSeries, isClassC) {
+    const per = [];
     if (isClassC) {
-        // Class C: check button data-value — must be 'H' or 'B'
+        // Class C: a shot is registered when the button holds 'H' or 'B' (a bom IS a shot).
         for (let i = 0; i < shotSeries.length; i++) {
-            const shots = shotSeries[i];
-            let filled = 0;
-            for (const s of shots) {
-                if (s === 'H' || s === 'B') filled++;
+            let entered = 0;
+            for (const s of shotSeries[i]) {
+                if (s === 'H' || s === 'B') entered++;
             }
-            if (filled < 5) {
-                return `Station ${i + 1}: alla 5 skott måste registreras (${filled}/5 ifyllda).`;
-            }
+            per.push({ label: `Station ${i + 1}`, entered: entered, expected: 5 });
         }
     } else {
-        // Class A zone count format: each target has 5 zone inputs, sum must equal shots per target
+        // Class A zone-count format: each target has 5 zone inputs; their sum is the shot count.
         const numTargets = springNumberOfSeries || 2;
         const shotsPerTarget = Math.floor(30 / numTargets);
         const extraShots = 30 - (shotsPerTarget * numTargets);
 
         for (let t = 1; t <= numTargets; t++) {
             const expected = t === numTargets ? shotsPerTarget + extraShots : shotsPerTarget;
-            let shotCount = 0;
+            let entered = 0;
             for (let z = 0; z < 5; z++) {
                 const input = document.getElementById(`target_${t}_zone_${z}`);
-                shotCount += parseInt(input?.value) || 0;
+                entered += parseInt(input?.value) || 0;
             }
-            if (shotCount !== expected) {
-                return `Mål ${t}: summan av alla zoner måste vara ${expected} (nu: ${shotCount}).`;
-            }
+            per.push({ label: `Mål ${t}`, entered: entered, expected: expected });
         }
     }
-    return null;
+    const entered = per.reduce((a, x) => a + x.entered, 0);
+    const expected = per.reduce((a, x) => a + x.expected, 0);
+    const over = per.filter(x => x.entered > x.expected);
+    return { per: per, entered: entered, expected: expected, over: over, isPartial: entered < expected };
+}
+
+// Hard block: message when a target/station holds more shots than it can. null = OK to save.
+function springShotOvercount(counts) {
+    if (!counts.over.length) return null;
+    const o = counts.over[0];
+    return `${o.label}: fler skott än målet rymmer (${o.entered} av ${o.expected}). Rätta innan du sparar.`;
+}
+
+// Soft note: short description of what's still missing. null = complete.
+function springPartialNote(counts) {
+    if (!counts.isPartial) return null;
+    const missing = counts.per
+        .filter(x => x.entered < x.expected)
+        .map(x => `${x.label} ${x.entered}/${x.expected}`)
+        .join(', ');
+    return `${counts.entered}/${counts.expected} skott — ${missing}`;
+}
+
+// Paint the "Skott registrerade" badge on a scoring pad. Amber while partial, red on overcount,
+// so a half-entered result is visible on screen rather than hidden behind a refused save.
+function springPaintShotCountBadge(elId, counts) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = `${counts.entered}/${counts.expected}`;
+    el.className = counts.over.length ? 'fw-bold text-danger'
+        : (counts.isPartial ? 'fw-bold text-warning' : 'fw-bold text-success');
+    const wrap = el.closest('[data-shotcount-wrap]');
+    if (wrap) {
+        wrap.title = counts.over.length ? springShotOvercount(counts)
+            : (counts.isPartial ? 'Ofullständigt — kan sparas som delresultat' : 'Alla skott registrerade');
+    }
 }
 
 // Always HH:MM:SS format (for finish time / clock time restoration)
