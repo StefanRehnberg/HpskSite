@@ -2,9 +2,11 @@
 <div class="modal fade" id="swishPaymentModal" tabindex="-1" aria-labelledby="swishPaymentModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
+            @* Title is set per invoice by window.paymentModalSetHeader — an organiser with bankgiro
+               only has no Swish QR to show, and "Betala med Swish" over an empty body reads as a bug. *@
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title" id="swishPaymentModalLabel">
-                    <i class="bi bi-qr-code"></i> Betala med Swish
+                    <i class="bi bi-qr-code"></i> Betala fakturan
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
@@ -105,6 +107,19 @@
     const modalEl = document.getElementById('swishPaymentModal');
     if (modalEl) modalEl.addEventListener('hidden.bs.modal', function () { window.swishModalSetPaymentSent(null); });
 
+    // Title follows what the dialog can actually offer: a Swish QR, bankgiro only, or an error.
+    // Called by every caller right before it fills the body.
+    window.paymentModalSetHeader = function (data) {
+        const label = document.getElementById('swishPaymentModalLabel');
+        if (!label) return;
+        const hasSwish = !!(data && (data.qrCodeBase64 || data.qrCode || data.swishAppUrl));
+        const bgOnly = !hasSwish && !!(data && data.bgNumber);
+        label.innerHTML = hasSwish
+            ? '<i class="bi bi-qr-code"></i> Betala med Swish'
+            : (bgOnly ? '<i class="bi bi-bank"></i> Betala via bankgiro'
+                      : '<i class="bi bi-receipt"></i> Betala fakturan');
+    };
+
     // ── Bankgiro alternative ────────────────────────────────────────────────────────────────────
     // Clubs and kretsar usually pay invoices by bankgiro rather than Swish, so every payment dialog
     // offers both. One renderer here means the block can't drift between the six surfaces that show
@@ -116,8 +131,17 @@
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         const hasQr = !!(data.qrCodeBase64 || (opts && opts.hasSwish));
         const amount = data.amount ? `${esc(data.amount)} kr` : '';
+        // With no Swish QR, say WHY up front — otherwise a dialog that used to show a QR just looks
+        // broken. Names the organiser, because for a krets-hosted competition it isn't your own club.
+        const noSwishNote = hasQr ? '' : `
+                <div class="alert alert-info py-2 small mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    ${data.payeeName ? esc(data.payeeName) + ' tar' : 'Arrangören tar'} inte emot Swish för
+                    den här tävlingen. Betala via bankgiro med uppgifterna nedan.
+                </div>`;
         return `
             <div class="border rounded p-3 mt-3 text-start">
+                ${noSwishNote}
                 <div class="fw-bold mb-2">
                     <i class="bi bi-bank me-1"></i>${hasQr ? 'Eller betala via bankgiro' : 'Betala via bankgiro'}
                 </div>
@@ -139,6 +163,15 @@
                 <div class="d-flex justify-content-between py-1">
                     <span class="text-muted">Referens (OCR/meddelande)</span>
                     <span class="fw-bold user-select-all">${esc(data.bgReference)}</span>
+                </div>` : ''}
+                ${data.bgQrCodeBase64 ? `
+                <div class="text-center mt-3">
+                    <img src="data:image/png;base64,${data.bgQrCodeBase64}" alt="QR-kod för fakturabetalning"
+                         class="img-fluid" style="max-width: 220px;">
+                    <div class="small text-muted mt-1">
+                        Skanna med <strong>bankappen</strong> (inte Swish) — kontonummer, belopp och
+                        referens fylls i automatiskt.
+                    </div>
                 </div>` : ''}
                 <div class="small text-muted mt-2">
                     Ange referensen så att arrangören kan matcha betalningen mot rätt faktura.

@@ -226,7 +226,13 @@
         <td>{paymentDate}</td>
         <td class="text-end">
             <div class="btn-group btn-group-sm" role="group">
-                <button class="btn btn-outline-primary" onclick="showClubSwishQRCode({id})" title="Visa Swish QR-kod">
+                @* The invoice itself, printable — a treasurer needs the document (or a PDF of it) to
+                   get the payment through their own bookkeeping, same way a shooter prints a Kvitto. *@
+                <a class="btn btn-outline-secondary" href="/faktura/{id}" target="_blank" rel="noopener"
+                   title="Visa faktura (för utskrift)">
+                    <i class="bi bi-file-earmark-text"></i>
+                </a>
+                <button class="btn btn-outline-primary" onclick="showClubSwishQRCode({id})" title="Visa betalningsuppgifter">
                     <i class="bi bi-qr-code"></i>
                 </button>
                 <button class="btn btn-outline-info" onclick="resendClubInvoiceEmail({id})" title="Skicka QR-kod via e-post">
@@ -824,6 +830,7 @@ function showClubSwishQRCode(invoiceId) {
     })
         .then(response => response.json())
         .then(data => {
+            if (window.paymentModalSetHeader) window.paymentModalSetHeader(data.success ? data : null);
             if (data.success) {
                 // Swish block only when the organiser has a Swish number — a BG-only organiser
                 // still gets a payable dialog, just with the bankgiro details instead of a QR.

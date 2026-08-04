@@ -1,0 +1,330 @@
+@model HpskSite.Models.InvoiceDocumentModel
+@using System.Globalization
+@*
+    Printable Faktura, opened from a club's or krets's Fakturor list (/faktura/{invoiceId}).
+    Deliberately the same visual language as Receipt.cshtml (same sheet, same print rules) so the two
+    documents from pistol.nu look like they come from the same organisation — but this one states what
+    is TO BE paid: amount due, to whom, and the reference the organiser matches the payment against.
+*@
+@{
+    Layout = null;
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+    string Kr(decimal v) => Math.Round(v).ToString("N0", sv) + " kr";
+    var issuerName = string.IsNullOrWhiteSpace(Model.IssuerName) ? "Arrangör" : Model.IssuerName;
+    var cityLine = string.Join(" ", new[] { Model.IssuerPostalCode, Model.IssuerCity }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    var issuedDate = Model.IssuedAt.ToString("yyyy-MM-dd", sv);
+    var compDate = Model.CompetitionDate?.ToString("d MMMM yyyy", sv) ?? "";
+    var isPaid = Model.PaymentStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase);
+    // No payment status on the document: status is dynamic (Stefan, 2026-08-04) and a printed paper
+    // would keep asserting a state that has since changed. The only stamp is MAKULERAD, which is a
+    // property of the DOCUMENT itself — a voided invoice must never be paid, whenever it is read.
+    var stampText = Model.IsCancelled ? "MAKULERAD" : "";
+    var docTitle = Model.IsCreditNote ? "KREDITFAKTURA" : "FAKTURA";
+    var hasIssuerAddress = !string.IsNullOrWhiteSpace(Model.IssuerStreet) && !string.IsNullOrWhiteSpace(cityLine);
+    var missingIssuerFields = new List<string>();
+    if (!hasIssuerAddress) missingIssuerFields.Add("postadress");
+    if (!Model.IssuerHasOrgNumber) missingIssuerFields.Add("organisationsnummer");
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(Model.IsCreditNote ? "Kreditfaktura" : "Faktura") @Model.ReceiptNumber</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#0d6efd; --paid:#198754; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--ink); background: #f3f4f6; margin: 0; padding: 24px;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .toolbar { max-width: 820px; margin: 0 auto 16px; display: flex; gap: 8px; justify-content: flex-end; }
+        .btn {
+            font: inherit; cursor: pointer; border: 1px solid var(--line); background:#fff;
+            color: var(--ink); padding: 8px 16px; border-radius: 8px; text-decoration:none;
+            display:inline-flex; align-items:center; gap:6px;
+        }
+        .btn-primary { background: var(--accent); border-color: var(--accent); color:#fff; }
+        .sheet {
+            max-width: 820px; margin: 0 auto; background:#fff; border-radius: 14px;
+            box-shadow: 0 6px 24px rgba(0,0,0,.08); padding: 48px 56px; position: relative;
+        }
+        .head { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; }
+        .issuer-logo { max-height: 76px; max-width: 220px; object-fit: contain; }
+        .issuer-meta { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+        .issuer-meta strong { color: var(--ink); font-size: 14px; }
+        .doc-title { text-align:right; }
+        .doc-title h1 { margin:0; font-size: 34px; letter-spacing: 2px; color: var(--accent); }
+        .doc-meta { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+        .doc-meta b { color: var(--ink); }
+        .rule { height:1px; background: var(--line); margin: 28px 0; border:0; }
+        .grid2 { display:flex; gap: 40px; flex-wrap: wrap; }
+        .grid2 > div { flex: 1 1 240px; }
+        .label { text-transform: uppercase; letter-spacing:.06em; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+        .val { font-size: 15px; }
+        table.items { width:100%; border-collapse: collapse; margin: 28px 0 8px; }
+        table.items th { text-align:left; font-size: 11px; text-transform:uppercase; letter-spacing:.06em; color: var(--muted); border-bottom: 2px solid var(--line); padding: 8px 0; }
+        table.items th.amt, table.items td.amt { text-align:right; }
+        table.items td { padding: 14px 0; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 15px; }
+        .item-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+        .totals { display:flex; justify-content:flex-end; margin-top: 16px; }
+        .totals table { border-collapse: collapse; min-width: 300px; }
+        .totals td { padding: 6px 0; font-size: 15px; }
+        .totals td.amt { text-align:right; font-variant-numeric: tabular-nums; }
+        .totals tr.grand td { border-top: 2px solid var(--ink); padding-top: 12px; font-size: 20px; font-weight: 700; }
+        .moms-note { font-size: 12px; color: var(--muted); margin-top: 6px; text-align:right; }
+        .stamp {
+            position:absolute; top: 150px; right: 70px; transform: rotate(-12deg);
+            border-radius: 10px; padding: 6px 18px; font-size: 26px; font-weight: 800;
+            letter-spacing: 3px; opacity:.85; border: 3px solid var(--paid); color: var(--paid);
+        }
+        .stamp.void { border-color:#dc3545; color:#dc3545; }
+        .paybox { margin-top: 28px; border:1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+        .paybox h2 { margin:0 0 12px; font-size: 15px; }
+        .payrow { display:flex; justify-content:space-between; gap:16px; padding: 6px 0; border-bottom:1px dashed var(--line); font-size:15px; }
+        .payrow:last-of-type { border-bottom:0; }
+        .payrow .k { color: var(--muted); }
+        .payrow .v { font-weight:600; }
+        .notice { background:#fff8e1; border:1px solid #f6e3a1; color:#7a5c00; border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-top: 24px; }
+        .foot { margin-top: 36px; padding-top: 16px; border-top:1px solid var(--line); font-size:12px; color: var(--muted); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+        @@media print {
+            body { background:#fff; padding:0; }
+            .toolbar { display:none; }
+            .sheet { box-shadow:none; border-radius:0; margin:0; max-width:none; padding: 24px 28px; }
+        }
+        @@media (max-width: 640px) {
+            .sheet { padding: 28px 22px; }
+            .head { flex-direction: column; }
+            .doc-title { text-align:left; }
+            .stamp { position: static; transform:none; display:inline-block; margin-top: 12px; }
+        }
+    </style>
+</head>
+<body>
+    @if (Model.AccessDenied)
+    {
+        <div class="sheet">
+            <h1 style="font-size:22px;margin-top:0;">Fakturan tillhör någon annan</h1>
+            <p>Den här fakturan hör till en annan betalare och en annan arrangör. Du kan öppna fakturor
+               som din förening ska betala eller ska få betalt för, och dina egna fakturor.</p>
+            <p><a class="btn" href="/user-profile-page#tavlingar"><i class="bi bi-arrow-left"></i> Till Mina tävlingar</a></p>
+        </div>
+    }
+    else
+    {
+        <div class="toolbar">
+            <button class="btn btn-primary" onclick="window.print()"><i class="bi bi-printer"></i> Skriv ut / Spara som PDF</button>
+        </div>
+
+        <div class="sheet">
+            @if (!string.IsNullOrEmpty(stampText))
+            {
+                <div class="stamp @(Model.IsCancelled ? "void" : "")">@stampText</div>
+            }
+
+            <div class="head">
+                <div>
+                    @if (!string.IsNullOrEmpty(Model.IssuerLogoUrl))
+                    {
+                        <img class="issuer-logo" src="@Model.IssuerLogoUrl" alt="@issuerName" onerror="this.style.display='none'">
+                    }
+                    <div class="issuer-meta">
+                        <strong>@issuerName</strong><br>
+                        @if (Model.IssuerHasOrgNumber)
+                        {
+                            <text>Org.nr: @Model.IssuerOrgNumber<br></text>
+                        }
+                        @if (Model.IssuerHasBgNumber)
+                        {
+                            <text>Bankgiro: @Model.IssuerBgNumber<br></text>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(Model.IssuerStreet)) { <text>@Model.IssuerStreet<br></text> }
+                        @if (!string.IsNullOrWhiteSpace(cityLine)) { <text>@cityLine<br></text> }
+                        @if (!string.IsNullOrWhiteSpace(Model.IssuerContactEmail)) { <text>@Model.IssuerContactEmail</text> }
+                    </div>
+                </div>
+                <div class="doc-title">
+                    <h1>@docTitle</h1>
+                    <div class="doc-meta">
+                        <div>Fakturanr: <b>@Model.ReceiptNumber</b></div>
+                        <div>Fakturadatum: <b>@issuedDate</b></div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="rule">
+
+            <div class="grid2">
+                <div>
+                    <div class="label">Faktureras</div>
+                    <div class="val">@(string.IsNullOrWhiteSpace(Model.BilledToName) ? Model.MemberName : Model.BilledToName)</div>
+                </div>
+                <div>
+                    <div class="label">Avser</div>
+                    <div class="val">@(Model.IsCreditNote ? "Kreditering av anmälningsavgift" : "Anmälningsavgift, tävling")</div>
+                </div>
+            </div>
+
+            <table class="items">
+                <thead>
+                    <tr>
+                        <th>Beskrivning</th>
+                        <th class="amt">Belopp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (Model.IsConsolidated)
+                    {
+                        @* Samlingsfaktura: itemise the covered registrations, or the club is handed a
+                           lump sum its bookkeeping cannot reconcile. *@
+                        <tr>
+                            <td>
+                                <strong>@Model.CompetitionName</strong>
+                                <div class="item-sub">
+                                    Samlingsfaktura för @Model.CoveredLines.Count anmälningar@(string.IsNullOrWhiteSpace(compDate) ? "" : $" · {compDate}")
+                                </div>
+                            </td>
+                            <td class="amt"></td>
+                        </tr>
+                        @foreach (var line in Model.CoveredLines)
+                        {
+                            <tr>
+                                <td style="padding-left:1.5rem;">
+                                    @line.MemberName
+                                    <div class="item-sub">
+                                        @line.InvoiceNumber@(string.IsNullOrWhiteSpace(line.ShootingClasses) ? "" : $" · Klasser: {line.ShootingClasses}")
+                                    </div>
+                                </td>
+                                <td class="amt">@Kr(line.Amount)</td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td>
+                                @Model.CompetitionName
+                                <div class="item-sub">
+                                    @(Model.IsCreditNote ? "Kreditering" : "Anmälningsavgift")@(string.IsNullOrWhiteSpace(compDate) ? "" : $" · {compDate}")
+                                    @if (!string.IsNullOrWhiteSpace(Model.ShootingClasses))
+                                    {
+                                        <text><br>Klasser: @Model.ShootingClasses</text>
+                                    }
+                                </div>
+                            </td>
+                            <td class="amt">@Kr(Model.IssuedTotal)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div class="totals">
+                <table>
+                    <tr>
+                        <td>Fakturerat belopp</td>
+                        <td class="amt">@Kr(Model.IssuedTotal)</td>
+                    </tr>
+                    @if (Model.Credited > 0)
+                    {
+                        <tr>
+                            <td>Krediterat</td>
+                            <td class="amt">−@Kr(Model.Credited)</td>
+                        </tr>
+                    }
+                    @if (Model.AmountPaid > 0)
+                    {
+                        <tr>
+                            <td>Betalt</td>
+                            <td class="amt">−@Kr(Model.AmountPaid)</td>
+                        </tr>
+                    }
+                    <tr class="grand">
+                        <td>Att betala</td>
+                        <td class="amt">@Kr(isPaid ? 0m : Model.AmountDue)</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="moms-note">Föreningen är inte momsregistrerad – moms ingår ej.</div>
+
+            @if (Model.IsSettledByParent)
+            {
+                <div class="notice">
+                    <strong>Betalas inte separat.</strong> Den här fakturan ingår i samlingsfakturan
+                    @(string.IsNullOrWhiteSpace(Model.SettledByInvoiceNumber) ? "" : Model.SettledByInvoiceNumber)
+                    och betalas genom den.
+                </div>
+            }
+            else if (Model.IsCreditNote)
+            {
+                <div class="notice">
+                    Kreditfaktura – minskar det som ska betalas på den ursprungliga fakturan.
+                    Är originalfakturan redan betald hanteras beloppet som återbetalning av arrangören.
+                </div>
+            }
+            else if (!isPaid && !Model.IsCancelled)
+            {
+                <div class="paybox">
+                    <h2><i class="bi bi-cash-coin"></i> Betalningsuppgifter</h2>
+                    @if (Model.HasAnyPaymentDetails)
+                    {
+                        @if (Model.HasSwishNumber)
+                        {
+                            <div class="payrow"><span class="k">Swish</span><span class="v">@Model.SwishNumber</span></div>
+                        }
+                        @if (Model.IssuerHasBgNumber)
+                        {
+                            <div class="payrow"><span class="k">Bankgiro</span><span class="v">@Model.IssuerBgNumber</span></div>
+                        }
+                        <div class="payrow"><span class="k">Mottagare</span><span class="v">@issuerName</span></div>
+                        <div class="payrow"><span class="k">Belopp</span><span class="v">@Kr(Model.AmountDue)</span></div>
+                        <div class="payrow"><span class="k">Referens (OCR/meddelande)</span><span class="v">@Model.PaymentReference</span></div>
+                        @if (Model.HasBgQrCode)
+                        {
+                            <div style="text-align:center; margin-top:16px;">
+                                <img src="data:image/png;base64,@Model.BgQrCodeBase64" alt="QR-kod för fakturabetalning"
+                                     style="width:180px; height:180px;">
+                                <div class="item-sub">
+                                    Skanna med <strong>bankappen</strong> (inte Swish) – konto, belopp och
+                                    referens fylls i automatiskt.
+                                </div>
+                            </div>
+                        }
+                        <div class="item-sub" style="margin-top:10px;">
+                            Ange referensen så att arrangören kan matcha betalningen mot rätt faktura.
+                            Betalningen bekräftas av arrangören när den är mottagen.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="item-sub">
+                            Arrangören har inte angett Swish-nummer eller bankgiro. Kontakta
+                            @issuerName@(string.IsNullOrWhiteSpace(Model.IssuerContactEmail) ? "" : $" ({Model.IssuerContactEmail})")
+                            för betalningsuppgifter.
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (missingIssuerFields.Count > 0)
+            {
+                @* A faktura has to carry the issuer's full postal address and org.nr — a club that
+                   receives this needs both for its bookkeeping. Say exactly what is missing so the
+                   organiser can fill it in under Inställningar rather than wonder what is wrong. *@
+                <div class="notice">
+                    <strong>Ofullständiga arrangörsuppgifter.</strong>
+                    @issuerName saknar @string.Join(" och ", missingIssuerFields) på fakturan.
+                    Uppgifterna fylls i under <em>Admin → Inställningar</em> hos arrangören och behövs
+                    för mottagarens bokföring.
+                </div>
+            }
+
+            <div class="foot">
+                <div>Faktura skapad via pistol.nu</div>
+                <div>@Model.ReceiptNumber</div>
+            </div>
+        </div>
+    }
+</body>
+</html>

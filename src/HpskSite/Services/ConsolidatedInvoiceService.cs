@@ -141,19 +141,22 @@ namespace HpskSite.Services
                     Key = $"club:{clubId}",
                     Name = _clubService.GetClubNameById(clubId) ?? $"Förening #{clubId}",
                     SwishNumber = swish,
-                    BgNumber = ReadBgNumber(clubNode)
+                    BgNumber = ReadBgNumber(clubNode),
+                    OrgNumber = ReadOrgNumber(clubNode)
                 };
             }
 
             var region = InvoiceAdminService.NormalizeRegionCode(competition.GetValue<string>("regionalFederation"));
             if (region.Length > 0)
             {
+                var regionNode = FindRegionNodeByCode(region);
                 return new Payee
                 {
                     Key = $"region:{region}",
                     Name = ResolveRegionName(region),
                     SwishNumber = swish,
-                    BgNumber = ReadBgNumber(FindRegionNodeByCode(region))
+                    BgNumber = ReadBgNumber(regionNode),
+                    OrgNumber = ReadOrgNumber(regionNode)
                 };
             }
 
@@ -165,6 +168,13 @@ namespace HpskSite.Services
         {
             if (organisationNode == null || !organisationNode.HasProperty("bgNumber")) return "";
             return (organisationNode.GetValue<string>("bgNumber") ?? "").Trim();
+        }
+
+        /// <summary>The organisation's org.nr, "" when unset. Printed on documents and put in the BG QR.</summary>
+        private static string ReadOrgNumber(IContent? organisationNode)
+        {
+            if (organisationNode == null || !organisationNode.HasProperty("orgNumber")) return "";
+            return (organisationNode.GetValue<string>("orgNumber") ?? "").Trim();
         }
 
         /// <summary>The regionalPage node for a region code — needed to read the krets's own bankgiro.</summary>
@@ -221,6 +231,8 @@ namespace HpskSite.Services
             public string SwishNumber { get; init; } = "";
             /// <summary>The organisation's bankgiro (club/regionalPage level), "" when it has none.</summary>
             public string BgNumber { get; init; } = "";
+            /// <summary>The organisation's org.nr — goes into the bankgiro invoice QR as the payee id.</summary>
+            public string OrgNumber { get; init; } = "";
         }
 
         public sealed class PreviewGroup

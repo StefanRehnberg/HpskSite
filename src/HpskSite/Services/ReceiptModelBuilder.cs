@@ -206,6 +206,108 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Build the printable "Faktura" for an invoice id: everything <see cref="Build"/> resolves
+        /// (issuer, buyer, competition, itemised samlingsfaktura lines) plus the invoice-side facts —
+        /// status, issue date, who is billed, and the Swish number to pay to. The MONEY (issued total,
+        /// credits, amount due) is deliberately left to the caller, which reads it from
+        /// ConsolidatedInvoiceService.GetBalance so the amount due is derived in exactly one place.
+        /// Returns null when the invoice or its competition can't be resolved.
+        /// </summary>
+        public InvoiceDocumentModel? BuildInvoice(int invoiceId)
+        {
+            var basis = Build(invoiceId);
+            if (basis == null) return null;
+
+            var invoice = _contentService.GetById(invoiceId);
+            if (invoice == null) return null;
+            var competition = _contentService.GetById(basis.CompetitionId);
+
+            var kind = invoice.GetValue<string>("invoiceKind") ?? "";
+            var status = NormalizeStatus(invoice.GetValue<string>("paymentStatus"));
+            var settledBy = invoice.GetValue<int?>("settledByInvoiceId")
+                            ?? ReadIntLoose(invoice, "settledByInvoiceId");
+            var settledByNumber = "";
+            if (settledBy > 0)
+                settledByNumber = _contentService.GetById(settledBy)?.GetValue<string>("invoiceNumber") ?? "";
+
+            var model = new InvoiceDocumentModel
+            {
+                // carry over everything the receipt already resolved
+                Found = basis.Found,
+                InvoiceId = basis.InvoiceId,
+                RegistrationId = basis.RegistrationId,
+                CompetitionId = basis.CompetitionId,
+                MemberId = basis.MemberId,
+                MemberName = basis.MemberName,
+                MemberEmail = basis.MemberEmail,
+                CompetitionName = basis.CompetitionName,
+                CompetitionDate = basis.CompetitionDate,
+                ShootingClasses = basis.ShootingClasses,
+                CoveredLines = basis.CoveredLines,
+                IssuerName = basis.IssuerName,
+                IssuerOrgNumber = basis.IssuerOrgNumber,
+                IssuerStreet = basis.IssuerStreet,
+                IssuerPostalCode = basis.IssuerPostalCode,
+                IssuerCity = basis.IssuerCity,
+                IssuerContactEmail = basis.IssuerContactEmail,
+                IssuerBgNumber = basis.IssuerBgNumber,
+                IssuerLogoUrl = basis.IssuerLogoUrl,
+                AmountPaid = basis.AmountPaid,
+                PaymentMethod = basis.PaymentMethod,
+                Reference = basis.Reference,
+                ReceiptNumber = basis.ReceiptNumber,
+                PaidAt = basis.PaidAt,
+                IsPaid = basis.IsPaid,
+
+                IssuedAt = invoice.GetValue<DateTime?>("createdDate") ?? invoice.CreateDate,
+                PaymentStatus = status,
+                IsCreditNote = kind == "creditNote",
+                IsCancelled = status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase),
+                IsSettledByParent = settledBy > 0,
+                SettledByInvoiceNumber = settledByNumber,
+                SwishNumber = (competition?.GetValue<string>("swishNumber") ?? "").Trim(),
+                PaymentReference = basis.ReceiptNumber,
+                BilledToName = ResolveBilledTo(invoice)
+            };
+
+            model.StatusLabel = model.IsCreditNote ? "Kreditfaktura" : status switch
+            {
+                "Paid" => "Betald",
+                "Cancelled" => "Makulerad",
+                "Refunded" => "Att återbetala",
+                "Failed" => "Misslyckad",
+                _ => "Obetald"
+            };
+            return model;
+        }
+
+        /// <summary>
+        /// Who the invoice is addressed to. A samlingsfaktura is billed to a club ("club-1098") and a
+        /// team invoice to a team ("team-38"), neither of which is a member — the stored memberName
+        /// already carries the readable text in those cases, so prefer it and fall back to the member.
+        /// </summary>
+        private static string ResolveBilledTo(IContent invoice)
+        {
+            var name = (invoice.GetValue<string>("memberName") ?? "").Trim();
+            return name;
+        }
+
+        /// <summary>Legacy rows can store paymentStatus JSON-wrapped as <c>["Paid"]</c>.</summary>
+        private static string NormalizeStatus(string? raw)
+        {
+            var s = (raw ?? "").Trim();
+            if (s.StartsWith("[")) s = s.Trim('[', ']', '"', ' ');
+            return s;
+        }
+
+        /// <summary>settledByInvoiceId is a Textstring on this doctype, so read it defensively.</summary>
+        private static int ReadIntLoose(IContent node, string alias)
+        {
+            var raw = node.GetValue<string>(alias) ?? "";
+            return int.TryParse(raw.Trim(), out var v) ? v : 0;
+        }
+
+        /// <summary>
         /// Every registrationInvoice linked to the registration (by single-int registrationId
         /// or legacy relatedRegistrationIds JSON), scoped to the competition's invoices hub.
         /// Falls back to just the passed invoice if the hub can't be found.

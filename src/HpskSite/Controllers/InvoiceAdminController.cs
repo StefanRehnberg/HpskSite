@@ -960,6 +960,32 @@ namespace HpskSite.Controllers
                     swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message);
                 }
 
+                // Bankgiro QR in the Swedish invoice-QR format, read by the payer's own bank app. Needs
+                // no agreement with the banks, so any organiser with a bankgiro gets one; a malformed
+                // or missing number simply yields no QR rather than failing the dialog.
+                string? bgQrBase64 = null, bgQrPayload = null;
+                if (BankgiroQrCodeGenerator.IsValidBankgiro(bgNumber))
+                {
+                    try
+                    {
+                        var invoiceDate = invoice.GetValue<DateTime?>("createdDate");
+                        // Exposed so a payment problem can be diagnosed from what the QR actually says,
+                        // rather than by decoding an image.
+                        bgQrPayload = BankgiroQrCodeGenerator.BuildPayload(
+                            payee.Name, bgNumber, totalAmount, invoiceNumber ?? "",
+                            payee.OrgNumber, invoiceDate);
+                        bgQrBase64 = Convert.ToBase64String(BankgiroQrCodeGenerator.GeneratePng(
+                            payee.Name, bgNumber, totalAmount, invoiceNumber ?? "",
+                            payeeOrgNumber: payee.OrgNumber,
+                            invoiceDate: invoiceDate));
+                    }
+                    catch
+                    {
+                        // The QR is a convenience on top of the bankgiro details, which are always shown
+                        // as text — so a malformed number costs the shortcut, never the ability to pay.
+                    }
+                }
+
                 return Json(new
                 {
                     success = true,
@@ -972,6 +998,8 @@ namespace HpskSite.Controllers
                     // name matters because a club often pays another club's or the krets's invoice.
                     bgNumber = bgNumber,
                     bgReference = invoiceNumber,
+                    bgQrCodeBase64 = bgQrBase64,
+                    bgQrPayload = bgQrPayload,
                     payeeName = payee.Name,
                     // So a payment dialog can explain why the QR is for less than the invoice says.
                     issuedTotal = balance.Total,

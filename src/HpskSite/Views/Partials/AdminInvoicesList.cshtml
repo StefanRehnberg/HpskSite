@@ -216,7 +216,13 @@
         <td>{paymentDate}</td>
         <td class="text-end">
             <div class="btn-group btn-group-sm" role="group">
-                <button class="btn btn-outline-primary" onclick="showSwishQRCode({id})" title="Visa Swish QR-kod">
+                @* The printable invoice document — the krets/organiser needs it to send or file, and it
+                   is the same document the paying club sees from its own Fakturor list. *@
+                <a class="btn btn-outline-secondary" href="/faktura/{id}" target="_blank" rel="noopener"
+                   title="Visa faktura (för utskrift)">
+                    <i class="bi bi-file-earmark-text"></i>
+                </a>
+                <button class="btn btn-outline-primary" onclick="showSwishQRCode({id})" title="Visa betalningsuppgifter">
                     <i class="bi bi-qr-code"></i>
                 </button>
                 <button class="btn btn-outline-info" onclick="resendInvoiceEmail({id})" title="Skicka QR-kod via e-post">
@@ -682,6 +688,7 @@ function showSwishQRCode(invoiceId) {
     })
         .then(response => response.json())
         .then(data => {
+            if (window.paymentModalSetHeader) window.paymentModalSetHeader(data.success ? data : null);
             if (data.success) {
                 // No Swish number on the competition -> no QR, but bankgiro still makes it payable.
                 const swishPart = data.qrCodeBase64 ? `
