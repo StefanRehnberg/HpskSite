@@ -91,6 +91,21 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string ListDate { get; set; } = "";  // Optional date (yyyy-MM-dd) for multi-day comps
         public List<string> CoveredClasses { get; set; } = new();  // Stafett class(es) this list covers
         public List<SpringskytteStafettStartListEntry> Teams { get; set; } = new();
+
+        /// <summary>
+        /// First team number to hand out when this list claims teams that don't have one yet.
+        /// 0 = continue after the highest number already used anywhere in the competition's stafett.
+        /// Team numbers form ONE series across every stafett list (Stefan 2026-08-04): batch 1 runs
+        /// 120-129, batch 2 carries on at 130 — and a team keeps its number when moved between batches.
+        /// </summary>
+        public int StartNumberBase { get; set; }
+
+        /// <summary>
+        /// Cap on how many teams this start holds. 0 = no cap. This is what makes batches practical:
+        /// 18 teams in one class → start 1 capped at 10 (120-129), start 2 picks up the rest (130-137).
+        /// Teams the list ALREADY holds are never evicted by the cap.
+        /// </summary>
+        public int MaxTeams { get; set; }
     }
 
     /// <summary>
@@ -150,6 +165,29 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string ListName { get; set; } = "";
         public string ListDate { get; set; } = "";
         public int? ExistingNodeId { get; set; }  // If set, replace this specific node; if null, create new
+        public int StartNumberBase { get; set; }  // 0 = continue after the highest number in use
+        public int MaxTeams { get; set; }         // 0 = no cap (see SpringskytteStafettStartListConfig)
+    }
+
+    /// <summary>Hand-edit ONE relay team's number. The only thing that may change a team number.</summary>
+    public class SpringskytteStafettNumberRequest
+    {
+        public int CompetitionId { get; set; }
+        public int NodeId { get; set; }
+        public int TeamId { get; set; }
+        public int StartOrder { get; set; }
+    }
+
+    /// <summary>
+    /// Move a relay team to another start (batch). The team KEEPS its number — only which start it
+    /// runs in changes, because a team pressed for time has to be movable into an earlier batch.
+    /// </summary>
+    public class SpringskytteStafettMoveRequest
+    {
+        public int CompetitionId { get; set; }
+        public int FromNodeId { get; set; }
+        public int ToNodeId { get; set; }
+        public int TeamId { get; set; }
     }
 
     public class SpringskytteStafettResultRequest

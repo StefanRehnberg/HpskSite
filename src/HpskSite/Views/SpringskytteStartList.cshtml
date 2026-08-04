@@ -63,6 +63,10 @@
         .start-list-table th.col-time { width:150px; }
         .start-list-table td.time { white-space:nowrap; }
         .write-in { display:none; }
+        /* Relay: the leg bib is what the runner wears; the name can be penned in afterwards. */
+        .leg-row { white-space:nowrap; }
+        .leg-bib { display:inline-block; min-width:52px; font-family:monospace; font-weight:bold; }
+        .leg-blank { display:inline-block; min-width:120px; border-bottom:1px dotted #adb5bd; }
         @@media print {
             body { background:#fff; padding:0; }
             .no-print { display:none !important; }
@@ -150,14 +154,19 @@
                     <th>Lag</th>
                     <th>Förening</th>
                     <th style="width:150px">Klass</th>
-                    <th>Deltagare</th>
+                    <th>Deltagare <span class="fw-normal">(nr per sträcka)</span></th>
                 </tr>
             </thead>
             <tbody>
                 @foreach (var team in scfg.Teams.OrderBy(t => t.StartOrder))
                 {
                     var rowClass = !string.IsNullOrEmpty(Model.CurrentMemberClub) && team.Club == Model.CurrentMemberClub ? "same-club" : "";
-                    var legs = team.Members.Where(m => !m.IsSpare).Select(m => m.Name).ToList();
+                    @* Each leg wears "teamNumber-leg" (120-1, 120-2 …). The bib belongs to the LEG, so a
+                       reserve stepping in wears the same one, and the NAME may legitimately be empty —
+                       a relay roster can be completed after the race, so leave a pen line for it. *@
+                    var named = team.Members.Where(m => !m.IsSpare).OrderBy(m => m.LegNumber).ToList();
+                    var legCount = Math.Max(named.Count,
+                        HpskSite.Models.TeamClassHelper.GetStafettTeamSize(team.StafettClass ?? "")?.coreMembers ?? 0);
                     var spares = team.Members.Where(m => m.IsSpare).Select(m => m.Name).ToList();
                     <tr class="@rowClass">
                         <td class="text-center">@team.StartOrder</td>
@@ -166,8 +175,22 @@
                         <td>@HpskSite.Helpers.ClubNameHelper.Shorten(team.Club)</td>
                         <td>@team.StafettClass</td>
                         <td>
-                            @string.Join(", ", legs)
-                            @if (spares.Any()) { <span class="text-muted"> (reserv: @string.Join(", ", spares))</span> }
+                            @for (int leg = 1; leg <= legCount; leg++)
+                            {
+                                var runner = named.FirstOrDefault(x => x.LegNumber == leg);
+                                <div class="leg-row">
+                                    <span class="leg-bib">@team.StartOrder-@leg</span>
+                                    @if (runner == null || string.IsNullOrWhiteSpace(runner.Name))
+                                    {
+                                        <span class="leg-blank"></span>
+                                    }
+                                    else
+                                    {
+                                        <span>@runner.Name</span>
+                                    }
+                                </div>
+                            }
+                            @if (spares.Any()) { <div class="text-muted small">(reserv: @string.Join(", ", spares))</div> }
                         </td>
                     </tr>
                 }

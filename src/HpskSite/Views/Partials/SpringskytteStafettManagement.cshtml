@@ -49,6 +49,22 @@
                     <label class="form-label small" for="stfSet_start">Gemensam starttid</label>
                     <input type="text" class="form-control form-control-sm" id="stfSet_start" placeholder="HH:MM" value="10:00">
                 </div>
+                <div class="mb-3" style="max-width:260px">
+                    <label class="form-label small" for="stfSet_base">Första lagnummer i denna start</label>
+                    <input type="number" min="1" class="form-control form-control-sm" id="stfSet_base" placeholder="fortsätter automatiskt">
+                    <div class="form-text">
+                        Tomt = fortsätter efter det högsta lagnummer som redan används (start 1 = 120–129, start 2 börjar på 130).
+                        Lagnummer är <strong>en gemensam serie</strong> för alla stafettstarter, och lag som redan har ett nummer behåller det.
+                    </div>
+                </div>
+                <div class="mb-3" style="max-width:260px">
+                    <label class="form-label small" for="stfSet_max">Max antal lag i denna start</label>
+                    <input type="number" min="1" class="form-control form-control-sm" id="stfSet_max" placeholder="ingen gräns">
+                    <div class="form-text">
+                        Tomt = alla lag som inte redan har en start. Sätt t.ex. 10 för att dela 18 lag på två
+                        starter — resten hamnar i nästa start du skapar. Lag som redan ligger i starten påverkas inte.
+                    </div>
+                </div>
                 <div class="mb-2">
                     <label class="form-label small">Klasser i denna lista <span class="text-muted">(lämna tomt = alla stafettklasser)</span></label>
                     <div id="stfSet_classes" class="d-flex flex-wrap gap-2"></div>
@@ -65,11 +81,40 @@
     </div>
 </div>
 
+<!-- Move a team to another start (batch). The team keeps its number. -->
+<div class="modal fade" id="stafettMoveModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-left-right me-2"></i>Flytta lag till en annan start</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="stfMoveFrom">
+                <input type="hidden" id="stfMoveTeam">
+                <p class="mb-3"><strong id="stfMoveTeamName">–</strong></p>
+                <label class="form-label small" for="stfMoveTo">Flytta till</label>
+                <select class="form-select" id="stfMoveTo"></select>
+                <div class="form-text">
+                    Laget behåller sitt lagnummer — bara starttiden följer den nya starten. Används när ett lag
+                    måste hinna ett tåg och behöver flyttas till en tidigare start.
+                </div>
+                <div class="alert alert-danger py-2 mt-3 mb-0 d-none" id="stfMoveError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="stfDoMove()"><i class="bi bi-arrow-left-right me-1"></i>Flytta laget</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     const stfCompId = parseInt('@competitionId');
     const stfToken = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value;
     let stfClasses = [];
+    let stfLastLists = [];   // the move picker offers the OTHER starts
 
     const stfPost = async (url, body) => {
         const r = await fetch('/umbraco/surface/Springskytte/' + url, {
@@ -82,26 +127,91 @@
     const stfGet = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => r.json());
     const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
 
-    // Teams inline in the card (like the individual list shows its starters) — Nr / Lag / Klass / Deltagare.
-    function stfTeamsTable(teams) {
+    // Teams inline in the card. The Deltagare column shows the per-leg BIB ("120-1") with the runner's
+    // name — which may be blank, since a relay roster can be filled in after the race.
+    function stfTeamsTable(teams, nodeId) {
         if (!teams.length) return '';
         const rows = teams.slice().sort((a, b) => (a.startOrder || 0) - (b.startOrder || 0)).map(t => {
-            const legs = (t.members || []).filter(m => !m.isSpare).map(m => esc(m.name));
+            const bibs = (t.legBibs || []);
             const spares = (t.members || []).filter(m => m.isSpare).map(m => esc(m.name));
-            let deltagare = legs.join(', ');
-            if (spares.length) deltagare += ` <span class="text-muted">(reserv: ${spares.join(', ')})</span>`;
-            if (!legs.length && !spares.length) deltagare = '<span class="text-muted fst-italic">Deltagare ej namngivna</span>';
+            let deltagare = bibs.length
+                ? bibs.map(l => `<span class="text-nowrap me-2"><span class="badge bg-secondary">${esc(l.bib)}</span> `
+                    + (l.name ? esc(l.name) : '<span class="text-muted fst-italic">namnges senare</span>') + '</span>').join('')
+                : '<span class="text-muted fst-italic">Deltagare ej namngivna</span>';
+            if (spares.length) deltagare += `<div class="text-muted small">(reserv: ${spares.join(', ')})</div>`;
             return `<tr>
-                <td class="text-center">${t.startOrder}</td>
+                <td class="text-center fw-bold">${t.startOrder}</td>
                 <td><strong>${esc(t.teamName)}</strong> <span class="text-muted small">${esc(t.club)}</span></td>
                 <td>${esc(t.stafettClass)}</td>
                 <td class="small">${deltagare}</td>
+                <td class="text-end text-nowrap">
+                    <button class="btn btn-outline-primary btn-sm py-0 px-1" title="Ändra lagnummer"
+                        onclick="stfEditNumber(${nodeId}, ${t.teamId})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm py-0 px-1" title="Flytta till en annan start"
+                        onclick="stfOpenMove(${nodeId}, ${t.teamId})"><i class="bi bi-arrow-left-right"></i></button>
+                </td>
             </tr>`;
         }).join('');
         return `<table class="table table-sm spring-starters-table mb-0">
-            <thead><tr><th style="width:44px" class="text-center">Nr</th><th>Lag</th><th>Klass</th><th>Deltagare</th></tr></thead>
+            <thead><tr><th style="width:56px" class="text-center">Lagnr</th><th>Lag</th><th>Klass</th>
+            <th>Deltagare <span class="fw-normal text-muted">(nr per sträcka)</span></th><th style="width:80px"></th></tr></thead>
             <tbody>${rows}</tbody></table>`;
     }
+
+    // Hand-edit is the ONLY thing that changes a team number (Stefan 2026-08-04) — generation keeps
+    // existing numbers and moving a team between starts keeps its number.
+    // Never pass a name through an inline onclick — look the team up in the loaded state instead.
+    function stfFindTeam(nodeId, teamId) {
+        const list = (stfLastLists || []).find(l => l.nodeId === nodeId);
+        const team = ((list && list.teams) || []).find(t => t.teamId === teamId);
+        return team ? { team: team, list: list } : null;
+    }
+
+    window.stfEditNumber = async function (nodeId, teamId) {
+        const hit = stfFindTeam(nodeId, teamId);
+        if (!hit) return;
+        const current = hit.team.startOrder, teamName = hit.team.teamName;
+        const val = prompt(`Lagnummer för ${teamName}:`, current);
+        if (val === null) return;
+        const n = parseInt(String(val).trim(), 10);
+        if (isNaN(n) || n <= 0) { alert('Ange ett positivt lagnummer.'); return; }
+        if (n === current) return;
+        const res = await stfPost('UpdateSpringskytteStafettTeamNumber',
+            { competitionId: stfCompId, nodeId: nodeId, teamId: teamId, startOrder: n });
+        if (!res.success) { alert(res.message || 'Kunde inte ändra lagnummer.'); return; }
+        await stfLoadLists();
+    };
+
+    // Relay is usually the last event of the day, so a team with a train to catch must be movable into
+    // an earlier start. The number travels with them.
+    window.stfOpenMove = function (fromNodeId, teamId) {
+        const hit = stfFindTeam(fromNodeId, teamId);
+        if (!hit) return;
+        const number = hit.team.startOrder, teamName = hit.team.teamName;
+        const others = (stfLastLists || []).filter(l => l.nodeId !== fromNodeId);
+        if (!others.length) { alert('Det finns bara en start att flytta mellan. Skapa en till stafett-startlista först.'); return; }
+        document.getElementById('stfMoveTeamName').textContent = `${teamName} (nr ${number})`;
+        document.getElementById('stfMoveFrom').value = fromNodeId;
+        document.getElementById('stfMoveTeam').value = teamId;
+        document.getElementById('stfMoveTo').innerHTML = others.map(l =>
+            `<option value="${l.nodeId}">${esc(l.listName)} – start ${esc((l.commonStartTime || '').substring(0, 5))} (${l.teamCount} lag)</option>`).join('');
+        document.getElementById('stfMoveError').classList.add('d-none');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('stafettMoveModal')).show();
+    };
+
+    window.stfDoMove = async function () {
+        const err = document.getElementById('stfMoveError');
+        err.classList.add('d-none');
+        const res = await stfPost('MoveSpringskytteStafettTeam', {
+            competitionId: stfCompId,
+            fromNodeId: parseInt(document.getElementById('stfMoveFrom').value, 10),
+            toNodeId: parseInt(document.getElementById('stfMoveTo').value, 10),
+            teamId: parseInt(document.getElementById('stfMoveTeam').value, 10)
+        });
+        if (!res.success) { err.textContent = res.message || 'Kunde inte flytta laget.'; err.classList.remove('d-none'); return; }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('stafettMoveModal')).hide();
+        await stfLoadLists();
+    };
 
     // Only render the whole section when the competition actually has relay teams.
     window.stfInitMgmt = async function () {
@@ -118,6 +228,7 @@
         const wrap = document.getElementById('stfListCards');
         const data = await stfGet('GetSpringskytteStafettStartLists?competitionId=' + stfCompId);
         const lists = (data && data.lists) || [];
+        stfLastLists = lists;
         if (lists.length === 0) {
             wrap.innerHTML = '<p class="text-muted small mb-0"><i class="bi bi-hourglass-split me-1"></i>Ingen stafett-startlista skapad än. Klicka <strong>Ny stafett-startlista</strong>.</p>';
             return;
@@ -150,9 +261,9 @@
                 <div class="card-body">
                     <div class="spring-settings-summary mb-2">
                         <div class="mb-1">${classBadges}</div>
-                        <div><i class="bi bi-people me-1"></i>${l.teamCount} lag · <i class="bi bi-flag me-1"></i>Gemensam start ${esc(l.commonStartTime)}</div>
+                        <div><i class="bi bi-people me-1"></i>${l.teamCount} lag${l.maxTeams > 0 ? ' av max ' + l.maxTeams : ''} · <i class="bi bi-flag me-1"></i>Gemensam start ${esc(l.commonStartTime)}</div>
                     </div>
-                    ${stfTeamsTable(l.teams || [])}
+                    ${stfTeamsTable(l.teams || [], l.nodeId)}
                 </div>
             </div>`;
         }).join('');
@@ -165,6 +276,8 @@
         document.getElementById('stfSet_nodeId').value = editing ? list.nodeId : '';
         document.getElementById('stfSet_name').value = editing ? (list.listName || '') : 'Stafett';
         document.getElementById('stfSet_start').value = editing ? (list.commonStartTime || '10:00') : '10:00';
+        document.getElementById('stfSet_base').value = (editing && list.startNumberBase > 0) ? list.startNumberBase : '';
+        document.getElementById('stfSet_max').value = (editing && list.maxTeams > 0) ? list.maxTeams : '';
         const covered = editing ? (list.coveredClasses || []) : [];
         document.getElementById('stfSet_classes').innerHTML = stfClasses.map(c =>
             `<label class="form-check-label small border rounded px-2 py-1">
@@ -183,7 +296,11 @@
         err.classList.add('d-none');
         btn.disabled = true;
         try {
-            const body = { competitionId: stfCompId, commonStartTime: start, coveredClasses: covered, listName: name };
+            const base = parseInt(document.getElementById('stfSet_base').value, 10);
+            const max = parseInt(document.getElementById('stfSet_max').value, 10);
+            const body = { competitionId: stfCompId, commonStartTime: start, coveredClasses: covered, listName: name,
+                           startNumberBase: (isNaN(base) || base <= 0) ? 0 : base,
+                           maxTeams: (isNaN(max) || max <= 0) ? 0 : max };
             if (nodeId) body.existingNodeId = parseInt(nodeId);
             const res = await stfPost('GenerateSpringskytteStafettStartList', body);
             if (!res.success) { err.textContent = res.message || 'Kunde inte generera.'; err.classList.remove('d-none'); return; }

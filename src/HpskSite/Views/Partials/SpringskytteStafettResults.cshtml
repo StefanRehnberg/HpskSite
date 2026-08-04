@@ -50,6 +50,17 @@
     const get = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => r.json());
     const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
 
+    // Per-leg bibs on the result list too: "120-1 Anna". The bib belongs to the leg, and a name that
+    // was only filled in after the race still lines up with the number the runner wore.
+    const stfResLegs = (t) => {
+        const legs = (t.members || []).filter(m => !m.isSpare)
+            .slice().sort((a, b) => (a.legNumber || 0) - (b.legNumber || 0));
+        if (!legs.length) return '';
+        return '<div class="small text-muted">' + legs.map(m =>
+            '<span class="text-nowrap me-2"><strong>' + esc(t.startOrder + '-' + (m.legNumber || 0)) + '</strong> '
+            + (m.name ? esc(m.name) : '&ndash;') + '</span>').join('') + '</div>';
+    };
+
     window.stfrInit = async function () {
         const card = document.getElementById('stafettResultsCard');
         if (!card) return;
@@ -98,7 +109,7 @@
                     ${g.teams.map(t => `
                         <tr>
                             <td>${t.rank > 0 ? '<span class="badge bg-primary">' + t.rank + '</span>' : ''}</td>
-                            <td><strong>${esc(t.teamName)}</strong>${(t.members && t.members.filter(m => !m.isSpare).length) ? `<div class="small text-muted">${t.members.filter(m => !m.isSpare).map(m => esc(m.name)).join(', ')}</div>` : ''}</td>
+                            <td><strong>${esc(t.teamName)}</strong>${stfResLegs(t)}</td>
                             <td class="small">${esc(t.club)}</td>
                             <td><input type="text" class="form-control form-control-sm stfr-elapsed" data-team="${t.teamId}" value="${t.status ? '' : esc(t.elapsedDisplay === '-' ? '' : t.elapsedDisplay)}" placeholder="MM:SS"></td>
                             <td>

@@ -106,13 +106,60 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .ThenBy(t => t.Team.TeamName, StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                var teamEntries = new List<SpringskytteStafettStartListEntry>();
-                int startOrder = 1;
-                foreach (var t in ordered)
+                // A relay team belongs to exactly ONE start (batch). Generating a list therefore claims
+                // only teams that are on no list yet, and a REgeneration keeps the teams this list
+                // already holds — otherwise regenerating batch 1 would swallow batch 2's teams, and the
+                // whole point of batches (Stefan 2026-08-04) is that they are separate starts.
+                var elsewhere = CollectStafettTeamAssignments(competition, request.ExistingNodeId);
+                var usedNumbers = new HashSet<int>(elsewhere.Values.Select(v => v.number).Where(n => n > 0));
+
+                // Existing numbers on THIS list are sticky, including hand-typed ones.
+                var keptNumbers = new Dictionary<int, int>();
+                var keptOrder = new List<int>();
+                if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
                 {
+                    var prev = ReadStafettConfig(_contentService.GetById(request.ExistingNodeId.Value));
+                    foreach (var pt in prev?.Teams ?? new List<SpringskytteStafettStartListEntry>())
+                    {
+                        keptOrder.Add(pt.TeamId);
+                        if (pt.StartOrder > 0) { keptNumbers[pt.TeamId] = pt.StartOrder; usedNumbers.Add(pt.StartOrder); }
+                    }
+                }
+
+                // Teams this list already holds always stay; the cap only limits how many NEW ones it
+                // claims, so a second start picks up the remainder (Stefan's 10 + 8 example).
+                var already = ordered
+                    .Where(t => keptNumbers.ContainsKey(t.Team.Id) || keptOrder.Contains(t.Team.Id))
+                    .ToList();
+                var claimable = ordered
+                    .Where(t => !already.Contains(t) && !elsewhere.ContainsKey(t.Team.Id))
+                    .ToList();
+                if (request.MaxTeams > 0)
+                    claimable = claimable.Take(Math.Max(0, request.MaxTeams - already.Count)).ToList();
+                var mine = ordered.Where(t => already.Contains(t) || claimable.Contains(t)).ToList();
+
+                int nextNumber = request.StartNumberBase > 0
+                    ? request.StartNumberBase
+                    : (usedNumbers.Count > 0 ? usedNumbers.Max() + 1 : 1);
+
+                var teamEntries = new List<SpringskytteStafettStartListEntry>();
+                foreach (var t in mine)
+                {
+                    int number;
+                    if (keptNumbers.TryGetValue(t.Team.Id, out var kept))
+                    {
+                        number = kept;
+                    }
+                    else
+                    {
+                        while (usedNumbers.Contains(nextNumber)) nextNumber++;
+                        number = nextNumber;
+                        usedNumbers.Add(number);
+                        nextNumber++;
+                    }
                     teamEntries.Add(new SpringskytteStafettStartListEntry
                     {
-                        StartOrder = startOrder++,
+                        StartOrder = number,
                         StartTime = commonStartStr,
                         TeamId = t.Team.Id,
                         TeamName = t.Team.TeamName,
@@ -121,6 +168,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         Members = BuildLegMembers(t)
                     });
                 }
+                teamEntries = teamEntries.OrderBy(x => x.StartOrder).ToList();
 
                 var listName = !string.IsNullOrWhiteSpace(request.ListName) ? request.ListName.Trim() : "Stafett";
                 var newSlug = SlugHelper.Slugify(listName);
@@ -143,6 +191,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     ListName = listName,
                     ListDate = (request.ListDate ?? "").Trim(),
                     CoveredClasses = coveredClasses,
+                    StartNumberBase = request.StartNumberBase,
+                    MaxTeams = request.MaxTeams,
                     Teams = teamEntries
                 };
 
@@ -225,7 +275,24 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         listDate = cfg.ListDate ?? "",
                         commonStartTime = cfg.CommonStartTime ?? "10:00",
                         coveredClasses = cfg.CoveredClasses ?? new List<string>(),
-                        teams = cfg.Teams ?? new List<SpringskytteStafettStartListEntry>(),
+                        startNumberBase = cfg.StartNumberBase,
+                        maxTeams = cfg.MaxTeams,
+                        teams = (cfg.Teams ?? new List<SpringskytteStafettStartListEntry>())
+                            .OrderBy(x => x.StartOrder)
+                            .Select(x => new
+                            {
+                                startOrder = x.StartOrder,
+                                startTime = x.StartTime,
+                                teamId = x.TeamId,
+                                teamName = x.TeamName,
+                                club = x.Club,
+                                stafettClass = x.StafettClass,
+                                members = x.Members,
+                                // "120-1", "120-2"... the bib the runner of that leg wears. Belongs to
+                                // the LEG, not the person, so a reserve stepping in wears the same one.
+                                legBibs = SpringskytteStafettLegBibs(x)
+                            })
+                            .ToList(),
                         teamCount = cfg.Teams?.Count ?? 0,
                         generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
                         isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList")
@@ -437,6 +504,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                             teamName = t.TeamName,
                             club = t.Club,
                             stafettClass = t.StafettClass,
+                            // The team number, so the result list can show the same per-leg bibs
+                            // ("120-1") the runners actually wore.
+                            startOrder = t.StartOrder,
                             rank = t.Rank,
                             elapsedSeconds = t.ElapsedSeconds,
                             elapsedDisplay = t.ElapsedTimeDisplay,
@@ -553,6 +623,201 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             catch { return false; }
         }
 
+        /// <summary>Reads a node's stafett config, or null if it isn't one.</summary>
+        private static SpringskytteStafettStartListConfig? ReadStafettConfig(Umbraco.Cms.Core.Models.IContent? node)
+        {
+            var json = node?.GetValue<string>("configurationData");
+            if (string.IsNullOrEmpty(json) || !IsStafettConfig(json)) return null;
+            try { return JsonConvert.DeserializeObject<SpringskytteStafettStartListConfig>(json); }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Every relay team already placed in a start, with its number and which node holds it.
+        /// Team numbers are one series across ALL stafett lists, so this is what both the
+        /// "claim only unassigned teams" rule and the uniqueness guard read.
+        /// </summary>
+        private Dictionary<int, (int nodeId, int number, string listName)> CollectStafettTeamAssignments(
+            Umbraco.Cms.Core.Models.IContent competition, int? exceptNodeId)
+        {
+            var map = new Dictionary<int, (int nodeId, int number, string listName)>();
+            foreach (var node in _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                         .Where(c => c.ContentType.Alias == "precisionStartList"))
+            {
+                if (exceptNodeId.HasValue && node.Id == exceptNodeId.Value) continue;
+                var cfg = ReadStafettConfig(node);
+                if (cfg?.Teams == null) continue;
+                var name = !string.IsNullOrWhiteSpace(cfg.ListName) ? cfg.ListName : (node.Name ?? "");
+                foreach (var t in cfg.Teams) map[t.TeamId] = (node.Id, t.StartOrder, name);
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Per-leg bibs: team number + leg ("120-1"). One row per leg the CLASS runs — not per named
+        /// member — because a relay roster may be completed after the race (Stefan 2026-08-04) and the
+        /// list still has to carry a numbered line for each runner.
+        /// </summary>
+        private static List<object> SpringskytteStafettLegBibs(SpringskytteStafettStartListEntry team)
+        {
+            var named = (team.Members ?? new List<SpringskytteStafettMember>())
+                .Where(x => !x.IsSpare).OrderBy(x => x.LegNumber).ToList();
+            var legCount = Math.Max(named.Count, StafettLegCount(team.StafettClass));
+            var legs = new List<object>();
+            for (int leg = 1; leg <= legCount; leg++)
+            {
+                var runner = named.FirstOrDefault(x => x.LegNumber == leg);
+                legs.Add(new { leg, bib = $"{team.StartOrder}-{leg}", name = runner?.Name ?? "" });
+            }
+            return legs;
+        }
+
+        /// <summary>How many legs a stafett class runs (SHB): Junior/Dam/Veteran 2, Senior Herr 3.</summary>
+        private static int StafettLegCount(string? stafettClass)
+            => HpskSite.Models.TeamClassHelper.GetStafettTeamSize(stafettClass ?? "")?.coreMembers ?? 0;
+
+        /// <summary>
+        /// Hand-edit ONE relay team's number — the ONLY thing that changes a team number (Stefan
+        /// 2026-08-04: "Nothing except a manual edit changes a team number"). Unique across every
+        /// stafett list in the competition, since the batches share one series.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateSpringskytteStafettTeamNumber([FromBody] SpringskytteStafettNumberRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.NodeId <= 0 || request.TeamId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (request.StartOrder <= 0)
+                    return Json(new { success = false, message = "Ogiltigt lagnummer." });
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
+                var node = _contentService.GetById(request.NodeId);
+                if (node == null || node.ParentId != competition.Id)
+                    return Json(new { success = false, message = "Startlistan hittades inte." });
+                var cfg = ReadStafettConfig(node);
+                var team = cfg?.Teams?.FirstOrDefault(x => x.TeamId == request.TeamId);
+                if (cfg == null || team == null)
+                    return Json(new { success = false, message = "Laget hittades inte i startlistan." });
+
+                if (team.StartOrder != request.StartOrder)
+                {
+                    var taken = CollectStafettTeamAssignments(competition, request.NodeId)
+                        .FirstOrDefault(kv => kv.Value.number == request.StartOrder);
+                    if (taken.Key != 0)
+                        return Json(new { success = false, message = $"Lagnummer {request.StartOrder} används redan i \"{taken.Value.listName}\"." });
+                    var sameList = cfg.Teams.FirstOrDefault(x => x.TeamId != request.TeamId && x.StartOrder == request.StartOrder);
+                    if (sameList != null)
+                        return Json(new { success = false, message = $"Lagnummer {request.StartOrder} används redan av {sameList.TeamName}." });
+                }
+
+                team.StartOrder = request.StartOrder;
+                cfg.Teams = cfg.Teams.OrderBy(x => x.StartOrder).ToList();
+                SaveStafettList(node, cfg);
+                await MirrorStafettStartAsync(request.CompetitionId, team.TeamId, team.StartOrder, team.StartTime);
+
+                return Json(new { success = true, message = $"{team.TeamName} har lagnummer {team.StartOrder}." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating Springskytte stafett team number");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Move a relay team into another start (batch), KEEPING its number. Relay is usually the last
+        /// event of the day, so a team with a train to catch must be movable into an earlier batch.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveSpringskytteStafettTeam([FromBody] SpringskytteStafettMoveRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.FromNodeId <= 0
+                    || request.ToNodeId <= 0 || request.TeamId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (request.FromNodeId == request.ToNodeId)
+                    return Json(new { success = false, message = "Laget är redan i den starten." });
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
+                var fromNode = _contentService.GetById(request.FromNodeId);
+                var toNode = _contentService.GetById(request.ToNodeId);
+                if (fromNode == null || toNode == null || fromNode.ParentId != competition.Id || toNode.ParentId != competition.Id)
+                    return Json(new { success = false, message = "Startlistan hittades inte." });
+
+                var fromCfg = ReadStafettConfig(fromNode);
+                var toCfg = ReadStafettConfig(toNode);
+                if (fromCfg == null || toCfg == null)
+                    return Json(new { success = false, message = "Båda listorna måste vara stafett-startlistor." });
+
+                var team = fromCfg.Teams?.FirstOrDefault(x => x.TeamId == request.TeamId);
+                if (team == null) return Json(new { success = false, message = "Laget hittades inte i starten." });
+                if ((toCfg.Teams ?? new List<SpringskytteStafettStartListEntry>()).Any(x => x.StartOrder == team.StartOrder))
+                    return Json(new { success = false, message = $"Lagnummer {team.StartOrder} används redan i den starten. Ändra numret först." });
+
+                fromCfg.Teams = fromCfg.Teams.Where(x => x.TeamId != request.TeamId).OrderBy(x => x.StartOrder).ToList();
+                // The number is untouched; only the start time follows the new batch.
+                team.StartTime = NormalizeStafettTime(toCfg.CommonStartTime);
+                toCfg.Teams ??= new List<SpringskytteStafettStartListEntry>();
+                toCfg.Teams.Add(team);
+                toCfg.Teams = toCfg.Teams.OrderBy(x => x.StartOrder).ToList();
+
+                SaveStafettList(fromNode, fromCfg);
+                SaveStafettList(toNode, toCfg);
+                await MirrorStafettStartAsync(request.CompetitionId, team.TeamId, team.StartOrder, team.StartTime);
+
+                var toName = !string.IsNullOrWhiteSpace(toCfg.ListName) ? toCfg.ListName : (toNode.Name ?? "starten");
+                return Json(new
+                {
+                    success = true,
+                    message = $"{team.TeamName} (nr {team.StartOrder}) flyttad till \"{toName}\" – starttid {(team.StartTime ?? "").Substring(0, 5)}. Lagnummret är oförändrat."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error moving Springskytte stafett team");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        private static string NormalizeStafettTime(string? hhmm)
+            => TimeSpan.TryParse(hhmm ?? "", out var ts) ? ts.ToString(@"hh\:mm\:ss") : "10:00:00";
+
+        private void SaveStafettList(Umbraco.Cms.Core.Models.IContent node, SpringskytteStafettStartListConfig cfg)
+        {
+            node.SetValue("configurationData", JsonConvert.SerializeObject(cfg));
+            node.SetValue("startListContent", BuildStafettStartListHtml(cfg));
+            _contentService.Save(node);
+            try { _contentService.Publish(node, new[] { "*" }); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Publish of stafett list {NodeId} failed; saved config is authoritative", node.Id); }
+        }
+
+        /// <summary>Keeps the result row's number/time in step with the start list (best-effort).</summary>
+        private async Task MirrorStafettStartAsync(int competitionId, int teamId, int startOrder, string? startTime)
+        {
+            try
+            {
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                await db.ExecuteAsync(
+                    @"UPDATE SpringskytteStafettResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
+                      WHERE CompetitionId = @3 AND TeamId = @4",
+                    startOrder, startTime, DateTime.Now, competitionId, teamId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not mirror stafett start for team {TeamId} (non-critical)", teamId);
+            }
+        }
+
         private static List<SpringskytteStafettMember> BuildLegMembers(TeamWithMembers t)
         {
             var members = new List<SpringskytteStafettMember>();
@@ -593,15 +858,26 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         {
             var sb = new System.Text.StringBuilder();
             sb.Append("<table class='table table-striped'><thead><tr>")
-              .Append("<th>Nr</th><th>Tid</th><th>Lag</th><th>Klubb</th><th>Klass</th><th>Deltagare</th>")
+              .Append("<th>Lagnr</th><th>Tid</th><th>Lag</th><th>Klubb</th><th>Klass</th><th>Deltagare (nr per sträcka)</th>")
               .Append("</tr></thead><tbody>");
             foreach (var team in config.Teams.OrderBy(t => t.StartOrder))
             {
-                var legs = string.Join(", ", team.Members
-                    .Where(m => !m.IsSpare)
-                    .Select(m => System.Net.WebUtility.HtmlEncode(m.Name)));
+                // Per-leg bib + runner, one row per leg the CLASS runs — so a team whose roster isn't
+                // named yet still prints a numbered line to write each runner on after the race.
+                var namedLegs = team.Members.Where(m => !m.IsSpare).OrderBy(m => m.LegNumber).ToList();
+                var legTotal = Math.Max(namedLegs.Count, StafettLegCount(team.StafettClass));
+                var legRows = new List<string>();
+                for (int leg = 1; leg <= legTotal; leg++)
+                {
+                    var runner = namedLegs.FirstOrDefault(x => x.LegNumber == leg);
+                    legRows.Add($"<strong>{team.StartOrder}-{leg}</strong> "
+                        + (string.IsNullOrWhiteSpace(runner?.Name)
+                            ? "<span style='display:inline-block;min-width:120px;border-bottom:1px dotted #adb5bd'>&nbsp;</span>"
+                            : System.Net.WebUtility.HtmlEncode(runner!.Name)));
+                }
+                var legs = string.Join("<br>", legRows);
                 var spares = team.Members.Where(m => m.IsSpare).Select(m => System.Net.WebUtility.HtmlEncode(m.Name)).ToList();
-                if (spares.Any()) legs += $" <span class='text-muted'>(reserv: {string.Join(", ", spares)})</span>";
+                if (spares.Any()) legs += $"<br><span class='text-muted'>(reserv: {string.Join(", ", spares)})</span>";
                 sb.Append("<tr>")
                   .Append($"<td>{team.StartOrder}</td>")
                   .Append($"<td>{System.Net.WebUtility.HtmlEncode(team.StartTime)}</td>")
