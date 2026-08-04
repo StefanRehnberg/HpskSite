@@ -97,6 +97,22 @@
                         <div class="form-text">Visas på kvitton. Lämna tom för att använda kontakt-e-posten.</div>
                     </div>
 
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editRegionSwishNumber" class="form-label">Swish-nummer</label>
+                                <input type="text" class="form-control" id="editRegionSwishNumber" name="swishNumber" placeholder="1231234567">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editRegionBgNumber" class="form-label">Bankgiro</label>
+                                <input type="text" class="form-control" id="editRegionBgNumber" name="bgNumber" placeholder="123-4567">
+                                <div class="form-text">Visas som betalningsalternativ på kretsens fakturor.</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <h6 class="mt-3">Välkomsttext</h6>
                     <hr class="mt-1 mb-3">
 
@@ -150,6 +166,8 @@ function showEditRegionModal(regionCode) {
                 document.getElementById('editRegionCity').value = region.city || '';
                 document.getElementById('editRegionPostalCode').value = region.postalCode || '';
                 document.getElementById('editRegionReceiptEmail').value = region.receiptEmail || '';
+                document.getElementById('editRegionSwishNumber').value = region.swishNumber || '';
+                document.getElementById('editRegionBgNumber').value = region.bgNumber || '';
                 document.getElementById('editRegionWelcomeTitle').value = region.welcomeTitle;
                 document.getElementById('editRegionWelcomeText').value = region.welcomeText;
             } else {
@@ -183,6 +201,8 @@ function saveRegion() {
     formData.append('city', document.getElementById('editRegionCity').value);
     formData.append('postalCode', document.getElementById('editRegionPostalCode').value);
     formData.append('receiptEmail', document.getElementById('editRegionReceiptEmail').value);
+    formData.append('swishNumber', document.getElementById('editRegionSwishNumber').value);
+    formData.append('bgNumber', document.getElementById('editRegionBgNumber').value);
     formData.append('welcomeTitle', document.getElementById('editRegionWelcomeTitle').value);
     formData.append('welcomeText', document.getElementById('editRegionWelcomeText').value);
 

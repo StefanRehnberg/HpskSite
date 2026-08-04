@@ -104,5 +104,47 @@
     // Reset to hidden when the modal closes so state never leaks to the next invoice.
     const modalEl = document.getElementById('swishPaymentModal');
     if (modalEl) modalEl.addEventListener('hidden.bs.modal', function () { window.swishModalSetPaymentSent(null); });
+
+    // ── Bankgiro alternative ────────────────────────────────────────────────────────────────────
+    // Clubs and kretsar usually pay invoices by bankgiro rather than Swish, so every payment dialog
+    // offers both. One renderer here means the block can't drift between the six surfaces that show
+    // a payment dialog. `data` is the JSON from a QR endpoint (bgNumber / bgReference / payeeName /
+    // amount). Returns '' when the organisation has no bankgiro, so callers can concatenate blindly.
+    window.renderBankgiroBlock = function (data, opts) {
+        if (!data || !data.bgNumber) return '';
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const hasQr = !!(data.qrCodeBase64 || (opts && opts.hasSwish));
+        const amount = data.amount ? `${esc(data.amount)} kr` : '';
+        return `
+            <div class="border rounded p-3 mt-3 text-start">
+                <div class="fw-bold mb-2">
+                    <i class="bi bi-bank me-1"></i>${hasQr ? 'Eller betala via bankgiro' : 'Betala via bankgiro'}
+                </div>
+                <div class="d-flex justify-content-between border-bottom py-1">
+                    <span class="text-muted">Bankgiro</span>
+                    <span class="fw-bold user-select-all">${esc(data.bgNumber)}</span>
+                </div>
+                ${data.payeeName ? `
+                <div class="d-flex justify-content-between border-bottom py-1">
+                    <span class="text-muted">Mottagare</span>
+                    <span>${esc(data.payeeName)}</span>
+                </div>` : ''}
+                ${amount ? `
+                <div class="d-flex justify-content-between border-bottom py-1">
+                    <span class="text-muted">Belopp</span>
+                    <span class="fw-bold">${amount}</span>
+                </div>` : ''}
+                ${data.bgReference ? `
+                <div class="d-flex justify-content-between py-1">
+                    <span class="text-muted">Referens (OCR/meddelande)</span>
+                    <span class="fw-bold user-select-all">${esc(data.bgReference)}</span>
+                </div>` : ''}
+                <div class="small text-muted mt-2">
+                    Ange referensen så att arrangören kan matcha betalningen mot rätt faktura.
+                    Betalningen bekräftas av arrangören när den är mottagen.
+                </div>
+            </div>`;
+    };
 })();
 </script>

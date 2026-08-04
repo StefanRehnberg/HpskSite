@@ -116,8 +116,14 @@ namespace HpskSite.Services
         /// <summary>
         /// Who gets paid for this competition: the hosting club, or the region when it hosts its own
         /// (clubId unset, regionalFederation set) — the same two host states CompetitionUrlProvider and
-        /// InvoiceAdminService.ResolveCompetitionRegion deal with. The Swish number is read from the
-        /// COMPETITION, since that is where it lives and it can differ between a club's competitions.
+        /// InvoiceAdminService.ResolveCompetitionRegion deal with.
+        ///
+        /// The two payment numbers live at DIFFERENT levels on purpose:
+        ///   * Swish is per COMPETITION (`competition.swishNumber`) — a club can collect different
+        ///     competitions to different Swish numbers, and that routing is left exactly as it was.
+        ///   * Bankgiro is per ORGANISATION (`club.bgNumber` / `regionalPage.bgNumber`) — a bankgiro
+        ///     belongs to the association, not to an event, and clubs/kretsar paying each other's
+        ///     invoices normally pay by BG (Stefan, 2026-08-04).
         /// </summary>
         public Payee ResolvePayee(int competitionId)
         {
@@ -129,11 +135,13 @@ namespace HpskSite.Services
             var clubId = ReadInt(competition, "clubId");
             if (clubId > 0)
             {
+                var clubNode = _contentService.GetById(clubId);
                 return new Payee
                 {
                     Key = $"club:{clubId}",
                     Name = _clubService.GetClubNameById(clubId) ?? $"Förening #{clubId}",
-                    SwishNumber = swish
+                    SwishNumber = swish,
+                    BgNumber = ReadBgNumber(clubNode)
                 };
             }
 
@@ -144,11 +152,30 @@ namespace HpskSite.Services
                 {
                     Key = $"region:{region}",
                     Name = ResolveRegionName(region),
-                    SwishNumber = swish
+                    SwishNumber = swish,
+                    BgNumber = ReadBgNumber(FindRegionNodeByCode(region))
                 };
             }
 
             return new Payee { Key = "", Name = "Okänd mottagare", SwishNumber = swish };
+        }
+
+        /// <summary>The organisation's bankgiro, "" when unset or the property is absent on this install.</summary>
+        private static string ReadBgNumber(IContent? organisationNode)
+        {
+            if (organisationNode == null || !organisationNode.HasProperty("bgNumber")) return "";
+            return (organisationNode.GetValue<string>("bgNumber") ?? "").Trim();
+        }
+
+        /// <summary>The regionalPage node for a region code — needed to read the krets's own bankgiro.</summary>
+        private IContent? FindRegionNodeByCode(string regionCode)
+        {
+            if (string.IsNullOrWhiteSpace(regionCode)) return null;
+            var root = _contentService.GetRootContent().FirstOrDefault();
+            if (root == null) return null;
+            return _contentService.GetPagedChildren(root.Id, 0, int.MaxValue, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "regionalPage"
+                    && (c.GetValue<string>("regionCode") ?? "").Equals(regionCode, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>
@@ -192,6 +219,8 @@ namespace HpskSite.Services
             public string Key { get; init; } = "";        // "club:1098" / "region:Halland" / "" when unresolved
             public string Name { get; init; } = "";
             public string SwishNumber { get; init; } = "";
+            /// <summary>The organisation's bankgiro (club/regionalPage level), "" when it has none.</summary>
+            public string BgNumber { get; init; } = "";
         }
 
         public sealed class PreviewGroup
@@ -229,7 +258,7 @@ namespace HpskSite.Services
                       + $"({string.Join(", ", Groups.Select(g => g.Payee.Name).Distinct())}). "
                       + "Det blir en separat faktura och en separat betalning för varje tävling."
                     : $"Ditt val gäller {Groups.Count} tävlingar. Det blir en separat faktura och "
-                      + "betalning per tävling, eftersom varje tävling har sitt eget Swish-nummer.";
+                      + "betalning per tävling, eftersom varje tävling har sina egna betalningsuppgifter.";
         }
 
         /// <summary>

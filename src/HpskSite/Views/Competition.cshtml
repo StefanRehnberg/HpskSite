@@ -2036,9 +2036,9 @@ window.CompetitionConfig = {
                         ` : '';
                         modalBody.innerHTML = `
                             ${swishAppButton}
-                            <div class="mb-3">
+                            ${qrSrc ? `<div class="mb-3">
                                 <img src="${qrSrc}" alt="Swish QR Code" style="max-width: 300px; width: 100%;" class="img-fluid">
-                            </div>
+                            </div>` : ''}
                             <div class="alert alert-info text-start mb-0">
                                 <p class="mb-1"><strong>Belopp:</strong> ${amount} kr</p>
                                 ${data.includesSubCompetition ? `<p class="mb-1 small text-muted">Inkluderar ${data.subCompetitionFeeTotal} kr i deltävlingsavgift${data.subCompetitionName ? ` (${data.subCompetitionName})` : ''}.</p>` : ''}
@@ -2046,6 +2046,7 @@ window.CompetitionConfig = {
                                 ${data.teamName ? `<p class="mb-1"><strong>Lag:</strong> ${data.teamName}</p>` : ''}
                                 <p class="mb-0"><strong>Fakturanummer:</strong> ${invNum}</p>
                             </div>
+                            ${window.renderBankgiroBlock ? window.renderBankgiroBlock(data) : ''}
                         `;
                         // Payer-side "Jag har betalat" claim for a shooter paying their own unpaid
                         // invoice. Auth (CanClaimPaymentForInvoice) gates it server-side; for a team

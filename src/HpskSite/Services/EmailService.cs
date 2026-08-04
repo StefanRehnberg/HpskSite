@@ -1265,7 +1265,9 @@ namespace HpskSite.Services
             string invoiceNumber,
             string swishNumber,
             string invoiceMessage,
-            string? customMessage = null)
+            string? customMessage = null,
+            string? bgNumber = null,
+            string? payeeName = null)
         {
             // If SMTP is not configured, log and return
             if (string.IsNullOrEmpty(_smtpHost))
@@ -1285,6 +1287,32 @@ namespace HpskSite.Services
             var bodyIntroMessage = string.IsNullOrWhiteSpace(customMessage)
                 ? "För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan:"
                 : System.Net.WebUtility.HtmlEncode(customMessage).Replace("\n", "<br>");
+
+            // Bankgiro alternative — clubs and kretsar normally pay by BG rather than Swish, so the
+            // mail states it in full (number, payee, amount, reference) instead of only a QR code.
+            var bankgiroSection = string.IsNullOrWhiteSpace(bgNumber) ? "" : $@"
+            <div class='info-box' style='border-left-color: #6c757d;'>
+                <h4 style='margin-top: 0; color: #495057;'>Eller betala via bankgiro</h4>
+                <div class='info-item'>
+                    <span class='info-label'>Bankgiro:</span>
+                    <span class='info-value'>{bgNumber}</span>
+                </div>
+                {(string.IsNullOrWhiteSpace(payeeName) ? "" : $@"<div class='info-item'>
+                    <span class='info-label'>Mottagare:</span>
+                    <span class='info-value'>{payeeName}</span>
+                </div>")}
+                <div class='info-item'>
+                    <span class='info-label'>Belopp:</span>
+                    <span class='info-value'>{amount:F2} kr</span>
+                </div>
+                <div class='info-item'>
+                    <span class='info-label'>Referens (OCR/meddelande):</span>
+                    <span class='info-value'>{invoiceNumber}</span>
+                </div>
+                <p style='margin: 10px 0 0 0; font-size: 13px; color: #6c757d;'>
+                    Ange referensen så att arrangören kan matcha betalningen mot rätt faktura.
+                </p>
+            </div>";
 
             var subject = $"Swish-betalning för {competitionName} - Pistol.nu";
             var body = $@"
@@ -1356,6 +1384,8 @@ namespace HpskSite.Services
                     <span class='info-value'>{invoiceNumber}</span>
                 </div>
             </div>
+
+            {bankgiroSection}
 
             <div class='instructions'>
                 <h5 style='margin-top: 0;'><strong>💡 Två sätt att betala</strong></h5>

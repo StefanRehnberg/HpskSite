@@ -235,6 +235,9 @@ namespace HpskSite.Controllers
                     payeeKey = g.Payee.Key,
                     payeeName = g.Payee.Name,
                     hasSwishNumber = !string.IsNullOrWhiteSpace(g.Payee.SwishNumber),
+                    // A payee with only a bankgiro is perfectly payable — the club just pays by BG.
+                    hasBgNumber = !string.IsNullOrWhiteSpace(g.Payee.BgNumber),
+                    bgNumber = g.Payee.BgNumber,
                     total = g.Total,
                     needsParent = g.NeedsParent,
                     invoices = g.Invoices.Select(i => new
@@ -810,12 +813,14 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member has no email address" });
                 }
 
-                // Get Swish details from competition
+                // Get Swish details from competition. The mail embeds a Swish QR, so it still needs a
+                // Swish number; the organiser's bankgiro rides along in the body as the alternative.
                 var swishNumber = competition.Value<string>("swishNumber");
                 if (string.IsNullOrEmpty(swishNumber))
                 {
                     return Json(new { success = false, message = "Competition has no Swish number configured" });
                 }
+                var emailPayee = _consolidatedService.ResolvePayee(competitionId);
 
                 // Generate QR code
                 var invoiceNumber = invoice.GetValue<string>("invoiceNumber");
@@ -835,7 +840,9 @@ namespace HpskSite.Controllers
                     "",  // shootingClasses (not needed for invoice email)
                     invoiceNumber,
                     swishNumber,
-                    "Faktura skickad av administratör"  // invoiceMessage
+                    "Faktura skickad av administratör",  // invoiceMessage
+                    bgNumber: emailPayee.BgNumber,             // bankgiro alternative in the mail
+                    payeeName: emailPayee.Name
                 );
 
                 // Audit: log who resent the QR email so the per-invoice history shows it.
@@ -904,11 +911,20 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Competition not found" });
                 }
 
-                // Get Swish details from competition
+                // Payment details: Swish comes from the competition, bankgiro from the organising
+                // club/krets. Either one alone is enough to pay — a BG-only organiser used to get
+                // "Competition has no Swish number configured" and no way to pay at all.
+                var payee = _consolidatedService.ResolvePayee(competitionId);
                 var swishNumber = competition.Value<string>("swishNumber");
-                if (string.IsNullOrEmpty(swishNumber))
+                var bgNumber = payee.BgNumber;
+                if (string.IsNullOrEmpty(swishNumber) && string.IsNullOrEmpty(bgNumber))
                 {
-                    return Json(new { success = false, message = "Competition has no Swish number configured" });
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Tävlingen saknar Swish-nummer och arrangören saknar bankgiro — "
+                                + "lägg till minst ett av dem för att kunna ta betalt."
+                    });
                 }
 
                 // Get invoice details
@@ -932,20 +948,31 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Generate QR code
-                var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
+                // Generate QR code — only when there is a Swish number; a BG-only organiser still gets
+                // a payable dialog, just without a QR.
                 var amountString = totalAmount.ToString("F2");
-                var qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
-                var qrCodeBase64 = Convert.ToBase64String(qrCodeBytes);
+                string? qrCodeBase64 = null, swishAppUrl = null;
+                if (!string.IsNullOrEmpty(swishNumber))
+                {
+                    var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
+                    qrCodeBase64 = Convert.ToBase64String(
+                        SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message));
+                    swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message);
+                }
 
                 return Json(new
                 {
                     success = true,
                     qrCodeBase64 = qrCodeBase64,
-                    swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message),
+                    swishAppUrl = swishAppUrl,
                     amount = amountString,
                     invoiceNumber = invoiceNumber,
                     competitionName = competition.Name,
+                    // Bankgiro alternative: the invoice number is the payment reference, and the payee
+                    // name matters because a club often pays another club's or the krets's invoice.
+                    bgNumber = bgNumber,
+                    bgReference = invoiceNumber,
+                    payeeName = payee.Name,
                     // So a payment dialog can explain why the QR is for less than the invoice says.
                     issuedTotal = balance.Total,
                     credited = balance.Credited,
@@ -1026,6 +1053,7 @@ namespace HpskSite.Controllers
             var swishNumber = competition.GetValue<string>("swishNumber");
             if (string.IsNullOrEmpty(swishNumber))
                 return Json(new { success = false, message = "Tävlingen saknar Swish-nummer." });
+            var reminderPayee = _consolidatedService.ResolvePayee(competitionId);
 
             var competitionChildren = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
             var invoicesHub = competitionChildren
@@ -1097,7 +1125,9 @@ namespace HpskSite.Controllers
                         invoiceNumber,
                         swishNumber,
                         qrMessage,        // Swish payment reference (matches the QR code)
-                        emailMessage);    // visible reminder note in the body
+                        emailMessage,     // visible reminder note in the body
+                        bgNumber: reminderPayee.BgNumber,
+                        payeeName: reminderPayee.Name);
 
                     await _auditService.LogAsync(
                         invoiceId: invoice.Id,
@@ -1316,6 +1346,7 @@ namespace HpskSite.Controllers
             var swishNumber = competition.GetValue<string>("swishNumber");
             if (string.IsNullOrEmpty(swishNumber))
                 return Json(new { success = false, message = "Tävlingen saknar Swish-nummer." });
+            var testPayee = _consolidatedService.ResolvePayee(competitionId);
 
             // Where does the test go? The logged-in operator's own email.
             var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -1371,7 +1402,9 @@ namespace HpskSite.Controllers
                     invoiceNumber,
                     swishNumber,
                     qrMessage,        // Swish payment reference (matches the QR code)
-                    emailMessage);    // visible reminder note in the body
+                    emailMessage,     // visible reminder note in the body
+                    bgNumber: testPayee.BgNumber,
+                    payeeName: testPayee.Name);
 
                 return Json(new
                 {

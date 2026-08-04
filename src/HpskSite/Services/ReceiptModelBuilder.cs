@@ -190,6 +190,8 @@ namespace HpskSite.Services
                 IssuerPostalCode = issuerNode?.GetValue<string>("postalCode") ?? "",
                 IssuerCity = issuerNode?.GetValue<string>("city") ?? "",
                 IssuerContactEmail = ResolveReceiptEmail(issuerNode),
+                IssuerBgNumber = (issuerNode != null && issuerNode.HasProperty("bgNumber")
+                    ? issuerNode.GetValue<string>("bgNumber") ?? "" : "").Trim(),
                 IssuerLogoUrl = issuerNode != null ? ResolveLogoUrl(issuerNode.Id) : "",
 
                 CoveredLines = coveredLines,

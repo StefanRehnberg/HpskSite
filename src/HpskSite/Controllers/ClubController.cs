@@ -1020,6 +1020,8 @@ namespace HpskSite.Controllers
                             postalCode = clubNode.Value<string>("postalCode") ?? "",
                             orgNumber = clubNode.Value<string>("orgNumber") ?? "",
                             receiptEmail = clubNode.Value<string>("receiptEmail") ?? "",
+                            swishNumber = clubNode.Value<string>("swishNumber") ?? "",
+                            bgNumber = clubNode.Value<string>("bgNumber") ?? "",
                             description = clubNode.Value<string>("description") ?? "",
                             aboutClub = clubNode.Value<string>("aboutClub") ?? "",
                             logoUrl = logo?.Url() ?? "",
@@ -1045,7 +1047,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> UpdateClubInfo(int clubId, string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string description = "",
             string webSite = "", string address = "", string city = "",
-            string postalCode = "", string orgNumber = "", string receiptEmail = "", string aboutClub = "", string brevoApiKey = "")
+            string postalCode = "", string orgNumber = "", string receiptEmail = "", string aboutClub = "", string brevoApiKey = "",
+            string swishNumber = "", string bgNumber = "")
         {
             try
             {
@@ -1078,6 +1081,14 @@ namespace HpskSite.Controllers
                 clubContent.SetValue("postalCode", postalCode);
                 clubContent.SetValue("orgNumber", orgNumber ?? "");
                 clubContent.SetValue("receiptEmail", receiptEmail ?? "");
+
+                // Payment details shown on the club's invoices. Guarded because SetValue on a missing
+                // alias is a silent no-op on some installs — a payment number that "saved" but didn't
+                // is worse than a visible error.
+                if (clubContent.HasProperty("swishNumber"))
+                    clubContent.SetValue("swishNumber", (swishNumber ?? "").Trim());
+                if (clubContent.HasProperty("bgNumber"))
+                    clubContent.SetValue("bgNumber", (bgNumber ?? "").Trim());
 
                 // Update description properties
                 clubContent.SetValue("description", description);
@@ -1491,6 +1502,8 @@ namespace HpskSite.Controllers
                         city = regionNode.Value<string>("city") ?? "",
                         postalCode = regionNode.Value<string>("postalCode") ?? "",
                         receiptEmail = regionNode.Value<string>("receiptEmail") ?? "",
+                        swishNumber = regionNode.Value<string>("swishNumber") ?? "",
+                        bgNumber = regionNode.Value<string>("bgNumber") ?? "",
                         logoUrl = logo?.Url() ?? "",
                         bannerImageUrl = bannerImage?.Url() ?? "",
                         brevoApiKey = regionNode.Value<string>("brevoApiKey") ?? ""
@@ -1511,7 +1524,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> UpdateRegionInfo(int contentId, string welcomeTitle = "",
             string welcomeText = "", string aboutRegion = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string orgNumber = "",
-            string address = "", string city = "", string postalCode = "", string receiptEmail = "", string brevoApiKey = "")
+            string address = "", string city = "", string postalCode = "", string receiptEmail = "", string brevoApiKey = "",
+            string swishNumber = "", string bgNumber = "")
         {
             try
             {
@@ -1555,6 +1569,13 @@ namespace HpskSite.Controllers
                 regionContent.SetValue("city", city ?? "");
                 regionContent.SetValue("postalCode", postalCode ?? "");
                 regionContent.SetValue("receiptEmail", receiptEmail ?? "");
+
+                // Payment details shown on the krets's invoices. Guarded — SetValue on a missing alias is
+                // a silent no-op, and a payment number that looked saved but wasn't sends money nowhere.
+                if (regionContent.HasProperty("swishNumber"))
+                    regionContent.SetValue("swishNumber", (swishNumber ?? "").Trim());
+                if (regionContent.HasProperty("bgNumber"))
+                    regionContent.SetValue("bgNumber", (bgNumber ?? "").Trim());
 
                 // Update Brevo API key (if property exists)
                 if (regionContent.HasProperty("brevoApiKey"))

@@ -333,6 +333,26 @@
 
                         <hr class="my-4">
 
+                        <!-- Betalningsuppgifter: shown on the krets's invoices (e.g. a krets-hosted SM) so a
+                             paying club can choose Swish or bankgiro. Bankgiro is what clubs normally use. -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-credit-card me-2"></i>Betalningsuppgifter
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Swish-nummer <small class="text-muted">(valfritt)</small></label>
+                                <input type="text" class="form-control" id="regionSwishNumber" name="swishNumber" placeholder="1231234567">
+                                <small class="text-muted">Kretsens Swish. Varje tävling har dessutom ett eget Swish-nummer i tävlingsinställningarna.</small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Bankgiro <small class="text-muted">(valfritt)</small></label>
+                                <input type="text" class="form-control" id="regionBgNumber" name="bgNumber" placeholder="123-4567">
+                                <small class="text-muted">Visas som betalningsalternativ på kretsens fakturor och kvitton. Fakturanummer används som referens.</small>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
                         <!-- Brevo Email Integration -->
                         <h6 class="text-muted mb-3">
                             <i class="bi bi-envelope me-2"></i>E-postutskick (Brevo)
@@ -864,6 +884,12 @@
                     document.getElementById('regionPostalCode').value = data.data.postalCode || '';
                     document.getElementById('regionCity').value = data.data.city || '';
                     document.getElementById('regionReceiptEmail').value = data.data.receiptEmail || '';
+
+                    // Betalningsuppgifter (Swish + bankgiro shown on the krets's invoices)
+                    var regionSwishField = document.getElementById('regionSwishNumber');
+                    if (regionSwishField) regionSwishField.value = data.data.swishNumber || '';
+                    var regionBgField = document.getElementById('regionBgNumber');
+                    if (regionBgField) regionBgField.value = data.data.bgNumber || '';
 
                     // Brevo API key
                     var brevoField = document.getElementById('regionBrevoApiKey');

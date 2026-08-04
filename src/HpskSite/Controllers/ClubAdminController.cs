@@ -180,6 +180,8 @@ namespace HpskSite.Controllers
                     PostalCode = clubNode.Value<string>("postalCode") ?? "",
                     OrgNumber = clubNode.Value<string>("orgNumber") ?? "",
                     ReceiptEmail = clubNode.Value<string>("receiptEmail") ?? "",
+                    SwishNumber = clubNode.Value<string>("swishNumber") ?? "",
+                    BgNumber = clubNode.Value<string>("bgNumber") ?? "",
                     WebSite = clubNode.Value<string>("clubUrl") ?? "",
                     IsActive = clubNode.IsPublished(),
                     MemberCount = memberCount,
@@ -194,6 +196,18 @@ namespace HpskSite.Controllers
             {
                 return Json(new { success = false, message = "Error loading club: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Writes an organisation's payment details (Swish + bankgiro). These end up on the invoices the
+        /// organisation issues, so both are guarded: SetValue on an alias the doctype doesn't have is a
+        /// silent no-op, and a payment number that looked saved but wasn't would send money nowhere.
+        /// Whitespace is trimmed because these values are pasted into QR payloads and payment references.
+        /// </summary>
+        private static void SetPaymentDetails(Umbraco.Cms.Core.Models.IContent node, string? swishNumber, string? bgNumber)
+        {
+            if (node.HasProperty("swishNumber")) node.SetValue("swishNumber", (swishNumber ?? "").Trim());
+            if (node.HasProperty("bgNumber")) node.SetValue("bgNumber", (bgNumber ?? "").Trim());
         }
 
         [HttpPost]
@@ -213,7 +227,9 @@ namespace HpskSite.Controllers
             string receiptEmail,
             bool isActive,
             int? clubIdNumber,
-            string regionalFederation)
+            string regionalFederation,
+            string swishNumber = "",
+            string bgNumber = "")
         {
             _logger.LogInformation("=== SaveClub called === ID: {Id}, Name: {Name}", id, name);
 
@@ -368,6 +384,7 @@ namespace HpskSite.Controllers
                         clubContent.SetValue("postalCode", postalCode ?? "");
                         clubContent.SetValue("orgNumber", orgNumber ?? "");
                         clubContent.SetValue("receiptEmail", receiptEmail ?? "");
+                        SetPaymentDetails(clubContent, swishNumber, bgNumber);
                         clubContent.SetValue("clubId", clubIdNumber);
                         clubContent.SetValue("regionalFederation", regionalFederation ?? "");
 
@@ -426,6 +443,7 @@ namespace HpskSite.Controllers
                                 newClubContent.SetValue("postalCode", postalCode ?? "");
                                 newClubContent.SetValue("orgNumber", orgNumber ?? "");
                                 newClubContent.SetValue("receiptEmail", receiptEmail ?? "");
+                                SetPaymentDetails(newClubContent, swishNumber, bgNumber);
                                 newClubContent.SetValue("clubId", clubIdNumber);
                                 newClubContent.SetValue("regionalFederation", regionalFederation ?? "");
 
@@ -1964,6 +1982,8 @@ namespace HpskSite.Controllers
                     city = regionalPage.Value<string>("city") ?? "",
                     postalCode = regionalPage.Value<string>("postalCode") ?? "",
                     receiptEmail = regionalPage.Value<string>("receiptEmail") ?? "",
+                    swishNumber = regionalPage.Value<string>("swishNumber") ?? "",
+                    bgNumber = regionalPage.Value<string>("bgNumber") ?? "",
                     pageId = regionalPage.Id
                 };
 
@@ -1993,7 +2013,9 @@ namespace HpskSite.Controllers
             string address,
             string city,
             string postalCode,
-            string receiptEmail)
+            string receiptEmail,
+            string swishNumber = "",
+            string bgNumber = "")
         {
             if (!await _authService.IsCurrentUserAdminAsync())
             {
@@ -2036,6 +2058,7 @@ namespace HpskSite.Controllers
                 regionalPage.SetValue("city", city ?? "");
                 regionalPage.SetValue("postalCode", postalCode ?? "");
                 regionalPage.SetValue("receiptEmail", receiptEmail ?? "");
+                SetPaymentDetails(regionalPage, swishNumber, bgNumber);
 
                 _contentService.Save(regionalPage);
                 _contentService.Publish(regionalPage, new[] { "*" }, -1);

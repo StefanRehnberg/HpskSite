@@ -683,13 +683,17 @@ function showSwishQRCode(invoiceId) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                // No Swish number on the competition -> no QR, but bankgiro still makes it payable.
+                const swishPart = data.qrCodeBase64 ? `
+                        <img src="data:image/png;base64,${data.qrCodeBase64}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;">
+                        <p class="text-muted">Scanna QR-koden med Swish-appen</p>` : '';
                 modalBody.innerHTML = `
                     <div class="text-center">
                         <h5>${escapeHtml(data.competitionName)}</h5>
                         <p class="mb-3">Belopp: <strong>${data.amount} kr</strong></p>
-                        <img src="data:image/png;base64,${data.qrCodeBase64}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;">
-                        <p class="text-muted">Scanna QR-koden med Swish-appen</p>
+                        ${swishPart}
                         <p class="small">Fakturanummer: ${escapeHtml(data.invoiceNumber)}</p>
+                        ${window.renderBankgiroBlock ? window.renderBankgiroBlock(data) : ''}
                     </div>
                 `;
             } else {

@@ -2652,11 +2652,12 @@ function showQrInManageModal() {
                 || (data.qrCodeBase64 ? `data:image/png;base64,${data.qrCodeBase64}` : '');
 
             body.innerHTML = `
-                <img src="${qrSrc}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 280px;" />
+                ${qrSrc ? `<img src="${qrSrc}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 280px;" />` : ''}
                 <p class="mb-1"><strong>Belopp:</strong> ${data.amount} kr</p>
                 ${data.shootingClasses ? `<p class="mb-1 small text-muted"><strong>Klasser:</strong> ${data.shootingClasses}</p>` : ''}
                 <p class="mb-1 small text-muted"><strong>Referens:</strong> ${data.invoiceNumber || ''}</p>
-                <p class="small text-muted mt-2 mb-0">Be skytten skanna koden med Swish-appen.</p>`;
+                ${qrSrc ? '<p class="small text-muted mt-2 mb-0">Be skytten skanna koden med Swish-appen.</p>' : ''}
+                ${window.renderBankgiroBlock ? window.renderBankgiroBlock(data) : ''}`;
 
             // Lazy-create path only: SwishController side-effect creates an invoice if none
             // existed; patch the in-memory row so subsequent actions see the new invoiceId

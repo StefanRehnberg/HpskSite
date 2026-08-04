@@ -565,7 +565,8 @@ async function clubOpenConsolidateModal() {
                             <strong>${clubEsc(g.competitionName)}</strong><br>
                             <span class="small text-muted">
                                 Betalas till ${clubEsc(g.payeeName)}
-                                ${g.hasSwishNumber || blocked ? '' : ' <span class="text-danger">(inget Swish-nummer angivet)</span>'}
+                                ${g.hasBgNumber ? ` <span class="text-muted">· bankgiro ${clubEsc(g.bgNumber)}</span>` : ''}
+                                ${(g.hasSwishNumber || g.hasBgNumber || blocked) ? '' : ' <span class="text-danger">(varken Swish-nummer eller bankgiro angivet)</span>'}
                             </span>
                         </div>
                         <div class="text-end">
@@ -824,13 +825,18 @@ function showClubSwishQRCode(invoiceId) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                // Swish block only when the organiser has a Swish number — a BG-only organiser
+                // still gets a payable dialog, just with the bankgiro details instead of a QR.
+                const swishPart = data.qrCodeBase64 ? `
+                        <img src="data:image/png;base64,${data.qrCodeBase64}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;">
+                        <p class="text-muted">Scanna QR-koden med Swish-appen</p>` : '';
                 modalBody.innerHTML = `
                     <div class="text-center">
                         <h5>${escapeClubHtml(data.competitionName)}</h5>
                         <p class="mb-3">Belopp: <strong>${data.amount} kr</strong></p>
-                        <img src="data:image/png;base64,${data.qrCodeBase64}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;">
-                        <p class="text-muted">Scanna QR-koden med Swish-appen</p>
+                        ${swishPart}
                         <p class="small">Fakturanummer: ${escapeClubHtml(data.invoiceNumber)}</p>
+                        ${window.renderBankgiroBlock ? window.renderBankgiroBlock(data) : ''}
                     </div>
                 `;
             } else {

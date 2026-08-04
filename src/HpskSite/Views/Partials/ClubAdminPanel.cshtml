@@ -442,6 +442,26 @@
 
                         <hr class="my-4">
 
+                        <!-- Betalningsuppgifter: shown on the club's invoices so a payer can choose
+                             Swish or bankgiro. Bankgiro is what other clubs and kretsar normally use. -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-credit-card me-2"></i>Betalningsuppgifter
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Swish-nummer <small class="text-muted">(valfritt)</small></label>
+                                <input type="text" class="form-control" id="clubSwishNumber" name="swishNumber" placeholder="1231234567">
+                                <small class="text-muted">Klubbens Swish för medlemsavgifter. Tävlingar har eget Swish-nummer i tävlingsinställningarna.</small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Bankgiro <small class="text-muted">(valfritt)</small></label>
+                                <input type="text" class="form-control" id="clubBgNumber" name="bgNumber" placeholder="123-4567">
+                                <small class="text-muted">Visas som betalningsalternativ på klubbens fakturor och kvitton. Fakturanummer används som referens.</small>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
                         <!-- Description Section -->
                         <h6 class="text-muted mb-3">
                             <i class="bi bi-card-text me-2"></i>Om Klubben
@@ -3131,6 +3151,12 @@ function loadClubSettings() {
                 document.getElementById('postalCode').value = data.data.postalCode || '';
                 document.getElementById('orgNumber').value = data.data.orgNumber || '';
                 document.getElementById('receiptEmail').value = data.data.receiptEmail || '';
+
+                // Betalningsuppgifter (Swish + bankgiro shown on the club's invoices)
+                var clubSwishField = document.getElementById('clubSwishNumber');
+                if (clubSwishField) clubSwishField.value = data.data.swishNumber || '';
+                var clubBgField = document.getElementById('clubBgNumber');
+                if (clubBgField) clubBgField.value = data.data.bgNumber || '';
 
                 // Description
                 document.getElementById('club_description').value = data.data.description || '';

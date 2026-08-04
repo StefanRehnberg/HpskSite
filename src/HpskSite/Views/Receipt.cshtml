@@ -123,6 +123,10 @@
                         {
                             <text>Org.nr: @Model.IssuerOrgNumber<br></text>
                         }
+                        @if (Model.IssuerHasBgNumber)
+                        {
+                            <text>Bankgiro: @Model.IssuerBgNumber<br></text>
+                        }
                         @if (!string.IsNullOrWhiteSpace(Model.IssuerStreet)) { <text>@Model.IssuerStreet<br></text> }
                         @if (!string.IsNullOrWhiteSpace(cityLine)) { <text>@cityLine<br></text> }
                         @if (!string.IsNullOrWhiteSpace(Model.IssuerContactEmail)) { <text>@Model.IssuerContactEmail</text> }

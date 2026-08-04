@@ -45,10 +45,17 @@ namespace HpskSite.Models
         public string IssuerPostalCode { get; set; } = "";
         public string IssuerCity { get; set; } = "";
         public string IssuerContactEmail { get; set; } = "";
+        /// <summary>
+        /// The issuer's bankgiro (club/regionalPage level), "" when they have none. Printed on the
+        /// receipt as part of the seller's details — normal on a Swedish kvitto/faktura, and it is what
+        /// a club looks for when reconciling a BG payment against the document.
+        /// </summary>
+        public string IssuerBgNumber { get; set; } = "";
         /// <summary>Resolved media URL for the issuer's logo, or "" when none is set.</summary>
         public string IssuerLogoUrl { get; set; } = "";
 
         public bool IssuerHasOrgNumber => !string.IsNullOrWhiteSpace(IssuerOrgNumber);
+        public bool IssuerHasBgNumber => !string.IsNullOrWhiteSpace(IssuerBgNumber);
 
         // Money
         public decimal AmountPaid { get; set; }

@@ -34,6 +34,7 @@ namespace HpskSite.Controllers
         private readonly EmailService _emailService;
         private readonly ClubService _clubService;
         private readonly InvoiceAuditService _auditService;
+        private readonly ConsolidatedInvoiceService _consolidatedService;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<SwishController> _logger;
 
@@ -50,6 +51,7 @@ namespace HpskSite.Controllers
             EmailService emailService,
             ClubService clubService,
             InvoiceAuditService auditService,
+            ConsolidatedInvoiceService consolidatedService,
             ILogger<SwishController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -59,6 +61,7 @@ namespace HpskSite.Controllers
             _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
             _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
             _auditService = auditService ?? throw new ArgumentNullException(nameof(auditService));
+            _consolidatedService = consolidatedService ?? throw new ArgumentNullException(nameof(consolidatedService));
             _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -201,9 +204,14 @@ namespace HpskSite.Controllers
                 _logger.LogInformation("Swish payment request - CompetitionId: {CompetitionId}, SwishNumber: {SwishNumber}, RegistrationFee: {RegistrationFee}, JuniorFee: {JuniorFee}, SubCompFee: {SubCompFee}",
                     competitionId, swishNumber, registrationFee, juniorFeeConfigured, subCompFeeConfigured);
 
-                if (string.IsNullOrEmpty(swishNumber))
+                // Bankgiro is the alternative to Swish and lives on the organising club/krets. With a BG
+                // on file the payment dialog is still useful without a Swish number — it then shows the
+                // bankgiro details instead of a QR, rather than refusing to open at all.
+                var payee = _consolidatedService.ResolvePayee(competitionId);
+                var hasSwish = !string.IsNullOrEmpty(swishNumber);
+                if (!hasSwish && string.IsNullOrEmpty(payee.BgNumber))
                 {
-                    return Json(new { success = false, message = "Ingen Swish-nummer är konfigurerad för denna tävling." });
+                    return Json(new { success = false, message = "Inget Swish-nummer eller bankgiro är konfigurerat för denna tävling." });
                 }
 
                 if (registrationFee <= 0 && juniorFeeConfigured <= 0 && subCompFeeConfigured <= 0)
@@ -384,30 +392,33 @@ namespace HpskSite.Controllers
                 // Generate QR code message
                 var message = $"Betalning: {invoiceNumber}";
 
-                // Validate Swish number format
-                var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-                if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
+                // Swish QR only when the competition has a Swish number — with bankgiro only, the dialog
+                // shows the BG details instead (and the invoice above was still created).
+                string? qrCodeDataUri = null, swishAppUrl = null;
+                if (hasSwish)
                 {
-                    return Json(new { success = false, message = "Swish-numret måste vara 10 siffror — antingen en privat-/Företag-mobil som börjar med 07 (t.ex. 0701234567) eller ett Swish Handel-alias som börjar med 123 (t.ex. 1234567890)." });
-                }
+                    var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
+                    if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
+                    {
+                        return Json(new { success = false, message = "Swish-numret måste vara 10 siffror — antingen en privat-/Företag-mobil som börjar med 07 (t.ex. 0701234567) eller ett Swish Handel-alias som börjar med 123 (t.ex. 1234567890)." });
+                    }
 
-                _logger.LogInformation("Generating QR code - SwishNumber: {SwishNumber}, Amount: {Amount}, Message: {Message}", 
-                    normalizedSwishNumber, amountString, message);
-
-                // Generate QR code
-                byte[] qrCodeBytes;
-                try
-                {
-                    qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
-                }
-                catch (Exception qrEx)
-                {
-                    _logger.LogError(qrEx, "QR code generation failed - SwishNumber: {SwishNumber}, Amount: {Amount}, Message: {Message}", 
+                    _logger.LogInformation("Generating QR code - SwishNumber: {SwishNumber}, Amount: {Amount}, Message: {Message}",
                         normalizedSwishNumber, amountString, message);
-                    return Json(new { success = false, message = $"QR-kod generering misslyckades: {qrEx.Message}" });
-                }
 
-                var qrCodeBase64 = Convert.ToBase64String(qrCodeBytes);
+                    try
+                    {
+                        qrCodeDataUri = "data:image/png;base64," + Convert.ToBase64String(
+                            SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message));
+                        swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message);
+                    }
+                    catch (Exception qrEx)
+                    {
+                        _logger.LogError(qrEx, "QR code generation failed - SwishNumber: {SwishNumber}, Amount: {Amount}, Message: {Message}",
+                            normalizedSwishNumber, amountString, message);
+                        return Json(new { success = false, message = $"QR-kod generering misslyckades: {qrEx.Message}" });
+                    }
+                }
 
                 var subCompPortion = RegistrationFeeCalculator.CalculateSubCompetitionPortion(
                     competition, classesForCalc, registeredIsSubCompetition);
@@ -415,14 +426,18 @@ namespace HpskSite.Controllers
 
                 return Json(new {
                     success = true,
-                    qrCode = $"data:image/png;base64,{qrCodeBase64}",
-                    swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message),
+                    qrCode = qrCodeDataUri,
+                    swishAppUrl = swishAppUrl,
                     amount = totalAmount,
                     registrationCount = userShootingClasses.Count,
                     shootingClasses = string.Join(", ", userShootingClasses),
                     invoiceId = invoice.Id,
                     invoiceNumber = invoiceNumber,
                     message = message,
+                    // Bankgiro alternative — same shape every payment dialog's renderBankgiroBlock reads.
+                    bgNumber = payee.BgNumber,
+                    bgReference = invoiceNumber,
+                    payeeName = payee.Name,
                     paymentAlreadySent = invoice.GetValue<DateTime?>("paymentSentDate").HasValue,
                     // Only surface the deltävling breakdown on a full (nothing-yet-paid) invoice — on a
                     // partial top-up the outstanding amount may be less than the deltävling portion.
@@ -619,9 +634,13 @@ namespace HpskSite.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
+                // Team fees are typically paid BY THE CLUB, which normally means bankgiro — so a missing
+                // Swish number must not block the payment dialog when the organiser has a BG.
                 var swishNumber = competition.Value<string>("swishNumber");
-                if (string.IsNullOrEmpty(swishNumber))
-                    return Json(new { success = false, message = "Ingen Swish-nummer är konfigurerad." });
+                var teamPayee = _consolidatedService.ResolvePayee(competitionId);
+                var teamHasSwish = !string.IsNullOrEmpty(swishNumber);
+                if (!teamHasSwish && string.IsNullOrEmpty(teamPayee.BgNumber))
+                    return Json(new { success = false, message = "Inget Swish-nummer eller bankgiro är konfigurerat." });
 
                 // Look up the team first so we can determine relay vs regular fee
                 CompetitionTeamDto team;
@@ -691,24 +710,33 @@ namespace HpskSite.Controllers
                 var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
                 var message = $"Lag: {invoiceNumber}";
 
-                var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-                if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
-                    return Json(new { success = false, message = "Ogiltigt Swish-nummer." });
+                string? teamQrDataUri = null, teamSwishAppUrl = null;
+                if (teamHasSwish)
+                {
+                    var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
+                    if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
+                        return Json(new { success = false, message = "Ogiltigt Swish-nummer." });
 
-                byte[] qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
-                var qrCodeBase64 = Convert.ToBase64String(qrCodeBytes);
+                    teamQrDataUri = "data:image/png;base64," + Convert.ToBase64String(
+                        SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message));
+                    teamSwishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message);
+                }
 
                 return Json(new
                 {
                     success = true,
-                    qrCode = $"data:image/png;base64,{qrCodeBase64}",
-                    swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message),
+                    qrCode = teamQrDataUri,
+                    swishAppUrl = teamSwishAppUrl,
                     amount = teamFee,
                     teamName = team.TeamName,
                     teamClass = team.TeamClass,
                     clubName = clubName,
                     invoiceNumber = invoiceNumber,
-                    message = message
+                    message = message,
+                    // Bankgiro alternative — the club paying for its teams normally uses this.
+                    bgNumber = teamPayee.BgNumber,
+                    bgReference = invoiceNumber,
+                    payeeName = teamPayee.Name
                 });
             }
             catch (Exception ex)
@@ -1358,6 +1386,8 @@ namespace HpskSite.Controllers
                     recipientName = currentMember.Name ?? "Medlem";
                 }
 
+                var mailPayee = _consolidatedService.ResolvePayee(competitionId);
+
                 // Send email with QR code as inline attachment
                 await _emailService.SendSwishQRCodeEmailAsync(
                     recipientEmail,
@@ -1368,7 +1398,10 @@ namespace HpskSite.Controllers
                     string.Join(", ", userShootingClasses),
                     invoiceNumber,
                     normalizedSwishNumber,
-                    message);
+                    message,
+                    customMessage: null,
+                    bgNumber: mailPayee.BgNumber,   // bankgiro alternative in the mail body
+                    payeeName: mailPayee.Name);
 
                 _logger.LogInformation("Swish QR code email sent to {Email} for competition {CompetitionId}", recipientEmail, competitionId);
 
@@ -1477,6 +1510,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ogiltigt Swish-nummer." });
 
                 var qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
+                var mailPayee = _consolidatedService.ResolvePayee(competitionId);
 
                 await _emailService.SendSwishQRCodeEmailAsync(
                     memberData.Email,
@@ -1487,7 +1521,10 @@ namespace HpskSite.Controllers
                     $"Lagklass: {team.TeamClass}",
                     invoiceNumber,
                     normalizedSwishNumber,
-                    message);
+                    message,
+                    customMessage: null,
+                    bgNumber: mailPayee.BgNumber,   // bankgiro alternative in the mail body
+                    payeeName: mailPayee.Name);
 
                 // Audit: log the team-invoice email send.
                 await _auditService.LogAsync(
