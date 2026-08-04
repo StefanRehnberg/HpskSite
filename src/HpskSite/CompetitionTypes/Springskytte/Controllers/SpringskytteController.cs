@@ -2175,6 +2175,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         return Json(new { success = false, message = $"Startnummer {request.StartOrder.Value} används redan i vapengrupp {starter.WeaponClass}." });
                 }
 
+                // Re-anchoring of an already-recorded löptid, filled in when the start time moves.
+                (decimal Sprint, decimal? Total)? reanchor = null;
+
                 // Guard: don't move onto a time already reserved by another (non-DNS) shooter (same class).
                 if (!string.IsNullOrWhiteSpace(request.StartTime))
                 {
@@ -2187,6 +2190,31 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         tl ??= await BuildTimelineAsync(request.CompetitionId);
                         if (tl.OccupiedFor(starter.WeaponClass).Contains(newSec))
                             return Json(new { success = false, message = "Starttiden är upptagen av en annan skytt. Välj en ledig lucka." });
+
+                        // The stored löptid is finish − start, and the FINISH TIME ITSELF IS NOT STORED —
+                        // so moving the start silently invalidated it (the timing screen can now edit a
+                        // start time, which makes this reachable for a shooter who has already run).
+                        // Derive the finish from the old start + stored sprint and re-anchor on the new
+                        // start; refuse rather than persist a negative löptid.
+                        using (var chkDb = _umbracoDatabaseFactory.CreateDatabase())
+                        {
+                            var timed = await chkDb.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                                "WHERE CompetitionId = @0 AND MemberId = @1 AND WeaponClass = @2",
+                                request.CompetitionId, request.MemberId, request.WeaponClass);
+                            if (timed?.SprintTimeSeconds != null)
+                            {
+                                var shifted = timed.SprintTimeSeconds.Value - (newSec - currentSec);
+                                if (shifted < 0)
+                                    return Json(new
+                                    {
+                                        success = false,
+                                        message = "Den nya starttiden ligger efter skyttens registrerade måltid. "
+                                                + "Rätta måltiden först, eller välj en tidigare starttid."
+                                    });
+                                reanchor = (shifted, _scoringService.CalculateTotalTime(
+                                    shifted, timed.ShootingScore ?? 0, timed.PenaltyMultiplier > 0 ? timed.PenaltyMultiplier : 1));
+                            }
+                        } // disposed before the mirror connection is opened
                     }
                     starter.StartTime = ts.ToString(@"hh\:mm\:ss");
                 }
@@ -2231,11 +2259,25 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 try
                 {
                     using var db = _umbracoDatabaseFactory.CreateDatabase();
-                    await db.ExecuteAsync(
-                        @"UPDATE SpringskytteResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
-                          WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
-                        starter.StartOrder, starter.StartTime, DateTime.Now,
-                        request.CompetitionId, request.MemberId, request.WeaponClass);
+                    if (reanchor.HasValue)
+                    {
+                        await db.ExecuteAsync(
+                            @"UPDATE SpringskytteResultEntry
+                              SET StartOrder = @0, StartTime = @1, LastModified = @2,
+                                  SprintTimeSeconds = @6, TotalTimeSeconds = @7
+                              WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                            starter.StartOrder, starter.StartTime, DateTime.Now,
+                            request.CompetitionId, request.MemberId, request.WeaponClass,
+                            reanchor.Value.Sprint, (object?)reanchor.Value.Total ?? DBNull.Value);
+                    }
+                    else
+                    {
+                        await db.ExecuteAsync(
+                            @"UPDATE SpringskytteResultEntry SET StartOrder = @0, StartTime = @1, LastModified = @2
+                              WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                            starter.StartOrder, starter.StartTime, DateTime.Now,
+                            request.CompetitionId, request.MemberId, request.WeaponClass);
+                    }
                 }
                 catch (Exception dbEx)
                 {
