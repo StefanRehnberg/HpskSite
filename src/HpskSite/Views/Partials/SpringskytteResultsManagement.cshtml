@@ -750,6 +750,14 @@ function springTimeRenderRecent(){
 
 // ===== DATA LOADING =====
 
+// Tab A's container does NOT exist on the Class-C-only station page (/station?c=..&s=C renders the
+// C pad alone). Writing a message into it there threw "Cannot set properties of null", which surfaced
+// as a page error on every load of that screen whenever the competition had no Class A shooters.
+function springSetEntryMessage(html) {
+    const el = document.getElementById('springEntryContainer');
+    if (el) el.innerHTML = html;
+}
+
 async function springLoadShooters() {
     try {
         const response = await fetch(`/umbraco/surface/Springskytte/GetShootersForSpringskytteResults?competitionId=${springCompetitionId}`);
@@ -762,17 +770,14 @@ async function springLoadShooters() {
                 springUpdateNav();
                 springRenderEntry();
             } else {
-                document.getElementById('springEntryContainer').innerHTML =
-                    '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>Inga anmälda skyttar hittades.</div>';
+                springSetEntryMessage('<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>Inga anmälda skyttar hittades.</div>');
             }
         } else {
-            document.getElementById('springEntryContainer').innerHTML =
-                `<div class="alert alert-warning">${data.message || 'Kunde inte ladda skyttar.'}</div>`;
+            springSetEntryMessage(`<div class="alert alert-warning">${data.message || 'Kunde inte ladda skyttar.'}</div>`);
         }
     } catch (err) {
         console.error('Error loading shooters:', err);
-        document.getElementById('springEntryContainer').innerHTML =
-            '<div class="alert alert-danger">Ett fel uppstod vid laddning av skyttar.</div>';
+        springSetEntryMessage('<div class="alert alert-danger">Ett fel uppstod vid laddning av skyttar.</div>');
     }
 }
 
@@ -789,8 +794,7 @@ function springFilterShooters() {
     if (springFilteredShooters.length > 0) {
         springRenderEntry();
     } else {
-        document.getElementById('springEntryContainer').innerHTML =
-            '<div class="text-center py-3 text-muted">Inga skyttar matchar filtret.</div>';
+        springSetEntryMessage('<div class="text-center py-3 text-muted">Inga skyttar matchar filtret.</div>');
     }
 }
 
