@@ -102,6 +102,20 @@ namespace HpskSite.Controllers
         {
             try
             {
+                // Authentication gate (2026-08-05). This endpoint had NO authorization at all:
+                // an anonymous caller with only an antiforgery token could persist a result row
+                // for any competition — proven against dev, see authsweep-findings-2026-08-05.md.
+                // Deliberately authentication-only, NOT the three-tier role check: deciding *which*
+                // logged-in member may enter results is a separate change that has to accept the
+                // hosting krets's admins (see memory competition-host-shape-auth), and it is not
+                // one to make weeks before SM. Every legitimate caller is already logged in —
+                // StationPage.cshtml renders a login prompt rather than the pad when anonymous.
+                var callingMember = await _memberManager.GetCurrentMemberAsync();
+                if (callingMember == null)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Du måste vara inloggad." });
+                }
+
                 _logger.LogInformation("SaveResult called with request: CompetitionId={CompetitionId}, SeriesNumber={SeriesNumber}, TeamNumber={TeamNumber}, Position={Position}, RangeOfficerId={RangeOfficerId}, Shots={Shots}",
                     request?.CompetitionId, request?.SeriesNumber, request?.TeamNumber, request?.Position, request?.RangeOfficerId,
                     request?.Shots != null ? string.Join(",", request.Shots) : "null");
@@ -1104,6 +1118,13 @@ namespace HpskSite.Controllers
         {
             try
             {
+                // Authentication gate — same reasoning as SaveResult above.
+                var callingMember = await _memberManager.GetCurrentMemberAsync();
+                if (callingMember == null)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Du måste vara inloggad." });
+                }
+
                 _logger.LogInformation("DeleteResult called with request: CompetitionId={CompetitionId}, SeriesNumber={SeriesNumber}, TeamNumber={TeamNumber}, Position={Position}",
                     request?.CompetitionId, request?.SeriesNumber, request?.TeamNumber, request?.Position);
 
@@ -1299,62 +1320,9 @@ namespace HpskSite.Controllers
             }
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetResultsDebug(int competitionId)
-        {
-            try
-            {
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-
-                // Get all tables
-                var tables = await db.ExecuteScalarAsync<string>("SELECT STRING_AGG(TABLE_NAME, ', ') FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME LIKE '%Result%'");
-                
-                // Get count from PrecisionResultEntry table
-                var precisionResultEntryCount = 0;
-
-                try { precisionResultEntryCount = await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM PrecisionResultEntry WHERE CompetitionId = @0", competitionId); } catch { }
-
-                return Json(new
-                {
-                    Success = true,
-                    TablesContainingResult = tables,
-                    PrecisionResultEntryCount = precisionResultEntryCount
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in debug query");
-                return Json(new { Success = false, Message = ex.Message });
-            }
-        }
-
-        [HttpGet]
-        public async Task<IActionResult> TestDatabaseConnection()
-        {
-            try
-            {
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-
-                // Simple test query
-                var result = await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM PrecisionResultEntry");
-
-                return Json(new
-                {
-                    Success = true,
-                    Message = "Database connection successful",
-                    RecordCount = result
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Database connection test failed");
-                return Json(new
-                {
-                    Success = false,
-                    Message = $"Database connection failed: {ex.Message}"
-                });
-            }
-        }
+        // GetResultsDebug + TestDatabaseConnection deleted 2026-08-05: unauthenticated endpoints
+        // that disclosed database schema (INFORMATION_SCHEMA table names) and row counts to anyone.
+        // No caller anywhere in the codebase.
 
         [HttpGet]
         public async Task<IActionResult> GetResultsStats(int competitionId)
