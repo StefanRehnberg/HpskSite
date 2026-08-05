@@ -27,6 +27,18 @@ namespace HpskSite.Services
         private readonly string _fromName;
         private readonly string _adminEmail;
 
+        /// <summary>
+        /// The intro text shown above the Swish QR code in a payment / reminder mail when no
+        /// custom message is supplied. Plain text — it goes through <see cref="FormatIntroMessage"/>
+        /// like an operator-entered message, so the tutorial URL becomes a link either way.
+        /// `InvoiceAdminController.DefaultReminderMessage` aliases this so the reminder modal
+        /// prefills exactly what the server would fall back to.
+        /// </summary>
+        public const string DefaultPaymentIntroMessage =
+            "För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan.\n\n"
+            + "Din klubb kan också betala flera anmälningar samlat från klubbens sida under Administration → Fakturor. "
+            + "Så här gör klubben: https://pistol.nu/tutorials/?tutorial=tutorial-samlingsfaktura";
+
         public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
         {
             _configuration = configuration;
@@ -1253,6 +1265,23 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Turns an operator-entered (or default) intro message into safe email HTML:
+        /// HTML-encode first, then preserve newlines and linkify bare http(s) URLs.
+        /// Encoding before linkifying is what keeps this injection-safe — the anchor is built
+        /// from already-encoded text, so no operator input can close the tag.
+        /// </summary>
+        private static string FormatIntroMessage(string message)
+        {
+            var encoded = System.Net.WebUtility.HtmlEncode(message ?? string.Empty);
+            // Trailing punctuation must stay outside the link ("…-samlingsfaktura." would 404).
+            encoded = System.Text.RegularExpressions.Regex.Replace(
+                encoded,
+                @"https?://[^\s<]*[^\s<.,;:!?)]",
+                m => $"<a href=\"{m.Value}\" style=\"color: #0d6efd;\">{m.Value}</a>");
+            return encoded.Replace("\r\n", "\n").Replace("\n", "<br>");
+        }
+
+        /// <summary>
         /// Send Swish QR code payment email with inline image attachment
         /// </summary>
         public async Task SendSwishQRCodeEmailAsync(
@@ -1281,12 +1310,12 @@ namespace HpskSite.Services
 
             // The intro line shown above the QR code. By default it's the standard payment
             // instruction; a reminder send overrides it with the operator's own (editable)
-            // message. HTML-encoded since it's operator-entered, with newlines preserved.
+            // message. HTML-encoded since it's operator-entered, with newlines preserved and
+            // bare URLs linkified (see FormatIntroMessage).
             // `invoiceMessage` is the separate Swish *payment reference* (matches the QR), so a
             // long custom message never pollutes the Swish app's text.
-            var bodyIntroMessage = string.IsNullOrWhiteSpace(customMessage)
-                ? "För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan:"
-                : System.Net.WebUtility.HtmlEncode(customMessage).Replace("\n", "<br>");
+            var bodyIntroMessage = FormatIntroMessage(
+                string.IsNullOrWhiteSpace(customMessage) ? DefaultPaymentIntroMessage : customMessage);
 
             // Bankgiro alternative — clubs and kretsar normally pay by BG rather than Swish, so the
             // mail states it in full (number, payee, amount, reference) instead of only a QR code.

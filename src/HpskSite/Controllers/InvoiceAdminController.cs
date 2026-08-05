@@ -44,10 +44,11 @@ namespace HpskSite.Controllers
         /// The message used in a bulk payment reminder when the operator leaves the
         /// "Meddelande" field empty. Single source of truth — the modal prefills the
         /// textarea with this (via CountReminderRecipients) and SendPaymentReminders
-        /// falls back to it server-side, so the two can never drift apart.
+        /// falls back to it server-side, so the two can never drift apart. Aliases
+        /// <see cref="EmailService.DefaultPaymentIntroMessage"/> so the reminder default and the
+        /// registration payment mail's own fallback stay one string.
         /// </summary>
-        public const string DefaultReminderMessage =
-            "För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan:";
+        public const string DefaultReminderMessage = EmailService.DefaultPaymentIntroMessage;
 
         public InvoiceAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
