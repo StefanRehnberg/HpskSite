@@ -10,6 +10,12 @@ namespace HpskSite.Controllers
     /// cues. Also hosts the range-master's live "move a late shooter to a free slot" tool (item 8).
     /// Chromeless routed page (like /station, /live, /patrullista) — polls GetSpringskytteStarterState.
     /// Routed at /startlinje/{competitionId}.
+    ///
+    /// Deliberately NOT login-gated: the clean wall view gets cast to a clubhouse TV or a spare
+    /// screen that cannot log in, and it shows the same names/times as the public start list. What IS
+    /// gated is Startledare-läge (the operator tools) — the view resolves the member itself via
+    /// IMemberManager so a views-only deploy cannot hide the toggle from everyone. The write endpoints
+    /// were always gated by HasCompetitionAccess.
     /// </summary>
     [Route("startlinje/{competitionId:int}")]
     public class SpringskytteStarterController : Controller

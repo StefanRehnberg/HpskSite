@@ -1,10 +1,15 @@
 @using Microsoft.AspNetCore.Mvc.ViewFeatures
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @{
     Layout = null;
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "0";
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Tävling";
     var presetWeaponClass = ViewData["PresetWeaponClass"]?.ToString() ?? "";
+    // Resolved here rather than passed through ViewData on purpose: this view is runtime-compiled and
+    // deploys on its own, so reading it from the controller would mean a views-only upload silently
+    // hid the Startledare toggle from everyone until the C# half shipped too.
+    var isLoggedIn = await MemberManager.GetCurrentMemberAsync() != null;
     var tokens = Antiforgery.GetAndStoreTokens(Context);
 }
 <!DOCTYPE html>
@@ -49,7 +54,10 @@
             <span id="connBadge" class="badge bg-secondary" title="Nätverksstatus"><i class="bi bi-wifi"></i></span>
             <button id="wakeBtn" class="btn btn-outline-secondary btn-sm" title="Hindra skärmen från att slockna"><i class="bi bi-display me-1"></i>Håll skärmen vaken</button>
             <button id="soundBtn" class="btn btn-outline-warning btn-sm"><i class="bi bi-volume-up me-1"></i>Aktivera ljud</button>
-            <button id="rmBtn" class="btn btn-outline-info btn-sm"><i class="bi bi-tools me-1"></i>Startledare</button>
+            @if (isLoggedIn)
+            {
+                <button id="rmBtn" class="btn btn-outline-info btn-sm"><i class="bi bi-tools me-1"></i>Startledare</button>
+            }
             <span id="evtMountSpringStarter" style="display:none"></span>
         </div>
     </div>
@@ -220,7 +228,11 @@ document.getElementById('soundBtn').addEventListener('click', () => {
 // card, and the move/straff panel). Default = clean shooter-facing wall view. Persisted per device
 // so the manager's pad stays in admin mode while the wall screen stays clean.
 const ADMIN_KEY = 'hpsk_startlinje_admin_' + COMP + '_' + (PRESET_WC || 'x');
-let adminMode = localStorage.getItem(ADMIN_KEY) === '1';
+// Operator tools require a login. The page itself stays open (wall screens get cast to a TV that
+// cannot log in), but an anonymous visitor must not be able to flip into Startledare-läge and read
+// the whole line's DNS + check-in state. The writes were always refused; this closes the reading.
+const CAN_OPERATE = @(isLoggedIn ? "true" : "false");
+let adminMode = CAN_OPERATE && localStorage.getItem(ADMIN_KEY) === '1';
 let evtInited = false;
 function ensureStarterInbox() {
     // Lazily start the inbox the first time the operator enters Startledare-läge. The public wall
@@ -252,13 +264,16 @@ function applyAdminMode() {
     document.getElementById('offsetRow').style.display = adminMode ? '' : 'none';
     const mount = document.getElementById('evtMountSpringStarter');
     if (mount) mount.style.display = adminMode ? '' : 'none';
-    const btn = document.getElementById('rmBtn');
-    btn.classList.toggle('btn-info', adminMode);
-    btn.classList.toggle('btn-outline-info', !adminMode);
+    const btn = document.getElementById('rmBtn');   // absent for anonymous visitors
+    if (btn) {
+        btn.classList.toggle('btn-info', adminMode);
+        btn.classList.toggle('btn-outline-info', !adminMode);
+    }
     if (adminMode) { buildMovePickers(); ensureStarterInbox(); }
     // The quick-action buttons in the card are toggled inside tick() (they also need a current shooter).
 }
-document.getElementById('rmBtn').addEventListener('click', () => {
+document.getElementById('rmBtn')?.addEventListener('click', () => {
+    if (!CAN_OPERATE) return;
     adminMode = !adminMode;
     localStorage.setItem(ADMIN_KEY, adminMode ? '1' : '0');
     applyAdminMode();
@@ -487,7 +502,8 @@ function buildSlotOptions() {
     const all = (state.freeSlots || [])
         .filter(f => !wc || f.weaponClass === wc)
         .sort((a, b) => hmsToSec(a.time) - hmsToSec(b.time));
-    const label = f => f.kind === 'dns' ? ('ledig – ' + (f.freedFrom || 'DNS')) : (f.kind === 'efter' ? 'efter sista' : 'paus');
+    // freedFrom is a shooter's raw name — escape it, this string is interpolated into <option> markup.
+    const label = f => f.kind === 'dns' ? ('ledig – ' + escapeHtml(f.freedFrom || 'DNS')) : (f.kind === 'efter' ? 'efter sista' : 'paus');
     const upcoming = all.filter(f => hmsToSec(f.time) >= n - 5);
     const passed = all.filter(f => hmsToSec(f.time) < n - 5);
     let html = upcoming.map(f => `<option value="${f.time}">${f.time.substring(0,5)} – ${label(f)}</option>`).join('');
@@ -643,7 +659,12 @@ document.getElementById('qsDns').addEventListener('click', async () => {
 });
 document.getElementById('qsBump').addEventListener('click', async () => {
     if (!curNext) return;
-    const n = nowSec();
+    // effNow(), NOT nowSec(): this screen runs on the LINE's clock, not the wall clock. With
+    // "Körs sent" set, filtering against the wall clock dropped every slot between the line clock and
+    // the wall clock — i.e. exactly the slot a DNS had just freed just ahead of the late-running line —
+    // so this said "Ingen ledig lucka" (or skipped to a much later one) while the move panel below
+    // correctly offered it. Same defect that was already fixed in buildSlotOptions.
+    const n = effNow();
     const slot = (state.freeSlots || []).filter(f => f.weaponClass === curNext.weaponClass && hmsToSec(f.time) >= n - 5).sort((a, b) => hmsToSec(a.time) - hmsToSec(b.time))[0];
     const msg = document.getElementById('qsMsg');
     if (!slot) { msg.innerHTML = '<span class="text-warning">Ingen ledig lucka att flytta till.</span>'; return; }

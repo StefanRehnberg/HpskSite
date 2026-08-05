@@ -404,6 +404,18 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // Fold manual penalties/reductions into totals BEFORE ranking.
                 await ApplyTimeAdjustmentsAsync(shooterResults, competitionId);
 
+                // Standard medals (1/9 silver, 1/3 bronze within each weapon+age class), gated on
+                // isAwardingStandardMedals AND !isClubOnly per BR-PS.1.3.
+                // This endpoint feeds BOTH the admin Resultat tab and the public result page, so
+                // without this call StandardMedal stays null and the Std/Medalj column renders as a
+                // header with permanently empty cells — while the medal LEDGER (and so Min sida) is
+                // correctly populated, leaving the two surfaces disagreeing.
+                // Must run AFTER ApplyTimeAdjustmentsAsync so medals rank on the adjusted totals.
+                var awardingMedals = (competition?.GetValue<bool>("isAwardingStandardMedals") ?? false)
+                    && !(competition?.GetValue<bool>("isClubOnly") ?? false);
+                if (awardingMedals)
+                    new SpringskytteMedalService().CalculateStandardMedals(shooterResults);
+
                 // Sort using tiebreaker
                 var tieBreaker = new SpringskytteTieBreaker();
                 shooterResults.Sort(tieBreaker);
@@ -821,8 +833,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return _scoringService.BuildShooterResult(e, name, club);
                 }).ToList();
 
+                // Fold manual penalties/reductions into totals BEFORE ranking AND before medals.
+                await ApplyTimeAdjustmentsAsync(shooterResults, competitionId);
+
                 // Calculate medals — gated on isAwardingStandardMedals AND !isClubOnly
                 // (BR-PS.1.3: club competitions don't award standard medals).
+                // Order matters: this used to run BEFORE the adjustments, so snapshot medals were
+                // ranked on unadjusted totals and could disagree with the ledger (which ranks after)
+                // on any competition using the penalty/reduction ledger.
                 var compForMedals = _contentService.GetById(competitionId);
                 var mainAwardingMedals = compForMedals?.GetValue<bool>("isAwardingStandardMedals") ?? false;
                 var mainIsClubOnly = compForMedals?.GetValue<bool>("isClubOnly") ?? false;
@@ -831,9 +849,6 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     var medalService = new SpringskytteMedalService();
                     medalService.CalculateStandardMedals(shooterResults);
                 }
-
-                // Fold manual penalties/reductions into totals BEFORE ranking.
-                await ApplyTimeAdjustmentsAsync(shooterResults, competitionId);
 
                 // Sort using tiebreaker
                 var tieBreaker = new SpringskytteTieBreaker();
@@ -2989,6 +3004,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         resultLookup[$"{r.MemberId}|{r.WeaponClass}"] = r;
                 }
 
+                // /startlinje is deliberately open (the clean wall view gets cast to a screen that
+                // cannot log in) and the names/times/classes it shows are already on the public start
+                // list. But the internal ids are only needed by the OPERATOR tools, which now require a
+                // login — so withhold them from anonymous callers rather than handing every passer-by a
+                // memberId/nodeId pair usable against other endpoints.
+                bool isStaffCaller = await HasCompetitionAccess(competitionId);
+
                 var tl = await BuildTimelineAsync(competitionId);
                 var starters = tl.Rows.OrderBy(r => r.Sec).Select(r =>
                 {
@@ -3001,13 +3023,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         club = r.Club,
                         weaponClass = r.WeaponClass,
                         ageGenderClass = r.AgeGenderClass,
-                        memberId = r.MemberId,
+                        memberId = isStaffCaller ? r.MemberId : 0,
                         listName = r.ListName,
-                        nodeId = r.NodeId,
+                        nodeId = isStaffCaller ? r.NodeId : 0,
                         status = r.Status,
                         isDns = r.Status == "DNS",
+                        // Kept for anonymous on purpose: the wall view's "⚠ ej incheckad" marker is a
+                        // documented feature of the clean screen (SL-14).
                         checkedIn = !checkedIn.TryGetValue(r.MemberId, out var ci) || ci,
-                        sprintTimeSeconds = res?.SprintTimeSeconds
+                        sprintTimeSeconds = isStaffCaller ? res?.SprintTimeSeconds : null
                     };
                 }).ToList();
 
@@ -3468,6 +3492,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             {
                 bool isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(clubId);
                 if (isClubAdmin) return true;
+
+                // Skjutledare of the organising club. StationPage.cshtml already GRANTS them the
+                // /station pads (it accepts Skjutledare_{clubId}), so without this they got a pad that
+                // rendered fully and then refused every read and every save with "Åtkomst nekad." — a
+                // functionary handed a dead screen with no way to tell until they tried to save a
+                // result. Range roles must reach their own club's tools without being separately named
+                // in competitionManagers.
+                if (await _adminAuthorizationService.IsSkjutledareForClub(clubId)) return true;
             }
 
             // Region-hosted (clubless) competition: regional admin of its region can manage it.

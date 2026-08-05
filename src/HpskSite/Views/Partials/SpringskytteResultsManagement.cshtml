@@ -922,8 +922,8 @@ function springRenderEntry() {
             <!-- Shooter Header -->
             <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
                 <div>
-                    <h5 class="mb-0">${shooter.memberName}</h5>
-                    <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${formatAgeSpan(shooter.ageGenderClass)}${shooter.startOrder ? ' | #' + shooter.startOrder : ''}</small>
+                    <h5 class="mb-0">${springTimeEsc(shooter.memberName)}</h5>
+                    <small class="text-muted">${springTimeEsc(shooter.memberClub)} | Vapengrupp ${shooter.weaponClass} | Klass ${formatAgeSpan(shooter.ageGenderClass)}${shooter.startOrder ? ' | #' + shooter.startOrder : ''}</small>
                 </div>
                 ${springStatusBadge(shooter)}
             </div>
@@ -1475,7 +1475,7 @@ function springCRenderActiveCard(shooter) {
     let html = `
     <div class="card border-primary">
         <div class="card-header bg-primary text-white">
-            <h5 class="mb-0">#${shooter.startOrder} — ${shooter.memberName} <small class="opacity-75">(${formatAgeSpan(shooter.registeredClass)})</small></h5>
+            <h5 class="mb-0">#${shooter.startOrder} — ${springTimeEsc(shooter.memberName)} <small class="opacity-75">(${formatAgeSpan(shooter.registeredClass)})</small></h5>
         </div>
         <div class="card-body">
             <!-- Stations: 6 x 5 shots, large buttons -->
@@ -2291,8 +2291,8 @@ async function springLoadResultsList() {
                     html += `
                                 <tr>
                                     <td>${s.status ? s.status : (s.rank || '-')}</td>
-                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}${s.handWarning ? ' <span class="badge bg-warning text-dark" title="Fler än 3 stationer med tvåhandsfattning (' + s.twoHandCount + '/6 tvåhand)">⚠ fattning</span>' : ''}</td>
-                                    <td title="${s.club}">${s.clubShort || s.club}</td>
+                                    <td>${springTimeEsc(s.name)}${s.startOrder ? ' (' + s.startOrder + ')' : ''}${s.handWarning ? ' <span class="badge bg-warning text-dark" title="Fler än 3 stationer med tvåhandsfattning (' + s.twoHandCount + '/6 tvåhand)">⚠ fattning</span>' : ''}</td>
+                                    <td title="${springTimeEsc(s.club)}">${springTimeEsc(s.clubShort || s.club)}</td>
                                     <td class="time-col">${s.sprintTimeDisplay}</td>
                                     <td>${s.shootingScore ?? '-'}</td>
                                     <td class="time-col">${s.penaltyTimeDisplay}</td>
@@ -2434,8 +2434,8 @@ async function springLoadSubResultsList() {
                     html += `
                                 <tr>
                                     <td>${s.status ? s.status : (s.rank || '-')}</td>
-                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}${s.handWarning ? ' <span class="badge bg-warning text-dark" title="Fler än 3 stationer med tvåhandsfattning (' + s.twoHandCount + '/6 tvåhand)">⚠ fattning</span>' : ''}</td>
-                                    <td title="${s.club}">${s.clubShort || s.club}</td>
+                                    <td>${springTimeEsc(s.name)}${s.startOrder ? ' (' + s.startOrder + ')' : ''}${s.handWarning ? ' <span class="badge bg-warning text-dark" title="Fler än 3 stationer med tvåhandsfattning (' + s.twoHandCount + '/6 tvåhand)">⚠ fattning</span>' : ''}</td>
+                                    <td title="${springTimeEsc(s.club)}">${springTimeEsc(s.clubShort || s.club)}</td>
                                     <td class="time-col">${s.sprintTimeDisplay}</td>
                                     <td>${s.shootingScore ?? '-'}</td>
                                     <td class="time-col">${s.penaltyTimeDisplay}</td>

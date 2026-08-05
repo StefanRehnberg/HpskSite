@@ -1020,14 +1020,22 @@ window.CompetitionConfig = {
             if (!data.success) { alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel')); return; }
             const el = document.getElementById('springEditModal');
             if (!el) { alert('Springskytte-redigeringsmodal inte tillgänglig.'); return; }
+            if (typeof window.populateSpringEditModal !== 'function') {
+                // Never open the modal we cannot fill. It used to be shown first and populated on a
+                // single 200 ms setTimeout with no retry, so a slow device could leave it open and
+                // BLANK over real data — and Spara posts the whole form (new FormData), so saving from
+                // that state wrote the blanks back. Worse, springEdit_competitionId is set inside
+                // populate, so a failed populate left Spara pointed at the PREVIOUS competition.
+                alert('Redigeringsformuläret är inte färdigladdat. Ladda om sidan och försök igen.');
+                return;
+            }
             const modal = window.springEditModalInstance || new bootstrap.Modal(el);
             window.springEditModalInstance = modal;
+            // Populate BEFORE show. Safe by design: the modal's show.bs.modal handler only inits
+            // Flatpickr/CKEditor and loads the club/series lists, and populate hands those off via
+            // dataset.currentValue / dataset.pendingValue rather than setting them directly.
+            window.populateSpringEditModal(data.data);
             modal.show();
-            setTimeout(() => {
-                if (typeof window.populateSpringEditModal === 'function') {
-                    window.populateSpringEditModal(data.data);
-                }
-            }, 200);
         })
         .catch(err => { console.error(err); alert('Fel vid laddning av tävlingsdata: ' + err.message); });
     }

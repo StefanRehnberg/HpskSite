@@ -800,11 +800,22 @@ function springEditSave() {
         }
     }
 
-    // Calculate numberOfSeriesOrStations from Class A series (or default 6 for C-only)
+    // Calculate numberOfSeriesOrStations from Class A series (or default 6 for C-only).
+    // The select has no name attribute, so it is not in FormData and the value is recomputed here.
+    // Guard rather than fall back: an unread select used to resolve to `|| 6`, so any save from a
+    // not-yet-populated form silently bumped a 3-series A competition to 6 — which then truncates
+    // stored shots on the next pad save, because the pad grid is sized from this value.
     const hasA = document.getElementById('springEdit_weaponA').checked;
-    fields.numberOfSeriesOrStations = hasA
-        ? parseInt(document.getElementById('springEdit_classASeries').value) || 6
-        : 6;
+    if (hasA) {
+        const seriesRaw = parseInt(document.getElementById('springEdit_classASeries').value, 10);
+        if (!seriesRaw || seriesRaw < 1 || seriesRaw > 6) {
+            alert('Antal serier för klass A är inte läst korrekt. Ladda om sidan och försök igen — sparar inte, för att inte skriva över antalet serier.');
+            return;
+        }
+        fields.numberOfSeriesOrStations = seriesRaw;
+    } else {
+        fields.numberOfSeriesOrStations = 6;
+    }
 
     // Series handling
     const newSeriesId = fields.seriesId || '';
