@@ -386,7 +386,14 @@
         <div class="text-center py-5">
             <h4><i class="bi bi-box-arrow-in-right me-2"></i>Logga in för att registrera resultat</h4>
             <p class="text-muted">Station @stationNumber@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</p>
-            <a class="btn btn-primary" href="/login-register?returnUrl=/station?c=@(competitionId)%26s=@(stationNumber)"><i class="bi bi-box-arrow-in-right me-1"></i>Logga in</a>
+            @* Escape the WHOLE target so the URL has a single "?" — a double-"?" URL 404s on prod
+               IIS/Simply even though Kestrel tolerates it (same fix as StyrelseController /
+               TavlingsplaneringController / MinaUppdragController got 2026-07-22; this one was missed).
+               This is the recovery path for the SaveResult authentication gate, so it has to work. *@
+            @* Return to the RAW "s" value, not the parsed int: on Springskytte "s" is a class letter,
+               so int.TryParse leaves 0 and the shooter would land back on /station?s=0 — a pad that
+               renders with no A/C tab switcher. *@
+            <a class="btn btn-primary" href="/login-register/?tab=login&returnUrl=@Uri.EscapeDataString($"/station?c={competitionId}&s={sStr}")"><i class="bi bi-box-arrow-in-right me-1"></i>Logga in</a>
         </div>
     }
     else
