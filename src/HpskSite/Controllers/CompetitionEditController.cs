@@ -238,6 +238,36 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // HOST PRESERVATION — must run before the guard below and before the per-type save
+                // service applies the fields.
+                //
+                // A competition is hosted by a club (clubId) or by a krets (regionalFederation), and
+                // that value decides the URL shape, who may administer it, and who the invoice payee
+                // is. The edit modals post EVERY field, and their club/region dropdowns are populated
+                // from GetClubsForCompetitionAdmin — which correctly refuses a plain competition
+                // manager, since they may not re-host the competition. The result was that the two
+                // selects rendered EMPTY and the save then posted regionalFederation="" and wiped the
+                // hosting krets: verified 2026-08-05, a competition manager saving the Springskytte
+                // edit modal turned region "Halland" into "". The URL guard below did not catch it
+                // because competitionScope was still set. The competition was left with no host, so
+                // even the krets's own admins — and the regional admin who created it — lost access
+                // to it entirely.
+                //
+                // Rule: an EMPTY incoming host value never clears a host that exists. Switching hosts
+                // still works, because a switch sets the other side (club -> krets or krets -> club),
+                // and that non-empty value is honoured.
+                bool clubIncomingEmpty = FieldPresentButEmpty(request.Fields, "clubId");
+                bool regionIncomingEmpty = FieldPresentButEmpty(request.Fields, "regionalFederation");
+                int existingClubId = content.GetValue<int?>("clubId") ?? 0;
+                string existingRegion = (content.GetValue<string>("regionalFederation") ?? "").Trim();
+                bool wouldClearBothHosts =
+                    (clubIncomingEmpty || existingClubId <= 0) && (regionIncomingEmpty || string.IsNullOrWhiteSpace(existingRegion));
+                if (wouldClearBothHosts && (existingClubId > 0 || !string.IsNullOrWhiteSpace(existingRegion)))
+                {
+                    if (clubIncomingEmpty && existingClubId > 0) request.Fields?.Remove("clubId");
+                    if (regionIncomingEmpty && !string.IsNullOrWhiteSpace(existingRegion)) request.Fields?.Remove("regionalFederation");
+                }
+
                 // Soft URL-correctness guard: at least one of clubId / regionalFederation /
                 // competitionScope must be set so CompetitionUrlProvider can produce a clean URL.
                 // For fields not present in the request, fall back to the existing content value
@@ -292,6 +322,35 @@ namespace HpskSite.Controllers
         /// node's stored value when the key isn't in the request (partial-update safety).
         /// Handles JsonElement (System.Text.Json shape), boxed int, and string forms.
         /// </summary>
+        /// <summary>
+        /// True when the key IS in the request but carries nothing usable (null, empty, whitespace,
+        /// or 0 for a numeric id). Distinguishes "the client deliberately cleared this" from "the
+        /// client never sent it" — the two must not be treated alike for host fields.
+        /// </summary>
+        private static bool FieldPresentButEmpty(Dictionary<string, object>? fields, string key)
+        {
+            if (fields == null || !fields.TryGetValue(key, out var obj)) return false;   // absent
+            if (obj == null) return true;
+            if (obj is System.Text.Json.JsonElement je)
+            {
+                switch (je.ValueKind)
+                {
+                    case System.Text.Json.JsonValueKind.Null:
+                    case System.Text.Json.JsonValueKind.Undefined:
+                        return true;
+                    case System.Text.Json.JsonValueKind.String:
+                        var s = je.GetString() ?? "";
+                        return string.IsNullOrWhiteSpace(s) || s.Trim() == "0";
+                    case System.Text.Json.JsonValueKind.Number:
+                        return je.TryGetInt32(out var n) && n == 0;
+                    default:
+                        return false;
+                }
+            }
+            var raw = (obj.ToString() ?? "").Trim();
+            return string.IsNullOrWhiteSpace(raw) || raw == "0";
+        }
+
         private static int ReadFieldOrContentAsInt(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
         {
             if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)

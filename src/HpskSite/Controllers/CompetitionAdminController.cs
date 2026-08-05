@@ -123,6 +123,82 @@ namespace HpskSite.Controllers
         /// club admins see their managed clubs, skjutledare see their clubs.
         /// </summary>
         [HttpGet]
+        /// <summary>
+        /// Members pickable as Tävlingsansvariga, for the shared ManagerSelectionModal.
+        ///
+        /// The picker used to call MemberAdmin/GetMembers, which is the site-admin member-administration
+        /// endpoint — so a plain COMPETITION MANAGER editing their own competition got
+        /// "Kunde inte ladda medlemmar: Access denied" and an empty picker (reported 2026-08-05,
+        /// kallekula on an SM). Appointing helpers is a normal part of running a competition, so this
+        /// endpoint answers to whoever may manage the competition, while returning only what the picker
+        /// renders — id, name, club — and none of the administrative fields (groups, lockout, activity)
+        /// that MemberAdmin/GetMembers exposes.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMembersForManagerPicker(int? competitionId = null, int? clubId = null)
+        {
+            try
+            {
+                bool authorized = await _authorizationService.IsCurrentUserAdminAsync()
+                    || (await _authorizationService.GetManagedClubIds()).Any()
+                    || (await _authorizationService.GetManagedRegions()).Any();
+
+                // Editing an existing competition: whoever manages THAT competition qualifies.
+                if (!authorized && competitionId.HasValue && competitionId.Value > 0)
+                {
+                    authorized = await _authorizationService.IsCompetitionManager(competitionId.Value)
+                              || await _authorizationService.IsRegionHostAdminAsync(competitionId.Value);
+                }
+
+                if (!authorized)
+                    return Ok(new { success = false, message = "Du har inte behörighet att välja tävlingsansvariga." });
+
+                // Club names for the picker's club column + filter. Same traversal the sibling
+                // endpoints in this controller use (clubsPage under a root, and under each region).
+                var clubNames = new Dictionary<int, string>();
+                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
+                {
+                    foreach (var root in ctx.Content.GetAtRoot())
+                    {
+                        var hubs = root.Children.Where(c => c.ContentType.Alias == "clubsPage").ToList();
+                        foreach (var region in root.Children.Where(c => c.ContentType.Alias == "regionalPage"))
+                            hubs.AddRange(region.Children.Where(c => c.ContentType.Alias == "clubsPage"));
+                        foreach (var hub in hubs)
+                            foreach (var club in hub.Children.Where(c => c.ContentType.Alias == "club"))
+                                clubNames[club.Id] = club.Value<string>("clubName") ?? club.Name;
+                    }
+                }
+
+                var members = _memberService.GetAll(0, int.MaxValue, out _)
+                    .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
+                    .Select(m =>
+                    {
+                        int primary = 0;
+                        int.TryParse(m.GetValue<string>("primaryClubId") ?? "", out primary);
+                        return new
+                        {
+                            id = m.Id,
+                            firstName = m.GetValue<string>("firstName") ?? "",
+                            lastName = m.GetValue<string>("lastName") ?? "",
+                            email = m.Email,
+                            primaryClubId = primary,
+                            primaryClubName = primary > 0 && clubNames.TryGetValue(primary, out var cn) ? cn : "No Club"
+                        };
+                    })
+                    .Where(m => !clubId.HasValue || clubId.Value <= 0 || m.primaryClubId == clubId.Value)
+                    .OrderBy(m => (m.firstName + " " + m.lastName).Trim(),
+                             StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), ignoreCase: true))
+                    .ToList();
+
+                return Ok(new { success = true, data = new { items = members } });
+            }
+            catch (Exception)
+            {
+                return Ok(new { success = false, message = "Kunde inte hämta medlemslistan." });
+            }
+        }
+
+        [HttpGet]
         public async Task<IActionResult> GetClubsForCompetitionAdmin()
         {
             try

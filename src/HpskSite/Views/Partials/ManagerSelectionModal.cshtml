@@ -181,6 +181,18 @@ let managerTarget = {
 };
 
 // Open Manager Selection Modal
+// Which competition is being edited? This modal is shared by the wizard (creating — no id yet, and
+// its user is a club/region admin by definition) and by each edit modal, which carries the id in a
+// hidden field. Read it at fetch time so no caller signature has to change.
+function managerPickerCompetitionId() {
+    for (const id of ['springEdit_competitionId', 'edit_competitionId', 'editCompetitionId', 'advertEdit_competitionId']) {
+        const el = document.getElementById(id);
+        const v = el ? parseInt(el.value, 10) : 0;
+        if (v > 0) return v;
+    }
+    return (window.CompetitionConfig && window.CompetitionConfig.competitionId) || 0;
+}
+
 function openManagerSelectionModal(fieldId, badgesId) {
     if (fieldId) managerTarget.fieldId = fieldId;
     if (badgesId) managerTarget.badgesId = badgesId;
@@ -288,8 +300,13 @@ function loadMembersForManagerSelection(clubIdFilter = null, onDone = null) {
     const params = new URLSearchParams();
     params.set('pageSize', '500');
     if (clubIdFilter) params.set('clubId', String(clubIdFilter));
+    // A plain competition manager may appoint helpers but is NOT a site admin, so this must not go to
+    // MemberAdmin/GetMembers (member administration) — that returned "Access denied" and left the
+    // picker empty. Pass the competition so the server can accept whoever manages it.
+    const mpCompId = managerPickerCompetitionId();
+    if (mpCompId) params.set('competitionId', String(mpCompId));
 
-    fetch(`/umbraco/surface/MemberAdmin/GetMembers?${params.toString()}`, {
+    fetch(`/umbraco/surface/CompetitionAdmin/GetMembersForManagerPicker?${params.toString()}`, {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json'

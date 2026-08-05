@@ -695,9 +695,47 @@ function springEditLoadClubs() {
 
                 // Load regions too
                 springEditLoadRegions();
+            } else {
+                // Not entitled to re-host (a plain competition manager has no clubs to assign to).
+                // Keep the CURRENT host visible and posted-back unchanged — an empty select used to
+                // post regionalFederation="" and wipe the hosting krets on save.
+                springEditLockHostSelects();
             }
         })
-        .catch(err => console.error('Error loading clubs:', err));
+        .catch(err => { console.error('Error loading clubs:', err); springEditLockHostSelects(); });
+}
+
+// Render the stored host read-only when the club/region lists are not available to this user, so the
+// modal shows the truth and the save cannot clear it.
+function springEditLockHostSelects() {
+    const clubSelect = document.getElementById('springEdit_clubId');
+    const regionSelect = document.getElementById('springEdit_regionalFederation');
+    const clubVal = (clubSelect?.dataset.currentValue || '').trim();
+    const regionVal = (regionSelect?.dataset.currentValue || '').trim();
+
+    if (clubSelect && clubVal && clubVal !== '0') {
+        const opt = document.createElement('option');
+        opt.value = clubVal;
+        opt.textContent = clubSelect.dataset.currentName || ('Nuvarande klubb (' + clubVal + ')');
+        clubSelect.appendChild(opt);
+        clubSelect.value = clubVal;
+    }
+    if (regionSelect && regionVal) {
+        const opt = document.createElement('option');
+        opt.value = regionVal;
+        opt.textContent = regionVal;           // region codes ARE the krets names
+        regionSelect.appendChild(opt);
+        regionSelect.value = regionVal;
+    }
+    [clubSelect, regionSelect].forEach(sel => {
+        if (!sel) return;
+        sel.disabled = true;
+        const help = sel.parentElement.querySelector('small');
+        if (help) {
+            help.textContent = 'Endast klubb-/kretsadministratör kan byta arrangör.';
+            help.style.display = '';
+        }
+    });
 }
 
 function springEditLoadRegions() {
@@ -717,9 +755,11 @@ function springEditLoadRegions() {
                 });
                 const val = regionSelect.dataset.currentValue;
                 if (val) regionSelect.value = val;
+            } else {
+                springEditLockHostSelects();
             }
         })
-        .catch(err => console.error('Error loading regions:', err));
+        .catch(err => { console.error('Error loading regions:', err); springEditLockHostSelects(); });
 }
 
 function springEditLoadSeries() {
