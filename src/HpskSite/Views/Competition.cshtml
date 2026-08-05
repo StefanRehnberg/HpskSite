@@ -436,6 +436,15 @@
                         return r == $"RegionalAdmin_{clubRegion}";
                     });
             }
+            else
+            {
+                // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so its
+                // regional admin manages it. Without this the management affordances on the public
+                // competition page were hidden from a region-hosted competition's own organisers.
+                var compRegion = (Model.Value<string>("regionalFederation") ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(compRegion))
+                    isClubAdminForCompetition = roles.Contains($"RegionalAdmin_{compRegion}");
+            }
             canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
 
             // Distributed result reporting — uses same auth values (no duplicate service calls)

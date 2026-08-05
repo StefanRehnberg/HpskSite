@@ -1211,6 +1211,12 @@ namespace HpskSite.Controllers
                     isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(competitionClubId);
                     isSkjutledare = await _adminAuthorizationService.IsSkjutledareForClub(competitionClubId);
                 }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+                    isClubAdmin = await _adminAuthorizationService.IsRegionHostAdminAsync(
+                        competitionClubId, competition.GetValue<string>("regionalFederation"));
+                }
 
                 if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
                 {
@@ -3713,6 +3719,12 @@ namespace HpskSite.Controllers
                 {
                     isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(competitionClubId);
                     isSkjutledare = await _adminAuthorizationService.IsSkjutledareForClub(competitionClubId);
+                }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+                    isClubAdmin = await _adminAuthorizationService.IsRegionHostAdminAsync(
+                        competitionClubId, competition.GetValue<string>("regionalFederation"));
                 }
 
                 if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)

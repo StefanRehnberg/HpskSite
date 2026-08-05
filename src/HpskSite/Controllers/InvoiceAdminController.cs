@@ -1075,6 +1075,13 @@ namespace HpskSite.Controllers
                     authorized = await _authService.IsClubAdminForClub(competitionClubId)
                               || await _authService.IsSkjutledareForClub(competitionClubId);
                 }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
+                    // the party entitled to chase its own unpaid entries.
+                    authorized = await _authService.IsRegionHostAdminAsync(
+                        competitionClubId, competition.GetValue<string>("regionalFederation"));
+                }
             }
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
@@ -1211,6 +1218,13 @@ namespace HpskSite.Controllers
                     authorized = await _authService.IsClubAdminForClub(competitionClubId)
                               || await _authService.IsSkjutledareForClub(competitionClubId);
                 }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
+                    // the party entitled to chase its own unpaid entries.
+                    authorized = await _authService.IsRegionHostAdminAsync(
+                        competitionClubId, competition.GetValue<string>("regionalFederation"));
+                }
             }
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
@@ -1262,6 +1276,13 @@ namespace HpskSite.Controllers
                 {
                     authorized = await _authService.IsClubAdminForClub(competitionClubId)
                               || await _authService.IsSkjutledareForClub(competitionClubId);
+                }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
+                    // the party entitled to chase its own unpaid entries.
+                    authorized = await _authService.IsRegionHostAdminAsync(
+                        competitionClubId, competition.GetValue<string>("regionalFederation"));
                 }
             }
             if (!authorized) return Json(new { success = false, message = "Access denied" });
@@ -1367,6 +1388,13 @@ namespace HpskSite.Controllers
                 {
                     authorized = await _authService.IsClubAdminForClub(competitionClubId)
                               || await _authService.IsSkjutledareForClub(competitionClubId);
+                }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
+                    // the party entitled to chase its own unpaid entries.
+                    authorized = await _authService.IsRegionHostAdminAsync(
+                        competitionClubId, competition.GetValue<string>("regionalFederation"));
                 }
             }
             if (!authorized) return Json(new { success = false, message = "Access denied" });

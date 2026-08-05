@@ -1124,7 +1124,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetClubMembers(int clubId)
+        public async Task<IActionResult> GetClubMembers(int clubId, int? competitionId = null)
         {
             try
             {
@@ -1140,25 +1140,46 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member data not found" });
                 }
 
-                // Check if user can access club members for registration
-                // Club admins and skjutledare can load members from any club (for cross-club registration)
+                // Who may list a club's members for registration purposes?
+                //
+                // This feeds the "register someone else" picker in BOTH registration modals (the
+                // generic one in competition-registration.js and SpringskytteRegistrationModal), so it
+                // must match what RegisterForCompetition will actually ALLOW (see the targetMemberId
+                // authorization above): self, or a member of a club you administer / are Skjutledare
+                // for, or anyone if you manage the competition.
+                //
+                // It used to grant ANY club's members to anyone holding ANY club-admin or ANY
+                // Skjutledare role — "if (managedClubIds.Count > 0) canAccess = true". So a Skjutledare
+                // of one club could list the name AND EMAIL of every member of every club, and the
+                // picker offered shooters the server would then refuse to register. Reported by Stefan
+                // 2026-08-05 (Skjutledare of Varbergs PK seeing every club).
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 bool canAccess = isSiteAdmin;
 
+                // Running the competition (named manager, roster app access, or the hosting krets on a
+                // region-hosted competition) legitimately means registering anyone at the desk.
+                if (!canAccess && competitionId.HasValue && competitionId.Value > 0)
+                {
+                    canAccess = await _authorizationService.IsCompetitionManager(competitionId.Value)
+                             || await _authorizationService.IsRegionHostAdminAsync(competitionId.Value);
+                }
+
+                // Otherwise: only the caller's OWN clubs. GetManagedClubIds already folds in a regional
+                // admin's clubs, so a krets admin keeps every club in their region.
                 if (!canAccess)
                 {
                     var managedClubIds = await _authorizationService.GetManagedClubIds();
-                    if (managedClubIds.Count > 0) canAccess = true;
-                }
-                if (!canAccess)
-                {
                     var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
-                    if (skjutledareClubIds.Count > 0) canAccess = true;
+                    canAccess = managedClubIds.Contains(clubId) || skjutledareClubIds.Contains(clubId);
                 }
 
                 if (!canAccess)
                 {
-                    return Json(new { success = false, message = "Access denied" });
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Du kan bara hämta medlemmar ur en klubb du är administratör eller skjutledare för."
+                    });
                 }
 
                 // PERFORMANCE FIX: Cache club members for 2 minutes to avoid repeated full member scans

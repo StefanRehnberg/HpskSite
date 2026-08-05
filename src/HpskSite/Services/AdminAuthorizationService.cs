@@ -156,6 +156,58 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// True when this competition is REGION-hosted (no organising club — <c>clubId</c> unset, the
+        /// region code on the competition's own <c>regionalFederation</c>) and the current user is a
+        /// regional admin of that region. An SM is exactly this shape.
+        ///
+        /// Why this exists: a competition is hosted EITHER by a club or by the krets itself, but nearly
+        /// every authorization block in the codebase only asked "is the caller an admin of
+        /// competition.clubId". With clubId unset the club branch was skipped and the caller fell
+        /// straight through to refused — so the krets's own officials could not run their own
+        /// competition. That was found and fixed piecemeal three times (CanManageCompetitionInvoice,
+        /// then the whole Anmälningar surface) before being centralised here.
+        ///
+        /// Deliberately returns FALSE for a club-hosted competition: there the club branch owns the
+        /// decision, and <see cref="IsClubAdminForClub"/> already folds in that club's regional admins.
+        /// So this is safe to OR into an existing check without widening the club-hosted case.
+        /// </summary>
+        /// <remarks>
+        /// Takes the two values every call site has already read, so it works identically for callers
+        /// holding an <c>IContent</c>, an <c>IPublishedContent</c> or a plain role list — and costs no
+        /// extra content lookup.
+        /// </remarks>
+        public async Task<bool> IsRegionHostAdminAsync(int competitionClubId, string? competitionRegionCode)
+        {
+            if (competitionClubId > 0) return false;          // club-hosted: the club branch owns it
+            var region = (competitionRegionCode ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(region)) return false;
+            return await IsRegionalAdminForRegion(region);
+        }
+
+        /// <summary>
+        /// Convenience overload for callers that only have the competition id. Resolves the competition
+        /// from the published cache (competitions are always published) and defers to the two-argument
+        /// overload.
+        /// </summary>
+        public async Task<bool> IsRegionHostAdminAsync(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return false;
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
+                var competition = ctx.Content.GetById(competitionId);
+                if (competition == null || competition.ContentType.Alias != "competition") return false;
+                return await IsRegionHostAdminAsync(
+                    competition.Value<int>("clubId"),
+                    competition.Value<string>("regionalFederation"));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Gets list of region codes that the current user can administer
         /// Returns all regions for site administrators
         /// </summary>

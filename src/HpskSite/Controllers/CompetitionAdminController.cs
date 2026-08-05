@@ -1506,6 +1506,14 @@ namespace HpskSite.Controllers
                     if (!isClubAdmin)
                         isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+                    // CreateCompetition/CopyCompetition/DeleteCompetition already handle this via
+                    // GetManagedRegions / IsRegionalAdminForCompetition; the advert editor did not.
+                    isClubAdmin = await _authorizationService.IsRegionHostAdminAsync(
+                        competitionClubId, competition.GetValue<string>("regionalFederation"));
+                }
 
                 if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
                 {

@@ -1558,7 +1558,10 @@ async function loadClubMembers(clubId) {
         memberSelect.innerHTML = '<option value="">Loading members...</option>';
         memberSelect.disabled = true;
 
-        const response = await fetch(`/umbraco/surface/Competition/GetClubMembers?clubId=${clubId}`, {
+        // competitionId lets the server grant cross-club listing to whoever RUNS this competition
+        // (named manager / roster app access / the hosting krets) while everyone else is limited to
+        // their own clubs.
+        const response = await fetch(`/umbraco/surface/Competition/GetClubMembers?clubId=${clubId}&competitionId=${COMPETITION_ID}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -1579,7 +1582,8 @@ async function loadClubMembers(clubId) {
 
             memberSelect.disabled = false;
         } else {
-            memberSelect.innerHTML = '<option value="">Error loading members</option>';
+            // Show WHY — most often "only your own club", which is a rule, not a fault.
+            memberSelect.innerHTML = `<option value="">${data.message || 'Kunde inte ladda medlemmar'}</option>`;
             memberSelect.disabled = true;
         }
     } catch (error) {

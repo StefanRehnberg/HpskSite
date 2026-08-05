@@ -368,7 +368,10 @@ async function springRegLoadMembers() {
     memberSelect.disabled = true;
 
     try {
-        const response = await fetch(`/umbraco/surface/Competition/GetClubMembers?clubId=${clubId}`, {
+        // competitionId lets the server grant cross-club listing to whoever RUNS this competition
+        // (named manager / roster app access / the hosting krets) while everyone else is limited to
+        // their own clubs.
+        const response = await fetch(`/umbraco/surface/Competition/GetClubMembers?clubId=${clubId}&competitionId=${@competitionId}`, {
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
         const data = await response.json();
@@ -383,7 +386,9 @@ async function springRegLoadMembers() {
             });
             memberSelect.disabled = false;
         } else {
-            memberSelect.innerHTML = '<option value="">Kunde inte ladda medlemmar</option>';
+            // Show WHY — most often "only your own club", which is a rule, not a fault.
+            memberSelect.innerHTML = `<option value="">${data.message || 'Kunde inte ladda medlemmar'}</option>`;
+            memberSelect.disabled = true;
         }
     } catch (err) {
         console.error('Error loading members:', err);

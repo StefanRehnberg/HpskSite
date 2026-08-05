@@ -82,8 +82,11 @@
                 isClubAdmin = await AuthService.IsClubAdminForClub(competitionClubId);
                 isSkjutledare = await AuthService.IsSkjutledareForClub(competitionClubId);
             }
+            // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+            var isRegionHost = await AuthService.IsRegionHostAdminAsync(
+                competitionClubId, competition.Value<string>("regionalFederation"));
 
-            canDeleteResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare;
+            canDeleteResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare || isRegionHost;
         }
     }
 }

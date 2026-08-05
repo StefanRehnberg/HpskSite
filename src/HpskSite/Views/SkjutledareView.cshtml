@@ -66,6 +66,15 @@
                 && (roles.Contains($"ClubAdmin_{competitionClubId}")
                     || roles.Contains($"Skjutledare_{competitionClubId}"));
 
+            // Region-hosted (clubId unset): the krets is the organiser, so its regional admin gets the
+            // skjutledare screen too.
+            if (!isClubStaff && competitionClubId == 0)
+            {
+                var compRegion = (competition.Value<string>("regionalFederation") ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(compRegion))
+                    isClubStaff = roles.Contains($"RegionalAdmin_{compRegion}");
+            }
+
             isAuthorized = isSiteAdmin || isCompetitionManager || isClubStaff;
         }
     }

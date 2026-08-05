@@ -139,7 +139,13 @@
                     || roles.Contains($"Skjutledare_{competitionClubId}");
             }
 
-            canEnterResults = isSiteAdmin || isCompetitionManager || isClubStaff;
+            // Region-hosted competition (clubId unset — the SM shape): the krets IS the organiser, so
+            // its regional admin gets the pads. Without this a region-hosted SM handed its own
+            // organisers no scoring or timing screen at all.
+            bool isRegionHost = await AuthService.IsRegionHostAdminAsync(
+                competitionClubId, competition.Value<string>("regionalFederation"));
+
+            canEnterResults = isSiteAdmin || isCompetitionManager || isClubStaff || isRegionHost;
         }
     }
 
