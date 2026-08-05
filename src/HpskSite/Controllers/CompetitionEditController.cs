@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
     {
         private readonly IContentService _contentService;
         private readonly IPublishedContentQuery _publishedContentQuery;
+        private readonly HpskSite.Services.AdminAuthorizationService _authorizationService;
 
         public CompetitionEditController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -34,20 +35,55 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             IContentService contentService,
-            IPublishedContentQuery publishedContentQuery)
+            IPublishedContentQuery publishedContentQuery,
+            HpskSite.Services.AdminAuthorizationService authorizationService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
             _publishedContentQuery = publishedContentQuery;
+            _authorizationService = authorizationService;
+        }
+
+        /// <summary>
+        /// May the caller read/change this competition's definition?
+        ///
+        /// This controller had NO authorization of any kind — verified 2026-08-05 that a fully
+        /// ANONYMOUS caller could read a competition's whole configuration (including swishNumber and
+        /// the organiser's contact details) and POST SaveCompetition to change fees, the Swish number,
+        /// dates and classes on ANY competition. Changing swishNumber redirects payments, so this was
+        /// the most serious hole found in the Springskytte test-plan run.
+        ///
+        /// Tiers match the rest of the per-competition surface: site admin, a named competition
+        /// manager (or Bemanning roster app access), a club admin of the organising club, or the
+        /// regional admin of the hosting krets on a region-hosted competition. Skjutledare are
+        /// deliberately NOT included — running the firing line does not include redefining the
+        /// competition's fees and classes.
+        /// </summary>
+        private async Task<bool> CanEditCompetitionAsync(int competitionId)
+        {
+            if (competitionId <= 0) return false;
+            if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
+            if (await _authorizationService.IsCompetitionManager(competitionId)) return true;
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return false;
+
+            var clubId = competition.GetValue<int>("clubId");
+            if (clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId)) return true;
+
+            return await _authorizationService.IsRegionHostAdminAsync(
+                clubId, competition.GetValue<string>("regionalFederation"));
         }
 
         /// <summary>
         /// Get competition data for editing.
         /// </summary>
         [HttpGet]
-        public IActionResult GetCompetitionData(int competitionId)
+        public async Task<IActionResult> GetCompetitionData(int competitionId)
         {
-            Console.WriteLine($"GetCompetitionData called with competitionId: {competitionId}");
+            if (!await CanEditCompetitionAsync(competitionId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
             try
             {
                 var content = _contentService.GetById(competitionId);
@@ -205,6 +241,9 @@ namespace HpskSite.Controllers
                     errors = ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage)
                 });
             }
+
+            if (!await CanEditCompetitionAsync(request.CompetitionId))
+                return Ok(new { success = false, message = "Åtkomst nekad." });
 
             try
             {

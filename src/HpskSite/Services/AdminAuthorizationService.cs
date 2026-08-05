@@ -185,6 +185,41 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// May the current member operate this competition's STAFF screens (start line, pads, timing)?
+        /// Site admin, a named competition manager or Bemanning roster app access, a club admin or
+        /// Skjutledare of the organising club, or the regional admin of the hosting krets.
+        ///
+        /// Unlike the competition-definition gate, Skjutledare ARE included: running the firing line is
+        /// exactly their role. Use this for staff SCREENS; use the per-controller edit gate for changing
+        /// what the competition IS.
+        /// </summary>
+        public async Task<bool> HasCompetitionStaffAccessAsync(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return false;
+                if (await IsCurrentUserAdminAsync()) return true;
+                if (await IsCompetitionManager(competitionId)) return true;
+
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
+                var competition = ctx.Content.GetById(competitionId);
+                if (competition == null) return false;
+
+                var clubId = competition.Value<int>("clubId");
+                if (clubId > 0)
+                {
+                    if (await IsClubAdminForClub(clubId)) return true;     // folds in the club's regional admins
+                    if (await IsSkjutledareForClub(clubId)) return true;
+                }
+                return await IsRegionHostAdminAsync(clubId, competition.Value<string>("regionalFederation"));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Convenience overload for callers that only have the competition id. Resolves the competition
         /// from the published cache (competitions are always published) and defers to the two-argument
         /// overload.

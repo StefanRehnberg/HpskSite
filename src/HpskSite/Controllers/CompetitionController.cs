@@ -1067,7 +1067,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetClubsForRegistration()
+        public async Task<IActionResult> GetClubsForRegistration(int? competitionId = null)
         {
             try
             {
@@ -1096,6 +1096,14 @@ namespace HpskSite.Controllers
                 {
                     var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
                     if (skjutledareClubIds.Count > 0) hasAccess = true;
+                }
+                // A competition manager needs the club list for the walk-in registration modal's club
+                // dropdown. They held no club role, so the desk's club picker came back "Access denied"
+                // and stayed empty. This is a list of club NAMES — no personal data.
+                if (!hasAccess && competitionId.HasValue && competitionId.Value > 0)
+                {
+                    hasAccess = await _authorizationService.IsCompetitionManager(competitionId.Value)
+                             || await _authorizationService.IsRegionHostAdminAsync(competitionId.Value);
                 }
 
                 if (!hasAccess)

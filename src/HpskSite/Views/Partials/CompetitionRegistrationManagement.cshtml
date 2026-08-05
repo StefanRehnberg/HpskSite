@@ -3344,7 +3344,8 @@ async function ensureWalkInQuickCreateClubs() {
         return;
     }
     try {
-        const resp = await fetch('/umbraco/surface/Competition/GetClubsForRegistration', {
+        // Pass the competition so a competition manager (who holds no club role) can load the list.
+        const resp = await fetch(`/umbraco/surface/Competition/GetClubsForRegistration?competitionId=@competitionId`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         });

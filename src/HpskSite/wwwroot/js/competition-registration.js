@@ -1524,7 +1524,8 @@ async function loadAllClubs() {
 
     // Fallback: fetch from API
     try {
-        const response = await fetch('/umbraco/surface/Competition/GetClubsForRegistration', {
+        // Pass the competition so a competition manager (who holds no club role) can load the list.
+        const response = await fetch(`/umbraco/surface/Competition/GetClubsForRegistration?competitionId=${COMPETITION_ID || 0}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         });

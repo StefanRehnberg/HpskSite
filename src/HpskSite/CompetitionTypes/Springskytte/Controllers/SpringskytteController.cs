@@ -1379,6 +1379,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
+                // Start lists themselves are public content (the public page shows preliminary ones by
+                // decision), so this endpoint stays open — but internal ids are staff-only.
+                bool isStaffCaller = await HasCompetitionAccess(competitionId);
+
                 // A shooter's DNS/DNF lives in SpringskytteResultEntry, NOT in the start list's
                 // configurationData — so without this the admin cards had no way to show it and
                 // marking someone DNS through the row's pen icon looked like it did nothing.
@@ -1446,12 +1450,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         breakDuration = config?.BreakDuration ?? "05:00",
                         // Projected (not the raw POCO) so each row carries its status. Every field the
                         // admin JS reads is kept — adding one, not replacing the shape.
+                        // memberId is withheld from non-staff callers: start lists are public content by
+                        // decision (the public page shows preliminary ones too), but the internal member
+                        // id is only needed by the admin card's row actions and is usable as an oracle
+                        // against other endpoints.
                         starters = (config?.Starters ?? new List<SpringskytteStartListEntry>())
                             .Select(s => new
                             {
                                 startOrder = s.StartOrder,
                                 startTime = s.StartTime,
-                                memberId = s.MemberId,
+                                memberId = isStaffCaller ? s.MemberId : 0,
                                 name = s.Name,
                                 club = s.Club,
                                 weaponClass = s.WeaponClass,

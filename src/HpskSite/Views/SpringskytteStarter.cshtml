@@ -1,6 +1,7 @@
 @using Microsoft.AspNetCore.Mvc.ViewFeatures
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject HpskSite.Services.AdminAuthorizationService AuthService
 @{
     Layout = null;
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "0";
@@ -9,7 +10,17 @@
     // Resolved here rather than passed through ViewData on purpose: this view is runtime-compiled and
     // deploys on its own, so reading it from the controller would mean a views-only upload silently
     // hid the Startledare toggle from everyone until the C# half shipped too.
-    var isLoggedIn = await MemberManager.GetCurrentMemberAsync() != null;
+    //
+    // Startledare-läge needs COMPETITION ACCESS, not merely a login. Gating it on "is logged in" was
+    // too loose: any member — e.g. a Skjutledare of an unrelated club — could flip a competition they
+    // have nothing to do with into operator mode and read the whole line's DNS and check-in state.
+    // The writes were refused either way, but the reading was not.
+    var isLoggedIn = false;
+    if (int.TryParse(competitionId, out var compIdForAuth) && compIdForAuth > 0)
+    {
+        isLoggedIn = await MemberManager.GetCurrentMemberAsync() != null
+            && await AuthService.HasCompetitionStaffAccessAsync(compIdForAuth);
+    }
     var tokens = Antiforgery.GetAndStoreTokens(Context);
 }
 <!DOCTYPE html>

@@ -128,9 +128,29 @@ namespace HpskSite.Controllers
             var managedRegions = await _authService.GetManagedRegions();
             bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
 
-            if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin)
+            // A competition manager runs the competition, so they may read ITS invoices — the Fakturor
+            // view and Bokföringsunderlag are part of running the day. They hold no club or region role,
+            // so this list previously came back "Access denied" for them.
+            bool isCompetitionManagerOnly = false;
+            if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin && competitionId.HasValue && competitionId.Value > 0)
+            {
+                isCompetitionManagerOnly = await _authService.IsCompetitionManager(competitionId.Value)
+                                        || await _authService.IsRegionHostAdminAsync(competitionId.Value);
+            }
+
+            if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin && !isCompetitionManagerOnly)
             {
                 return Json(new { success = false, message = "Access denied" });
+            }
+
+            // Access granted solely by managing ONE competition stays pinned to that competition — the
+            // filters arrive from the client, so without this the grant would widen to other clubs and
+            // kretsar simply by asking.
+            if (isCompetitionManagerOnly)
+            {
+                clubId = null;
+                region = null;
+                regionOwnCompetitionsOnly = false;
             }
 
             // A regional admin may only ever read their OWN krets. `region` arrives from the client,
