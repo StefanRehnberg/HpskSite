@@ -1317,14 +1317,24 @@ namespace HpskSite.Controllers
 
                 // Check if user is club admin or skjutledare for this competition's club
                 var competitionClubId = competition.Value<int>("clubId");
+                bool isRegionHost = false;
                 if (competitionClubId > 0)
                 {
                     isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
                     if (!isClubAdmin)
                         isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so its
+                    // regional admin runs the competition. Without this the Anmälningar tab could not
+                    // even LIST the registrations of a region-hosted competition.
+                    var regionCode = (competition.Value<string>("regionalFederation") ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(regionCode))
+                        isRegionHost = await _authorizationService.IsRegionalAdminForRegion(regionCode);
+                }
 
-                if (!isCompetitionManager && !isClubAdmin && !isSkjutledare)
+                if (!isCompetitionManager && !isClubAdmin && !isSkjutledare && !isRegionHost)
                 {
                     return Json(new { success = false, message = "Access denied - insufficient permissions" });
                 }

@@ -248,6 +248,15 @@ namespace HpskSite.Controllers
                             authorized = await _authService.IsClubAdminForClub(clubId)
                                       || await _authService.IsSkjutledareForClub(clubId);
                         }
+                        else
+                        {
+                            // Region-hosted (clubId unset — the SM shape): the organiser is the krets,
+                            // so its regional admin runs the competition. Without this branch every
+                            // Anmälningar action was refused on an SM.
+                            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                            if (!string.IsNullOrWhiteSpace(regionCode))
+                                authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                        }
                     }
                 }
                 if (!authorized)
@@ -557,6 +566,15 @@ namespace HpskSite.Controllers
                             authorized = await _authService.IsClubAdminForClub(clubId)
                                       || await _authService.IsSkjutledareForClub(clubId);
                         }
+                        else
+                        {
+                            // Region-hosted (clubId unset — the SM shape): the organiser is the krets,
+                            // so its regional admin runs the competition. Without this branch every
+                            // Anmälningar action was refused on an SM.
+                            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                            if (!string.IsNullOrWhiteSpace(regionCode))
+                                authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                        }
                     }
                 }
                 if (!authorized)
@@ -632,6 +650,15 @@ namespace HpskSite.Controllers
                     {
                         authorized = await _authService.IsClubAdminForClub(competitionClubId)
                                   || await _authService.IsSkjutledareForClub(competitionClubId);
+                    }
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
+                        // its regional admin runs the competition. Without this branch every
+                        // Anmälningar action was refused on an SM, walk-in registrations included.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
                     }
                 }
                 if (!authorized)
@@ -834,6 +861,15 @@ namespace HpskSite.Controllers
                         authorized = await _authService.IsClubAdminForClub(clubId)
                                   || await _authService.IsSkjutledareForClub(clubId);
                     }
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
+                        // its regional admin runs the competition. Without this branch every
+                        // Anmälningar action was refused on an SM, walk-in registrations included.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                    }
                 }
                 if (!authorized) return Json(new { success = false, message = "Access denied" });
 
@@ -914,6 +950,15 @@ namespace HpskSite.Controllers
                     {
                         authorized = await _authService.IsClubAdminForClub(clubId)
                                   || await _authService.IsSkjutledareForClub(clubId);
+                    }
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
+                        // its regional admin runs the competition. Without this branch every
+                        // Anmälningar action was refused on an SM, walk-in registrations included.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
                     }
                 }
                 if (!authorized) return Json(new { success = false, message = "Access denied" });
@@ -1057,6 +1102,15 @@ namespace HpskSite.Controllers
                         authorized = await _authService.IsClubAdminForClub(clubId)
                                   || await _authService.IsSkjutledareForClub(clubId);
                     }
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
+                        // its regional admin runs the competition. Without this branch every
+                        // Anmälningar action was refused on an SM, walk-in registrations included.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                    }
                 }
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
@@ -1172,6 +1226,15 @@ namespace HpskSite.Controllers
                         authorized = await _authService.IsClubAdminForClub(competitionClubId)
                                   || await _authService.IsSkjutledareForClub(competitionClubId);
                     }
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
+                        // its regional admin runs the competition. Without this branch every
+                        // Anmälningar action was refused on an SM, walk-in registrations included.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                    }
                 }
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
@@ -1215,6 +1278,13 @@ namespace HpskSite.Controllers
                     if (clubId > 0)
                         authorized = await _authService.IsClubAdminForClub(clubId)
                                   || await _authService.IsSkjutledareForClub(clubId);
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                    }
                 }
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
@@ -1300,6 +1370,13 @@ namespace HpskSite.Controllers
                     if (clubId > 0)
                         authorized = await _authService.IsClubAdminForClub(clubId)
                                   || await _authService.IsSkjutledareForClub(clubId);
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                    }
                 }
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
@@ -1378,6 +1455,9 @@ namespace HpskSite.Controllers
                     }
                     else
                     {
+                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
+                        // its regional admin runs the competition. Without this branch every
+                        // Anmälningar action was refused on an SM, walk-in registrations included.
                         var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
                         if (!string.IsNullOrWhiteSpace(regionCode))
                             authorized = await _authService.IsRegionalAdminForRegion(regionCode);
@@ -1501,6 +1581,15 @@ namespace HpskSite.Controllers
                         authorized = await _authService.IsClubAdminForClub(competitionClubId)
                                   || await _authService.IsSkjutledareForClub(competitionClubId);
                     }
+                    else
+                    {
+                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
+                        // its regional admin runs the competition. Without this branch every
+                        // Anmälningar action was refused on an SM, walk-in registrations included.
+                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(regionCode))
+                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
+                    }
                 }
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
@@ -1613,6 +1702,13 @@ namespace HpskSite.Controllers
                 {
                     authorized = await _authService.IsClubAdminForClub(competitionClubId)
                               || await _authService.IsSkjutledareForClub(competitionClubId);
+                }
+                else
+                {
+                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+                    var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(regionCode))
+                        authorized = await _authService.IsRegionalAdminForRegion(regionCode);
                 }
             }
             if (!authorized) return Forbid();

@@ -123,6 +123,16 @@
                             return r == $"RegionalAdmin_{clubRegion}";
                         });
                 }
+                else
+                {
+                    // Region-hosted competition (clubId unset — the SM shape): the organiser IS the
+                    // krets, so its regional admin manages it. Without this branch the whole
+                    // management page answered "Access Denied" on a region-hosted competition unless
+                    // the viewer was a site admin or separately named a competition manager.
+                    var compRegion = (competition.Value<string>("regionalFederation") ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(compRegion))
+                        isClubAdminForCompetition = roles.Contains($"RegionalAdmin_{compRegion}");
+                }
 
                 canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
             }
