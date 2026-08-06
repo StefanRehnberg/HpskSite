@@ -132,14 +132,16 @@
             <div class="card h-100">
                 <div class="card-body py-2">
                     <h6 class="card-subtitle mb-1 text-muted small">Starter</h6>
-                    <div class="d-flex justify-content-between align-items-baseline">
+                    @* Per weapon class, because "104 starter" says nothing about how many banor
+                       each group needs. It sits in the same baseline row as the total — where the
+                       word "klasser" used to be — because a second line here stretches every card
+                       in the row (they are h-100). Clipped rather than wrapped for the same reason;
+                       the full list is on the title attribute. Derived from the registrations' own
+                       class ids, so Springskytte's composite ids work too. *@
+                    <div class="d-flex justify-content-between align-items-baseline gap-2">
                         <h4 class="card-title mb-0" id="summaryStartsCount">0</h4>
-                        <small class="text-muted">klasser</small>
+                        <small class="text-muted text-end text-truncate" id="summaryStartsByWeapon"></small>
                     </div>
-                    @* Per weapon class, because "120 starter" says nothing about how many
-                       banor/skjutlag each group needs. Derived from the registrations'
-                       own class ids, so it works for Springskytte's composite ids too. *@
-                    <div class="small text-muted mt-1" id="summaryStartsByWeapon"></div>
                 </div>
             </div>
         </div>
@@ -1910,6 +1912,8 @@ function updatePaymentSummary() {
             .sort((a, b) => startsByWeapon[b] - startsByWeapon[a] || a.localeCompare(b, 'sv'))
             .map(wc => `${wc} ${startsByWeapon[wc]}`);
         byWeaponEl.textContent = parts.join(' · ');
+        // The cell clips at one line, so keep the whole list reachable on hover.
+        byWeaponEl.title = parts.length ? 'Starter per vapengrupp: ' + parts.join(', ') : '';
     }
     document.getElementById('summaryCheckedInCount').textContent = checkedInMembers.size;
     document.getElementById('summaryCheckedInTotal').textContent = uniqueMembers;
@@ -3046,6 +3050,9 @@ async function setCheckedIn(registrationId, checkedIn) {
     if (reg) reg.isCheckedIn = checkedIn;
     const label = document.querySelector(`label[for="checkin_${registrationId}"]`);
     if (label) label.textContent = checkedIn ? 'Här' : '';
+    // The Incheckade card counts the same in-memory rows, so it follows the toggle
+    // immediately — and follows the revert below if the save fails.
+    updatePaymentSummary();
 
     try {
         const token = $('input[name="__RequestVerificationToken"]').val();
@@ -3067,6 +3074,7 @@ async function setCheckedIn(registrationId, checkedIn) {
         if (cb) cb.checked = !checkedIn;
         if (reg) reg.isCheckedIn = !checkedIn;
         if (label) label.textContent = !checkedIn ? 'Här' : '';
+        updatePaymentSummary();
         alert('Kunde inte uppdatera närvaro: ' + err.message);
     }
 }
