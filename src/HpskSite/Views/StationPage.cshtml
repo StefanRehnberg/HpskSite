@@ -153,6 +153,17 @@
     bool isSpringskytte = competitionType == "Springskytte";
     bool isPrecision = !isFaltskytte && !isSpringskytte;
 
+    // "s" is a station NUMBER for Fältskytte and a skjutlag number for the precision family,
+    // but a weapon-CLASS LETTER for Springskytte (?s=C). int.TryParse leaves 0 for a letter, so
+    // every user-facing string built from stationNumber read "Station 0" on a Springskytte pad —
+    // and the "Fortsätt där du slutade" entry stored that 0, whose link then sent the operator to
+    // ?s=0, i.e. PresetWeaponClass "0": a pad that renders with no A/C tab switcher. Label off the
+    // RAW value instead, and name the thing what it actually is per discipline.
+    var sRaw = (sStr ?? "").Trim();
+    var surfaceLabel = isSpringskytte
+        ? (string.IsNullOrEmpty(sRaw) ? "Startlinje" : $"Klass {sRaw.ToUpperInvariant()}")
+        : (stationNumber > 0 ? $"Station {stationNumber}" : "Station");
+
     // Detect shoot-off-only stations early so we can render a friendly notice
     // instead of routing into the regular entry/info flow. Shoot-off entries
     // go through the Resultat tab's per-shooter modal, never via /station.
@@ -219,7 +230,7 @@
     bool willEnter = renderChief || resolvedPatrol != null;
 
     ViewBag.Title = competition != null
-        ? $"Station {stationNumber} — {competitionName}"
+        ? $"{surfaceLabel} — {competitionName}"
         : "Station";
 }
 
@@ -266,14 +277,16 @@
                 if (saved && saved.competitionId && saved.stationNumber) {
                     var age = (Date.now() - new Date(saved.timestamp).getTime()) / 1000 / 60 / 60;
                     if (age < 24) {
-                        document.getElementById('stationResumeInfo').textContent = 'Station ' + saved.stationNumber + (saved.competitionName ? ' — ' + saved.competitionName : '');
+                        // stationLabel is absent on entries written before the label existed.
+                        var lbl = saved.stationLabel || ('Station ' + saved.stationNumber);
+                        document.getElementById('stationResumeInfo').textContent = lbl + (saved.competitionName ? ' — ' + saved.competitionName : '');
                         document.getElementById('stationResumePrompt').style.display = '';
                     }
                 }
             } catch(e) {}
             window.stationResume = function() {
                 var saved = JSON.parse(localStorage.getItem('hpsk_station_resume') || 'null');
-                if (saved) window.location.href = '/station?c=' + saved.competitionId + '&s=' + saved.stationNumber;
+                if (saved) window.location.href = '/station?c=' + encodeURIComponent(saved.competitionId) + '&s=' + encodeURIComponent(saved.stationNumber);
             };
         })();
         </script>
@@ -302,7 +315,10 @@
         try {
             localStorage.setItem('hpsk_station_resume', JSON.stringify({
                 competitionId: @competitionId,
-                stationNumber: @stationNumber,
+                // The RAW "s" value, not the parsed int — on Springskytte it is a class letter,
+                // and storing the parsed 0 made the resume link open a pad with no class chosen.
+                stationNumber: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(sRaw)),
+                stationLabel: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(surfaceLabel)),
                 competitionName: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(competitionName)),
                 timestamp: new Date().toISOString()
             }));
@@ -362,11 +378,11 @@
            results under the wrong class/patrol). *@
         <div class="text-center py-4">
             <h4><i class="bi bi-signpost-split me-2"></i>Vad vill du göra?</h4>
-            <p class="text-muted small mb-3">Station @stationNumber — välj hur du vill fortsätta.</p>
+            <p class="text-muted small mb-3">@surfaceLabel — välj hur du vill fortsätta.</p>
             <div class="d-grid gap-2 col-md-6 mx-auto">
                 @if (hasChief)
                 {
-                    <a class="btn btn-outline-primary btn-lg" href="/station?c=@competitionId&s=@stationNumber&role=chief"><i class="bi bi-person-badge me-1"></i>Stationschef</a>
+                    <a class="btn btn-outline-primary btn-lg" href="/station?c=@competitionId&s=@sRaw&role=chief"><i class="bi bi-person-badge me-1"></i>Stationschef</a>
                 }
                 @foreach (var p in memberPatrols)
                 {
@@ -375,7 +391,7 @@
                         + "Patrull " + p.PatrolNumber
                         + (string.IsNullOrEmpty(t) ? "" : " · " + t)
                         + (string.IsNullOrEmpty(p.Label) ? "" : " — " + p.Label);
-                    <a class="btn btn-primary btn-lg" href="/station?c=@competitionId&s=@stationNumber&p=@p.Id"><i class="bi bi-arrow-right me-1"></i>@lbl</a>
+                    <a class="btn btn-primary btn-lg" href="/station?c=@competitionId&s=@sRaw&p=@p.Id"><i class="bi bi-arrow-right me-1"></i>@lbl</a>
                 }
             </div>
         </div>
@@ -385,7 +401,7 @@
         @* Not logged in — offer login, return to this entry URL. NO layout shown. *@
         <div class="text-center py-5">
             <h4><i class="bi bi-box-arrow-in-right me-2"></i>Logga in för att registrera resultat</h4>
-            <p class="text-muted">Station @stationNumber@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</p>
+            <p class="text-muted">@surfaceLabel@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</p>
             @* Escape the WHOLE target so the URL has a single "?" — a double-"?" URL 404s on prod
                IIS/Simply even though Kestrel tolerates it (same fix as StyrelseController /
                TavlingsplaneringController / MinaUppdragController got 2026-07-22; this one was missed).

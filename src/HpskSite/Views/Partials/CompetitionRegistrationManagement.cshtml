@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Competition-Specific Registration Management Partial View
  * Focused on managing registrations for a single competition
 *@
@@ -34,6 +34,14 @@
     // start TIME in an existing start list (per registered class). No competition-level toggle:
     // it just surfaces whenever a Springskytte start list already exists for the ticked class.
     var springskytteEnabled = compType == "Springskytte";
+
+    // The server's own UTC offset as "+02:00" / "-05:00", handed to the JS timestamp helpers
+    // (see the note at the top of the script block). Built here rather than inline in the
+    // script because Razor HTML-encodes a "+" in an @() expression — "&#x2B;02:00" produces
+    // an Invalid Date and every timestamp silently renders blank.
+    var srvOffset = DateTimeOffset.Now.Offset;
+    var serverUtcOffset = (srvOffset < TimeSpan.Zero ? "-" : "+")
+        + Math.Abs(srvOffset.Hours).ToString("00") + ":" + Math.Abs(srvOffset.Minutes).ToString("00");
 
     // Springskytte class selector: mirror the public registration modal (tick A/C weapon groups +
     // pick ONE spelled-out age class) instead of a flat checkbox list of composite ids. This makes
@@ -115,7 +123,7 @@
                     <h6 class="card-subtitle mb-1 text-muted small">Anmälda Lag</h6>
                     <div class="d-flex justify-content-between align-items-baseline">
                         <h4 class="card-title mb-0" id="summaryTeamCount">0</h4>
-                        <small class="text-muted">lag/stafett</small>
+                        <small class="text-muted" id="summaryTeamBreakdown">lag/stafett</small>
                     </div>
                 </div>
             </div>
@@ -127,6 +135,24 @@
                     <div class="d-flex justify-content-between align-items-baseline">
                         <h4 class="card-title mb-0" id="summaryStartsCount">0</h4>
                         <small class="text-muted">klasser</small>
+                    </div>
+                    @* Per weapon class, because "120 starter" says nothing about how many
+                       banor/skjutlag each group needs. Derived from the registrations'
+                       own class ids, so it works for Springskytte's composite ids too. *@
+                    <div class="small text-muted mt-1" id="summaryStartsByWeapon"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card h-100">
+                <div class="card-body py-2">
+                    <h6 class="card-subtitle mb-1 text-muted small">Incheckade</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <h4 class="card-title mb-0" id="summaryCheckedInCount">0</h4>
+                        <small class="text-muted">av <span id="summaryCheckedInTotal">0</span> skyttar</small>
+                    </div>
+                    <div class="progress mt-1" style="height:4px;">
+                        <div class="progress-bar bg-success" id="summaryCheckedInBar" style="width:0%"></div>
                     </div>
                 </div>
             </div>
@@ -153,26 +179,24 @@
                 </div>
             </div>
         </div>
-        <div class="col-6 col-lg">
-            <div class="card h-100 border-secondary">
-                <div class="card-body py-2">
-                    <h6 class="card-subtitle mb-1 text-secondary small">Saknar faktura</h6>
-                    <div class="d-flex justify-content-between align-items-baseline">
-                        <h4 class="card-title mb-0" id="summaryNoInvoiceCount">0</h4>
-                        <small class="text-muted">st</small>
-                    </div>
-                    @* An anmälan without an invoice cannot be paid at all — not by the shooter and not
-                       through a club's samlingsfaktura, because there is nothing to select. The eager
-                       invoice is created by a background job a few seconds after registration and is
-                       best-effort, so a recycle or a burst of registrations can lose one silently, and
-                       re-registering does NOT retry it. This repairs them in one go; it is idempotent. *@
-                    <button class="btn btn-sm btn-outline-secondary w-100 mt-2 d-none" id="fixMissingInvoicesBtn"
-                            onclick="fixMissingInvoices()" title="Skapar fakturor för anmälningar som saknar en">
-                        <i class="bi bi-wrench-adjustable me-1"></i>Skapa saknade fakturor
-                    </button>
-                </div>
-            </div>
+    </div>
+
+    @* "Saknar faktura" used to be a permanent sixth card showing 0 almost always. It is now an
+       exception row that appears only when there is something to repair — but the repair itself
+       must not be lost: an anmälan without an invoice cannot be paid at all, not by the shooter
+       and not through a club's samlingsfaktura, because there is nothing to select. The eager
+       invoice is created by a background job a few seconds after registration and is best-effort,
+       so a recycle or a burst of registrations can lose one silently, and re-registering does NOT
+       retry it. The count is also still reachable as a Betalstatus filter. Idempotent. *@
+    <div class="alert alert-secondary d-none d-flex align-items-center justify-content-between mb-3" id="missingInvoiceRow">
+        <div>
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            <strong><span id="summaryNoInvoiceCount">0</span></strong> anmälningar saknar faktura och kan inte betalas.
         </div>
+        <button class="btn btn-sm btn-outline-dark ms-3 flex-shrink-0" id="fixMissingInvoicesBtn"
+                onclick="fixMissingInvoices()" title="Skapar fakturor för anmälningar som saknar en">
+            <i class="bi bi-wrench-adjustable me-1"></i>Skapa saknade fakturor
+        </button>
     </div>
 
     @if (springskytteEnabled)
@@ -1058,6 +1082,45 @@
 </div>
 
 <script>
+// ── Timestamps ────────────────────────────────────────────────────────────
+// Timestamps come off the wire WITHOUT a timezone designator ("2026-08-05T18:15:48"),
+// and JavaScript reads an offset-less datetime as the BROWSER's local time. Two different
+// clocks are stored behind that identical shape:
+//   • registrationDate — written with DateTime.Now, i.e. the SERVER's local time. Prod runs
+//     UTC, so the desk saw 18:15 for a 20:15 registration; dev runs Swedish time, so a fixed
+//     "add two hours" would be wrong there. The server's own offset is stamped in below at
+//     render time, which makes both environments come out right.
+//   • occurredAt (invoice audit trail) — written with DateTime.UtcNow, so it is UTC regardless
+//     of where the app runs.
+// Both are then rendered in Europe/Stockholm, which is the clock the desk is working to.
+// (Caveat: SERVER_UTC_OFFSET is the offset as of page render, so on a dev machine a timestamp
+// from the other side of a DST switch can be an hour out. On prod the offset is always +00:00.)
+const SERVER_UTC_OFFSET = '@Html.Raw(serverUtcOffset)';
+const SWEDISH_DATETIME_FORMAT = {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm'
+};
+
+function hasExplicitZone(s) {
+    return /(Z|[+-]\d{2}:?\d{2})$/.test(s);
+}
+
+// For values written with DateTime.Now (server local).
+function formatServerLocalDateTime(value) {
+    if (!value) return '';
+    const s = String(value);
+    const d = new Date(hasExplicitZone(s) ? s : s + SERVER_UTC_OFFSET);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString('sv-SE', SWEDISH_DATETIME_FORMAT);
+}
+
+// For values written with DateTime.UtcNow.
+function formatUtcDateTime(value) {
+    if (!value) return '';
+    const s = String(value);
+    const d = new Date(hasExplicitZone(s) ? s : s + 'Z');
+    return isNaN(d.getTime()) ? '' : d.toLocaleString('sv-SE', SWEDISH_DATETIME_FORMAT);
+}
+
 // Competition Registration Management JavaScript
 let competitionRegistrations = [];
 let filteredCompetitionRegistrations = [];
@@ -1297,6 +1360,9 @@ function loadCompetitionTeams() {
         .then(r => r.json())
         .then(data => {
             competitionTeams = (data.success && data.teams) ? data.teams : [];
+            // Teams arrive after the individuals, so re-run the club list now that their
+            // clubs are known (see the note in populateCompetitionClubFilter).
+            populateCompetitionClubFilter();
             renderCompetitionTeams();
             refreshDeskCoverageBanner();
         })
@@ -1307,18 +1373,53 @@ function loadCompetitionTeams() {
         });
 }
 
+// Reads the same inputs as filterCompetitionRegistrations so the two lists can never drift apart.
+function filterCompetitionTeams(teams) {
+    const clubFilter = document.getElementById('competitionClubFilter')?.value || '';
+    const paymentFilter = document.getElementById('competitionPaymentFilter')?.value || '';
+    const searchTerm = (document.getElementById('competitionRegistrationSearch')?.value || '').trim().toLowerCase();
+    if (!clubFilter && !paymentFilter && !searchTerm) return teams;
+
+    return teams.filter(t => {
+        if (clubFilter && t.clubName !== clubFilter) return false;
+        if (paymentFilter && (t.paymentStatus || 'No Invoice') !== paymentFilter) return false;
+        if (searchTerm) {
+            const haystack = [
+                t.teamName || '',
+                t.clubName || '',
+                t.teamClass || '',
+                ...(t.members || []).map(m => m.name || '')
+            ].join(' ').toLowerCase();
+            if (!haystack.includes(searchTerm)) return false;
+        }
+        return true;
+    });
+}
+
 function renderCompetitionTeams() {
     const section = document.getElementById('competitionTeamsSection');
     const tbody = document.getElementById('competitionTeamsTableBody');
     if (!section || !tbody) return;
 
-    const countEl = document.getElementById('teamsCount');
-    if (countEl) countEl.textContent = competitionTeams.length;
-
     // Teams load asynchronously after individuals; recompute the summary cards so the
     // money totals + "Anmälda Lag" count include teams once they arrive.
     updatePaymentSummary();
 
+    // Apply the desk's filters to teams too. Sök matches the team name, its club and its
+    // members' names; Klubb and Betalstatus map straight across. Klass / Startpreferens /
+    // Närvaro are individual-only concepts and are deliberately NOT applied — a team has no
+    // check-in and its teamClass lives in a different id space than the shooters' classes.
+    const teamsFiltered = filterCompetitionTeams(competitionTeams);
+
+    const countEl = document.getElementById('teamsCount');
+    if (countEl) {
+        countEl.textContent = teamsFiltered.length === competitionTeams.length
+            ? competitionTeams.length
+            : `${teamsFiltered.length} av ${competitionTeams.length}`;
+    }
+
+    // Keep the card visible while filtered-to-empty, so "no hits" reads as a filter result
+    // rather than as a competition without teams.
     if (!competitionTeams.length) {
         section.classList.add('d-none');
         tbody.innerHTML = '';
@@ -1326,8 +1427,13 @@ function renderCompetitionTeams() {
     }
     section.classList.remove('d-none');
 
+    if (!teamsFiltered.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Inga lag matchar filtret.</td></tr>';
+        return;
+    }
+
     // Sort a copy by the active key (the natural load order is preserved until a header click).
-    let teamRows = competitionTeams.slice();
+    let teamRows = teamsFiltered.slice();
     if (teamSortKey) {
         const dir = teamSortDir;
         teamRows.sort((a, b) => {
@@ -1406,9 +1512,7 @@ function renderHistoryButton(invoiceId, nameArg, lastReminderSentDate, reminderC
     let title = 'Visa betalningshistorik';
     if (lastReminderSentDate) {
         cls = 'btn-outline-info';
-        const when = new Date(lastReminderSentDate).toLocaleString('sv-SE', {
-            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-        });
+        const when = formatUtcDateTime(lastReminderSentDate);
         const n = reminderCount || 1;
         title = `Påminnelse skickad ${when}${n > 1 ? ` (${n} st)` : ''} – visa betalningshistorik`;
     }
@@ -1721,10 +1825,17 @@ function filterCompetitionRegistrations() {
     applyCompetitionSort();
     currentCompetitionPage = 1;
     displayCompetitionRegistrations();
+
+    // The Lag card used to ignore every filter: searching for a shooter narrowed the
+    // individuals to one row while all 55 teams stayed on screen. Re-render it here so
+    // Sök / Klubb / Betalstatus reach both lists from the one set of inputs.
+    renderCompetitionTeams();
 }
 
 // Recompute and render the totals across the FULL registration list (not the filtered view).
 // Filtering changes the table below, the summary above represents the whole competition.
+const springskytteSummary = @(springskytteEnabled ? "true" : "false");
+
 function updatePaymentSummary() {
     const cards = document.getElementById('paymentSummaryCards');
     if (!cards) return;
@@ -1740,11 +1851,21 @@ function updatePaymentSummary() {
     let paidCount = 0, paidAmount = 0;
     let pendingCount = 0, pendingAmount = 0;
     let noInvoiceCount = 0;
+    // Counted as unique MEMBERS, not rows — the same shooter can hold two registration rows,
+    // and the card is labelled "skyttar", so rows would over-count against the total.
+    const checkedInMembers = new Set();
     // "Starter" = total class entries across all registrations. A shooter
     // registered for two classes contributes 2 starts, not 1.
     let totalStarts = 0;
+    // …and per weapon class, which is what staffing a firing line actually needs.
+    const startsByWeapon = {};
 
     regs.forEach(r => {
+        if (r.isCheckedIn === true) checkedInMembers.add(r.memberId);
+        (Array.isArray(r.shootingClasses) ? r.shootingClasses : []).forEach(sc => {
+            const wc = weaponClassOf(sc.class);
+            if (wc) startsByWeapon[wc] = (startsByWeapon[wc] || 0) + 1;
+        });
         const status = r.paymentStatus || 'No Invoice';
         // Amounts come from aggregates so multi-invoice regs (paid + top-up pending) sum correctly.
         paidAmount += Number(r.paidAmount) || 0;
@@ -1759,7 +1880,9 @@ function updatePaymentSummary() {
     // Fold teams/stafett (Lag) into the money totals so the sums above the lists
     // reflect the whole competition, not just individuals. Teams carry a single
     // invoice (amount + status), not the multi-invoice aggregates individuals have.
+    let relayCount = 0;
     teams.forEach(t => {
+        if (t.isRelay) relayCount++;
         const status = t.paymentStatus || 'No Invoice';
         const amount = Number(t.amount) || 0;
         if (status === 'Paid') { paidCount++; paidAmount += amount; }
@@ -1770,15 +1893,45 @@ function updatePaymentSummary() {
     document.getElementById('summaryRegCount').textContent = regs.length;
     document.getElementById('summaryUniqueMembers').textContent = uniqueMembers;
     document.getElementById('summaryTeamCount').textContent = teams.length;
+    // Springskytte runs lag and stafett side by side with different fees and different start
+    // lists, so one merged number hides which half is missing. Everywhere else there is only
+    // one kind of team, so the split would be noise.
+    const teamBreakdownEl = document.getElementById('summaryTeamBreakdown');
+    if (teamBreakdownEl) {
+        teamBreakdownEl.textContent = springskytteSummary
+            ? `${teams.length - relayCount} lag · ${relayCount} stafett`
+            : 'lag/stafett';
+    }
     document.getElementById('summaryStartsCount').textContent = totalStarts;
+    const byWeaponEl = document.getElementById('summaryStartsByWeapon');
+    if (byWeaponEl) {
+        // Ordered by count so the biggest group leads — that is the one that sets the schedule.
+        const parts = Object.keys(startsByWeapon)
+            .sort((a, b) => startsByWeapon[b] - startsByWeapon[a] || a.localeCompare(b, 'sv'))
+            .map(wc => `${wc} ${startsByWeapon[wc]}`);
+        byWeaponEl.textContent = parts.join(' · ');
+    }
+    document.getElementById('summaryCheckedInCount').textContent = checkedInMembers.size;
+    document.getElementById('summaryCheckedInTotal').textContent = uniqueMembers;
+    const bar = document.getElementById('summaryCheckedInBar');
+    if (bar) bar.style.width = uniqueMembers ? `${Math.round(100 * checkedInMembers.size / uniqueMembers)}%` : '0%';
     document.getElementById('summaryPaidCount').textContent = paidCount;
     document.getElementById('summaryPaidAmount').textContent = `${Math.round(paidAmount)} kr`;
     document.getElementById('summaryPendingCount').textContent = pendingCount;
     document.getElementById('summaryPendingAmount').textContent = `${Math.round(pendingAmount)} kr`;
     document.getElementById('summaryNoInvoiceCount').textContent = noInvoiceCount;
-    // Only offer the repair when there is actually something to repair.
-    document.getElementById('fixMissingInvoicesBtn')?.classList.toggle('d-none', noInvoiceCount === 0);
+    // Only surface the exception row when there is actually something to repair.
+    document.getElementById('missingInvoiceRow')?.classList.toggle('d-none', noInvoiceCount === 0);
     cards.style.display = '';
+}
+
+// Weapon class from a class id. First character for the standard ids (C1, A_Vet_Y, A_opt_1)
+// and for Springskytte's composite ids ("A-D 21" → A) alike — the same rule the live result
+// board uses. Returns '' for anything that doesn't start with a known weapon letter, so an
+// unexpected id is dropped from the breakdown rather than inventing a group.
+function weaponClassOf(classId) {
+    const c = (classId || '').trim().charAt(0).toUpperCase();
+    return 'ABCRLM'.includes(c) ? c : '';
 }
 
 // Mint the invoices for registrations that lost theirs. Idempotent — the endpoint skips anything
@@ -1812,9 +1965,14 @@ async function fixMissingInvoices() {
 function populateCompetitionClubFilter() {
     const select = document.getElementById('competitionClubFilter');
     if (!select) return;
-    const clubs = Array.from(new Set(competitionRegistrations.map(r => r.memberClub).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    // Teams are included: a club can have a lag in the competition without any individual
+    // entry, and it would otherwise be unreachable from the Klubb filter.
+    const clubs = Array.from(new Set([
+        ...competitionRegistrations.map(r => r.memberClub),
+        ...(competitionTeams || []).map(t => t.clubName)
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'sv'));
     const current = select.value;
-    select.innerHTML = '<option value="">All Clubs</option>';
+    select.innerHTML = '<option value="">Alla klubbar</option>';
     clubs.forEach(club => {
         const opt = document.createElement('option');
         opt.value = club;
@@ -1983,7 +2141,7 @@ function displayCompetitionRegistrations() {
                     : '<span class="text-muted">—</span>'}
             </td>
             <td>
-                ${new Date(reg.registrationDate).toLocaleString('sv-SE', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}
+                ${formatServerLocalDateTime(reg.registrationDate)}
             </td>
             <td>
                 <span class="badge ${getPaymentStatusBadgeClass(reg.paymentStatus)}">
@@ -2631,9 +2789,30 @@ function saveCompetitionRegistrationChanges() {
 // after removal free their slot + drop result/adjustments via a cleanup call.
 const springDiscipline = '@compType' === 'Springskytte';
 
+// What the delete does to the money, spelled out in the confirm. The backend is right —
+// Pending invoices are cancelled, Paid ones are kept as the historical record
+// (RegistrationAdminController.DeleteCompetitionRegistration) — but until now the operator
+// was told only "Åtgärden kan inte ångras", so deleting a paid shooter looked free.
+function deleteMoneyNote(registrationId) {
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
+    if (!reg) return '';
+    const paid = Math.round(Number(reg.paidAmount) || 0);
+    const pending = Math.round(Number(reg.pendingAmount) || 0);
+    const lines = [];
+    if (paid > 0) {
+        lines.push(`OBS: ${paid} kr är redan betalt. Den betalda fakturan makuleras INTE — ` +
+                   `återbetalning eller överföring till en annan skytt måste hanteras separat.`);
+    }
+    if (pending > 0) {
+        lines.push(`Obetald faktura på ${pending} kr makuleras.`);
+    }
+    return lines.length ? '\n\n' + lines.join('\n') : '';
+}
+
 async function confirmDeleteCompetitionRegistration(registrationId) {
     if (springDiscipline) { await springAwareDelete(registrationId, null); return; }
-    if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.')) {
+    if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.'
+                + deleteMoneyNote(registrationId))) {
         deleteRegistrationById(registrationId);
     }
 }
@@ -2642,7 +2821,8 @@ async function deleteCompetitionRegistration() {
     const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value);
     const modalEl = document.getElementById('competitionEditRegistrationModal');
     if (springDiscipline) { await springAwareDelete(registrationId, modalEl); return; }
-    if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.')) {
+    if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.'
+                + deleteMoneyNote(registrationId))) {
         bootstrap.Modal.getInstance(modalEl).hide();
         deleteRegistrationById(registrationId);
     }
@@ -2665,6 +2845,7 @@ async function springAwareDelete(registrationId, modalElToHide) {
             }
         }
     } catch (e) { /* fall back to the generic confirm */ }
+    msg += deleteMoneyNote(registrationId);
     if (!confirm(msg)) return;
     if (modalElToHide) { const inst = bootstrap.Modal.getInstance(modalElToHide); if (inst) inst.hide(); }
     deleteRegistrationById(registrationId, memberId);
@@ -4397,9 +4578,8 @@ function renderInvoiceHistory(data) {
     html += '<thead><tr><th>När</th><th>Händelse</th><th>Av</th><th>Metod</th><th class="text-end">Belopp</th>'
         + (singleRef ? '' : '<th>Referens</th>') + '<th>Anteckning</th></tr></thead><tbody>';
     events.forEach(e => {
-        const when = e.occurredAt ? new Date(e.occurredAt).toLocaleString('sv-SE', {
-            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-        }) : '';
+        // Audit events are stamped with DateTime.UtcNow — see the note at the top of this script.
+        const when = formatUtcDateTime(e.occurredAt);
         const amount = (e.amount != null && e.amount !== '') ? Math.round(Number(e.amount)) + ' kr' : '';
         // A payment method is only meaningful for events where money actually moved.
         // For "Faktura skapad", cancellations, emails, transfers etc. the stored method
@@ -4501,9 +4681,7 @@ function renderReminderRecipients() {
     reminderRecipients.forEach((r, i) => {
         let reminded = '';
         if (r.lastReminderSentDate) {
-            const when = new Date(r.lastReminderSentDate).toLocaleString('sv-SE', {
-                year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-            });
+            const when = formatUtcDateTime(r.lastReminderSentDate);
             const n = r.reminderCount || 1;
             reminded = `<span class="badge bg-info ms-2" title="Senaste: ${escapeHistory(when)}">Påmind${n > 1 ? ` ${n}×` : ''}</span>`;
         }
