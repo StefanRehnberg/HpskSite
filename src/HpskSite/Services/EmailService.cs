@@ -936,13 +936,20 @@ namespace HpskSite.Services
         /// <summary>
         /// Core method to send an email
         /// </summary>
-        private async Task SendEmailAsync(string toEmail, string subject, string htmlBody, string? bccEmail = null)
+        /// <remarks>
+        /// Returns <c>true</c> only when the message actually left via SMTP. Failures are still
+        /// swallowed (never thrown) so a dead mail server can't break registration/approval flows —
+        /// but callers that record "email sent" in an audit trail MUST check the return value.
+        /// Assuming success here is what made Betalningshistorik claim "Betalningsbekräftelse
+        /// skickad" for confirmations that never went out.
+        /// </remarks>
+        private async Task<bool> SendEmailAsync(string toEmail, string subject, string htmlBody, string? bccEmail = null)
         {
             // If SMTP is not configured, log and return
             if (string.IsNullOrEmpty(_smtpHost))
             {
                 _logger.LogWarning("SMTP host not configured. Email not sent to {Email} with subject: {Subject}", toEmail, subject);
-                return;
+                return false;
             }
 
             try
@@ -968,6 +975,7 @@ namespace HpskSite.Services
 
                         await smtpClient.SendMailAsync(message);
                         _logger.LogInformation("Email sent successfully to {Email} with subject: {Subject}", toEmail, subject);
+                        return true;
                     }
                 }
             }
@@ -975,6 +983,7 @@ namespace HpskSite.Services
             {
                 _logger.LogError(ex, "Failed to send email to {Email} with subject: {Subject}", toEmail, subject);
                 // Don't throw - we don't want email failures to break registration/approval flows
+                return false;
             }
         }
 
@@ -1843,7 +1852,11 @@ namespace HpskSite.Services
         /// `actualAmount` is shown as a separate line only when it differs from `billedAmount`,
         /// so a normal exact-match payment renders one amount line.
         /// </summary>
-        public async Task SendPaymentConfirmationAsync(
+        /// <remarks>
+        /// Returns whether the confirmation actually went out. The caller writes a ReceiptSent
+        /// audit row off this, so it must never be assumed true.
+        /// </remarks>
+        public async Task<bool> SendPaymentConfirmationAsync(
             string memberEmail,
             string memberName,
             string competitionName,
@@ -1858,7 +1871,7 @@ namespace HpskSite.Services
             if (string.IsNullOrEmpty(_smtpHost))
             {
                 _logger.LogWarning("SMTP host not configured. Confirmation not sent to {Email}", memberEmail);
-                return;
+                return false;
             }
 
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
@@ -1920,7 +1933,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            return await SendEmailAsync(memberEmail, subject, body);
         }
 
         /// <summary>

@@ -9,7 +9,9 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Services;
+using HpskSite.Models;
 using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace HpskSite.Controllers
 {
@@ -20,6 +22,7 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly PaymentService _paymentService;
         private readonly AdminAuthorizationService _authService;
+        private readonly InvoiceAuditService _auditService;
         private readonly ILogger<PaymentController> _logger;
 
         public PaymentController(
@@ -34,6 +37,7 @@ namespace HpskSite.Controllers
             IContentService contentService,
             PaymentService paymentService,
             AdminAuthorizationService authService,
+            InvoiceAuditService auditService,
             ILogger<PaymentController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -42,6 +46,7 @@ namespace HpskSite.Controllers
             _contentService = contentService;
             _paymentService = paymentService;
             _authService = authService;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -174,14 +179,41 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ett fel uppstod vid uppdatering av betalningsstatus." });
                 }
 
-                // Receipt-send happens inside PaymentService now (so InvoiceAdmin's mark-paid
-                // path benefits from the same behaviour). The cashier UI doesn't need a
-                // success/failure echo — failures land in the application log and the audit
-                // row's absence (no ReceiptSent event) tells the operator after the fact.
+                // Receipt-send happens inside PaymentService (so InvoiceAdmin's mark-paid path
+                // gets the same behaviour). It records ReceiptSent or ReceiptFailed, so read the
+                // outcome back and echo it — the desk must be told when the shooter did NOT get a
+                // confirmation, while they're still standing there. Relying on "no row = not sent"
+                // was wrong: SMTP failures are swallowed, so a row was always written.
+                string? receiptError = null;
+                if (sendReceipt && paymentStatus == "Paid")
+                {
+                    try
+                    {
+                        var events = await _auditService.GetForInvoiceAsync(invoiceId);
+                        var lastReceipt = events
+                            .Where(e => e.EventType == InvoicePaymentEventTypes.ReceiptSent
+                                     || e.EventType == InvoicePaymentEventTypes.ReceiptFailed)
+                            .OrderByDescending(e => e.OccurredAt)
+                            .FirstOrDefault();
+                        if (lastReceipt?.EventType == InvoicePaymentEventTypes.ReceiptFailed)
+                        {
+                            receiptError = string.IsNullOrWhiteSpace(lastReceipt.Notes)
+                                ? "Betalningsbekräftelsen kunde inte skickas."
+                                : $"Betalningsbekräftelsen kunde inte skickas: {lastReceipt.Notes}";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Never fail the payment over a read-back; the payment itself is committed.
+                        _logger.LogWarning(ex, "Could not read receipt outcome for invoice {InvoiceId}", invoiceId);
+                    }
+                }
+
                 return Json(new {
                     success = true,
                     message = "Betalningsstatus uppdaterad.",
-                    receiptRequested = sendReceipt
+                    receiptRequested = sendReceipt,
+                    receiptError
                 });
             }
             catch (Exception ex)

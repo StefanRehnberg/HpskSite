@@ -141,7 +141,7 @@ namespace HpskSite.Controllers
                     var leaveTeamClubId = await _teamService.GetTeamClubIdAsync(request.TeamId);
                     if (leaveTeamClubId == 0)
                         return Json(new { success = false, message = "Laget hittades inte." });
-                    if (!await CanManageTeamAsync(leaveTeamClubId, memberData.GetValue<string>("primaryClubId")))
+                    if (!await CanManageTeamAsync(leaveTeamClubId, memberData.GetValue<string>("primaryClubId"), request.TeamId))
                         return Json(new { success = false, message = "Du har inte behörighet att ta bort andra medlemmar ur laget." });
                 }
 
@@ -174,7 +174,7 @@ namespace HpskSite.Controllers
                 var teamClubId = await _teamService.GetTeamClubIdAsync(request.TeamId);
                 if (teamClubId == 0)
                     return Json(new { success = false, message = "Laget hittades inte." });
-                if (!await CanManageTeamAsync(teamClubId, memberData.GetValue<string>("primaryClubId")))
+                if (!await CanManageTeamAsync(teamClubId, memberData.GetValue<string>("primaryClubId"), request.TeamId))
                     return Json(new { success = false, message = "Du har inte behörighet att ta bort det här laget." });
 
                 var (success, message) = await _teamService.DeleteTeamAsync(request.TeamId);
@@ -206,7 +206,7 @@ namespace HpskSite.Controllers
                 var teamClubId = await _teamService.GetTeamClubIdAsync(request.TeamId);
                 if (teamClubId == 0)
                     return Json(new { success = false, message = "Laget hittades inte." });
-                if (!await CanManageTeamAsync(teamClubId, memberData.GetValue<string>("primaryClubId")))
+                if (!await CanManageTeamAsync(teamClubId, memberData.GetValue<string>("primaryClubId"), request.TeamId))
                     return Json(new { success = false, message = "Du har inte behörighet att ändra det här laget." });
 
                 var (success, message) = await _teamService.UpdateTeamAsync(
@@ -271,12 +271,36 @@ namespace HpskSite.Controllers
         /// club (IsClubAdminForClub covers regional admins of the club's region), or a member
         /// whose PRIMARY club is that club. Teams are always made up of a club's own members.
         /// </summary>
-        private async Task<bool> CanManageTeamAsync(int teamClubId, string? memberPrimaryClubId)
+        private async Task<bool> CanManageTeamAsync(int teamClubId, string? memberPrimaryClubId, int teamId = 0)
         {
             if (teamClubId <= 0) return false;
             if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
             if (await _authorizationService.IsClubAdminForClub(teamClubId)) return true;
-            return int.TryParse(memberPrimaryClubId, out var primaryClubId) && primaryClubId == teamClubId;
+            if (int.TryParse(memberPrimaryClubId, out var primaryClubId) && primaryClubId == teamClubId)
+                return true;
+
+            // The organiser running the competition must be able to fix any club's roster at the
+            // registration desk (a captain turning up to name a deferred Springskytte roster or swap
+            // in the reserv). Same four-tier rule the rest of the per-competition surface uses,
+            // including the region-hosted SM shape where clubId is unset.
+            if (teamId <= 0) return false;
+            var competitionId = await _teamService.GetTeamCompetitionIdAsync(teamId);
+            if (competitionId <= 0) return false;
+            if (await _authorizationService.IsCompetitionManager(competitionId)) return true;
+
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
+            var competition = ctx.Content.GetById(competitionId);
+            if (competition == null) return false;
+            var competitionClubId = competition.Value<int>("clubId");
+            if (competitionClubId > 0)
+            {
+                return await _authorizationService.IsClubAdminForClub(competitionClubId)
+                    || await _authorizationService.IsSkjutledareForClub(competitionClubId);
+            }
+            // Region-hosted (clubId unset — the SM shape): the krets's regional admin is the organiser.
+            var regionCode = (competition.Value<string>("regionalFederation") ?? "").Trim();
+            return !string.IsNullOrWhiteSpace(regionCode)
+                && await _authorizationService.IsRegionalAdminForRegion(regionCode);
         }
 
         [HttpPost]

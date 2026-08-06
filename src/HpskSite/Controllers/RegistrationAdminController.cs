@@ -1328,6 +1328,9 @@ namespace HpskSite.Controllers
                         teamName = t.Team.TeamName,
                         teamClass = t.Team.TeamClass,
                         isRelay = t.Team.IsRelay,
+                        // clubId (not just the display name) — the desk's roster editor needs it to
+                        // pull the club's members for the deltagare picker.
+                        clubId = t.Team.ClubId,
                         clubName = t.ClubName ?? "",
                         members = t.Members.Select(m => new { memberId = m.MemberId, name = m.Name, isSpare = m.IsSpare }),
                         memberCount = t.Members.Count,

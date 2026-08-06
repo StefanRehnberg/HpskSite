@@ -1142,7 +1142,14 @@ namespace HpskSite.Services
 
                 var member = _memberService.GetById(memberId);
                 var memberEmail = member?.Email;
-                if (string.IsNullOrWhiteSpace(memberEmail)) return;
+                if (string.IsNullOrWhiteSpace(memberEmail))
+                {
+                    // "No address" used to be indistinguishable from "sent" (both left no row).
+                    // Record it so the desk can see the shooter never got a confirmation.
+                    await LogReceiptFailureAsync(invoice, actorId, actorName,
+                        "Skytten saknar e-postadress");
+                    return;
+                }
 
                 var memberName = invoice.GetValue<string>("memberName") ?? member?.Name ?? "";
                 var billed = invoice.GetValue<decimal>("totalAmount");
@@ -1197,7 +1204,7 @@ namespace HpskSite.Services
                     ? transactionId
                     : invoiceNumber;
 
-                await _emailService.SendPaymentConfirmationAsync(
+                var sent = await _emailService.SendPaymentConfirmationAsync(
                     memberEmail: memberEmail,
                     memberName: memberName,
                     competitionName: competitionName,
@@ -1212,17 +1219,48 @@ namespace HpskSite.Services
                 await _auditService.LogAsync(
                     invoiceId: invoice.Id,
                     competitionId: competitionId,
-                    eventType: InvoicePaymentEventTypes.ReceiptSent,
+                    eventType: sent
+                        ? InvoicePaymentEventTypes.ReceiptSent
+                        : InvoicePaymentEventTypes.ReceiptFailed,
                     byMemberId: actorId,
                     byMemberName: actorName,
                     paymentMethod: paymentMethod,
                     amount: actual,
                     reference: $"Email: {memberEmail}",
-                    notes: null);
+                    notes: sent ? null : "Utskicket misslyckades (se serverloggen)");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to send payment receipt for invoice {InvoiceId}", invoice.Id);
+                // The send path swallows SMTP errors itself, so reaching here means something
+                // else broke (a lookup, the audit write). Still record the miss — never let a
+                // failed confirmation look like a successful one.
+                await LogReceiptFailureAsync(invoice, actorId, actorName, "Tekniskt fel vid utskick");
+            }
+        }
+
+        /// <summary>
+        /// Best-effort ReceiptFailed audit row. Swallows its own errors — this runs on the failure
+        /// path already and must never mask the original problem.
+        /// </summary>
+        private async Task LogReceiptFailureAsync(IContent invoice, int? actorId, string? actorName, string reason)
+        {
+            try
+            {
+                await _auditService.LogAsync(
+                    invoiceId: invoice.Id,
+                    competitionId: invoice.GetValue<int>("competitionId"),
+                    eventType: InvoicePaymentEventTypes.ReceiptFailed,
+                    byMemberId: actorId,
+                    byMemberName: actorName,
+                    paymentMethod: invoice.GetValue<string>("paymentMethod") ?? "",
+                    amount: invoice.GetValue<decimal?>("actualPaidAmount") ?? invoice.GetValue<decimal>("totalAmount"),
+                    reference: null,
+                    notes: reason);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not log ReceiptFailed for invoice {InvoiceId}", invoice.Id);
             }
         }
 

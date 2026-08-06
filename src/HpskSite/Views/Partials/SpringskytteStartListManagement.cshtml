@@ -33,6 +33,11 @@
                 <span id="springDupWarnText"></span>
                 <button class="btn btn-danger btn-sm ms-3" onclick="springOpenRenumberModal()"><i class="bi bi-sort-numeric-down me-1"></i>Numrera om nu</button>
             </div>
+
+            <!-- Placement coverage: how many registered starts / stafett teams actually have a
+                 start time. Nothing used to say this, so a whole weapon group could be missing a
+                 start list and the only symptom was shooters with no start time on the day. -->
+            <div id="springCoveragePanel" class="mb-3 d-none"></div>
             <div id="springListCardsContainer">
                 <div class="text-center py-4" id="springLoadingIndicator">
                     <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
@@ -289,6 +294,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // When the settings modal closes without generating a brand-new list, drop the orphan temp card.
     const modalEl = document.getElementById('springSettingsModal');
     if (modalEl) modalEl.addEventListener('hidden.bs.modal', springOnSettingsHidden);
+
+    // Re-read on every visit to this tab. Desk work on the Anmälningar tab (a walk-in, a class
+    // added, a shooter removed) changes both the lists and the coverage figures, and this tab is
+    // rendered once at page load — so without this it shows numbers from before the desk opened.
+    const tabBtn = document.getElementById('startlists-tab');
+    if (tabBtn) tabBtn.addEventListener('shown.bs.tab', () => springLoadAll());
 });
 
 async function springLoadAll() {
@@ -325,11 +336,98 @@ async function springLoadAll() {
         }
 
         springRenderCards();
+        springLoadCoverage();
     } catch (err) {
         console.error('Error loading start list data:', err);
         document.getElementById('springListCardsContainer').innerHTML =
             '<div class="alert alert-danger">Kunde inte ladda startlistor.</div>';
     }
+}
+
+// ---- Placement coverage -------------------------------------------------------------
+// Answers the question nothing on this page used to answer: "is everyone who is registered
+// actually on a start list?" Rendered as a per-weapon-group ladder plus an expandable list of
+// exactly who is missing, so the gap is fixable rather than merely visible.
+function springEsc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+}
+
+window.springLoadCoverage = springLoadCoverage;
+async function springLoadCoverage() {
+    const panel = document.getElementById('springCoveragePanel');
+    if (!panel) return;
+    try {
+        const res = await fetch(`/umbraco/surface/Springskytte/GetStartListCoverage?competitionId=${springCompId}`)
+            .then(r => r.json());
+        if (!res.success) { panel.classList.add('d-none'); return; }
+        springRenderCoverage(res);
+    } catch (err) {
+        console.warn('Could not load start-list coverage:', err);
+        panel.classList.add('d-none');
+    }
+}
+
+function springRenderCoverage(cov) {
+    const panel = document.getElementById('springCoveragePanel');
+    const ind = cov.individuals || { total: 0, placed: 0, byWeapon: [] };
+    const staf = cov.stafett || { total: 0, placed: 0, missing: [] };
+
+    const indMissing = Math.max(0, (ind.total || 0) - (ind.placed || 0));
+    const stafMissing = (staf.missing || []).length;
+
+    if ((ind.total || 0) === 0 && (staf.total || 0) === 0) { panel.classList.add('d-none'); return; }
+
+    const allPlaced = indMissing === 0 && stafMissing === 0;
+    const tone = allPlaced ? 'success' : 'danger';
+
+    // Per-weapon-group ladder — "C 60/60", "A 0/43" reads at a glance.
+    const wcBadges = (ind.byWeapon || []).map(w => {
+        const ok = w.placed >= w.total;
+        return `<span class="badge bg-${ok ? 'success' : 'danger'} me-1">`
+             + `Vapengrupp ${springEsc(w.weaponClass)}: ${w.placed}/${w.total}</span>`;
+    }).join('');
+
+    const stafBadge = (staf.total || 0) > 0
+        ? `<span class="badge bg-${stafMissing === 0 ? 'success' : 'danger'} me-1">Stafettlag: ${staf.placed}/${staf.total}</span>`
+        : '';
+
+    let detail = '';
+    if (!allPlaced) {
+        const blocks = [];
+        (ind.byWeapon || []).filter(w => (w.missing || []).length > 0).forEach(w => {
+            const rows = w.missing.map(m =>
+                `<li>${springEsc(m.name)} <span class="text-muted">— ${springEsc(m.club || '')} · ${springEsc(m.shootingClass || '')}</span></li>`
+            ).join('');
+            blocks.push(`<div class="mb-2"><strong>Vapengrupp ${springEsc(w.weaponClass)} — ${w.missing.length} utan starttid</strong>`
+                      + `<ul class="mb-0 small">${rows}</ul></div>`);
+        });
+        if (stafMissing > 0) {
+            const rows = staf.missing.map(t =>
+                `<li>${springEsc(t.teamName)} <span class="text-muted">— ${springEsc(t.teamClass || '')}</span></li>`
+            ).join('');
+            blocks.push(`<div class="mb-2"><strong>Stafettlag utan startlista — ${stafMissing} st</strong>`
+                      + `<ul class="mb-0 small">${rows}</ul></div>`);
+        }
+        detail = `
+            <details class="mt-2">
+                <summary class="small">Visa vilka som saknas</summary>
+                <div class="mt-2">${blocks.join('')}</div>
+            </details>`;
+    }
+
+    const headline = allPlaced
+        ? '<i class="bi bi-check-circle me-1"></i>Alla anmälda har en starttid.'
+        : `<i class="bi bi-exclamation-triangle me-1"></i><strong>`
+          + `${indMissing > 0 ? `${indMissing} start${indMissing === 1 ? '' : 'er'} utan starttid` : ''}`
+          + `${indMissing > 0 && stafMissing > 0 ? ' · ' : ''}`
+          + `${stafMissing > 0 ? `${stafMissing} stafettlag utan startlista` : ''}`
+          + `</strong> — de kommer inte att synas på någon startlista.`;
+
+    panel.className = `alert alert-${tone} mb-3`;
+    panel.innerHTML = `<div>${headline}</div><div class="mt-2">${wcBadges}${stafBadge}</div>${detail}`;
+    panel.classList.remove('d-none');
 }
 
 function springRenderCards() {

@@ -175,6 +175,19 @@
         </div>
     </div>
 
+    @if (springskytteEnabled)
+    {
+        @* Placement warning at the DESK, not just on the Startlistor tab — this is where staff
+           stand all day, and a shooter with no starttid is only discovered at the firing line
+           otherwise. Links straight to the tab that can fix it. *@
+        <div id="deskCoverageBanner" class="alert alert-danger d-none align-items-center justify-content-between mb-3">
+            <div id="deskCoverageText"></div>
+            <button class="btn btn-sm btn-danger ms-3 flex-shrink-0" onclick="deskGoToStartLists()">
+                <i class="bi bi-list-ol me-1"></i>Till startlistor
+            </button>
+        </div>
+    }
+
     <!-- Search + Filters — six inputs in a single row at lg+ to minimize vertical
          space at the desk. Search matches name, club, and Swish reference (invoice
          number) so a treasurer can paste the reference from a Swish notification
@@ -902,6 +915,19 @@
                         </div>
                     }
 
+                    @if (springskytteEnabled)
+                    {
+                        <div class="mb-3">
+                            <div id="competitionEditSpringSlotsContainer">
+                                <!-- Springskytte rullande start: one row per ticked weapon group.
+                                     A group the shooter is already slotted in shows its current start
+                                     time read-only; a group with no start (i.e. a class just added at
+                                     the desk) gets a free-slot picker. Without this the added class
+                                     silently landed on no start list at all. -->
+                            </div>
+                        </div>
+                    }
+
                     @* Deltävling opt-in. Pre-checked from reg.isSubCompetition; toggling here
                        triggers the fee re-compute path on save. *@
                     @if (subCompetitionEnabled)
@@ -926,6 +952,50 @@
                 </button>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" onclick="saveCompetitionRegistrationChanges()">
+                    <i class="bi bi-check-circle me-1"></i>Spara ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Team Modal — rename AND roster. The desk previously had rename only, so a captain
+     arriving to name a deferred Springskytte roster, or to swap the reserv in, had no tool at
+     the registration desk at all. Members come from the team's own club. -->
+<div class="modal fade" id="competitionEditTeamModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Redigera lag</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editTeamId" />
+                <div class="row">
+                    <div class="col-md-7">
+                        <div class="mb-3">
+                            <label for="editTeamName" class="form-label">Lagnamn</label>
+                            <input type="text" class="form-control" id="editTeamName" />
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="mb-3">
+                            <label class="form-label">Klass</label>
+                            <input type="text" class="form-control" id="editTeamClass" readonly />
+                        </div>
+                    </div>
+                </div>
+
+                <label class="form-label fw-bold">Deltagare</label>
+                <small class="text-muted d-block mb-2" id="editTeamRosterHint"></small>
+                <div id="editTeamRosterList" class="border rounded p-2" style="max-height: 260px; overflow-y: auto;">
+                    <!-- One checkbox per club member; a radio marks the reserv. -->
+                </div>
+                <div id="editTeamRosterError" class="alert alert-danger mt-2 d-none py-2 small"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveTeamChanges()">
                     <i class="bi bi-check-circle me-1"></i>Spara ändringar
                 </button>
             </div>
@@ -1168,6 +1238,56 @@ function updateTeamSortIndicators() {
     });
 }
 
+// Desk-side placement warning. Same coverage data the Startlistor tab shows, condensed to one
+// line: the desk needs to know that what it just registered has nowhere to start.
+async function refreshDeskCoverageBanner() {
+    const banner = document.getElementById('deskCoverageBanner');
+    if (!banner) return; // non-Springskytte
+    try {
+        const cid = $('.competition-registration-management').data('competition-id');
+        const cov = await fetch(`/umbraco/surface/Springskytte/GetStartListCoverage?competitionId=${cid}`)
+            .then(r => r.json());
+        if (!cov.success) { banner.classList.add('d-none'); return; }
+
+        const ind = cov.individuals || { total: 0, placed: 0, byWeapon: [] };
+        const staf = cov.stafett || { total: 0, placed: 0, missing: [] };
+        const indMissing = Math.max(0, (ind.total || 0) - (ind.placed || 0));
+        const stafMissing = (staf.missing || []).length;
+
+        if (indMissing === 0 && stafMissing === 0) {
+            banner.classList.add('d-none');
+            banner.classList.remove('d-flex');
+            return;
+        }
+
+        const parts = [];
+        if (indMissing > 0) {
+            const perWc = (ind.byWeapon || [])
+                .filter(w => w.placed < w.total)
+                .map(w => `${w.weaponClass} ${w.total - w.placed}`)
+                .join(', ');
+            parts.push(`<strong>${indMissing} start${indMissing === 1 ? '' : 'er'} utan starttid</strong>`
+                     + (perWc ? ` (${perWc})` : ''));
+        }
+        if (stafMissing > 0) parts.push(`<strong>${stafMissing} stafettlag utan startlista</strong>`);
+
+        document.getElementById('deskCoverageText').innerHTML =
+            '<i class="bi bi-exclamation-triangle me-1"></i>' + parts.join(' · ')
+            + ' — de saknas på startlistan.';
+        banner.classList.remove('d-none');
+        banner.classList.add('d-flex');
+    } catch (err) {
+        console.warn('Could not refresh desk coverage banner:', err);
+    }
+}
+
+// The tab buttons live in the host page (CompetitionManagement.cshtml), so switch via Bootstrap.
+function deskGoToStartLists() {
+    const tabBtn = document.querySelector('[data-bs-target="#startlists"], #startlists-tab');
+    if (tabBtn && window.bootstrap) { bootstrap.Tab.getOrCreateInstance(tabBtn).show(); }
+    else { alert('Öppna fliken Startlistor för att lägga till de som saknas.'); }
+}
+
 function loadCompetitionTeams() {
     const cid = $('.competition-registration-management').data('competition-id');
     fetch(`/umbraco/surface/RegistrationAdmin/GetCompetitionTeams?competitionId=${cid}`)
@@ -1175,6 +1295,7 @@ function loadCompetitionTeams() {
         .then(data => {
             competitionTeams = (data.success && data.teams) ? data.teams : [];
             renderCompetitionTeams();
+            refreshDeskCoverageBanner();
         })
         .catch(err => {
             console.error('Error loading teams:', err);
@@ -1237,7 +1358,7 @@ function renderCompetitionTeams() {
         // Markera som betald (only when Pending) + Betalningshistorik (when an invoice exists),
         // with the destructive Ta bort pinned to the right so it stays in a fixed position.
         const nameArg = JSON.stringify(t.teamName).replace(/"/g, '&quot;');
-        const editBtn = `<button class="btn btn-sm btn-outline-primary" onclick="editTeam(${t.id})" title="Byt namn på laget"><i class="bi bi-pencil"></i></button>`;
+        const editBtn = `<button class="btn btn-sm btn-outline-primary" onclick="editTeam(${t.id})" title="Redigera lag — namn och deltagare"><i class="bi bi-pencil"></i></button>`;
         const walletBtn = (t.paymentStatus !== 'No Fee')
             ? `<button class="btn btn-sm btn-outline-success" onclick="showPaymentOptionsForTeam(${t.id})" title="Hantera betalning"><i class="bi bi-wallet2"></i></button>`
             : '';
@@ -1294,21 +1415,110 @@ function renderHistoryButton(invoiceId, nameArg, lastReminderSentDate, reminderC
 // Edit a team from the desk = rename it. The full roster editor lives on the public
 // competition page; here the common need is correcting the name. We post the current
 // roster back unchanged (UpdateTeam replaces all members) so only the name changes.
+// Open the team editor: name + roster. Roster candidates are the team's club's members who
+// are registered for this competition, unioned with whoever is already on the team (so a
+// member who was named on a deferred roster but has no individual registration still shows).
 async function editTeam(teamId) {
     const team = competitionTeams.find(t => t.id === teamId);
     if (!team) { alert('Laget hittades inte.'); return; }
 
-    const newName = prompt('Nytt lagnamn:', team.teamName);
-    if (newName === null) return; // cancelled
-    const trimmed = newName.trim();
-    if (!trimmed) { alert('Lagnamnet får inte vara tomt.'); return; }
-    if (trimmed === team.teamName) return; // no change
+    document.getElementById('editTeamId').value = team.id;
+    document.getElementById('editTeamName').value = team.teamName || '';
+    document.getElementById('editTeamClass').value = team.teamClass || '';
+    const errBox = document.getElementById('editTeamRosterError');
+    errBox.classList.add('d-none');
+    errBox.textContent = '';
 
-    // Preserve the current roster: send every member id (core + spare) and flag the spare.
-    const roster = team.members || [];
-    const memberIds = roster.map(m => m.memberId).filter(id => id > 0);
-    const spare = roster.find(m => m.isSpare && m.memberId > 0);
-    const spareId = spare ? spare.memberId : null;
+    const listEl = document.getElementById('editTeamRosterList');
+    listEl.innerHTML = '<div class="text-muted small">Hämtar medlemmar…</div>';
+    new bootstrap.Modal(document.getElementById('competitionEditTeamModal')).show();
+
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    const current = (team.members || []).filter(m => m.memberId > 0);
+    const currentIds = new Set(current.map(m => m.memberId));
+    const spare = current.find(m => m.isSpare);
+
+    let candidates = [];
+    try {
+        const resp = await fetch(
+            `/umbraco/surface/CompetitionTeam/GetRegisteredMembersForClub?competitionId=${competitionId}&clubId=${team.clubId}`);
+        const data = await resp.json();
+        if (data && data.success && Array.isArray(data.members)) candidates = data.members;
+    } catch (err) {
+        console.warn('Could not load club members for team roster:', err);
+    }
+
+    // Union in anyone already on the team who isn't in the registered list — never let opening
+    // the editor be a way to silently drop an existing member.
+    const seen = new Set(candidates.map(c => c.memberId));
+    current.forEach(m => {
+        if (!seen.has(m.memberId)) {
+            candidates.push({ memberId: m.memberId, name: m.name, shootingClasses: '', notRegistered: true });
+        }
+    });
+    candidates.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'sv'));
+
+    document.getElementById('editTeamRosterHint').textContent = candidates.length
+        ? 'Bocka i vilka som ingår i laget. Markera eventuell reserv i högerkolumnen.'
+        : 'Inga medlemmar från klubben är anmälda till tävlingen än.';
+
+    if (candidates.length === 0) {
+        listEl.innerHTML = '<div class="text-muted small">Inga medlemmar att välja.</div>';
+        return;
+    }
+
+    listEl.innerHTML = `
+        <div class="d-flex fw-bold small text-muted border-bottom pb-1 mb-1">
+            <div class="flex-grow-1">Medlem</div><div style="width:70px" class="text-center">Reserv</div>
+        </div>` +
+        candidates.map(c => {
+            const checked = currentIds.has(c.memberId) ? 'checked' : '';
+            const isSpare = spare && spare.memberId === c.memberId ? 'checked' : '';
+            const warn = c.notRegistered
+                ? ' <span class="badge bg-warning text-dark" title="Medlemmen har ingen individuell anmälan till tävlingen">ej anmäld</span>'
+                : '';
+            const cls = c.shootingClasses
+                ? ` <span class="text-muted small">${escapeHtmlSafe(c.shootingClasses)}</span>` : '';
+            return `
+            <div class="d-flex align-items-center py-1">
+                <div class="form-check flex-grow-1 mb-0">
+                    <input class="form-check-input team-member-cb" type="checkbox"
+                           id="teamMem_${c.memberId}" value="${c.memberId}" ${checked}>
+                    <label class="form-check-label" for="teamMem_${c.memberId}">
+                        ${escapeHtmlSafe(c.name)}${cls}${warn}
+                    </label>
+                </div>
+                <div style="width:70px" class="text-center">
+                    <input class="form-check-input team-spare-radio" type="radio" name="editTeamSpare"
+                           value="${c.memberId}" ${isSpare}>
+                </div>
+            </div>`;
+        }).join('');
+
+    // Unticking a member must also clear them as reserv — otherwise the save would send a
+    // spareId that isn't in memberIds.
+    listEl.addEventListener('change', (e) => {
+        if (!e.target.classList.contains('team-member-cb') || e.target.checked) return;
+        const radio = listEl.querySelector(`.team-spare-radio[value="${e.target.value}"]`);
+        if (radio && radio.checked) radio.checked = false;
+    });
+}
+
+async function saveTeamChanges() {
+    const teamId = parseInt(document.getElementById('editTeamId').value, 10);
+    const team = competitionTeams.find(t => t.id === teamId);
+    const errBox = document.getElementById('editTeamRosterError');
+    const showErr = (msg) => { errBox.textContent = msg; errBox.classList.remove('d-none'); };
+    errBox.classList.add('d-none');
+
+    const teamName = (document.getElementById('editTeamName').value || '').trim();
+    if (!teamName) { showErr('Lagnamnet får inte vara tomt.'); return; }
+
+    const memberIds = Array.from(document.querySelectorAll('#editTeamRosterList .team-member-cb:checked'))
+        .map(cb => parseInt(cb.value, 10));
+    const spareEl = document.querySelector('#editTeamRosterList .team-spare-radio:checked');
+    let spareId = spareEl ? parseInt(spareEl.value, 10) : null;
+    if (spareId != null && !memberIds.includes(spareId)) spareId = null;
 
     try {
         const resp = await fetch('/umbraco/surface/CompetitionTeam/UpdateTeam', {
@@ -1317,16 +1527,19 @@ async function editTeam(teamId) {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
             },
-            body: JSON.stringify({ teamId: team.id, teamName: trimmed, memberIds: memberIds, spareId: spareId })
+            body: JSON.stringify({ teamId, teamName, memberIds, spareId })
         });
         const data = await resp.json();
         if (data && data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('competitionEditTeamModal')).hide();
             loadCompetitionTeams();
         } else {
-            alert((data && data.message) || 'Kunde inte uppdatera laget.');
+            // Roster rules (min/max size, duplicate name) come back as messages — keep the modal
+            // open so the operator can correct the selection instead of losing their edits.
+            showErr((data && data.message) || 'Kunde inte uppdatera laget.');
         }
     } catch (err) {
-        alert('Ett fel uppstod: ' + err.message);
+        showErr('Ett fel uppstod: ' + err.message);
     }
 }
 
@@ -2081,6 +2294,16 @@ async function editCompetitionRegistration(registrationId) {
         renderEditDpSlotRows(registration);
     }
 
+    // Springskytte: load the free slots + which weapon groups this shooter already has a start
+    // in, so adding a class here can be given a start time instead of silently getting none.
+    if (walkInSpringskytteEnabled) {
+        await Promise.all([
+            refreshSpringFreeSlots(),
+            refreshEditSpringMembership(registration.memberId)
+        ]);
+        renderEditSpringSlotRows();
+    }
+
     // Pre-fill the deltävling checkbox from the registration. Untoggling here will
     // recompute the fee downward (and surface a refund note); toggling on creates a
     // top-up invoice via the standard multi-invoice flow.
@@ -2088,6 +2311,113 @@ async function editCompetitionRegistration(registrationId) {
     if (editSubCompCb) editSubCompCb.checked = !!registration.isSubCompetition;
 
     new bootstrap.Modal(document.getElementById('competitionEditRegistrationModal')).show();
+}
+
+// Springskytte: the weapon groups this shooter is ALREADY slotted in, keyed by weapon class
+// ("C" → { startTime, listName, official }). Refreshed each time the Edit modal opens.
+let editSpringStartsByWc = {};
+
+async function refreshEditSpringMembership(memberId) {
+    editSpringStartsByWc = {};
+    if (!walkInSpringskytteEnabled || !memberId) return;
+    try {
+        const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+        const resp = await fetch(`/umbraco/surface/Springskytte/GetStartListMembership?competitionId=${competitionId}&memberId=${memberId}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const data = await resp.json();
+        if (!data.success || !Array.isArray(data.inLists)) return;
+        data.inLists.forEach(l => {
+            const wc = String(l.weaponClass || '').toUpperCase();
+            if (wc && !editSpringStartsByWc[wc]) {
+                editSpringStartsByWc[wc] = { startTime: l.startTime, listName: l.listName, official: !!l.official };
+            }
+        });
+    } catch (err) {
+        console.warn('Could not load Springskytte start-list membership for edit:', err);
+    }
+}
+
+// One row per ticked WEAPON GROUP (a Springskytte start is per member+vapengrupp, not per
+// age class — ticking C-H 35 and C-D 35 is still a single C start). Already-slotted groups
+// render read-only; groups with no start get the same free-slot picker the walk-in uses.
+function renderEditSpringSlotRows() {
+    const host = document.getElementById('competitionEditSpringSlotsContainer');
+    if (!walkInSpringskytteEnabled || !host) return;
+
+    // Preserve picks across re-renders (the operator may tick more classes afterwards).
+    const previous = {};
+    host.querySelectorAll('.edit-spring-slot-select').forEach(s => {
+        if (s.value) previous[s.dataset.weaponClass] = s.value;
+    });
+
+    const checked = Array.from(document.querySelectorAll('#competitionEditClassList .edit-class-cb:checked'))
+        .map(cb => cb.value);
+    // Distinct weapon groups, in a stable order.
+    const weapons = [];
+    checked.forEach(id => {
+        const wc = springClassWeapon(id);
+        if (wc && !weapons.includes(wc)) weapons.push(wc);
+    });
+
+    if (weapons.length === 0) { host.innerHTML = ''; return; }
+
+    host.innerHTML = '';
+    const heading = document.createElement('div');
+    heading.className = 'form-label fw-bold mb-1';
+    heading.textContent = 'Starttid per vapengrupp';
+    host.appendChild(heading);
+
+    weapons.forEach(wc => {
+        const row = document.createElement('div');
+        row.className = 'd-flex align-items-center gap-2 mb-2';
+
+        const label = document.createElement('div');
+        label.className = 'small fw-semibold';
+        label.style.minWidth = '120px';
+        label.textContent = `Vapengrupp ${wc}`;
+        row.appendChild(label);
+
+        const existing = editSpringStartsByWc[wc];
+        if (existing) {
+            // Already on a start list — say so plainly rather than offering a second slot.
+            const note = document.createElement('div');
+            note.className = 'form-text mb-0 small';
+            note.innerHTML = `<span class="badge bg-success">kl ${escapeAttr(springTimeShort(existing.startTime))}</span> `
+                + `redan på <strong>${escapeAttr(existing.listName || 'startlistan')}</strong>`
+                + (existing.official ? ' <span class="badge bg-info">publicerad</span>' : '');
+            row.appendChild(note);
+        } else {
+            const slots = (springFreeSlotsByWc && springFreeSlotsByWc[wc]) || [];
+            if (slots.length === 0) {
+                const note = document.createElement('div');
+                note.className = 'form-text text-warning mb-0 small';
+                note.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>'
+                    + 'Ingen startlista genererad för denna vapengrupp — skytten får ingen starttid.';
+                row.appendChild(note);
+            } else {
+                const sel = document.createElement('select');
+                sel.className = 'form-select form-select-sm edit-spring-slot-select';
+                sel.dataset.weaponClass = wc;
+                const placeholder = new Option('— Välj starttid —', '');
+                placeholder.disabled = true;
+                sel.add(placeholder);
+                sel.add(new Option('Lägg inte på startlistan', 'skip'));
+                slots.forEach(s => {
+                    const kindLabel = s.kind === 'dns' ? 'ledig (DNS)' : (s.kind === 'paus' ? 'lucka' : 'efter sista');
+                    sel.add(new Option(`kl ${springTimeShort(s.time)} · ${kindLabel}`, `${s.time}|${s.nodeId}`));
+                });
+                sel.value = (previous[wc] != null) ? previous[wc] : '';
+                row.appendChild(sel);
+
+                const hint = document.createElement('div');
+                hint.className = 'form-text text-muted mb-0 small';
+                hint.textContent = 'Ny klass — välj starttid.';
+                row.appendChild(hint);
+            }
+        }
+
+        host.appendChild(row);
+    });
 }
 
 // Read the Edit modal's checked classes + the registration's existing per-class team
@@ -2120,6 +2450,7 @@ document.addEventListener('DOMContentLoaded', () => {
     list.addEventListener('change', (e) => {
         if (!e.target.classList.contains('edit-class-cb')) return;
         enforceClassMutex('#competitionEditClassList', e.target);
+        if (walkInSpringskytteEnabled) renderEditSpringSlotRows();
         if (!walkInDirektplaceringEnabled) return;
         const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
         const reg = competitionRegistrations.find(r => r.id === registrationId);
@@ -2191,6 +2522,37 @@ function saveCompetitionRegistrationChanges() {
         isSubCompetition
     };
 
+    // Springskytte start-time picks for weapon groups the shooter isn't slotted in yet. Read
+    // BEFORE the save — hiding the modal tears the rows down.
+    const springPicks = walkInSpringskytteEnabled
+        ? Array.from(document.querySelectorAll('#competitionEditSpringSlotsContainer .edit-spring-slot-select'))
+            .filter(sel => sel.value && sel.value !== 'skip')
+            .map(sel => {
+                const [startTime, nodeIdRaw] = sel.value.split('|');
+                // Any ticked class in this weapon group identifies the start; the start list is
+                // keyed by member + vapengrupp, and the class travels with the registration.
+                const cls = Array.from(document.querySelectorAll('#competitionEditClassList .edit-class-cb:checked'))
+                    .map(cb => cb.value)
+                    .find(id => springClassWeapon(id) === sel.dataset.weaponClass);
+                return { shootingClass: cls, startTime, nodeId: nodeIdRaw ? parseInt(nodeIdRaw, 10) : null };
+            })
+            .filter(p => p.shootingClass)
+        : [];
+
+    // A picker left on the placeholder means a class was added but no start time chosen — the
+    // exact silent failure this picker exists to prevent. Make the operator confirm it.
+    if (walkInSpringskytteEnabled) {
+        const undecided = Array.from(document.querySelectorAll('#competitionEditSpringSlotsContainer .edit-spring-slot-select'))
+            .filter(sel => !sel.value)
+            .map(sel => sel.dataset.weaponClass);
+        if (undecided.length > 0) {
+            const ok = confirm(
+                `Ingen starttid vald för vapengrupp ${undecided.join(', ')}.\n\n` +
+                'Skytten kommer inte att finnas på startlistan för den vapengruppen.\n\nSpara ändå?');
+            if (!ok) return;
+        }
+    }
+
     fetch('/umbraco/surface/RegistrationAdmin/UpdateCompetitionRegistration', {
         method: 'POST',
         headers: {
@@ -2200,8 +2562,36 @@ function saveCompetitionRegistrationChanges() {
         body: JSON.stringify(data)
     })
     .then(response => response.json())
-    .then(result => {
+    .then(async result => {
         if (result.success) {
+            // Slot the shooter onto the picked free start times. Fail-soft, exactly like the
+            // walk-in path: the class change is the load-bearing op and is already committed.
+            if (springPicks.length > 0) {
+                const compId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+                const token = $('input[name="__RequestVerificationToken"]').val();
+                const memberId = reg ? reg.memberId : null;
+                const failures = [];
+                for (const p of springPicks) {
+                    try {
+                        const r = await fetch('/umbraco/surface/Springskytte/AssignSpringskytteWalkInStartTime', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                            body: JSON.stringify({
+                                competitionId: compId, memberId,
+                                shootingClass: p.shootingClass, startTime: p.startTime, nodeId: p.nodeId
+                            })
+                        });
+                        const d = await r.json();
+                        if (!d.success) failures.push(d.message || 'okänt fel');
+                    } catch (e) {
+                        failures.push(e.message || 'nätverksfel');
+                    }
+                }
+                if (failures.length > 0) {
+                    alert('Klassändringen sparades, men starttiden kunde inte sättas:\n' + failures.join('\n')
+                        + '\n\nLägg skytten på startlistan från fliken Startlistor.');
+                }
+            }
             bootstrap.Modal.getInstance(document.getElementById('competitionEditRegistrationModal')).hide();
             // Surface fee-change feedback (e.g. "Faktura uppdaterat: 150 → 300 kr" or
             // a manual-reconciliation warning when invoice is already paid).
@@ -2442,9 +2832,13 @@ function confirmMarkAsPaid() {
         if (result.success) {
             markPaidModalInstance?.hide();
             loadCompetitionRegistrations();
-            // Receipt is best-effort and lives inside PaymentService now. Failures land
-            // in the application log; the audit history modal shows whether a ReceiptSent
-            // event was actually written for this invoice.
+            // The payment itself is committed — only the confirmation email can fail. Tell the
+            // operator while the shooter is still at the desk so they can correct the address or
+            // print a kvitto instead. Silence here used to mean "assume it went out".
+            if (result.receiptError) {
+                alert('Betalningen är registrerad.\n\nOBS: ' + result.receiptError +
+                      '\nSkytten har alltså INTE fått någon bekräftelse via e-post.');
+            }
         } else {
             alert('Kunde inte uppdatera: ' + (result.message || 'okänt fel'));
         }
@@ -3967,6 +4361,7 @@ function renderInvoiceHistory(data) {
         Refunded: 'Återbetald',
         EmailSent: 'E-post skickad',
         ReceiptSent: 'Betalningsbekräftelse skickad',
+        ReceiptFailed: 'Betalningsbekräftelse kunde INTE skickas',
         Transferred: 'Överförd till annan skytt',
         StatusChanged: 'Status ändrad',
         PaymentSent: 'Betalning anmäld av betalaren',
@@ -3979,6 +4374,7 @@ function renderInvoiceHistory(data) {
         Refunded: 'warning',
         EmailSent: 'info',
         ReceiptSent: 'info',
+        ReceiptFailed: 'danger',
         Transferred: 'warning',
         StatusChanged: 'secondary',
         PaymentSent: 'info',

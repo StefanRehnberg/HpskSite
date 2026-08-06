@@ -498,6 +498,20 @@ namespace HpskSite.Services
             return team?.ClubId ?? 0;
         }
 
+        /// <summary>
+        /// Returns the competition a team belongs to (0 if not found). Needed so the people
+        /// RUNNING a competition (competition manager, or the krets's regional admin on a
+        /// region-hosted SM) can fix any club's roster at the registration desk — the club-only
+        /// rule locked them out of exactly the teams they're responsible for.
+        /// </summary>
+        public async Task<int> GetTeamCompetitionIdAsync(int teamId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>(
+                $"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
+            return team?.CompetitionId ?? 0;
+        }
+
         public async Task<List<TeamWithMembers>> GetTeamsForCompetitionAsync(int competitionId)
         {
             using var db = _databaseFactory.CreateDatabase();

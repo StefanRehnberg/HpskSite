@@ -3334,6 +3334,113 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             }
         }
 
+        /// <summary>
+        /// Start-list COVERAGE: which registered starts and which stafett teams are not on any
+        /// start list yet.
+        ///
+        /// This exists because nothing anywhere told the organiser that starts were unplaced. At the
+        /// 2026-08-05 desk run the competition had 103 individual starts but only the C list had been
+        /// generated — 43 A-starts had no start time — and 22 of 30 stafett teams were unplaced
+        /// behind a "8 lag av max 8" label. Both states were completely silent.
+        ///
+        /// Individual starts are keyed (memberId, vapengrupp): one Springskytte start covers every
+        /// age class a shooter has in that weapon group. Read-only; safe to poll.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStartListCoverage(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
+
+                var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                    .ToList();
+
+                // ---- Individuals -------------------------------------------------------
+                // placed = (memberId, weaponClass) pairs that appear on some individual list.
+                var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var node in startListNodes)
+                {
+                    var cfgJson = node.GetValue<string>("configurationData");
+                    if (string.IsNullOrEmpty(cfgJson)) continue;
+                    SpringskytteStartListConfig? cfg = null;
+                    try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                    foreach (var s in cfg?.Starters ?? new List<SpringskytteStartListEntry>())
+                        placed.Add($"{s.MemberId}|{(s.WeaponClass ?? "").ToUpperInvariant()}");
+                }
+
+                var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+                // Collapse to one row per (member, weapon group) — that's what a start actually is.
+                var required = registrations
+                    .Select(r => new
+                    {
+                        r.MemberId,
+                        r.MemberName,
+                        r.MemberClub,
+                        Weapon = (ExtractWeaponClass(r.MemberClass) ?? "").ToUpperInvariant(),
+                        Cls = r.MemberClass ?? ""
+                    })
+                    .Where(x => x.MemberId > 0 && !string.IsNullOrEmpty(x.Weapon))
+                    .GroupBy(x => $"{x.MemberId}|{x.Weapon}")
+                    .Select(g => g.First())
+                    .ToList();
+
+                var byWeapon = required
+                    .GroupBy(x => x.Weapon, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => new
+                    {
+                        weaponClass = g.Key,
+                        total = g.Count(),
+                        placed = g.Count(x => placed.Contains($"{x.MemberId}|{x.Weapon}")),
+                        missing = g.Where(x => !placed.Contains($"{x.MemberId}|{x.Weapon}"))
+                                   .OrderBy(x => x.MemberName, StringComparer.OrdinalIgnoreCase)
+                                   .Select(x => new { memberId = x.MemberId, name = x.MemberName, club = x.MemberClub, shootingClass = x.Cls })
+                                   .ToList()
+                    })
+                    .ToList();
+
+                // ---- Stafett teams -----------------------------------------------------
+                var stafettAssigned = CollectStafettTeamAssignments(competition, null);
+                var allTeams = await _teamService.GetTeamsForCompetitionAsync(competitionId);
+                var relayTeams = allTeams.Where(t => t.Team.IsRelay).ToList();
+                var stafettMissing = relayTeams
+                    .Where(t => !stafettAssigned.ContainsKey(t.Team.Id))
+                    .OrderBy(t => t.Team.TeamClass, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(t => t.Team.TeamName, StringComparer.OrdinalIgnoreCase)
+                    .Select(t => new { teamId = t.Team.Id, teamName = t.Team.TeamName, teamClass = t.Team.TeamClass, club = t.ClubName ?? "" })
+                    .ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    individuals = new
+                    {
+                        total = required.Count,
+                        placed = required.Count(x => placed.Contains($"{x.MemberId}|{x.Weapon}")),
+                        byWeapon
+                    },
+                    stafett = new
+                    {
+                        total = relayTeams.Count,
+                        placed = relayTeams.Count - stafettMissing.Count,
+                        missing = stafettMissing
+                    },
+                    hasAnyStartList = startListNodes.Count > 0
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building Springskytte start-list coverage");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
         /// <summary>Which start lists a member appears in (for the delete-confirmation warning).</summary>
         [HttpGet]
         public async Task<IActionResult> GetStartListMembership(int competitionId, int memberId)
