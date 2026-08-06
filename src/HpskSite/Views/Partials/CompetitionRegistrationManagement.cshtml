@@ -461,7 +461,7 @@
 
 <!-- Invoice History Modal — read-only audit trail for one invoice. -->
 <div class="modal fade" id="invoiceHistoryModal" tabindex="-1" aria-labelledby="invoiceHistoryModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header bg-secondary text-white">
                 <h5 class="modal-title" id="invoiceHistoryModalLabel">
@@ -470,7 +470,10 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <div class="small text-muted mb-2" id="invoiceHistoryHeader"></div>
+                <div class="small text-muted mb-2 d-flex flex-wrap gap-3">
+                    <span id="invoiceHistoryHeader"></span>
+                    <span id="invoiceHistoryRef"></span>
+                </div>
                 <div id="invoiceHistoryBody">
                     <div class="text-center py-3">
                         <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar historik...
@@ -4325,6 +4328,7 @@ function showInvoiceHistory(invoiceId, memberName) {
         invoiceHistoryModalInstance = new bootstrap.Modal(modalEl);
     }
     document.getElementById('invoiceHistoryHeader').textContent = memberName ? `För ${memberName}` : '';
+    document.getElementById('invoiceHistoryRef').textContent = '';
     document.getElementById('invoiceHistoryBody').innerHTML = `
         <div class="text-center py-3">
             <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar historik...
@@ -4381,8 +4385,17 @@ function renderInvoiceHistory(data) {
         PaymentSentCleared: 'secondary'
     })[t] || 'secondary';
 
+    // The reference is normally the invoice number, identical on every row — hoist it into the
+    // header and drop the column so the remaining ones stop line-breaking. Only keep the column
+    // when the rows genuinely differ (e.g. a Swish transaction id on the MarkedPaid row).
+    const refs = [...new Set(events.map(e => (e.reference || '').trim()).filter(r => r !== ''))];
+    const singleRef = refs.length === 1 ? refs[0] : null;
+    const refEl = document.getElementById('invoiceHistoryRef');
+    if (refEl) refEl.textContent = singleRef ? `Referens: ${singleRef}` : '';
+
     let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
-    html += '<thead><tr><th>När</th><th>Händelse</th><th>Av</th><th>Metod</th><th class="text-end">Belopp</th><th>Referens</th><th>Anteckning</th></tr></thead><tbody>';
+    html += '<thead><tr><th>När</th><th>Händelse</th><th>Av</th><th>Metod</th><th class="text-end">Belopp</th>'
+        + (singleRef ? '' : '<th>Referens</th>') + '<th>Anteckning</th></tr></thead><tbody>';
     events.forEach(e => {
         const when = e.occurredAt ? new Date(e.occurredAt).toLocaleString('sv-SE', {
             year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
@@ -4401,11 +4414,11 @@ function renderInvoiceHistory(data) {
         }
         html += `<tr>
             <td class="small text-nowrap">${escapeHistory(when)}</td>
-            <td><span class="badge bg-${colorFor(e.eventType)}">${escapeHistory(typeLabel)}</span></td>
-            <td class="small">${escapeHistory(e.byMemberName || '—')}</td>
-            <td class="small">${showMethod ? escapeHistory(e.paymentMethod || '') : ''}</td>
-            <td class="small text-end">${escapeHistory(amount)}</td>
-            <td class="small">${escapeHistory(e.reference || '')}</td>
+            <td class="text-nowrap"><span class="badge bg-${colorFor(e.eventType)}">${escapeHistory(typeLabel)}</span></td>
+            <td class="small text-nowrap">${escapeHistory(e.byMemberName || '—')}</td>
+            <td class="small text-nowrap">${showMethod ? escapeHistory(e.paymentMethod || '') : ''}</td>
+            <td class="small text-end text-nowrap">${escapeHistory(amount)}</td>
+            ${singleRef ? '' : `<td class="small">${escapeHistory(e.reference || '')}</td>`}
             <td class="small">${escapeHistory(e.notes || '')}</td>
         </tr>`;
     });
