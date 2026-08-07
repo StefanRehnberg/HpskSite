@@ -1,0 +1,250 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@*
+    Notiser — the shooter's message channel from tävlingsledningen.
+
+    ONE implementation, rendered on both the competition page (right column) and /mitt-schema?c=
+    (the page a shooter actually has open at the range). It was previously inline in
+    Competition.cshtml; it lives here so the two surfaces cannot drift apart.
+
+    ViewData:
+      CompetitionId (int, required)  — which competition's feed to show
+      NoticesInitialCount (int)      — messages shown before "Visa alla" (default 3)
+      NoticesHeading (string)        — card heading (default "Notiser")
+      NoticesCardClass (string)      — extra class on the card. The competition page passes
+                                       "information-sidebar", whose styling is defined inside
+                                       Competition.cshtml and so does not exist elsewhere.
+
+    Behaviour worth knowing before editing:
+      • The feed is newest-first and server-windowed to 4 days (EventMessageService.ShooterWindow).
+      • Unread is tracked client-side only, as the highest message id the member has actually SEEN,
+        in localStorage per competition. There is no server-side read state, so this must never be
+        used for anything that matters — it is a visual aid, nothing more.
+      • An unread Safety/Urgent message below the fold force-expands the list. Safety information
+        must never be hidden behind a "visa fler" tap.
+
+    NOT safe to render twice on the same page: it includes _WebPushSetup, which owns fixed element
+    ids (#webPushToggle etc.).
+*@
+@{
+    var pnCompId = ViewData["CompetitionId"] as int? ?? 0;
+    var pnInitial = ViewData["NoticesInitialCount"] as int? ?? 3;
+    var pnHeading = ViewData["NoticesHeading"]?.ToString() ?? "Notiser";
+    var pnCardClass = ViewData["NoticesCardClass"]?.ToString() ?? "";
+
+    var pnTutorialExists = false;
+    try
+    {
+        var pnHome = Umbraco.ContentAtRoot().FirstOrDefault();
+        var pnTutHub = pnHome?.Children?.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
+        pnTutorialExists = pnTutHub?.Children?.Any(t => t.ContentType.Alias == "tutorial"
+            && (t.Value<string>("tutorialId") ?? "") == "tutorial-notiser") ?? false;
+    }
+    catch { }
+}
+
+@if (pnCompId > 0)
+{
+    <div class="card @pnCardClass" id="pnShooterCard" data-comp="@pnCompId" data-initial="@pnInitial">
+        <div class="card-header d-flex justify-content-between align-items-center gap-2">
+            <h5 class="mb-0"><i class="bi bi-bell me-2"></i>@pnHeading</h5>
+            <span id="pnNewBadge" class="badge bg-danger" style="display:none"></span>
+        </div>
+        <div class="card-body">
+            @* Opt-in prompt — shown only when NOT subscribed (JS decides). *@
+            <div id="pnOptIn" class="d-print-none" style="display:none">
+                <p class="small text-body-secondary mb-2">
+                    Aktivera notiser så får du meddelanden från arrangören — schemaändringar,
+                    särskjutning och när resultatlistan publiceras — direkt i telefonen.
+                </p>
+                @await Html.PartialAsync("_WebPushSetup", new ViewDataDictionary(ViewData) { { "WebPushShowMatchPrefs", false }, { "WebPushOptInOnly", true } })
+                @if (pnTutorialExists)
+                {
+                    <script>window.pnNotisTutorialId = 'tutorial-notiser';</script>
+                }
+                <p id="pnCardApple" class="small text-body-secondary mt-2 mb-0" style="display:none">
+                    <i class="bi bi-apple me-1"></i>
+                    På iPhone kräver Apple ett extra steg: lägg först till pistol.nu på hemskärmen,
+                    öppna appen därifrån och aktivera sedan notiser. Det är en begränsning i iOS, inte i pistol.nu.
+                </p>
+                @if (pnTutorialExists)
+                {
+                    <div id="pnCardTut" class="mt-2" style="display:none">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="TutorialHelper.open('tutorial-notiser')">
+                            <i class="bi bi-play-circle me-1"></i>Visa hur på iPhone
+                        </button>
+                    </div>
+                }
+                @* Even without push the messages are worth reading, so the feed sits under the prompt. *@
+                <hr class="my-3">
+            </div>
+
+            <div id="pnMessages">
+                <div class="fw-semibold mb-2" id="pnListHead">Meddelanden från arrangören</div>
+                <div id="pnShooterList" class="small pn-list"></div>
+                <button type="button" id="pnToggleAll" class="btn btn-sm btn-outline-secondary w-100 mt-2 d-print-none" style="display:none"></button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Long feeds must not push the rest of the page off a phone screen: once expanded the list
+           scrolls inside the card instead of growing without bound. */
+        #pnShooterList.pn-expanded { max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        .pn-msg { border: 1px solid var(--bs-border-color); border-left-width: 4px; border-radius: 8px;
+                  background: var(--bs-tertiary-bg); padding: 8px 10px; margin-bottom: 8px; }
+        .pn-msg-new { background: var(--bs-primary-bg-subtle); border-color: var(--bs-primary-border-subtle); }
+        .pn-msg-meta { font-size: 12px; color: var(--bs-secondary-color); display: flex; flex-wrap: wrap;
+                       gap: 4px 6px; align-items: center; margin-bottom: 2px; }
+        .pn-msg-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+        /* Comfortable tap target on a phone. */
+        #pnToggleAll { min-height: 44px; }
+        @@media print { #pnShooterList.pn-expanded { max-height: none; overflow: visible; } }
+    </style>
+
+    <script>
+    (function () {
+        var card = document.getElementById('pnShooterCard');
+        if (!card || card.dataset.pnInit) return;
+        card.dataset.pnInit = '1';
+
+        var compId = parseInt(card.getAttribute('data-comp'), 10) || 0;
+        var INITIAL = parseInt(card.getAttribute('data-initial'), 10) || 3;
+        var optIn = document.getElementById('pnOptIn');
+        var list = document.getElementById('pnShooterList');
+        var toggle = document.getElementById('pnToggleAll');
+        var newBadge = document.getElementById('pnNewBadge');
+        var listHead = document.getElementById('pnListHead');
+
+        var expanded = false;
+        var msgs = [];
+        var SEEN_KEY = 'hpsk_pn_seen_' + compId;
+
+        function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+        function storedSeen() { try { return parseInt(localStorage.getItem(SEEN_KEY), 10) || 0; } catch (e) { return 0; } }
+        function setSeen(id) { try { if (id > storedSeen()) localStorage.setItem(SEEN_KEY, String(id)); } catch (e) { } }
+
+        // The "new since you last looked" watermark is captured ONCE per page load and held for the
+        // whole visit. Re-reading it each render would clear the Ny badges the instant the member
+        // tapped "Visa alla" — they'd be told there were 6 new messages and then never see which.
+        // Persisting still happens on every render, so the next visit starts from the right place.
+        var visitSeen = storedSeen();
+
+        // At the range "för 6 min sedan" beats a timestamp you have to subtract in your head.
+        // Older than a day falls back to an absolute date, where relative stops being useful.
+        function whenText(iso) {
+            try {
+                var d = new Date(iso), diff = (Date.now() - d.getTime()) / 1000;
+                if (diff < 60) return 'nyss';
+                if (diff < 3600) return 'för ' + Math.floor(diff / 60) + ' min sedan';
+                if (diff < 86400) { var h = Math.floor(diff / 3600); return 'för ' + h + (h === 1 ? ' timme' : ' timmar') + ' sedan'; }
+                return d.toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' });
+            } catch (e) { return ''; }
+        }
+        function absText(iso) {
+            try { return new Date(iso).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' }); }
+            catch (e) { return ''; }
+        }
+
+        function urgencyOf(m) {
+            if (m.urgency === 'Safety') return { colour: 'var(--bs-danger)', label: 'Säkerhet', badge: 'bg-danger' };
+            if (m.urgency === 'Urgent') return { colour: 'var(--bs-warning)', label: 'Viktigt', badge: 'bg-warning text-dark' };
+            return { colour: 'var(--bs-primary)', label: '', badge: '' };
+        }
+
+        function msgHtml(m, isNew) {
+            var u = urgencyOf(m);
+            return '<div class="pn-msg' + (isNew ? ' pn-msg-new' : '') + '" style="border-left-color:' + u.colour + ';">'
+                + '<div class="pn-msg-meta">'
+                + (u.label ? '<span class="badge ' + u.badge + '">' + u.label + '</span>' : '')
+                + (isNew ? '<span class="badge bg-danger">Ny</span>' : '')
+                + '<span>Från <strong style="color:var(--bs-body-color);">tävlingsledningen</strong></span>'
+                + '<span title="' + esc(absText(m.createdDate)) + '">· ' + esc(whenText(m.createdDate)) + '</span>'
+                + '</div>'
+                + '<div class="pn-msg-body">' + esc(m.body) + '</div>'
+                + '</div>';
+        }
+
+        function render() {
+            var seen = visitSeen;
+
+            if (!msgs.length) {
+                list.innerHTML = '<div class="text-body-secondary">Inga meddelanden från arrangören ännu.</div>';
+                list.classList.remove('pn-expanded');
+                toggle.style.display = 'none';
+                newBadge.style.display = 'none';
+                return;
+            }
+
+            var unread = msgs.filter(function (m) { return m.id > seen; });
+
+            // Safety/Urgent must never sit hidden behind "visa fler".
+            var hiddenCritical = msgs.slice(INITIAL).some(function (m) {
+                return m.id > seen && (m.urgency === 'Safety' || m.urgency === 'Urgent');
+            });
+            if (hiddenCritical) expanded = true;
+
+            var shown = expanded ? msgs : msgs.slice(0, INITIAL);
+            list.innerHTML = shown.map(function (m) { return msgHtml(m, m.id > seen); }).join('');
+            list.classList.toggle('pn-expanded', expanded && msgs.length > INITIAL);
+
+            if (msgs.length > INITIAL) {
+                var hiddenCount = msgs.length - INITIAL;
+                toggle.style.display = '';
+                toggle.innerHTML = expanded
+                    ? '<i class="bi bi-chevron-up me-1"></i>Visa färre'
+                    : '<i class="bi bi-chevron-down me-1"></i>Visa alla ' + msgs.length + ' meddelanden';
+                toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            } else {
+                toggle.style.display = 'none';
+            }
+
+            newBadge.style.display = unread.length ? '' : 'none';
+            newBadge.textContent = unread.length ? unread.length + ' ny' + (unread.length === 1 ? '' : 'a') : '';
+            listHead.textContent = 'Meddelanden från arrangören';
+
+            // Only what the member could actually read counts as seen.
+            var maxVisible = shown.reduce(function (a, m) { return Math.max(a, m.id || 0); }, 0);
+            setSeen(maxVisible);
+        }
+
+        toggle.addEventListener('click', function () { expanded = !expanded; render(); });
+
+        function loadMsgs() {
+            fetch('/umbraco/surface/ParticipantMessage/GetMyMessages?competitionId=' + compId,
+                  { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    if (!j || !j.success) return;
+                    msgs = j.messages || [];   // server returns newest-first
+                    render();
+                })
+                .catch(function () { /* offline at the range — keep whatever is on screen */ });
+        }
+
+        function showOptIn() {
+            optIn.style.display = '';
+            if (window.HpskWebPush && window.HpskWebPush.isIOS) {
+                var a = document.getElementById('pnCardApple'); if (a) a.style.display = '';
+                var t = document.getElementById('pnCardTut'); if (t) t.style.display = '';
+            }
+        }
+        function decide() {
+            var api = window.HpskWebPush;
+            if (!api || !api.isSupported) { showOptIn(); return; }
+            api.getSubscription()
+               .then(function (sub) { if (!sub) showOptIn(); else optIn.style.display = 'none'; })
+               .catch(function () { showOptIn(); });
+        }
+
+        decide();
+        loadMsgs();
+        document.addEventListener('click', function (e) {
+            if (e.target && e.target.closest && e.target.closest('#webPushToggle')) setTimeout(decide, 1500);
+        });
+        // Coming back to the tab at the range should show the latest immediately, not up to 60 s later.
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) loadMsgs(); });
+        setInterval(function () { if (!document.hidden) loadMsgs(); }, 60000);
+    })();
+    </script>
+}

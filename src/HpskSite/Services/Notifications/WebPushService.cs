@@ -118,6 +118,37 @@ namespace HpskSite.Services.Notifications
         }
 
         /// <summary>
+        /// Of the given member ids, which have at least one browser registered for push — i.e. who can
+        /// actually be reached by a notification right now. One query for the whole set, because the
+        /// caller is a desk table of a few hundred rows and a per-row lookup would be N+1.
+        ///
+        /// Note this asks "is this member reachable at all", NOT "have they opted in to any particular
+        /// kind of push" — subscriptions are per-browser and hard-deleted on unsubscribe, so a row's
+        /// existence is the whole signal. ScheduleRemindersEnabled is a separate, narrower opt-in.
+        /// </summary>
+        public HashSet<int> GetMemberIdsWithSubscriptions(IEnumerable<int> memberIds)
+        {
+            var ids = memberIds?.Where(id => id > 0).Distinct().ToList() ?? new List<int>();
+            if (ids.Count == 0) return new HashSet<int>();
+
+            try
+            {
+                using var scope = _scopeProvider.CreateScope();
+                var found = scope.Database.Fetch<int>(
+                    "SELECT DISTINCT MemberId FROM WebPushSubscription WHERE MemberId IN (@0)", ids);
+                scope.Complete();
+                return found.ToHashSet();
+            }
+            catch (Exception ex)
+            {
+                // Table missing = push never provisioned here → nobody is reachable, which is the
+                // truthful answer. The indicator just stays dark rather than breaking the table.
+                _logger.LogDebug(ex, "WebPush: bulk subscription lookup failed (migration pending?)");
+                return new HashSet<int>();
+            }
+        }
+
+        /// <summary>
         /// Broadcasts a "ny träningsmatch" push to every subscriber whose MatchPref matches — mirrors the
         /// FCM rule: open match → 'OpenMatchesOnly' + 'All'; closed match → 'All' only. Skips the creator.
         /// </summary>

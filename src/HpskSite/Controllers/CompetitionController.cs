@@ -1557,6 +1557,28 @@ namespace HpskSite.Controllers
                     id => _clubService.GetClubNameById(id) ?? $"Club {id}"
                 );
 
+                // Which of these shooters can actually be reached by a push notification. One query
+                // for the whole table (a per-row lookup would be N+1 across a few hundred rows).
+                // Resolved lazily like the other notification touch-points so the controller's
+                // constructor stays untouched; a null service just leaves every indicator dark.
+                var pushEnabledMemberIds = new HashSet<int>();
+                try
+                {
+                    var webPush = HttpContext.RequestServices
+                        .GetService(typeof(HpskSite.Services.Notifications.WebPushService))
+                        as HpskSite.Services.Notifications.WebPushService;
+                    if (webPush != null)
+                    {
+                        pushEnabledMemberIds = webPush.GetMemberIdsWithSubscriptions(
+                            registrationContents.Select(c => c.GetValue<int>("memberId")));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // The desk table must render even if push is misconfigured.
+                    _logger.LogDebug(ex, "Push-reachability lookup failed for competition {CompetitionId}", competitionId);
+                }
+
                 // Now build the registrations list with pre-loaded data
                 var registrations = registrationContents
                     .Select(content =>
@@ -1671,7 +1693,10 @@ namespace HpskSite.Controllers
                             paymentSentDate = paymentSentDate,
                             paymentSentBy = paymentSentBy,
                             lastReminderSentDate = lastReminderSentDate,
-                            reminderCount = reminderCount
+                            reminderCount = reminderCount,
+                            // "Can we push to this shooter right now" — true when they have at least one
+                            // browser subscribed. Not a competition-specific opt-in; see WebPushService.
+                            hasPushSubscription = memberId > 0 && pushEnabledMemberIds.Contains(memberId)
                         };
                     })
                     .OrderBy(r => r.memberName)

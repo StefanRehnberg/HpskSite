@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly StartListHtmlRenderer _startListRenderer;
         private readonly UmbracoStartListRepository _startListRepository;
         private readonly CompetitionTeamService _teamService;
+        private readonly ConsolidatedInvoiceService _consolidatedService;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -51,7 +52,8 @@ namespace HpskSite.Controllers
             DirektplaceringStartListService dpStartListService,
             StartListHtmlRenderer startListRenderer,
             UmbracoStartListRepository startListRepository,
-            CompetitionTeamService teamService)
+            CompetitionTeamService teamService,
+            ConsolidatedInvoiceService consolidatedService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -65,6 +67,7 @@ namespace HpskSite.Controllers
             _startListRenderer = startListRenderer;
             _startListRepository = startListRepository;
             _teamService = teamService;
+            _consolidatedService = consolidatedService;
         }
 
         #region Registration Management
@@ -1253,6 +1256,420 @@ namespace HpskSite.Controllers
             {
                 return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// The four-tier desk authorization used across the Anmälningar surface: site admin,
+        /// competition manager, club admin/skjutledare of the hosting club, or — when the
+        /// competition is REGION-hosted (clubId unset, the SM shape) — a regional admin of the
+        /// organising krets. The region branch is not optional: without it an SM locks out the
+        /// very krets running it, a bug that has been fixed piecemeal several times already.
+        /// </summary>
+        private async Task<bool> CanManageCompetitionDeskAsync(IContent competition, int competitionId)
+        {
+            if (await _authService.IsCurrentUserAdminAsync()) return true;
+            if (await _authService.IsCompetitionManager(competitionId)) return true;
+
+            var clubId = competition.GetValue<int>("clubId");
+            if (clubId > 0)
+            {
+                return await _authService.IsClubAdminForClub(clubId)
+                    || await _authService.IsSkjutledareForClub(clubId);
+            }
+
+            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(regionCode))
+                return await _authService.IsRegionalAdminForRegion(regionCode);
+
+            return false;
+        }
+
+        /// <summary>
+        /// Contact + context card for one registered shooter, opened from the row's Åtgärder
+        /// menu. Answers the two questions the desk actually asks: "how do I reach this person"
+        /// and "why is this row not settled". Deliberately narrow — the Anmälningar row payload
+        /// already carries payment/reminder/class state client-side, so this returns only what
+        /// the browser cannot already see: member contact details plus the two registration
+        /// fields the list endpoint omits (registeredBy, shooterNotes).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetShooterInfo(int competitionId, int registrationId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                if (!await CanManageCompetitionDeskAsync(competition, competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet att se skyttens uppgifter." });
+
+                var registration = _contentService.GetById(registrationId);
+                if (registration == null || registration.ContentType.Alias != "competitionRegistration")
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
+
+                // A registrationId belonging to some other competition must not be readable
+                // through a competitionId this user happens to be authorized for.
+                if (registration.GetValue<int>("competitionId") != competitionId)
+                    return Json(new { success = false, message = "Anmälan hör inte till denna tävling." });
+
+                var memberId = registration.GetValue<int>("memberId");
+                var member = memberId > 0 ? _memberService.GetById(memberId) : null;
+
+                string Val(string alias) =>
+                    member != null && member.HasProperty(alias)
+                        ? (member.GetValue<string>(alias) ?? "").Trim()
+                        : "";
+
+                // Club: the registration's own clubId wins (a shooter may enter for a club other
+                // than their primary one); fall back to the member's primary club.
+                var clubName = "";
+                var regClubId = registration.GetValue<int>("clubId");
+                if (regClubId > 0)
+                    clubName = _clubService.GetClubNameById(regClubId) ?? "";
+                if (string.IsNullOrEmpty(clubName))
+                {
+                    var primary = Val("primaryClubId");
+                    if (!string.IsNullOrEmpty(primary) && int.TryParse(primary, out var pcid))
+                        clubName = _clubService.GetClubNameById(pcid) ?? "";
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    shooter = new
+                    {
+                        memberId,
+                        name = registration.GetValue<string>("memberName") ?? member?.Name ?? "",
+                        email = member?.Email ?? "",
+                        phone = Val("phoneNumber"),
+                        clubName,
+                        emergencyContactName = Val("emergencyContactName"),
+                        emergencyContactPhone = Val("emergencyContactPhone"),
+                        guardian1Name = Val("guardian1Name"),
+                        guardian1Mobile = Val("guardian1Mobile"),
+                        guardian1Email = Val("guardian1Email"),
+                        guardian2Name = Val("guardian2Name"),
+                        guardian2Mobile = Val("guardian2Mobile"),
+                        guardian2Email = Val("guardian2Email"),
+                        memberMissing = member == null
+                    },
+                    registration = new
+                    {
+                        id = registration.Id,
+                        registeredBy = registration.GetValue<string>("registeredBy") ?? "",
+                        shooterNotes = registration.GetValue<string>("shooterNotes") ?? ""
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Resolve a payment reference from a bank statement to something on the Anmälningar tab.
+        ///
+        /// Individual invoices are numbered "{competitionId}-{memberId}-{seq}" and appear on the
+        /// registration row, so the plain text search finds them. A SAMLINGSFAKTURA is numbered
+        /// "{competitionId}-club-{clubId}-{seq}" and belongs to a PARENT invoice that is not a
+        /// registration at all — the rows underneath it carry their own child numbers. So the club
+        /// reference the cashier reads off the bank receipt matches literally nothing in the table,
+        /// which is what she reported: the search silently returns no rows.
+        ///
+        /// This resolves the reference server-side and hands back the registrations the payment
+        /// covers, so pasting the bank reference lands her on exactly the rows it settles.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> LookupPaymentReference(int competitionId, string reference)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                if (!await CanManageCompetitionDeskAsync(competition, competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var wanted = (reference ?? "").Trim();
+                if (wanted.Length < 3)
+                    return Json(new { success = true, kind = "notfound" });
+
+                // A reference always starts with the competition id. When it starts with a DIFFERENT
+                // one the cashier is looking at another competition's payment — say which, rather than
+                // letting her conclude the payment has vanished.
+                var leading = wanted.Split('-').FirstOrDefault() ?? "";
+                if (int.TryParse(leading, out var refCompId) && refCompId != competitionId)
+                {
+                    var other = _contentService.GetById(refCompId);
+                    return Json(new
+                    {
+                        success = true,
+                        kind = "othercompetition",
+                        reference = wanted,
+                        otherCompetitionId = refCompId,
+                        otherCompetitionName = other?.Name ?? "",
+                        message = other != null
+                            ? $"Referensen gäller tävlingen \"{other.Name}\", inte den här."
+                            : $"Referensen gäller tävling {refCompId}, inte den här."
+                    });
+                }
+
+                var invoicesHub = _contentService.GetPagedChildren(competitionId, 0, 100, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                if (invoicesHub == null)
+                    return Json(new { success = true, kind = "notfound" });
+
+                var invoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
+                    .Where(x => x.ContentType.Alias == "registrationInvoice")
+                    .ToList();
+
+                var match = invoices.FirstOrDefault(x =>
+                    string.Equals((x.GetValue<string>("invoiceNumber") ?? "").Trim(), wanted,
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (match == null)
+                {
+                    // Before reporting nothing, look in the recycle bin. Cancelling a samlingsfaktura
+                    // only sets paymentStatus=Cancelled (CancelUnpaidParent) and leaves it under the
+                    // hub, so a trashed invoice got there by a manual delete in the backoffice. The
+                    // club has still paid against that reference, so "fakturan har raderats" is a far
+                    // more useful answer than "hittade ingen faktura" — and it is recoverable.
+                    var trashed = FindTrashedInvoiceByNumber(wanted);
+                    if (trashed != null)
+                    {
+                        return Json(new
+                        {
+                            success = true,
+                            kind = "trashed",
+                            invoiceId = trashed.Id,
+                            reference = wanted,
+                            payerName = trashed.GetValue<string>("memberName") ?? "",
+                            totalAmount = trashed.GetValue<decimal>("totalAmount"),
+                            paymentStatus = (trashed.GetValue<string>("paymentStatus") ?? "").Trim(),
+                            isConsolidated = string.Equals(
+                                (trashed.GetValue<string>("invoiceKind") ?? "").Trim(), "consolidated",
+                                StringComparison.OrdinalIgnoreCase)
+                        });
+                    }
+
+                    return Json(new { success = true, kind = "notfound" });
+                }
+
+                var kind = (match.GetValue<string>("invoiceKind") ?? "").Trim();
+                var status = (match.GetValue<string>("paymentStatus") ?? "").Trim();
+
+                if (!string.Equals(kind, "consolidated", StringComparison.OrdinalIgnoreCase))
+                {
+                    // An ordinary invoice — the row is already in the table; hand back its
+                    // registration so the client can highlight rather than report nothing found.
+                    return Json(new
+                    {
+                        success = true,
+                        kind = "individual",
+                        invoiceId = match.Id,
+                        reference = wanted,
+                        memberName = match.GetValue<string>("memberName") ?? "",
+                        registrationId = match.GetValue<int>("registrationId"),
+                        paymentStatus = status,
+                        totalAmount = match.GetValue<decimal>("totalAmount")
+                    });
+                }
+
+                // Samlingsfaktura: walk parent → covered child invoices → what each one settles.
+                //
+                // A child is NOT necessarily an individual registration. Team/stafett invoices carry
+                // memberId "team-{teamId}" and live in the Lag card, not the individuals table — a real
+                // samlingsfaktura on the SM seed covers seven of them and zero registrations. Splitting
+                // the ids here is what stops the client claiming "shows the 7 anmälningar" over an
+                // empty table. `registrationId` alone can't be trusted for this: team invoices carry a
+                // non-zero value in it that is not a registration node id.
+                var coveredInvoiceIds = _consolidatedService.ReadCoveredIds(match);
+                var byId = invoices.ToDictionary(x => x.Id);
+                var registrationIds = new List<int>();
+                var teamIds = new List<int>();
+                var otherCount = 0;
+                var children = new List<object>();
+                foreach (var childId in coveredInvoiceIds)
+                {
+                    if (!byId.TryGetValue(childId, out var child)) continue;
+
+                    var childMemberId = (child.GetValue<string>("memberId") ?? "").Trim();
+                    var regId = child.GetValue<int>("registrationId");
+                    string target;
+                    int teamId = 0;
+
+                    if (childMemberId.StartsWith("team-", StringComparison.OrdinalIgnoreCase)
+                        && int.TryParse(childMemberId.Substring(5), out teamId) && teamId > 0)
+                    {
+                        target = "team";
+                        teamIds.Add(teamId);
+                    }
+                    else if (regId > 0)
+                    {
+                        target = "registration";
+                        registrationIds.Add(regId);
+                    }
+                    else
+                    {
+                        target = "other";
+                        otherCount++;
+                    }
+
+                    children.Add(new
+                    {
+                        invoiceId = child.Id,
+                        invoiceNumber = child.GetValue<string>("invoiceNumber") ?? "",
+                        memberName = child.GetValue<string>("memberName") ?? "",
+                        target,
+                        registrationId = target == "registration" ? regId : 0,
+                        teamId,
+                        amount = child.GetValue<decimal>("totalAmount"),
+                        paymentStatus = (child.GetValue<string>("paymentStatus") ?? "").Trim()
+                    });
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    kind = "consolidated",
+                    invoiceId = match.Id,
+                    reference = wanted,
+                    payerName = match.GetValue<string>("memberName") ?? "",
+                    payerClubId = match.GetValue<string>("payerClubId") ?? "",
+                    totalAmount = match.GetValue<decimal>("totalAmount"),
+                    paymentStatus = status,
+                    coveredCount = coveredInvoiceIds.Count,
+                    registrationIds,
+                    teamIds,
+                    otherCount,
+                    children
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Find a deleted invoice by its number in the recycle bin. Only ever called on the
+        /// not-found path, so the bin scan costs nothing on the normal lookup. Capped, and
+        /// swallowing failures, because this is a nicety on top of an already-answered question.
+        /// </summary>
+        private IContent? FindTrashedInvoiceByNumber(string invoiceNumber)
+        {
+            bool Matches(IContent x) =>
+                x.ContentType.Alias == "registrationInvoice"
+                && string.Equals((x.GetValue<string>("invoiceNumber") ?? "").Trim(), invoiceNumber,
+                    StringComparison.OrdinalIgnoreCase);
+
+            try
+            {
+                // Deleted content sits directly under the recycle-bin root, and GetPagedDescendants
+                // does NOT resolve against that system node — it returns nothing. GetPagedChildren
+                // does. Descendants is still worth a second pass for the nested case (a deleted
+                // invoice HUB carries its invoices down with it, one level deeper).
+                var binned = _contentService.GetPagedChildren(
+                    Umbraco.Cms.Core.Constants.System.RecycleBinContent, 0, 2000, out _);
+                var hit = binned.FirstOrDefault(Matches);
+                if (hit != null) return hit;
+
+                foreach (var node in binned.Where(n => n.ContentType.Alias != "registrationInvoice"))
+                {
+                    var nested = _contentService.GetPagedChildren(node.Id, 0, 2000, out _)
+                        .FirstOrDefault(Matches);
+                    if (nested != null) return nested;
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                // No logger on this controller; the caller already has a correct answer either way.
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Restore a deleted invoice back under its competition's invoice hub, so a payment that
+        /// arrived against a since-deleted reference can be settled instead of re-keyed by hand.
+        ///
+        /// Deliberately narrow: the invoice must be in the recycle bin AND its number must belong to
+        /// the competition the caller is authorised for, so this can never be used to pull arbitrary
+        /// content out of the bin.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RestoreDeletedInvoice([FromBody] RestoreInvoiceRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.InvoiceId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                if (!await CanManageCompetitionDeskAsync(competition, request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var invoice = _contentService.GetById(request.InvoiceId);
+                if (invoice == null || invoice.ContentType.Alias != "registrationInvoice")
+                    return Json(new { success = false, message = "Fakturan hittades inte." });
+
+                if (!invoice.Trashed)
+                    return Json(new { success = false, message = "Fakturan ligger inte i papperskorgen." });
+
+                // The invoice number carries the competition it belongs to. Without this check the
+                // endpoint would restore any deleted invoice to any competition the caller manages.
+                var number = (invoice.GetValue<string>("invoiceNumber") ?? "").Trim();
+                if (!number.StartsWith($"{request.CompetitionId}-", StringComparison.OrdinalIgnoreCase))
+                    return Json(new { success = false, message = "Fakturan hör inte till den här tävlingen." });
+
+                var hub = _contentService.GetPagedChildren(request.CompetitionId, 0, 100, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                if (hub == null)
+                    return Json(new { success = false, message = "Tävlingen saknar fakturamapp att återställa till." });
+
+                var moved = _contentService.Move(invoice, hub.Id);
+                if (!moved.Success)
+                    return Json(new { success = false, message = "Kunde inte återställa fakturan." });
+
+                var (actorId, actorName) = (0, "");
+                try
+                {
+                    var current = await _memberManager.GetCurrentMemberAsync();
+                    var md = current != null ? _memberService.GetByEmail(current.Email ?? "") : null;
+                    if (md != null) { actorId = md.Id; actorName = md.Name ?? ""; }
+                }
+                catch { /* attribution is best-effort */ }
+
+                _ = _auditService.LogAsync(
+                    invoiceId: invoice.Id,
+                    competitionId: request.CompetitionId,
+                    eventType: HpskSite.Models.InvoicePaymentEventTypes.StatusChanged,
+                    byMemberId: actorId,
+                    byMemberName: actorName,
+                    paymentMethod: null,
+                    amount: null,
+                    reference: number,
+                    notes: "Fakturan återställd från papperskorgen");
+
+                return Json(new { success = true, invoiceNumber = number });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        public class RestoreInvoiceRequest
+        {
+            public int CompetitionId { get; set; }
+            public int InvoiceId { get; set; }
         }
 
         /// <summary>

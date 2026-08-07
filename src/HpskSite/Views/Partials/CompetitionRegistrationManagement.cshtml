@@ -227,6 +227,7 @@
                     </label>
                     <input type="text" class="form-control" id="competitionRegistrationSearch"
                            placeholder="Namn, klubb, referens"
+                           title="Sök på namn, klubb eller betalningsreferens. Klistra in referensen från banken — även en samlingsfaktura (…-club-…), då visas alla anmälningar som betalningen täcker."
                            oninput="filterCompetitionRegistrations()" autocomplete="off">
                 </div>
                 <div class="col-xl-2 col-lg-4 col-md-6">
@@ -313,6 +314,10 @@
                 <button class="btn btn-outline-danger" onclick="loadCompetitionRegistrations()">Försök igen</button>
             </div>
 
+            <!-- Resolved payment reference (samlingsfaktura / wrong competition / unknown ref).
+                 Sits above the table because it explains what the table is currently showing. -->
+            <div id="paymentRefBanner" class="alert d-none py-2"></div>
+
             <!-- Registrations Table -->
             <div id="competitionRegistrationsTableContainer" class="d-none">
                 <div class="table-responsive">
@@ -325,8 +330,9 @@
                                 <th id="subCompColHeader" class="sortable-col" style="display:none; cursor:pointer;" onclick="sortCompetitionRegistrations('isSubCompetition')">Deltävling <span class="sort-ind" data-sort="isSubCompetition"></span></th>
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('registrationDate')">Anmälningsdatum <span class="sort-ind" data-sort="registrationDate"></span></th>
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('paymentStatus')">Status <span class="sort-ind" data-sort="paymentStatus"></span></th>
-                                <th>Närvaro</th>
-                                <th>Åtgärder</th>
+                                <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('isCheckedIn')">Närvaro <span class="sort-ind" data-sort="isCheckedIn"></span></th>
+                                <th class="sortable-col text-center" style="cursor:pointer;" title="Kan nås med push-notis" onclick="sortCompetitionRegistrations('hasPushSubscription')">Notis <span class="sort-ind" data-sort="hasPushSubscription"></span></th>
+                                <th class="text-end">Åtgärder</th>
                             </tr>
                         </thead>
                         <tbody id="competitionRegistrationsTableBody">
@@ -371,7 +377,7 @@
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('clubName')">Klubb <span class="team-sort-ind" data-sort="clubName"></span></th>
                                 <th>Deltagare</th>
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('paymentStatus')">Status <span class="team-sort-ind" data-sort="paymentStatus"></span></th>
-                                <th>Åtgärder</th>
+                                <th class="text-end">Åtgärder</th>
                             </tr>
                         </thead>
                         <tbody id="competitionTeamsTableBody"></tbody>
@@ -1083,6 +1089,76 @@
     </div>
 </div>
 
+<!-- Send a notis to ONE shooter (Åtgärder → "Skicka notis…"). Reuses the same pipeline as the
+     "Meddela deltagare" tab — ParticipantMessage/SendToParticipants with the Person scope — so the
+     message is logged as an EventMessage and appears in the shooter's in-app list on the competition
+     page whether or not their phone can be pushed. -->
+<div class="modal fade" id="sendNoticeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-broadcast me-2"></i>Skicka notis</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">Till: <strong id="sendNoticeName"></strong></p>
+                <div id="sendNoticeReach" class="small mb-3"></div>
+                <div class="mb-3">
+                    <label for="sendNoticeUrgency" class="form-label">Typ</label>
+                    <select class="form-select" id="sendNoticeUrgency">
+                        <option value="Normal" selected>Normal</option>
+                        <option value="Urgent">Viktigt</option>
+                        <option value="Safety">Säkerhet</option>
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label for="sendNoticeBody" class="form-label">Meddelande</label>
+                    <textarea class="form-control" id="sendNoticeBody" rows="4" maxlength="2000"
+                              placeholder="T.ex. Din betalning saknas – hör av dig vid sekretariatet."></textarea>
+                </div>
+                <div id="sendNoticeError" class="alert alert-danger d-none py-2 mb-0"></div>
+                <div id="sendNoticeOk" class="alert alert-success d-none py-2 mb-0"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="sendNoticeSubmit" onclick="confirmSendNotice()">
+                    <i class="bi bi-send me-1"></i>Skicka
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Shooter info card (Åtgärder → "Visa skytt"). Read-only by design: it answers
+     "how do I reach this person" and "why is this row not settled" without the operator
+     leaving the Anmälningar tab for the member register. Contact details are rendered as
+     tel:/mailto: links so a phone at the desk can dial straight from the row. -->
+<div class="modal fade" id="shooterInfoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-person-vcard me-2"></i><span id="shooterInfoTitle">Skytt</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="shooterInfoLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar…</span></div>
+                </div>
+                <div id="shooterInfoError" class="alert alert-danger d-none"></div>
+                <div id="shooterInfoBody" class="d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary me-auto d-none" id="shooterInfoEditBtn">
+                    <i class="bi bi-pencil me-1"></i>Redigera anmälan
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // ── Timestamps ────────────────────────────────────────────────────────────
 // Timestamps come off the wire WITHOUT a timezone designator ("2026-08-05T18:15:48"),
@@ -1182,6 +1258,12 @@ function applyCompetitionSort() {
                 return (a.memberClub || '').localeCompare(b.memberClub || '', 'sv') * dir;
             case 'isSubCompetition':
                 return ((a.isSubCompetition ? 1 : 0) - (b.isSubCompetition ? 1 : 0)) * dir;
+            // Both boolean columns sort false-first ascending, so one click groups the shooters
+            // the desk needs to chase — not yet checked in, or unreachable by push — together.
+            case 'isCheckedIn':
+                return ((a.isCheckedIn ? 1 : 0) - (b.isCheckedIn ? 1 : 0)) * dir;
+            case 'hasPushSubscription':
+                return ((a.hasPushSubscription ? 1 : 0) - (b.hasPushSubscription ? 1 : 0)) * dir;
             case 'registrationDate':
                 return ((new Date(a.registrationDate).getTime() || 0) - (new Date(b.registrationDate).getTime() || 0)) * dir;
             case 'paymentStatus':
@@ -1380,6 +1462,16 @@ function filterCompetitionTeams(teams) {
     const clubFilter = document.getElementById('competitionClubFilter')?.value || '';
     const paymentFilter = document.getElementById('competitionPaymentFilter')?.value || '';
     const searchTerm = (document.getElementById('competitionRegistrationSearch')?.value || '').trim().toLowerCase();
+
+    // A resolved samlingsfaktura reference wins here too — it can cover lag as well as individual
+    // registrations (often both), and the raw reference text matches no team's name or roster, so
+    // without this the Lag card would empty out exactly when it holds what the payment settles.
+    if (consolidatedRefTeamIds) {
+        return consolidatedRefTeamIds.size > 0
+            ? teams.filter(t => consolidatedRefTeamIds.has(t.id))
+            : [];
+    }
+
     if (!clubFilter && !paymentFilter && !searchTerm) return teams;
 
     return teams.filter(t => {
@@ -1465,18 +1557,22 @@ function renderCompetitionTeams() {
             : '<span class="text-muted fst-italic">Ej valda än</span>';
         const statusBadge = `<span class="badge ${getPaymentStatusBadgeClass(t.paymentStatus)}">${getPaymentStatusText(t.paymentStatus)}</span>`;
 
-        // Mirror the individual rows' Åtgärder exactly: Redigera (rename) + Hantera betalning +
-        // Markera som betald (only when Pending) + Betalningshistorik (when an invoice exists),
-        // with the destructive Ta bort pinned to the right so it stays in a fixed position.
+        // Mirror the individual rows' Åtgärder menu exactly — same items, same order, same
+        // divider placement, delete last and named in full. A team row that still looked like
+        // the old icon strip while the shooter rows above it were menus would be worse than
+        // either style applied consistently. No "Visa skytt" here: a team has no one member.
         const nameArg = JSON.stringify(t.teamName).replace(/"/g, '&quot;');
-        const editBtn = `<button class="btn btn-sm btn-outline-primary" onclick="editTeam(${t.id})" title="Redigera lag — namn och deltagare"><i class="bi bi-pencil"></i></button>`;
-        const walletBtn = (t.paymentStatus !== 'No Fee')
-            ? `<button class="btn btn-sm btn-outline-success" onclick="showPaymentOptionsForTeam(${t.id})" title="Hantera betalning"><i class="bi bi-wallet2"></i></button>`
+        const editItem = `<li><button class="dropdown-item" type="button" onclick="editTeam(${t.id})"><i class="bi bi-pencil me-2 text-primary"></i>Redigera lag – namn och deltagare</button></li>`;
+        const walletItem = (t.paymentStatus !== 'No Fee')
+            ? `<li><button class="dropdown-item" type="button" onclick="showPaymentOptionsForTeam(${t.id})"><i class="bi bi-wallet2 me-2 text-success"></i>Hantera betalning</button></li>`
             : '';
-        const markBtn = (t.paymentStatus === 'Pending')
-            ? `<button class="btn btn-sm btn-success" onclick="markTeamAsPaid(${t.id})" title="Markera som betald"><i class="bi bi-check-circle"></i></button>`
+        const markItem = (t.paymentStatus === 'Pending')
+            ? `<li><button class="dropdown-item fw-semibold" type="button" onclick="markTeamAsPaid(${t.id})"><i class="bi bi-check-circle me-2 text-success"></i>Markera som betald</button></li>`
             : '';
-        const histBtn = renderHistoryButton(t.invoiceId, nameArg, t.lastReminderSentDate, t.reminderCount);
+        const histItem = renderHistoryMenuItem(t.invoiceId, nameArg, t.lastReminderSentDate, t.reminderCount);
+        const payItems = (markItem || walletItem || histItem)
+            ? `<li><hr class="dropdown-divider"></li>${markItem}${walletItem}${histItem}`
+            : '';
 
         return `<tr>
             <td><strong>${escapeHtmlSafe(t.teamName)}</strong></td>
@@ -1485,12 +1581,23 @@ function renderCompetitionTeams() {
             <td style="font-size:0.85em; max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtmlSafe(t.clubName || '')}">${escapeHtmlSafe(shortenClubName(t.clubName || ''))}</td>
             <td class="small">${members}</td>
             <td>${statusBadge}</td>
-            <td>
-                <div class="d-flex justify-content-between align-items-center gap-1">
-                    <div class="d-flex gap-1">${editBtn}${walletBtn}${markBtn}${histBtn}</div>
-                    <button class="btn btn-sm btn-outline-danger" onclick="confirmDeleteTeam(${t.id})" title="Ta bort laget">
-                        <i class="bi bi-trash"></i>
+            <td class="text-end">
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                            data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                            aria-expanded="false" title="Åtgärder för ${escapeHtmlSafe(t.teamName)}">
+                        <i class="bi bi-sliders me-2"></i>Åtgärder
                     </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        ${editItem}
+                        ${payItems}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <button class="dropdown-item text-danger" type="button" onclick="confirmDeleteTeam(${t.id})">
+                                <i class="bi bi-trash me-2"></i>Ta bort laget
+                            </button>
+                        </li>
+                    </ul>
                 </div>
             </td>
         </tr>`;
@@ -1503,22 +1610,290 @@ function escapeHtmlSafe(s) {
     return d.innerHTML;
 }
 
-// Build the "Betalningshistorik" button. When a payment reminder has already gone out for
-// this invoice we tint the button (info instead of the neutral secondary) and spell out
-// when / how many times in the tooltip, so the operator can tell at a glance who has
-// already been chased before opening the full history. `nameArg` is the member/team name
-// pre-stringified + &quot;-escaped by the caller (passed straight into the onclick).
-function renderHistoryButton(invoiceId, nameArg, lastReminderSentDate, reminderCount) {
+// Build the "Betalningshistorik" item for a row's Åtgärder menu. No invoice, no item.
+// When a payment reminder has already gone out we tint the icon and say the count out loud
+// in the label rather than hiding it in a tooltip — when the operator is chasing an unpaid
+// entry, "already reminded 3 times" is the thing they need to see without hovering.
+// `nameArg` is the member/team name pre-stringified + &quot;-escaped by the caller
+// (passed straight into the onclick).
+function renderHistoryMenuItem(invoiceId, nameArg, lastReminderSentDate, reminderCount) {
     if (!invoiceId) return '';
-    let cls = 'btn-outline-secondary';
-    let title = 'Visa betalningshistorik';
+    let label = 'Betalningshistorik';
+    let icon = 'text-secondary';
     if (lastReminderSentDate) {
-        cls = 'btn-outline-info';
-        const when = formatUtcDateTime(lastReminderSentDate);
         const n = reminderCount || 1;
-        title = `Påminnelse skickad ${when}${n > 1 ? ` (${n} st)` : ''} – visa betalningshistorik`;
+        label = `Betalningshistorik – påmind ${n} ${n > 1 ? 'gånger' : 'gång'}`;
+        icon = 'text-info';
     }
-    return `<button class="btn btn-sm ${cls}" onclick="showInvoiceHistory(${invoiceId}, ${nameArg})" title="${title.replace(/"/g, '&quot;')}"><i class="bi bi-clock-history"></i></button>`;
+    return `<li>
+        <button class="dropdown-item" type="button" onclick="showInvoiceHistory(${invoiceId}, ${nameArg})">
+            <i class="bi bi-clock-history me-2 ${icon}"></i>${escapeHtmlSafe(label)}
+        </button>
+    </li>`;
+}
+
+// ── Send a notis to one shooter ───────────────────────────────────────────
+// Reuses ParticipantMessage/SendToParticipants with the Person scope, which already exists for
+// the "Meddela deltagare" tab. Nothing new server-side: same audit trail, same in-app inbox,
+// same push fan-out — just an audience of one.
+let sendNoticeMemberId = 0;
+
+function openSendNoticeModal(registrationId) {
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
+    if (!reg) { alert('Anmälan kunde inte hittas.'); return; }
+
+    sendNoticeMemberId = reg.memberId;
+    document.getElementById('sendNoticeName').textContent = reg.memberName || '';
+    document.getElementById('sendNoticeBody').value = '';
+    document.getElementById('sendNoticeUrgency').value = 'Normal';
+    document.getElementById('sendNoticeError').classList.add('d-none');
+    document.getElementById('sendNoticeOk').classList.add('d-none');
+    document.getElementById('sendNoticeSubmit').disabled = false;
+
+    // Be explicit about what will actually happen — a dark antenna does not mean "cannot send".
+    document.getElementById('sendNoticeReach').innerHTML = reg.hasPushSubscription
+        ? '<span class="text-success"><i class="bi bi-broadcast me-1"></i>Skytten har en enhet registrerad — notisen når mobilen direkt.</span>'
+        : '<span class="text-muted"><i class="bi bi-broadcast me-1"></i>Ingen enhet registrerad för push. Meddelandet sparas ändå och syns på tävlingssidan när skytten loggar in — men mobilen plingar inte.</span>';
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('sendNoticeModal')).show();
+}
+
+async function confirmSendNotice() {
+    const body = document.getElementById('sendNoticeBody').value.trim();
+    const errBox = document.getElementById('sendNoticeError');
+    const okBox = document.getElementById('sendNoticeOk');
+    const btn = document.getElementById('sendNoticeSubmit');
+
+    errBox.classList.add('d-none');
+    okBox.classList.add('d-none');
+
+    if (!body) {
+        errBox.textContent = 'Skriv ett meddelande först.';
+        errBox.classList.remove('d-none');
+        return;
+    }
+    if (!sendNoticeMemberId) {
+        errBox.textContent = 'Skytten saknar medlems-id — notis kan inte skickas.';
+        errBox.classList.remove('d-none');
+        return;
+    }
+
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar…';
+
+    try {
+        const competitionId = $('.competition-registration-management').data('competition-id');
+        const resp = await fetch('/umbraco/surface/ParticipantMessage/SendToParticipants', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({
+                competitionId: competitionId,
+                scopeType: 'Person',
+                scopeKey: String(sendNoticeMemberId),
+                body: body,
+                urgency: document.getElementById('sendNoticeUrgency').value
+            })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            okBox.textContent = data.recipientCount > 0
+                ? 'Notisen är skickad.'
+                : 'Ingen mottagare hittades — kontrollera att skytten fortfarande är anmäld.';
+            okBox.classList.remove('d-none');
+            btn.innerHTML = original;
+            setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('sendNoticeModal'))?.hide(), 1200);
+            return;
+        }
+        errBox.textContent = data.message || 'Notisen kunde inte skickas.';
+    } catch (e) {
+        errBox.textContent = 'Notisen kunde inte skickas. Kontrollera nätverket.';
+    }
+
+    errBox.classList.remove('d-none');
+    btn.disabled = false;
+    btn.innerHTML = original;
+}
+
+// ── Shooter info card ─────────────────────────────────────────────────────
+// Opened from the row's Åtgärder menu. Everything about payment, classes and check-in is
+// ALREADY in the row object the table was rendered from, so the round-trip fetches only the
+// contact details the browser has never seen. That keeps the modal fast on a phone at the
+// desk and keeps the endpoint small.
+
+function shooterInfoRow(label, value, opts) {
+    if (!value) return '';
+    const o = opts || {};
+    const shown = o.html ? value : escapeHtmlSafe(value);
+    return `<div class="row g-0 py-1 border-bottom">
+        <div class="col-5 col-sm-4 text-muted small">${escapeHtmlSafe(label)}</div>
+        <div class="col-7 col-sm-8">${shown}</div>
+    </div>`;
+}
+
+function shooterInfoTel(number) {
+    if (!number) return '';
+    const clean = String(number).replace(/[^\d+]/g, '');
+    return `<a href="tel:${encodeURIComponent(clean)}">${escapeHtmlSafe(number)}</a>`;
+}
+
+function shooterInfoMail(addr) {
+    if (!addr) return '';
+    return `<a href="mailto:${encodeURIComponent(addr)}">${escapeHtmlSafe(addr)}</a>`;
+}
+
+function shooterInfoMoney(n) {
+    const v = Number(n || 0);
+    return `${v.toLocaleString('sv-SE', { maximumFractionDigits: 2 })} kr`;
+}
+
+async function showShooterInfo(registrationId) {
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
+
+    const modalEl = document.getElementById('shooterInfoModal');
+    const loading = document.getElementById('shooterInfoLoading');
+    const errBox = document.getElementById('shooterInfoError');
+    const body = document.getElementById('shooterInfoBody');
+    const editBtn = document.getElementById('shooterInfoEditBtn');
+
+    document.getElementById('shooterInfoTitle').textContent = reg ? reg.memberName : 'Skytt';
+    loading.classList.remove('d-none');
+    errBox.classList.add('d-none');
+    body.classList.add('d-none');
+    body.innerHTML = '';
+    editBtn.classList.add('d-none');
+
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    let info = null;
+    try {
+        // currentCompetitionId is a const scoped inside loadCompetitionRegistrations, not a
+        // global — read the same source it does.
+        const competitionId = $('.competition-registration-management').data('competition-id');
+        const resp = await fetch(
+            `/umbraco/surface/RegistrationAdmin/GetShooterInfo?competitionId=${competitionId}&registrationId=${registrationId}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        info = await resp.json();
+    } catch (e) {
+        info = { success: false, message: 'Kunde inte hämta uppgifterna. Kontrollera nätverket.' };
+    }
+
+    loading.classList.add('d-none');
+
+    if (!info || !info.success) {
+        errBox.textContent = (info && info.message) || 'Kunde inte hämta uppgifterna.';
+        errBox.classList.remove('d-none');
+        return;
+    }
+
+    const s = info.shooter || {};
+    const r = info.registration || {};
+
+    // ── Kontakt ──
+    let contact = '';
+    contact += shooterInfoRow('Klubb', s.clubName || (reg ? reg.memberClub : ''));
+    contact += shooterInfoRow('Telefon', shooterInfoTel(s.phone), { html: true });
+    contact += shooterInfoRow('E-post', shooterInfoMail(s.email), { html: true });
+    if (reg) {
+        contact += shooterInfoRow('Push-notis', reg.hasPushSubscription
+            ? '<span class="text-success"><i class="bi bi-broadcast me-1"></i>Enhet registrerad</span>'
+            : '<span class="text-muted"><i class="bi bi-broadcast me-1"></i>Ingen enhet – notis syns bara i appen</span>',
+            { html: true });
+    }
+    if (!s.phone && !s.email) {
+        contact += `<div class="alert alert-warning mb-0 mt-2 py-2 small">
+            <i class="bi bi-exclamation-triangle me-1"></i>Inga kontaktuppgifter registrerade på medlemmen.
+        </div>`;
+    }
+
+    // ── Målsman / anhörig — only rendered when something is on file ──
+    let nextOfKin = '';
+    nextOfKin += shooterInfoRow('Närmast anhörig', s.emergencyContactName);
+    nextOfKin += shooterInfoRow('Anhörig, telefon', shooterInfoTel(s.emergencyContactPhone), { html: true });
+    nextOfKin += shooterInfoRow('Målsman 1', s.guardian1Name);
+    nextOfKin += shooterInfoRow('Målsman 1, telefon', shooterInfoTel(s.guardian1Mobile), { html: true });
+    nextOfKin += shooterInfoRow('Målsman 1, e-post', shooterInfoMail(s.guardian1Email), { html: true });
+    nextOfKin += shooterInfoRow('Målsman 2', s.guardian2Name);
+    nextOfKin += shooterInfoRow('Målsman 2, telefon', shooterInfoTel(s.guardian2Mobile), { html: true });
+    nextOfKin += shooterInfoRow('Målsman 2, e-post', shooterInfoMail(s.guardian2Email), { html: true });
+
+    // ── Anmälan ── (from the row object the table already holds)
+    let entry = '';
+    if (reg) {
+        const classNames = (reg.shootingClasses || []).map(sc => {
+            const id = sc.class || sc.className || '';
+            const norm = normalizeShootingClass(id);
+            const disp = window.formatAgeSpan ? window.formatAgeSpan(norm) : norm;
+            return `<span class="badge bg-primary me-1">${escapeHtmlSafe(disp)}</span>`;
+        }).join('');
+        entry += shooterInfoRow('Klasser', classNames || '<span class="text-muted">—</span>', { html: true });
+        entry += shooterInfoRow('Anmäld', formatServerLocalDateTime(reg.registrationDate));
+        entry += shooterInfoRow('Incheckad', reg.isCheckedIn
+            ? '<span class="badge bg-success">Ja</span>'
+            : '<span class="badge bg-secondary">Nej</span>', { html: true });
+        if (competitionSubCompetitionName) {
+            entry += shooterInfoRow(competitionSubCompetitionName, reg.isSubCompetition ? 'Ja' : 'Nej');
+        }
+    }
+    entry += shooterInfoRow('Anmäld av', r.registeredBy);
+    entry += shooterInfoRow('Skyttens meddelande', r.shooterNotes);
+
+    // ── Betalning ── the "why is this not settled" half
+    let pay = '';
+    if (reg) {
+        pay += shooterInfoRow('Status',
+            `<span class="badge ${getPaymentStatusBadgeClass(reg.paymentStatus)}">${getPaymentStatusText(reg.paymentStatus)}</span>`,
+            { html: true });
+        pay += shooterInfoRow('Fakturanummer', reg.invoiceNumber);
+        pay += shooterInfoRow('Att betala', shooterInfoMoney(reg.paymentAmount));
+        if (Number(reg.paidAmount) > 0) pay += shooterInfoRow('Betalt', shooterInfoMoney(reg.paidAmount));
+        if (Number(reg.pendingAmount) > 0) pay += shooterInfoRow('Utestående', shooterInfoMoney(reg.pendingAmount));
+        if (reg.hasVariance) {
+            pay += shooterInfoRow('Avvikelse',
+                '<span class="badge bg-warning text-dark">Faktiskt belopp avviker från fakturan</span>', { html: true });
+        }
+        if (reg.paymentSentDate && reg.paymentStatus !== 'Paid') {
+            pay += shooterInfoRow('Betalning anmäld',
+                `${escapeHtmlSafe(formatUtcDateTime(reg.paymentSentDate))}${reg.paymentSentBy ? ' av ' + escapeHtmlSafe(reg.paymentSentBy) : ''}
+                 <div class="small text-muted">Betalaren uppger att betalning är gjord — bekräfta när den är mottagen.</div>`,
+                { html: true });
+        }
+        // The single most useful answer to "why hasn't this person paid": often nobody asked.
+        if (reg.lastReminderSentDate) {
+            const n = reg.reminderCount || 1;
+            pay += shooterInfoRow('Påminnelser',
+                `${n} st – senast ${escapeHtmlSafe(formatUtcDateTime(reg.lastReminderSentDate))}`, { html: true });
+        } else if (reg.paymentStatus === 'Pending') {
+            pay += shooterInfoRow('Påminnelser',
+                '<span class="text-danger">Ingen påminnelse skickad</span>', { html: true });
+        }
+    }
+
+    const section = (title, icon, content) => content
+        ? `<h6 class="text-uppercase text-muted small mt-3 mb-2"><i class="bi bi-${icon} me-1"></i>${title}</h6>${content}`
+        : '';
+
+    body.innerHTML =
+        (s.memberMissing
+            ? `<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle me-1"></i>
+                 Medlemsposten kunde inte hittas — anmälan finns kvar men medlemmen kan vara borttagen.</div>`
+            : '')
+        + section('Kontakt', 'telephone', contact)
+        + section('Målsman & närmast anhörig', 'people', nextOfKin)
+        + section('Anmälan', 'card-checklist', entry)
+        + section('Betalning', 'wallet2', pay);
+
+    body.classList.remove('d-none');
+
+    // Hand off to the editor without making the operator find the row again.
+    editBtn.classList.remove('d-none');
+    editBtn.onclick = () => {
+        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+        editCompetitionRegistration(registrationId);
+    };
 }
 
 // Edit a team from the desk = rename it. The full roster editor lives on the public
@@ -1784,6 +2159,16 @@ async function openMarkAsPaidForTeam(team) {
     markPaidModalInstance.show();
 }
 
+// ── Payment-reference lookup ──────────────────────────────────────────────
+// While a samlingsfaktura reference is resolved these hold what it settles; null otherwise.
+// Registrations and teams are tracked separately because a samlingsfaktura may cover either or
+// both — one on the SM seed covers seven LAG and zero individual registrations.
+let consolidatedRefRegistrationIds = null;   // Set<registrationId> | null
+let consolidatedRefTeamIds = null;           // Set<teamId> | null
+let consolidatedRefTerm = '';                // the search term this resolution belongs to
+let paymentRefLookupTimer = null;
+let paymentRefLastTerm = '';
+
 function filterCompetitionRegistrations() {
     const selectedClasses = getSelectedCompetitionClasses();
     const clubFilter = document.getElementById('competitionClubFilter').value;
@@ -1804,6 +2189,14 @@ function filterCompetitionRegistrations() {
         const matchesCheckedIn = !checkedInFilter
             || (checkedInFilter === 'in' && reg.isCheckedIn === true)
             || (checkedInFilter === 'out' && !reg.isCheckedIn);
+
+        // A resolved samlingsfaktura reference wins over text matching: the club's payment covers a
+        // specific set of registrations, and those are exactly the rows the cashier needs to see.
+        // The parent's own number appears on NO row (rows carry their own child invoice numbers),
+        // so text search can never find it — see resolvePaymentReference below.
+        if (consolidatedRefRegistrationIds) {
+            return consolidatedRefRegistrationIds.has(reg.id);
+        }
 
         // Free-text search against name, club, and Swish reference (invoice number).
         // Substring match so partial pastes from a Swish notification still hit.
@@ -1832,6 +2225,234 @@ function filterCompetitionRegistrations() {
     // individuals to one row while all 55 teams stayed on screen. Re-render it here so
     // Sök / Klubb / Betalstatus reach both lists from the one set of inputs.
     renderCompetitionTeams();
+
+    maybeResolvePaymentReference(searchTerm);
+}
+
+// A search that finds nothing is the signal to ask the server what the term means. Only then —
+// so ordinary name searches never cost a request, and the lookup can't fire on every keystroke
+// of someone typing a shooter's name.
+function maybeResolvePaymentReference(searchTerm) {
+    const term = (searchTerm || '').trim();
+
+    // A resolution belongs to the term it was made for. Without this the banner and the row filter
+    // stick on the first reference for the rest of the session: typing a second reference kept
+    // showing the first one's club, total and rows.
+    if (consolidatedRefRegistrationIds && term !== consolidatedRefTerm) {
+        consolidatedRefRegistrationIds = null;
+        consolidatedRefTeamIds = null;
+        consolidatedRefTerm = '';
+        hidePaymentRefBanner();
+        filterCompetitionRegistrations();   // re-run now that the reference filter is gone
+        return;
+    }
+
+    if (!term) {
+        if (consolidatedRefRegistrationIds) { clearPaymentReference(false); }
+        hidePaymentRefBanner();
+        paymentRefLastTerm = '';
+        return;
+    }
+    if (consolidatedRefRegistrationIds) return;          // current term already resolved
+    if (filteredCompetitionRegistrations.length > 0) { hidePaymentRefBanner(); paymentRefLastTerm = term; return; }
+    if (term === paymentRefLastTerm) return;             // already asked about this exact term
+    if (term.length < 4 || !term.includes('-')) { hidePaymentRefBanner(); return; }
+
+    clearTimeout(paymentRefLookupTimer);
+    paymentRefLookupTimer = setTimeout(() => resolvePaymentReference(term), 350);
+}
+
+async function resolvePaymentReference(term) {
+    paymentRefLastTerm = term;
+    try {
+        const competitionId = $('.competition-registration-management').data('competition-id');
+        const resp = await fetch(
+            `/umbraco/surface/RegistrationAdmin/LookupPaymentReference?competitionId=${competitionId}&reference=${encodeURIComponent(term)}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const data = await resp.json();
+        if (!data || !data.success) return;
+
+        // The user may have kept typing while this was in flight.
+        const current = (document.getElementById('competitionRegistrationSearch')?.value || '').trim();
+        if (current !== term) return;
+
+        if (data.kind === 'consolidated') {
+            // Only keep ids that correspond to rows we can actually show, so the banner's counts
+            // and the tables agree. A covered invoice with no row here (already-deleted
+            // registration, or an unexpected shape) is reported rather than quietly dropped.
+            const knownRegIds = new Set(competitionRegistrations.map(r => r.id));
+            const matchedRegs = (data.registrationIds || []).filter(id => knownRegIds.has(id));
+            const knownTeamIds = new Set((competitionTeams || []).map(t => t.id));
+            const matchedTeams = (data.teamIds || []).filter(id => knownTeamIds.has(id));
+
+            // Both tables are filtered to exactly what the payment settles, even when one side is
+            // empty. Leaving the individuals table showing all 61 shooters while the payment covers
+            // 7 lag would bury the answer in noise; an empty table plus a banner that says where the
+            // rows actually are is clearer. The banner always names both counts.
+            consolidatedRefTerm = term;
+            consolidatedRefTeamIds = new Set(matchedTeams);
+            consolidatedRefRegistrationIds = new Set(matchedRegs);
+
+            showConsolidatedRefBanner(data, matchedRegs.length, matchedTeams.length);
+            filterCompetitionRegistrations();
+            if (matchedTeams.length > 0) renderCompetitionTeams();
+        } else if (data.kind === 'othercompetition') {
+            showPaymentRefBanner('warning', 'bi-signpost-split',
+                `<strong>Referensen hör till en annan tävling.</strong> ${escapeHtmlSafe(data.message || '')}` +
+                (data.otherCompetitionId
+                    ? ` <a href="/competitionmanagement?competitionId=${data.otherCompetitionId}" class="alert-link">Öppna den tävlingen</a>.`
+                    : ''));
+        } else if (data.kind === 'trashed') {
+            // The club paid against a reference whose invoice has since been deleted. Say so, and
+            // offer the undo — otherwise the cashier has no way to reconcile the payment at all.
+            const amount = Number(data.totalAmount || 0).toLocaleString('sv-SE', { maximumFractionDigits: 2 });
+            const what = data.isConsolidated ? 'Samlingsfakturan' : 'Fakturan';
+            showPaymentRefBanner('warning', 'bi-trash',
+                `<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                    <div>
+                        <strong>${what} ${escapeHtmlSafe(data.reference || '')} har raderats.</strong><br>
+                        <span class="small">${escapeHtmlSafe(data.payerName || '')} · ${amount} kr — ligger i papperskorgen.</span><br>
+                        <span class="small text-body-secondary">Återställ den för att kunna registrera betalningen.</span>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="button" class="btn btn-warning btn-sm" onclick="restoreDeletedInvoice(${data.invoiceId}, '${escapeHtmlSafe(data.reference || '')}')">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>Återställ fakturan
+                        </button>
+                    </div>
+                 </div>`);
+        } else if (data.kind === 'individual' && data.registrationId) {
+            // Rare: the invoice exists but its registration is filtered out by another control.
+            showPaymentRefBanner('info', 'bi-info-circle',
+                `<strong>${escapeHtmlSafe(data.memberName || 'Anmälan')}</strong> har den referensen, men raden döljs av ett annat filter. Rensa filtren för att se den.`);
+        } else {
+            showPaymentRefBanner('secondary', 'bi-question-circle',
+                `Hittade ingen faktura med referensen <code>${escapeHtmlSafe(term)}</code> i den här tävlingen.`);
+        }
+    } catch (e) { /* leave the table as-is; the plain search result still stands */ }
+}
+
+function showConsolidatedRefBanner(d, matchedRegs, matchedTeams) {
+    const paid = (d.paymentStatus || '').toLowerCase() === 'paid';
+    const statusBadge = paid
+        ? '<span class="badge bg-success">Betald</span>'
+        : '<span class="badge bg-warning text-dark">Väntande</span>';
+    const amount = Number(d.totalAmount || 0).toLocaleString('sv-SE', { maximumFractionDigits: 2 });
+    const payBtn = paid ? '' :
+        `<button type="button" class="btn btn-success btn-sm" onclick="markConsolidatedRefPaid(${d.invoiceId})">
+            <i class="bi bi-check-circle me-1"></i>Markera samlingsfakturan som betald
+         </button>`;
+
+    // Describe what the payment ACTUALLY covers. Claiming "N anmälningar" over a table showing
+    // none was the first version's bug: a real samlingsfaktura here covers 7 lag and 0 shooters.
+    const parts = [];
+    if (matchedRegs > 0) parts.push(`${matchedRegs} ${matchedRegs === 1 ? 'anmälan' : 'anmälningar'}`);
+    if (matchedTeams > 0) parts.push(`${matchedTeams} ${matchedTeams === 1 ? 'lag' : 'lag'}`);
+    const covers = parts.length ? parts.join(' och ') : 'inga poster som visas här';
+
+    let where = '';
+    if (matchedRegs > 0 && matchedTeams > 0) where = 'Tabellen nedan och <strong>Lag</strong>-kortet är filtrerade till dem.';
+    else if (matchedRegs > 0) where = 'Tabellen nedan är filtrerad till dem.';
+    else if (matchedTeams > 0) where = 'De ligger i <strong>Lag</strong>-kortet längre ned. Inga individuella anmälningar ingår, så tabellen nedan är tom.';
+
+    const unaccounted = (d.coveredCount || 0) - matchedRegs - matchedTeams;
+    const gapNote = unaccounted > 0
+        ? `<br><span class="small text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>${unaccounted} av posterna kunde inte kopplas till en rad här. Öppna fakturan i klubbens eller kretsens Fakturor-flik för hela listan.</span>`
+        : '';
+
+    showPaymentRefBanner('primary', 'bi-collection',
+        `<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <div>
+                <strong>Samlingsfaktura ${escapeHtmlSafe(d.reference || '')}</strong> ${statusBadge}<br>
+                <span class="small">${escapeHtmlSafe(d.payerName || '')} · ${amount} kr · täcker ${covers}</span><br>
+                <span class="small text-body-secondary">${where}</span>${gapNote}
+            </div>
+            <div class="d-flex gap-2 flex-wrap">${payBtn}
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearPaymentReference(true)">
+                    <i class="bi bi-x-lg me-1"></i>Rensa
+                </button>
+            </div>
+         </div>`);
+}
+
+function showPaymentRefBanner(variant, icon, html) {
+    let el = document.getElementById('paymentRefBanner');
+    if (!el) return;
+    el.className = `alert alert-${variant} py-2`;
+    el.innerHTML = `<i class="bi ${icon} me-2"></i>${html}`;
+    el.classList.remove('d-none');
+}
+
+function hidePaymentRefBanner() {
+    const el = document.getElementById('paymentRefBanner');
+    if (el) el.classList.add('d-none');
+}
+
+function clearPaymentReference(alsoClearSearch) {
+    consolidatedRefRegistrationIds = null;
+    consolidatedRefTeamIds = null;
+    consolidatedRefTerm = '';
+    paymentRefLastTerm = '';
+    hidePaymentRefBanner();
+    if (alsoClearSearch) {
+        const box = document.getElementById('competitionRegistrationSearch');
+        if (box) box.value = '';
+    }
+    filterCompetitionRegistrations();
+}
+
+// Pull a deleted invoice back out of the recycle bin, so a payment that arrived against a
+// since-deleted reference can be settled. After restoring we re-run the lookup, which then finds
+// it under the hub and shows the normal samlingsfaktura banner with its Markera som betald action.
+async function restoreDeletedInvoice(invoiceId, reference) {
+    if (!confirm(`Återställ fakturan ${reference} från papperskorgen?`)) return;
+    try {
+        const competitionId = $('.competition-registration-management').data('competition-id');
+        const resp = await fetch('/umbraco/surface/RegistrationAdmin/RestoreDeletedInvoice', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ competitionId: competitionId, invoiceId: invoiceId })
+        });
+        const data = await resp.json();
+        if (!data.success) { alert(data.message || 'Kunde inte återställa fakturan.'); return; }
+
+        paymentRefLastTerm = '';
+        await loadCompetitionRegistrations();
+        setTimeout(() => resolvePaymentReference(reference), 700);
+    } catch (e) {
+        alert('Kunde inte återställa fakturan. Kontrollera nätverket.');
+    }
+}
+
+// Reuses the existing InvoiceAdmin/MarkAsPaid, which already cascades a parent to every child it
+// covers (audit row + betalningsbekräftelse per shooter). No separate code path for the desk.
+async function markConsolidatedRefPaid(invoiceId) {
+    if (!confirm('Markera samlingsfakturan som betald? Alla anmälningar den täcker markeras också som betalda och skyttarna får en betalningsbekräftelse.')) return;
+    try {
+        const resp = await fetch('/umbraco/surface/InvoiceAdmin/MarkAsPaid', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ invoiceId: invoiceId })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            const term = (document.getElementById('competitionRegistrationSearch')?.value || '').trim();
+            consolidatedRefRegistrationIds = null;
+            paymentRefLastTerm = '';
+            await loadCompetitionRegistrations();
+            // Re-resolve so the banner comes back showing Betald over the same rows.
+            if (term) setTimeout(() => resolvePaymentReference(term), 600);
+        } else {
+            alert(data.message || 'Kunde inte markera samlingsfakturan som betald.');
+        }
+    } catch (e) {
+        alert('Kunde inte markera samlingsfakturan som betald. Kontrollera nätverket.');
+    }
 }
 
 // Recompute and render the totals across the FULL registration list (not the filtered view).
@@ -2177,37 +2798,70 @@ function displayCompetitionRegistrations() {
                     </label>
                 </div>
             </td>
+            <td class="text-center">
+                <!-- Push reachability. Lit = the shooter has at least one browser subscribed, so a
+                     notis will reach their phone. Dark = it will still be delivered as an in-app
+                     message on the competition page, it just won't buzz. -->
+                ${reg.hasPushSubscription
+                    ? `<i class="bi bi-broadcast text-success fs-5" title="Kan nås med push-notis"></i>`
+                    : `<i class="bi bi-broadcast text-muted fs-5" style="opacity:.3;" title="Ingen enhet registrerad för push — en notis syns bara i appen"></i>`}
+            </td>
             <td>
-                <!-- Action buttons in two groups: workflow on the left, destructive (delete)
-                     pinned to the right so it's always in the same horizontal position
-                     regardless of how many of the optional middle buttons (mark-paid /
-                     history) are present. Reduces the chance of mis-tapping delete. -->
-                <div class="d-flex justify-content-between align-items-center gap-1">
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-primary"
-                                onclick="editCompetitionRegistration(${reg.id})"
-                                title="Redigera anmälan">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-success"
-                                onclick="showPaymentOptionsForRegistration(${reg.id})"
-                                title="Hantera betalning">
-                            <i class="bi bi-wallet2"></i>
-                        </button>
-                        ${reg.paymentStatus === 'Pending' ? `
-                            <button class="btn btn-sm btn-success"
-                                    onclick="markAsPaid(${reg.id})"
-                                    title="Markera som betald">
-                                <i class="bi bi-check-circle"></i>
-                            </button>
-                        ` : ''}
-                        ${renderHistoryButton(reg.invoiceId, JSON.stringify(reg.memberName).replace(/"/g, '&quot;'), reg.lastReminderSentDate, reg.reminderCount)}
-                    </div>
-                    <button class="btn btn-sm btn-outline-danger"
-                            onclick="confirmDeleteCompetitionRegistration(${reg.id})"
-                            title="Ta bort anmälan">
-                        <i class="bi bi-trash"></i>
+                <!-- One labelled "Åtgärder" menu per row rather than a variable-length icon
+                     strip. The row had outgrown the strip (5 buttons, 2 of them conditional,
+                     so the positions shifted per row) and delete sat one mis-tap away from
+                     mark-as-paid. In the menu delete is last, below a divider, and named in
+                     full — safer than the old pinned-right trash icon it replaces.
+                     The popper-config strategy:fixed is required: .table-responsive is
+                     overflow-x:auto (which makes the browser clip vertically too), so an
+                     absolutely-positioned menu is cut off on the last rows of the table.
+                     Note it is data-bs-popper-config, NOT data-bs-strategy — the latter is
+                     not a Bootstrap option and is silently ignored. -->
+                <div class="dropdown text-end">
+                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                            type="button" data-bs-toggle="dropdown"
+                            data-bs-popper-config='{"strategy":"fixed"}'
+                            aria-expanded="false" title="Åtgärder för ${escapeHtmlSafe(reg.memberName)}">
+                        <i class="bi bi-sliders me-2"></i>Åtgärder
                     </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <button class="dropdown-item" type="button" onclick="showShooterInfo(${reg.id})">
+                                <i class="bi bi-person-vcard me-2 text-primary"></i>Visa skytt – kontakt &amp; status
+                            </button>
+                        </li>
+                        <li>
+                            <button class="dropdown-item" type="button" onclick="editCompetitionRegistration(${reg.id})">
+                                <i class="bi bi-pencil me-2 text-primary"></i>Redigera anmälan
+                            </button>
+                        </li>
+                        <li>
+                            <button class="dropdown-item" type="button" onclick="openSendNoticeModal(${reg.id})">
+                                <i class="bi bi-broadcast me-2 ${reg.hasPushSubscription ? 'text-success' : 'text-muted'}"></i>Skicka notis…
+                            </button>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        ${reg.paymentStatus === 'Pending' ? `
+                            <li>
+                                <button class="dropdown-item fw-semibold" type="button" onclick="markAsPaid(${reg.id})">
+                                    <i class="bi bi-check-circle me-2 text-success"></i>Markera som betald
+                                </button>
+                            </li>
+                        ` : ''}
+                        <li>
+                            <button class="dropdown-item" type="button" onclick="showPaymentOptionsForRegistration(${reg.id})">
+                                <i class="bi bi-wallet2 me-2 text-success"></i>Hantera betalning
+                            </button>
+                        </li>
+                        ${renderHistoryMenuItem(reg.invoiceId, JSON.stringify(reg.memberName).replace(/"/g, '&quot;'), reg.lastReminderSentDate, reg.reminderCount)}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <button class="dropdown-item text-danger" type="button"
+                                    onclick="confirmDeleteCompetitionRegistration(${reg.id})">
+                                <i class="bi bi-trash me-2"></i>Ta bort anmälan
+                            </button>
+                        </li>
+                    </ul>
                 </div>
             </td>
         `;

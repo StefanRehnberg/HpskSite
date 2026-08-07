@@ -875,6 +875,86 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 - Maps a class id to a `weapon:subcategory` bucket. Within-bucket ticks auto-untick siblings; across-bucket ticks are independent.
 - Subcategory derivation: `_Jun` → jun, `_Vet_` → vet, contains `Dam` → dam, else open. Springskytte composite ids (containing `-`) get a unique bucket per id so multi-class registration there is unaffected.
 
+### Anmälningar row Åtgärder menu, shooter info, push column, reference lookup (2026-08-07)
+
+Desk batch on the Anmälningar tab (`CompetitionRegistrationManagement.cshtml`). All five items
+below ship together; verified 199/199 via `hpsk-verify/{row-actions-menu,notices-card,payment-reference-lookup,deskbatch-comprehensive}-verify.mjs`.
+
+- **Per-row Åtgärder dropdown** replaces the variable-length icon strip on BOTH the shooter rows and
+  the Lag rows (same items, same order). Delete is last, under a divider, in red — strictly safer
+  than the old pinned-right trash icon. Icon is `bi-sliders` to match the club-admin Medlemmar menu;
+  `text-end` on both the `<th>` and the cell right-aligns it.
+  **⚠️ `data-bs-popper-config='{"strategy":"fixed"}'` is required** — `.table-responsive` is
+  `overflow-x:auto` and clips the menu on the LAST rows. `data-bs-strategy` is NOT a Bootstrap
+  option and is silently ignored; assert `getComputedStyle(menu).position === 'fixed'`, and test the
+  bottom row (the top row passes either way).
+- **`RegistrationAdmin/GetShooterInfo(competitionId, registrationId)`** — contact card behind
+  "Visa skytt". Deliberately narrow: the row payload already carries payment/reminder/class state
+  client-side, so this returns only member contact + the two registration fields the list endpoint
+  omits (`registeredBy`, `shooterNotes`). Refuses a registrationId belonging to another competition.
+- **Push-reachability "Notis" column** — `WebPushService.GetMemberIdsWithSubscriptions(ids)` (new,
+  ONE query for the whole table) → `hasPushSubscription` on each row in
+  `CompetitionController.GetCompetitionRegistrations`. Means "can we push at all" (≥1 subscription),
+  NOT a per-competition opt-in. **⚠️ `IN (@0)` caps at ~2100 SQL parameters** — fine at SM scale,
+  breaks at thousands of registrations, and fails SILENTLY (antennas go dark). See backlog P3.
+- **"Skicka notis…" to one shooter** — NO new backend: reuses
+  `ParticipantMessage/SendToParticipants` with the already-existing `Person` scope
+  (`ParticipantAudienceResolver.cs:42`), so same auth, audit trail and in-app inbox.
+- **Sortable Närvaro / Notis** — both boolean columns sort false-first ascending, so one click groups
+  the rows the desk must chase.
+
+### Bank payment-reference lookup — samlingsfaktura (2026-08-07)
+
+Reported by the SM cashier: an individual reference (`3803-1120-1`) is on the registration row so
+the search finds it, but a **samlingsfaktura reference is `{competitionId}-club-{clubId}-{seq}`** and
+belongs to a PARENT invoice that is not a registration — the rows under it carry their own child
+numbers. The search returned nothing, and there is **no Fakturor tab on the competition page** to
+fall back to (the invoice list lives only on ClubAdminPanel / RegionalAdminPanel).
+
+`RegistrationAdmin/LookupPaymentReference(competitionId, reference)` resolves a pasted reference to
+one of five outcomes: `consolidated` / `individual` / `othercompetition` (names it + links) /
+`trashed` (offers restore) / `notfound`. On `consolidated` the client filters the individuals table
+AND the Lag card to what the payment settles, and offers Markera som betald via the existing
+`InvoiceAdmin/MarkAsPaid` (which already cascades to children).
+
+**⚠️ A samlingsfaktura may cover individual registrations, LAG, or BOTH — and a team invoice carries
+a NON-ZERO `registrationId` that is not a registration node id** (invoice 6770 → 6769). Routing on
+`registrationId` alone puts lag into the individuals filter and the banner claims "täcker 7
+anmälningar" over an empty table. Split on `memberId` instead: `"team-{id}"` → Lag card, otherwise a
+registration. All three shapes exist in dev data (`5326-club-2604-1` mixed, `5631-club-2604-20`
+individuals-only, `6628-club-2614-1` lag-only).
+
+**`RestoreDeletedInvoice`** pulls a deleted invoice back under the competition's invoice hub.
+Justified because **cancelling never deletes** — `CancelUnpaidParent` only sets
+`paymentStatus=Cancelled` and leaves the invoice in place — so anything in the recycle bin was
+deleted by hand in the backoffice while the club may still have paid against that reference. Guarded
+to trashed invoices whose number starts with the competition id.
+**⚠️ `GetPagedDescendants` returns NOTHING against `Constants.System.RecycleBinContent`** — use
+`GetPagedChildren`. Silently empty, so the feature just doesn't work.
+
+**Pending (agreed 2026-08-07):** block deletion of `registrationInvoice` entirely via a
+`ContentMovingToRecycleBinNotification` handler — an invoice is räkenskapsinformation under
+bokföringslagen and must be makulerad/credited, never deleted. Deferred out of the SM-eve deploy.
+NB the `PaymentService.Delete(invoice)` calls are rollback of a FAILED creation, not deletion of a
+live invoice — those stay.
+
+### Notiser card shared by the competition page and /mitt-schema (2026-08-07)
+
+Extracted from `Competition.cshtml` into **`Views/Partials/_ParticipantNotices.cshtml`** and
+rendered by both surfaces, so they cannot drift. ViewData knobs: `CompetitionId` (required),
+`NoticesInitialCount` (default 3), `NoticesHeading`, `NoticesCardClass` (the competition page passes
+`"information-sidebar mb-4"` — that styling is defined INSIDE Competition.cshtml and exists nowhere
+else, and the `mb-4` is needed because the Information card below sets no top margin).
+**Not safe to render twice on one page** — it includes `_WebPushSetup`, which owns fixed element ids.
+
+On `/mitt-schema?c=` it sits BELOW the timeline (the page is called Mitt schema). Long-feed
+handling: collapsed to 3 with "Visa alla N", expanded list capped at `60vh` and scrolling inside the
+card, unread "Ny" badges + header count via `localStorage['hpsk_pn_seen_<compId>']`, and an unread
+Safety/Urgent message below the fold **force-expands** the list.
+**⚠️ The unread watermark must be captured ONCE per page load**, not re-read per render — otherwise
+the first render marks the visible messages seen and the Ny badges vanish the instant the user taps
+"Visa alla".
+
 **See Also:** [Cashier Workflow Knowledge Base Doc](KnowledgeBase/docs/anmalningar-registreringsbord.md) for the user-facing version that the AI chat assistant uses.
 
 ## UI Implementation

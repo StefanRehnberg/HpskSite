@@ -61,6 +61,21 @@
         }
 
         @await Html.PartialAsync("_MittSchema", single)
+
+        @* Notiser BELOW the timeline: the page is called Mitt schema, so the schedule is what the
+           member came for and it leads. Same partial as the competition page's right-column card.
+           Compact by default (3 messages, then "Visa alla") with the expanded list capped and
+           scrolling internally, so a busy feed stays a well-behaved block at the foot of the page. *@
+        @if (single.CompetitionId > 0)
+        {
+            <div class="mt-3">
+                @await Html.PartialAsync("_ParticipantNotices", Model, new ViewDataDictionary(ViewData)
+                {
+                    { "CompetitionId", single.CompetitionId },
+                    { "NoticesInitialCount", 3 }
+                })
+            </div>
+        }
     }
     else
     {
