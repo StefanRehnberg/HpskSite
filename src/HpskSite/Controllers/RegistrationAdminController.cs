@@ -1324,15 +1324,45 @@ namespace HpskSite.Controllers
                 // Club: the registration's own clubId wins (a shooter may enter for a club other
                 // than their primary one); fall back to the member's primary club.
                 var clubName = "";
+                var clubId = 0;
                 var regClubId = registration.GetValue<int>("clubId");
                 if (regClubId > 0)
+                {
                     clubName = _clubService.GetClubNameById(regClubId) ?? "";
+                    if (!string.IsNullOrEmpty(clubName)) clubId = regClubId;
+                }
                 if (string.IsNullOrEmpty(clubName))
                 {
                     var primary = Val("primaryClubId");
                     if (!string.IsNullOrEmpty(primary) && int.TryParse(primary, out var pcid))
+                    {
                         clubName = _clubService.GetClubNameById(pcid) ?? "";
+                        if (!string.IsNullOrEmpty(clubName)) clubId = pcid;
+                    }
                 }
+
+                // Links to the club's and its krets's pages, so the desk can jump straight to
+                // contact details or the krets's own page. The tree IS the region — clubs live at
+                // regionalPage > clubsPage > club — so the grandparent gives the krets without
+                // going via the regionalFederation code. Unpublished/moved clubs simply yield no
+                // link and the name renders as plain text.
+                string clubUrl = "", regionName = "", regionUrl = "";
+                try
+                {
+                    var clubNode = clubId > 0 ? UmbracoContext.Content?.GetById(clubId) : null;
+                    if (clubNode != null && clubNode.ContentType.Alias == "club")
+                    {
+                        clubUrl = clubNode.Url();
+
+                        var regionNode = clubNode.Parent?.Parent;
+                        if (regionNode != null && regionNode.ContentType.Alias == "regionalPage")
+                        {
+                            regionName = regionNode.Value<string>("regionName") ?? regionNode.Name ?? "";
+                            regionUrl = regionNode.Url();
+                        }
+                    }
+                }
+                catch { /* links are a convenience; the names still render without them */ }
 
                 return Json(new
                 {
@@ -1344,6 +1374,9 @@ namespace HpskSite.Controllers
                         email = member?.Email ?? "",
                         phone = Val("phoneNumber"),
                         clubName,
+                        clubUrl,
+                        regionName,
+                        regionUrl,
                         emergencyContactName = Val("emergencyContactName"),
                         emergencyContactPhone = Val("emergencyContactPhone"),
                         guardian1Name = Val("guardian1Name"),

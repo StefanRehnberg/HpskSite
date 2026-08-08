@@ -1793,8 +1793,21 @@ async function showShooterInfo(registrationId) {
     const r = info.registration || {};
 
     // ── Kontakt ──
+    // Klubb and krets share one row and are both links when the pages resolve. Opening in a new
+    // tab is deliberate: the desk must not lose the Anmälningar view mid-transaction.
     let contact = '';
-    contact += shooterInfoRow('Klubb', s.clubName || (reg ? reg.memberClub : ''));
+    const clubLabel = s.clubName || (reg ? reg.memberClub : '') || '';
+    if (clubLabel) {
+        const clubPart = s.clubUrl
+            ? `<a href="${escapeHtmlSafe(s.clubUrl)}" target="_blank" rel="noopener">${escapeHtmlSafe(clubLabel)}</a>`
+            : escapeHtmlSafe(clubLabel);
+        const regionPart = s.regionName
+            ? (s.regionUrl
+                ? ` <span class="text-body-secondary">·</span> <a href="${escapeHtmlSafe(s.regionUrl)}" target="_blank" rel="noopener">${escapeHtmlSafe(s.regionName)}</a>`
+                : ` <span class="text-body-secondary">·</span> ${escapeHtmlSafe(s.regionName)}`)
+            : '';
+        contact += shooterInfoRow('Klubb', clubPart + regionPart, { html: true });
+    }
     contact += shooterInfoRow('Telefon', shooterInfoTel(s.phone), { html: true });
     contact += shooterInfoRow('E-post', shooterInfoMail(s.email), { html: true });
     if (reg) {

@@ -892,6 +892,10 @@ below ship together; verified 199/199 via `hpsk-verify/{row-actions-menu,notices
   "Visa skytt". Deliberately narrow: the row payload already carries payment/reminder/class state
   client-side, so this returns only member contact + the two registration fields the list endpoint
   omits (`registeredBy`, `shooterNotes`). Refuses a registrationId belonging to another competition.
+  Also returns `clubUrl` / `regionName` / `regionUrl` so the Klubb row links to both pages. The
+  krets comes from the TREE (`regionalPage > clubsPage > club`, i.e. `clubNode.Parent?.Parent`), not
+  from the `regionalFederation` code — same source the URL provider uses for club-hosted comps.
+  Wrapped in try/catch: an unpublished or moved club yields no link and the names render as text.
 - **Push-reachability "Notis" column** — `WebPushService.GetMemberIdsWithSubscriptions(ids)` (new,
   ONE query for the whole table) → `hasPushSubscription` on each row in
   `CompetitionController.GetCompetitionRegistrations`. Means "can we push at all" (≥1 subscription),
@@ -931,6 +935,12 @@ deleted by hand in the backoffice while the club may still have paid against tha
 to trashed invoices whose number starts with the competition id.
 **⚠️ `GetPagedDescendants` returns NOTHING against `Constants.System.RecycleBinContent`** — use
 `GetPagedChildren`. Silently empty, so the feature just doesn't work.
+
+**⚠️ Invoice numbers are NOT unique across live + deleted.** `GenerateInvoiceNumber` counts existing
+invoices, so deleting one frees its number for re-issue — `5312-2353-1` exists both trashed and live
+in dev. The lookup therefore searches the hub FIRST and only falls back to the recycle bin, so the
+live invoice (the one you would actually settle) always wins. Anything keying off an invoice number
+alone must not assume it identifies one node.
 
 **Pending (agreed 2026-08-07):** block deletion of `registrationInvoice` entirely via a
 `ContentMovingToRecycleBinNotification` handler — an invoice is räkenskapsinformation under
