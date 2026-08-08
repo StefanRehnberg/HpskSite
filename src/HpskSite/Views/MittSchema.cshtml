@@ -50,13 +50,17 @@
             </div>
         </div>
 
-        @* Calendar caveat, stated once. The export is a snapshot by design; the honest thing is to say so. *@
+        @* Calendar caveat, stated once. The export is a snapshot by design; the honest thing is to say
+           so plainly, because a stale calendar entry looks exactly like a correct one. Deliberately
+           says nothing about reminders — the file still carries them, but promising a reminder here
+           invites the shooter to rely on a copy that may already be out of date. *@
         @if (single.HasAny)
         {
             <p class="text-muted small d-print-none" style="max-width:720px">
                 <i class="bi bi-info-circle me-1"></i>
-                Kalenderfilen är en <strong>kopia</strong> av schemat som det ser ut nu, med påminnelse 30 minuter
-                före varje pass. Flyttar arrangören en tid får du en avisering — hämta då filen igen.
+                Kalenderfilen är en <strong>ögonblicksbild</strong> av schemat som det ser ut just nu.
+                Ändrar arrangören något efteråt uppdateras <strong>inte</strong> din kalender —
+                schemat här på sidan gäller alltid. Hämta filen igen för att få de nya tiderna.
             </p>
         }
 
