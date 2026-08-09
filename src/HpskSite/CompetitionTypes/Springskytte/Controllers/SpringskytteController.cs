@@ -3591,6 +3591,138 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             }
         }
 
+        /// <summary>
+        /// Spectator board state for the live screen (/live): who is out on the course RIGHT NOW, and
+        /// who is next off. GetSpringskytteResults only ever returns shooters who already HAVE a result
+        /// row, so the in-progress field is invisible to it — this fills that gap by diffing the
+        /// published start list against the entered results.
+        /// </summary>
+        /// <remarks>
+        /// Anonymous on purpose: the wall TV cannot log in (same reasoning as the /live page itself).
+        /// It exposes nothing a published start list doesn't already show publicly.
+        ///
+        /// "Now" is resolved SERVER-side and echoed back as <c>serverNowSec</c>. The board machine is a
+        /// borrowed kiosk PC whose clock may be minutes out, and a skewed clock would either show an
+        /// empty course or hold finished shooters on screen. The client ticks the elapsed clocks locally
+        /// from this baseline between the 15 s polls, so the display counts up smoothly.
+        /// </remarks>
+        [HttpGet]
+        public async Task<IActionResult> GetSpringskytteBoardState(int competitionId, string? weaponClass = null)
+        {
+            // A shooter still listed as "on course" this long after their start time is almost certainly
+            // a missing result entry, not somebody running — a Springskytte lap is minutes. Drop them so
+            // the band self-cleans instead of accumulating ghosts across the day.
+            const int MaxOnCourseSeconds = 45 * 60;
+
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                var wcFilter = (weaponClass ?? "").Trim().ToUpperInvariant();
+
+                // Finished = has a time OR carries a status (DNS/DNF). Both must leave the course band.
+                var finished = new HashSet<string>();
+                using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                {
+                    var rows = await db.FetchAsync<SpringskytteResultEntry>("WHERE CompetitionId = @0", competitionId);
+                    foreach (var r in rows)
+                        if (r.TotalTimeSeconds.HasValue || !string.IsNullOrWhiteSpace(r.Status))
+                            finished.Add($"{r.MemberId}|{r.WeaponClass}");
+                }
+
+                var nowSec = (int)DateTime.Now.TimeOfDay.TotalSeconds;
+                var today = DateTime.Today;
+
+                var onCourse = new List<(int Sec, object Row)>();
+                var upcoming = new List<(int Sec, object Row)>();
+
+                var slNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                    .ToList();
+
+                foreach (var node in slNodes)
+                {
+                    // Only PUBLISHED lists feed a public board — an unpublished draft must never leak.
+                    if (!node.HasProperty("isOfficialStartList") || !node.GetValue<bool>("isOfficialStartList"))
+                        continue;
+
+                    var cfgJson = node.GetValue<string>("configurationData");
+                    if (string.IsNullOrEmpty(cfgJson)) continue;
+                    SpringskytteStartListConfig? cfg = null;
+                    try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
+                    if (cfg?.Starters == null || cfg.Starters.Count == 0) continue;
+
+                    // Start times are time-of-day only, so on a multi-day competition a dated list for
+                    // another day would otherwise read as "on course" today (Sunday's A list showing
+                    // mid-Saturday). Undated lists are always considered — single-day is the common case.
+                    if (!string.IsNullOrWhiteSpace(cfg.ListDate)
+                        && DateTime.TryParse(cfg.ListDate, out var listDate)
+                        && listDate.Date != today)
+                        continue;
+
+                    foreach (var s in cfg.Starters)
+                    {
+                        var wc = (s.WeaponClass ?? "").Trim().ToUpperInvariant();
+                        if (wcFilter.Length > 0 && !wc.StartsWith(wcFilter, StringComparison.Ordinal)) continue;
+                        if (finished.Contains($"{s.MemberId}|{s.WeaponClass}")) continue;
+
+                        var sec = ParseStartTimeSeconds(s.StartTime);
+                        if (sec == int.MaxValue) continue;   // no usable start time — can't place them
+
+                        if (sec <= nowSec)
+                        {
+                            var elapsed = nowSec - sec;
+                            if (elapsed > MaxOnCourseSeconds) continue;
+                            onCourse.Add((sec, new
+                            {
+                                startOrder = s.StartOrder,
+                                name = s.Name,
+                                club = s.Club,
+                                clubShort = ClubNameHelper.Shorten(s.Club),
+                                weaponClass = s.WeaponClass,
+                                ageGenderClass = s.AgeGenderClass,
+                                startTime = s.StartTime,
+                                elapsedSeconds = elapsed
+                            }));
+                        }
+                        else
+                        {
+                            upcoming.Add((sec, new
+                            {
+                                startOrder = s.StartOrder,
+                                name = s.Name,
+                                club = s.Club,
+                                clubShort = ClubNameHelper.Shorten(s.Club),
+                                weaponClass = s.WeaponClass,
+                                ageGenderClass = s.AgeGenderClass,
+                                startTime = s.StartTime,
+                                secondsUntil = sec - nowSec
+                            }));
+                        }
+                    }
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    serverTime = DateTime.Now.ToString("HH:mm:ss"),
+                    serverNowSec = nowSec,
+                    // Earliest start first: the shooter who has been out longest is nearest the finish.
+                    onCourse = onCourse.OrderBy(x => x.Sec).Take(12).Select(x => x.Row).ToList(),
+                    onCourseTotal = onCourse.Count,
+                    upcoming = upcoming.OrderBy(x => x.Sec).Take(4).Select(x => x.Row).ToList(),
+                    upcomingTotal = upcoming.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building Springskytte board state for {Comp}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
         // ===== HELPER METHODS =====
 
         private async Task<bool> HasCompetitionAccess(int competitionId)

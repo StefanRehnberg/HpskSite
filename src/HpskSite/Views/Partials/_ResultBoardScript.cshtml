@@ -10,6 +10,15 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     var layoutMode='list';         // 'list' | 'grid' (tiled dashboard)
     var tileCount=4;               // grid: 1-4 tiles
     var REFRESH=15000;
+    // Springskytte spectator additions: an on-course band pinned above the standings, and paging so a
+    // 100+ field is fully visible over time instead of being cut off at the fold.
+    var springBoard=null;          // GetSpringskytteBoardState payload (on course + next off)
+    var springBoardAt=0;           // Date.now() at fetch — lets the elapsed clocks tick between polls
+    var springTick=null;
+    var pageIdx=0,pageTimer=null,springPageCount=1,PAGE_MS=12000;
+    var compact=false;             // denser rows; drops Bom (it's just a count of the red dots)
+    var rowsPerPage=0;             // 0 = auto-fit to the screen height
+    var springRowH=0,springBandH=0,springHeadH=0,springRemeasuring=false;   // measured, for the capacity maths
     configuredWCs=configuredWCs||[];
     compTypeId=compTypeId||'Precision';
     var isMilsnabb=compTypeId==='Milsnabb';
@@ -120,7 +129,44 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                 allGroups=(d.results||d.Results).classGroups||(d.results||d.Results).ClassGroups||[];
             }
             populateWcFilter();updateStatus();renderAll();
+            if(isSpringskytte)fetchSpringBoard();
         }).catch(function(e){console.error(e)});
+    }
+    // Springskytte only. The results payload contains shooters who already have a result row, so the
+    // in-progress field is invisible to it — this second call diffs the published start list against
+    // entered results to get who is out on the course right now.
+    function fetchSpringBoard(){
+        var sel=Object.keys(selectedWCs||{});
+        var wc=sel.length===1?sel[0]:'';   // one class on screen (the normal case) → let the server filter
+        fetch('/umbraco/surface/Springskytte/GetSpringskytteBoardState?competitionId='+compId+(wc?'&weaponClass='+encodeURIComponent(wc):''))
+        .then(function(r){return r.json()})
+        .then(function(d){
+            if(!d.success)return;
+            springBoard=d;springBoardAt=Date.now();
+            renderAll();
+        }).catch(function(e){console.error(e)});
+    }
+    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+    function mmss(t){t=Math.max(0,Math.round(t));var m=Math.floor(t/60),s=t%60;return m+':'+(s<10?'0':'')+s}
+    // Count the on-course clocks up locally between the 15 s polls, anchored on the server's "now" so a
+    // wrong clock on the kiosk PC can't skew them.
+    function startSpringTick(){
+        if(springTick||!isSpringskytte)return;
+        springTick=setInterval(function(){
+            if(!springBoardAt)return;
+            var drift=Math.floor((Date.now()-springBoardAt)/1000);
+            var els=document.querySelectorAll('[data-elapsed]');
+            for(var i=0;i<els.length;i++){
+                var base=parseInt(els[i].getAttribute('data-elapsed'))||0;
+                els[i].textContent=mmss(base+drift);
+            }
+        },1000);
+    }
+    function stopSpringTick(){if(springTick){clearInterval(springTick);springTick=null}}
+    function springPageTick(){
+        if(!isSpringskytte||springPageCount<=1)return;
+        pageIdx=(pageIdx+1)%springPageCount;
+        renderAll();
     }
     function updateStatus(){
         var b=document.getElementById('rbStatusBadge'),ts=document.getElementById('rbLastUpdated');
@@ -318,45 +364,136 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         return cn;
     }
 
-    // Springskytte result board — with shot visualization for Class C
-    function renderSpringskytte(wr,groups){
-        if(!groups.length){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
-
-        var h='';
-        // Ranked table per group
-        h+='<table class="rb-table">';
-        h+='<colgroup><col style="width:2.5rem"><col style="width:2.5rem"><col><col>';
-        h+='<col><col style="width:5rem"><col style="width:3rem"><col style="width:4.5rem"><col style="width:5.5rem"></colgroup>';
-        h+='<thead><tr><th>#</th><th>Nr</th><th style="text-align:left">Namn</th><th style="text-align:left">Förening</th>';
-        h+='<th>Skytte</th><th>Löptid</th><th>Bom</th><th>Tillägg</th><th>Totaltid</th></tr></thead><tbody>';
-        groups.forEach(function(cg,gi){
-            var cn=formatClassWithAgeSpan(cg.className||cg.ClassName||'');
-            var wc=cg.weaponClass||'C';
+    // "Nu på banan" band: who is out on the course right now, plus the next few off the line. This is
+    // what a spectator actually looks for, and it is the one thing a pure results feed cannot show.
+    function springBandHtml(){
+        if(!springBoard)return '';
+        var oc=springBoard.onCourse||[],up=springBoard.upcoming||[];
+        if(!oc.length&&!up.length)return '';
+        var more=(springBoard.onCourseTotal||0)>oc.length?' ('+oc.length+'/'+springBoard.onCourseTotal+')':'';
+        var h='<div id="rbSpringBand" style="margin-bottom:.9rem;border:2px solid #4ecca3;border-radius:.4rem;overflow:hidden">';
+        h+='<div style="background:#4ecca3;color:#0f1021;font-weight:800;letter-spacing:.08em;padding:.35rem .6rem;font-size:1rem">NU PÅ BANAN'+more+'</div>';
+        if(oc.length){
+            h+='<table class="rb-table" style="margin:0"><colgroup><col style="width:3rem"><col><col><col style="width:6rem"></colgroup><tbody>';
+            oc.forEach(function(r){
+                var e=r.elapsedSeconds||0;
+                h+='<tr><td style="font-weight:700">'+esc(r.startOrder||'')+'</td>'
+                  +'<td style="text-align:left;font-weight:700">'+esc(r.name||'')+'</td>'
+                  +'<td style="text-align:left;opacity:.75">'+esc(r.clubShort||r.club||'')+'</td>'
+                  +'<td style="font-variant-numeric:tabular-nums;font-weight:700;color:#4ecca3" data-elapsed="'+e+'">'+mmss(e)+'</td></tr>';
+            });
+            h+='</tbody></table>';
+        } else {
+            h+='<div style="padding:.55rem .6rem;opacity:.6">Ingen ute på banan just nu</div>';
+        }
+        if(up.length){
+            h+='<div style="background:#0f3460;padding:.35rem .6rem;font-size:.9rem">'
+              +'<span style="color:#4ecca3;font-weight:700;letter-spacing:.06em;margin-right:.6rem">NÄSTA START</span>';
+            h+=up.map(function(r){
+                return '<span style="margin-right:1.4rem;white-space:nowrap"><strong>'+esc(r.startTime||'')+'</strong> '+esc(r.name||'')+'</span>';
+            }).join('');
+            h+='</div>';
+        }
+        return h+'</div>';
+    }
+    // Flatten the class groups into a single row stream (group headers included) so it can be paged.
+    function springFlatRows(groups){
+        var flat=[];
+        groups.forEach(function(cg){
             var shooters=cg.shooters||[];
             if(!shooters.length)return;
-            h+='<tr><td colspan="9" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:.6rem .5rem;font-size:.95rem;text-align:left;border-bottom:2px solid #4ecca3'+(gi>0?';border-top:4px solid #1a1a2e':'')+'">'+cn+'</td></tr>';
-            shooters.forEach(function(sh){
-                var rank=sh.rank||0;
-                var status=sh.status||null;
-                var pc=rank>=1&&rank<=3&&!status?' rb-pos-'+rank:'';
-                var nm=sh.name||'';
-                var cl=sh.club||'';
-                var so=sh.startOrder||'';
-                if(status){
-                    h+='<tr><td>-</td><td>'+so+'</td><td style="text-align:left">'+nm+'</td><td style="text-align:left">'+cl+'</td>';
-                    h+='<td colspan="5" style="text-align:center;opacity:.6">'+status+'</td></tr>';
-                } else {
-                    h+='<tr><td class="'+pc.trim()+'">'+(rank||'-')+'</td><td>'+so+'</td><td style="text-align:left">'+nm+'</td><td style="text-align:left">'+cl+'</td>';
-                    h+='<td>'+renderShotDots(sh,wc)+'</td>';
-                    h+='<td>'+(sh.sprintTimeDisplay||'-')+'</td>';
-                    h+='<td>'+(sh.shootingScore||0)+'</td>';
-                    h+='<td>'+(sh.penaltyTimeDisplay||'-')+'</td>';
-                    h+='<td><strong>'+(sh.totalTimeDisplay||'-')+'</strong></td></tr>';
-                }
-            });
+            var cn=formatClassWithAgeSpan(cg.className||cg.ClassName||'');
+            var wc=cg.weaponClass||'C';
+            flat.push({group:cn});
+            shooters.forEach(function(sh){flat.push({sh:sh,wc:wc,group:cn})});
+        });
+        return flat;
+    }
+    // How many rows fit on this screen. Everything is measured from the real rendered DOM rather than
+    // assumed: font sizes scale with the kiosk's zoom factor, and the on-course band's height varies
+    // with how many shooters are out, so a fixed row count would overflow the screen on most TVs —
+    // which is the exact truncation this paging exists to prevent.
+    function springCapacity(wr){
+        if(rowsPerPage>0)return rowsPerPage;
+        var h=wr.clientHeight||0;
+        if(!h||!springRowH)return 20;                     // conservative until we've measured once
+        var avail=h-springBandH-springHeadH-28;           // 28 ≈ the "Sida x/y" line
+        // −1 row of slack: group-header rows are taller than shooter rows and we budget them as one.
+        return Math.max(6,Math.floor(avail/springRowH)-1);
+    }
+    function springPaginate(flat,cap){
+        var pages=[],i=0,guard=0;
+        while(i<flat.length&&guard++<200){
+            var cont=(flat[i]&&flat[i].sh)?flat[i].group:null;   // page opens mid-class → repeat header
+            var budget=Math.max(1,cap-(cont?1:0)),rows=[];
+            while(i<flat.length&&rows.length<budget){rows.push(flat[i]);i++}
+            // Never end a page on a dangling group header with its shooters overleaf.
+            if(rows.length>1&&!rows[rows.length-1].sh&&i<flat.length){rows.pop();i--}
+            pages.push({rows:rows,cont:cont});
+        }
+        return pages.length?pages:[{rows:[],cont:null}];
+    }
+    // Springskytte result board — shot dots kept deliberately (the biathlon-style hit/miss row is the
+    // most legible thing on the screen from across a hall); compact mode drops Bom instead.
+    function renderSpringskytte(wr,groups){
+        if(!groups.length&&!springBoard){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
+        var nCols=compact?8:9;
+        var h=springBandHtml();
+        var flat=springFlatRows(groups);
+        if(!flat.length){
+            wr.innerHTML=h+'<div style="text-align:center;padding:2rem 0;opacity:.5"><p>Inga resultat än</p></div>';
+            springPageCount=1;return;
+        }
+        var pages=springPaginate(flat,springCapacity(wr));
+        springPageCount=pages.length;
+        if(pageIdx>=pages.length)pageIdx=0;
+        var pg=pages[pageIdx];
+
+        h+='<table class="rb-table" id="rbSpringTable">';
+        h+='<colgroup><col style="width:2.5rem"><col style="width:2.5rem"><col><col>';
+        h+='<col><col style="width:5rem">'+(compact?'':'<col style="width:3rem">')+'<col style="width:4.5rem"><col style="width:5.5rem"></colgroup>';
+        h+='<thead><tr><th>#</th><th>Nr</th><th style="text-align:left">Namn</th><th style="text-align:left">Förening</th>';
+        h+='<th>Skytte</th><th>Löptid</th>'+(compact?'':'<th>Bom</th>')+'<th>Tillägg</th><th>Totaltid</th></tr></thead><tbody>';
+
+        function groupRow(label,first){
+            return '<tr><td colspan="'+nCols+'" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:'
+                +(compact?'.35rem':'.6rem')+' .5rem;font-size:.95rem;text-align:left;border-bottom:2px solid #4ecca3'
+                +(first?'':';border-top:4px solid #1a1a2e')+'">'+label+'</td></tr>';
+        }
+        if(pg.cont)h+=groupRow(pg.cont+' <span style="opacity:.6;font-weight:400">(forts.)</span>',true);
+        pg.rows.forEach(function(r,ri){
+            if(!r.sh){h+=groupRow(r.group,ri===0&&!pg.cont);return}
+            var sh=r.sh,rank=sh.rank||0,status=sh.status||null;
+            var pc=rank>=1&&rank<=3&&!status?' rb-pos-'+rank:'';
+            var pad=compact?' style="padding-top:.2rem;padding-bottom:.2rem"':'';
+            var so=sh.startOrder||'';
+            if(status){
+                h+='<tr'+pad+'><td>-</td><td>'+esc(so)+'</td><td style="text-align:left">'+esc(sh.name||'')+'</td><td style="text-align:left">'+esc(sh.clubShort||sh.club||'')+'</td>';
+                h+='<td colspan="'+(nCols-4)+'" style="text-align:center;opacity:.6">'+esc(status)+'</td></tr>';
+            } else {
+                h+='<tr'+pad+'><td class="'+pc.trim()+'">'+(rank||'-')+'</td><td>'+esc(so)+'</td><td style="text-align:left">'+esc(sh.name||'')+'</td><td style="text-align:left">'+esc(sh.clubShort||sh.club||'')+'</td>';
+                h+='<td>'+renderShotDots(sh,r.wc)+'</td>';
+                h+='<td>'+esc(sh.sprintTimeDisplay||'-')+'</td>';
+                if(!compact)h+='<td>'+(sh.shootingScore||0)+'</td>';
+                h+='<td>'+esc(sh.penaltyTimeDisplay||'-')+'</td>';
+                h+='<td><strong>'+esc(sh.totalTimeDisplay||'-')+'</strong></td></tr>';
+            }
         });
         h+='</tbody></table>';
+        if(pages.length>1)
+            h+='<div style="text-align:right;opacity:.55;padding:.3rem .2rem 0;font-size:.85rem">Sida '+(pageIdx+1)+'/'+pages.length+'</div>';
         wr.innerHTML=h;
+
+        // Measure the real band / header / row heights, and re-page once if they changed. Guarded by a
+        // reentrancy flag so a layout that measures slightly differently each pass can't ping-pong.
+        var bandEl=wr.querySelector('#rbSpringBand'),headEl=wr.querySelector('#rbSpringTable thead'),probe=wr.querySelector('#rbSpringTable tbody tr');
+        var bh=bandEl?bandEl.offsetHeight:0,hh=headEl?headEl.offsetHeight:0,rh=probe?probe.offsetHeight:0;
+        if(rh&&(rh!==springRowH||bh!==springBandH||hh!==springHeadH)&&!springRemeasuring){
+            springRowH=rh;springBandH=bh;springHeadH=hh;
+            springRemeasuring=true;
+            renderSpringskytte(wr,groups);
+            springRemeasuring=false;
+        }
     }
 
     function isUnshot(shot){return !shot||shot===''||shot==='-'}
@@ -463,6 +600,12 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         if(tp!==null){var t=parseInt(tp);if(t>=1&&t<=4){layoutMode='grid';tileCount=t}}
         var vp=qp.get('vaxla');
         if(vp==='1'||vp==='true')cycleMode=true;else if(vp==='0'||vp==='false')cycleMode=false;
+        // Springskytte board tuning, URL-only (no on-screen control — these are set once per venue):
+        //   ?compact=1  denser rows, drops Bom      ?rows=N  fixed rows/page instead of auto-fit
+        var cp=qp.get('compact');
+        if(cp==='1'||cp==='true')compact=true;
+        var rp=parseInt(qp.get('rows'));
+        if(rp>0&&rp<=200)rowsPerPage=rp;
         var ct=document.getElementById('rbCycleToggle');
         if(ct){ct.checked=cycleMode;ct.addEventListener('change',function(){cycleMode=this.checked;cycleIdx=0;persistCycle();syncUrl();renderAll();restartCycle()})}
         var ls=document.getElementById('rbLayoutSel');
@@ -476,10 +619,19 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             });
         }
     })();
+    function startSpringTimers(){
+        if(!isSpringskytte)return;
+        if(!pageTimer)pageTimer=setInterval(springPageTick,PAGE_MS);
+        startSpringTick();
+    }
+    function stopSpringTimers(){
+        if(pageTimer){clearInterval(pageTimer);pageTimer=null}
+        stopSpringTick();
+    }
     document.addEventListener('visibilitychange',function(){
-        if(document.hidden){if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null}stopCycle()}
-        else{fetchResults();refreshTimer=setInterval(fetchResults,REFRESH);restartCycle()}
+        if(document.hidden){if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null}stopCycle();stopSpringTimers()}
+        else{fetchResults();refreshTimer=setInterval(fetchResults,REFRESH);restartCycle();startSpringTimers()}
     });
-    fetchResults();refreshTimer=setInterval(fetchResults,REFRESH);restartCycle();
+    fetchResults();refreshTimer=setInterval(fetchResults,REFRESH);restartCycle();startSpringTimers();
 }
 </script>
