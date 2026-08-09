@@ -3592,27 +3592,29 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         }
 
         /// <summary>
-        /// Spectator board state for the live screen (/live): who is out on the course RIGHT NOW, and
-        /// who is next off. GetSpringskytteResults only ever returns shooters who already HAVE a result
-        /// row, so the in-progress field is invisible to it — this fills that gap by diffing the
-        /// published start list against the entered results.
+        /// Start-line state for the live screen (/live): the last few shooters to have gone off, and who
+        /// is next. Reads the published start list — GetSpringskytteResults only returns shooters who
+        /// already HAVE a result row, so it cannot see the start line at all.
         /// </summary>
         /// <remarks>
         /// Anonymous on purpose: the wall TV cannot log in (same reasoning as the /live page itself).
         /// It exposes nothing a published start list doesn't already show publicly.
         ///
         /// "Now" is resolved SERVER-side and echoed back as <c>serverNowSec</c>. The board machine is a
-        /// borrowed kiosk PC whose clock may be minutes out, and a skewed clock would either show an
-        /// empty course or hold finished shooters on screen. The client ticks the elapsed clocks locally
-        /// from this baseline between the 15 s polls, so the display counts up smoothly.
+        /// borrowed kiosk PC whose clock may be minutes out, and a skewed clock would show the wrong
+        /// shooters at the line. The client ticks the "time since start" clocks locally from this
+        /// baseline between the 15 s polls, so they count up smoothly.
+        ///
+        /// This deliberately reports STARTED, not "still out on the course" — an earlier cut listed
+        /// everyone without a finishing time, which meant a slow result desk made the band swell (a
+        /// missing result is indistinguishable from a runner) until it crowded out the standings.
+        /// A fixed 3 cannot do that. <c>allStarted</c> tells the board to drop the band entirely once
+        /// the field is away, handing the whole screen back to the results.
         /// </remarks>
         [HttpGet]
         public async Task<IActionResult> GetSpringskytteBoardState(int competitionId, string? weaponClass = null)
         {
-            // A shooter still listed as "on course" this long after their start time is almost certainly
-            // a missing result entry, not somebody running — a Springskytte lap is minutes. Drop them so
-            // the band self-cleans instead of accumulating ghosts across the day.
-            const int MaxOnCourseSeconds = 45 * 60;
+            const int JustStartedCount = 3;
 
             try
             {
@@ -3622,20 +3624,21 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 var wcFilter = (weaponClass ?? "").Trim().ToUpperInvariant();
 
-                // Finished = has a time OR carries a status (DNS/DNF). Both must leave the course band.
-                var finished = new HashSet<string>();
+                // Status per shooter. A DNS never took the line, so it must appear in neither list; a
+                // DNF did start, so it stays eligible for "nyss startat".
+                var statusByKey = new Dictionary<string, string?>();
                 using (var db = _umbracoDatabaseFactory.CreateDatabase())
                 {
                     var rows = await db.FetchAsync<SpringskytteResultEntry>("WHERE CompetitionId = @0", competitionId);
                     foreach (var r in rows)
-                        if (r.TotalTimeSeconds.HasValue || !string.IsNullOrWhiteSpace(r.Status))
-                            finished.Add($"{r.MemberId}|{r.WeaponClass}");
+                        if (!string.IsNullOrWhiteSpace(r.Status))
+                            statusByKey[$"{r.MemberId}|{r.WeaponClass}"] = r.Status;
                 }
 
                 var nowSec = (int)DateTime.Now.TimeOfDay.TotalSeconds;
                 var today = DateTime.Today;
 
-                var onCourse = new List<(int Sec, object Row)>();
+                var started = new List<(int Sec, object Row)>();
                 var upcoming = new List<(int Sec, object Row)>();
 
                 var slNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
@@ -3666,16 +3669,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     {
                         var wc = (s.WeaponClass ?? "").Trim().ToUpperInvariant();
                         if (wcFilter.Length > 0 && !wc.StartsWith(wcFilter, StringComparison.Ordinal)) continue;
-                        if (finished.Contains($"{s.MemberId}|{s.WeaponClass}")) continue;
+
+                        statusByKey.TryGetValue($"{s.MemberId}|{s.WeaponClass}", out var status);
+                        if (status == "DNS") continue;       // never took the line
 
                         var sec = ParseStartTimeSeconds(s.StartTime);
                         if (sec == int.MaxValue) continue;   // no usable start time — can't place them
 
                         if (sec <= nowSec)
                         {
-                            var elapsed = nowSec - sec;
-                            if (elapsed > MaxOnCourseSeconds) continue;
-                            onCourse.Add((sec, new
+                            started.Add((sec, new
                             {
                                 startOrder = s.StartOrder,
                                 name = s.Name,
@@ -3684,10 +3687,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                                 weaponClass = s.WeaponClass,
                                 ageGenderClass = s.AgeGenderClass,
                                 startTime = s.StartTime,
-                                elapsedSeconds = elapsed
+                                elapsedSeconds = nowSec - sec
                             }));
                         }
-                        else
+                        else if (status == null)             // a DNF'd future starter isn't "next off"
                         {
                             upcoming.Add((sec, new
                             {
@@ -3704,16 +3707,20 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }
                 }
 
+                var ordered = upcoming.OrderBy(x => x.Sec).ToList();
                 return Json(new
                 {
                     success = true,
                     serverTime = DateTime.Now.ToString("HH:mm:ss"),
                     serverNowSec = nowSec,
-                    // Earliest start first: the shooter who has been out longest is nearest the finish.
-                    onCourse = onCourse.OrderBy(x => x.Sec).Take(12).Select(x => x.Row).ToList(),
-                    onCourseTotal = onCourse.Count,
-                    upcoming = upcoming.OrderBy(x => x.Sec).Take(4).Select(x => x.Row).ToList(),
-                    upcomingTotal = upcoming.Count
+                    // The most recent starters, kept in start order so the band reads downward in time
+                    // and flows straight into the "next off" strip below it.
+                    justStarted = started.OrderBy(x => x.Sec).TakeLast(JustStartedCount).Select(x => x.Row).ToList(),
+                    startedTotal = started.Count,
+                    upcoming = ordered.Take(4).Select(x => x.Row).ToList(),
+                    upcomingTotal = ordered.Count,
+                    // Whole field away → the board drops the band and gives the screen to the results.
+                    allStarted = ordered.Count == 0
                 });
             }
             catch (Exception ex)

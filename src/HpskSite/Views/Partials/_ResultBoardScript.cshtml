@@ -364,18 +364,20 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         return cn;
     }
 
-    // "Nu på banan" band: who is out on the course right now, plus the next few off the line. This is
-    // what a spectator actually looks for, and it is the one thing a pure results feed cannot show.
+    // "Nyss startat" band: the last 3 shooters away, with time-since-start counting up, plus who is
+    // next off. It is a START-LINE widget, not an on-course tracker — see the endpoint's remarks for
+    // why. Once the whole field has started (allStarted) the band disappears and the standings get the
+    // full screen, which is also when spectators stop caring about the line.
     function springBandHtml(){
         if(!springBoard)return '';
-        var oc=springBoard.onCourse||[],up=springBoard.upcoming||[];
-        if(!oc.length&&!up.length)return '';
-        var more=(springBoard.onCourseTotal||0)>oc.length?' ('+oc.length+'/'+springBoard.onCourseTotal+')':'';
+        if(springBoard.allStarted)return '';
+        var js=springBoard.justStarted||[],up=springBoard.upcoming||[];
+        if(!js.length&&!up.length)return '';
         var h='<div id="rbSpringBand" style="margin-bottom:.9rem;border:2px solid #4ecca3;border-radius:.4rem;overflow:hidden">';
-        h+='<div style="background:#4ecca3;color:#0f1021;font-weight:800;letter-spacing:.08em;padding:.35rem .6rem;font-size:1rem">NU PÅ BANAN'+more+'</div>';
-        if(oc.length){
+        h+='<div style="background:#4ecca3;color:#0f1021;font-weight:800;letter-spacing:.08em;padding:.35rem .6rem;font-size:1rem">NYSS STARTAT</div>';
+        if(js.length){
             h+='<table class="rb-table" style="margin:0"><colgroup><col style="width:3rem"><col><col><col style="width:6rem"></colgroup><tbody>';
-            oc.forEach(function(r){
+            js.forEach(function(r){
                 var e=r.elapsedSeconds||0;
                 h+='<tr><td style="font-weight:700">'+esc(r.startOrder||'')+'</td>'
                   +'<td style="text-align:left;font-weight:700">'+esc(r.name||'')+'</td>'
@@ -384,7 +386,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             });
             h+='</tbody></table>';
         } else {
-            h+='<div style="padding:.55rem .6rem;opacity:.6">Ingen ute på banan just nu</div>';
+            h+='<div style="padding:.55rem .6rem;opacity:.6">Ingen har startat än</div>';
         }
         if(up.length){
             h+='<div style="background:#0f3460;padding:.35rem .6rem;font-size:.9rem">'
