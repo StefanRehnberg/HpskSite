@@ -80,8 +80,15 @@
         *{box-sizing:border-box}
         html,body{margin:0;padding:0;height:100%;overflow:hidden;font-family:Arial,sans-serif}
         body{background:#1a1a2e;color:#e0e0e0;display:flex;flex-direction:column}
-        .rb-header{background:#16213e;border-bottom:1px solid #0f3460;padding:.5rem 1rem;display:flex;align-items:center;gap:.75rem;flex-shrink:0;flex-wrap:wrap}
-        .rb-header h1{font-size:1.1rem;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+        .rb-header{background:#16213e;border-bottom:1px solid #0f3460;padding:.5rem 1rem;display:flex;align-items:center;gap:.75rem;flex-shrink:0;flex-wrap:wrap;position:relative}
+        /* Capped so a long competition name can't run under the centred brand; the auto margin on the
+           status badge keeps the controls hard right now that the h1 no longer fills the row. */
+        .rb-header h1{font-size:1.1rem;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;max-width:42%}
+        .rb-header #rbStatusBadge{margin-left:auto}
+        /* Absolute-centred on the header itself: a flex-centred brand would drift as the title and the
+           controls change width, and this bar is read from across a room. */
+        .rb-brand{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-weight:800;
+                  font-size:1.1rem;letter-spacing:.01em;color:#4ecca3;white-space:nowrap;pointer-events:none}
         .rb-badge-live{background:#27ae60;font-size:.75rem;letter-spacing:.05em;padding:.25rem .5rem;border-radius:.25rem;white-space:nowrap}
         .rb-badge-official{background:#f39c12;color:#1a1a2e;font-size:.75rem;letter-spacing:.05em;padding:.25rem .5rem;border-radius:.25rem;white-space:nowrap}
         .rb-pulse{animation:rbPulse 1.5s ease-in-out infinite}
@@ -119,6 +126,9 @@
         .rb-tile{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid #0f3460;border-radius:.35rem;overflow:hidden;background:rgba(22,33,62,.4)}
         .rb-tile-head{background:#0f3460;color:#4ecca3;font-weight:700;padding:.3rem .5rem;font-size:.9rem;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .rb-tile-body{flex:1;overflow:auto;min-height:0}
+        /* Narrow screens have no room to centre anything between the title and the controls — the brand
+           is for the wall TV, so drop it rather than let it collide. */
+        @@media(max-width:991.98px){.rb-brand{display:none}.rb-header h1{max-width:none}}
         @@media(max-width:767.98px){.rb-table{font-size:.95rem}.rb-table .rb-series-col{display:none}.rb-header{padding:.4rem .75rem}}
         @@media(min-width:768px) and (max-width:991.98px){.rb-table{font-size:.95rem}}
         @@media(max-height:500px){.rb-header{padding:.25rem .75rem}.rb-header h1{font-size:.9rem}.rb-table td,.rb-table th{padding:.25rem .4rem}}
@@ -134,6 +144,7 @@ else
 {
     <div class="rb-header">
         <h1><i class="bi bi-trophy me-2"></i>@competitionName</h1>
+        <span class="rb-brand">pistol.nu</span>
         <span class="rb-badge-live" id="rbStatusBadge"><i class="bi bi-broadcast me-1 rb-pulse"></i>LIVE</span>
         <div class="rb-wc-filter" id="rbWcFilter"></div>
         <label class="rb-vaxla"><input type="checkbox" id="rbCycleToggle"> Växla</label>
