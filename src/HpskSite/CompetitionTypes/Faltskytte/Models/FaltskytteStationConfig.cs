@@ -13,6 +13,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>Keyed by weapon class: "A", "A_Opt", "B", "C", "R", "M1"-"M9".</summary>
         public Dictionary<string, FaltskytteWeaponClassConfig> WeaponConfigs { get; set; } = new();
 
+        /// <summary>
+        /// The configuration's own Tävlingstyp ("Normal" / "Poang"), read from the
+        /// `_scoringMode` meta key. Null when the blob predates the key.
+        /// The configurator is the source of truth for this (2026-05-26); the
+        /// competition's `scoringMode` property is only a mirror propagated at
+        /// Anslut time, so it goes stale when the Tävlingstyp is changed later.
+        /// Resolve the two via <see cref="FaltskytteScoringMode.Resolve"/>.
+        /// </summary>
+        public string? ScoringMode { get; set; }
+
         /// <summary>Gets station config for a specific weapon class. Falls back to first available.</summary>
         public FaltskytteWeaponClassConfig? GetForWeaponClass(string weaponClass)
         {
@@ -128,6 +138,48 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int TargetsPerFigure { get; set; } = 1;
     }
 
+    /// <summary>
+    /// Resolves a Fältskytte competition's Tävlingstyp from the two places it can live.
+    ///
+    /// The station configuration's `_scoringMode` is the source of truth (2026-05-26,
+    /// when the Tävlingstyp picker moved into the configurator). The competition's
+    /// `scoringMode` property is a mirror that the competition picker propagates ONLY at
+    /// Anslut time — so changing the Tävlingstyp in the configurator afterwards, or
+    /// attaching a config that predates the propagation, leaves the property stale.
+    ///
+    /// That drift is what made the printed station card and the QR Förutsättningar page
+    /// disagree about "Max träff/fig" (reported 2026-08-10): the card read Poäng and hid
+    /// it, the QR page read Normal and leaked a legacy stored value of 2.
+    /// </summary>
+    public static class FaltskytteScoringMode
+    {
+        public const string Normal = "Normal";
+        public const string Poang = "Poang";
+
+        /// <summary>Config first, competition property second, "Normal" last.</summary>
+        public static string Resolve(FaltskytteCompetitionConfig? config, string? competitionPropertyValue)
+            => Normalize(config?.ScoringMode) ?? Normalize(competitionPropertyValue) ?? Normal;
+
+        public static bool IsPoang(FaltskytteCompetitionConfig? config, string? competitionPropertyValue)
+            => Resolve(config, competitionPropertyValue) == Poang;
+
+        /// <summary>
+        /// Maps a stored value to "Normal"/"Poang", or null when it says nothing.
+        /// Tolerates the array shapes a dropdown property can come back as
+        /// (`["Poang"]`), since an untyped Umbraco read isn't guaranteed to be a
+        /// plain string — same defensive posture as CompetitionUrlProvider.ReadScopeValue.
+        /// </summary>
+        private static string? Normalize(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            var v = raw.Trim().Trim('[', ']').Trim().Trim('"', '\'').Trim();
+            if (v.Length == 0) return null;
+            if (v.Equals(Poang, StringComparison.OrdinalIgnoreCase)) return Poang;
+            if (v.Equals(Normal, StringComparison.OrdinalIgnoreCase)) return Normal;
+            return null; // unrecognised → let the next source speak
+        }
+    }
+
     /// <summary>Parses station config JSON. Handles direct format from JS.</summary>
     public static class FaltskytteConfigParser
     {
@@ -140,10 +192,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
             if (trimmed.StartsWith("{"))
             {
+                // The `_scoringMode` meta key is read out before the metadata keys are
+                // stripped below — it's the configuration's own Tävlingstyp and the
+                // authoritative one (the competition property is a stale-able mirror).
+                string? scoringMode = null;
+                try { scoringMode = JObject.Parse(json)["_scoringMode"]?.ToString(); } catch { }
+
                 // Try wrapped format: { "WeaponConfigs": { "C": {...} } }
                 var wrapped = JsonConvert.DeserializeObject<FaltskytteCompetitionConfig>(json);
                 if (wrapped?.WeaponConfigs?.Any() == true)
+                {
+                    wrapped.ScoringMode ??= scoringMode;
                     return wrapped;
+                }
 
                 // Direct format from JS: { "C": { "stations": [...] } }
                 // Strip metadata keys (e.g. _linkedGroups) before deserializing — they aren't weapon configs
@@ -152,7 +213,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
                     jobj.Remove(key);
                 var direct = jobj.ToObject<Dictionary<string, FaltskytteWeaponClassConfig>>();
                 if (direct?.Any() == true)
-                    return new FaltskytteCompetitionConfig { WeaponConfigs = direct };
+                    return new FaltskytteCompetitionConfig { WeaponConfigs = direct, ScoringMode = scoringMode };
             }
 
             return new FaltskytteCompetitionConfig();

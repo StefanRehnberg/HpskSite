@@ -219,7 +219,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             var config = ParseCompetitionConfig(competition);
-            var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
+            // Config's own _scoringMode wins over the competition's mirrored property,
+            // which only syncs at Anslut time. See FaltskytteScoringMode.
+            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode"));
             var maxReshoots = competition.GetValue<int>("maxReshoots");
 
             return Json(new { success = true, config, scoringMode, maxReshoots });
@@ -596,7 +598,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }).ToList();
 
             // Build per-weapon-class station configs for this station number
-            var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
+            // Tävlingstyp from the config first (the property is a stale-able mirror).
+            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
             var wcStations = new Dictionary<string, FaltskytteStationConfig>();
             foreach (var kvp in competitionConfig.WeaponConfigs)
             {
@@ -940,8 +943,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
                 var competitionConfig = ParseCompetitionConfig(competition);
+                // Tävlingstyp from the config first (the property is a stale-able mirror) —
+                // this decides Normalfält "32/22" vs Poängfält "54 p" scoring below.
+                var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
                 // For result display, use the first available weapon class config to determine station count.
                 // Stations marked IsShootOffOnly are NOT counted — they don't contribute to the qualification
                 // ranking and they're filtered out everywhere else (admin links, public station card).
@@ -1544,8 +1549,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!competition.GetValue<bool>("isAwardingStandardMedals") || competition.GetValue<bool>("isClubOnly"))
                 return result;
 
-            var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
             var competitionConfig = ParseCompetitionConfig(competition);
+            // Tävlingstyp from the config first (the property is a stale-able mirror) —
+            // standardmedalj thresholds differ between Normalfält and Poängfält.
+            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
             var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
             var stationCount = firstWcConfig?.Stations.Count(s => !s.IsShootOffOnly) ?? 0;
             var shootOffOnlyStationNumbers = (firstWcConfig?.Stations

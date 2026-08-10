@@ -50,7 +50,10 @@ namespace HpskSite.Controllers
             var model = new FaltskyttePrintStationCardsModel
             {
                 CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
-                ScoringMode = competition.GetValue<string>("scoringMode") ?? "Normal",
+                // Config wins over the competition's mirrored property — see
+                // FaltskytteScoringMode. Keeps this card and the QR Förutsättningar
+                // page (StationPage's ?t= branch) in agreement about Max träff/fig.
+                ScoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode")),
                 Stations = stationNumbers.Select(n =>
                 {
                     var byWc = new Dictionary<string, FaltskytteStationConfig>();

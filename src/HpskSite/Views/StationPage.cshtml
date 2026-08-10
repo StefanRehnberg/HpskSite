@@ -81,8 +81,13 @@
                         infoStations = byWc;
                         var n = SafeStr(infoNode, "competitionName");
                         infoCompName = !string.IsNullOrEmpty(n) ? n : (infoNode.Name ?? "");
-                        var sm = SafeStr(infoNode, "scoringMode");
-                        infoScoringMode = !string.IsNullOrEmpty(sm) ? sm : "Normal";
+                        // Tävlingstyp: the configuration's own _scoringMode wins over the
+                        // competition's mirrored property, which goes stale whenever the
+                        // Tävlingstyp is changed in the configurator after Anslut. Reading
+                        // the property alone made this page show "Max träff/fig: 2" — a
+                        // legacy stored default — on a Poängfält competition whose printed
+                        // station card (correctly) omitted it.
+                        infoScoringMode = FaltskytteScoringMode.Resolve(cfg, SafeStr(infoNode, "scoringMode"));
                         infoTokenValid = true;
                     }
                 }

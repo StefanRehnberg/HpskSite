@@ -94,8 +94,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     var competitionType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
                     if (competitionType != "Faltskytte" && competitionType != "MagnumFalt") continue;
 
-                    var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
                     var competitionConfig = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig"));
+                    // Config's own _scoringMode wins — the competition property is a mirror
+                    // that only syncs at Anslut time. See FaltskytteScoringMode.
+                    var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
                     var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
                     var stationCount = firstWcConfig?.Stations.Count ?? 0;
 
