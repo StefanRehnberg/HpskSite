@@ -47,7 +47,10 @@
                     eller när din träningsform förbättras. Notiser gäller den här enheten för hela pistol.nu —
                     aktiverar du dem här får du <strong>även notiser för tävlingar du är anmäld till</strong>.
                     Du stänger av dem på Min sida.</p>
-                @{ ViewData["WebPushOptInOnly"] = true; }
+                @* Start-time reminders are a COMPETITION setting ("30 min innan jag skjuter") and don't
+                   belong in the Träningsmatch settings — hidden here. _WebPushSetup sends the server's
+                   own value back for suppressed controls, so saving here can't reset it. *@
+                @{ ViewData["WebPushOptInOnly"] = true; ViewData["WebPushShowSchedulePref"] = false; }
                 @await Html.PartialAsync("_WebPushSetup")
 
                 <hr class="my-3">

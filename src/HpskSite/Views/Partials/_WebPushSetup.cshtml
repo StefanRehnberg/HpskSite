@@ -8,9 +8,25 @@
     // The "Nya matcher" + "träningsform"-prefs are Träningsmatch-specific. Host pages opt in;
     // competition pages + Min sida pass WebPushShowMatchPrefs=false (unrelated to competitions).
     var wpShowMatchPrefs = (ViewData["WebPushShowMatchPrefs"] as bool?) ?? true;
+    // The other two prefs gate independently, defaulting to whatever the match pref does (so the
+    // Träningsmatch page and Min sida behave exactly as before). A competition page turns the match
+    // pref ON on its own, so a shooter who opted in there can also opt OUT of träningsmatch
+    // broadcasts there — without being shown "träningsform"-prefs that have nothing to do with a
+    // competition. NOTE: any surface showing ONE of these must not clobber the other two — see
+    // lastPrefs in savePrefs below.
+    var wpShowRankingPref = (ViewData["WebPushShowRankingPref"] as bool?) ?? wpShowMatchPrefs;
+    var wpShowSchedulePref = (ViewData["WebPushShowSchedulePref"] as bool?) ?? wpShowMatchPrefs;
+    var wpShowAnyPrefs = wpShowMatchPrefs || wpShowRankingPref || wpShowSchedulePref;
     // Opt-in only: hide the toggle once subscribed so this surface can't opt OUT. Opting out
     // lives solely on Min sida → Profil (deliberately out-of-the-way). Default false = full toggle.
     var wpOptInOnly = (ViewData["WebPushOptInOnly"] as bool?) ?? false;
+    // What a NEW subscription made from this surface should default its träningsmatch pref to.
+    // A subscription carries no competition scope, so the surface is the only evidence of intent:
+    // where the träningsmatch prefs aren't even shown (competition page, Mitt schema), the member
+    // is opting in to THAT competition — signing them up for every open träningsmatch on the site
+    // would be a broadcast they never asked for and can't turn off from here. Overridable.
+    var wpMatchPrefDefault = ViewData["WebPushMatchPrefDefault"] as string
+        ?? (wpShowMatchPrefs ? "OpenMatchesOnly" : "Off");
 }
 <div id="webPushSetup" class="d-none">
     <button type="button" id="webPushToggle" class="btn btn-sm btn-outline-primary">
@@ -18,28 +34,37 @@
     </button>
     <span id="webPushStatus" class="small text-body-secondary ms-2"></span>
 
-    @if (wpShowMatchPrefs)
+    @if (wpShowAnyPrefs)
     {
         <div id="webPushPrefs" class="d-none mt-2 small">
-            <div class="mb-1 d-flex align-items-center gap-2">
-                <label for="wpMatchPref" class="mb-0">Nya matcher:</label>
-                <select id="wpMatchPref" class="form-select form-select-sm w-auto">
-                    <option value="All">Alla matcher</option>
-                    <option value="OpenMatchesOnly">Bara öppna matcher</option>
-                    <option value="Off">Av</option>
-                </select>
-            </div>
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="wpRanking" checked>
-                <label class="form-check-label" for="wpRanking">Notis när min träningsform förbättras</label>
-            </div>
-            @* Opt-in, unchecked by default — matches ScheduleRemindersEnabled DEFAULT 0 in the migration. *@
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="wpScheduleReminders">
-                <label class="form-check-label" for="wpScheduleReminders">
-                    Påminnelse 30 min innan jag skjuter eller börjar ett funktionärspass
-                </label>
-            </div>
+            @if (wpShowMatchPrefs)
+            {
+                <div class="mb-1 d-flex align-items-center gap-2">
+                    <label for="wpMatchPref" class="mb-0">Nya träningsmatcher:</label>
+                    <select id="wpMatchPref" class="form-select form-select-sm w-auto">
+                        <option value="All">Alla matcher</option>
+                        <option value="OpenMatchesOnly">Bara öppna matcher</option>
+                        <option value="Off">Av</option>
+                    </select>
+                </div>
+            }
+            @if (wpShowRankingPref)
+            {
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="wpRanking" checked>
+                    <label class="form-check-label" for="wpRanking">Notis när min träningsform förbättras</label>
+                </div>
+            }
+            @if (wpShowSchedulePref)
+            {
+                @* Opt-in, unchecked by default — matches ScheduleRemindersEnabled DEFAULT 0 in the migration. *@
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="wpScheduleReminders">
+                    <label class="form-check-label" for="wpScheduleReminders">
+                        Påminnelse 30 min innan jag skjuter eller börjar ett funktionärspass
+                    </label>
+                </div>
+            }
         </div>
     }
 </div>
@@ -73,6 +98,7 @@
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     var optInOnly = @(wpOptInOnly ? "true" : "false"); // hide the toggle once subscribed (no opt-out here)
+    var matchPrefDefault = '@wpMatchPrefDefault';      // träningsmatch default for NEW subscriptions from this surface
 
     var btn = document.getElementById('webPushToggle');
     var txt = document.getElementById('webPushToggleText');
@@ -98,6 +124,12 @@
 
     function getReg() { return navigator.serviceWorker.register('/sw-push.js'); }
 
+    // Last values read from the server. SavePreferences writes all three columns in one go, so a
+    // surface rendering only SOME of the controls must send the server's own value back for the
+    // ones it isn't showing — otherwise turning off träningsmatch notices on a competition page
+    // would silently reset the member's ranking + reminder settings to this page's defaults.
+    var lastPrefs = { matchPref: 'OpenMatchesOnly', rankingEnabled: true, scheduleRemindersEnabled: false };
+
     function loadPrefs() {
         if (!document.getElementById('webPushPrefs')) return; // prefs suppressed on this host page
         getReg().then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) {
@@ -108,9 +140,17 @@
                 body: JSON.stringify({ endpoint: sub.endpoint })
             }).then(function (r) { return r.json(); }).then(function (j) {
                 if (!j.success) return;
-                document.getElementById('wpMatchPref').value = j.matchPref || 'OpenMatchesOnly';
-                document.getElementById('wpRanking').checked = j.rankingEnabled !== false;
-                document.getElementById('wpScheduleReminders').checked = j.scheduleRemindersEnabled === true;
+                lastPrefs = {
+                    matchPref: j.matchPref || 'OpenMatchesOnly',
+                    rankingEnabled: j.rankingEnabled !== false,
+                    scheduleRemindersEnabled: j.scheduleRemindersEnabled === true
+                };
+                var mp = document.getElementById('wpMatchPref');
+                if (mp) mp.value = lastPrefs.matchPref;
+                var rk = document.getElementById('wpRanking');
+                if (rk) rk.checked = lastPrefs.rankingEnabled;
+                var sr = document.getElementById('wpScheduleReminders');
+                if (sr) sr.checked = lastPrefs.scheduleRemindersEnabled;
                 document.getElementById('webPushPrefs').classList.remove('d-none');
             }).catch(function () { });
         });
@@ -119,15 +159,21 @@
     function savePrefs() {
         getReg().then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) {
             if (!sub) return;
+            var mp = document.getElementById('wpMatchPref');
+            var rk = document.getElementById('wpRanking');
+            var sr = document.getElementById('wpScheduleReminders');
+            var body = {
+                endpoint: sub.endpoint,
+                matchPref: mp ? mp.value : lastPrefs.matchPref,
+                rankingEnabled: rk ? rk.checked : lastPrefs.rankingEnabled,
+                scheduleRemindersEnabled: sr ? sr.checked : lastPrefs.scheduleRemindersEnabled
+            };
             fetch('/umbraco/surface/WebPush/SavePreferences', {
                 method: 'POST', credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': afToken() },
-                body: JSON.stringify({
-                    endpoint: sub.endpoint,
-                    matchPref: document.getElementById('wpMatchPref').value,
-                    rankingEnabled: document.getElementById('wpRanking').checked,
-                    scheduleRemindersEnabled: document.getElementById('wpScheduleReminders').checked
-                })
+                body: JSON.stringify(body)
+            }).then(function () {
+                lastPrefs = { matchPref: body.matchPref, rankingEnabled: body.rankingEnabled, scheduleRemindersEnabled: body.scheduleRemindersEnabled };
             }).catch(function () { });
         });
     }
@@ -161,10 +207,14 @@
                 });
             })
             .then(function (sub) {
+                // toJSON() gives {endpoint, keys}; carry this surface's träningsmatch default alongside.
+                // The server ignores it when this browser is only re-subscribing (prefs are preserved).
+                var payload = sub.toJSON();
+                payload.matchPref = matchPrefDefault;
                 return fetch('/umbraco/surface/WebPush/Subscribe', {
                     method: 'POST', credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': afToken() },
-                    body: JSON.stringify(sub)
+                    body: JSON.stringify(payload)
                 });
             })
             .then(function () { setState(true); status.textContent = 'Klart! Du får nu notiser.'; loadPrefs(); return true; })

@@ -17,11 +17,16 @@
         public DateTime? LastUsedAt { get; set; }
     }
 
-    /// <summary>Shape posted by the browser's PushSubscription.toJSON().</summary>
+    /// <summary>Shape posted by the browser's PushSubscription.toJSON(), plus the opting-in surface's
+    /// träningsmatch default. A subscription has no competition/club scope of its own, so the surface
+    /// the member opted in FROM is the only signal we have for what they meant to subscribe to:
+    /// a competition page passes "Off" so an SM opt-in doesn't also sign them up for every open
+    /// träningsmatch on the site. Null = the träningsmatch default ("OpenMatchesOnly").</summary>
     public class WebPushSubscribeRequest
     {
         public string? Endpoint { get; set; }
         public WebPushKeys? Keys { get; set; }
+        public string? MatchPref { get; set; }
     }
 
     public class WebPushKeys

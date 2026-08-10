@@ -54,8 +54,14 @@ namespace HpskSite.Controllers
             if (string.IsNullOrEmpty(request?.Endpoint) || string.IsNullOrEmpty(request.Keys?.P256dh) || string.IsNullOrEmpty(request.Keys?.Auth))
                 return Json(new { success = false, message = "Ogiltig prenumeration." });
 
+            // Whitelist rather than trust the posted value — it lands straight in a column the
+            // träningsmatch broadcast filters on.
+            var matchPref = request.MatchPref is "All" or "OpenMatchesOnly" or "Off"
+                ? request.MatchPref
+                : "OpenMatchesOnly";
+
             _webPush.SaveSubscription(memberId.Value, request.Endpoint!, request.Keys!.P256dh!, request.Keys.Auth!,
-                Request.Headers.UserAgent.ToString());
+                Request.Headers.UserAgent.ToString(), matchPref);
             return Json(new { success = true });
         }
 

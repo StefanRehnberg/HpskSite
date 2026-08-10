@@ -38,10 +38,23 @@ namespace HpskSite.Services.Notifications
             return new VapidDetails(subject, _config["WebPush:PublicKey"], _config["WebPush:PrivateKey"]);
         }
 
-        public void SaveSubscription(int memberId, string endpoint, string p256dh, string auth, string? userAgent)
+        /// <summary>
+        /// Stores (or re-points) a browser subscription. <paramref name="matchPref"/> is the default the
+        /// opting-in surface asks for — see WebPushSubscribeRequest. It applies only to genuinely NEW
+        /// subscriptions: re-subscribing the same browser as the same member carries the member's own
+        /// choices across, because this is a DELETE+INSERT and silently resetting their prefs would be
+        /// indistinguishable from us ignoring them.
+        /// </summary>
+        public void SaveSubscription(int memberId, string endpoint, string p256dh, string auth, string? userAgent,
+            string? matchPref = null)
         {
             using var scope = _scopeProvider.CreateScope();
             var db = scope.Database;
+
+            var existing = db.Fetch<WebPushSubscriptionRow>(
+                "SELECT * FROM WebPushSubscription WHERE Endpoint = @0", endpoint).FirstOrDefault();
+            var keepPrefs = existing != null && existing.MemberId == memberId;
+
             db.Execute("DELETE FROM WebPushSubscription WHERE Endpoint = @0", endpoint); // dedupe / re-point to this member
             db.Insert("WebPushSubscription", "Id", true, new
             {
@@ -50,9 +63,27 @@ namespace HpskSite.Services.Notifications
                 P256dh = p256dh,
                 Auth = auth,
                 UserAgent = userAgent ?? "",
+                MatchPref = keepPrefs ? existing!.MatchPref : (matchPref ?? "OpenMatchesOnly"),
+                RankingEnabled = keepPrefs ? existing!.RankingEnabled : true,
                 CreatedAt = DateTime.UtcNow,
                 LastUsedAt = (DateTime?)null
             });
+
+            // Separate UPDATE, not part of the INSERT above: ScheduleRemindersEnabled arrived in a later
+            // migration than the table, so referencing it in the insert would break subscribing outright
+            // on any environment where add-schedulereminders-to-webpushsubscription.sql hasn't been run.
+            if (keepPrefs && existing!.ScheduleRemindersEnabled)
+            {
+                try
+                {
+                    db.Execute("UPDATE WebPushSubscription SET ScheduleRemindersEnabled = 1 WHERE Endpoint = @0", endpoint);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "WebPush: could not carry over schedule-reminder opt-in (migration pending?)");
+                }
+            }
+
             scope.Complete();
         }
 
