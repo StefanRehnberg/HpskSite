@@ -35,6 +35,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly InvoiceAuditService _auditService;
         private readonly ConsolidatedInvoiceService _consolidatedService;
+        private readonly AdminAuthorizationService _authorizationService;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<SwishController> _logger;
 
@@ -52,6 +53,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             InvoiceAuditService auditService,
             ConsolidatedInvoiceService consolidatedService,
+            AdminAuthorizationService authorizationService,
             ILogger<SwishController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -62,6 +64,7 @@ namespace HpskSite.Controllers
             _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
             _auditService = auditService ?? throw new ArgumentNullException(nameof(auditService));
             _consolidatedService = consolidatedService ?? throw new ArgumentNullException(nameof(consolidatedService));
+            _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
             _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -1271,7 +1274,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [IgnoreAntiforgeryToken]
-        public async Task<IActionResult> SendTeamQRCodeEmail(int competitionId, int teamId)
+        public async Task<IActionResult> SendTeamQRCodeEmail(int competitionId, int teamId, int targetMemberId = 0)
         {
             try
             {
@@ -1279,20 +1282,19 @@ namespace HpskSite.Controllers
                 if (currentMember == null)
                     return Json(new { success = false, message = "Du måste vara inloggad." });
 
-                var memberData = _memberService.GetById(currentMember.Key);
-                if (memberData == null || string.IsNullOrEmpty(memberData.Email))
-                    return Json(new { success = false, message = "Ingen e-postadress registrerad." });
+                var callerData = _memberService.GetById(currentMember.Key);
+                if (callerData == null)
+                    return Json(new { success = false, message = "Kunde inte hitta din profil." });
 
                 var competition = UmbracoContext.Content.GetById(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
-                var swishNumber = competition.Value<string>("swishNumber");
-                var feeStr = competition.Value<string>("teamRegistrationFee") ?? "0";
-                if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0 || string.IsNullOrEmpty(swishNumber))
-                    return Json(new { success = false, message = "Betalning ej konfigurerad." });
-
-                // Look up the team
+                // Look up the team BEFORE reading the fee — a stafett is billed from
+                // stafettRegistrationFee, not teamRegistrationFee. Reading the lag fee for a relay
+                // mailed a QR for the wrong amount (and refused outright on a competition that only
+                // configures a stafett fee). GenerateTeamPaymentQR has always branched here; this
+                // endpoint did not, so the on-screen QR and the mailed QR could disagree.
                 CompetitionTeamDto team;
                 using (var db = _databaseFactory.CreateDatabase())
                 {
@@ -1301,6 +1303,31 @@ namespace HpskSite.Controllers
                 }
                 if (team == null)
                     return Json(new { success = false, message = "Laget kunde inte hittas." });
+
+                var kindLabel = team.IsRelay ? "Stafett" : "Lag";
+                var swishNumber = competition.Value<string>("swishNumber");
+                var feeStr = competition.Value<string>(team.IsRelay ? "stafettRegistrationFee" : "teamRegistrationFee") ?? "0";
+                if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0 || string.IsNullOrEmpty(swishNumber))
+                    return Json(new { success = false, message = "Betalning ej konfigurerad." });
+
+                // Recipient. Default is the caller — that is right on the public page, where the club's
+                // own lagledare creates the team and mails themselves the QR. At the registration desk
+                // it is not: the organiser creating a late lag would mail the QR to themselves rather
+                // than to the club standing at the desk. So the desk passes an explicit recipient, which
+                // only someone running this competition (or a site admin) may do.
+                var recipient = callerData;
+                if (targetMemberId > 0 && targetMemberId != callerData.Id)
+                {
+                    if (!await _authorizationService.IsCurrentUserAdminAsync()
+                        && !await _authorizationService.HasCompetitionStaffAccessAsync(competitionId))
+                        return Json(new { success = false, message = "Ingen behörighet att skicka till en annan mottagare." });
+
+                    recipient = _memberService.GetById(targetMemberId);
+                    if (recipient == null)
+                        return Json(new { success = false, message = "Mottagaren kunde inte hittas." });
+                }
+                if (string.IsNullOrEmpty(recipient.Email))
+                    return Json(new { success = false, message = "Ingen e-postadress registrerad." });
 
                 var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
                 var amountString = teamFee.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
@@ -1339,6 +1366,9 @@ namespace HpskSite.Controllers
                     invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
                 }
 
+                // Payment reference stays "Lag: …" for a relay too — GenerateTeamPaymentQR builds it
+                // that way, and the on-screen QR and the mailed QR must carry the SAME reference or
+                // the organiser cannot reconcile the payment.
                 var message = $"Lag: {invoiceNumber}";
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
                 if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
@@ -1348,12 +1378,12 @@ namespace HpskSite.Controllers
                 var mailPayee = _consolidatedService.ResolvePayee(competitionId);
 
                 await _emailService.SendSwishQRCodeEmailAsync(
-                    memberData.Email,
-                    currentMember.Name ?? "Medlem",
-                    $"{competition.Name} - Lag: {team.TeamName}",
+                    recipient.Email,
+                    recipient.Name ?? "Medlem",
+                    $"{competition.Name} - {kindLabel}: {team.TeamName}",
                     qrCodeBytes,
                     teamFee,
-                    $"Lagklass: {team.TeamClass}",
+                    $"{kindLabel}klass: {team.TeamClass}",
                     invoiceNumber,
                     normalizedSwishNumber,
                     message,
@@ -1361,18 +1391,19 @@ namespace HpskSite.Controllers
                     bgNumber: mailPayee.BgNumber,   // bankgiro alternative in the mail body
                     payeeName: mailPayee.Name);
 
-                // Audit: log the team-invoice email send.
+                // Audit: log the team-invoice email send. The actor is whoever clicked (the desk
+                // operator on a late registration); the recipient goes in the note.
                 await _auditService.LogAsync(
                     invoiceId: invoice.Id,
                     competitionId: competitionId,
                     eventType: InvoicePaymentEventTypes.EmailSent,
-                    byMemberId: memberData.Id,
-                    byMemberName: memberData.Name,
+                    byMemberId: callerData.Id,
+                    byMemberName: callerData.Name,
                     amount: teamFee,
                     reference: invoiceNumber,
-                    notes: $"Lag-QR mejlad till {memberData.Email} (lag: {team.TeamName})");
+                    notes: $"{kindLabel}-QR mejlad till {recipient.Email} ({kindLabel.ToLower()}: {team.TeamName})");
 
-                return Json(new { success = true, message = $"QR-kod skickad till {memberData.Email}" });
+                return Json(new { success = true, email = recipient.Email, message = $"QR-kod skickad till {recipient.Email}" });
             }
             catch (Exception ex)
             {

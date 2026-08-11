@@ -573,6 +573,43 @@
                     regViewData["SubCompetitionName"] = competition?.HasProperty("subCompetitionName") == true
                         ? (competition.Value<string>("subCompetitionName") ?? "")
                         : "";
+
+                    // Late lag/stafett registration at the desk. The public competition page disables
+                    // "Anmäl lag" / "Anmäl stafettlag" once sista anmälningsdag has passed, but a club
+                    // turning up on the day wanting to enter another lag or stafettlag is routine at an
+                    // SM — so the desk gets its own create-team modal with no deadline gate, mirroring
+                    // the individual walk-in. Only rendered for the kinds the competition allows.
+                    var allowTeamsHere = competition?.Value<bool>("allowTeams") ?? false;
+                    var allowStafettHere = competition?.Value<bool>("allowStafett") ?? false;
+                    regViewData["AllowTeams"] = allowTeamsHere;
+                    regViewData["AllowStafett"] = allowStafettHere;
+
+                    // Club picker source for that modal. Built the same way Competition.cshtml builds it
+                    // (Umbraco.Content(id) is an O(1) cache hit — no tree scan), and only when a team of
+                    // some kind is actually possible.
+                    var lateTeamClubsJson = "[]";
+                    if (allowTeamsHere || allowStafettHere)
+                    {
+                        var svComparerClubs = StringComparer.Create(
+                            System.Globalization.CultureInfo.GetCultureInfo("sv-SE"), true);
+                        var clubsWithRegions = ClubService.GetAllClubs()
+                            .Where(c => c.IsActive)
+                            .Select(c => new
+                            {
+                                id = c.Id,
+                                name = c.Name,
+                                region = Umbraco.Content(c.Id)?.Value<string>("regionalFederation") ?? ""
+                            })
+                            .OrderBy(c => c.name, svComparerClubs)
+                            .ToList();
+                        lateTeamClubsJson = System.Text.Json.JsonSerializer.Serialize(
+                            clubsWithRegions,
+                            new System.Text.Json.JsonSerializerOptions
+                            {
+                                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                            });
+                    }
+                    regViewData["ClubsWithRegionsJson"] = lateTeamClubsJson;
                 }
                 @await Html.PartialAsync("CompetitionRegistrationManagement", regViewData)
             </div>

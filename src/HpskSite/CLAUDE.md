@@ -840,7 +840,7 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 
 **Invoices are created eagerly (2026-06-11):** every fee-bearing registration/team gets its Pending invoice at *creation* (not lazily on first payment option) via `PaymentService.EnsureRegistrationInvoiceAsync` (wired into public register / late-walk-in / team creation). So a fee'd row shows **Väntande** immediately; "Saknar betalning" was renamed **"Saknar faktura"** (now the error/edge case) and free comps show **"Ingen avgift"** (`No Fee`). The status lookup now matches invoices by the single `registrationId` too, not only legacy `relatedRegistrationIds`. See memory `eager-invoices-and-lag-section`.
 
-**Lag section on the Anmälningar tab (2026-06-11):** teams + relay (stafett) are listed in their own collapsible "Lag" card (`RegistrationAdmin/GetCompetitionTeams`), discipline-agnostic, with the same per-row payment actions as individuals (team-aware manage-payment modal; team invoices use memberId `team-{id}`). **Team edit/delete is now authorized** (`CompetitionTeamController.UpdateTeam`/`DeleteTeam` previously had none): site admin / club+regional admin for the team's club / member whose primary club is that club (`CanManageTeamAsync`); other clubs' edit/delete buttons hidden in the team + stafett registration modals.
+**Lag section on the Anmälningar tab (2026-06-11; late team CREATION added 2026-08-11 — see "Efteranmälan av lag/stafett" below):** teams + relay (stafett) are listed in their own collapsible "Lag" card (`RegistrationAdmin/GetCompetitionTeams`), discipline-agnostic, with the same per-row payment actions as individuals (team-aware manage-payment modal; team invoices use memberId `team-{id}`). **Team edit/delete is now authorized** (`CompetitionTeamController.UpdateTeam`/`DeleteTeam` previously had none): site admin / club+regional admin for the team's club / member whose primary club is that club (`CanManageTeamAsync`); other clubs' edit/delete buttons hidden in the team + stafett registration modals.
 
 **Springskytte deferred team/relay rosters (2026-06-11):** Springskytte lag/stafett can be created with a name only + paid, shooters named any time before the event (relaxation gated to Springskytte in the shared `CompetitionTeamService` + modals; a stafett edit modal was added). See memory `springskytte-deferred-team-roster`.
 
@@ -874,6 +874,54 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 **Class mutex bucket logic (`getClassMutexBucket` in CompetitionRegistrationManagement.cshtml):**
 - Maps a class id to a `weapon:subcategory` bucket. Within-bucket ticks auto-untick siblings; across-bucket ticks are independent.
 - Subcategory derivation: `_Jun` → jun, `_Vet_` → vet, contains `Dam` → dam, else open. Springskytte composite ids (containing `-`) get a unique bucket per id so multi-class registration there is unaffected.
+
+### Efteranmälan av lag/stafett vid registreringsbordet (2026-08-11)
+
+**What:** the desk can create lag AND stafettlag after sista anmälningsdag. Individual walk-in
+already worked; teams did not — team creation only ever existed on the public competition page,
+where the buttons are disabled once registration closes. Nothing server-side enforced the deadline,
+so the gap was purely the missing UI. Discipline-agnostic: renders whenever `allowTeams` /
+`allowStafett` is set. Verified on Springskytte (6628, 5626) and Precision (2576) via
+`hpsk-verify/late-team-{verify,e2e}.mjs`.
+
+- **`lateTeamRegistrationModal`** (`CompetitionRegistrationManagement.cshtml`). One modal, both
+  kinds; `lateTeamIsRelay` switches class list (`teamClasses` vs `stafettTeamClasses` — both come
+  from `CompetitionTeam/GetTeamsForCompetition`), member source (`GetEligibleMembers` vs
+  `GetClubMembersForRelay`) and endpoint (`CreateTeam` vs `CreateStafettTeam`).
+- **Payment handoff** reuses `showPaymentOptionsForTeam()` — the Lag card's own chooser — so QR,
+  mark-paid and QR-email need no new code. **No QR pre-flight** (unlike the individual walk-in,
+  which calls `GeneratePaymentQR` to force invoice creation): `CreateTeamAsync` already creates the
+  team invoice eagerly via `EnsureTeamInvoiceCoreAsync`, so the amount is right on first paint.
+- **Auth widened** with `HasCompetitionStaffAccessAsync` on `CompetitionTeam.CreateTeam`,
+  `CreateStafettTeam` and `GetClubMembersForRelay` — the organiser must be able to register a
+  **visiting** club's team. The old rule was own-club-or-club-admin, which locked the krets out of
+  every club but its own on a region-hosted SM. Member self-service path is unchanged.
+- **Header is now one Åtgärder menu** instead of six buttons (walk-in, lag, stafett, påminnelser,
+  bokföringsunderlag, CSV) which wrapped on a desk tablet. Styled as the PAGE-level menu from
+  club-admin Medlemmar (`btn-primary`, default size, `shadow`, `min-width:260px`, `dropdown-header`
+  groups) — deliberately unlike the small grey outline toggles the table ROWS use, so blue+large
+  reads as "acts on the whole list" and small+grey as "acts on this row". No
+  `data-bs-popper-config` needed here: the header is not inside `.table-responsive`.
+
+**Two team-QR-email bugs fixed at the same time** (`SwishController.SendTeamQRCodeEmail`):
+
+1. **Relay fee.** It read `teamRegistrationFee` unconditionally, so a 250 kr stafett was mailed a
+   300 kr QR — and it refused outright ("Betalning ej konfigurerad") on a competition configuring
+   only a stafett fee. Now branches on `team.IsRelay`, as `GenerateTeamPaymentQR` always did. The
+   Swish **reference stays `"Lag: {invoiceNumber}"` for both kinds** — on-screen and mailed QR must
+   carry the same reference or the payment can't be reconciled. Proof: audit rows for the same team
+   went `300.00 "Lag-QR"` → `250.00 "Stafett-QR"`.
+2. **Recipient.** It mailed the *logged-in user*, right on the public page (club's lagledare mails
+   themselves) and wrong at the desk (organiser mails themselves). Now takes optional
+   `targetMemberId`, gated on admin/desk-staff auth, fed by the new
+   **`CompetitionTeam/GetTeamContacts(competitionId, teamId)`** (team members that have an email;
+   `CanManageTeamAsync`-gated). Deliberately a separate lookup, not a field on the Lag list — that
+   list is a hot path and this is only needed when the operator clicks. Deferred Springskytte roster
+   → no contacts → chooser degrades to "Mig själv" with an explanation.
+
+**⚠️ Still open:** both team-QR endpoints compute the amount from the competition's fee **property**
+rather than the invoice's `totalAmount`. When they disagree (fee edited after invoicing) the QR and
+the invoice ask for different sums. Pre-existing, affects the public flow equally.
 
 ### Anmälningar row Åtgärder menu, shooter info, push column, reference lookup (2026-08-07)
 

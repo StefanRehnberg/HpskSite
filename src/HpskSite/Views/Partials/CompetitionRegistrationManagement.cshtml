@@ -74,6 +74,29 @@
     // (and the backend recomputes the fee via RegistrationFeeCalculator).
     var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
     var subCompetitionEnabled = !string.IsNullOrWhiteSpace(subCompetitionName);
+
+    // Late lag/stafett registration (efteranmälan av lag). The public page's team buttons go dead
+    // at sista anmälningsdag; the desk has no deadline, so these render whenever the competition
+    // allows that kind of team at all. Discipline-agnostic — a Precision comp with allowTeams gets
+    // the same modal Springskytte does.
+    var allowTeams = ViewData["AllowTeams"] as bool? ?? false;
+    var allowStafett = ViewData["AllowStafett"] as bool? ?? false;
+    var lateTeamEnabled = allowTeams || allowStafett;
+    var lateTeamClubsJson = ViewData["ClubsWithRegionsJson"]?.ToString() ?? "[]";
+    var lateTeamRegionsJson = "[]";
+    if (lateTeamEnabled)
+    {
+        var regionOptions = Enum.GetValues(typeof(HpskSite.Models.Federations.RegionalFederations))
+            .Cast<Enum>()
+            .Select(rf => new { code = rf.ToString(), name = HpskSite.Models.Federations.GetDescription(rf) })
+            .ToList();
+        lateTeamRegionsJson = System.Text.Json.JsonSerializer.Serialize(
+            regionOptions,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+    }
 }
 
 <!-- Flatpickr (used by the mark-as-paid date picker). Loaded again here so the
@@ -86,19 +109,62 @@
     <!-- Header Section -->
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-people me-2"></i>Anmälningar</h4>
-        <div class="d-flex gap-2 flex-wrap">
-            <button type="button" class="btn btn-primary btn-sm" onclick="openWalkInRegistrationModal()" title="Anmäl en skytt vid registreringsbordet">
-                <i class="bi bi-person-plus me-1"></i>Anmäl och betala
+        @* One Åtgärder menu instead of a row of buttons. Adding late lag + stafett took the
+           header to six side-by-side buttons, which wrapped onto two lines on the desk's
+           tablet and made nothing findable.
+
+           Styled as the PAGE-level action menu from Klubbadmin → Medlemmar (btn-primary at
+           default size, shadowed menu, min-width) rather than the small outline toggle the
+           table ROWS use. That contrast is deliberate: blue-and-large means "acts on this
+           whole list", small-and-grey means "acts on this one row". *@
+        <div class="dropdown">
+            <button class="btn btn-primary dropdown-toggle" type="button" id="registrationActionsMenu"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-sliders me-2"></i>Åtgärder
             </button>
-            <button type="button" class="btn btn-warning btn-sm" onclick="openSendRemindersModal()" title="Öppna påminnelser – välj mottagare innan du skickar">
-                <i class="bi bi-envelope-exclamation me-1"></i>Påminnelser
-            </button>
-            <button type="button" class="btn btn-outline-success btn-sm" onclick="openBokforingsUnderlag()" title="Öppna utskriftsvänligt bokföringsunderlag">
-                <i class="bi bi-file-earmark-text me-1"></i>Bokföringsunderlag
-            </button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportCompetitionRegistrations()" title="Exportera anmälningar och betalningar som CSV">
-                <i class="bi bi-download me-1"></i>Exportera CSV
-            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="registrationActionsMenu" style="min-width: 260px;">
+                <li><h6 class="dropdown-header">Anmälningar</h6></li>
+                <li>
+                    <button class="dropdown-item" type="button" onclick="openWalkInRegistrationModal()">
+                        <i class="bi bi-person-plus me-2 text-primary"></i>Anmäl och betala
+                    </button>
+                </li>
+                @if (allowTeams)
+                {
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="openLateTeamModal(false)">
+                            <i class="bi bi-people-fill me-2 text-primary"></i>Anmäl lag
+                        </button>
+                    </li>
+                }
+                @if (allowStafett)
+                {
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="openLateTeamModal(true)">
+                            <i class="bi bi-flag-fill me-2 text-primary"></i>Anmäl stafettlag
+                        </button>
+                    </li>
+                }
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header">Kommunikation</h6></li>
+                <li>
+                    <button class="dropdown-item" type="button" onclick="openSendRemindersModal()">
+                        <i class="bi bi-envelope-exclamation me-2 text-warning"></i>Påminnelser – välj mottagare innan du skickar
+                    </button>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header">Listor</h6></li>
+                <li>
+                    <button class="dropdown-item" type="button" onclick="openBokforingsUnderlag()">
+                        <i class="bi bi-file-earmark-text me-2 text-success"></i>Bokföringsunderlag – utskriftsvänligt
+                    </button>
+                </li>
+                <li>
+                    <button class="dropdown-item" type="button" onclick="exportCompetitionRegistrations()">
+                        <i class="bi bi-download me-2 text-secondary"></i>Exportera CSV – anmälningar och betalningar
+                    </button>
+                </li>
+            </ul>
         </div>
     </div>
 
@@ -584,6 +650,93 @@
     </div>
 </div>
 
+@if (lateTeamEnabled)
+{
+    <!-- Late lag/stafett Registration Modal — the team counterpart of the walk-in modal.
+         One modal serves both kinds; openLateTeamModal(isRelay) sets the mode, which decides
+         the class list (teamClasses vs stafettTeamClasses), the member source (registered
+         shooters in compatible classes vs all club members) and the create endpoint.
+         On success it hands off to showPaymentOptionsForTeam() — the same chooser the Lag
+         card uses — so Visa QR-kod / Registrera betalning / Skicka QR via e-post all work
+         exactly as they do for a late individual registration. -->
+    <div class="modal fade" id="lateTeamRegistrationModal" tabindex="-1" aria-labelledby="lateTeamRegistrationModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="lateTeamRegistrationModalLabel">
+                        <i class="bi bi-people-fill me-2"></i><span id="lateTeamModalTitle">Anmäl lag</span>
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3" id="lateTeamModalIntro">
+                        Anmäl ett lag som inte hunnit anmäla sig i tid. Efter anmälan öppnas
+                        betalningshanteringen direkt.
+                    </p>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="lateTeamRegionSelect" class="form-label fw-bold">Krets</label>
+                            <select class="form-select" id="lateTeamRegionSelect">
+                                <option value="">Alla kretsar</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="lateTeamClubSelect" class="form-label fw-bold">Förening</label>
+                            <select class="form-select" id="lateTeamClubSelect">
+                                <option value="">Välj förening...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="lateTeamName" class="form-label fw-bold">Lagnamn</label>
+                        <input type="text" class="form-control" id="lateTeamName" placeholder="T.ex. 'Klubbens A-lag'" maxlength="100" autocomplete="off">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="lateTeamClassSelect" class="form-label fw-bold"><span id="lateTeamClassLabel">Lagklass</span></label>
+                        <select class="form-select" id="lateTeamClassSelect">
+                            <option value="">Välj klass...</option>
+                        </select>
+                        <div class="form-text" id="lateTeamClassInfo"></div>
+                    </div>
+
+                    <div id="lateTeamOptionalHint" class="bg-info-subtle border border-info-subtle text-info-emphasis rounded py-2 px-3 small mb-2 d-none">
+                        <i class="bi bi-info-circle me-1"></i>Att välja skyttar är valfritt. Du kan skapa laget och ta betalt nu, och lägga till skyttarna senare via <i class="bi bi-pencil"></i> Redigera lag.
+                    </div>
+
+                    <div id="lateTeamMembersArea" style="display:none;">
+                        <label class="form-label fw-bold" id="lateTeamMembersLabel">Deltagare</label>
+                        <div class="table-responsive" style="max-height: 320px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width:40px;"></th>
+                                        <th>Namn</th>
+                                        <th id="lateTeamMembersClassHeader">Klasser</th>
+                                        <th style="width:70px;" class="text-center" id="lateTeamMembersSpareHeader">Reserv</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="lateTeamMembersTableBody"></tbody>
+                            </table>
+                        </div>
+                        <div class="form-text mt-1" id="lateTeamMemberCountInfo"></div>
+                    </div>
+
+                    <div id="lateTeamError" class="alert alert-danger d-none mt-3"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" id="lateTeamSubmitBtn" onclick="submitLateTeamRegistration()">
+                        <i class="bi bi-arrow-right me-1"></i>Skapa lag och fortsätt
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <!-- Walk-in Registration Modal — for a shooter who turns up at the desk without
      pre-registering. Searches members, picks a class, calls AddLateRegistration,
      then drops the result into the manage-invoice flow so the cashier can take
@@ -599,7 +752,7 @@
             </div>
             <div class="modal-body">
                 <p class="text-muted small mb-3">
-                    Anmäl en skytt som kommer till tävlingsbordet utan att vara föranmäld.
+                    Anmäl en skytt som inte hunnit anmäla sig i tid.
                     Efter anmälan öppnas betalningshanteringen direkt.
                 </p>
 
@@ -2170,6 +2323,427 @@ async function openMarkAsPaidForTeam(team) {
         markPaidDatePicker.setDate(new Date(), true);
     }
     markPaidModalInstance.show();
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Late lag / stafett registration (efteranmälan av lag)
+//
+// The public competition page disables "Anmäl lag" / "Anmäl stafettlag" the moment sista
+// anmälningsdag passes, but a club turning up on the competition day wanting to enter one
+// more lag or stafettlag is routine — at an SM it is expected. The desk therefore gets its
+// own create-team path with no deadline gate, exactly like the individual walk-in above.
+//
+// One modal serves both kinds. lateTeamIsRelay decides three things:
+//   class list   — data.teamClasses            vs data.stafettTeamClasses
+//   member list  — GetEligibleMembers          vs GetClubMembersForRelay
+//                  (lag members must already be registered in a compatible class;
+//                   relay members need no individual registration at all)
+//   endpoint     — CompetitionTeam/CreateTeam  vs CompetitionTeam/CreateStafettTeam
+//
+// On success we hand off to showPaymentOptionsForTeam() — the same chooser the Lag card's
+// rows use — so Visa QR-kod, Registrera betalning and Skicka QR via e-post all work on a
+// late team just as they do on a late individual registration. The team's Pending invoice
+// is created eagerly server-side (CreateTeamAsync → EnsureTeamInvoiceCoreAsync), so the
+// amount is already correct by the time the chooser opens; no QR pre-flight needed here.
+// ──────────────────────────────────────────────────────────────────────
+const lateTeamAllClubs = @Html.Raw(lateTeamClubsJson);
+const lateTeamAllRegions = @Html.Raw(lateTeamRegionsJson);
+
+let lateTeamModalInstance = null;
+let lateTeamIsRelay = false;
+let lateTeamClassList = [];          // the active class list for the current mode
+let lateTeamIsSpringskytte = false;  // Springskytte may create a team with no/partial roster
+let lateTeamMembers = [];
+let lateTeamSelected = new Set();
+let lateTeamSpare = null;
+let lateTeamBound = false;
+
+function openLateTeamModal(isRelay) {
+    lateTeamIsRelay = !!isRelay;
+    lateTeamClassList = [];
+    lateTeamMembers = [];
+    lateTeamSelected.clear();
+    lateTeamSpare = null;
+
+    document.getElementById('lateTeamModalTitle').textContent = lateTeamIsRelay ? 'Anmäl stafettlag' : 'Anmäl lag';
+    document.getElementById('lateTeamModalIntro').textContent = lateTeamIsRelay
+        ? 'Anmäl ett stafettlag som inte hunnit anmäla sig i tid. Efter anmälan öppnas betalningshanteringen direkt.'
+        : 'Anmäl ett lag som inte hunnit anmäla sig i tid. Efter anmälan öppnas betalningshanteringen direkt.';
+    document.getElementById('lateTeamClassLabel').textContent = lateTeamIsRelay ? 'Stafettklass' : 'Lagklass';
+    document.getElementById('lateTeamMembersLabel').textContent = lateTeamIsRelay
+        ? 'Deltagare från vald förening'
+        : 'Anmälda skyttar från vald förening';
+    document.getElementById('lateTeamSubmitBtn').innerHTML = lateTeamIsRelay
+        ? '<i class="bi bi-arrow-right me-1"></i>Skapa stafettlag och fortsätt'
+        : '<i class="bi bi-arrow-right me-1"></i>Skapa lag och fortsätt';
+
+    // Relay teams have no reserv and no per-shooter registration class, so those two
+    // columns are meaningless there.
+    document.getElementById('lateTeamMembersClassHeader').style.display = lateTeamIsRelay ? 'none' : '';
+    document.getElementById('lateTeamMembersSpareHeader').style.display = lateTeamIsRelay ? 'none' : '';
+
+    document.getElementById('lateTeamName').value = '';
+    document.getElementById('lateTeamClassInfo').textContent = '';
+    document.getElementById('lateTeamMembersArea').style.display = 'none';
+    document.getElementById('lateTeamMembersTableBody').innerHTML = '';
+    document.getElementById('lateTeamMemberCountInfo').textContent = '';
+    document.getElementById('lateTeamOptionalHint').classList.add('d-none');
+    hideLateTeamError();
+
+    populateLateTeamRegions();
+    populateLateTeamClubs('');
+    loadLateTeamClasses();
+
+    if (!lateTeamBound) {
+        document.getElementById('lateTeamRegionSelect').addEventListener('change', function () {
+            populateLateTeamClubs(this.value);
+            onLateTeamSelectionChanged();
+        });
+        document.getElementById('lateTeamClubSelect').addEventListener('change', onLateTeamSelectionChanged);
+        document.getElementById('lateTeamClassSelect').addEventListener('change', onLateTeamClassChanged);
+        lateTeamBound = true;
+    }
+
+    if (!lateTeamModalInstance) {
+        lateTeamModalInstance = new bootstrap.Modal(document.getElementById('lateTeamRegistrationModal'));
+    }
+    lateTeamModalInstance.show();
+}
+
+function showLateTeamError(msg) {
+    const el = document.getElementById('lateTeamError');
+    el.textContent = msg;
+    el.classList.remove('d-none');
+}
+
+function hideLateTeamError() {
+    document.getElementById('lateTeamError').classList.add('d-none');
+}
+
+function populateLateTeamRegions() {
+    const sel = document.getElementById('lateTeamRegionSelect');
+    sel.innerHTML = '<option value="">Alla kretsar</option>';
+    (lateTeamAllRegions || []).forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.code;
+        opt.textContent = r.name;
+        sel.appendChild(opt);
+    });
+    sel.value = '';
+}
+
+function populateLateTeamClubs(regionFilter) {
+    const sel = document.getElementById('lateTeamClubSelect');
+    sel.innerHTML = '<option value="">Välj förening...</option>';
+    let clubs = lateTeamAllClubs || [];
+    if (regionFilter) clubs = clubs.filter(c => c.region === regionFilter);
+    clubs.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        sel.appendChild(opt);
+    });
+    sel.value = '';
+}
+
+async function loadLateTeamClasses() {
+    const select = document.getElementById('lateTeamClassSelect');
+    select.innerHTML = '<option value="">Laddar klasser...</option>';
+    const cid = $('.competition-registration-management').data('competition-id');
+    try {
+        const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${cid}`);
+        const data = await resp.json();
+        if (!data.success) { select.innerHTML = '<option value="">Kunde inte hämta klasser</option>'; return; }
+        lateTeamIsSpringskytte = !!data.isSpringskytte;
+        lateTeamClassList = (lateTeamIsRelay ? data.stafettTeamClasses : data.teamClasses) || [];
+
+        select.innerHTML = '<option value="">Välj klass...</option>';
+        lateTeamClassList.forEach(tc => {
+            const opt = document.createElement('option');
+            opt.value = tc.teamClass;
+            opt.textContent = lateTeamIsRelay
+                ? `${tc.teamClass} (${tc.coreMembers} deltagare, ${tc.description})`
+                : `${tc.teamClass} (${tc.coreMembers} skyttar + reserv)`;
+            select.appendChild(opt);
+        });
+
+        // Springskytte lets a lag/stafett be created and paid for with the roster named later.
+        document.getElementById('lateTeamOptionalHint').classList.toggle('d-none', !lateTeamIsSpringskytte);
+    } catch (e) {
+        select.innerHTML = '<option value="">Kunde inte hämta klasser</option>';
+    }
+}
+
+function lateTeamSelectedClass() {
+    const tc = document.getElementById('lateTeamClassSelect').value;
+    return tc ? lateTeamClassList.find(c => c.teamClass === tc) : null;
+}
+
+function onLateTeamClassChanged() {
+    hideLateTeamError();
+    const tc = lateTeamSelectedClass();
+    const info = document.getElementById('lateTeamClassInfo');
+    if (!tc) {
+        info.textContent = '';
+    } else if (lateTeamIsRelay) {
+        info.textContent = `${tc.coreMembers} deltagare. ${tc.description || ''}`.trim();
+    } else {
+        info.textContent = `${tc.coreMembers} ordinarie skyttar, max ${tc.maxSpares} reserv.`;
+    }
+    onLateTeamSelectionChanged();
+}
+
+async function onLateTeamSelectionChanged() {
+    hideLateTeamError();
+    lateTeamSelected.clear();
+    lateTeamSpare = null;
+
+    const clubId = parseInt(document.getElementById('lateTeamClubSelect').value, 10);
+    const area = document.getElementById('lateTeamMembersArea');
+    const tbody = document.getElementById('lateTeamMembersTableBody');
+    const teamClass = document.getElementById('lateTeamClassSelect').value;
+
+    // Lag needs a class before we can ask which shooters are eligible for it; stafett only
+    // needs the club (every club member may run a relay leg).
+    if (!clubId || (!lateTeamIsRelay && !teamClass)) {
+        area.style.display = 'none';
+        lateTeamMembers = [];
+        updateLateTeamMemberCount();
+        return;
+    }
+
+    area.style.display = 'block';
+    const colSpan = lateTeamIsRelay ? 2 : 4;
+    tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-center py-2"><span class="spinner-border spinner-border-sm"></span></td></tr>`;
+
+    const cid = $('.competition-registration-management').data('competition-id');
+    const url = lateTeamIsRelay
+        ? `/umbraco/surface/CompetitionTeam/GetClubMembersForRelay?competitionId=${cid}&clubId=${clubId}`
+        : `/umbraco/surface/CompetitionTeam/GetEligibleMembers?competitionId=${cid}&teamClass=${encodeURIComponent(teamClass)}&clubId=${clubId}`;
+
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        lateTeamMembers = (data.success && data.members) ? data.members : [];
+        if (!data.success && data.message) showLateTeamError(data.message);
+    } catch (e) {
+        lateTeamMembers = [];
+        showLateTeamError('Kunde inte hämta medlemmar: ' + e.message);
+    }
+    renderLateTeamMembers();
+}
+
+// Damklasser in stafett are dam-only. Unknown gender passes — the same lenient rule the
+// server applies, so a member without gender on file is never silently locked out.
+function lateTeamMemberAllowed(m) {
+    if (!lateTeamIsRelay) return true;
+    const tc = lateTeamSelectedClass();
+    const restriction = tc && tc.genderRestriction ? tc.genderRestriction : null;
+    if (!restriction) return true;
+    const g = (m.gender || '').trim();
+    return g === '' || g === restriction;
+}
+
+function renderLateTeamMembers() {
+    const tbody = document.getElementById('lateTeamMembersTableBody');
+    const colSpan = lateTeamIsRelay ? 2 : 4;
+    tbody.innerHTML = '';
+
+    if (!lateTeamMembers.length) {
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-muted small py-2">`
+            + (lateTeamIsRelay
+                ? 'Inga medlemmar hittades för denna förening.'
+                : 'Inga anmälda skyttar i en kompatibel klass för denna förening.')
+            + '</td></tr>';
+        updateLateTeamMemberCount();
+        return;
+    }
+
+    lateTeamMembers.forEach(m => {
+        const row = document.createElement('tr');
+        const eligible = lateTeamMemberAllowed(m);
+
+        const tdCheck = document.createElement('td');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'form-check-input';
+        cb.checked = lateTeamSelected.has(m.memberId);
+        cb.disabled = !eligible;
+        cb.addEventListener('change', function () {
+            if (this.checked) {
+                lateTeamSelected.add(m.memberId);
+            } else {
+                lateTeamSelected.delete(m.memberId);
+                if (lateTeamSpare === m.memberId) lateTeamSpare = null;
+            }
+            // Update in place rather than re-rendering: with a big club roster a full redraw
+            // on every tick throws away the operator's scroll position mid-selection.
+            syncLateTeamSpareBoxes();
+            updateLateTeamMemberCount();
+        });
+        tdCheck.appendChild(cb);
+        row.appendChild(tdCheck);
+
+        const tdName = document.createElement('td');
+        tdName.textContent = m.name;
+        if (!eligible) {
+            row.classList.add('text-muted');
+            tdName.title = 'Klassen är endast för damer';
+        }
+        row.appendChild(tdName);
+
+        if (!lateTeamIsRelay) {
+            const tdClass = document.createElement('td');
+            tdClass.className = 'small text-muted';
+            tdClass.textContent = m.shootingClass || '';
+            row.appendChild(tdClass);
+
+            const tdSpare = document.createElement('td');
+            tdSpare.className = 'text-center';
+            const spareCb = document.createElement('input');
+            spareCb.type = 'checkbox';
+            spareCb.className = 'form-check-input';
+            spareCb.checked = lateTeamSpare === m.memberId;
+            spareCb.disabled = !lateTeamSelected.has(m.memberId);
+            spareCb.dataset.lateTeamSpareFor = m.memberId;
+            spareCb.addEventListener('change', function () {
+                // At most one reserv — ticking a new one releases the previous.
+                lateTeamSpare = this.checked ? m.memberId : null;
+                syncLateTeamSpareBoxes();
+                updateLateTeamMemberCount();
+            });
+            tdSpare.appendChild(spareCb);
+            row.appendChild(tdSpare);
+        }
+
+        tbody.appendChild(row);
+    });
+
+    updateLateTeamMemberCount();
+}
+
+// The Reserv column only makes sense for a shooter who is actually on the team, and only one
+// reserv is allowed — both are kept true in place so ticking never redraws the table.
+function syncLateTeamSpareBoxes() {
+    document.querySelectorAll('#lateTeamMembersTableBody [data-late-team-spare-for]').forEach(box => {
+        const id = parseInt(box.dataset.lateTeamSpareFor, 10);
+        box.disabled = !lateTeamSelected.has(id);
+        box.checked = lateTeamSpare === id;
+    });
+}
+
+function updateLateTeamMemberCount() {
+    const el = document.getElementById('lateTeamMemberCountInfo');
+    const tc = lateTeamSelectedClass();
+    if (!tc) { el.textContent = ''; return; }
+    const core = lateTeamSelected.size - (lateTeamSpare != null && lateTeamSelected.has(lateTeamSpare) ? 1 : 0);
+    const suffix = lateTeamIsSpringskytte ? ' (kan fyllas i senare)' : '';
+    el.textContent = `Valda: ${core} av ${tc.coreMembers} ordinarie`
+        + (lateTeamIsRelay ? '' : `, ${lateTeamSpare != null ? 1 : 0} av ${tc.maxSpares} reserv`)
+        + suffix;
+}
+
+// Advisory only, same as the public modals: a shooter may legitimately be in more than one
+// team, so we surface the clash and let the operator continue.
+async function lateTeamConfirmConflicts(teamClass, memberIds) {
+    if (!memberIds.length) return true;
+    const cid = $('.competition-registration-management').data('competition-id');
+    let conflicts = [];
+    try {
+        const resp = await fetch('/umbraco/surface/CompetitionTeam/CheckTeamMembership', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ competitionId: parseInt(cid, 10), teamClass, memberIds, excludeTeamId: null })
+        });
+        const d = await resp.json();
+        conflicts = (d && d.conflicts) ? d.conflicts : [];
+    } catch (e) {
+        return true;   // never let the advisory check block a registration
+    }
+    if (!conflicts.length) return true;
+    const lines = conflicts
+        .map(c => `• ${c.memberName} är redan med i ${c.teamName} (${c.teamClass})${c.isSpare ? ' — som reserv' : ''}`)
+        .join('\n');
+    return window.confirm(`Redan med i ett lag:\n\n${lines}\n\nDet är tillåtet att vara med i flera lag. Vill du fortsätta ändå?`);
+}
+
+async function submitLateTeamRegistration() {
+    hideLateTeamError();
+
+    const cid = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    const clubId = parseInt(document.getElementById('lateTeamClubSelect').value, 10);
+    const teamName = document.getElementById('lateTeamName').value.trim();
+    const teamClass = document.getElementById('lateTeamClassSelect').value;
+    const tc = lateTeamSelectedClass();
+
+    if (!clubId) { showLateTeamError('Välj en förening för laget.'); return; }
+    if (!teamName) { showLateTeamError('Ange ett lagnamn.'); return; }
+    if (!teamClass || !tc) { showLateTeamError('Välj en klass.'); return; }
+
+    const memberIds = Array.from(lateTeamSelected);
+    const spareId = (!lateTeamIsRelay && lateTeamSpare != null && lateTeamSelected.has(lateTeamSpare))
+        ? lateTeamSpare : null;
+    const coreCount = memberIds.length - (spareId != null ? 1 : 0);
+
+    // Mirror CreateTeamAsync's roster rules so the mistake is caught before the round trip.
+    if (lateTeamIsSpringskytte) {
+        if (coreCount > tc.coreMembers) {
+            showLateTeamError(`Max ${tc.coreMembers} ordinarie deltagare (${coreCount} valda).`);
+            return;
+        }
+    } else if (coreCount !== tc.coreMembers) {
+        showLateTeamError(`Välj exakt ${tc.coreMembers} ordinarie deltagare (${coreCount} valda).`);
+        return;
+    }
+
+    if (!await lateTeamConfirmConflicts(teamClass, memberIds)) return;
+
+    const btn = document.getElementById('lateTeamSubmitBtn');
+    const btnHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar...';
+
+    try {
+        const token = $('input[name="__RequestVerificationToken"]').val();
+        const endpoint = lateTeamIsRelay
+            ? '/umbraco/surface/CompetitionTeam/CreateStafettTeam'
+            : '/umbraco/surface/CompetitionTeam/CreateTeam';
+        const body = { competitionId: cid, teamName, teamClass, clubId, memberIds };
+        if (spareId != null) body.spareId = spareId;
+
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify(body)
+        });
+        const raw = await resp.text();
+        const data = raw ? JSON.parse(raw) : null;
+
+        if (!data || !data.success) {
+            showLateTeamError((data && data.message) || 'Kunde inte skapa laget.');
+            return;
+        }
+
+        const newTeamId = data.teamId;
+        lateTeamModalInstance?.hide();
+
+        // Refresh the Lag card, then open the payment chooser for the new team as soon as its
+        // row exists — the same handoff the individual walk-in makes.
+        loadCompetitionTeams();
+        const wait = setInterval(() => {
+            const team = competitionTeams.find(t => t.id === newTeamId);
+            if (team) {
+                clearInterval(wait);
+                if ((team.paymentStatus || '') !== 'No Fee') showPaymentOptionsForTeam(newTeamId);
+            }
+        }, 200);
+        setTimeout(() => clearInterval(wait), 5000);
+    } catch (err) {
+        showLateTeamError('Ett fel uppstod: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = btnHtml;
+    }
 }
 
 // ── Payment-reference lookup ──────────────────────────────────────────────
@@ -3940,6 +4514,78 @@ function showQrInManageModal() {
     });
 }
 
+// Recipient chooser for a team's Swish QR e-mail. Rendered into the manage-payment modal's
+// second panel (the one the QR uses), so it inherits the existing Tillbaka affordance.
+// Recipients are the team's own members that have an e-mail on file, plus the operator — a
+// Springskytte team whose roster is still deferred has no members yet, so "mig själv" must
+// always remain available as the fallback.
+async function showTeamQrEmailRecipients(reg, competitionId) {
+    document.getElementById('manageInvoiceActions').style.display = 'none';
+    document.getElementById('manageInvoiceQr').style.display = '';
+    const body = document.getElementById('manageInvoiceQrBody');
+    body.innerHTML = `
+        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+        <p class="mt-2 small text-muted">Hämtar lagets kontakter...</p>`;
+
+    let contacts = [];
+    try {
+        const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamContacts?competitionId=${competitionId}&teamId=${reg.teamId}`);
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.contacts)) contacts = data.contacts;
+    } catch (err) {
+        console.warn('Could not load team contacts:', err);
+    }
+
+    const options = contacts.map(c =>
+        `<option value="${c.memberId}">${escapeHtmlSafe(c.name)} — ${escapeHtmlSafe(c.email)}</option>`).join('');
+
+    body.innerHTML = `
+        <div class="text-start">
+            <p class="mb-2"><strong>Skicka QR-kod för ${escapeHtmlSafe(reg.memberName)}</strong></p>
+            <label for="teamQrRecipient" class="form-label small fw-bold">Mottagare</label>
+            <select class="form-select mb-2" id="teamQrRecipient">
+                ${options}
+                <option value="0">Mig själv</option>
+            </select>
+            ${contacts.length === 0
+                ? '<div class="alert alert-warning small py-2 mb-2">Ingen av lagets deltagare har en e-postadress registrerad. Du kan skicka koden till dig själv och vidarebefordra den.</div>'
+                : ''}
+            <button type="button" class="btn btn-primary w-100" id="teamQrSendBtn">
+                <i class="bi bi-envelope me-1"></i>Skicka
+            </button>
+        </div>`;
+
+    document.getElementById('teamQrSendBtn').addEventListener('click', async function () {
+        const targetMemberId = parseInt(document.getElementById('teamQrRecipient').value, 10) || 0;
+        this.disabled = true;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
+        try {
+            const resp = await fetch(
+                `/umbraco/surface/Swish/SendTeamQRCodeEmail?competitionId=${competitionId}&teamId=${reg.teamId}&targetMemberId=${targetMemberId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                }
+            });
+            const result = await resp.json();
+            if (result.success) {
+                manageInvoiceModalInstance?.hide();
+                alert(result.email ? `QR-koden har skickats till ${result.email}` : 'QR-koden har skickats.');
+            } else {
+                alert('Fel: ' + (result.message || 'okänt fel'));
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-envelope me-1"></i>Skicka';
+            }
+        } catch (error) {
+            console.error('Error sending team Swish QR code email:', error);
+            alert('Ett fel uppstod när e-posten skulle skickas. Försök igen.');
+            this.disabled = false;
+            this.innerHTML = '<i class="bi bi-envelope me-1"></i>Skicka';
+        }
+    });
+}
+
 // Team QR inside the shared manage-payment modal.
 function showTeamQrInManageModal(reg, competitionId) {
     document.getElementById('manageInvoiceActions').style.display = 'none';
@@ -4053,30 +4699,13 @@ async function emailQrFromManageModal(button) {
     button.disabled = true;
     button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
 
-    // Team: send the team QR via the team-specific endpoint.
+    // Team: ask WHO the QR goes to before sending. Without this step the endpoint defaults to the
+    // logged-in user — right on the public page (the club's own lagledare mails themselves), wrong
+    // at the desk, where a late lag registered by the organiser would mail the QR to the organiser.
     if (reg.isTeam) {
-        try {
-            const response = await fetch(`/umbraco/surface/Swish/SendTeamQRCodeEmail?competitionId=${competitionId}&teamId=${reg.teamId}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-                }
-            });
-            const result = await response.json();
-            if (result.success) {
-                manageInvoiceModalInstance?.hide();
-                alert(result.email ? `QR-koden har skickats till ${result.email}` : 'QR-koden har skickats.');
-            } else {
-                alert('Fel: ' + (result.message || 'okänt fel'));
-            }
-        } catch (error) {
-            console.error('Error sending team Swish QR code email:', error);
-            alert('Ett fel uppstod när e-posten skulle skickas. Försök igen.');
-        } finally {
-            button.disabled = false;
-            button.innerHTML = original;
-        }
+        button.disabled = false;
+        button.innerHTML = original;
+        await showTeamQrEmailRecipients(reg, competitionId);
         return;
     }
 

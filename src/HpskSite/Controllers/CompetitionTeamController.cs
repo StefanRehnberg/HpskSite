@@ -66,7 +66,8 @@ namespace HpskSite.Controllers
                 if (memberData == null)
                     return Json(new { success = false, message = "Kunde inte hitta din profil." });
 
-                // Auth: member can create for own club, admin/regional admin for other clubs
+                // Auth: member can create for own club, admin/regional admin for other clubs,
+                // and the organiser running the competition for ANY club (late laganmälan at the desk).
                 var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 var isClubAdmin = await _authorizationService.IsClubAdminForClub(request.ClubId);
 
@@ -74,7 +75,8 @@ namespace HpskSite.Controllers
                 {
                     // Regular member - verify it's their own club
                     var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
-                    if (!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != request.ClubId)
+                    if ((!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != request.ClubId)
+                        && !await _authorizationService.HasCompetitionStaffAccessAsync(request.CompetitionId))
                         return Json(new { success = false, message = "Du kan bara skapa lag för din egen förening." });
                 }
 
@@ -441,6 +443,50 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Who can the Swish QR for this team be mailed to? Returns the team's own members that have
+        /// an e-mail address on file, so the registration desk can send a late team's QR to the club
+        /// standing in front of it rather than to the operator's own inbox (the endpoint's default).
+        ///
+        /// Deliberately a separate lookup rather than a field on the Lag list: the desk's team list is
+        /// a hot path and this is needed only when the operator actually clicks "Skicka QR via e-post".
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetTeamContacts(int competitionId, int teamId)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? "");
+                if (memberData == null)
+                    return Json(new { success = false, message = "Kunde inte hitta din profil." });
+
+                var team = (await _teamService.GetTeamsForCompetitionAsync(competitionId))
+                    .FirstOrDefault(t => t.Team.Id == teamId);
+                if (team == null)
+                    return Json(new { success = false, message = "Laget kunde inte hittas." });
+
+                if (!await CanManageTeamAsync(team.Team.ClubId, memberData.GetValue<string>("primaryClubId"), teamId))
+                    return Json(new { success = false, message = "Ingen behörighet." });
+
+                var contacts = team.Members
+                    .Select(m => new { m.MemberId, m.Name, Email = _memberService.GetById(m.MemberId)?.Email ?? "" })
+                    .Where(c => !string.IsNullOrWhiteSpace(c.Email))
+                    .Select(c => new { memberId = c.MemberId, name = c.Name, email = c.Email })
+                    .ToList();
+
+                return Json(new { success = true, contacts });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting team contacts for team {TeamId}", teamId);
+                return Json(new { success = false, message = "Kunde inte hämta lagets kontakter." });
+            }
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetTeamResults(int competitionId)
         {
@@ -508,14 +554,17 @@ namespace HpskSite.Controllers
                 if (memberData == null)
                     return Json(new { success = false, message = "Kunde inte hitta din profil." });
 
-                // Auth: own club, club admin, or site admin
+                // Auth: own club, club admin, site admin — or the organiser running this competition,
+                // who must be able to pick any visiting club's members when a captain turns up at the
+                // desk to enter a late stafettlag.
                 var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 var isClubAdmin = await _authorizationService.IsClubAdminForClub(clubId);
 
                 if (!isSiteAdmin && !isClubAdmin)
                 {
                     var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
-                    if (!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != clubId)
+                    if ((!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != clubId)
+                        && !await _authorizationService.HasCompetitionStaffAccessAsync(competitionId))
                         return Json(new { success = false, message = "Ingen behörighet." });
                 }
 
@@ -563,7 +612,8 @@ namespace HpskSite.Controllers
                 if (!isSiteAdmin && !isClubAdmin)
                 {
                     var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
-                    if (!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != request.ClubId)
+                    if ((!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != request.ClubId)
+                        && !await _authorizationService.HasCompetitionStaffAccessAsync(request.CompetitionId))
                         return Json(new { success = false, message = "Du kan bara skapa lag för din egen förening." });
                 }
 
