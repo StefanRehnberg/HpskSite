@@ -69,8 +69,9 @@
         <div class="d-flex gap-2 flex-wrap">
             @if (compExists && canAccess)
             {
-                <a href="/tavlingsplanering/blad?c=@competitionId" target="_blank" rel="noopener" class="btn btn-outline-primary" title="Skriv ut vem gör vad">
-                    <i class="bi bi-printer"></i> Skriv ut plan
+                @* Hela planen. Varje flik har dessutom sin egen utskrift — de är olika dokument. *@
+                <a href="/tavlingsplanering/blad?c=@competitionId&amp;vy=allt" target="_blank" rel="noopener" class="btn btn-outline-primary" title="Skriv ut hela planen">
+                    <i class="bi bi-printer"></i> Skriv ut allt
                 </a>
             }
             <a href="@manageUrl" class="btn btn-outline-secondary">

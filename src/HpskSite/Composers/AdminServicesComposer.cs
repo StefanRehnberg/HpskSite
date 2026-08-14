@@ -176,6 +176,9 @@ namespace HpskSite.Composers
             // Guesses which member a free-text roster name was meant to be. Suggestions only — a wrong
             // silent link hands a stranger someone else's shift, invisibly. Run create-staff-role-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.PersonMatchService>();
+            // THE GRID: roles x days. One builder for the screen AND the printout - the printable sheet
+            // used to render its own role-grouped list, so paper looked nothing like the plan on screen.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingGridService>();
             // Phase 1.5: editable per-club/region planning templates. Run create-staffing-template-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingTemplateService>();
             // Materiel-quantity estimate (general Beställningslista from participant/class/series counts).

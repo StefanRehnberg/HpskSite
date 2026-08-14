@@ -158,6 +158,13 @@ namespace HpskSite.Models.Staffing
         public int Affected { get; set; }
     }
 
+    /// <summary>The arrangör's own running order for the grid rows, top to bottom.</summary>
+    public class ReorderRolesRequest
+    {
+        public int CompetitionId { get; set; }
+        public List<string> RoleKeys { get; set; } = new();
+    }
+
     /// <summary>Hide a built-in role for this competition (or unhide it).</summary>
     public class HideStaffRoleRequest
     {

@@ -14,6 +14,15 @@
     var filledGroups = Model.Roster?.Groups?.Where(g => g.Assignments != null && g.Assignments.Count > 0).ToList()
                        ?? new List<HpskSite.Models.Staffing.StaffRoleGroup>();
     var areas = Model.Work?.Areas ?? new List<HpskSite.Models.Staffing.WorkAreaView>();
+
+    // The grid: only days that are real (the undated bucket has no column on paper) and only rows that
+    // carry someone or state a need — a printout of 29 empty rows helps nobody.
+    var grid = Model.Grid;
+    var gridCols = grid?.Columns?.Where(c => !string.IsNullOrEmpty(c.Key)).ToList()
+                   ?? new List<HpskSite.Models.Staffing.GridColumn>();
+    var gridRows = grid?.Rows?.Where(r => r.Filled > 0 || r.Needed > 0).ToList()
+                   ?? new List<HpskSite.Models.Staffing.GridRow>();
+    var unreachable = grid?.Unreachable ?? new List<string>();
 }
 <!DOCTYPE html>
 <html lang="sv">
@@ -42,11 +51,34 @@
         .btn { display: inline-block; padding: 8px 16px; background: #0d6efd; color: #fff; border: 0; border-radius: 6px; text-decoration: none; cursor: pointer; font-size: .95rem; }
         .btn.secondary { background: #6c757d; }
         .area-head { display: flex; justify-content: space-between; align-items: baseline; }
-        @@media print { .no-print { display: none !important; } body { padding: 0; } h2 { page-break-after: avoid; } tr { page-break-inside: avoid; } }
+        /* The grid sheet is wide, so it gets the full page and landscape paper. */
+        .wide { max-width: none; }
+        table.grid { table-layout: fixed; }
+        table.grid th, table.grid td { border: 1px solid #ccc; padding: 4px 6px; font-size: .82rem; }
+        table.grid th { background: #f3f3f3; text-transform: none; font-size: .85rem; letter-spacing: 0; color: #222; }
+        table.grid .rolecol { width: 190px; font-weight: 600; }
+        .daylabel { font-size: .74rem; font-weight: 400; }
+        .person { line-height: 1.25; }
+        .person .pname { font-weight: 500; }
+        .person .club { color: #666; font-size: .74rem; margin-left: .25rem; }
+        .person .tid { color: #333; font-size: .74rem; margin-left: .25rem; white-space: nowrap; }
+        .note { color: #777; font-size: .7rem; margin: 0 0 3px 0; }
+        .gap { color: #c00; font-size: .78rem; }
+        .small-note { font-size: .78rem; margin-top: .4rem; }
+        @@media print {
+            .no-print { display: none !important; }
+            body { padding: 0; }
+            h2 { page-break-after: avoid; }
+            tr { page-break-inside: avoid; }
+            /* Repeat the day headings on every page — a grid whose columns you can't see is unusable. */
+            thead { display: table-header-group; }
+            .note { display: none; }   /* anteckningarna gör rutorna för höga på papper */
+        }
+        @@page { size: A4 landscape; margin: 10mm; }
     </style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap @(Model.ShowBemanning ? "wide" : "")">
     @if (!Model.Exists)
     {
         <p>Tävlingen hittades inte.</p>
@@ -62,52 +94,140 @@
             <a class="btn secondary" href="/tavlingsplanering?c=@Model.CompetitionId"><i class="bi bi-arrow-left"></i> Tillbaka till planeringen</a>
         </div>
 
-        <h1>Vem gör vad</h1>
+        <h1>@Model.Heading</h1>
         <div class="meta">
             <strong>@Model.CompName</strong>
             @if (!string.IsNullOrEmpty(Model.CompDate)) { <span> · Tävlingsdatum @Model.CompDate</span> }
-            @if (Model.Work != null && (Model.Work.TotalEstimatedCost != 0 || Model.Work.TotalActualCost != 0))
+            @if (Model.ShowForberedelser && Model.Work != null && (Model.Work.TotalEstimatedCost != 0 || Model.Work.TotalActualCost != 0))
             {
                 <span> · Budget @Kr(Model.Work.TotalEstimatedCost)@(Model.Work.TotalActualCost != 0 ? $" · Utfall {Kr(Model.Work.TotalActualCost)}" : "")</span>
             }
+            @if (Model.ShowBemanning && grid != null && grid.TotalAssigned > 0)
+            {
+                <span> · @grid.TotalAssigned uppdrag · @gridRows.Count funktioner · @gridCols.Count dagar</span>
+            }
+            <span> · Utskrivet @DateTime.Now.ToString("d MMMM yyyy HH:mm", ci)</span>
         </div>
 
-        <h2><i class="bi bi-person-badge"></i> Bemanning</h2>
-        @if (!filledGroups.Any())
+        @*
+            BEMANNING AS A GRID — roles down, days across, names in the cells.
+            It used to print as a role-grouped list, which put one person on row after row and left the
+            day axis out entirely. The organiser's own sheet is a matrix, and the printout is the thing
+            they carry around the range, so it has to be the same shape as the plan they built.
+        *@
+        @if (Model.ShowBemanning)
         {
-            <p class="muted">Inga funktionärer tilldelade ännu.</p>
-        }
-        else
-        {
-            foreach (var g in filledGroups)
+            @* Bara när flera avsnitt trycks — annars upprepar rubriken sig själv direkt under H1. *@
+            @if (Model.Vy == HpskSite.Models.Staffing.PlaneringBladVy.Allt)
             {
-                <h3>@g.RolePlural</h3>
-                <table>
+                <h2><i class="bi bi-person-badge"></i> Bemanning</h2>
+            }
+            @if (grid == null || !gridRows.Any())
+            {
+                <p class="muted">Inga funktionärer tilldelade ännu.</p>
+            }
+            else
+            {
+                <table class="grid">
                     <thead>
-                        <tr><th style="width:30%">Namn</th><th style="width:14%">Funktion</th><th style="width:22%">Var</th><th style="width:14%">Tid</th><th style="width:12%">Telefon</th><th style="width:8%">Status</th></tr>
+                        <tr>
+                            <th class="rolecol">Funktion</th>
+                            @foreach (var col in gridCols)
+                            {
+                                <th>
+                                    @col.Label
+                                    @if (!string.IsNullOrEmpty(col.DayLabel)) { <div class="daylabel">@col.DayLabel</div> }
+                                    @if (col.Kind != "Tavlingsdag" && !string.IsNullOrEmpty(col.KindLabel)) { <div class="muted daylabel">@col.KindLabel</div> }
+                                </th>
+                            }
+                        </tr>
                     </thead>
                     <tbody>
-                    @foreach (var a in g.Assignments)
+                    @foreach (var row in gridRows)
                     {
                         <tr>
-                            <td>
-                                @if (a.IsResponsible) { <i class="bi bi-star-fill resp" title="Ansvarig"></i> }
-                                @a.DisplayName
-                                @if (a.ReadOnly && !string.IsNullOrEmpty(a.SourceLabel)) { <span class="pill">@a.SourceLabel</span> }
+                            <td class="rolecol">
+                                @row.RoleName
+                                @if (!string.IsNullOrEmpty(row.ScopeLabel)) { <div class="muted daylabel">@row.ScopeLabel</div> }
                             </td>
-                            <td>@(string.IsNullOrEmpty(a.FunctionTitle) ? "" : a.FunctionTitle)</td>
-                            <td>@a.ScopeLabel</td>
-                            <td>@(string.IsNullOrEmpty(a.ShiftLabel) ? "Heldag" : a.ShiftLabel)</td>
-                            <td>@(string.IsNullOrEmpty(a.Phone) ? "" : a.Phone)</td>
-                            <td>@StatusSv(a.Status)</td>
+                            @foreach (var col in gridCols)
+                            {
+                                var cell = row.Cells.TryGetValue(col.Key, out var list) ? list : new List<HpskSite.Models.Staffing.GridEntry>();
+                                <td>
+                                    @foreach (var e in cell)
+                                    {
+                                        <div class="person">
+                                            @if (e.IsResponsible) { <span class="resp">★</span> }
+                                            <span class="pname">@e.DisplayName</span>
+                                            @if (!string.IsNullOrEmpty(e.ClubName)) { <span class="club">@e.ClubName</span> }
+                                            @if (!string.IsNullOrEmpty(e.TimeLabel)) { <span class="tid">@e.TimeLabel</span> }
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(e.Note))
+                                        {
+                                            <div class="note">@e.Note</div>
+                                        }
+                                    }
+                                    @if (!cell.Any() && row.Needed > 0)
+                                    {
+                                        <div class="gap">— saknas @row.Needed</div>
+                                    }
+                                </td>
+                            }
                         </tr>
                     }
                     </tbody>
                 </table>
+
+                @if (unreachable.Any())
+                {
+                    <p class="muted small-note">
+                        <strong>Utan konto på pistol.nu (@unreachable.Count):</strong>
+                        @string.Join(", ", unreachable)
+                        — de får inget personligt schema och inga påminnelser.
+                    </p>
+                }
             }
         }
 
-        <h2><i class="bi bi-list-check"></i> Förberedelser</h2>
+        @if (Model.ShowDagsprogram)
+        {
+            @if (Model.Vy == HpskSite.Models.Staffing.PlaneringBladVy.Allt)
+            {
+                <h2><i class="bi bi-calendar2-event"></i> Dagsprogram</h2>
+            }
+            @if (!Model.Agenda.Any())
+            {
+                <p class="muted">Inget dagsprogram inlagt.</p>
+            }
+            else
+            {
+                foreach (var g in Model.Agenda.GroupBy(a => a.ItemDate?.Date).OrderBy(g => g.Key ?? DateTime.MaxValue))
+                {
+                    <h3>@(g.Key?.ToString("dddd d MMMM", ci) ?? "Tävlingsdagen")</h3>
+                    <table>
+                        <thead><tr><th style="width:16%">Tid</th><th style="width:44%">Vad</th><th style="width:24%">Var</th><th style="width:16%">Vem</th></tr></thead>
+                        <tbody>
+                        @foreach (var it in g.OrderBy(x => x.StartTime ?? "zz"))
+                        {
+                            <tr>
+                                <td>@(string.IsNullOrEmpty(it.StartTime) ? "Under dagen" : it.StartTime + (string.IsNullOrEmpty(it.EndTime) ? "" : "–" + it.EndTime))</td>
+                                <td>@it.Title</td>
+                                <td>@it.Location</td>
+                                <td>@(it.Audience == "Staff" ? "Funktionärer" : it.Audience == "Shooters" ? "Skyttar" : "Alla")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            }
+        }
+
+        @if (Model.ShowForberedelser)
+        {
+        @if (Model.Vy == HpskSite.Models.Staffing.PlaneringBladVy.Allt)
+        {
+            <h2><i class="bi bi-list-check"></i> Förberedelser</h2>
+        }
         @if (!areas.Any())
         {
             <p class="muted">Inga förberedelseområden ännu.</p>
@@ -152,6 +272,7 @@
                     <p class="muted">Inga uppgifter.</p>
                 }
             }
+        }
         }
 
         <p class="muted" style="margin-top:2rem; font-size:.8rem">Utskrivet från pistol.nu tävlingsplanering.</p>

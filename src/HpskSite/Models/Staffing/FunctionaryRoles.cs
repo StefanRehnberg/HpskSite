@@ -45,6 +45,14 @@ namespace HpskSite.Models.Staffing
         /// Static per-role checklist shown in the roster + add-dialog; data-driven, no schema.</summary>
         public string[] Needs { get; set; } = Array.Empty<string>();
 
+        /// <summary>
+        /// Where the role sits in the arrangör's own running order. Alphabetical looks tidy but splits
+        /// the groups a staffing plan is actually read in — Start/Mål together, Skjutplats together — so
+        /// the order is theirs to set (drag the rows) and this is what it persists to.
+        /// Built-ins the arrangör has never touched trail behind at <see cref="BuiltInSortBase"/> + index.
+        /// </summary>
+        public int SortOrder { get; set; }
+
         public string Plural => string.IsNullOrEmpty(PluralName) ? DisplayName : PluralName;
     }
 
@@ -58,6 +66,9 @@ namespace HpskSite.Models.Staffing
     /// </summary>
     public static class FunctionaryRoles
     {
+        /// <summary>Built-ins the arrangör hasn't placed themselves sort after everything they have.</summary>
+        public const int BuiltInSortBase = 100000;
+
         // --- discipline groups ---
         public static readonly string[] PrecisionFamily =
         {

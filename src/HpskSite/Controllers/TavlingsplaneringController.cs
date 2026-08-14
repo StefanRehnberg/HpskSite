@@ -30,6 +30,8 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _auth;
         private readonly StaffingService _staffing;
         private readonly WorkBreakdownService _work;
+        private readonly StaffingGridService _grid;
+        private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
 
         public TavlingsplaneringController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -37,7 +39,9 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             AdminAuthorizationService auth,
             StaffingService staffing,
-            WorkBreakdownService work)
+            WorkBreakdownService work,
+            StaffingGridService grid,
+            HpskSite.Services.Schedule.CompetitionAgendaService agenda)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
@@ -45,6 +49,8 @@ namespace HpskSite.Controllers
             _auth = auth;
             _staffing = staffing;
             _work = work;
+            _grid = grid;
+            _agenda = agenda;
         }
 
         [HttpGet("")]
@@ -76,7 +82,7 @@ namespace HpskSite.Controllers
 
         /// <summary>Printable "vem gör vad"-blad — roster (Bemanning) + prep (Förberedelser) on one sheet.</summary>
         [HttpGet("blad")]
-        public async Task<IActionResult> Blad(int c)
+        public async Task<IActionResult> Blad(int c, string? vy = null)
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return StatusCode(500, "Umbraco-kontext saknas.");
@@ -92,6 +98,7 @@ namespace HpskSite.Controllers
             var model = new PlaneringBladModel
             {
                 CompetitionId = c,
+                Vy = PlaneringBladVy.Normalise(vy),
                 Exists = isCompetition,
                 CanAccess = canAccess,
                 CompName = isCompetition ? (competition!.Value<string>("competitionName") ?? "Tävling") : "",
@@ -103,8 +110,20 @@ namespace HpskSite.Controllers
                 var d = competition!.Value<DateTime?>("competitionDate");
                 if (d.HasValue && d.Value != default)
                     model.CompDate = d.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-                model.Roster = _staffing.BuildRoster(c, model.Discipline, canEdit: false);
-                model.Work = _work.Build(c, canEdit: false);
+                // Build only what this sheet shows — the grid and the prep breakdown are both expensive.
+                if (model.ShowBemanning)
+                {
+                    model.Roster = _staffing.BuildRoster(c, model.Discipline, canEdit: false);
+                    // Same builder as the screen. A print that renders its own shape is how paper stopped
+                    // resembling the plan the organiser actually built.
+                    model.Grid = _grid.BuildGrid(c, model.Discipline, 0);
+                }
+                if (model.ShowForberedelser) model.Work = _work.Build(c, canEdit: false);
+                if (model.ShowDagsprogram)
+                {
+                    try { model.Agenda = _agenda.GetForCompetition(c); }
+                    catch { /* tabellen kan saknas — bladet klarar sig utan */ }
+                }
             }
             return View("TavlingsplaneringBlad", model);
         }

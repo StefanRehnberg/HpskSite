@@ -133,6 +133,9 @@ namespace HpskSite.Models.Staffing
         public string? ScopeKey { get; set; }
         public string? ScopeLabel { get; set; }
         public bool IsCustom { get; set; }
+        /// <summary>The arrangör's own running order (drag the rows). Roles they have never placed
+        /// carry <see cref="FunctionaryRoles.BuiltInSortBase"/> + catalog index and trail behind.</summary>
+        public int SortOrder { get; set; }
         public bool SupportsTargetRange { get; set; }
         public bool SupportsFunctionTitle { get; set; }
         public string? DefaultScopeType { get; set; }

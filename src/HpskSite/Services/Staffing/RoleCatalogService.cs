@@ -54,10 +54,25 @@ namespace HpskSite.Services.Staffing
             var merged = new List<FunctionaryRole>();
             var byKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
+            var builtInPos = 0;
             foreach (var b in builtIns)
             {
+                // A built-in the arrangör has never placed trails behind everything they HAVE placed,
+                // in catalog order. As soon as they drag it, a StaffRole row is written and it moves.
                 byKey[b.Key] = merged.Count;
-                merged.Add(b);
+                merged.Add(new FunctionaryRole
+                {
+                    Key = b.Key,
+                    DisplayName = b.DisplayName,
+                    PluralName = b.PluralName,
+                    DefaultScopeType = b.DefaultScopeType,
+                    SupportsTargetRange = b.SupportsTargetRange,
+                    SupportsFunctionTitle = b.SupportsFunctionTitle,
+                    IsResponsibleByDefault = b.IsResponsibleByDefault,
+                    Description = b.Description,
+                    Needs = b.Needs,
+                    SortOrder = FunctionaryRoles.BuiltInSortBase + builtInPos++,
+                });
             }
 
             // IsActive=0 is a HIDE marker, not a soft delete: an arrangör who uses 5 of the 11 built-ins
@@ -239,6 +254,65 @@ namespace HpskSite.Services.Staffing
             return (true, null);
         }
 
+        /// <summary>
+        /// Persist the arrangör's own running order for the whole grid. Alphabetical is tidy but splits
+        /// the groups a plan is read in (Start/Mål together, Skjutplats together), so the order is theirs.
+        /// <para>A built-in that gets dragged has no <see cref="StaffRole"/> row yet — one is created on
+        /// the spot, carrying its current name, because that is the only place an order can be stored.
+        /// Keys not in the list keep their existing order after the ones that are.</para>
+        /// </summary>
+        public (bool ok, string? message) Reorder(int competitionId, IList<string> roleKeys, string? discipline, int byMemberId)
+        {
+            if (roleKeys == null || roleKeys.Count == 0) return (false, "Ingen ordning angiven.");
+
+            var known = ForCompetition(competitionId, discipline)
+                .ToDictionary(r => r.Key, r => r, StringComparer.OrdinalIgnoreCase);
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var existing = db.Fetch<StaffRole>(
+                    "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1",
+                    RoleOwnerType.Competition, competitionId)
+                .ToDictionary(r => r.RoleKey, r => r, StringComparer.OrdinalIgnoreCase);
+
+            var now = DateTime.UtcNow;
+            var order = 0;
+            foreach (var key in roleKeys)
+            {
+                if (string.IsNullOrWhiteSpace(key) || !known.TryGetValue(key, out var role)) continue;
+                if (existing.TryGetValue(key, out var row))
+                {
+                    if (row.SortOrder == order) { order++; continue; }
+                    row.SortOrder = order++;
+                    row.ModifiedDate = now;
+                    db.Update(row);
+                }
+                else
+                {
+                    db.Insert(new StaffRole
+                    {
+                        OwnerType = RoleOwnerType.Competition,
+                        OwnerId = competitionId,
+                        RoleKey = role.Key,
+                        DisplayName = role.DisplayName,
+                        PluralName = role.PluralName,
+                        DefaultScopeType = role.DefaultScopeType,
+                        SupportsTargetRange = role.SupportsTargetRange,
+                        SupportsFunctionTitle = role.SupportsFunctionTitle,
+                        Description = role.Description,
+                        SortOrder = order++,
+                        IsActive = true,
+                        CreatedByMemberId = byMemberId,
+                        CreatedDate = now,
+                        ModifiedDate = now,
+                    });
+                }
+            }
+
+            Forget(competitionId);
+            return (true, null);
+        }
+
         /// <summary>Roles the arrangör has hidden, so the UI can offer to bring them back.</summary>
         public List<(string Key, string Name)> GetHidden(int competitionId)
             => GetCustom(competitionId).Where(c => !c.IsActive)
@@ -360,6 +434,7 @@ namespace HpskSite.Services.Staffing
                 SupportsFunctionTitle = r.SupportsFunctionTitle,
                 Description = r.Description ?? "",
                 Needs = needs,
+                SortOrder = r.SortOrder,
             };
         }
     }
