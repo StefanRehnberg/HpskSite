@@ -52,12 +52,26 @@
         Kept as a full list too (the "Alla personer" item in Mer), because the volunteer queue and the
         who-hasn't-answered view are about people the grid cannot show.
     *@
-    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemPersonerPanel" style="width:min(760px,95vw)">
+    @*
+        TWO MODES, one panel. Clicking a name in the grid opens ONE PERSON — a card, not the list filtered
+        down to a single row. The first cut did the latter and it was unreadable: a search box, three
+        filters, "Visar 1 av 41", five column headings and the same assignment printed twice, all to show
+        one human. A list view and a detail view are different objects and must look like it.
+    *@
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemPersonerPanel" style="width:min(720px,95vw)">
       <div class="offcanvas-header border-bottom">
-        <h5 class="offcanvas-title"><i class="bi bi-people-fill me-2"></i>Personer</h5>
+        <div class="d-flex align-items-center gap-2 min-w-0">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="stfBackBtn"
+                    style="display:none" onclick="stfBackToList()" title="Tillbaka till listan">
+                <i class="bi bi-arrow-left"></i>
+            </button>
+            <h5 class="offcanvas-title text-truncate" id="stfPanelTitle"><i class="bi bi-people-fill me-2"></i>Personer</h5>
+        </div>
         <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
       </div>
       <div class="offcanvas-body">
+        <div id="stfPersonMode" style="display:none"></div>
+        <div id="stfListMode">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <div class="small" id="stfPeopleSummary"></div>
             <button type="button" class="btn btn-primary" onclick="stfOpenAdd('')">
@@ -106,6 +120,41 @@
             </table>
         </div>
         <div class="mt-2" id="stfPeopleMore"></div>
+        </div>
+      </div>
+    </div>
+
+    @*
+        ---- Koppla personer till medlemmar ----
+        A staffing plan is typed from paper, so most people start as free text — 32 of 41 on the SM plan.
+        A free-text row delivers nothing: no personal schedule, no push, no club tally. Linking them one at
+        a time is 32 searches and will not happen, so we guess and let the organiser confirm a screenful.
+        Nothing is ever linked without a click: binding "Tommy" to the wrong Tommy would hand a stranger
+        someone else's shift, and would be invisible afterwards.
+    *@
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemMatchPanel" style="width:min(860px,96vw)">
+      <div class="offcanvas-header border-bottom">
+        <div>
+          <h5 class="offcanvas-title mb-0"><i class="bi bi-person-check me-2"></i>Koppla personer till medlemmar</h5>
+          <div class="small text-muted" id="stfMatchSummary"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+      </div>
+      <div class="offcanvas-body">
+        <p class="text-muted small">
+            Personer som skrivits in för hand får varken personligt schema eller notiser, och räknas inte
+            till klubbens funktionärer. Här gissar vi vem som menades — <strong>du bekräftar</strong>.
+            En koppling ändrar <em>alla</em> personens uppdrag på tävlingen.
+        </p>
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+            <button type="button" class="btn btn-sm btn-primary" id="stfMatchAllBtn" onclick="stfLinkAllConfident()">
+                <i class="bi bi-lightning-charge me-1"></i>Koppla alla säkra
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfLoadMatches()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Läs om
+            </button>
+        </div>
+        <div id="stfMatchList"><div class="text-muted small">Laddar…</div></div>
       </div>
     </div>
 
@@ -540,6 +589,29 @@
         return '<div class="mb-2 d-flex flex-wrap align-items-center gap-1"><span class="text-muted small"><i class="bi bi-check2-square me-1"></i>Vad behövs:</span>' + chips + '</div>';
     }
 
+    /// The role catalog, loaded on its own. It used to arrive as a by-product of the (now retired) Roller
+    /// view, so retiring that view left the add-funktionär dialog with an empty role list — the button
+    /// opened something unusable. A dialog's data must not depend on a screen nobody opens any more.
+    async function loadRoles() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetRoles?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) return;
+            roles = (d.roles || []).map(function (x) {
+                return {
+                    roleKey: x.key, roleName: x.name, rolePlural: x.plural,
+                    defaultScopeType: x.defaultScopeType, supportsTargetRange: x.supportsTargetRange,
+                    supportsFunctionTitle: x.supportsFunctionTitle, description: x.description,
+                    needs: x.needs || [], assignments: []
+                };
+            });
+            populateRoleSelect();
+            populateFilterSelects();
+            populatePeopleFilterSelects();
+            renderNeedsEditor();
+        } catch (e) { /* the dialog degrades to whatever it already had */ }
+    }
+
     async function loadRoster() {
         // The Roller view is retired as a destination; its markup only survives because the add/edit
         // dialog and a dozen helpers still bind to its ids. Nothing reads it, so don't pay for it.
@@ -627,6 +699,9 @@
     }
 
     function renderPeople() {
+        // In person mode the same data drives a card, not the table. Rendering the table underneath is
+        // what made a single person look like a filtered list.
+        if (personKey) { renderPerson(); return; }
         var body = document.getElementById('stfPeopleBody');
         if (!body) return;
         var f = pplFilter();
@@ -744,6 +819,14 @@
     // volunteered for, when they said they're available, and what they own in Förberedelser.
     function personDetailHtml(p, keyEsc) {
         var h = '<tr class="table-active"><td colspan="6" class="pt-0">';
+
+        // Identity actions do NOT live here. They belong to the person card (stfOpenPerson), where there
+        // is room to edit a name in place and search for a member — a row of four buttons crammed into an
+        // expanded table row, each opening a prompt(), was worse than not having them.
+        h += '<div class="py-2 border-bottom mb-2">'
+            + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenPerson(\'' + keyEsc + '\')">'
+            + '<i class="bi bi-person-lines-fill me-1"></i>Öppna ' + esc(p.displayName) + '</button></div>';
+
         h += '<div class="row g-3 py-2">';
 
         // --- uppdrag (editable rows) ---
@@ -1748,28 +1831,431 @@
     window.stfOpenPeople = function (view) {
         var sel = document.getElementById('stfPplView');
         if (sel) { sel.value = view || ''; peopleShown = PEOPLE_PAGE; }
+        var f = document.getElementById('stfPplFilter'); if (f) f.value = '';
+        personKey = null;
+        document.getElementById('stfPanelTitle').innerHTML = '<i class="bi bi-people-fill me-2"></i>Personer';
+        setMode(false);
         var p = panel('bemPersonerPanel'); if (p) p.show();
         loadPeople();
     };
 
-    /// Open ONE person, expanded — this is what a name in the grid does. The person layer already groups
-    /// every row a human holds, so this answers "what is this person doing?" in one place instead of
-    /// making the organiser scan the grid for their name.
-    window.stfOpenPerson = async function (key) {
-        var sel = document.getElementById('stfPplFilter');
-        var p = panel('bemPersonerPanel'); if (p) p.show();
-        if (!people.length) await loadPeople();
-        var row = people.find(function (x) { return x.key === key; });
-        if (!row) {   // free-text people are keyed on the lowercased name
-            row = people.find(function (x) { return (x.displayName || '').toLowerCase() === String(key || '').toLowerCase(); });
-        }
-        if (!row) { loadPeople(); return; }
-        expandedPeople = {}; expandedPeople[row.key] = true;
-        if (sel) sel.value = row.displayName;
-        var v = document.getElementById('stfPplView'); if (v) v.value = '';
-        peopleShown = PEOPLE_PAGE;
-        renderPeople();
+    // ---- ONE PERSON: a card, not the list filtered to one row --------------------------------------
+
+    var personKey = null;   // non-null = person mode
+
+    function setMode(person) {
+        document.getElementById('stfPersonMode').style.display = person ? '' : 'none';
+        document.getElementById('stfListMode').style.display = person ? 'none' : '';
+        document.getElementById('stfBackBtn').style.display = person ? '' : 'none';
+    }
+
+    window.stfBackToList = function () {
+        personKey = null;
+        document.getElementById('stfPanelTitle').innerHTML = '<i class="bi bi-people-fill me-2"></i>Personer';
+        setMode(false);
+        loadPeople();
     };
+
+    /// What a name in the grid opens. The people layer already groups every row a human holds, so this
+    /// answers "what is this person doing, and can we reach them?" in one place.
+    window.stfOpenPerson = async function (key) {
+        var p = panel('bemPersonerPanel'); if (p) p.show();
+        personKey = key;
+        setMode(true);
+        document.getElementById('stfPersonMode').innerHTML =
+            '<div class="text-muted small py-4"><div class="spinner-border spinner-border-sm"></div> Laddar…</div>';
+        if (!people.length) await loadPeople();
+        renderPerson();
+    };
+
+    function findPerson() {
+        if (!personKey) return null;
+        return people.find(function (x) { return x.key === personKey; })
+            || people.find(function (x) { return (x.displayName || '').toLowerCase() === String(personKey).replace(/^n:/, ''); })
+            || null;
+    }
+
+    function renderPerson() {
+        if (!personKey) return;
+        var host = document.getElementById('stfPersonMode');
+        var p = findPerson();
+        if (!p) { host.innerHTML = '<div class="alert alert-warning">Personen finns inte kvar på tävlingen.</div>'; return; }
+        personKey = p.key;
+        // The name is an editable field two lines below — printing it in the header too just reads as a
+        // duplicate.
+        document.getElementById('stfPanelTitle').innerHTML = '<i class="bi bi-person me-2"></i>Person';
+
+        var asg = p.assignments || [];
+        var h = '';
+
+        // --- identity ---------------------------------------------------------------------------
+        h += '<div class="d-flex align-items-start gap-2 mb-1">'
+            + '<div class="flex-grow-1">'
+            + '<input type="text" class="form-control form-control-lg fw-semibold border-0 px-0" id="stfPName"'
+            + ' value="' + esc(p.displayName) + '" aria-label="Namn">'
+            + '<div class="text-muted small">'
+            + (p.clubName ? esc(p.clubName) + ' · ' : '')
+            + (p.memberId
+                ? '<span class="text-success"><i class="bi bi-person-check me-1"></i>Medlem på pistol.nu</span>'
+                : '<span class="text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>Saknar konto</span>')
+            + '</div></div></div>'
+            + '<div class="form-text mb-2">Ändra namnet och tryck Enter — det gäller alla '
+            + asg.length + (asg.length === 1 ? ' uppdrag.' : ' uppdrag.') + '</div>';
+
+        // A link overwrites the typed name with the register's spelling. Usually right, occasionally wrong,
+        // and it used to happen silently and irreversibly — a person was renamed and nothing said so.
+        var orig = (asg.find(function (a) { return a.originalName; }) || {}).originalName;
+        if (orig && orig !== p.displayName) {
+            h += '<div class="alert alert-secondary py-2 small d-flex align-items-center gap-2 flex-wrap mb-3">'
+                + '<i class="bi bi-info-circle"></i>'
+                + '<span class="flex-grow-1">Hette <strong>' + esc(orig) + '</strong> i planen.</span>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfPersonUndo()">'
+                + '<i class="bi bi-arrow-counterclockwise me-1"></i>Ångra</button></div>';
+        }
+
+        // --- reachability: the whole reason the plan is in pistol.nu at all -----------------------
+        if (!p.memberId) {
+            h += '<div class="border rounded p-2 mb-3 bg-body-tertiary">'
+                + '<div class="fw-semibold small mb-1">Hur når vi ' + esc(p.displayName.split(' ')[0]) + '?</div>'
+                + '<div class="small text-muted mb-2">Utan konto får hen inget personligt schema och inga '
+                + 'påminnelser. Med e-post går det åtminstone att skicka förfrågan.</div>'
+                + '<label class="form-label small mb-1">Är det här en medlem?</label>'
+                + '<div class="position-relative mb-2">'
+                + '<input type="text" class="form-control form-control-sm" id="stfPLink" autocomplete="off"'
+                + ' placeholder="Sök medlem…" value="' + esc(p.displayName) + '">'
+                + '<div class="list-group position-absolute w-100 shadow" id="stfPLinkResults" style="z-index:5;display:none"></div>'
+                + '</div>'
+                + '<label class="form-label small mb-1">…eller bara e-post</label>'
+                + '<div class="input-group input-group-sm">'
+                + '<input type="email" class="form-control" id="stfPEmail" placeholder="namn@exempel.se" value="' + esc(p.email || '') + '">'
+                + '<button class="btn btn-outline-secondary" type="button" onclick="stfPersonSaveEmail()">Spara</button>'
+                + '</div></div>';
+        }
+
+        // --- assignments ---------------------------------------------------------------------------
+        h += '<div class="fw-semibold small text-uppercase text-muted mb-1">Uppdrag (' + asg.length + ')</div>';
+        h += asg.length
+            ? '<div class="list-group mb-2">' + asg.map(function (a) {
+                return '<div class="list-group-item d-flex align-items-center gap-2 py-2">'
+                    + '<div class="flex-grow-1">'
+                    + '<div class="fw-semibold">' + esc(a.roleName)
+                    + (a.functionTitle ? ' <span class="fw-normal text-muted">· ' + esc(a.functionTitle) + '</span>' : '')
+                    + (a.isResponsible ? ' <i class="bi bi-star-fill text-warning" title="Ansvarig"></i>' : '') + '</div>'
+                    + '<div class="small text-muted">'
+                    + (a.dayLabel ? '<span class="text-body">' + esc(a.dayLabel) + '</span> · ' : '')
+                    + (a.scopeLabel && a.scopeLabel !== 'Hela tävlingen' ? esc(a.scopeLabel) + ' · ' : '')
+                    + esc(a.shiftLabel || a.passLabel || 'Heldag') + '</div></div>'
+                    + '<span class="badge ' + (STATE_CLS[SV_STATUS[a.status] || ''] || 'bg-secondary') + '">'
+                    + esc(SV_STATUS[a.status] || a.status) + '</span>'
+                    + (a.readOnly ? '' :
+                        // Splitting only means something on a row with real from–to times.
+                        (a.shiftLabel && a.shiftLabel.indexOf('–') > 0
+                            ? '<button type="button" class="btn btn-sm btn-outline-warning" onclick="stfSplitOpen(' + a.id + ')" title="Dela passet — någon annan tar resten"><i class="bi bi-scissors"></i></button>'
+                            : '')
+                      + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Ändra"><i class="bi bi-pencil"></i></button>'
+                      + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>')
+                    + '</div>'
+                    + '<div class="list-group-item py-2 bg-body-tertiary" id="stfSplit' + a.id + '" style="display:none">'
+                    + '<div class="small fw-semibold mb-1">Dela passet ' + esc(a.shiftLabel || '') + '</div>'
+                    + '<div class="d-flex gap-2 align-items-start flex-wrap">'
+                    + '<div><label class="form-label small mb-0">Från kl</label>'
+                    + '<input type="text" class="form-control form-control-sm" id="stfSplitAt' + a.id + '" placeholder="09:00" style="width:90px"></div>'
+                    + '<div class="flex-grow-1 position-relative" style="min-width:200px">'
+                    + '<label class="form-label small mb-0">tar över</label>'
+                    + '<input type="text" class="form-control form-control-sm" id="stfSplitWho' + a.id + '" placeholder="Sök person…" autocomplete="off">'
+                    + '<div class="list-group position-absolute w-100 shadow" id="stfSplitRes' + a.id + '" style="z-index:5;display:none"></div>'
+                    + '</div></div>'
+                    + '<div class="form-text">Den som tar över står som Planerad tills hen tackat ja.</div>'
+                    + '</div>';
+            }).join('') + '</div>'
+            : '<div class="text-muted small mb-2">Inga uppdrag än.</div>';
+
+        h += '<button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="stfOpenAdd(\'\')">'
+            + '<i class="bi bi-plus-lg me-1"></i>Ge ett uppdrag</button>';
+
+        // --- context (only what exists) --------------------------------------------------------------
+        var extras = [];
+        if (p.volunteer) extras.push('<i class="bi bi-hand-thumbs-up me-1"></i>Har anmält sig: '
+            + esc(p.volunteer.slotsSummary || '—') + (p.volunteer.comment ? ' — "' + esc(p.volunteer.comment) + '"' : ''));
+        (p.availabilityLabels || []).forEach(function (l) { extras.push('<i class="bi bi-calendar-week me-1"></i>Kan: ' + esc(l)); });
+        (p.prep || []).forEach(function (x) {
+            extras.push('<i class="bi bi-list-check me-1"></i>' + (x.isAreaLead ? 'Ansvarig: ' + esc(x.areaName) : esc(x.itemTitle || '')));
+        });
+        if (extras.length) {
+            h += '<div class="fw-semibold small text-uppercase text-muted mb-1">Övrigt</div>'
+                + '<ul class="list-unstyled small text-muted mb-3">'
+                + extras.map(function (e) { return '<li class="mb-1">' + e + '</li>'; }).join('') + '</ul>';
+        }
+
+        // --- replacement, last and visually separate: it is the destructive one ----------------------
+        h += '<hr>'
+            + '<div class="fw-semibold small mb-1">Kan hen inte längre?</div>'
+            + '<div class="small text-muted mb-2">Lämna över alla ' + asg.length + ' uppdrag till någon annan. '
+            + 'Svaren följer inte med — den nya personen står som Planerad tills hen tackat ja.</div>'
+            + '<div class="position-relative" style="max-width:420px">'
+            + '<input type="text" class="form-control form-control-sm" id="stfPReplace" autocomplete="off" placeholder="Sök vem som tar över…">'
+            + '<div class="list-group position-absolute w-100 shadow" id="stfPReplaceResults" style="z-index:5;display:none"></div>'
+            + '</div>';
+
+        host.innerHTML = h;
+        wirePersonCard(p);
+    }
+
+    var SV_STATUS = { Planned: 'Planerad', Invited: 'Inbjuden', Accepted: 'Accepterad', Declined: 'Avböjt', Confirmed: 'Bekräftad' };
+
+    function wirePersonCard(p) {
+        var nameEl = document.getElementById('stfPName');
+        if (nameEl) {
+            nameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); } });
+            nameEl.addEventListener('blur', async function () {
+                var v = nameEl.value.trim();
+                if (!v || v === p.displayName) { nameEl.value = p.displayName; return; }
+                var r = await stfPersonPost({ competitionId: compId, personKey: p.key, newName: v });
+                if (!r.success) { alert(r.message || 'Kunde inte byta namn.'); nameEl.value = p.displayName; return; }
+                personKey = 'n:' + v.toLowerCase();
+                await loadPeople(); renderPerson(); if (window.grdLoad) window.grdLoad();
+            });
+        }
+        wireMemberPicker('stfPLink', 'stfPLinkResults', async function (m) {
+            var r = await stfPersonPost({ competitionId: compId, personKey: p.key, memberId: m.memberId });
+            if (!r.success) { alert(r.message || 'Kunde inte koppla.'); return; }
+            personKey = 'm:' + m.memberId;
+            await loadPeople(); renderPerson(); if (window.grdLoad) window.grdLoad();
+        });
+        wireMemberPicker('stfPReplace', 'stfPReplaceResults', async function (m) {
+            if (!confirm('Lämna över alla uppdrag från ' + p.displayName + ' till ' + m.memberName + '?')) return;
+            var r = await stfPersonPost({ competitionId: compId, personKey: p.key, memberId: m.memberId, isReplacement: true });
+            if (!r.success) { alert(r.message || 'Kunde inte ersätta.'); return; }
+            personKey = 'm:' + m.memberId;
+            await loadPeople(); renderPerson(); if (window.grdLoad) window.grdLoad();
+        }, true);
+    }
+
+    /// A live member search under an input — the same gesture as the grid cell. Replaces the numbered
+    /// prompt() lists, which asked the organiser to read a menu and type a number back.
+    function wireMemberPicker(inputId, resultsId, onPick, allowFreeText) {
+        var input = document.getElementById(inputId);
+        var box = document.getElementById(resultsId);
+        if (!input || !box) return;
+        var t = null;
+        function hide() { box.style.display = 'none'; box.innerHTML = ''; }
+        input.addEventListener('input', function () {
+            clearTimeout(t);
+            var q = input.value.trim();
+            if (q.length < 2) { hide(); return; }
+            t = setTimeout(async function () {
+                try {
+                    var r = await fetch('/umbraco/surface/Staffing/SearchMembers?competitionId=' + compId + '&query=' + encodeURIComponent(q),
+                        { headers: { 'Accept': 'application/json' } });
+                    var d = await r.json();
+                    var list = (d && d.members) ? d.members : [];
+                    if (!list.length) {
+                        box.innerHTML = '<div class="list-group-item small text-muted">Ingen medlem matchar'
+                            + (allowFreeText ? ' — tryck Enter för att spara som fritext' : '') + '</div>';
+                        box.style.display = 'block'; return;
+                    }
+                    box.innerHTML = list.slice(0, 7).map(function (m, i) {
+                        return '<button type="button" class="list-group-item list-group-item-action py-1 small" data-i="' + i + '">'
+                            + esc(m.memberName) + (m.clubName ? ' <span class="text-muted">' + esc(m.clubName) + '</span>' : '')
+                            + '</button>';
+                    }).join('');
+                    box.style.display = 'block';
+                    box.querySelectorAll('button[data-i]').forEach(function (btn) {
+                        btn.addEventListener('click', function () { hide(); onPick(list[parseInt(btn.dataset.i, 10)]); });
+                    });
+                } catch (e) { hide(); }
+            }, 200);
+        });
+        input.addEventListener('blur', function () { setTimeout(hide, 200); });
+    }
+
+    window.stfPersonUndo = async function () {
+        var p = findPerson(); if (!p) return;
+        var r = await stfPersonPost({ competitionId: compId, personKey: p.key }, 'UndoPersonIdentity');
+        if (!r.success) { alert(r.message || 'Kunde inte ångra.'); return; }
+        personKey = null;   // the key changes back to the free-text name
+        await loadPeople();
+        var back = people.find(function (x) { return (x.assignments || []).some(function (a) { return true; }); });
+        stfBackToList();
+        if (window.grdLoad) window.grdLoad();
+    };
+
+    /// "Han blev sjuk en timme in i passet." Cut here, someone else takes the rest — one action instead of
+    /// two edits with nothing tying them together and a silent hole between them.
+    window.stfSplitOpen = function (id) {
+        var box = document.getElementById('stfSplit' + id);
+        if (!box) return;
+        var open = box.style.display !== 'none';
+        box.style.display = open ? 'none' : '';
+        if (open) return;
+        document.getElementById('stfSplitAt' + id).focus();
+        wireMemberPicker('stfSplitWho' + id, 'stfSplitRes' + id, async function (m) {
+            await stfSplitDo(id, m.memberId, m.memberName);
+        }, true);
+        var who = document.getElementById('stfSplitWho' + id);
+        who.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); stfSplitDo(id, 0, who.value.trim()); }
+        });
+    };
+
+    async function stfSplitDo(id, memberId, name) {
+        var at = (document.getElementById('stfSplitAt' + id).value || '').trim();
+        if (!at) { alert('Ange klockslaget där passet delas.'); return; }
+        if (!memberId && !name) { alert('Ange vem som tar över.'); return; }
+        var r = await stfPersonPost({ competitionId: compId, id: id, at: at, memberId: memberId, newName: memberId ? null : name },
+            'SplitAssignment');
+        if (!r.success) { alert(r.message || 'Kunde inte dela passet.'); return; }
+        await loadPeople(); renderPerson(); if (window.grdLoad) window.grdLoad();
+    }
+
+    window.stfPersonSaveEmail = async function () {
+        var p = findPerson(); if (!p) return;
+        var v = (document.getElementById('stfPEmail').value || '').trim();
+        var r = await stfPersonPost({ competitionId: compId, personKey: p.key, email: v });
+        if (!r.success) { alert(r.message || 'Kunde inte spara.'); return; }
+        await loadPeople(); renderPerson(); if (window.grdLoad) window.grdLoad();
+    };
+
+    // ---- person identity ------------------------------------------------------------------------
+
+    var matchRows = [];
+
+    window.stfOpenMatch = function () {
+        var p = panel('bemMatchPanel'); if (p) p.show();
+        stfLoadMatches();
+    };
+
+    window.stfLoadMatches = async function () {
+        var host = document.getElementById('stfMatchList');
+        host.innerHTML = '<div class="text-muted small">Laddar…</div>';
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SuggestPersonMatches?competitionId=' + compId,
+                { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { host.innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa.') + '</div>'; return; }
+            matchRows = d.people || [];
+            var sum = document.getElementById('stfMatchSummary');
+            if (sum) sum.textContent = matchRows.length
+                ? (matchRows.length + ' utan koppling · ' + d.confident + ' säkra förslag · ' + d.unmatched + ' utan träff')
+                : 'Alla personer är kopplade till medlemmar.';
+            var btn = document.getElementById('stfMatchAllBtn');
+            if (btn) btn.style.display = d.confident ? '' : 'none';
+            renderMatches();
+        } catch (e) {
+            host.innerHTML = '<div class="alert alert-warning">Kunde inte läsa förslagen.</div>';
+        }
+    };
+
+    function renderMatches() {
+        var host = document.getElementById('stfMatchList');
+        if (!matchRows.length) {
+            host.innerHTML = '<div class="alert alert-success mb-0"><i class="bi bi-check2-circle me-1"></i>'
+                + 'Alla på tävlingen är kopplade till en medlem.</div>';
+            return;
+        }
+        host.innerHTML = matchRows.map(function (m, i) {
+            var head = '<div class="fw-semibold">' + esc(m.name)
+                + ' <span class="text-muted fw-normal small">' + m.rowCount + (m.rowCount === 1 ? ' uppdrag' : ' uppdrag') + '</span>'
+                + (m.confident ? ' <span class="badge bg-success-subtle text-success-emphasis border fw-normal">säkert förslag</span>' : '')
+                + '</div>';
+
+            if (m.looksLikeTwoPeople) {
+                return '<div class="border rounded p-2 mb-2">' + head
+                    + '<div class="small text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>'
+                    + 'Ser ut som två personer i samma ruta. Dela upp den i två uppdrag först.</div></div>';
+            }
+            // Written twice in the same plan — the commonest typo, and the member register can't see it.
+            var dup = (m.inPlan || []).length
+                ? '<div class="small mt-1 text-warning-emphasis"><i class="bi bi-files me-1"></i>'
+                  + 'Finns redan i planen som '
+                  + m.inPlan.map(function (x, j) {
+                      return '<button type="button" class="btn btn-sm btn-link p-0 align-baseline fw-semibold" onclick="stfMergeInPlan(' + i + ',' + j + ')">'
+                          + esc(x.name) + '</button> <span class="text-muted">(' + x.rowCount + ' uppdrag, ' + esc(x.reason) + ')</span>';
+                  }).join(', ') + ' — samma person?</div>'
+                : '';
+
+            if (!(m.candidates || []).length) {
+                return '<div class="border rounded p-2 mb-2">' + head + dup
+                    + '<div class="small text-muted">Ingen medlem liknar namnet. '
+                    + '<button type="button" class="btn btn-sm btn-link p-0 align-baseline" onclick="stfOpenPerson(\'' + pkey(m.key) + '\')">Öppna personen</button>'
+                    + ' och lägg till e-post, så kan hen åtminstone bjudas in.</div></div>';
+            }
+
+            var opts = m.candidates.map(function (c, j) {
+                return '<option value="' + c.memberId + '"' + (j === 0 && m.confident ? ' selected' : '') + '>'
+                    + esc(c.name) + (c.clubName ? ' — ' + esc(c.clubName) : '') + ' (' + esc(c.reason) + ')</option>';
+            }).join('');
+            return '<div class="border rounded p-2 mb-2">' + head + dup
+                + '<div class="d-flex gap-2 align-items-center flex-wrap mt-1">'
+                + '<select class="form-select form-select-sm" id="stfMatchSel' + i + '" style="max-width:420px">'
+                + '<option value="">— välj medlem —</option>' + opts + '</select>'
+                + '<button type="button" class="btn btn-sm btn-primary" onclick="stfLinkOne(' + i + ')">Koppla</button>'
+                + '</div></div>';
+        }).join('');
+    }
+
+    function pkey(s) { return encodeURIComponent(s == null ? '' : s).replace(/'/g, '%27'); }
+    function unpkey(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+
+    /// Merge a misspelling into the spelling already used elsewhere in the plan. A RENAME, not a link —
+    /// and it links too when the target is already tied to a member.
+    window.stfMergeInPlan = async function (i, j) {
+        var m = matchRows[i]; if (!m) return;
+        var t = (m.inPlan || [])[j]; if (!t) return;
+        if (!confirm('Är "' + m.name + '" samma person som "' + t.name + '"?\n\n'
+            + m.rowCount + ' uppdrag byter namn till ' + t.name + '.')) return;
+        var r = await stfPersonPost({
+            competitionId: compId, personKey: m.key, newName: t.name,
+            memberId: t.memberId > 0 ? t.memberId : 0
+        });
+        if (!r.success) { alert(r.message || 'Kunde inte slå ihop.'); return; }
+        await stfLoadMatches();
+        if (window.grdLoad) window.grdLoad();
+    };
+
+    window.stfLinkOne = async function (i) {
+        var m = matchRows[i]; if (!m) return;
+        var sel = document.getElementById('stfMatchSel' + i);
+        var id = sel ? parseInt(sel.value, 10) : 0;
+        if (!id) { alert('Välj en medlem först.'); return; }
+        var r = await stfPersonPost({ competitionId: compId, personKey: m.key, memberId: id });
+        if (!r.success) { alert(r.message || 'Kunde inte koppla.'); return; }
+        await stfLoadMatches();
+        if (window.grdLoad) window.grdLoad();
+    };
+
+    /// Only the ones with a single clear winner. Everything ambiguous still needs a human.
+    window.stfLinkAllConfident = async function () {
+        var todo = matchRows.filter(function (m) { return m.confident && (m.candidates || []).length; });
+        if (!todo.length) return;
+        if (!confirm('Koppla ' + todo.length + ' personer till de föreslagna medlemmarna?\n\n'
+            + todo.slice(0, 12).map(function (m) { return '· ' + m.name + ' → ' + m.candidates[0].name; }).join('\n')
+            + (todo.length > 12 ? '\n… och ' + (todo.length - 12) + ' till' : ''))) return;
+        var ok = 0;
+        for (var k = 0; k < todo.length; k++) {
+            var r = await stfPersonPost({ competitionId: compId, personKey: todo[k].key, memberId: todo[k].candidates[0].memberId });
+            if (r.success) ok++;
+        }
+        alert('Kopplade ' + ok + ' av ' + todo.length + '.');
+        await stfLoadMatches();
+        if (window.grdLoad) window.grdLoad();
+    };
+
+    async function stfPersonPost(body, action) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/' + (action || 'ApplyPersonIdentity'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify(body)
+            });
+            return await r.json();
+        } catch (e) { return { success: false, message: 'Nätverksfel.' }; }
+    }
+
+    // The prompt()-driven rename/link/replace helpers that used to live here are gone. They asked the
+    // organiser to read a numbered menu in a browser dialog and type a number back, which is worse than
+    // no feature. The person card does all four inline: editable name, live member search, e-mail field,
+    // and a separate hand-over search. See renderPerson().
 
     window.stfOpenBehov = function () {
         var p = panel('bemBehovPanel'); if (p) p.show();
@@ -1780,8 +2266,10 @@
         loadScopes(); loadHelp();
     };
 
-    // Only the grid loads up front. Everything else waits until someone opens it.
+    // Only the grid and the role catalog load up front — the catalog because the add-funktionär dialog
+    // needs it the moment it opens. Everything else waits until someone opens it.
     if (window.grdLoad) window.grdLoad();
+    loadRoles();
     startTimer();
 })();
 </script>

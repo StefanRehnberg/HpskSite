@@ -93,6 +93,71 @@ namespace HpskSite.Models.Staffing
         public string? Date { get; set; }   // "yyyy-MM-dd"
     }
 
+    // --- person identity: one human, many rows -----------------------------------------------------
+
+    /// <summary>A free-text name on the roster, and the members it might be.</summary>
+    public class PersonMatchRow
+    {
+        public string Key { get; set; } = "";          // "n:{lowercased name}"
+        public string Name { get; set; } = "";
+        /// <summary>How many assignments carry this name — what a link or a rename will touch.</summary>
+        public int RowCount { get; set; }
+        public string? Email { get; set; }
+        /// <summary>"Bert J / Hans R" is a note, not a person. Flagged instead of half-matched.</summary>
+        public bool LooksLikeTwoPeople { get; set; }
+        /// <summary>One clear winner — safe to pre-select. Never means "linked automatically".</summary>
+        public bool Confident { get; set; }
+        public List<PersonMatchCandidate> Candidates { get; set; } = new();
+        /// <summary>Names already on THIS competition that look like the same person written twice — the
+        /// commonest typo, and one the member register cannot help with.</summary>
+        public List<PersonMatchInPlan> InPlan { get; set; } = new();
+    }
+
+    public class PersonMatchInPlan
+    {
+        public string Name { get; set; } = "";
+        /// <summary>Non-zero when that other name is already linked to a member, so merging links too.</summary>
+        public int MemberId { get; set; }
+        public int RowCount { get; set; }
+        public int Score { get; set; }
+        public string Reason { get; set; } = "";
+    }
+
+    public class PersonMatchCandidate
+    {
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string? ClubName { get; set; }
+        public int Score { get; set; }
+        public string Reason { get; set; } = "";
+    }
+
+    /// <summary>
+    /// Act on a PERSON, not a row. Name, e-mail and phone live on every assignment, so Hans Reschke is
+    /// five rows — fixing a spelling or adding an address one row at a time is how the data drifts.
+    /// </summary>
+    public class PersonActionRequest
+    {
+        public int CompetitionId { get; set; }
+        /// <summary>"m:{memberId}" or "n:{lowercased name}".</summary>
+        public string PersonKey { get; set; } = "";
+        /// <summary>Link/replace target. 0 = none.</summary>
+        public int MemberId { get; set; }
+        public string? NewName { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        /// <summary>Replace = a DIFFERENT human takes the work over; their answers don't carry across, so
+        /// statuses reset. Link = the same human, now identified; answers are kept.</summary>
+        public bool IsReplacement { get; set; }
+    }
+
+    public class PersonActionResult
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public int Affected { get; set; }
+    }
+
     /// <summary>Hide a built-in role for this competition (or unhide it).</summary>
     public class HideStaffRoleRequest
     {

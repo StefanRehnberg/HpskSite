@@ -44,6 +44,7 @@ namespace HpskSite.Controllers
         private readonly StaffPassService _pass;
         private readonly RoleCatalogService _roleCatalog;
         private readonly StaffDayService _days;
+        private readonly PersonMatchService _match;
         private readonly PrepDocumentStorage _docs;
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
         private readonly EmailService _email;
@@ -73,6 +74,7 @@ namespace HpskSite.Controllers
             StaffPassService pass,
             RoleCatalogService roleCatalog,
             StaffDayService days,
+            PersonMatchService match,
             PrepDocumentStorage docs,
             HpskSite.Services.Schedule.CompetitionAgendaService agenda,
             EmailService email,
@@ -97,6 +99,7 @@ namespace HpskSite.Controllers
             _pass = pass;
             _roleCatalog = roleCatalog;
             _days = days;
+            _match = match;
             _docs = docs;
             _agenda = agenda;
             _email = email;
@@ -1403,7 +1406,8 @@ namespace HpskSite.Controllers
                 // Per-member overlap. Only members can be checked — a free-text helper has no identity
                 // to collide with, and their rows carry no MemberId.
                 var clashes = new List<object>();
-                foreach (var grp in assignments.Where(a => a.MemberId is > 0).GroupBy(a => a.MemberId!.Value))
+                foreach (var grp in assignments.Where(a => !string.IsNullOrWhiteSpace(a.DisplayName))
+                                               .GroupBy(PersonKeyOf))
                 {
                     var named = grp.ToList();
                     for (var i = 0; i < named.Count; i++)
@@ -1439,6 +1443,10 @@ namespace HpskSite.Controllers
         /// </summary>
         private static bool ShiftsOverlap(StaffAssignmentView a, StaffAssignmentView b)
         {
+            // DIFFERENT DAYS NEVER CLASH. Comparing clock times alone made Kristian's 08–09 on Saturday
+            // collide with his 07:30–09:00 on Sunday — noise that buries the real clashes.
+            if (a.DateKey != null && b.DateKey != null && a.DateKey != b.DateKey) return false;
+
             if (a.PassId != null && b.PassId != null) return a.PassId == b.PassId;
 
             var ra = ParseShiftRange(a.ShiftLabel);
@@ -1446,6 +1454,15 @@ namespace HpskSite.Controllers
             if (ra == null || rb == null) return false;
             return ra.Value.start < rb.Value.end && rb.Value.start < ra.Value.end;
         }
+
+        /// <summary>
+        /// Identity for clash detection. Used to be MemberId only, on the reasoning that "a free-text helper
+        /// has no identity to collide with" — true before the people layer, false now that free-text rows are
+        /// grouped by name. On a real plan 37 of 41 people are free text, so the old rule checked almost
+        /// nobody: the same person could be booked on two posts at the same hour with no warning at all.
+        /// </summary>
+        private static string PersonKeyOf(StaffAssignmentView a)
+            => a.MemberId is int m && m > 0 ? "m:" + m : "n:" + (a.DisplayName ?? "").Trim().ToLowerInvariant();
 
         /// <summary>Parses the "13:00–16:00" shape BuildShiftLabel emits. Anything else → null.</summary>
         private static (TimeSpan start, TimeSpan end)? ParseShiftRange(string? label)
@@ -1604,6 +1621,7 @@ namespace HpskSite.Controllers
                             Status = a.Status,
                             IsResponsible = a.IsResponsible,
                             IsExternal = a.MemberId is not > 0,
+                            OriginalName = a.OriginalName,
                             Email = a.Email,
                             HasContact = a.MemberId is > 0 || !string.IsNullOrWhiteSpace(a.Email),
                             ReadOnly = a.ReadOnly,
@@ -1629,6 +1647,58 @@ namespace HpskSite.Controllers
             // grid has to be told about them explicitly or they are invisible until someone goes looking.
             // Same predicate as the people layer's UnassignedVolunteerCount; sharing it is what keeps the
             // strip, the badge and the filtered list from disagreeing.
+            // Double-booking, surfaced where the organiser is standing. It used to be computed only for
+            // MEMBERS and rendered only on the retired Roller view — so on a plan that is 90% free text it
+            // checked almost nobody, and showed the result to nobody.
+            foreach (var grp in all.Where(a => !a.ReadOnly && !string.IsNullOrWhiteSpace(a.DisplayName))
+                                   .GroupBy(PersonKeyOf))
+            {
+                var list = grp.ToList();
+                for (var i = 0; i < list.Count; i++)
+                    for (var j = i + 1; j < list.Count; j++)
+                    {
+                        if (!ShiftsOverlap(list[i], list[j])) continue;
+                        resp.Clashes.Add(new GridClash
+                        {
+                            PersonKey = grp.Key,
+                            Name = list[i].DisplayName,
+                            DateKey = list[i].DateKey,
+                            A = $"{list[i].RoleName} ({list[i].ShiftLabel ?? list[i].PassLabel ?? "heldag"})",
+                            B = $"{list[j].RoleName} ({list[j].ShiftLabel ?? list[j].PassLabel ?? "heldag"})",
+                        });
+                    }
+            }
+
+            // Time gaps INSIDE a cell: "han gick hem kl 09 och ingen tog över". Deliberately measured only
+            // between the cell's own first and last shift — flagging the rest of the day would invent a
+            // requirement nobody stated and cry wolf on every plan.
+            foreach (var row in resp.Rows)
+            {
+                foreach (var kv in row.Cells)
+                {
+                    if (string.IsNullOrEmpty(kv.Key)) continue;
+                    var spans = kv.Value
+                        .Select(e => ParseShiftRange(e.TimeLabel))
+                        .Where(x => x != null).Select(x => x!.Value)
+                        .OrderBy(x => x.start).ToList();
+                    // An untimed row is present all day, so it can't leave a hole.
+                    if (spans.Count < 2 || spans.Count != kv.Value.Count) continue;
+
+                    var cursor = spans[0].end;
+                    foreach (var s in spans.Skip(1))
+                    {
+                        if (s.start > cursor)
+                            row.Gaps.Add(new GridGap
+                            {
+                                DateKey = kv.Key,
+                                From = $"{cursor:hh\\:mm}",
+                                To = $"{s.start:hh\\:mm}",
+                            });
+                        if (s.end > cursor) cursor = s.end;
+                    }
+                }
+            }
+
             try
             {
                 // includePrep:false — the strip only needs who volunteered, and the prep breakdown is the
@@ -1734,6 +1804,118 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Staffing: MoveAssignmentToDay failed for {Id}", request.Id);
                 return Json(new { success = false, message = "Kunde inte flytta uppdraget." });
+            }
+        }
+
+        /// <summary>
+        /// Which pistol.nu member did the organiser mean? One call for every free-text name on the
+        /// competition, so 32 unidentified helpers become one screen to confirm instead of 32 searches.
+        /// Suggestions only — nothing is ever linked without a human saying yes.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> SuggestPersonMatches(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var rows = _match.Suggest(competitionId);
+                return Json(new
+                {
+                    success = true,
+                    people = rows,
+                    total = rows.Count,
+                    confident = rows.Count(r => r.Confident),
+                    unmatched = rows.Count(r => r.Candidates.Count == 0 && !r.LooksLikeTwoPeople),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SuggestPersonMatches failed for {Comp}", competitionId);
+                return Json(new { success = false, message = "Kunde inte föreslå matchningar." });
+            }
+        }
+
+        /// <summary>
+        /// Apply an identity change to EVERY row a person holds — link to a member, rename, set contact,
+        /// or hand the work to someone else. Row-at-a-time editing is what let the same human end up with
+        /// three spellings and an e-mail on only one of them.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApplyPersonIdentity([FromBody] PersonActionRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.PersonKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            if (request.MemberId <= 0 && string.IsNullOrWhiteSpace(request.NewName)
+                && string.IsNullOrWhiteSpace(request.Email) && string.IsNullOrWhiteSpace(request.Phone))
+                return Json(new { success = false, message = "Inget att ändra." });
+
+            var email = (request.Email ?? "").Trim();
+            if (email.Length > 0 && (!email.Contains('@') || email.Contains(' ')))
+                return Json(new { success = false, message = "Ogiltig e-postadress." });
+
+            try
+            {
+                var r = _staffing.ApplyPersonIdentity(request);
+                return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: ApplyPersonIdentity failed for {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte spara ändringen." });
+            }
+        }
+
+        /// <summary>Put back the originally typed name and unlink — the undo for a link that went to the
+        /// wrong person.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UndoPersonIdentity([FromBody] PersonActionRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.PersonKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var r = _staffing.UndoPersonIdentity(request.CompetitionId, request.PersonKey);
+                return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: UndoPersonIdentity failed for {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte ångra." });
+            }
+        }
+
+        /// <summary>Cut a shift at a clock time and hand the tail to someone else — the mid-shift dropout.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SplitAssignment([FromBody] SplitAssignmentRequest request)
+        {
+            if (request == null || request.Id <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
+            if (!await HasCompetitionAccessAsync(compId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            if (!TimeSpan.TryParseExact((request.At ?? "").Trim(), new[] { @"hh\:mm", @"h\:mm" },
+                    CultureInfo.InvariantCulture, out var at))
+                return Json(new { success = false, message = "Ange en tid som TT:MM." });
+            try
+            {
+                var (ok, msg, newId) = _staffing.SplitAssignment(request.Id, compId, at,
+                    request.MemberId > 0 ? request.MemberId : null, request.NewName, viewer.Id);
+                return Json(new { success = ok, message = msg, id = newId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SplitAssignment failed for {Id}", request.Id);
+                return Json(new { success = false, message = "Kunde inte dela passet." });
             }
         }
 

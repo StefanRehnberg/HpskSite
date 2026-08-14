@@ -96,6 +96,9 @@ namespace HpskSite.Models.Staffing
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public bool IsResponsible { get; set; }
         public bool IsExternal { get; set; }        // no member account → no schedule, no push
+        /// <summary>What the organiser first typed, when an identity change has since replaced it.
+        /// Shown so a silent rename is visible and reversible.</summary>
+        public string? OriginalName { get; set; }
         public string? Email { get; set; }
         /// <summary>Reachable at all: has an account, or at least an e-mail for a tokened invite.</summary>
         public bool HasContact { get; set; }
@@ -136,6 +139,8 @@ namespace HpskSite.Models.Staffing
         /// <summary>Column key → the people in that cell.</summary>
         public Dictionary<string, List<GridEntry>> Cells { get; set; } = new();
         public int Filled { get; set; }
+        /// <summary>Uncovered stretches between this row's own shifts, per day.</summary>
+        public List<GridGap> Gaps { get; set; } = new();
         /// <summary>How many of this role are needed PER DAY. 0 = no stated requirement. Drives the
         /// needed-vs-filled number rendered in each cell — coverage stopped being a separate screen.</summary>
         public int Needed { get; set; }
@@ -175,6 +180,35 @@ namespace HpskSite.Models.Staffing
         public List<HiddenRoleView> HiddenRoles { get; set; } = new();
         /// <summary>Volunteered, nothing assigned yet — surfaced as a strip above the grid.</summary>
         public List<GridVolunteer> Volunteers { get; set; } = new();
+        /// <summary>Same person, two posts, overlapping time, same day.</summary>
+        public List<GridClash> Clashes { get; set; } = new();
+    }
+
+    public class GridClash
+    {
+        public string PersonKey { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? DateKey { get; set; }
+        public string A { get; set; } = "";
+        public string B { get; set; } = "";
+    }
+
+    /// <summary>An uncovered stretch between two shifts on the same role and day.</summary>
+    public class GridGap
+    {
+        public string DateKey { get; set; } = "";
+        public string From { get; set; } = "";
+        public string To { get; set; } = "";
+    }
+
+    public class SplitAssignmentRequest
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        /// <summary>"HH:mm" — where to cut.</summary>
+        public string? At { get; set; }
+        public int MemberId { get; set; }
+        public string? NewName { get; set; }
     }
 
     public class HiddenRoleView

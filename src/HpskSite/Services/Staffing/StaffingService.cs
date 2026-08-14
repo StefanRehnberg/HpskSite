@@ -541,6 +541,192 @@ namespace HpskSite.Services.Staffing
             return (true, null);
         }
 
+        // ---- person-level writes: one human, every row -------------------------------------------
+
+        /// <summary>
+        /// Resolve a person key to the rows it owns. "m:{id}" → that member's rows; "n:{name}" → the
+        /// member-less rows carrying that name. Keeping this in ONE place is what makes the person actions
+        /// agree with <see cref="CompetitionPeopleService"/>, which groups by the same key.
+        /// </summary>
+        private List<StaffAssignment> RowsForPerson(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            int competitionId, string personKey)
+        {
+            if (string.IsNullOrWhiteSpace(personKey)) return new List<StaffAssignment>();
+            if (personKey.StartsWith("m:", StringComparison.Ordinal)
+                && int.TryParse(personKey[2..], out var mid) && mid > 0)
+            {
+                return db.Fetch<StaffAssignment>(
+                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1", competitionId, mid);
+            }
+            var name = personKey.StartsWith("n:", StringComparison.Ordinal) ? personKey[2..] : personKey;
+            return db.Fetch<StaffAssignment>(
+                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId IS NULL", competitionId)
+                .Where(r => string.Equals((r.DisplayName ?? "").Trim(), name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Point every assignment a person holds at a pistol.nu member — or hand them all to a different
+        /// person entirely.
+        ///
+        /// <para><b>Link vs replace is not cosmetic.</b> Linking says "this free-text row IS that member":
+        /// same human, so an Accepted answer and a check-in still stand. Replacing says "someone else does
+        /// this now": their predecessor's yes means nothing, so statuses reset to Planerad and check-ins
+        /// clear. Treating them the same is how a stand-in silently inherits a confirmation they never gave.</para>
+        /// </summary>
+        public PersonActionResult ApplyPersonIdentity(PersonActionRequest req)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var rows = RowsForPerson(db, req.CompetitionId, req.PersonKey);
+            if (rows.Count == 0) return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+
+            string? name = string.IsNullOrWhiteSpace(req.NewName) ? null : req.NewName.Trim();
+            int? memberId = req.MemberId > 0 ? req.MemberId : null;
+            string? phone = string.IsNullOrWhiteSpace(req.Phone) ? null : req.Phone.Trim();
+
+            if (memberId is int mid)
+            {
+                var m = _memberService.GetById(mid);
+                if (m == null) return new PersonActionResult { Success = false, Message = "Medlemmen hittades inte." };
+                // The member's own name wins — that is the whole point of linking, and it is what the
+                // functionary will see in their personal schedule.
+                name ??= ResolveMemberName(mid);
+                if (phone == null && m.HasProperty("phoneNumber")) phone = m.GetValue<string>("phoneNumber");
+            }
+
+            var now = DateTime.UtcNow;
+            var n = 0;
+            foreach (var r in rows)
+            {
+                // Keep the first-ever typed name before anything overwrites it, so the change is visible
+                // and reversible. Set once — a second rename must not erase the original.
+                var changesName = (name != null && !string.Equals(name, r.DisplayName, StringComparison.Ordinal))
+                                  || (memberId != null && r.MemberId != memberId);
+                if (changesName && string.IsNullOrEmpty(r.OriginalName)) r.OriginalName = r.DisplayName;
+
+                if (memberId != null) r.MemberId = memberId;
+                if (name != null) r.DisplayName = name;
+                // Renamed back to what it was → there is nothing left to undo, so don't keep claiming
+                // "hette X i planen" about a name that is X.
+                if (string.Equals(r.OriginalName, r.DisplayName, StringComparison.Ordinal)) r.OriginalName = null;
+                if (phone != null) r.Phone = phone;
+                if (!string.IsNullOrWhiteSpace(req.Email)) r.Email = req.Email.Trim();
+                if (req.IsReplacement)
+                {
+                    r.Status = StaffAssignmentStatus.Planned;
+                    r.CheckedInAt = null;
+                    // App access was granted to a login, not to a slot on the roster.
+                    r.HasAdminAccess = false;
+                }
+                r.ModifiedDate = now;
+                db.Update(r);
+                n++;
+            }
+
+            // A replacement or a link can change who holds Tävlingsledning, and that list is also the
+            // public "Tävlingsansvariga" block on the competition page.
+            try { SyncCompetitionManagers(req.CompetitionId); } catch { }
+
+            return new PersonActionResult { Success = true, Affected = n };
+        }
+
+        /// <summary>
+        /// Put back the name the organiser originally typed, and unlink. The escape hatch for a link that
+        /// went to the wrong person — which is easy to do and, without this, impossible to notice or reverse.
+        /// </summary>
+        public PersonActionResult UndoPersonIdentity(int competitionId, string personKey)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var rows = RowsForPerson(db, competitionId, personKey).Where(r => !string.IsNullOrEmpty(r.OriginalName)).ToList();
+            if (rows.Count == 0)
+                return new PersonActionResult { Success = false, Message = "Det finns inget tidigare namn att gå tillbaka till." };
+
+            var now = DateTime.UtcNow;
+            foreach (var r in rows)
+            {
+                r.DisplayName = r.OriginalName!;
+                r.OriginalName = null;
+                r.MemberId = null;
+                r.HasAdminAccess = false;   // access was granted to a login that is no longer attached
+                r.ModifiedDate = now;
+                db.Update(r);
+            }
+            try { SyncCompetitionManagers(competitionId); } catch { }
+            return new PersonActionResult { Success = true, Affected = rows.Count };
+        }
+
+        /// <summary>
+        /// Split a timed assignment at a clock time and hand the remainder to someone else — "han blev sjuk
+        /// en timme in i passet". Doing it by hand is two edits with nothing tying them together, and it is
+        /// easy to leave the tail uncovered without noticing.
+        /// <para>Refuses on an untimed row: there is no point to split at, and inventing one would invent a
+        /// time the person never agreed to.</para>
+        /// </summary>
+        public (bool Ok, string? Message, int NewId) SplitAssignment(int assignmentId, int competitionId,
+            TimeSpan at, int? newMemberId, string? newName, int byMemberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var a = db.SingleOrDefault<StaffAssignment>(
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", assignmentId, competitionId);
+            if (a == null) return (false, "Uppdraget hittades inte.", 0);
+            if (a.StartsAt == null || a.EndsAt == null)
+                return (false, "Passet saknar tider. Sätt från- och till-tid först, annars finns ingen punkt att dela vid.", 0);
+
+            var day = a.StartsAt.Value.Date;
+            var cut = day.Add(at);
+            if (cut <= a.StartsAt.Value || cut >= a.EndsAt.Value)
+                return (false, $"Tiden måste ligga inuti passet ({a.StartsAt:HH\\:mm}–{a.EndsAt:HH\\:mm}).", 0);
+
+            var tailEnd = a.EndsAt.Value;
+            var now = DateTime.UtcNow;
+
+            string? name = string.IsNullOrWhiteSpace(newName) ? null : newName.Trim();
+            string? phone = null;
+            if (newMemberId is int mid && mid > 0)
+            {
+                var m = _memberService.GetById(mid);
+                if (m == null) return (false, "Medlemmen hittades inte.", 0);
+                name ??= ResolveMemberName(mid);
+                if (m.HasProperty("phoneNumber")) phone = m.GetValue<string>("phoneNumber");
+            }
+            if (string.IsNullOrWhiteSpace(name))
+                return (false, "Ange vem som tar över resten av passet.", 0);
+
+            a.EndsAt = cut;
+            a.ModifiedDate = now;
+            db.Update(a);
+
+            var tail = new StaffAssignment
+            {
+                CompetitionId = competitionId,
+                MemberId = newMemberId is > 0 ? newMemberId : null,
+                DisplayName = name!,
+                Phone = phone,
+                RoleKey = a.RoleKey,
+                FunctionTitle = a.FunctionTitle,
+                ScopeType = a.ScopeType,
+                ScopeKey = a.ScopeKey,
+                TargetFrom = a.TargetFrom,
+                TargetTo = a.TargetTo,
+                StartsAt = cut,
+                EndsAt = tailEnd,
+                PassId = a.PassId,
+                IsResponsible = false,
+                HasAdminAccess = false,
+                // A stand-in has not agreed to anything yet.
+                Status = StaffAssignmentStatus.Planned,
+                Note = a.Note,
+                AssignedByMemberId = byMemberId,
+                CreatedDate = now,
+                ModifiedDate = now,
+            };
+            tail.Id = Convert.ToInt32(db.Insert(tail));
+            return (true, null, tail.Id);
+        }
+
         /// <summary>
         /// Set contact details on an existing roster row. Used by the grid to rescue an account-less helper
         /// from being unreachable — with an e-mail they can at least be invited via a tokened link.
@@ -839,6 +1025,7 @@ namespace HpskSite.Services.Staffing
                 Id = a.Id,
                 MemberId = a.MemberId,
                 DisplayName = a.DisplayName,
+                OriginalName = a.OriginalName,
                 Phone = a.Phone,
                 Email = a.Email,
                 RoleKey = a.RoleKey,

@@ -102,6 +102,11 @@ namespace HpskSite.Services.Staffing
                         ShiftLabel = a.ShiftLabel,
                         PassId = a.PassId,
                         PassLabel = a.PassLabel,
+                        // WHICH DAY. Without it a person on three days shows three identical
+                        // "Sekretariat · Heldag" rows that cannot be told apart — or deleted with any
+                        // confidence about which one you are removing.
+                        DateKey = a.DateKey,
+                        DayLabel = FormatDay(a.DateKey),
                         Status = a.Status,
                         IsResponsible = a.IsResponsible,
                         HasAdminAccess = a.HasAdminAccess,
@@ -280,6 +285,16 @@ namespace HpskSite.Services.Staffing
         }
 
         // ---- helpers ----
+
+        /// <summary>"2026-08-22" → "lör 22 aug". Null/unparseable → null (never a guessed day).</summary>
+        private static string? FormatDay(string? dateKey)
+        {
+            if (string.IsNullOrWhiteSpace(dateKey)) return null;
+            return DateTime.TryParseExact(dateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d)
+                ? d.ToString("ddd d MMM", System.Globalization.CultureInfo.GetCultureInfo("sv-SE"))
+                : null;
+        }
 
         private static string BuildAssignmentLabel(CompetitionPersonAssignment a)
         {

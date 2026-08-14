@@ -88,6 +88,11 @@ namespace HpskSite.Models.Staffing
         public string? ShiftLabel { get; set; }
         public int? PassId { get; set; }
         public string? PassLabel { get; set; }
+        /// <summary>"yyyy-MM-dd" — which day of the plan this row sits on.</summary>
+        public string? DateKey { get; set; }
+        /// <summary>"lör 22 aug" — the day, spelled out. Two assignments to the same role on different
+        /// days are otherwise indistinguishable in any per-person view.</summary>
+        public string? DayLabel { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }

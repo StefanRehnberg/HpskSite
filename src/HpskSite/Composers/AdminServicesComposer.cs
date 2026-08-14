@@ -173,6 +173,9 @@ namespace HpskSite.Composers
             // Seeded from the competition span, owned by the arrangör. Shared by the Bemanning grid and
             // Dagsprogram so they cannot disagree. Run create-staff-day-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffDayService>();
+            // Guesses which member a free-text roster name was meant to be. Suggestions only — a wrong
+            // silent link hands a stranger someone else's shift, invisibly. Run create-staff-role-table.sql.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.PersonMatchService>();
             // Phase 1.5: editable per-club/region planning templates. Run create-staffing-template-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingTemplateService>();
             // Materiel-quantity estimate (general Beställningslista from participant/class/series counts).

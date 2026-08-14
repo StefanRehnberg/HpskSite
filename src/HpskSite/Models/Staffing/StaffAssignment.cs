@@ -17,6 +17,10 @@ namespace HpskSite.Models.Staffing
 
         public int? MemberId { get; set; }              // NULL = free-text external helper
         public string DisplayName { get; set; } = "";
+        /// <summary>What the organiser first typed, kept the moment an identity change first overwrites it.
+        /// Linking to a member replaces the name with the register's spelling — right most of the time,
+        /// wrong occasionally, and previously silent and irreversible. Set once; never overwritten.</summary>
+        public string? OriginalName { get; set; }
         public string? Phone { get; set; }
         public string? Email { get; set; }
 
@@ -144,6 +148,8 @@ namespace HpskSite.Models.Staffing
         public int Id { get; set; }
         public int? MemberId { get; set; }
         public string DisplayName { get; set; } = "";
+        /// <summary>The name as first typed, if an identity change has since replaced it.</summary>
+        public string? OriginalName { get; set; }
         public string? Phone { get; set; }
         public string? Email { get; set; }
         public string RoleKey { get; set; } = "";
