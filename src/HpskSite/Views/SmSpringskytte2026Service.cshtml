@@ -1,0 +1,120 @@
+@*
+    /sm-springskytte-2026/service — servering, parkering, toaletter, husvagn, bad och boende.
+    Källa: Tävlings-PM 2026-08-13 + översiktsbild "Service".
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Service och boende — SM i Springskytte 2026";
+    ViewBag.MetaDescription = "Servering, parkering, toaletter, dusch, husvagnsuppställning, bad och boendetips vid SM i Springskytte 2026 i Obbhult, Varberg.";
+}
+
+<link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="container sm-page my-4">
+
+    <header class="sm-hero">
+        <div class="sm-kicker">SM i Springskytte 2026</div>
+        <h1>Service och boende</h1>
+        <p class="sm-hero-sub">Servering, parkering, toaletter, dusch och tips på boende</p>
+    </header>
+
+    @await Html.PartialAsync("_SmSpringskytteNav")
+
+    <section class="sm-section">
+        <h2>Så ligger servicen</h2>
+        <figure class="sm-figure">
+            <img src="~/images/sm-springskytte-2026/service.jpg"
+                 alt="Flygbild över serviceområdet med parkering A, B och C, dusch, herrtoalett, damtoalett samt uppställningsplats för husvagn och husbil utmarkerade." />
+            <figcaption>
+                Serviceområdet vid infarten: parkering A, B och C, dusch, dam- och herrtoalett samt uppställningsplats
+                för husvagn och husbil.
+            </figcaption>
+        </figure>
+    </section>
+
+    <section class="sm-section">
+        <h2>Servering</h2>
+        <div class="sm-card">
+            <p>
+                Serveringen är öppen <strong>lördag och söndag från kl. 8.30</strong>. Då erbjuds mackor och toast,
+                kylda drycker, kaffe och te med tilltugg, frukt och godis.
+            </p>
+            <p class="mb-0">
+                Någon timme senare finns även <strong>hamburgare med tillbehör samt korv med bröd</strong>.
+            </p>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Toaletter och dusch</h2>
+        <ul class="sm-list-tight">
+            <li>Dam- respektive herrtoalett finns i servicebyggnaderna, tillsammans med dusch.</li>
+            <li>
+                Utöver dessa står en <strong>toavagn uppställd i anslutning till start- och målområdet</strong>, så att
+                du slipper gå tillbaka till infarten.
+            </li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <h2>Parkering, husvagn och husbil</h2>
+        <ul class="sm-list-tight">
+            <li>Tre parkeringar finns: <strong>parkering A, B och C</strong> — se kartan ovan.</li>
+            <li>
+                Husvagnar och husbilar ställs upp på anvisad plats. <strong>El eller vatten kan inte erbjudas</strong>
+                till fordon som ställs upp på området.
+            </li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <h2>Bad i sjön</h2>
+        <div class="sm-safety">
+            <p class="mb-2">
+                Vattnet i den konstgjorda sjön är dugligt att bada i. <strong>Bad får inte ske i kanten utmed
+                löpslingorna.</strong>
+            </p>
+            <p class="mb-0"><strong>Alla aktiviteter i sjön sker på egen risk.</strong></p>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Boende i närheten</h2>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>Åkulla Fritidsby</h3>
+                    <p>Stugor och boende i Åkulla bokskogar, en kort bilresa från tävlingsområdet.</p>
+                    <a class="btn btn-outline-primary btn-sm" href="https://akullaoutdoorresort.se/" target="_blank" rel="noopener">Åkulla Outdoor Resort</a>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>Gekås i Ullared</h3>
+                    <p>Boende, camping och stugby — och shopping för den som har sällskap som inte tävlar.</p>
+                    <a class="btn btn-outline-primary btn-sm" href="https://www.gekas.se/" target="_blank" rel="noopener">Gekås Ullared</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Adress</h2>
+        <div class="sm-card">
+            <p class="mb-2">
+                Släryds Grus<br />
+                Obbhult 1<br />
+                432 97 Rolfstorp
+            </p>
+            <p class="mb-2">
+                <strong>Koordinater:</strong> 57.131637, 12.513277 &nbsp;·&nbsp;
+                <strong>Plus code:</strong> 4GJ7+J8 Stenaljung
+            </p>
+            <a class="btn btn-outline-primary btn-sm"
+               href="https://www.google.com/maps/search/?api=1&query=57.131637,12.513277"
+               target="_blank" rel="noopener">Öppna i Google Maps</a>
+        </div>
+    </section>
+
+</div>

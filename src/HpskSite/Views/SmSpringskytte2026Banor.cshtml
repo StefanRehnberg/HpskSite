@@ -1,0 +1,163 @@
+@*
+    /sm-springskytte-2026/banor — löpslingor och skjutområden med kartor.
+    Bilderna är renderade ur arrangörens översikts-PDF:er (2026-08-13) och ligger i
+    /images/sm-springskytte-2026/. PDF:erna finns kvar för utskrift.
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Banor och skjutområden — SM i Springskytte 2026";
+    ViewBag.MetaDescription = "Kartor över löpslingorna och skjutområdena vid SM i Springskytte 2026 i Obbhult: blå, röd, svart och gul slinga samt skjutområde A och C.";
+}
+
+<link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="container sm-page my-4">
+
+    <header class="sm-hero">
+        <div class="sm-kicker">SM i Springskytte 2026</div>
+        <h1>Banor och skjutområden</h1>
+        <p class="sm-hero-sub">Löpslingor, spurtsträcka, straffrunda och skjutplatser</p>
+    </header>
+
+    @await Html.PartialAsync("_SmSpringskytteNav")
+
+    <section class="sm-section">
+        <h2>Tävlingsområdet</h2>
+        <figure class="sm-figure">
+            <img src="~/images/sm-springskytte-2026/tavlingsomrade.jpg"
+                 alt="Flygbild över tävlingsområdet med sekretariat, vapenkontroll, servering, start, målgång, skjutplats, publikområde samt stafettens start och mål utmarkerade." />
+            <figcaption>
+                Sekretariat, vapenkontroll och servering ligger samlade vid infarten. Start, målgång, skjutplats och
+                publikområde ligger på andra sidan sjön. Till stafetten flyttas start, växling och mål till direkt
+                anslutning till publikplatsen och skjutområdet.
+            </figcaption>
+        </figure>
+    </section>
+
+    <section class="sm-section">
+        <h2>Löpslingorna</h2>
+        <ul class="sm-legend">
+            <li><span class="sm-swatch sm-swatch-bla"></span> Blå — junior till H/D 60, ca 6 km</li>
+            <li><span class="sm-swatch sm-swatch-rod"></span> Röd — H/D 65 till 70+, ca 4 km</li>
+            <li><span class="sm-swatch sm-swatch-svart"></span> Svart — spurtsträcka och stafett</li>
+            <li><span class="sm-swatch sm-swatch-gul"></span> Gul — straffrunda i stafetten</li>
+        </ul>
+        <p>
+            Slingorna är markerade med snitslar i respektive färg, och kompletteras med text, pilar och avdelare.
+            <strong>Provgå eller spring gärna slingorna</strong> — fram till senast en halvtimme innan första start.
+            Utmed blå slinga finns funktionärer utplacerade; röd slinga är i sin helhet synlig från start- och målområdet.
+        </p>
+
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <figure class="sm-figure">
+                    <img src="~/images/sm-springskytte-2026/loprunda-bla.jpg"
+                         alt="Karta över blå löpslinga med svart spurtsträcka, start, målgång och skjutområde markerade." />
+                    <figcaption>
+                        <strong>Blå slinga + svart spurtsträcka</strong> — dam, junior och herr till och med H/D 60.
+                        Sex varv, totalt ca 6 km. Nivåskillnad ca 10–12 m, med stigning i början och nerför till plant
+                        inför skjutning.
+                    </figcaption>
+                </figure>
+            </div>
+            <div class="col-lg-6">
+                <figure class="sm-figure">
+                    <img src="~/images/sm-springskytte-2026/loprunda-rod.jpg"
+                         alt="Karta över röd löpslinga med svart spurtsträcka, start, målgång och skjutområde markerade." />
+                    <figcaption>
+                        <strong>Röd slinga + svart spurtsträcka</strong> — klasserna 65+. Sex varv, totalt ca 4 km.
+                        Nivåskillnad ca 6–8 m.
+                    </figcaption>
+                </figure>
+            </div>
+            <div class="col-lg-6">
+                <figure class="sm-figure">
+                    <img src="~/images/sm-springskytte-2026/loprunda-stafett.jpg"
+                         alt="Karta över stafettens svarta löpslinga med gul straffrunda samt start, växling och målgång markerade." />
+                    <figcaption>
+                        <strong>Stafett: svart slinga + gul straffrunda</strong> — varje varv ca 400 m på plan mark,
+                        straffrundan ca 60 m. Start, växling och mål ligger samlat vid publikplatsen.
+                    </figcaption>
+                </figure>
+            </div>
+            <div class="col-lg-6">
+                <div class="sm-card">
+                    <h3>Så många varv springer du</h3>
+                    <ul class="sm-list-tight">
+                        <li><strong>Junior–H/D 60:</strong> sex varv blå slinga, avslutar med svart spurtslinga.</li>
+                        <li><strong>H/D 65–70+:</strong> sex varv röd slinga, avslutar med svart spurtslinga.</li>
+                        <li><strong>Stafett:</strong> varje deltagare löper tre varv på svart slinga — skjuter efter
+                            varv 1 och varv 2, tredje varvet går till växling eller mål. Straffrundor löps på gul slinga.</li>
+                    </ul>
+                    <p class="mb-0">
+                        Efter sista skjutningen följer du den svarta spurtslingan och skyltningen mot ”Mål”.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Skjutområde — vapengrupp C</h2>
+        <figure class="sm-figure">
+            <img src="~/images/sm-springskytte-2026/skjutomrade-c.png"
+                 alt="Skiss över skjutområdet för vapengrupp C: 22 Kurvinen-fallmål, skjutlinje på 17,5 meter, numrerade skjutplatser, sektion A och B, in- och utgående löpvägar, invisare, skjutledare, läsare/dragare och skrivare." />
+            <figcaption>
+                Skjutområde vapengrupp C. Skjutlinjen ligger 17,5 m från målen och är parallell med mållinjen.
+                Skjutplatserna är numrerade rutor om 1 kvm, centrerade mot respektive fallmål.
+                <em>Obs: i skissen står ”Järvinen” — fallmålstypen heter Kurvinen.</em>
+            </figcaption>
+        </figure>
+        <ul class="sm-list-tight">
+            <li>
+                22 fallmål av typen <strong>Kurvinen</strong>, uppdelade i två sektioner:
+                <strong>mål 1–10 = sektion A</strong> (stående utan stödhand) och
+                <strong>mål 11–22 = sektion B</strong> (stående med stödhand tillåten).
+            </li>
+            <li>
+                Klasserna H/D junior–60 skjuter på <strong>sektion A vid serie 1, 3 och 5</strong> och på
+                <strong>sektion B vid serie 2, 4 och 6</strong>. Klasserna D/H 60–70+ genomför all skjutning på sektion B.
+            </li>
+            <li>
+                Du väljer <strong>löpväg A eller B</strong> innan du kommer fram till invisaren, som anvisar skjutplats
+                inom vald sektion. <strong>Det är ditt eget ansvar att hålla reda på vilket varv du är inne på</strong>
+                och därmed vilken sektion du ska besöka.
+            </li>
+            <li>5 skott per skjutning, totalt 30 skott. Du ansvarar själv för att skjuta på det målnummer du tilldelats.</li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <h2>Skjutområde — vapengrupp A</h2>
+        <div class="sm-card">
+            <ul class="sm-list-tight mb-0">
+                <li>Området är i stort likt C-området men <strong>inte uppdelat i sektioner</strong>.</li>
+                <li>
+                    Målen består av 35 vertikalt monterade dubbeltavlor av typen ”Gamla olympiska skidskyttetavlan”.
+                    <strong>Varje tävlande tilldelas en egen skjutplats</strong> där all skjutning genomförs.
+                </li>
+                <li>Skjutavståndet är 25 meter. Banan tilldelas innan start.</li>
+                <li>
+                    Skjutning vid 6 tillfällen, 5 patroner per tillfälle, max 15 träff per tavla — totalt 30 skott.
+                    Tidstillägg om 0, 1, 2 eller 3 minuter i respektive träffzon.
+                </li>
+                <li>
+                    Varannan skjutning stående utan stödhand, varannan stående med stödhand tillåten. Dam- och herrklass
+                    65–70+ skjuter med stödhand tillåten vid samtliga tillfällen.
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Ladda ner</h2>
+        <p class="sm-downloads">
+            <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/oversiktsbilder.pdf" target="_blank" rel="noopener">🗺️ Översiktsbilder (PDF)</a>
+            <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/oversikt-skjutomrade-c.pdf" target="_blank" rel="noopener">🎯 Skjutområde C (PDF)</a>
+            <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/tavlings-pm.pdf" target="_blank" rel="noopener">📄 Tävlings-PM (PDF)</a>
+        </p>
+        <p class="small text-muted mb-0">Täckningen i grustaget kan vara svag — ladda gärna ner kartorna innan du åker.</p>
+    </section>
+
+</div>

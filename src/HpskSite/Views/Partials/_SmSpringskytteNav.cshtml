@@ -1,0 +1,17 @@
+@*
+    Sub navigation for the SM i Springskytte 2026 event site.
+    Active page comes from ViewData["ActivePage"] (set by SmSpringskytte2026Controller).
+    NB: no top-level <style> here — that 500s in a partial. Styling lives in
+    /css/sm-springskytte-2026.css, linked by each view.
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    var active = ViewData["ActivePage"] as string ?? "";
+}
+<nav class="sm-nav" aria-label="Sidor om SM i Springskytte 2026">
+    <a href="/sm-springskytte-2026" class="@(active == "start" ? "active" : "")">Start</a>
+    <a href="/sm-springskytte-2026/pm" class="@(active == "pm" ? "active" : "")">Tävlings-PM</a>
+    <a href="/sm-springskytte-2026/banor" class="@(active == "banor" ? "active" : "")">Banor &amp; skjutområden</a>
+    <a href="/sm-springskytte-2026/service" class="@(active == "service" ? "active" : "")">Service &amp; boende</a>
+    <a href="/sm-springskytte-2026/funktionarer" class="@(active == "funktionarer" ? "active" : "")">För funktionärer</a>
+</nav>

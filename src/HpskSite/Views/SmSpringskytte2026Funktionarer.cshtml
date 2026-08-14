@@ -1,0 +1,183 @@
+@*
+    /sm-springskytte-2026/funktionarer — funktionärsinfo.
+    Publik sida (utskicket går till både tävlande och funktionärer), men de personliga
+    länkarna — Mitt schema, Mina uppdrag — kräver inloggning som vanligt.
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "För funktionärer — SM i Springskytte 2026";
+    ViewBag.MetaDescription = "Funktionärsinformation för SM i Springskytte 2026: roller på skjutområdet, tider, västar och länk till ditt personliga schema.";
+
+    var compId = ViewData["CompetitionId"] as int? ?? 0;
+    var compUrl = ViewData["CompetitionUrl"] as string ?? "";
+}
+
+<link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="container sm-page my-4">
+
+    <header class="sm-hero">
+        <div class="sm-kicker">SM i Springskytte 2026</div>
+        <h1>För funktionärer</h1>
+        <p class="sm-hero-sub">Utan er blir det inget mästerskap — tack för att ni ställer upp</p>
+    </header>
+
+    @await Html.PartialAsync("_SmSpringskytteNav")
+
+    <section class="sm-section">
+        <h2>Ditt schema</h2>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>📅 Mitt schema</h3>
+                    <p>
+                        Dina egna pass och tider under tävlingsdagen — och om du både tävlar och jobbar, båda delarna
+                        i samma tidslinje. Kräver att du är inloggad på pistol.nu.
+                    </p>
+                    @if (compId > 0)
+                    {
+                        <a class="btn btn-primary" href="/mitt-schema?c=@compId">Öppna mitt schema</a>
+                    }
+                    else
+                    {
+                        <a class="btn btn-primary" href="/mitt-schema">Öppna mitt schema</a>
+                    }
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>✅ Mina uppdrag</h3>
+                    <p>
+                        Har du fått en förfrågan om ett funktionärsuppdrag som du inte svarat på ännu? Svara här, så vet
+                        vi hur vi kan planera.
+                    </p>
+                    <a class="btn btn-outline-primary" href="/mina-uppdrag">Mina uppdrag</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Praktiskt på plats</h2>
+        <ul class="sm-list-tight">
+            <li><strong>Alla funktionärer bär gula eller orangea västar</strong> — så att tävlande hittar er direkt.</li>
+            <li>
+                <strong>Vapenkontrollen</strong> är öppen fredag 21/8 kl. 18.00–21.00, lördag kl. 9.00–12.00 och
+                söndag kl. 7.30–9.30. Anmälan och utlämning av nummerlappar och föreningskuvert sker där.
+            </li>
+            <li>
+                <strong>Inskjutning</strong> lördag kl. 10.00–11.00 och söndag kl. 8.30–9.30.
+            </li>
+            <li>
+                <strong>Lagändringar</strong> tas emot skriftligen vid sekretariatet senast lördag kl. 09.30 — hänvisa
+                dit vid frågor om lagsammansättning.
+            </li>
+            <li>
+                <strong>Utmed blå slinga</strong> finns funktionärer utplacerade för assistans vid tillbud eller frågor.
+                Röd slinga är i sin helhet synlig från start- och målområdet.
+            </li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <h2>Bemanning på skjutområdet — vapengrupp C</h2>
+        <figure class="sm-figure">
+            <img src="~/images/sm-springskytte-2026/skjutomrade-c.png"
+                 alt="Skiss över skjutområdet för vapengrupp C med funktionärsplaceringar: invisare A och B, väntfållor, skjutledare A och B samt läsare/dragare och skrivare längs skjutlinjen." />
+            <figcaption>
+                Funktionärsuppställningen på C-området, med löpvägar, väntfållor, invisare och skjutledare.
+                <em>Obs: i skissen står ”Järvinen” — fallmålstypen heter Kurvinen.</em>
+            </figcaption>
+        </figure>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>Rollerna</h3>
+                    <ul class="sm-list-tight mb-0">
+                        <li><strong>Invisare A och B</strong> — tar emot vid respektive löpväg, anvisar skjutplats inom vald sektion och tilldelar målnummer. Väntfålla finns vid varje löpväg.</li>
+                        <li><strong>Skjutledare A</strong> — skjutplats 1–10 (sektion A, utan stödhand).</li>
+                        <li><strong>Skjutledare B</strong> — skjutplats 11–22 (sektion B, stödhand tillåten).</li>
+                        <li><strong>Läsare/dragare</strong> — läser av och reser fallmålen, indelade i fyra grupper längs skjutlinjen.</li>
+                        <li><strong>Skrivare</strong> — noterar resultat, indelade i samma fyra grupper.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>Så är banan uppdelad</h3>
+                    <ul class="sm-list-tight mb-0">
+                        <li>22 fallmål av typen <strong>Kurvinen</strong>. Skjutlinjen ligger 17,5 m från målen, parallell med mållinjen.</li>
+                        <li><strong>Mål och skjutplats 1–10 = sektion A</strong>, stående utan stödhand.</li>
+                        <li><strong>Mål och skjutplats 11–22 = sektion B</strong>, stående med stödhand tillåten.</li>
+                        <li>Skjutplatserna är numrerade rutor om 1 kvm, centrerade mot respektive fallmål.</li>
+                        <li>Klasserna junior–60 växlar mellan sektionerna (A vid serie 1, 3, 5 och B vid serie 2, 4, 6). Klasserna 60–70+ skjuter allt på sektion B.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Bemanning på skjutområdet — vapengrupp A</h2>
+        <div class="sm-card">
+            <p>
+                A-området är i stort likt C-området, men är <strong>inte uppdelat i sektioner</strong>. Varje tävlande
+                tilldelas en egen skjutplats där all skjutning genomförs, mot 35 vertikalt monterade dubbeltavlor av
+                typen ”Gamla olympiska skidskyttetavlan”. Skjutavståndet är 25 meter.
+            </p>
+            <p class="mb-0">
+                Funktionärsuppställningen är därför annorlunda: <strong>endast en invisare, två skjutledare och två
+                kontrollanter</strong>.
+            </p>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Stafetten</h2>
+        <ul class="sm-list-tight">
+            <li>
+                Till stafetten <strong>flyttas start-, växlings- och målområdet</strong> till direkt anslutning till
+                publikplatsen och skjutområdet.
+            </li>
+            <li>
+                Skjutningen sker mot fallmål Kurvinen, på samma bana som <strong>slutsiffran i lagets startnummer</strong>.
+            </li>
+            <li>
+                Varje deltagare har 5 patroner per skjuttillfälle plus 3 extraskott — totalt 16 skott. För varje mål som
+                står kvar efter att alla skott avfyrats ska en <strong>straffrunda</strong> löpas på den gula slingan.
+            </li>
+            <li>
+                <strong>Antalet löpta straffrundor loggas av funktionär.</strong> Den tävlande ansvarar själv för att rätt
+                antal löps; vid för få rundor får laget 2 minuters tidstillägg per missad runda.
+            </li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <div class="sm-safety">
+            <h2>Säkerheten är allas ansvar</h2>
+            <ul class="sm-list-tight mb-0">
+                <li>Vapnet ska bäras hölstrat och proppat under hela tävlingen — det tas ur hölstret och proppen tas ur först på markerad skjutplats.</li>
+                <li>Magasin får inte införas i vapnet igen efter patron ur, förrän nästa skjutplats intagits. Påfyllning sker först på tilldelad skjutplats.</li>
+                <li>För vapengrupp C får endast blykula kaliber .22 användas.</li>
+                <li>Kontrollera att vapnet är tomt och proppat efter varje skjutning och efter målgång.</li>
+                <li>Brott mot säkerhetsreglerna ger tillägg motsvarande 1 bom, eller vid allvarligt fel diskvalifikation. Klickade patroner får ersättas efter att ha uppvisats för funktionär.</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Läs på inför dagen</h2>
+        <p class="sm-downloads">
+            <a class="btn btn-outline-primary btn-sm" href="/sm-springskytte-2026/pm">📋 Hela tävlings-PM:et</a>
+            <a class="btn btn-outline-primary btn-sm" href="/sm-springskytte-2026/banor">🗺️ Banor och skjutområden</a>
+            <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/tavlings-pm.pdf" target="_blank" rel="noopener">📄 PM som PDF</a>
+        </p>
+        @if (!string.IsNullOrEmpty(compUrl))
+        {
+            <p class="mb-0">Startlistorna publiceras i vecka 34 på <a href="@compUrl">tävlingssidan</a>.</p>
+        }
+    </section>
+
+</div>

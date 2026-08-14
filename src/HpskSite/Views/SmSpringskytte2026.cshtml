@@ -1,0 +1,222 @@
+@*
+    /sm-springskytte-2026 — hub page for the event site.
+    Rendered by SmSpringskytte2026Controller (routed, no Umbraco node).
+    Facts come from Tävlings-PM 2026-08-13 (Hallands Pistolskyttekrets).
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "SM i Springskytte 2026 — Obbhult, Varberg";
+    ViewBag.MetaDescription = "Allt du behöver veta om Svenska Mästerskapen i springskytte 22–23 augusti 2026 i Släryds grustag, Obbhult utanför Varberg. Tidsplan, banor, PM, service och funktionärsinfo.";
+
+    var compUrl = ViewData["CompetitionUrl"] as string ?? "";
+    var compId = ViewData["CompetitionId"] as int? ?? 0;
+    var contactName = ViewData["ContactName"] as string ?? "";
+    var contactEmail = ViewData["ContactEmail"] as string ?? "";
+    var contactPhone = ViewData["ContactPhone"] as string ?? "";
+}
+
+<link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="container sm-page my-4">
+
+    <header class="sm-hero">
+        <div class="sm-kicker">Svenska Mästerskapen · Hallands Pistolskyttekrets</div>
+        <h1>SM i Springskytte 2026</h1>
+        <p class="sm-hero-sub">22–23 augusti · Släryds grustag, Obbhult utanför Varberg</p>
+        <div class="sm-hero-facts">
+            <span>📅 Lördag 22/8: vapengrupp C + stafett</span>
+            <span>📅 Söndag 23/8: vapengrupp A</span>
+            <span>🔫 Vapenkontroll öppnar fredag 18.00</span>
+            <span>🏅 Första SM i springskytte i vapengrupp A</span>
+        </div>
+    </header>
+
+    @await Html.PartialAsync("_SmSpringskytteNav")
+
+    <section class="sm-section">
+        <h2>Välkommen till Halland</h2>
+        <p class="lead">
+            Hej och välkommen till Springskytte-SM i Varbergs kommun och Obbhult. Vi är väldigt glada att som
+            förstagångsvärdar kunna bjuda in till årets Svenska Mästerskap i springskytte med pistol — som
+            därtill är Svenska Pistolskytteförbundets första SM-springskytte i vapengrupp A.
+        </p>
+        <p>
+            Vi känner oss väl förberedda och trygga i att kunna bjuda på utmanande, rättvisa och därmed fina
+            tävlingsdagar. Putsen på diverse detaljer pågår såklart in i det sista. På den här sidan samlar vi
+            all information — tävlings-PM, banor, service och funktionärsinfo — och den uppdateras löpande fram
+            till tävlingsdagarna.
+        </p>
+        <p class="mb-0"><strong>Väl mött i Halland!</strong></p>
+    </section>
+
+    <section class="sm-section">
+        <h2>Tidsplan</h2>
+        <p>Startlistor publiceras i vecka 34. Tiderna för prisutdelning och stafettstart är ungefärliga.</p>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="sm-day">
+                    <div class="sm-day-head">Lördag 22 augusti <small>Vapengrupp C, individuellt och stafett</small></div>
+                    <ul>
+                        <li><span class="sm-time">9.00–12.00</span><span>Vapenkontroll och nummerlappar</span></li>
+                        <li><span class="sm-time">10.00–11.00</span><span>Inskjutning mot Kurvinen fallmål och femprickstavlor i papp</span></li>
+                        <li><span class="sm-time">12.00</span><span>Första start vapengrupp C</span></li>
+                        <li><span class="sm-time">ca 15.00</span><span>Stafettstart H/D 21</span></li>
+                        <li><span class="sm-time">ca 15.30</span><span>Stafettstart H/D 50</span></li>
+                        <li><span class="sm-time">ca 17.00</span><span>Prisutdelning</span></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="sm-day">
+                    <div class="sm-day-head">Söndag 23 augusti <small>Vapengrupp A</small></div>
+                    <ul>
+                        <li><span class="sm-time">7.30–9.00</span><span>Vapenkontroll och nummerlappar</span></li>
+                        <li><span class="sm-time">8.30–9.30</span><span>Inskjutning mot olympiska skidskyttetavlan</span></li>
+                        <li><span class="sm-time">10.00</span><span>Start skjutlag 1, vapengrupp A</span></li>
+                        <li><span class="sm-time">12.00</span><span>Start skjutlag 2, vapengrupp A</span></li>
+                        <li><span class="sm-time">ca 15.00</span><span>Prisutdelning</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <p class="mt-3 mb-0">
+            <strong>Vapenkontrollen öppnar redan fredag 21 augusti kl. 18.00–21.00</strong> för dig som kommer
+            kvällen innan. Söndagens vapenkontroll är öppen 7.30–9.30.
+        </p>
+    </section>
+
+    <section class="sm-section">
+        <h2>Läs vidare</h2>
+        <div class="row g-3">
+            <div class="col-md-6 col-lg-3">
+                <a class="sm-card" href="/sm-springskytte-2026/pm">
+                    <h3>📋 Tävlings-PM</h3>
+                    <p>Hela PM:et: tävlingsområdet, genomförande per vapengrupp, stafetten, säkerhetsregler och lagtävlingar.</p>
+                    <span class="sm-card-more">Läs PM:et →</span>
+                </a>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <a class="sm-card" href="/sm-springskytte-2026/banor">
+                    <h3>🗺️ Banor &amp; skjutområden</h3>
+                    <p>Kartor över löpslingorna (blå, röd, svart och gul), skjutområde C med sektion A/B, samt skjutområde A.</p>
+                    <span class="sm-card-more">Se kartorna →</span>
+                </a>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <a class="sm-card" href="/sm-springskytte-2026/service">
+                    <h3>🍔 Service &amp; boende</h3>
+                    <p>Servering, parkering, toaletter och dusch, husvagn/husbil, bad i sjön och tips på boende.</p>
+                    <span class="sm-card-more">Se servicen →</span>
+                </a>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <a class="sm-card" href="/sm-springskytte-2026/funktionarer">
+                    <h3>🦺 För funktionärer</h3>
+                    <p>Din roll, bemanningen på skjutområdet, tider — och länk till ditt personliga schema.</p>
+                    <span class="sm-card-more">Funktionärsinfo →</span>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Anmälan, startlistor och resultat</h2>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>Tävlingssidan</h3>
+                    <p>
+                        Anmälan, avgifter, laganmälan och betalning sköts på tävlingens egen sida. Där publiceras
+                        också startlistorna i vecka 34 och resultaten under och efter tävlingen.
+                    </p>
+                    @if (!string.IsNullOrEmpty(compUrl))
+                    {
+                        <a class="btn btn-primary" href="@compUrl">Till tävlingssidan</a>
+                    }
+                    else
+                    {
+                        <p class="text-muted mb-0"><em>Länken till tävlingssidan kunde inte hämtas.</em></p>
+                    }
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="sm-card">
+                    <h3>Under tävlingen</h3>
+                    <ul class="sm-list-tight">
+                        <li><strong>Mitt schema</strong> — dina egna starttider och uppdrag, samlade på ett ställe. Kräver inloggning.</li>
+                        <li><strong>Live-tävlan</strong> — resultaten uppdateras löpande på storskärm vid publikplatsen och i din telefon.</li>
+                    </ul>
+                    <div class="d-flex flex-wrap gap-2">
+                        @if (compId > 0)
+                        {
+                            <a class="btn btn-outline-primary" href="/mitt-schema?c=@compId">Mitt schema</a>
+                            <a class="btn btn-outline-primary" href="/live?c=@compId" target="_blank" rel="noopener">Live-tävlan</a>
+                        }
+                        else
+                        {
+                            <a class="btn btn-outline-primary" href="/mitt-schema">Mitt schema</a>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Hitta hit</h2>
+        <div class="row g-4">
+            <div class="col-lg-7">
+                <figure class="sm-figure">
+                    <img src="~/images/sm-springskytte-2026/tavlingsomrade.jpg"
+                         alt="Flygbild över tävlingsområdet i Släryds grustag med sekretariat, vapenkontroll, servering, start, målgång, skjutplats, publikområde och stafettens start och mål utmarkerade." />
+                    <figcaption>Tävlingsområdet. Sekretariat, vapenkontroll och servering ligger samlat vid infarten; start, målgång och skjutområde ligger på andra sidan sjön.</figcaption>
+                </figure>
+            </div>
+            <div class="col-lg-5">
+                <div class="sm-card">
+                    <h3>Adress</h3>
+                    <p class="mb-2">
+                        Släryds Grus<br />
+                        Obbhult 1<br />
+                        432 97 Rolfstorp
+                    </p>
+                    <p class="mb-2">
+                        <strong>Koordinater:</strong> 57.131637, 12.513277<br />
+                        <strong>Plus code:</strong> 4GJ7+J8 Stenaljung
+                    </p>
+                    <a class="btn btn-outline-primary btn-sm"
+                       href="https://www.google.com/maps/search/?api=1&query=57.131637,12.513277"
+                       target="_blank" rel="noopener">Öppna i Google Maps</a>
+                    <p class="mt-3 mb-0 small text-muted">
+                        Täckningen i grustaget kan vara svag. Ladda gärna ner PM och kartor innan du åker.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Frågor?</h2>
+        <div class="sm-card">
+            @if (!string.IsNullOrEmpty(contactName) || !string.IsNullOrEmpty(contactEmail))
+            {
+                <p class="mb-1"><strong>Tävlingsledare:</strong> @contactName</p>
+                if (!string.IsNullOrEmpty(contactEmail))
+                {
+                    <p class="mb-1"><strong>E-post:</strong> <a href="mailto:@contactEmail">@contactEmail</a></p>
+                }
+                if (!string.IsNullOrEmpty(contactPhone))
+                {
+                    <p class="mb-1"><strong>Telefon:</strong> <a href="tel:@contactPhone">@contactPhone</a></p>
+                }
+            }
+            else
+            {
+                <p class="mb-1">Kontaktuppgifter finns på tävlingssidan.</p>
+            }
+            <p class="mb-0 mt-2">Arrangör: Hallands Pistolskyttekrets.</p>
+        </div>
+    </section>
+
+</div>

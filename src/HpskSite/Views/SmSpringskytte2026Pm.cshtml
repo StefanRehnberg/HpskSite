@@ -1,0 +1,249 @@
+@*
+    /sm-springskytte-2026/pm — the full Tävlings-PM as a web page.
+    Source: "SM Springskytte 2026. Tävlings-PM." (Hallands Pistolskyttekrets, 2026-08-13).
+    The PDF is kept downloadable for print; this page is the version you read on a phone.
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Tävlings-PM — SM i Springskytte 2026";
+    ViewBag.MetaDescription = "Tävlings-PM för SM i Springskytte 2026: tävlingsområdet, tidsplan, genomförande i vapengrupp A och C, stafetten, säkerhetsregler och lagtävlingar.";
+
+    var compUrl = ViewData["CompetitionUrl"] as string ?? "";
+}
+
+<link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="container sm-page my-4">
+
+    <header class="sm-hero">
+        <div class="sm-kicker">SM i Springskytte 2026</div>
+        <h1>Tävlings-PM</h1>
+        <p class="sm-hero-sub">Till anmälda tävlande, funktionärer och SPSF</p>
+    </header>
+
+    @await Html.PartialAsync("_SmSpringskytteNav")
+
+    <section class="sm-section">
+        <p class="sm-downloads">
+            <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/tavlings-pm.pdf" target="_blank" rel="noopener">📄 Ladda ner PM som PDF</a>
+            <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/oversiktsbilder.pdf" target="_blank" rel="noopener">🗺️ Översiktsbilder (PDF)</a>
+            <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/oversikt-skjutomrade-c.pdf" target="_blank" rel="noopener">🎯 Skjutområde C (PDF)</a>
+        </p>
+    </section>
+
+    <section class="sm-section">
+        <h2>Tävlingsområdet</h2>
+        <ul class="sm-list-tight">
+            <li>Alla funktionärer bär gula/orangea västar.</li>
+            <li>
+                <strong>Vapenkontrollen är öppen</strong> fredag 21/8 kl. 18.00–21.00, lördag 22/8 kl. 9.00–12.00
+                och söndag 23/8 kl. 7.30–9.30.
+            </li>
+            <li>
+                <strong>Inskjutning</strong> är öppen mot Kurvinen fallmål och femprickstavlor i papp på lördag
+                kl. 10.00–11.00, och mot olympiska skidskyttetavlan på söndag kl. 8.30–9.30.
+            </li>
+            <li>Husbilar och husvagnar som ställs upp på området kan inte erbjudas anslutning till el eller vatten.</li>
+            <li>Till stafettävlingen flyttas start-, växlings- och målområdet till direkt anslutning till publikplatsen och skjutområdet.</li>
+        </ul>
+        <p>Se <a href="/sm-springskytte-2026/banor">banor och skjutområden</a> för kartor över området.</p>
+    </section>
+
+    <section class="sm-section">
+        <h2>Översiktlig tidsplan</h2>
+        <p>Startlistor publiceras i vecka 34.</p>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="sm-day">
+                    <div class="sm-day-head">Lördag 22 augusti</div>
+                    <ul>
+                        <li><span class="sm-time">9.00–12.00</span><span>Vapenkontroll och nummerlappar</span></li>
+                        <li><span class="sm-time">10.00–11.00</span><span>Inskjutning</span></li>
+                        <li><span class="sm-time">12.00</span><span>Första start vapengrupp C</span></li>
+                        <li><span class="sm-time">ca 15.00</span><span>Stafettstart H/D 21</span></li>
+                        <li><span class="sm-time">ca 15.30</span><span>Stafettstart H/D 50</span></li>
+                        <li><span class="sm-time">ca 17.00</span><span>Prisutdelning</span></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="sm-day">
+                    <div class="sm-day-head">Söndag 23 augusti</div>
+                    <ul>
+                        <li><span class="sm-time">7.30–9.00</span><span>Vapenkontroll och nummerlappar</span></li>
+                        <li><span class="sm-time">8.30–9.30</span><span>Inskjutning</span></li>
+                        <li><span class="sm-time">10.00</span><span>Start skjutlag 1, vapengrupp A</span></li>
+                        <li><span class="sm-time">12.00</span><span>Start skjutlag 2, vapengrupp A</span></li>
+                        <li><span class="sm-time">ca 15.00</span><span>Prisutdelning</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Löpslingorna</h2>
+        <ul class="sm-legend">
+            <li><span class="sm-swatch sm-swatch-bla"></span> Blå slinga — junior till H/D 60</li>
+            <li><span class="sm-swatch sm-swatch-rod"></span> Röd slinga — H/D 65 till 70+</li>
+            <li><span class="sm-swatch sm-swatch-svart"></span> Svart slinga — spurtsträcka och stafett</li>
+            <li><span class="sm-swatch sm-swatch-gul"></span> Gul slinga — straffrunda i stafetten</li>
+        </ul>
+        <ul class="sm-list-tight">
+            <li>Klasserna junior–H/D 60 springer sex varv på blå slinga och avslutar med svart spurtslinga. Totalt ca 6 km.</li>
+            <li>Klasserna H/D 65–70+ springer sex varv på röd slinga och avslutar med svart spurtslinga. Totalt ca 4 km.</li>
+            <li>Stafetten springs på vardera sträcka (2 eller 3) två varv på svart slinga, och eventuella straffrundor på gul slinga.</li>
+            <li>Löpslingorna är markerade med tydliga snitslar i respektive slingas färg. Anvisningar i form av text, pilar, avdelare med mera finns också för att undvika missförstånd.</li>
+            <li>Utmed blå slinga finns funktionärer utplacerade för assistans vid eventuella tillbud eller efterfrågan. Röd slinga är i sin helhet synlig från start- och målområdet.</li>
+            <li>Nivåskillnaden utmed blå slinga är ca 10–12 m och utmed röd slinga ca 6–8 m. Båda med stigning i början och nerför till plant inför skjutning.</li>
+            <li><strong>Provgå eller spring gärna slingorna</strong> — fram till senast en halvtimme innan första start.</li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <h2>Skjutområdet, vapengrupp C</h2>
+        <ul class="sm-list-tight">
+            <li>
+                Skjutområdet är uppdelat i två sektioner, A och B, med 10 respektive 12 fallmål av typen Kurvinen.
+                På <strong>sektion A</strong> sker skjutning för klasserna H/D junior–60 <strong>utan stödhand</strong>
+                vid serie 1, 3 och 5. På <strong>sektion B</strong> sker skjutning <strong>med stödhand tillåten</strong>
+                vid serie 2, 4 och 6. Klasserna D/H 60–70+ genomför all skjutning på sektion B.
+            </li>
+            <li>
+                Det är den tävlandes uppgift att veta vilket löpvarv man är inne på, och därmed vilken sektion man
+                ska besöka. Valet sker genom att välja löpväg A eller B innan ankomst till invisaren, som anvisar
+                skjutplats inom vald sektion.
+            </li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <h2>Skjutområdet, vapengrupp A</h2>
+        <p>
+            Skjutområdet är i stort likt C-området, men är inte uppdelat i sektioner. Målen består av 35 vertikalt
+            monterade dubbeltavlor av typen ”Gamla olympiska skidskyttetavlan”, där varje tävlande tilldelas en egen
+            skjutplats som all skjutning genomförs på. Funktionärsuppställningen är också något annorlunda, med
+            endast en invisare, två skjutledare och två kontrollanter.
+        </p>
+    </section>
+
+    <section class="sm-section">
+        <h2>Tävlingarnas genomförande</h2>
+
+        <h3>Vapengrupp C, individuellt</h3>
+        <p>För tävlingen gäller Svenska Pistolskytteförbundets tävlingsregler enligt skjuthandbokens upplaga 21.</p>
+        <ul class="sm-list-tight">
+            <li>Löpning på en slinga som löps sex varv. Se ”Löpslingorna” ovan.</li>
+            <li>
+                Skjutavståndet är 17,5 meter och skjutningen utförs vid två sektioner, A och B: stående utan stödhand
+                vid A respektive stående med stödhand tillåten vid B.
+            </li>
+            <li>
+                Vid varje skjutning skjuts 5 skott — totalt 30 skott. Vid ankomsten till stationen tilldelas den
+                tävlande ett målnummer av invisaren, och den tävlande ansvarar själv för att skjutningen sker på rätt mål.
+            </li>
+            <li>Efter sista skjutningen följer du den svarta spurtslingan och skyltningen mot ”Mål”.</li>
+        </ul>
+
+        <h3>Vapengrupp C, stafett</h3>
+        <ul class="sm-list-tight">
+            <li>
+                Banan utgörs av svart slinga som går på plan mark och är markerad med svarta snitslar. Varje varv är
+                ca 400 meter långt. Den gula straffrundan är markerad med gula snitslar och är ca 60 meter lång.
+            </li>
+            <li>
+                Memorera banan, växlingsområdet och straffrundan i förväg så att alla är säkra på de olika
+                sträckningarna. Tempot på denna tävling blir högt och rafflande!
+            </li>
+            <li>H 21 = 3 deltagare, H/D 50 = 2 deltagare.</li>
+            <li>Skjutningen sker mot fallmål Kurvinen, på samma bana som slutsiffran på lagets startnummer.</li>
+            <li>
+                Varje deltagare löper 3 varv på banan och skjuter 1 gång efter första varvet och 1 gång efter andra
+                varvet på lagets tilldelade bana. Tredje varvet går till växling eller mål.
+            </li>
+            <li>Skjutställningen är stående med stödhand tillåten och avståndet är 17,5 meter.</li>
+            <li>Vapnet ska bäras proppat och hölstrat fram till dess man har intagit markerad skjutplats.</li>
+            <li>Först läggs 3 extraskott i ”fat”, därefter fylls 5 patroner i tomt magasin.</li>
+            <li>5 patroner per skjuttillfälle samt 3 extraskott tillåtna — totalt 16 skott per deltagare.</li>
+            <li>Extraskott ska laddas ett och ett, antingen i patronläget eller i tomt magasin som därefter införs i vapnet.</li>
+            <li>
+                För varje ej träffat mål som kvarstår efter att alla fem patroner och alla tre extraskott har avfyrats
+                ska en straffrunda löpas.
+            </li>
+            <li>Den tävlande ansvarar själv för att rätt antal straffrundor löps. Antalet löpta rundor loggas av funktionär.</li>
+            <li>Vid för få löpta straffrundor drabbas laget av ett tidstillägg på 2 minuter per missad runda.</li>
+        </ul>
+
+        <h3>Vapengrupp A</h3>
+        <ul class="sm-list-tight">
+            <li>Löpning på en slinga som löps sex varv. Se ”Löpslingorna” ovan.</li>
+            <li>Skjutavståndet är 25 meter och utförs på en och samma bana, vilken du tilldelas innan start.</li>
+            <li>A-tävlingen sker i två skjutlag.</li>
+            <li>
+                Skjutning vid 6 tillfällen mot 2 papptavlor av typen ”Gamla olympiska skidskyttetavlan”, monterade
+                ovanför varandra. 5 patroner per tillfälle och max 15 träff per tavla — totalt 30 skott.
+            </li>
+            <li>
+                Tidstillägg om 0, 1, 2 eller 3 minuter i respektive träffzon. Varannan skjutning sker stående utan
+                stödhand och varannan stående med stödhand tillåten.
+            </li>
+            <li>Dam- och herrklass 65–70+ skjuter stående med stödhand tillåten vid samtliga tillfällen.</li>
+            <li>Efter sista skjutningen följer du den svarta spurtslingan och skyltningen mot ”Mål”.</li>
+        </ul>
+    </section>
+
+    <section class="sm-section">
+        <div class="sm-safety">
+            <h2>Tänk hela tiden på säkerheten</h2>
+            <p class="fw-bold">
+                Kontrollera att vapnet är tomt och proppat efter varje skjutning och efter målgång.
+            </p>
+            <ul class="sm-list-tight mb-0">
+                <li>Före start ska vapnet vara godkänt och märkt av vapenkontrollant.</li>
+                <li>För vapengrupp C får endast blykula kaliber .22 användas.</li>
+                <li>Vapnet ska under hela tävlingen bäras i någon form av hölster och vara proppat.</li>
+                <li>
+                    Vapnet får tas ur hölstret och proppen tas ur först när du har intagit din markerade skjutplats.
+                    Det ska proppas och läggas tillbaka i hölstret innan du lämnar platsen.
+                </li>
+                <li>Magasin får inte införas i vapnet igen efter att patron ur gjorts, förrän nästa skjutplats intagits.</li>
+                <li>Påfyllning av magasin får ske först när man har intagit sin tilldelade skjutplats.</li>
+                <li>Brott mot säkerhetsreglerna ger tillägg motsvarande 1 bom, eller vid allvarligt fel diskvalifikation.</li>
+                <li>Klickade patroner får ersättas efter att ha uppvisats för funktionär.</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="sm-section">
+        <h2>Lagtävlingar</h2>
+        <p>
+            Lagsammansättning eller eventuella ändringar i föranmält lag ska anmälas skriftligen vid sekretariatet
+            <strong>senast lördag kl. 09.30</strong>.
+        </p>
+
+        <h3>Anmälan och uthämtning av nummerlappar</h3>
+        <p>
+            Anmälan och hämtning av nummerlappar och föreningskuvert görs i vapenkontrollen. Nummerlappen ska bäras
+            <strong>väl synlig på ryggen</strong> under tävlingen.
+        </p>
+
+        <h3>Jury</h3>
+        <p>Juryn utses senast under tävlingsdagen, varefter namnen anslås vid sekretariatet.</p>
+    </section>
+
+    <section class="sm-section">
+        <h2>Service och övrigt</h2>
+        <p>
+            Servering, toaletter, parkering, husvagnsuppställning, bad och boendetips finns samlade på
+            <a href="/sm-springskytte-2026/service">Service &amp; boende</a>.
+        </p>
+        @if (!string.IsNullOrEmpty(compUrl))
+        {
+            <p class="mb-0">Anmälan och startlistor finns på <a href="@compUrl">tävlingssidan</a>.</p>
+        }
+    </section>
+
+    <p class="text-center fs-4 fw-bold mt-5">Väl mött i Halland</p>
+
+</div>
