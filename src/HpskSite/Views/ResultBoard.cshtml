@@ -66,6 +66,24 @@
     var boardAvailable = competition != null && showLiveResults && !isExternal;
     var hasFinals = numberOfFinalSeries > 0;
     var qualSeriesCount = hasFinals ? numberOfSeriesOrStations - numberOfFinalSeries : numberOfSeriesOrStations;
+
+    // The "Resultat" child page — the QR target for the wait between the last shooter and the medal
+    // ceremony. Resolved FROM THE NODE, never hardcoded: the competition URL is a function of scope +
+    // host (SM / landsdel / club- / region-hosted), so the shape can change under us and a literal path
+    // would silently start pointing at a 404. Absolute URL is built from the request rather than
+    // UrlMode.Absolute so this runtime-compiled view needs no extra enum in scope.
+    // Empty until results are published (PublishResults is what creates the node), which is exactly the
+    // condition the board uses to decide whether to show the panel at all.
+    var resultPageUrl = "";
+    if (competition != null)
+    {
+        var kids = competition.Children()?.ToList() ?? new List<IPublishedContent>();
+        var resultNode = kids.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat")
+                      ?? kids.FirstOrDefault(c => c.ContentType.Alias == "competitionResult");
+        var rel = resultNode?.Url();
+        if (!string.IsNullOrEmpty(rel))
+            resultPageUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{rel}";
+    }
 }<!DOCTYPE html>
 <html lang="sv">
 <head>
@@ -99,7 +117,19 @@
         .rb-vaxla{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem;cursor:pointer;user-select:none;color:#4ecca3}
         .rb-vaxla input{cursor:pointer;margin:0}
         .rb-ts{color:rgba(255,255,255,.5);font-size:.75rem;white-space:nowrap}
-        .rb-table-wrap{flex:1;overflow-y:auto;padding:.5rem}
+        .rb-body{flex:1;display:flex;min-height:0}
+        .rb-table-wrap{flex:1;min-width:0;overflow-y:auto;padding:.5rem}
+        /* QR panel for the gap between the last shooter and the medal ceremony. Shown once results are
+           official (see rbQrApply) — before that /resultat/ does not exist. */
+        .rb-qr{flex:0 0 20rem;display:flex;flex-direction:column;align-items:center;justify-content:center;
+               gap:1rem;padding:1rem;background:#16213e;border-left:1px solid #0f3460}
+        .rb-qr[hidden]{display:none}
+        .rb-qr-img{background:#fff;padding:.6rem;border-radius:.5rem;line-height:0}
+        /* pixelated: QR modules must stay hard-edged when upscaled, or scanning gets flaky across a hall */
+        .rb-qr-img img{display:block;width:15rem;height:15rem;image-rendering:pixelated}
+        .rb-qr-cap{color:#4ecca3;font-weight:700;font-size:1.05rem;text-align:center;line-height:1.3;letter-spacing:.02em}
+        .rb-qr-sub{color:rgba(255,255,255,.45);font-size:.8rem;text-align:center;word-break:break-all}
+        @@media(max-width:1200px){.rb-qr{flex-basis:15rem}.rb-qr-img img{width:11rem;height:11rem}}
         .rb-table{width:100%;border-collapse:collapse;font-size:1.1rem}
         .rb-table th{position:sticky;top:0;background:#16213e;color:#4ecca3;padding:.45rem .5rem;text-align:center;font-weight:600;font-size:.85rem;border-bottom:2px solid #0f3460;z-index:1}
         .rb-table td{padding:.4rem .5rem;border-bottom:1px solid rgba(255,255,255,.06);text-align:center}
@@ -158,11 +188,21 @@ else
         <span class="rb-ts" id="rbCycleNow"></span>
         <span class="rb-ts" id="rbLastUpdated"></span>
     </div>
-    <div class="rb-table-wrap" id="rbTableWrap"><div style="text-align:center;padding:3rem 0"><div class="spinner-border text-light" role="status"></div></div></div>
+    @* Body is a ROW: standings left, QR panel right. Splitting horizontally (not stacking) is
+       deliberate — the paging capacity maths is measured from the table wrap's HEIGHT, so taking width
+       away costs no rows, while a bottom band would silently shrink every page. *@
+    <div class="rb-body">
+        <div class="rb-table-wrap" id="rbTableWrap"><div style="text-align:center;padding:3rem 0"><div class="spinner-border text-light" role="status"></div></div></div>
+        <aside class="rb-qr" id="rbQrPanel" hidden>
+            <div class="rb-qr-img"><img id="rbQrImg" alt="QR-kod till resultatlistan"></div>
+            <div class="rb-qr-cap">SKANNA FÖR<br>FULLSTÄNDIGA RESULTAT</div>
+            <div class="rb-qr-sub" id="rbQrSub"></div>
+        </aside>
+    </div>
 
     @await Html.PartialAsync("_ResultBoardScript")
     <script>
-        rbBoardScript(@competitionId, @(hasFinals ? "true" : "false"), @qualSeriesCount, @numberOfFinalSeries, @numberOfSeriesOrStations, @Html.Raw(System.Text.Json.JsonSerializer.Serialize(configuredWCs)), @Html.Raw(System.Text.Json.JsonSerializer.Serialize(competitionType)));
+        rbBoardScript(@competitionId, @(hasFinals ? "true" : "false"), @qualSeriesCount, @numberOfFinalSeries, @numberOfSeriesOrStations, @Html.Raw(System.Text.Json.JsonSerializer.Serialize(configuredWCs)), @Html.Raw(System.Text.Json.JsonSerializer.Serialize(competitionType)), @Html.Raw(System.Text.Json.JsonSerializer.Serialize(resultPageUrl)));
     </script>
 }
 else

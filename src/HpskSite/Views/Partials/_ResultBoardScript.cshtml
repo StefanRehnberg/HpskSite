@@ -1,6 +1,6 @@
 <script>
 // Live result board logic (rbBoardScript) — rendered by /live (Views/ResultBoard.cshtml). Do not duplicate; this is the single home.
-function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, totalSeriesCount, configuredWCs, compTypeId) {
+function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, totalSeriesCount, configuredWCs, compTypeId, resultPageUrl) {
     var refreshTimer=null;
     var allGroups=[],isOfficial=false,isMedals=false;
     var selectedWCs=null;          // object map of checked weapon classes, e.g. {C:1,A:1}
@@ -18,6 +18,11 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     var pageIdx=0,pageTimer=null,springPageCount=1,PAGE_MS=12000;
     var compact=false;             // denser rows; drops Bom (it's just a count of the red dots)
     var rowsPerPage=0;             // 0 = auto-fit to the screen height
+    var springGrouped=false;       // ?grupper=1 restores the old per-class group headers (see springFlatSorted)
+    resultPageUrl=resultPageUrl||'';
+    var qrMode='auto';             // ?qr= auto (default, on when official) | 1 (always) | 0 (never)
+    var qrShown=null;              // last applied state, so we don't re-set src every 15 s poll
+    var springOfficialWCs=[];      // Springskytte publishes per weapon class — see updateStatus
     var springRowH=0,springBandH=0,springHeadH=0,springRemeasuring=false;   // measured, for the capacity maths
     configuredWCs=configuredWCs||[];
     compTypeId=compTypeId||'Precision';
@@ -114,7 +119,12 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             if(!d.success)return;
             if(isSpringskytte){
                 allGroups=d.classGroups||[];
-                isOfficial=false;isMedals=false;
+                // Springskytte publishes PER WEAPON CLASS (officialWeaponClasses; resultsOfficial is only
+                // "at least one class is public"). The board shows one class at a time, so the official
+                // state has to be judged against what is on screen — computed in updateStatus, which is
+                // called after populateWcFilter has resolved the selection.
+                springOfficialWCs=(d.officialWeaponClasses||[]).map(function(w){return String(w||'').toUpperCase()});
+                isMedals=false;
             } else if(isFaltskytte){
                 var rr=d.results||d.Results||{};
                 allGroups=rr.classGroups||rr.ClassGroups||[];
@@ -170,9 +180,44 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     }
     function updateStatus(){
         var b=document.getElementById('rbStatusBadge'),ts=document.getElementById('rbLastUpdated');
+        // Springskytte: official is per weapon class, so it is true only when EVERY class on screen is
+        // published. Showing OFFICIELLT (and the results QR) over a still-preliminary A list because C
+        // happened to be published would be a lie on a wall in front of spectators.
+        if(isSpringskytte){
+            var disp=currentDisplayWcs();
+            isOfficial=disp.length>0&&disp.every(function(w){return springOfficialWCs.indexOf(w)>=0});
+        }
         if(isOfficial){b.className='rb-badge-official';b.innerHTML='<i class="bi bi-check-circle me-1"></i>OFFICIELLT'}
         else{b.className='rb-badge-live';b.innerHTML='<i class="bi bi-broadcast me-1 rb-pulse"></i>LIVE'}
         if(ts)ts.textContent='Uppdaterad '+new Date().toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        rbQrApply();
+    }
+    // QR panel to the official /resultat/ page — for the hour or so between the last shooter and the
+    // medal ceremony, when what spectators want is their own full result on their own phone.
+    //
+    // It appears BY ITSELF when results go official, which is the whole design point: the board is a
+    // Chrome kiosk with no keyboard to hand, and changing its URL at the venue means killing the
+    // supervisor loop over Remote Desktop. Publishing the results already happens before the ceremony,
+    // and /resultat/ does not exist until then (PublishResults creates the node), so "official" is both
+    // the right moment AND the guarantee the link resolves. ?qr=1 forces it on, ?qr=0 off.
+    //
+    // Split left/right rather than replacing the standings: the panel costs width, and the paging
+    // capacity maths is measured from HEIGHT, so no rows are lost.
+    function rbQrApply(){
+        var el=document.getElementById('rbQrPanel');
+        if(!el)return;
+        var want=!!resultPageUrl&&(qrMode==='1'||(qrMode==='auto'&&isOfficial));
+        if(want===qrShown)return;                     // don't re-fetch the PNG on every poll
+        qrShown=want;
+        el.hidden=!want;
+        if(!want)return;
+        var img=document.getElementById('rbQrImg');
+        if(img&&!img.getAttribute('src'))
+            img.src='/umbraco/surface/Faltskytte/GenerateQrCode?url='+encodeURIComponent(resultPageUrl);
+        var sub=document.getElementById('rbQrSub');
+        if(sub&&!sub.textContent)
+            sub.textContent=resultPageUrl.replace(/^https?:\/\//,'');
+        if(springRowH){springRowH=0;renderAll()}      // narrower table → re-measure rows, re-page
     }
     function renderAll(){
         var wr=document.getElementById('rbTableWrap');
@@ -411,6 +456,46 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         });
         return flat;
     }
+    // DEFAULT for Springskytte: one flat cross-class table, class carried in a Klass column instead of
+    // group headers. On an SM C-field the ~10 age/gender headers cost ~10 rows per pass (plus a repeat
+    // whenever a page opens mid-class); one narrow column costs none, so that many more shooters fit.
+    //
+    // Ranked on Totaltid ascending, and ONLY shooters who have FINISHED are ranked. A shooter mid-course
+    // has accumulated less time than the finishers, so a naive sort puts someone who is still out running
+    // at the very top of the board — the "least time on the track" trap. Those shooters are the "Nyss
+    // startat" band's job, not the table's, which keeps the two halves of the screen non-overlapping:
+    // the band is who is running, the table is who is done.
+    //   DNF → bottom of the table (did start, has no time).  DNS → never shown (never took the line;
+    //   the server excludes it from the band for the same reason).
+    //
+    // The # column is the OVERALL position, so the gold/silver/bronze cell tint follows it. Placement in
+    // Springskytte is per class, though, so the class leaders get their own discreet row cue instead —
+    // otherwise a shooter leading D 50 is indistinguishable from mid-field.
+    function springFlatSorted(groups){
+        var fin=[],dnf=[];
+        groups.forEach(function(cg){
+            var wc=cg.weaponClass||'C';
+            var cls=cg.ageGenderClass||cg.AgeGenderClass||'';
+            (cg.shooters||[]).forEach(function(sh){
+                var row={sh:sh,wc:wc,cls:cls,classRank:sh.rank||0};
+                if(sh.status){
+                    if(String(sh.status).toUpperCase()==='DNS')return;
+                    dnf.push(row);return;
+                }
+                if(sh.totalTimeSeconds===null||sh.totalTimeSeconds===undefined)return;   // still out
+                fin.push(row);
+            });
+        });
+        fin.sort(function(a,b){
+            var d=(a.sh.totalTimeSeconds||0)-(b.sh.totalTimeSeconds||0);
+            if(d)return d;
+            d=(a.classRank||99)-(b.classRank||99);            // server tiebreaker already ordered per class
+            if(d)return d;
+            return (a.sh.name||'').localeCompare(b.sh.name||'','sv');
+        });
+        fin.forEach(function(r,i){r.overall=i+1});
+        return fin.concat(dnf);
+    }
     // How many rows fit on this screen. Everything is measured from the real rendered DOM rather than
     // assumed: font sizes scale with the kiosk's zoom factor, and the on-course band's height varies
     // with how many shooters are out, so a fixed row count would overflow the screen on most TVs —
@@ -420,7 +505,10 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         var h=wr.clientHeight||0;
         if(!h||!springRowH)return 20;                     // conservative until we've measured once
         var avail=h-springBandH-springHeadH-28;           // 28 ≈ the "Sida x/y" line
-        // −1 row of slack: group-header rows are taller than shooter rows and we budget them as one.
+        // −1 row of slack. In grouped mode it covers group-header rows being taller than shooter rows
+        // while being budgeted as one; in flat mode there are no headers, but the row is kept as margin —
+        // overflowing the bottom edge re-creates the exact truncation this paging exists to prevent, and
+        // one row is a cheap insurance premium against a TV whose reported height is off.
         return Math.max(6,Math.floor(avail/springRowH)-1);
     }
     function springPaginate(flat,cap){
@@ -439,9 +527,18 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     // most legible thing on the screen from across a hall); compact mode drops Bom instead.
     function renderSpringskytte(wr,groups){
         if(!groups.length&&!springBoard){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
-        var nCols=compact?8:9;
+        var showKlass=!springGrouped;
+        var nCols=(compact?8:9)+(showKlass?1:0);
         var h=springBandHtml();
-        var flat=springFlatRows(groups);
+        var flat=springGrouped?springFlatRows(groups):springFlatSorted(groups);
+        // Only prefix the weapon group in the Klass cell when more than one is on screen — at an SM it is
+        // one group at a time (?wc=C) and "C" on every row is pure noise.
+        var multiWc=false;
+        if(showKlass){
+            var seenWc={},nWc=0;
+            flat.forEach(function(r){if(r.wc&&!seenWc[r.wc]){seenWc[r.wc]=1;nWc++}});
+            multiWc=nWc>1;
+        }
         if(!flat.length){
             wr.innerHTML=h+'<div style="text-align:center;padding:2rem 0;opacity:.5"><p>Inga resultat än</p></div>';
             springPageCount=1;return;
@@ -453,8 +550,10 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
 
         h+='<table class="rb-table" id="rbSpringTable">';
         h+='<colgroup><col style="width:2.5rem"><col style="width:2.5rem"><col><col>';
+        h+=(showKlass?'<col style="width:7rem">':'');
         h+='<col><col style="width:5rem">'+(compact?'':'<col style="width:3rem">')+'<col style="width:4.5rem"><col style="width:5.5rem"></colgroup>';
         h+='<thead><tr><th>#</th><th>Nr</th><th style="text-align:left">Namn</th><th style="text-align:left">Förening</th>';
+        h+=(showKlass?'<th style="text-align:left;white-space:nowrap">Klass · Pos</th>':'');
         h+='<th>Skytte</th><th>Löptid</th>'+(compact?'':'<th>Bom</th>')+'<th>Tillägg</th><th>Totaltid</th></tr></thead><tbody>';
 
         function groupRow(label,first){
@@ -465,15 +564,33 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         if(pg.cont)h+=groupRow(pg.cont+' <span style="opacity:.6;font-weight:400">(forts.)</span>',true);
         pg.rows.forEach(function(r,ri){
             if(!r.sh){h+=groupRow(r.group,ri===0&&!pg.cont);return}
-            var sh=r.sh,rank=sh.rank||0,status=sh.status||null;
+            var sh=r.sh,status=sh.status||null;
+            // Grouped mode: # is the rank within the class (straight from the server). Flat mode: # is the
+            // overall position, and the class rank moves into the Klass cell.
+            var rank=showKlass?(r.overall||0):(sh.rank||0);
             var pc=rank>=1&&rank<=3&&!status?' rb-pos-'+rank:'';
-            var pad=compact?' style="padding-top:.2rem;padding-bottom:.2rem"':'';
+            var isClassLeader=showKlass&&!status&&r.classRank===1;
+            // Discreet class-leader cue: a tinted row + a green edge on the first cell. The edge lives on
+            // the TD, not as a box-shadow on the TR — the table is border-collapse:collapse, where a
+            // shadow on a row is not reliably painted, but a cell border always is.
+            var trStyle=(compact?'padding-top:.2rem;padding-bottom:.2rem;':'')
+                +(isClassLeader?'background:rgba(78,204,163,.07);':'');
+            var pad=trStyle?' style="'+trStyle+'"':'';
+            var firstTd=isClassLeader?' style="border-left:3px solid #4ecca3"':'';
             var so=sh.startOrder||'';
+            var klassCell='';
+            if(showKlass){
+                var rk=r.classRank>=1
+                    ?' <span style="color:'+(isClassLeader?'#4ecca3':'#8892b0')+';font-weight:'+(isClassLeader?'700':'400')+'">· '+r.classRank+'</span>'
+                    :'';
+                klassCell='<td style="text-align:left;white-space:nowrap">'
+                    +esc((multiWc?r.wc+' ':'')+(r.cls||''))+rk+'</td>';
+            }
             if(status){
-                h+='<tr'+pad+'><td>-</td><td>'+esc(so)+'</td><td style="text-align:left">'+esc(sh.name||'')+'</td><td style="text-align:left">'+esc(sh.clubShort||sh.club||'')+'</td>';
-                h+='<td colspan="'+(nCols-4)+'" style="text-align:center;opacity:.6">'+esc(status)+'</td></tr>';
+                h+='<tr'+pad+'><td>-</td><td>'+esc(so)+'</td><td style="text-align:left">'+esc(sh.name||'')+'</td><td style="text-align:left">'+esc(sh.clubShort||sh.club||'')+'</td>'+klassCell;
+                h+='<td colspan="'+(nCols-(showKlass?5:4))+'" style="text-align:center;opacity:.6">'+esc(status)+'</td></tr>';
             } else {
-                h+='<tr'+pad+'><td class="'+pc.trim()+'">'+(rank||'-')+'</td><td>'+esc(so)+'</td><td style="text-align:left">'+esc(sh.name||'')+'</td><td style="text-align:left">'+esc(sh.clubShort||sh.club||'')+'</td>';
+                h+='<tr'+pad+'><td class="'+pc.trim()+'"'+firstTd+'>'+(rank||'-')+'</td><td>'+esc(so)+'</td><td style="text-align:left">'+esc(sh.name||'')+'</td><td style="text-align:left">'+esc(sh.clubShort||sh.club||'')+'</td>'+klassCell;
                 h+='<td>'+renderShotDots(sh,r.wc)+'</td>';
                 h+='<td>'+esc(sh.sprintTimeDisplay||'-')+'</td>';
                 if(!compact)h+='<td>'+(sh.shootingScore||0)+'</td>';
@@ -608,6 +725,13 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         if(cp==='1'||cp==='true')compact=true;
         var rp=parseInt(qp.get('rows'));
         if(rp>0&&rp<=200)rowsPerPage=rp;
+        //   ?grupper=1  restore per-class group headers instead of the flat Klass-column table
+        var gp=qp.get('grupper');
+        if(gp==='1'||gp==='true')springGrouped=true;
+        //   ?qr=1|0     force the results-QR panel on/off (default: on once results are official)
+        var qrp=qp.get('qr');
+        if(qrp==='1'||qrp==='true')qrMode='1';
+        else if(qrp==='0'||qrp==='false')qrMode='0';
         var ct=document.getElementById('rbCycleToggle');
         if(ct){ct.checked=cycleMode;ct.addEventListener('change',function(){cycleMode=this.checked;cycleIdx=0;persistCycle();syncUrl();renderAll();restartCycle()})}
         var ls=document.getElementById('rbLayoutSel');

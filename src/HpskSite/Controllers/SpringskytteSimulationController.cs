@@ -8,7 +8,9 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
+using Newtonsoft.Json;
 using HpskSite.Services;
+using HpskSite.CompetitionTypes.Springskytte.Services;
 
 namespace HpskSite.Controllers
 {
@@ -51,6 +53,9 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authService;
         private readonly ClubService _clubService;
         private readonly PaymentService _paymentService;
+        // Results live in SQL (SpringskytteResultEntry), unlike registrations which are content nodes,
+        // so the results seeder needs the database factory the base class doesn't expose.
+        private readonly IUmbracoDatabaseFactory _databaseFactory;
 
         public SpringskytteSimulationController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -71,6 +76,7 @@ namespace HpskSite.Controllers
             _authService = authService;
             _clubService = clubService;
             _paymentService = paymentService;
+            _databaseFactory = databaseFactory;
         }
 
         // Obviously-fake Kalle Anka (Ankeborg) universe names. Combined with the surnames below +
@@ -372,7 +378,264 @@ namespace HpskSite.Controllers
             return Json(new { success = true, message = "Seedade anmälningar rensade.", removed, invoicesRemoved });
         }
 
+        /// <summary>
+        /// Fill a practice competition with plausible RESULTS, so the /live board has a real field to
+        /// page through. Seeds one SpringskytteResultEntry per (member, weapon class) registration.
+        ///
+        /// Rows are written through the SAME scoring service the real save path uses
+        /// (CalculateShootingScore + CalculateTotalTime), and with the same shot tokens, so they are
+        /// indistinguishable from hand-entered results rather than merely looking right on screen.
+        ///
+        /// Deliberately does NOT give everyone a finishing time: `runningRatio` are left with no result
+        /// row at all (still out on the course) and a few get DNS/DNF. That is what exercises the board's
+        /// finishers-only ranking, the "Nyss startat" band, and the DNF-at-the-bottom rule — a field where
+        /// everybody has finished tests none of it.
+        ///
+        /// Idempotent: MERGE on (CompetitionId, MemberId, WeaponClass), deterministic per competition id.
+        ///
+        ///   /umbraco/surface/SpringskytteSimulation/SeedSimulationResults?competitionId=5123
+        ///   /umbraco/surface/SpringskytteSimulation/ClearSimulationResults?competitionId=5123
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> SeedSimulationResults(
+            int competitionId, double runningRatio = 0.10, double dnfRatio = 0.03, double dnsRatio = 0.02)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast webbplatsadministratör kan köra simuleringen." });
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null || competition.ContentType.Alias != "competition")
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            // ── SAME SAFETY GUARD AS THE REGISTRATION SEEDER ─────────────────────────────
+            var compType = competition.GetValue<string>("competitionType") ?? "";
+            if (!string.Equals(compType, "Springskytte", StringComparison.OrdinalIgnoreCase))
+                return Json(new { success = false, message = $"Tävlingen är inte Springskytte (competitionType = '{compType}')." });
+            var name = competition.GetValue<string>("competitionName");
+            if (string.IsNullOrWhiteSpace(name)) name = competition.Name ?? "";
+            if (!competition.GetValue<bool>("isClubOnly") && !LooksLikePractice(name))
+                return Json(new
+                {
+                    success = false,
+                    message = "Säkerhetsspärr: vägrar skriva resultat på en publik tävling. Sätt isClubOnly=true "
+                            + "ELLER ha ÖVNING/TEST/SIM i tävlingsnamnet innan du kör."
+                });
+
+            var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
+            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+            if (hub == null)
+                return Json(new { success = false, message = "Inga anmälningar — kör SeedSimulation först." });
+
+            // One result row per (member, weapon class). A shooter registered in both C and A gets two,
+            // which is the normal shape here (most simulation shooters register in both).
+            var regs = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
+                .Where(c => c.ContentType.Alias == "competitionRegistration")
+                .ToList();
+
+            // Classes live in `shootingClasses` as a serialized ShootingClassEntry LIST — NOT a plain
+            // `shootingClass` string — and a single registration node can carry SEVERAL classes, so every
+            // entry has to be walked. Reading the wrong property yields an empty list on every node and
+            // the seeder silently finds no starters at all.
+            var starters = new List<(int MemberId, string Weapon, string AgeGender)>();
+            foreach (var reg in regs)
+            {
+                var memberId = reg.GetValue<int>("memberId");
+                if (memberId <= 0) continue;
+
+                var entries = HpskSite.Models.CompetitionRegistrationDocument
+                    .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "");
+                var composites = entries.Select(e => e.Class ?? "").Where(c => c.Length > 0).ToList();
+                // Fallback for any registration written by an older/other path as a single string.
+                if (composites.Count == 0)
+                {
+                    var single = reg.GetValue<string>("shootingClass") ?? "";
+                    if (single.Length > 0) composites.Add(single);
+                }
+
+                foreach (var composite in composites)
+                {
+                    // Springskytte composite class: "C-H 35" → weapon "C", ageGender "H 35".
+                    var idx = composite.IndexOf('-');
+                    if (idx <= 0 || idx >= composite.Length - 1) continue;
+                    var weapon = composite.Substring(0, idx).Trim().ToUpperInvariant();
+                    var ageGender = composite.Substring(idx + 1).Trim();
+                    if (weapon != "C" && weapon != "A") continue;
+                    // Results are keyed (comp, member, weapon class) — one row per weapon group, so a
+                    // shooter entered in both C and A gets two, and duplicates across nodes collapse.
+                    if (starters.Any(s => s.MemberId == memberId && s.Weapon == weapon)) continue;
+                    starters.Add((memberId, weapon, ageGender));
+                }
+            }
+
+            if (starters.Count == 0)
+                return Json(new { success = false, message = "Hittade inga anmälningar med tolkningsbar Springskytte-klass." });
+
+            runningRatio = Math.Clamp(runningRatio, 0d, 0.9d);
+            dnfRatio = Math.Clamp(dnfRatio, 0d, 0.5d);
+            dnsRatio = Math.Clamp(dnsRatio, 0d, 0.5d);
+
+            var rnd = new Random(competitionId);
+            var scoring = new SpringskytteScoringService();
+            var now = DateTime.Now;
+
+            // EnteredBy is informational; 0 is what the real save path also stores when it can't resolve
+            // a member, so seeded rows stay valid without pulling IMemberManager into this throwaway file.
+            const int enteredBy = 0;
+
+            // Start numbers run per weapon class (one series each) — matches how Springskytte numbers
+            // its start lists. Overridden at read time when a published start list exists.
+            var startOrder = new Dictionary<string, int> { ["C"] = 0, ["A"] = 0 };
+
+            int written = 0, dnf = 0, dns = 0, leftRunning = 0;
+
+            using var db = _databaseFactory.CreateDatabase();
+
+            foreach (var s in starters.OrderBy(x => x.Weapon).ThenBy(x => x.MemberId))
+            {
+                startOrder[s.Weapon] = startOrder[s.Weapon] + 1;
+                var no = startOrder[s.Weapon];
+
+                var roll = rnd.NextDouble();
+                if (roll < runningRatio) { leftRunning++; continue; }   // no row at all — still on the course
+
+                string? status = null;
+                if (roll < runningRatio + dnfRatio) { status = "DNF"; dnf++; }
+                else if (roll < runningRatio + dnfRatio + dnsRatio) { status = "DNS"; dns++; }
+
+                // Skill factor per shooter: correlates run speed with marksmanship a little, so the
+                // leaderboard has believable spread instead of uniform noise.
+                var skill = rnd.NextDouble();
+
+                string shotsJson = "[]";
+                decimal? sprint = null;
+                int score = 0;
+                decimal? total = null;
+
+                if (status == null)
+                {
+                    var series = s.Weapon == "C"
+                        ? BuildClassCShots(rnd, skill)
+                        : BuildClassAShots(rnd, skill);
+                    shotsJson = JsonConvert.SerializeObject(series);
+                    score = scoring.CalculateShootingScore(shotsJson, s.Weapon);
+
+                    // ~6 legs of roughly 1 km. Faster shooters (high skill) run nearer the low end.
+                    var baseSeconds = 1500 + (1 - skill) * 900 + rnd.NextDouble() * 120;
+                    sprint = Math.Round((decimal)baseSeconds, 1);
+                    total = scoring.CalculateTotalTime(sprint, score, 1);
+                }
+
+                var mergeSql = @"
+                    MERGE INTO [SpringskytteResultEntry] AS target
+                    USING (SELECT @0 AS CompetitionId, @1 AS MemberId, @2 AS WeaponClass) AS source
+                    ON target.CompetitionId = source.CompetitionId
+                       AND target.MemberId = source.MemberId
+                       AND target.WeaponClass = source.WeaponClass
+                    WHEN MATCHED THEN
+                        UPDATE SET AgeGenderClass = @3, StartOrder = @4, SprintTimeSeconds = @5, Shots = @6,
+                                   ShootingScore = @7, PenaltyMultiplier = 1, TotalTimeSeconds = @8,
+                                   Status = @9, EnteredBy = @10, LastModified = @11, ScoreModified = @11
+                    WHEN NOT MATCHED THEN
+                        INSERT (CompetitionId, MemberId, WeaponClass, AgeGenderClass, StartOrder,
+                                SprintTimeSeconds, Shots, ShootingScore, PenaltyMultiplier, TotalTimeSeconds,
+                                Status, EnteredBy, EnteredAt, LastModified, ScoreModified)
+                        VALUES (@0, @1, @2, @3, @4, @5, @6, @7, 1, @8, @9, @10, @11, @11, @11);";
+
+                await db.ExecuteAsync(mergeSql,
+                    competitionId,                                   // @0
+                    s.MemberId,                                      // @1
+                    s.Weapon,                                        // @2
+                    s.AgeGender,                                     // @3
+                    no,                                              // @4
+                    status != null ? (decimal?)null : sprint,         // @5
+                    shotsJson,                                       // @6
+                    status != null ? (int?)null : score,              // @7
+                    status != null ? (decimal?)null : total,          // @8
+                    status,                                          // @9
+                    enteredBy,                                       // @10
+                    now);                                            // @11
+
+                written++;
+            }
+
+            return Json(new
+            {
+                success = true,
+                message = $"Seedade {written} resultatrader för '{name}'.",
+                starters = starters.Count,
+                written,
+                withTime = written - dnf - dns,
+                dnf,
+                dns,
+                leftRunning,
+                note = "Publicera INTE resultatlistan om tävlingen bara ska användas för att testa tavlan — "
+                     + "opublicerat håller dummyresultaten borta från publika resultatlistor och medaljregistret."
+            });
+        }
+
+        /// <summary>Wipe seeded results for a practice competition so a fresh seed can be run.</summary>
+        [HttpGet]
+        public async Task<IActionResult> ClearSimulationResults(int competitionId)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast webbplatsadministratör." });
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null || competition.ContentType.Alias != "competition")
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            var name = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+            if (!competition.GetValue<bool>("isClubOnly") && !LooksLikePractice(name))
+                return Json(new { success = false, message = "Säkerhetsspärr: vägrar rensa resultat på en publik tävling." });
+
+            using var db = _databaseFactory.CreateDatabase();
+            var removed = await db.ExecuteAsync(
+                "DELETE FROM [SpringskytteResultEntry] WHERE CompetitionId = @0", competitionId);
+
+            return Json(new { success = true, message = "Seedade resultat rensade.", removed });
+        }
+
         // ── Helpers ──────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Class C: 6 stations × 5 shots, "H" = hit, "B" = miss. Both tokens matter — the scoring
+        /// service counts only "B" as a miss, while the board's dot renderer paints anything that is
+        /// not "H" red, so any other token would score and display inconsistently.
+        /// </summary>
+        private static List<List<string>> BuildClassCShots(Random rnd, double skill)
+        {
+            var hitChance = 0.62 + skill * 0.33;              // ~62–95 % per shot
+            var series = new List<List<string>>();
+            for (int station = 0; station < 6; station++)
+            {
+                var shots = new List<string>();
+                for (int i = 0; i < 5; i++)
+                    shots.Add(rnd.NextDouble() < hitChance ? "H" : "B");
+                series.Add(shots);
+            }
+            return series;
+        }
+
+        /// <summary>
+        /// Class A: 6 targets, each [ring1, ring2, ring3, ring4, bom] as COUNTS summing to 5 shots
+        /// (penalty = ring3×1 + ring4×2 + bom×3, see SpringskytteScoringService.CalculateClassAScore).
+        /// </summary>
+        private static List<List<string>> BuildClassAShots(Random rnd, double skill)
+        {
+            var series = new List<List<string>>();
+            for (int target = 0; target < 6; target++)
+            {
+                var counts = new int[5];
+                for (int i = 0; i < 5; i++)
+                {
+                    var r = rnd.NextDouble() * (1.15 - skill * 0.55);   // better shooters skew to ring 1–2
+                    int zone = r < 0.45 ? 0 : r < 0.70 ? 1 : r < 0.85 ? 2 : r < 0.95 ? 3 : 4;
+                    counts[zone]++;
+                }
+                series.Add(counts.Select(c => c.ToString()).ToList());
+            }
+            return series;
+        }
 
         private static bool LooksLikePractice(string name)
         {
