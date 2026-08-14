@@ -1737,6 +1737,83 @@ not "start date inside window" — otherwise a comp running 1–31 Aug, or one a
 properties, no Umbraco nodes. Adds C# → full rebuild. Verified end-to-end 33/33 via
 `C:\Repos\hpsk-verify\schema-verify.mjs`. KB: `KnowledgeBase/docs/mitt-schema.md`.
 
+## Bemanning — the grid (roll × dag), open role catalog, person identity (2026-08-14)
+
+Rebuilt from a real SM springskytte staffing plan (`Bemanningsplan Spring SM 20226.xlsx`, 41 people,
+101 assignments, 3 days). Design rationale + what is still open: `bemanningsrutnat-skiss-2026-08-14.md`
+in the repo root (local, not committed). Verified 41/41 via `hpsk-verify/staffing-grid-verify.mjs`;
+the reality walkthrough (sickness, walk-ins, typos, mid-shift dropout) is `hans-verkligheten.mjs`.
+
+**Migrations (all four run in prod 2026-08-14):** `create-staff-role-table.sql`,
+`create-staff-day-table.sql`, `add-daydate-to-staffassignment.sql`,
+`add-originalname-to-staffassignment.sql`. Adds C# → full rebuild.
+
+### Bemanning IS the grid — there are no sub-tabs
+It used to be five (Rutnät / Personer / Roller / Behov & täckning / Värvning) and an organiser opening
+Planering could not tell which one was the work. They were **dissolved, not hidden behind a menu** — a
+menu of five is the same question with the buttons out of sight. Personer → click a name (a panel);
+Roller → deleted; Behov → the number lives in the cell; Värvning → one button. `#bem-roster` markup
+survives **hidden** because the add/edit dialog and a dozen helpers bind to its ids; `loadRoster()`
+early-returns while it is hidden. Delete the pane and those bindings together, not before.
+
+### The day axis: `StaffDay`, not the competition span
+**The days you STAFF are not the days you COMPETE.** The source plan has Friday = iordningställande;
+bigger events add banbygge a fortnight earlier and återställning the day after, all with real crew.
+So the span (`competitionDate`..`competitionEndDate`) only **seeds** the list on first read
+(`StaffDayService.EnsureSeeded`, runs only when empty) and the arrangör owns it after that.
+- `Kind` = `Tavlingsdag` | `Forberedelse` | `Efterarbete`. **Not cosmetic:** a Förberedelse day is
+  filtered out of participants' Dagsprogram in `MyScheduleService.BuildAgendaItems` (crew still see it).
+- Grid columns = `StaffDay` ∪ dates that actually carry crew. The competition date is deliberately NOT
+  unioned in — doing that produced a phantom column the organiser could not remove.
+- **Dagsprogram reads the same list** (`GetDays`), so the two surfaces cannot disagree about the days.
+- ⚠ First open of Bemanning **writes** (the seed). A read that writes.
+
+### `DayDate` — how "heldag på lördag" is expressible
+`StartsAt` carries date+time, so an all-day row could only be dated by inventing a clock time, and a
+fake 00:00 becomes a real reminder at 23:30 the night before. Resolution order **everywhere**:
+`StartsAt.Date → DayDate → linked StaffPass.PassDate`. Wired in the grid, `MyScheduleService`,
+`MoveToDay`, `CopyDay` and the day-delete guard. A timed row must never also carry `DayDate`.
+
+### Roles are arrangör-named (`StaffRole` + `RoleCatalogService`)
+`SaveAssignment` used to hard-reject anything outside a closed catalog; the source plan used 22
+functions of which 5 existed. Worse than a missing word is a word the club already uses for a
+*different* job. **`RoleCatalogService` is the ONE place a role is resolved — never call
+`FunctionaryRoles` from a surface again** (12 call sites were migrated). Same key = rename/override a
+built-in; new key = new role; `IsActive=0` = hidden for this competition. Falls back to the built-ins
+if the table is missing, and every caller already falls back to the raw key.
+
+### Person identity: one human, many rows
+Name/e-mail/phone live on the **assignment**, so one person is often 3–5 rows.
+`StaffingService.ApplyPersonIdentity` acts on a **person key** (`m:{id}` / `n:{lowercased name}` — the
+same key `CompetitionPeopleService` groups on) and touches every row.
+- **Link ≠ replace.** Link = same human, now identified → answers and check-ins stand. Replace =
+  someone else does the work → status resets to Planerad, check-ins clear, app access is revoked
+  (it was granted to a login).
+- **`OriginalName`** keeps the first typed name, set once. A link overwrites the name with the
+  register's spelling; without this it was silent AND irreversible — during testing "Lis Erevall"
+  became "Andy Haard" on three rows and the original was gone. `UndoPersonIdentity` puts it back.
+- **`PersonMatchService`** guesses which member was meant (misspelling / abbreviation / first name
+  only) **and** flags the same person typed twice in the same plan — the commonest typo, which the
+  member register cannot see. Suggestions only; nothing is ever auto-linked.
+- `ReconcileManagersIntoRoster` is now a single `INSERT … WHERE NOT EXISTS`: the page loads roster and
+  people in parallel and both called it, so read-then-insert duplicated the tävlingsledare.
+
+### Coverage and clashes live where the organiser is standing
+- Per-role need (`SetCrewNeed`) renders as `bemannat/behov` **in the cell**. The old coverage matrix was
+  its own tab and was empty on every real competition — nobody found it.
+- **Time gaps**: "ingen 12:00–14:00" when a cell's own shifts leave a hole. Measured only between that
+  cell's first and last shift — flagging the rest of the day would invent a requirement nobody stated.
+- **Clashes** are computed on the person key (not `MemberId` — 37 of 41 people on a real plan are free
+  text, so the old rule checked almost nobody) and require the **same day**; comparing clock times alone
+  made Saturday 08–09 collide with Sunday 07:30–09:00. Rendered above the grid, not on a retired tab.
+- `SplitAssignment` cuts a timed shift at a clock time and hands the tail to someone else (the mid-shift
+  dropout). Refuses on an untimed row — there is no point to split at.
+
+### Still open
+`ClubId` on the assignment. Club is the basis for splitting a competition's surplus between the clubs
+that staffed it, so it must be settable per row (a person can be a member of several clubs, and an
+external helper has no member record at all) — today it is only derived from `primaryClubId`.
+
 ## Board Work (Styrelsearbete) — dedicated /styrelse page
 
 Senior-friendly board workspace for clubs & regions, built on the existing `BoardRoles` table.
