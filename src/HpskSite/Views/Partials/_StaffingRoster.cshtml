@@ -22,55 +22,42 @@
 @* TODO: här kommer en länk till instruktionsfilmen. Den gamla "Så gör du"-raden är borttagen — den
    beskrev dessutom det gamla arbetssättet ("lägg upp skift"), som dagslistan har ersatt. *@
 
-<ul class="nav nav-tabs mb-3" id="bemSubNav" role="tablist">
-    @* Rutnätet is the AUTHORING surface and therefore the default — roll × dag, the shape arrangörer
-       already plan in. Personer/Roller/Behov/Värvning are untouched and remain the fallback. *@
-    <li class="nav-item" role="presentation">
-        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#bem-rutnat" type="button" role="tab">
-            <i class="bi bi-grid-3x3 me-1"></i>Rutnät
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-personer" type="button" role="tab">
-            <i class="bi bi-people-fill me-1"></i>Personer
-            <span class="badge bg-secondary ms-1" id="stfPeopleBadge" style="display:none"></span>
-            <span class="badge bg-warning text-dark ms-1" id="stfQueueBadge" style="display:none" title="Anmälda som inte fått något uppdrag"></span>
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-roster" type="button" role="tab">
-            <i class="bi bi-person-lines-fill me-1"></i>Roller
-            <span class="badge bg-secondary ms-1" id="stfRosterBadge" style="display:none"></span>
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-behov" type="button" role="tab">
-            <i class="bi bi-clipboard-data me-1"></i>Behov &amp; täckning
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-varvning" type="button" role="tab">
-            <i class="bi bi-megaphone me-1"></i>Värvning
-        </button>
-    </li>
-</ul>
+@*
+    BEMANNING IS THE GRID. There are no sub-tabs.
 
-<div class="tab-content" id="bemSubContent">
+    It used to be five: Rutnät / Personer / Roller / Behov & täckning / Värvning. An organiser opening
+    Planering for the first time clicked "Bemanning" and was met by five more tabs with no way to tell
+    which one was the work — and hiding them behind a menu would not have helped, because a menu of five
+    is the same question ("which one?") with the buttons out of sight.
 
-    @*
-        ---- TAB 1: Personer (default) — the people layer ----
-        One row per human, whatever store they came from: a roster assignment, a self-sign-up on /bemanna,
-        a declared availability window, or ownership of preparation work. Rendered as a TABLE (~40 px/row,
-        sticky header) rather than cards, because a krets/SM comp has hundreds of people and the old card
-        list cost ~120 px each — twelve screens of scrolling for a hundred helpers.
-        Sorted so the organiser's queue floats to the top (anmälda utan uppdrag, then avböjt, then inbjudna).
-    *@
-    @* ---- TAB 0: Rutnät — roll × dag, the authoring surface ---- *@
-    <div class="tab-pane fade show active" id="bem-rutnat" role="tabpanel">
+    So they were DISSOLVED rather than hidden. The other views were never places; they were answers to
+    questions you get while standing in the grid, so they open from the grid:
+      · Personer  → click a name. The person panel is a detail view, not a destination.
+      · Roller    → deleted. The grid answers "who has role X", with a day axis and a club column.
+      · Behov     → the needed-vs-filled number lives in the cell, where the hole already is.
+      · Värvning  → a button. It is genuinely a different job (get people, not place them).
+    The one thing the grid cannot show is people who are NOT in it — volunteers with no assignment yet —
+    so those get a strip above it, visible only when there are any.
+*@
+<div id="bemSubContent">
+
+    <div id="bem-rutnat">
         @await Html.PartialAsync("_StaffingGrid", ViewData)
     </div>
 
-    <div class="tab-pane fade" id="bem-personer" role="tabpanel">
+    @*
+        ---- Personer — the people layer, now an offcanvas opened from a name in the grid ----
+        One row per human, whatever store they came from: a roster assignment, a self-sign-up on /bemanna,
+        a declared availability window, or ownership of preparation work.
+        Kept as a full list too (the "Alla personer" item in Mer), because the volunteer queue and the
+        who-hasn't-answered view are about people the grid cannot show.
+    *@
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemPersonerPanel" style="width:min(760px,95vw)">
+      <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title"><i class="bi bi-people-fill me-2"></i>Personer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+      </div>
+      <div class="offcanvas-body">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <div class="small" id="stfPeopleSummary"></div>
             <button type="button" class="btn btn-primary" onclick="stfOpenAdd('')">
@@ -119,10 +106,17 @@
             </table>
         </div>
         <div class="mt-2" id="stfPeopleMore"></div>
+      </div>
     </div>
 
-    @* ---- TAB 2: Roller — the same people, grouped by role (a projection of the people layer) ---- *@
-    <div class="tab-pane fade" id="bem-roster" role="tabpanel">
+    @*
+        ---- Roller — RETIRED as a destination ----
+        The grid answers "who has role X" with a day axis and a club column, so a second role-grouped list
+        was a second place to edit the same rows. The markup stays here, permanently hidden, because a
+        dozen helper functions and the add/edit dialog still bind to its ids; loadRoster() early-returns
+        while it is hidden, so it costs nothing. Delete the pane and those bindings together, not before.
+    *@
+    <div id="bem-roster" style="display:none" aria-hidden="true">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
             <div>
                 <span class="text-muted small" id="stfCount"></span>
@@ -173,11 +167,22 @@
         </div>
     </div>
 
-    @* ---- TAB 3: Behov & täckning (arbetspass/skift + behov + coverage) ---- *@
-    <div class="tab-pane fade" id="bem-behov" role="tabpanel">
-        <p class="text-muted small mb-3" style="max-width:680px">
-            Lägg upp <strong>skift</strong> (t.ex. Lör FM 06–13) och hur många ni behöver per roll.
-            Täckningen längst ner visar <em>bemannat mot behov</em> så du ser var det fattas folk.
+    @*
+        ---- Skift & täckning — an offcanvas, opened from "Mer" ----
+        The needed-vs-filled number now lives in the grid cell, where the hole already is. What is left
+        here is the finer machinery: shifts inside a day, and the per-role need that feeds those numbers.
+        It was a tab, and as a tab it stayed empty on every real competition — nobody found it.
+    *@
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemBehovPanel" style="width:min(760px,95vw)">
+      <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title"><i class="bi bi-clipboard-data me-2"></i>Skift &amp; behov</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+      </div>
+      <div class="offcanvas-body">
+        <p class="text-muted small mb-3">
+            Dagarna sätter du i rutnätet. Här delar du en dag i <strong>skift</strong> om ni jobbar i
+            omgångar, och anger <strong>hur många</strong> ni behöver per roll — siffran syns sedan
+            direkt i rutnätets rutor.
         </p>
         <div class="card mb-3" id="stfPassCard">
             <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
@@ -193,21 +198,25 @@
                 <div id="stfCoverage"><div class="text-muted small">Laddar…</div></div>
             </div>
         </div>
+      </div>
     </div>
 
     @*
-        ---- TAB 4: Värvning — how to GET more people ----
-        Recruitment only. Reviewing and assigning the people who signed up happens under **Personer**,
-        together with everyone else — keeping a second person-list here is exactly what made a volunteer
-        look "unassigned" on this tab after they had been given a role on another one.
+        ---- Värvning — an offcanvas behind one button ----
+        Genuinely a different job: getting people, not placing them. Reviewing who signed up happens in the
+        volunteer strip above the grid and in the person panel, with everyone else — a second person-list
+        in here is exactly what once made a volunteer look "unassigned" after they had been given a role.
     *@
-    <div class="tab-pane fade" id="bem-varvning" role="tabpanel">
-        <p class="text-muted small mb-3" style="max-width:680px">
-            <i class="bi bi-megaphone me-1"></i>Saknas funktionärer? Öppna tävlingen för självanmälan, skicka
-            en förfrågan till klubben/kretsen, och lägg upp en <strong>anmälningssida</strong> där medlemmar
-            bockar för de pass de kan hjälpa till med.
-            <strong>De som anmält sig hanterar du under <a href="#" onclick="stfGoToPeople(event)">Personer</a></strong>
-            — där ser du dem tillsammans med alla andra och vad de redan har fått.
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemVarvningPanel" style="width:min(760px,95vw)">
+      <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title"><i class="bi bi-megaphone me-2"></i>Värva funktionärer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+      </div>
+      <div class="offcanvas-body">
+        <p class="text-muted small mb-3">
+            Saknas funktionärer? Öppna tävlingen för självanmälan, skicka en förfrågan till klubben/kretsen,
+            och lägg upp en <strong>anmälningssida</strong> där medlemmar bockar för de pass de kan hjälpa
+            till med. De som anmäler sig dyker upp <strong>överst i rutnätet</strong>.
         </p>
 
         <div class="card mb-3" id="stfSourceCard">
@@ -225,10 +234,11 @@
             <div class="card-body py-2">
                 <div class="text-muted small mb-2">Lägg upp de <strong>pass</strong> ni behöver hjälp med (datum, tid, rubrik, kort beskrivning — flera per datum går bra). Medlemmar bockar för de pass de kan hjälpa till med på sidan <code>/bemanna</code> och skriver en kommentar.</div>
                 <div id="stfHelpSlots" class="mb-3"><div class="text-muted small">Laddar…</div></div>
-                @* Just the tally + a way in — the volunteers themselves are listed under Personer. *@
+                @* Just the tally + a way in — the volunteers themselves show above the grid. *@
                 <div id="stfHelpTally"></div>
             </div>
         </div>
+      </div>
     </div>
 </div>
 
@@ -531,6 +541,10 @@
     }
 
     async function loadRoster() {
+        // The Roller view is retired as a destination; its markup only survives because the add/edit
+        // dialog and a dozen helpers still bind to its ids. Nothing reads it, so don't pay for it.
+        var host = document.getElementById('bem-roster');
+        if (!host || host.style.display === 'none') return;
         try {
             var r = await fetch('/umbraco/surface/Staffing/GetRoster?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
             var d = await r.json();
@@ -790,8 +804,7 @@
     };
     window.stfGoToPeople = function (ev) {
         if (ev) ev.preventDefault();
-        var btn = document.querySelector('#bemSubNav button[data-bs-target="#bem-personer"]');
-        if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+        if (window.stfOpenPeople) window.stfOpenPeople('queue');
     };
 
     // The organiser's queue, stated as an action rather than buried in a list.
@@ -1680,20 +1693,20 @@
     // refreshing both every 12 s doubles the DB work for no visible benefit — and GetPeople is the heavier of
     // the two (it also builds the prep breakdown for the "Förb." column). Both are still loaded once at init
     // so the filter selects and role list are populated whichever tab you land on.
-    function activeSubTab() {
-        var pane = document.querySelector('#bemSubContent .tab-pane.active');
-        return pane ? pane.id : 'bem-personer';
+    // The grid is always on screen, so it is always what we refresh. An open panel refreshes too, because
+    // that is what the user is reading right now.
+    function panelOpen(id) {
+        var el = document.getElementById(id);
+        return !!el && el.classList.contains('show');
     }
     function poll() {
         if (document.hidden) return;
         if (document.querySelector('.modal.show')) return;
-        var t = activeSubTab();
-        // The grid owns its own refresh, and must NOT be re-rendered while a cell editor is open —
-        // that would blow away the half-typed name and the focus with it.
-        if (t === 'bem-rutnat') { if (window.grdLoad && !window.grdBusy) window.grdLoad(); return; }
-        if (t === 'bem-roster') loadRoster();
-        else if (t === 'bem-personer') loadPeople();
-        else { /* Behov & täckning + Värvning have their own lighter refreshes */ loadCoverage(); }
+        // The grid must NOT be re-rendered while a cell editor is open — that would blow away the
+        // half-typed name and the focus with it.
+        if (window.grdLoad && !window.grdBusy) window.grdLoad();
+        if (panelOpen('bemPersonerPanel')) loadPeople();
+        else if (panelOpen('bemBehovPanel')) loadCoverage();
     }
     function startTimer() { if (!timer) timer = setInterval(poll, REFRESH); }
     function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
@@ -1722,24 +1735,53 @@
         el.addEventListener('input', h); el.addEventListener('change', h);
     });
 
-    // Switching sub-tab refreshes what you just switched to, so you never look at a view that is up to one
-    // poll-interval stale after editing on the other one.
-    document.querySelectorAll('#bemSubNav button[data-bs-toggle="tab"]').forEach(function (btn) {
-        btn.addEventListener('shown.bs.tab', function () {
-            var t = activeSubTab();
-            if (t === 'bem-rutnat') { if (window.grdLoad) window.grdLoad(); }
-            else if (t === 'bem-roster') loadRoster();
-            else if (t === 'bem-personer') loadPeople();
-            else if (t === 'bem-behov') { loadPasses(); }
-            else if (t === 'bem-varvning') { loadScopes(); loadHelp(); }
-        });
-    });
+    // ---- the panels (opened from the grid, not navigated to) ----------------------------------
+    // Each loads on show, so nothing is fetched for a panel nobody opened. That is also why the heavy
+    // GetPeople call no longer runs on every page load.
 
-    loadPeople();
-    loadRoster();
-    loadScopes();
-    loadHelp();
-    loadPasses();
+    function panel(id) {
+        var el = document.getElementById(id);
+        return el ? bootstrap.Offcanvas.getOrCreateInstance(el) : null;
+    }
+
+    /// Open the people list, optionally filtered ("queue" = volunteers with no assignment yet).
+    window.stfOpenPeople = function (view) {
+        var sel = document.getElementById('stfPplView');
+        if (sel) { sel.value = view || ''; peopleShown = PEOPLE_PAGE; }
+        var p = panel('bemPersonerPanel'); if (p) p.show();
+        loadPeople();
+    };
+
+    /// Open ONE person, expanded — this is what a name in the grid does. The person layer already groups
+    /// every row a human holds, so this answers "what is this person doing?" in one place instead of
+    /// making the organiser scan the grid for their name.
+    window.stfOpenPerson = async function (key) {
+        var sel = document.getElementById('stfPplFilter');
+        var p = panel('bemPersonerPanel'); if (p) p.show();
+        if (!people.length) await loadPeople();
+        var row = people.find(function (x) { return x.key === key; });
+        if (!row) {   // free-text people are keyed on the lowercased name
+            row = people.find(function (x) { return (x.displayName || '').toLowerCase() === String(key || '').toLowerCase(); });
+        }
+        if (!row) { loadPeople(); return; }
+        expandedPeople = {}; expandedPeople[row.key] = true;
+        if (sel) sel.value = row.displayName;
+        var v = document.getElementById('stfPplView'); if (v) v.value = '';
+        peopleShown = PEOPLE_PAGE;
+        renderPeople();
+    };
+
+    window.stfOpenBehov = function () {
+        var p = panel('bemBehovPanel'); if (p) p.show();
+        loadPasses();
+    };
+    window.stfOpenVarvning = function () {
+        var p = panel('bemVarvningPanel'); if (p) p.show();
+        loadScopes(); loadHelp();
+    };
+
+    // Only the grid loads up front. Everything else waits until someone opens it.
+    if (window.grdLoad) window.grdLoad();
     startTimer();
 })();
 </script>

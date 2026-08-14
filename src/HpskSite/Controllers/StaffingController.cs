@@ -1544,6 +1544,16 @@ namespace HpskSite.Controllers
             var catalog = _roleCatalog.ForCompetition(competitionId, discipline);
             var clubs = ResolveClubNames(all);
 
+            // Per-role need drives the number inside each cell. Coverage stopped being a screen of its
+            // own precisely because nobody ever found that screen — on every real competition it was zero.
+            var needByRole = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var n in _pass.GetCrewNeeds(competitionId, discipline))
+                    if (n.Count > 0) needByRole[n.RoleKey] = n.Count;
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: crew-need read failed for {Comp}", competitionId); }
+
             foreach (var role in catalog)
             {
                 var mine = all.Where(a => string.Equals(a.RoleKey, role.Key, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -1573,6 +1583,7 @@ namespace HpskSite.Controllers
                         SupportsTargetRange = role.SupportsTargetRange,
                         SupportsFunctionTitle = role.SupportsFunctionTitle,
                         DefaultScopeType = role.DefaultScopeType,
+                        Needed = needByRole.TryGetValue(role.Key, out var nd) ? nd : 0,
                     };
 
                     foreach (var a in mine.Where(a => NormScope(a.ScopeType) == scopeType && a.ScopeKey == scopeKey))
@@ -1613,6 +1624,23 @@ namespace HpskSite.Controllers
                 .Select(a => a.DisplayName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             resp.HiddenRoles = _roleCatalog.GetHidden(competitionId)
                 .Select(h => new HiddenRoleView { RoleKey = h.Key, RoleName = h.Name }).ToList();
+
+            // Volunteers with no assignment. They are, by definition, absent from every cell — so the
+            // grid has to be told about them explicitly or they are invisible until someone goes looking.
+            // Same predicate as the people layer's UnassignedVolunteerCount; sharing it is what keeps the
+            // strip, the badge and the filtered list from disagreeing.
+            try
+            {
+                // includePrep:false — the strip only needs who volunteered, and the prep breakdown is the
+                // expensive half of the people build.
+                var people = _people.Build(competitionId, discipline, canEdit: true, includePrep: false);
+                resp.Volunteers = people.People
+                    .Where(p => p.Volunteer != null && p.Assignments.Count == 0)
+                    .Select(p => new GridVolunteer { Key = p.Key, Name = p.DisplayName, Summary = p.Volunteer?.SlotsSummary })
+                    .ToList();
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: volunteer strip failed for {Comp}", competitionId); }
+
             return resp;
         }
 
@@ -1706,6 +1734,34 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Staffing: MoveAssignmentToDay failed for {Id}", request.Id);
                 return Json(new { success = false, message = "Kunde inte flytta uppdraget." });
+            }
+        }
+
+        /// <summary>Set how many of one role are needed. One role at a time, because it is now edited from
+        /// the grid row rather than a full-replace needs editor on a screen nobody opened.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetCrewNeed([FromBody] SetCrewNeedRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.RoleKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var discipline = GetDiscipline(request.CompetitionId);
+                var needs = _pass.GetCrewNeeds(request.CompetitionId, discipline)
+                    .Where(n => !string.Equals(n.RoleKey, request.RoleKey, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (request.Count > 0)
+                    needs.Add(new CrewNeedRow { ScopeKind = CrewNeedScope.All, RoleKey = request.RoleKey, Count = request.Count });
+                _pass.SaveCrewNeeds(request.CompetitionId, needs);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SetCrewNeed failed for {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte spara behovet." });
             }
         }
 

@@ -36,7 +36,11 @@
     #grdTable td.grd-cell { min-width: 250px; cursor: pointer; }
     #grdTable td.grd-cell:hover { background: var(--bs-tertiary-bg); }
     .grd-entry { display: flex; align-items: baseline; gap: .35rem; line-height: 1.3; padding: 1px 0; flex-wrap: nowrap; }
-    .grd-entry .grd-name { font-weight: 500; white-space: nowrap; }
+    .grd-entry .grd-name { font-weight: 500; white-space: nowrap; text-decoration: none; color: inherit; }
+    .grd-entry .grd-name:hover { text-decoration: underline; }
+    .grd-need { font-size: .72rem; }
+    td.grd-short { background: rgba(var(--bs-danger-rgb), .07); }
+    td.grd-full { background: rgba(var(--bs-success-rgb), .05); }
     .grd-entry .grd-club { font-size: .75rem; color: var(--bs-secondary-color); }
     .grd-entry .grd-time { font-size: .75rem; }
     .grd-entry .grd-del { visibility: hidden; border: 0; background: none; color: var(--bs-danger); line-height: 1; padding: 0 2px; }
@@ -59,17 +63,44 @@
     .grd-ext { font-size: .7rem; }
 </style>
 
+@* The whole of Bemanning's chrome: what the plan looks like right now, one button for the other job
+   (getting people), and a LABELLED menu for the rest. Never a bare hamburger — the audience includes
+   club officials who do not read icons. *@
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
     <div class="small text-muted" id="grdSummary"></div>
-    <div class="d-flex gap-2">
-        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="grdLoad()" title="Läs om">
-            <i class="bi bi-arrow-clockwise"></i>
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenVarvning()">
+            <i class="bi bi-megaphone me-1"></i>Värva funktionärer
         </button>
-        <a class="btn btn-sm btn-outline-primary" href="/tavlingsplanering/blad?c=@competitionId" target="_blank" rel="noopener">
-            <i class="bi bi-printer me-1"></i>Skriv ut
-        </a>
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                    data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'>
+                <i class="bi bi-sliders me-1"></i>Mer
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width:250px">
+                <li><h6 class="dropdown-header">Personer</h6></li>
+                <li><button class="dropdown-item" type="button" onclick="stfOpenPeople('')">
+                    <i class="bi bi-people-fill me-2"></i>Alla personer</button></li>
+                <li><button class="dropdown-item" type="button" onclick="stfOpenPeople('invited')">
+                    <i class="bi bi-hourglass-split me-2"></i>Väntar på svar</button></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header">Planen</h6></li>
+                <li><button class="dropdown-item" type="button" onclick="stfOpenBehov()">
+                    <i class="bi bi-clipboard-data me-2"></i>Skift &amp; behov…</button></li>
+                <li><button class="dropdown-item" type="button" onclick="grdAddDay()">
+                    <i class="bi bi-calendar-plus me-2"></i>Lägg till dag…</button></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="/tavlingsplanering/blad?c=@competitionId" target="_blank" rel="noopener">
+                    <i class="bi bi-printer me-2"></i>Skriv ut planen</a></li>
+                <li><button class="dropdown-item" type="button" onclick="grdLoad()">
+                    <i class="bi bi-arrow-clockwise me-2"></i>Läs om</button></li>
+            </ul>
+        </div>
     </div>
 </div>
+
+@* The one thing the grid cannot show: people who are not in it yet. Hidden when there are none. *@
+<div id="grdVolunteers" class="mb-2"></div>
 
 <div id="grdExternalWarn" class="alert alert-warning py-2 small" style="display:none"></div>
 <div id="grdHiddenRoles" class="small mb-2"></div>
@@ -190,9 +221,31 @@
             if (e.key === 'Enter') { e.preventDefault(); grdCreateRole(nr.value); }
         });
 
+        // Orientation without instruction: where the plan stands, in one line.
         var s = document.getElementById('grdSummary');
+        var gaps = (grid.rows || []).reduce(function (acc, r) {
+            if (!r.needed) return acc;
+            return acc + cols.filter(function (c) {
+                return c.key && ((r.cells && r.cells[c.key]) || []).length < r.needed;
+            }).length;
+        }, 0);
         s.innerHTML = '<i class="bi bi-grid-3x3 me-1"></i><strong>' + (grid.totalAssigned || 0) + '</strong> uppdrag · '
-            + (grid.rows || []).length + ' rader · ' + cols.length + ' dagar';
+            + (grid.rows || []).length + ' funktioner · ' + cols.filter(function (c) { return c.key; }).length + ' dagar'
+            + (gaps ? ' · <span class="text-danger fw-semibold">' + gaps + (gaps === 1 ? ' ruta' : ' rutor') + ' saknar folk</span>' : '')
+            + ((grid.unreachable || []).length ? ' · <span class="text-danger">' + grid.unreachable.length + ' kan inte nås</span>' : '');
+
+        // Volunteers with no assignment: the only people the grid itself cannot show.
+        var vw = document.getElementById('grdVolunteers');
+        var vols = grid.volunteers || [];
+        vw.innerHTML = vols.length
+            ? '<div class="alert alert-warning py-2 small mb-0 d-flex align-items-center gap-2 flex-wrap">'
+              + '<i class="bi bi-hand-thumbs-up"></i>'
+              + '<span class="flex-grow-1"><strong>' + vols.length + ' har anmält sig</strong> men fått inget uppdrag: '
+              + vols.slice(0, 6).map(function (v) { return esc(v.name); }).join(', ') + (vols.length > 6 ? ' m.fl.' : '')
+              + '</span>'
+              + '<button type="button" class="btn btn-sm btn-warning" onclick="stfOpenPeople(\'queue\')">Tilldela</button>'
+              + '</div>'
+            : '';
 
         // Two different problems, two different messages. "Extern" is survivable; unreachable is not —
         // that person will simply never be told they are working, which is the one thing this tool
@@ -235,6 +288,7 @@
             + (row.scopeLabel ? '<div class="grd-scope">' + esc(row.scopeLabel) + '</div>' : '')
             + '</div>'
             + '<span class="grd-roleacts text-nowrap">'
+            + '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Hur många behövs per dag?" onclick="grdSetNeed(\'' + arg(row.roleKey) + '\')"><i class="bi bi-123"></i></button>'
             + '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Byt namn på rollen" onclick="grdRenameRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-pencil"></i></button>'
             + (row.filled ? '' : '<button type="button" class="btn btn-sm btn-link p-0 me-1 text-secondary" title="Dölj rollen — vi använder den inte" onclick="grdHideRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-eye-slash"></i></button>')
             + (row.isCustom ? '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort rollen" onclick="grdDeleteRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-trash"></i></button>' : '')
@@ -242,8 +296,21 @@
 
         (grid.columns || []).forEach(function (c) {
             var entries = (row.cells && row.cells[c.key]) || [];
-            h += '<td class="grd-cell" onclick="grdOpenCell(event,\'' + idParts + "','" + arg(c.key) + '\')">'
+            // Needed-vs-filled lives HERE, in the cell, not on a separate tab. The hole is already on
+            // screen; the number just names it. Shown only once a need has been set for the role.
+            var need = row.needed || 0;
+            var cls = 'grd-cell';
+            var tally = '';
+            if (need > 0 && c.key) {
+                var short = entries.length < need;
+                cls += short ? ' grd-short' : ' grd-full';
+                tally = '<div class="grd-need ' + (short ? 'text-danger fw-semibold' : 'text-success') + '">'
+                    + entries.length + '/' + need + (short ? ' — saknas ' + (need - entries.length) : '')
+                    + '</div>';
+            }
+            h += '<td class="' + cls + '" onclick="grdOpenCell(event,\'' + idParts + "','" + arg(c.key) + '\')">'
                 + entries.map(entryHtml).join('')
+                + tally
                 + '<div class="grd-add"><i class="bi bi-plus"></i> lägg till</div>'
                 + '</td>';
         });
@@ -254,7 +321,11 @@
         var cls = e.isExternal ? 'text-warning-emphasis' : '';
         return '<div class="grd-entry">'
             + (e.isResponsible ? '<i class="bi bi-star-fill text-warning" title="Ansvarig"></i>' : '')
-            + '<span class="grd-name ' + cls + '">' + esc(e.displayName) + '</span>'
+            // The name is the way into the person. Personer stopped being a place you navigate to and
+            // became a panel you open from whatever you are looking at.
+            + '<button type="button" class="btn btn-link p-0 border-0 align-baseline grd-name ' + cls + '"'
+            + ' title="Visa personen" onclick="event.stopPropagation();grdPerson(\'' + arg(e.memberId ? ('m:' + e.memberId) : ('n:' + (e.displayName || '').toLowerCase())) + '\')">'
+            + esc(e.displayName) + '</button>'
             + (e.clubName ? '<span class="grd-club">' + esc(e.clubName) + '</span>' : '')
             // An account-less helper WITH an e-mail can at least be invited by a tokened link; without one
             // the row delivers nothing at all — so those two states must not look the same.
@@ -468,6 +539,25 @@
         if (!confirm('Ta bort rollen? Uppdrag som redan ligger på den måste flyttas först.')) return;
         var d = await post('DeleteRole', { competitionId: compId, roleKey: roleKey });
         if (!d.success) { alert(d.message || 'Kunde inte ta bort rollen.'); return; }
+        await grdLoad();
+    };
+
+    // Open the person behind a name. Personer is a panel now, not a destination.
+    window.grdPerson = function (key) {
+        if (window.stfOpenPerson) window.stfOpenPerson(unarg(key));
+    };
+
+    // How many of this role do we need, per day? Feeds the number in every cell on the row.
+    window.grdSetNeed = async function (roleKey) {
+        roleKey = unarg(roleKey);
+        var row = (grid.rows || []).find(function (r) { return r.roleKey === roleKey; });
+        var cur = row ? (row.needed || 0) : 0;
+        var v = prompt('Hur många ' + (row ? row.roleName : 'personer') + ' behövs per dag?\n\n0 = inget angivet krav.', String(cur));
+        if (v == null) return;
+        var n = parseInt(v, 10);
+        if (isNaN(n) || n < 0) return;
+        var r = await post('SetCrewNeed', { competitionId: compId, roleKey: roleKey, count: n });
+        if (!r.success) { alert(r.message || 'Kunde inte spara behovet.'); return; }
         await grdLoad();
     };
 

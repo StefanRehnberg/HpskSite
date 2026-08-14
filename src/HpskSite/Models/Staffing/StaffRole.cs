@@ -136,6 +136,25 @@ namespace HpskSite.Models.Staffing
         /// <summary>Column key → the people in that cell.</summary>
         public Dictionary<string, List<GridEntry>> Cells { get; set; } = new();
         public int Filled { get; set; }
+        /// <summary>How many of this role are needed PER DAY. 0 = no stated requirement. Drives the
+        /// needed-vs-filled number rendered in each cell — coverage stopped being a separate screen.</summary>
+        public int Needed { get; set; }
+    }
+
+    /// <summary>A member who volunteered but holds no assignment — the only people the grid cannot show,
+    /// because they are not in it.</summary>
+    public class GridVolunteer
+    {
+        public string Key { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Summary { get; set; }
+    }
+
+    public class SetCrewNeedRequest
+    {
+        public int CompetitionId { get; set; }
+        public string RoleKey { get; set; } = "";
+        public int Count { get; set; }
     }
 
     public class GridResponse
@@ -154,6 +173,8 @@ namespace HpskSite.Models.Staffing
         public List<string> Unreachable { get; set; } = new();
         /// <summary>Built-in roles the arrangör hid, so the UI can offer them back.</summary>
         public List<HiddenRoleView> HiddenRoles { get; set; } = new();
+        /// <summary>Volunteered, nothing assigned yet — surfaced as a strip above the grid.</summary>
+        public List<GridVolunteer> Volunteers { get; set; } = new();
     }
 
     public class HiddenRoleView
