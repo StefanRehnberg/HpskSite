@@ -152,6 +152,11 @@
                         <i class="bi bi-envelope-exclamation me-2 text-warning"></i>Påminnelser – välj mottagare innan du skickar
                     </button>
                 </li>
+                <li>
+                    <button class="dropdown-item" type="button" onclick="openParticipantEmails()">
+                        <i class="bi bi-envelope me-2 text-primary"></i>E-postlista – adresser att klistra in
+                    </button>
+                </li>
                 <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Listor</h6></li>
                 <li>
@@ -449,6 +454,45 @@
                         <tbody id="competitionTeamsTableBody"></tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- E-postlista — a paste target, not a mail client. The organiser's own mail program knows their
+     signature, their attachments and their sent-folder; pistol.nu should not try to replace it.
+     BCC is what the hint and the mailto both use: a start list is a list of named private people,
+     and two hundred addresses in To: hands every one of them to everybody else.
+     Same shape as the Bemanning list, deliberately — one idiom for "get the addresses out". -->
+<div class="modal fade" id="participantEmailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title mb-0"><i class="bi bi-envelope me-2"></i>E-postlista</h5>
+                    <div class="small text-muted" id="peSummary"></div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+                    <button type="button" class="btn btn-sm btn-primary" onclick="peCopy(event)">
+                        <i class="bi bi-clipboard me-1"></i>Kopiera adresserna
+                    </button>
+                    <a class="btn btn-sm btn-outline-secondary" id="peMailto" href="#">
+                        <i class="bi bi-envelope-open me-1"></i>Öppna i e-postprogrammet
+                    </a>
+                    <div class="form-check form-switch ms-auto">
+                        <input class="form-check-input" type="checkbox" id="peIncludeTeams" checked onchange="peRender()">
+                        <label class="form-check-label small" for="peIncludeTeams">Ta med lagmedlemmar</label>
+                    </div>
+                </div>
+                <textarea class="form-control font-monospace" id="peBox" rows="8" readonly style="font-size:.8rem"></textarea>
+                <div class="form-text">
+                    Semikolon mellan adresserna — klistra in i <strong>Hemlig kopia (BCC)</strong> så ser
+                    inte deltagarna varandras adresser.
+                </div>
+                <div id="peMissing" class="mt-3"></div>
             </div>
         </div>
     </div>
@@ -3551,6 +3595,77 @@ function refreshCompetitionRegistrations() {
 function exportCompetitionRegistrations() {
     const currentCompetitionId = $('.competition-registration-management').data('competition-id');
     window.open(`/umbraco/surface/RegistrationAdmin/ExportCompetitionRegistrations?competitionId=${currentCompetitionId}`, '_blank');
+}
+
+// ---- e-postlista -------------------------------------------------------------------------------
+// Fetched once per open; the include-teams switch re-filters what's already here rather than
+// round-tripping, so toggling it is instant.
+let peData = null;
+
+async function openParticipantEmails() {
+    const compId = $('.competition-registration-management').data('competition-id');
+    peData = null;
+    document.getElementById('peBox').value = '';
+    document.getElementById('peSummary').textContent = 'Läser…';
+    document.getElementById('peMissing').innerHTML = '';
+    new bootstrap.Modal(document.getElementById('participantEmailsModal')).show();
+    try {
+        const r = await fetch(`/umbraco/surface/RegistrationAdmin/GetParticipantEmails?competitionId=${compId}`,
+            { headers: { 'Accept': 'application/json' } });
+        const d = await r.json();
+        if (!d.success) { document.getElementById('peSummary').textContent = d.message || 'Kunde inte läsa adresserna.'; return; }
+        peData = d;
+        peRender();
+    } catch (e) {
+        document.getElementById('peSummary').textContent = 'Kunde inte läsa adresserna.';
+    }
+}
+
+function peRender() {
+    if (!peData) return;
+    const withTeams = document.getElementById('peIncludeTeams').checked;
+    const keep = x => withTeams || x.source !== 'Lag';
+
+    // Dedupe on the ADDRESS: one person entered in two classes is one recipient, and a parent's
+    // address shared by two juniors should be mailed once.
+    const seen = {}, addrs = [];
+    (peData.people || []).filter(keep).forEach(p => {
+        const k = (p.email || '').trim().toLowerCase();
+        if (!k || seen[k]) return;
+        seen[k] = 1; addrs.push(p.email.trim());
+    });
+    const missing = (peData.missing || []).filter(keep);
+
+    document.getElementById('peBox').value = addrs.join('; ');
+    document.getElementById('peSummary').textContent =
+        addrs.length + (addrs.length === 1 ? ' adress' : ' adresser')
+        + (missing.length ? ' · ' + missing.length + ' saknar e-post' : '');
+
+    const a = document.getElementById('peMailto');
+    a.href = 'mailto:?bcc=' + encodeURIComponent(addrs.join(','));
+    a.classList.toggle('disabled', addrs.length === 0);
+
+    document.getElementById('peMissing').innerHTML = missing.length
+        ? `<div class="alert alert-warning py-2 mb-0">
+             <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle me-1"></i>${missing.length} ${missing.length === 1 ? 'deltagare nås' : 'deltagare nås'} inte av mejlet</div>
+             <div class="small">${missing.map(m => escapeHtmlSafe(m.name) + (m.clubName ? ` <span class="text-muted">(${escapeHtmlSafe(m.clubName)})</span>` : '')).join(', ')}</div>
+           </div>`
+        : '';
+}
+
+function peCopy(ev) {
+    const box = document.getElementById('peBox');
+    if (!box.value) return;
+    navigator.clipboard.writeText(box.value).then(() => {
+        const b = ev && ev.currentTarget; if (!b) return;
+        const old = b.innerHTML;
+        b.innerHTML = '<i class="bi bi-check2 me-1"></i>Kopierat';
+        setTimeout(() => { b.innerHTML = old; }, 1500);
+    }, () => {
+        // Clipboard can be blocked; select instead so Ctrl+C still works rather than the button
+        // appearing to do nothing.
+        box.removeAttribute('readonly'); box.select(); box.setAttribute('readonly', 'readonly');
+    });
 }
 
 function openBokforingsUnderlag() {

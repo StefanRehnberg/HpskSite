@@ -2130,6 +2130,96 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// The organiser-side gate for a competition's registration data: site admin OR competition
+        /// manager OR club admin/skjutledare of the hosting club OR — when the competition is
+        /// region-hosted (clubId unset, the SM shape) — a regional admin of that region.
+        /// <para>Extracted so the club-vs-region host shape is decided in ONE place. Written out
+        /// per-endpoint it has been got wrong repeatedly, always the same way: checking only clubId and
+        /// thereby locking the krets out of its own championship.</para>
+        /// </summary>
+        private async Task<bool> CanManageRegistrationsAsync(IContent competition, int competitionId)
+        {
+            if (await _authService.IsCurrentUserAdminAsync()) return true;
+            if (await _authService.IsCompetitionManager(competitionId)) return true;
+
+            var clubId = competition.GetValue<int>("clubId");
+            if (clubId > 0)
+                return await _authService.IsClubAdminForClub(clubId)
+                    || await _authService.IsSkjutledareForClub(clubId);
+
+            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
+            return !string.IsNullOrWhiteSpace(regionCode)
+                && await _authService.IsRegionalAdminForRegion(regionCode);
+        }
+
+        /// <summary>
+        /// Every e-mail address for a competition's participants, so the organiser can write to them
+        /// from their OWN mail program. Deliberately a separate call rather than a column on
+        /// GetCompetitionRegistrations: that payload is a hot path rendered on every filter change, and
+        /// this needs a member lookup per person that is only wanted when someone asks for it.
+        /// <para>Team members are included — on a relay or lag competition they are participants who may
+        /// never appear as an individual registration, and leaving them out yields a list that looks
+        /// complete and isn't.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetParticipantEmails(int competitionId)
+        {
+            if (competitionId <= 0) return Json(new { success = false, message = "competitionId krävs" });
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte" });
+            if (!await CanManageRegistrationsAsync(competition, competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            try
+            {
+                var seenMember = new HashSet<int>();
+                var people = new List<object>();
+                var missing = new List<object>();
+
+                void Add(int memberId, string name, string club, string source)
+                {
+                    if (memberId > 0 && !seenMember.Add(memberId)) return;
+                    var email = (memberId > 0 ? _memberService.GetById(memberId)?.Email : null) ?? "";
+                    if (string.IsNullOrWhiteSpace(email))
+                        missing.Add(new { name, clubName = club, source });
+                    else
+                        people.Add(new { name, clubName = club, email, source });
+                }
+
+                var children = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
+                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+                if (hub != null)
+                {
+                    foreach (var reg in _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
+                                 .Where(c => c.ContentType.Alias == "competitionRegistration"))
+                    {
+                        // Cancelled registrations are not participants; mailing them is a mistake the
+                        // organiser cannot see in a pasted address list.
+                        if (reg.HasProperty("isActive") && !reg.GetValue<bool>("isActive")) continue;
+
+                        var clubId = reg.GetValue<int>("clubId");
+                        Add(reg.GetValue<int>("memberId"),
+                            reg.GetValue<string>("memberName") ?? "",
+                            clubId > 0 ? (_clubService.GetClubNameById(clubId) ?? "") : "",
+                            "Anmäld");
+                    }
+                }
+
+                foreach (var team in await _teamService.GetTeamsForCompetitionAsync(competitionId))
+                    foreach (var m in team.Members)
+                        Add(m.MemberId, m.Name ?? "", team.Team.TeamName ?? "", "Lag");
+
+                return Json(new { success = true, people, missing });
+            }
+            catch (Exception)
+            {
+                // No ILogger on this controller — the caller is told plainly instead of getting a
+                // half-filled list it would mistake for the whole thing.
+                return Json(new { success = false, message = "Kunde inte läsa e-postadresserna." });
+            }
+        }
+
+        /// <summary>
         /// Export all registrations for a single competition as a CSV (semicolon-separated,
         /// UTF-8 with BOM so Excel opens it correctly with Swedish characters). Includes
         /// payment columns so the treasurer can reconcile against bank/Swish statements.
@@ -2146,25 +2236,7 @@ namespace HpskSite.Controllers
             if (competition == null)
                 return NotFound("Competition not found");
 
-            bool authorized = await _authService.IsCurrentUserAdminAsync()
-                || await _authService.IsCompetitionManager(competitionId);
-            if (!authorized)
-            {
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                              || await _authService.IsSkjutledareForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
-                    var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                    if (!string.IsNullOrWhiteSpace(regionCode))
-                        authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                }
-            }
-            if (!authorized) return Forbid();
+            if (!await CanManageRegistrationsAsync(competition, competitionId)) return Forbid();
 
             try
             {
