@@ -1547,8 +1547,14 @@ namespace HpskSite.Controllers
             foreach (var role in catalog)
             {
                 var mine = all.Where(a => string.Equals(a.RoleKey, role.Key, StringComparison.OrdinalIgnoreCase)).ToList();
+                // NULL and "All" both mean "hela tävlingen" — grouping on the raw value split one function
+                // into two identical-looking rows depending on which surface created the assignment.
+                static string? NormScope(string? t)
+                    => string.IsNullOrEmpty(t) || string.Equals(t, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
+                        ? null : t;
+
                 var scopeKeys = mine
-                    .Select(a => (a.ScopeType, a.ScopeKey, a.ScopeLabel))
+                    .Select(a => (ScopeType: NormScope(a.ScopeType), a.ScopeKey, a.ScopeLabel))
                     .Distinct()
                     .OrderBy(x => x.ScopeKey, StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -1569,7 +1575,7 @@ namespace HpskSite.Controllers
                         DefaultScopeType = role.DefaultScopeType,
                     };
 
-                    foreach (var a in mine.Where(a => a.ScopeType == scopeType && a.ScopeKey == scopeKey))
+                    foreach (var a in mine.Where(a => NormScope(a.ScopeType) == scopeType && a.ScopeKey == scopeKey))
                     {
                         var colKey = a.DateKey ?? single ?? "";
                         if (!row.Cells.TryGetValue(colKey, out var list))
@@ -1608,6 +1614,30 @@ namespace HpskSite.Controllers
             resp.HiddenRoles = _roleCatalog.GetHidden(competitionId)
                 .Select(h => new HiddenRoleView { RoleKey = h.Key, RoleName = h.Name }).ToList();
             return resp;
+        }
+
+        /// <summary>
+        /// The days of the plan. Bemanning AND Dagsprogram both read this, so the two surfaces cannot
+        /// disagree about what days the event has — which was the original complaint.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetDays(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var viewer = await ResolveViewerAsync();
+                var withWork = _days.DatesWithAssignments(competitionId);
+                var days = _days.EnsureSeeded(competitionId, viewer?.Id ?? 0)
+                    .Select(d => _days.ToView(d, withWork)).ToList();
+                return Json(new { success = true, days });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetDays failed for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Kunde inte läsa dagarna." });
+            }
         }
 
         /// <summary>Add or edit a day of the plan — including a build/teardown day outside the competition.</summary>
@@ -1769,6 +1799,7 @@ namespace HpskSite.Controllers
                 string? DayOf(StaffAssignment a)
                 {
                     if (a.StartsAt is { } s) return s.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    if (a.DayDate is { } dd) return dd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                     if (a.PassId is int pid && passDateById.TryGetValue(pid, out var d)) return d;
                     return null;
                 }
@@ -1810,6 +1841,8 @@ namespace HpskSite.Controllers
                         TargetTo = a.TargetTo,
                         StartsAt = Shift(a.StartsAt),
                         EndsAt = Shift(a.EndsAt),
+                        // An all-day row keeps being all-day — on the new day.
+                        DayDate = a.StartsAt == null ? request.ToDate : null,
                         // Only attach a pass when the source row used one AND the target day has one;
                         // otherwise the copy would silently inherit the wrong day's times.
                         PassId = a.PassId != null ? targetPassId : null,

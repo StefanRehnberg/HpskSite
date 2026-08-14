@@ -52,9 +52,13 @@
                 </div>
                 <div class="row g-2">
                     <div class="col-sm-4 mb-3">
-                        <label class="form-label fw-semibold" for="agDate">Datum</label>
-                        <input type="text" class="form-control" id="agDate" placeholder="Tävlingsdagen">
-                        <div class="form-text">Lämna tomt på endagstävlingar.</div>
+                        <label class="form-label fw-semibold" for="agDate">Dag</label>
+                        @* Fed from StaffDay — the SAME day list the Bemanning grid uses, so the programme
+                           and the crew plan can never disagree about which days the event has. *@
+                        <select class="form-select" id="agDate">
+                            <option value="">Tävlingsdagen</option>
+                        </select>
+                        <div class="form-text">Dagarna kommer från planen. Lägg till fler under Bemanning.</div>
                     </div>
                     <div class="col-sm-4 mb-3">
                         <label class="form-label fw-semibold" for="agStart">Från</label>
@@ -133,10 +137,16 @@
 
         let html = '';
         Object.keys(byDay).sort().forEach(day => {
+            const di = dayInfo(day);
             const heading = day
                 ? new Date(day + 'T00:00:00').toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })
                 : 'Tävlingsdagen';
-            html += '<div class="fw-semibold text-muted small text-uppercase mt-3 mb-1">' + esc(heading) + '</div>';
+            html += '<div class="fw-semibold text-muted small text-uppercase mt-3 mb-1">' + esc(heading)
+                + (di && di.label ? ' <span class="text-body">· ' + esc(di.label) + '</span>' : '')
+                + (di && !di.isParticipantFacing
+                    ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis border fw-normal text-lowercase">'
+                      + esc(di.kindLabel) + ' — syns bara för funktionärer</span>' : '')
+                + '</div>';
             html += '<div class="list-group list-group-flush">';
             byDay[day].forEach(it => {
                 html += '<div class="list-group-item px-0 d-flex gap-3 align-items-start">' +
@@ -164,9 +174,40 @@
     }
 
     let agItems = [];
+    let agDays = [];
+
+    // One shared day list with Bemanning. A Förberedelse day is crew-only, and the picker says so, so a
+    // "banbygge 07:00" item can't quietly turn up in every shooter's schedule.
+    function loadDays() {
+        return fetch('/umbraco/surface/Staffing/GetDays?competitionId=' + AG_COMP)
+            .then(r => r.json())
+            .then(d => {
+                agDays = (d && d.success && d.days) ? d.days : [];
+                const sel = document.getElementById('agDate');
+                if (!sel) return;
+                const keep = sel.value;
+                sel.innerHTML = '<option value="">' + (agDays.length ? 'Ingen särskild dag' : 'Tävlingsdagen') + '</option>'
+                    + agDays.map(function (dd) {
+                        const label = new Date(dd.date + 'T00:00:00')
+                            .toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+                        return '<option value="' + dd.date + '">' + esc(label)
+                            + (dd.label ? ' — ' + esc(dd.label) : '')
+                            + (dd.isParticipantFacing ? '' : ' (' + esc(dd.kindLabel) + ' — endast funktionärer)')
+                            + '</option>';
+                    }).join('');
+                sel.value = keep;
+            })
+            .catch(() => { agDays = []; });
+    }
+
+    function dayInfo(key) { return agDays.find(function (d) { return d.date === key; }) || null; }
 
     function load() {
-        fetch('/umbraco/surface/Staffing/GetAgenda?competitionId=' + AG_COMP)
+        loadDays().then(loadItems);
+    }
+
+    function loadItems() {
+        return fetch('/umbraco/surface/Staffing/GetAgenda?competitionId=' + AG_COMP)
             .then(r => r.json())
             .then(d => {
                 if (!d.success) {
@@ -187,7 +228,7 @@
 
     function pickers() {
         if (typeof flatpickr !== 'function') return;
-        flatpickr('#agDate', { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+        // #agDate is a <select> fed from the plan's day list — never a datepicker.
         flatpickr('#agStart', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, allowInput: true });
         flatpickr('#agEnd', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, allowInput: true });
     }

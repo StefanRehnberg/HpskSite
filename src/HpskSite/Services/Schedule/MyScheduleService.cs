@@ -490,12 +490,15 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
                 DateTime? startsAt = a.StartsAt;
                 DateTime? endsAt = a.EndsAt;
                 string timeLabel;
-                DateTime? dayDate = a.StartsAt?.Date;
+                // StartsAt.Date → DayDate → pass date. DayDate is how "heldag på lördag" is expressed
+                // without inventing a clock time (a fake 00:00 would fire a reminder at 23:30 the night
+                // before), so it pins the DAY and leaves StartsAt null on purpose.
+                DateTime? dayDate = a.StartsAt?.Date ?? a.DayDate?.Date;
 
                 if (startsAt == null && a.PassId is int pid && passById.TryGetValue(pid, out var pass))
                 {
                     // A structured pass gives a real date plus (usually) real clock times.
-                    dayDate = pass.PassDate.Date;
+                    dayDate ??= pass.PassDate.Date;
                     var st = ParseTimeOfDay(pass.StartTime);
                     var en = ParseTimeOfDay(pass.EndTime);
                     startsAt = Combine(dayDate, st);
@@ -559,11 +562,28 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
                 return items;   // table not migrated yet → the feature is simply absent
             }
 
+            // Crew-only DAYS (banbygge, återställning) are crew-only programmes. A shooter has no business
+            // seeing "materielhämtning 07:00 onsdag", and the organiser shouldn't have to remember to set
+            // the audience on every single row of a build day.
+            var crewOnlyDays = new HashSet<string>(StringComparer.Ordinal);
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var days = scope.Database.Fetch<HpskSite.Models.Staffing.StaffDay>(
+                    "SELECT * FROM StaffDay WHERE CompetitionId = @0", competitionId);
+                foreach (var d in days)
+                    if (!HpskSite.Models.Staffing.StaffDayKind.IsParticipantFacing(d.Kind))
+                        crewOnlyDays.Add(d.DayDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            }
+            catch { /* no day list yet → nothing is crew-only */ }
+
             foreach (var r in rows)
             {
                 // Audience gate: staff-only rows are hidden from pure shooters and vice versa.
                 if (string.Equals(r.Audience, AgendaAudience.Staff, StringComparison.OrdinalIgnoreCase) && !hasStaffItems) continue;
                 if (string.Equals(r.Audience, AgendaAudience.Shooters, StringComparison.OrdinalIgnoreCase) && !s.IsRegistered) continue;
+                if (!hasStaffItems && r.ItemDate is { } id
+                    && crewOnlyDays.Contains(id.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))) continue;
 
                 var st = ParseTimeOfDay(r.StartTime);
                 var en = ParseTimeOfDay(r.EndTime);

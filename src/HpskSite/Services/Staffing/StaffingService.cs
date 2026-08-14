@@ -281,6 +281,9 @@ namespace HpskSite.Services.Staffing
                 row.TargetTo = req.TargetTo is > 0 ? req.TargetTo : null;
                 row.StartsAt = ParseDateTime(req.StartsAt);
                 row.EndsAt = ParseDateTime(req.EndsAt);
+                // A timed row already carries its day; DayDate only speaks for untimed ("heldag") rows,
+                // so keeping both would let them drift apart.
+                row.DayDate = row.StartsAt != null ? null : ParseDate(req.DayDate);
                 row.PassId = req.PassId is > 0 ? req.PassId : null;
                 row.IsResponsible = req.IsResponsible;
                 // App access is role-agnostic (a Kassa- or Sekretariatsansvarig needs the same management
@@ -527,14 +530,13 @@ namespace HpskSite.Services.Staffing
 
             if (a.StartsAt == null)
             {
-                if (targetPassId == null)
-                    return (false, "Uppdraget saknar tid, och dagen har inget skift att hänga det på. Ange en tid på uppdraget, eller lägg till ett skift på dagen.");
-                db.Execute("UPDATE StaffAssignment SET PassId = @0, ModifiedDate = @1 WHERE Id = @2",
-                    targetPassId, DateTime.UtcNow, assignmentId);
+                // An all-day row now has an honest home: the day, with no clock time claimed.
+                db.Execute("UPDATE StaffAssignment SET DayDate = @0, PassId = @1, ModifiedDate = @2 WHERE Id = @3",
+                    day.Date, targetPassId, DateTime.UtcNow, assignmentId);
                 return (true, null);
             }
 
-            db.Execute("UPDATE StaffAssignment SET StartsAt = @0, EndsAt = @1, PassId = @2, ModifiedDate = @3 WHERE Id = @4",
+            db.Execute("UPDATE StaffAssignment SET StartsAt = @0, EndsAt = @1, DayDate = NULL, PassId = @2, ModifiedDate = @3 WHERE Id = @4",
                 Shift(a.StartsAt), Shift(a.EndsAt), targetPassId, DateTime.UtcNow, assignmentId);
             return (true, null);
         }
@@ -685,21 +687,20 @@ namespace HpskSite.Services.Staffing
                     if (mid <= 0 || haveMemberIds.Contains(mid)) continue;
                     var name = ResolveMemberName(mid);
                     var now = DateTime.UtcNow;
-                    db.Insert(new StaffAssignment
-                    {
-                        CompetitionId = competitionId,
-                        MemberId = mid,
-                        DisplayName = name,
-                        RoleKey = TavlingsledningRole,
-                        FunctionTitle = "Tävlingsledare",
-                        ScopeType = StaffScopeType.All,
-                        IsResponsible = true,
-                        HasAdminAccess = true,
-                        Status = StaffAssignmentStatus.Confirmed,
-                        AssignedByMemberId = 0,
-                        CreatedDate = now,
-                        ModifiedDate = now,
-                    });
+                    // INSERT ... WHERE NOT EXISTS, not read-then-Insert. The planning page loads the roster
+                    // and the people list in parallel and BOTH call this; with a separate read both saw
+                    // "missing" and both inserted, so the tävlingsledare appeared twice. One statement makes
+                    // the check and the write atomic.
+                    db.Execute(@"
+                        INSERT INTO StaffAssignment
+                            (CompetitionId, MemberId, DisplayName, RoleKey, FunctionTitle, ScopeType,
+                             IsResponsible, HasAdminAccess, Status, AssignedByMemberId, CreatedDate, ModifiedDate)
+                        SELECT @0, @1, @2, @3, @4, @5, 1, 1, @6, 0, @7, @7
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM StaffAssignment
+                            WHERE CompetitionId = @0 AND RoleKey = @3 AND MemberId = @1)",
+                        competitionId, mid, name, TavlingsledningRole, "Tävlingsledare",
+                        StaffScopeType.All, StaffAssignmentStatus.Confirmed, now);
                 }
             }
             catch (Exception ex)
@@ -850,7 +851,8 @@ namespace HpskSite.Services.Staffing
                 TargetTo = a.TargetTo,
                 ShiftLabel = BuildShiftLabel(a.StartsAt, a.EndsAt),
                 PassId = a.PassId,
-                DateKey = a.StartsAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                // StartsAt.Date → DayDate → (pass date, filled in by BuildRoster). One order, everywhere.
+                DateKey = (a.StartsAt ?? a.DayDate)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 IsResponsible = a.IsResponsible,
                 HasAdminAccess = a.HasAdminAccess,
                 Status = a.Status,
@@ -902,6 +904,14 @@ namespace HpskSite.Services.Staffing
             }
             if (from != null) return $"från {Day(from.Value)} {T(from.Value)}";
             return $"till {Day(to!.Value)} {T(to.Value)}";
+        }
+
+        /// <summary>"yyyy-MM-dd" only — a day, never a time.</summary>
+        private static DateTime? ParseDate(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            return DateTime.TryParseExact(s.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var d) ? d.Date : null;
         }
 
         private static DateTime? ParseDateTime(string? s)

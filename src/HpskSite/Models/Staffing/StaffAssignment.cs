@@ -31,6 +31,9 @@ namespace HpskSite.Models.Staffing
 
         public DateTime? StartsAt { get; set; }         // shift start; NULL = heldag
         public DateTime? EndsAt { get; set; }
+        /// <summary>Which DAY this row belongs to when it claims no clock time ("heldag på lördag").
+        /// Resolution order everywhere: StartsAt.Date → DayDate → linked StaffPass.PassDate.</summary>
+        public DateTime? DayDate { get; set; }
         public int? PassId { get; set; }                 // structured shift (StaffPass); NULL = ad-hoc
 
         public bool IsResponsible { get; set; }
@@ -212,6 +215,8 @@ namespace HpskSite.Models.Staffing
         public int? TargetTo { get; set; }
         public string? StartsAt { get; set; }          // Flatpickr "Y-m-d H:i" or null
         public string? EndsAt { get; set; }
+        /// <summary>"yyyy-MM-dd" — the day an untimed (heldag) row belongs to.</summary>
+        public string? DayDate { get; set; }
         public int? PassId { get; set; }                 // structured shift
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }

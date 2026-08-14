@@ -394,6 +394,9 @@
             roleKey: editing.roleKey,
             scopeType: editing.scopeType, scopeKey: editing.scopeKey,
             startsAt: stamp(from), endsAt: stamp(to),
+            // Always send the day. Without a time the row is "heldag på den dagen" (dayDate); with one,
+            // the server ignores dayDate because StartsAt already carries the date.
+            dayDate: day || null,
             status: 'Planned', allowDuplicate: false
         };
         var d = await post('SaveAssignment', payload);

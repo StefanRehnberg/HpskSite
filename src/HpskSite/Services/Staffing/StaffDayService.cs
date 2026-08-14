@@ -161,7 +161,7 @@ namespace HpskSite.Services.Staffing
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 // StartsAt wins; otherwise the linked pass's date. Mirrors the grid's own day resolution.
                 var rows = scope.Database.Fetch<DateTime?>(@"
-                    SELECT COALESCE(CAST(sa.StartsAt AS DATE), CAST(sp.PassDate AS DATE))
+                    SELECT COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE))
                     FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                     WHERE sa.CompetitionId = @0", competitionId);
@@ -183,7 +183,7 @@ namespace HpskSite.Services.Staffing
                     SELECT COUNT(1) FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                     WHERE sa.CompetitionId = @0
-                      AND COALESCE(CAST(sa.StartsAt AS DATE), CAST(sp.PassDate AS DATE)) = @1",
+                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @1",
                     competitionId, date.Date);
             }
             catch { return 0; }
