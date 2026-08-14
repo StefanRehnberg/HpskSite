@@ -1647,6 +1647,16 @@ namespace HpskSite.Controllers
             // grid has to be told about them explicitly or they are invisible until someone goes looking.
             // Same predicate as the people layer's UnassignedVolunteerCount; sharing it is what keeps the
             // strip, the badge and the filtered list from disagreeing.
+            // Rows in Swedish alphabetical order. It has to be a Swedish comparer, not Ordinal or
+            // Invariant: å, ä and ö sort AFTER z in Swedish, so "Åkulla" belongs last, not between A and B.
+            // Predictability is the point — a newly created role must land where the eye expects it
+            // instead of wherever the catalog happened to append it.
+            var svCmp = StringComparer.Create(CultureInfo.GetCultureInfo("sv-SE"), ignoreCase: true);
+            resp.Rows = resp.Rows
+                .OrderBy(r => r.RoleName, svCmp)
+                .ThenBy(r => r.ScopeLabel ?? "", svCmp)
+                .ToList();
+
             // Double-booking, surfaced where the organiser is standing. It used to be computed only for
             // MEMBERS and rendered only on the retired Roller view — so on a plan that is 90% free text it
             // checked almost nobody, and showed the result to nobody.

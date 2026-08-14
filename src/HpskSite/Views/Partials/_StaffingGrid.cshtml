@@ -414,7 +414,22 @@
 
     document.addEventListener('click', function (e) {
         if (!editing) return;
-        if (e.target.closest('#grdEditor') || e.target.closest('.grd-cell')) return;
+        // A suggestion button removes ITSELF from the DOM inside its own onclick (hideSuggest clears
+        // the list). By the time this listener runs on the way up, e.target is detached, so
+        // closest('#grdEditor') finds nothing and we would close the editor on the very click that
+        // picks the person — the name appeared and then everything vanished, saving nothing.
+        // composedPath() is captured when the event is dispatched and still holds the real ancestors.
+        var path = (typeof e.composedPath === 'function') ? e.composedPath() : null;
+        if (path) {
+            for (var i = 0; i < path.length; i++) {
+                var el = path[i];
+                if (!el || el.nodeType !== 1) continue;
+                if (el.id === 'grdEditor') return;
+                if (el.classList && el.classList.contains('grd-cell')) return;
+            }
+        } else if (e.target.closest && (e.target.closest('#grdEditor') || e.target.closest('.grd-cell'))) {
+            return;
+        }
         closeEditor();
     });
 
