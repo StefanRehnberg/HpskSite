@@ -27,15 +27,17 @@ namespace HpskSite.Services.Staffing
         private readonly IScopeProvider _scopeProvider;
         private readonly IContentService _contentService;
         private readonly IMemberService _memberService;
+        private readonly RoleCatalogService _roles;
         private readonly ILogger<StaffingService> _logger;
 
         private const string TavlingsledningRole = "tavlingsledning";
 
-        public StaffingService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, ILogger<StaffingService> logger)
+        public StaffingService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, RoleCatalogService roles, ILogger<StaffingService> logger)
         {
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _memberService = memberService;
+            _roles = roles;
             _logger = logger;
         }
 
@@ -101,7 +103,7 @@ namespace HpskSite.Services.Staffing
             var rows = GetForCompetition(competitionId);
             var resp = new StaffRosterResponse { Discipline = discipline ?? "", CanEdit = canEdit };
 
-            var roles = FunctionaryRoles.ForDiscipline(discipline);
+            var roles = _roles.ForCompetition(competitionId, discipline);
             var byRole = rows.GroupBy(r => r.RoleKey ?? "").ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
             foreach (var role in roles)
@@ -123,7 +125,7 @@ namespace HpskSite.Services.Staffing
                         .OrderBy(a => a.ScopeKey, StringComparer.OrdinalIgnoreCase)
                         .ThenBy(a => a.StartsAt ?? DateTime.MinValue)
                         .ThenByDescending(a => a.IsResponsible)
-                        .Select(ToView)
+                        .Select(a => ToView(a, competitionId, discipline))
                         .ToList();
                 }
                 resp.Groups.Add(group);
@@ -140,7 +142,7 @@ namespace HpskSite.Services.Staffing
                     RoleKey = "_ovriga",
                     RoleName = "Övriga roller",
                     RolePlural = "Övriga roller",
-                    Assignments = orphans.Select(ToView).ToList(),
+                    Assignments = orphans.Select(a => ToView(a, competitionId, discipline)).ToList(),
                 });
             }
 
@@ -167,9 +169,15 @@ namespace HpskSite.Services.Staffing
                         var t = (string.IsNullOrEmpty(p.StartTime) && string.IsNullOrEmpty(p.EndTime)) ? null : $"{p.StartTime}–{p.EndTime}";
                         return t == null ? lbl : $"{lbl} · {t}";
                     });
+                    var dateById = passes.ToDictionary(p => p.Id, p => p.PassDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                     foreach (var g in resp.Groups)
                         foreach (var a in g.Assignments)
-                            if (a.PassId is int pid && byId.TryGetValue(pid, out var lbl)) a.PassLabel = lbl;
+                            if (a.PassId is int pid)
+                            {
+                                if (byId.TryGetValue(pid, out var lbl)) a.PassLabel = lbl;
+                                // An explicit StartsAt wins; the pass only supplies the day when there isn't one.
+                                if (a.DateKey == null && dateById.TryGetValue(pid, out var dk)) a.DateKey = dk;
+                            }
                 }
             }
             catch { }
@@ -506,7 +514,7 @@ namespace HpskSite.Services.Staffing
             var content = _contentService.GetById(a.CompetitionId);
             var compName = content?.GetValue<string>("competitionName") ?? "Tävling";
             var discipline = content?.GetValue<string>("competitionType") ?? "";
-            var role = FunctionaryRoles.Resolve(discipline, a.RoleKey);
+            var role = _roles.Resolve(a.CompetitionId, discipline, a.RoleKey);
             return new InviteResponseModel
             {
                 Valid = true,
@@ -577,7 +585,7 @@ namespace HpskSite.Services.Staffing
                         .Select(r => new MyAssignmentView
                         {
                             Id = r.Id,
-                            RoleName = FunctionaryRoles.Resolve(discipline, r.RoleKey)?.DisplayName ?? r.RoleKey,
+                            RoleName = _roles.NameFor(compId, discipline, r.RoleKey),
                             FunctionTitle = r.FunctionTitle,
                             ScopeLabel = BuildScopeLabel(r),
                             ShiftLabel = BuildShiftLabel(r.StartsAt, r.EndsAt),
@@ -777,9 +785,9 @@ namespace HpskSite.Services.Staffing
 
         // ---- mapping helpers ----
 
-        private static StaffAssignmentView ToView(StaffAssignment a)
+        private StaffAssignmentView ToView(StaffAssignment a, int competitionId, string? discipline)
         {
-            var role = FunctionaryRoles.Resolve(null, a.RoleKey);
+            var role = _roles.Resolve(competitionId, discipline, a.RoleKey);
             return new StaffAssignmentView
             {
                 Id = a.Id,
@@ -797,6 +805,7 @@ namespace HpskSite.Services.Staffing
                 TargetTo = a.TargetTo,
                 ShiftLabel = BuildShiftLabel(a.StartsAt, a.EndsAt),
                 PassId = a.PassId,
+                DateKey = a.StartsAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 IsResponsible = a.IsResponsible,
                 HasAdminAccess = a.HasAdminAccess,
                 Status = a.Status,

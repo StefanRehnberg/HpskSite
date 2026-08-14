@@ -42,6 +42,7 @@ namespace HpskSite.Services.Schedule
         private readonly IScopeProvider _scopeProvider;
         private readonly ParticipantAudienceResolver _audience;
         private readonly AppCaches _appCaches;
+        private readonly HpskSite.Services.Staffing.RoleCatalogService _roles;
         private readonly ILogger<MyScheduleService> _logger;
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
@@ -59,12 +60,14 @@ namespace HpskSite.Services.Schedule
             IScopeProvider scopeProvider,
             ParticipantAudienceResolver audience,
             AppCaches appCaches,
+            HpskSite.Services.Staffing.RoleCatalogService roles,
             ILogger<MyScheduleService> logger)
         {
             _ctxFactory = ctxFactory;
             _scopeProvider = scopeProvider;
             _audience = audience;
             _appCaches = appCaches;
+            _roles = roles;
             _logger = logger;
         }
 
@@ -518,7 +521,7 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
                 items.Add(new ScheduleItem
                 {
                     Kind = ScheduleItemKind.Funktionar,
-                    Title = ResolveRoleName(s.Discipline, a.RoleKey, a.FunctionTitle),
+                    Title = ResolveRoleName(competitionId, s.Discipline, a.RoleKey, a.FunctionTitle),
                     Where = BuildScopeLabel(a),
                     Detail = a.Note,
                     StartsAt = startsAt,
@@ -698,9 +701,15 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
         private static string DisplayClass(string weaponClass, string? championshipClass)
             => !string.IsNullOrWhiteSpace(championshipClass) ? championshipClass! : weaponClass;
 
-        private static string ResolveRoleName(string discipline, string roleKey, string? functionTitle)
+        /// <summary>
+        /// The role name the functionary sees in their own schedule. Resolved through the merged catalog,
+        /// so an arrangör-named role ("Vapenkontroll", "Vakt på löpslingan") reads exactly as they typed it.
+        /// Falls back to the raw key, never to an empty title.
+        /// </summary>
+        private string ResolveRoleName(int competitionId, string discipline, string roleKey, string? functionTitle)
         {
-            var name = FunctionaryRoles.Resolve(discipline, roleKey)?.DisplayName ?? roleKey;
+            var name = _roles.NameFor(competitionId, discipline, roleKey);
+            if (string.IsNullOrWhiteSpace(name)) name = roleKey;
             return string.IsNullOrWhiteSpace(functionTitle) ? name : $"{name} — {functionTitle}";
         }
 

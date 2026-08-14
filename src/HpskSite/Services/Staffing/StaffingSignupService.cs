@@ -16,13 +16,15 @@ namespace HpskSite.Services.Staffing
         private readonly IContentService _contentService;
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
+        private readonly RoleCatalogService _roles;
 
-        public StaffingSignupService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, ClubService clubService)
+        public StaffingSignupService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, ClubService clubService, RoleCatalogService roles)
         {
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _memberService = memberService;
             _clubService = clubService;
+            _roles = roles;
         }
 
         // ---- source scopes (organiser side) ----
@@ -122,7 +124,7 @@ namespace HpskSite.Services.Staffing
                     CompName = comp.GetValue<string>("competitionName") ?? comp.Name ?? "Tävling",
                     CompDate = date is { } d && d != default ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null,
                     Discipline = discipline,
-                    Roles = FunctionaryRoles.ForDiscipline(discipline)
+                    Roles = _roles.ForCompetition(compId, discipline)
                         .Where(r => r.Key != "tavlingsledning")   // self-sign-up never grants leadership/app admin
                         .Select(r => new RoleOption { Key = r.Key, Name = r.DisplayName }).ToList(),
                 });
@@ -138,7 +140,7 @@ namespace HpskSite.Services.Staffing
             var comp = _contentService.GetById(competitionId);
             if (comp == null) return (false, "Tävlingen hittades inte.");
             var discipline = comp.GetValue<string>("competitionType") ?? "";
-            var role = FunctionaryRoles.Resolve(discipline, roleKey);
+            var role = _roles.Resolve(competitionId, discipline, roleKey);
             if (role == null || role.Key == "tavlingsledning") return (false, "Ogiltig roll.");
 
             var m = _memberService.GetById(memberId);

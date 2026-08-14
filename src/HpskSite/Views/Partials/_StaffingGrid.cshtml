@@ -1,0 +1,428 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    // Bemanning — RUTNÄTET. Roles as rows, competition DAYS as columns, people in the cells.
+    //
+    // WHY THIS SHAPE: arrangörer plan staffing in Excel, and the reason is authoring ergonomics — the whole
+    // plan on one screen, type a name and tab on. This is that surface, with pistol.nu's data model behind
+    // it: a name you type resolves to a MEMBER, which is what makes the row show up in that person's own
+    // schedule, reachable by push, and countable per club. Excel can never do that.
+    //
+    // DAY on the column axis, time INSIDE the cell — not one column per pass. Three days × five passes is
+    // fifteen columns that never fit on a laptop, and five identical cells for a whole-day person read as
+    // five people. The arrangör this was designed from had the option in Excel and chose day columns with
+    // the time written in the cell; a person with no shift renders as a bare name.
+    //
+    // Roles are FREE-NAMED (StaffRole + RoleCatalogService). Clubs use their own vocabulary, and being
+    // forced onto our word for a job they call something else — or worse, onto a word they already use for
+    // a DIFFERENT job — makes the stored data wrong, not just awkward. Typing a name in "+ Ny roll" creates
+    // it; the built-ins are suggestions you may rename.
+    //
+    // Deliberately additive: the Personer/Roller/Behov/Värvning views are untouched and still work, so if
+    // this misbehaves the plan can still be entered the old way.
+    var competitionId = ViewData["CompetitionId"];
+    var grdToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+
+<style>
+    /* Sticky role column is non-negotiable — the row must stay identifiable however wide the grid gets. */
+    #grdWrap { overflow-x: auto; overflow-y: visible; }
+    #grdTable { border-collapse: separate; border-spacing: 0; min-width: 100%; }
+    #grdTable th, #grdTable td { border-bottom: 1px solid var(--bs-border-color); vertical-align: top; padding: .4rem .5rem; }
+    #grdTable thead th { position: sticky; top: 0; z-index: 3; background: var(--bs-body-bg); border-bottom-width: 2px; }
+    #grdTable .grd-rolecol { position: sticky; left: 0; z-index: 2; background: var(--bs-body-bg); min-width: 210px; max-width: 260px; box-shadow: 1px 0 0 var(--bs-border-color); }
+    #grdTable thead .grd-rolecol { z-index: 4; }
+    #grdTable td.grd-cell { min-width: 190px; cursor: pointer; }
+    #grdTable td.grd-cell:hover { background: var(--bs-tertiary-bg); }
+    #grdTable tr.grd-empty td.grd-cell { }
+    .grd-entry { display: flex; align-items: baseline; gap: .35rem; line-height: 1.25; padding: 1px 0; }
+    .grd-entry .grd-name { font-weight: 500; }
+    .grd-entry .grd-club { font-size: .75rem; color: var(--bs-secondary-color); }
+    .grd-entry .grd-time { font-size: .75rem; }
+    .grd-entry .grd-del { visibility: hidden; border: 0; background: none; color: var(--bs-danger); line-height: 1; padding: 0 2px; }
+    .grd-entry:hover .grd-del { visibility: visible; }
+    .grd-add { font-size: .8rem; color: var(--bs-secondary-color); }
+    #grdTable td.grd-cell:hover .grd-add { color: var(--bs-primary); }
+    .grd-rolename { font-weight: 600; }
+    .grd-scope { font-size: .75rem; color: var(--bs-secondary-color); }
+    .grd-roleacts { visibility: hidden; }
+    #grdTable tr:hover .grd-roleacts { visibility: visible; }
+    /* Floating cell editor — anchored, not a modal: a modal per cell is exactly the friction we're removing. */
+    #grdEditor { position: fixed; z-index: 1080; width: 330px; display: none; }
+    #grdSuggest { max-height: 220px; overflow-y: auto; }
+    #grdSuggest .list-group-item { cursor: pointer; padding: .35rem .6rem; }
+    .grd-ext { font-size: .7rem; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <div class="small text-muted" id="grdSummary"></div>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="grdLoad()" title="Läs om">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+        <a class="btn btn-sm btn-outline-primary" href="/tavlingsplanering/blad?c=@competitionId" target="_blank" rel="noopener">
+            <i class="bi bi-printer me-1"></i>Skriv ut
+        </a>
+    </div>
+</div>
+
+<div id="grdExternalWarn" class="alert alert-warning py-2 small" style="display:none"></div>
+
+<div id="grdWrap" class="border rounded">
+    <table class="table table-sm mb-0" id="grdTable">
+        <thead><tr id="grdHead"></tr></thead>
+        <tbody id="grdBody"></tbody>
+        <tfoot id="grdFoot"></tfoot>
+    </table>
+</div>
+
+<p class="text-muted small mt-2 mb-0">
+    <i class="bi bi-info-circle me-1"></i>
+    Klicka i en ruta för att lägga till en person. Namn utan tid betyder <strong>heldag</strong>.
+    Personer utan konto på pistol.nu får <strong>inget schema och inga notiser</strong> — de visas gulmarkerade.
+</p>
+
+@* ---- floating cell editor ---- *@
+<div id="grdEditor" class="card shadow">
+    <div class="card-body p-2">
+        <div class="small text-muted mb-1" id="grdEditorHead"></div>
+        <input type="text" class="form-control form-control-sm mb-1" id="grdNameInput" autocomplete="off"
+               placeholder="Sök medlem eller skriv namn…">
+        <div class="list-group mb-1" id="grdSuggest" style="display:none"></div>
+        <div class="d-flex gap-1 mb-1">
+            <input type="text" class="form-control form-control-sm" id="grdFrom" placeholder="från t.ex. 08:00" style="width:50%">
+            <input type="text" class="form-control form-control-sm" id="grdTo" placeholder="till" style="width:50%">
+        </div>
+        <div class="d-flex justify-content-between align-items-center">
+            <span class="text-muted" style="font-size:.72rem">Enter sparar · Esc stänger</span>
+            <button type="button" class="btn btn-sm btn-primary" id="grdCommit">Lägg till</button>
+        </div>
+        <div class="text-danger small mt-1" id="grdErr"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var compId = @competitionId;
+    var TOKEN = '@grdToken';
+    var grid = { columns: [], rows: [] };
+    var editing = null;          // { roleKey, scopeType, scopeKey, colKey, memberId }
+    var searchTimer = null;
+
+    function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    // Row identity travels through inline handlers URL-ENCODED, never HTML-escaped — a role called
+    // "Läsare/Dragare" or a scope with an apostrophe decodes back and breaks the handler otherwise.
+    function arg(s) { return encodeURIComponent(s == null ? '' : s).replace(/'/g, '%27'); }
+    function unarg(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+
+    async function post(action, payload) {
+        var r = await fetch('/umbraco/surface/Staffing/' + action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+            body: JSON.stringify(payload)
+        });
+        return await r.json();
+    }
+
+    // ---------------------------------------------------------------- load + render
+
+    window.grdLoad = async function () {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetGrid?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { document.getElementById('grdBody').innerHTML = '<tr><td class="text-muted p-3">' + esc(d.message || 'Kunde inte läsa rutnätet.') + '</td></tr>'; return; }
+            grid = d;
+            render();
+        } catch (e) {
+            document.getElementById('grdBody').innerHTML = '<tr><td class="text-muted p-3">Kunde inte läsa rutnätet.</td></tr>';
+        }
+    };
+
+    function render() {
+        var cols = grid.columns || [];
+        var head = '<th class="grd-rolecol">Roll</th>';
+        cols.forEach(function (c, i) {
+            head += '<th class="grd-cell">'
+                + '<div class="d-flex justify-content-between align-items-start gap-1">'
+                + '<div><div>' + esc(c.label) + '</div>'
+                + (c.timeLabel ? '<div class="text-muted fw-normal" style="font-size:.75rem">' + esc(c.timeLabel) + '</div>' : '')
+                + '</div>'
+                + (cols.length > 1 && c.key ? '<button type="button" class="btn btn-sm btn-link p-0 grd-roleacts" title="Kopiera den här dagens bemanning till en annan dag" onclick="grdCopyDay(\'' + arg(c.key) + '\')"><i class="bi bi-arrow-right-square"></i></button>' : '')
+                + '</div></th>';
+        });
+        document.getElementById('grdHead').innerHTML = head;
+
+        var body = (grid.rows || []).map(rowHtml).join('');
+        document.getElementById('grdBody').innerHTML = body
+            || '<tr><td class="text-muted p-3" colspan="' + (cols.length + 1) + '">Inga roller än. Skapa den första nedan.</td></tr>';
+
+        // "+ Ny roll" lives in the table itself: creating a role is part of planning, not a settings page.
+        document.getElementById('grdFoot').innerHTML =
+            '<tr><td class="grd-rolecol">'
+            + '<input type="text" class="form-control form-control-sm" id="grdNewRole" placeholder="+ Ny roll — skriv namnet…" autocomplete="off">'
+            + '</td><td class="text-muted small" colspan="' + Math.max(1, cols.length) + '">'
+            + 'Skriv vad <em>ni</em> kallar funktionen och tryck Enter. Den blir en rad i rutnätet.'
+            + '</td></tr>';
+        var nr = document.getElementById('grdNewRole');
+        if (nr) nr.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); grdCreateRole(nr.value); }
+        });
+
+        var s = document.getElementById('grdSummary');
+        s.innerHTML = '<i class="bi bi-grid-3x3 me-1"></i><strong>' + (grid.totalAssigned || 0) + '</strong> uppdrag · '
+            + (grid.rows || []).length + ' rader · ' + cols.length + ' dagar';
+
+        var w = document.getElementById('grdExternalWarn');
+        if (grid.externalCount) {
+            w.style.display = '';
+            w.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i><strong>' + grid.externalCount
+                + '</strong> personer saknar konto på pistol.nu. De får inget personligt schema och inga notiser — '
+                + 'be dem registrera sig, eller koppla raden till rätt medlem.';
+        } else w.style.display = 'none';
+    }
+
+    function rowHtml(row) {
+        var idParts = arg(row.roleKey) + "','" + arg(row.scopeType || '') + "','" + arg(row.scopeKey || '');
+        var h = '<tr>';
+        h += '<td class="grd-rolecol">'
+            + '<div class="d-flex justify-content-between align-items-start gap-1">'
+            + '<div><span class="grd-rolename">' + esc(row.roleName) + '</span>'
+            + (row.scopeLabel ? '<div class="grd-scope">' + esc(row.scopeLabel) + '</div>' : '')
+            + '</div>'
+            + '<span class="grd-roleacts text-nowrap">'
+            + '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Byt namn på rollen" onclick="grdRenameRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-pencil"></i></button>'
+            + (row.isCustom ? '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort rollen" onclick="grdDeleteRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-trash"></i></button>' : '')
+            + '</span></div></td>';
+
+        (grid.columns || []).forEach(function (c) {
+            var entries = (row.cells && row.cells[c.key]) || [];
+            h += '<td class="grd-cell" onclick="grdOpenCell(event,\'' + idParts + "','" + arg(c.key) + '\')">'
+                + entries.map(entryHtml).join('')
+                + '<div class="grd-add"><i class="bi bi-plus"></i> lägg till</div>'
+                + '</td>';
+        });
+        return h + '</tr>';
+    }
+
+    function entryHtml(e) {
+        var cls = e.isExternal ? 'text-warning-emphasis' : '';
+        return '<div class="grd-entry">'
+            + (e.isResponsible ? '<i class="bi bi-star-fill text-warning" title="Ansvarig"></i>' : '')
+            + '<span class="grd-name ' + cls + '">' + esc(e.displayName) + '</span>'
+            + (e.clubName ? '<span class="grd-club">' + esc(e.clubName) + '</span>' : '')
+            + (e.isExternal ? '<span class="badge bg-warning-subtle text-warning-emphasis border grd-ext" title="Saknar konto — får inget schema och inga notiser">ext</span>' : '')
+            + (e.timeLabel ? '<span class="badge bg-primary-subtle text-primary-emphasis border fw-normal grd-time">' + esc(e.timeLabel) + '</span>' : '')
+            + (e.readOnly ? '' : '<button type="button" class="grd-del" title="Ta bort" onclick="event.stopPropagation();grdRemove(' + e.id + ',\'' + arg(e.displayName) + '\')">&times;</button>')
+            + '</div>';
+    }
+
+    // ---------------------------------------------------------------- cell editor
+
+    window.grdOpenCell = function (ev, roleKey, scopeType, scopeKey, colKey) {
+        editing = {
+            roleKey: unarg(roleKey), scopeType: unarg(scopeType) || null,
+            scopeKey: unarg(scopeKey) || null, colKey: unarg(colKey), memberId: null
+        };
+        var cell = ev.currentTarget.getBoundingClientRect();
+        var ed = document.getElementById('grdEditor');
+        ed.style.display = 'block';
+        // Keep it on screen: flip up/left when the cell is near an edge.
+        var top = cell.bottom + 4, left = cell.left;
+        if (top + ed.offsetHeight > window.innerHeight - 8) top = Math.max(8, cell.top - ed.offsetHeight - 4);
+        if (left + 330 > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 338);
+        ed.style.top = top + 'px';
+        ed.style.left = left + 'px';
+
+        var row = (grid.rows || []).find(function (r) {
+            return r.roleKey === editing.roleKey && (r.scopeKey || null) === editing.scopeKey;
+        });
+        var col = (grid.columns || []).find(function (c) { return c.key === editing.colKey; });
+        document.getElementById('grdEditorHead').textContent =
+            (row ? row.roleName : '') + ' · ' + (col ? col.label : 'Utan datum');
+        document.getElementById('grdNameInput').value = '';
+        document.getElementById('grdFrom').value = '';
+        document.getElementById('grdTo').value = '';
+        document.getElementById('grdErr').textContent = '';
+        hideSuggest();
+        // Freeze the 12 s multi-user poll while a cell is open — a re-render mid-typing would discard the
+        // half-entered name and steal focus.
+        window.grdBusy = true;
+        document.getElementById('grdNameInput').focus();
+    };
+
+    function closeEditor() {
+        document.getElementById('grdEditor').style.display = 'none';
+        editing = null; window.grdBusy = false; hideSuggest();
+    }
+    function hideSuggest() { var b = document.getElementById('grdSuggest'); b.style.display = 'none'; b.innerHTML = ''; }
+
+    document.addEventListener('click', function (e) {
+        if (!editing) return;
+        if (e.target.closest('#grdEditor') || e.target.closest('.grd-cell')) return;
+        closeEditor();
+    });
+
+    var nameInput = document.getElementById('grdNameInput');
+    nameInput.addEventListener('input', function () {
+        editing && (editing.memberId = null);       // typing after picking = a different person
+        var q = nameInput.value.trim();
+        clearTimeout(searchTimer);
+        if (q.length < 2) { hideSuggest(); return; }
+        searchTimer = setTimeout(function () { doSearch(q); }, 200);
+    });
+    nameInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeEditor(); }
+    });
+    document.getElementById('grdTo').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    });
+    document.getElementById('grdFrom').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    });
+    document.getElementById('grdCommit').addEventListener('click', commit);
+
+    async function doSearch(q) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SearchMembers?competitionId=' + compId + '&query=' + encodeURIComponent(q),
+                { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            var box = document.getElementById('grdSuggest');
+            var list = (d && d.success && d.members) ? d.members : [];
+            if (!list.length) {
+                // Never a dead end: an unmatched name is still savable, just flagged.
+                box.innerHTML = '<div class="list-group-item small text-muted">Ingen medlem matchar — Enter sparar som extern hjälpare</div>';
+                box.style.display = 'block';
+                return;
+            }
+            // NB the endpoint returns memberId/memberName/clubName — not id/name/club.
+            box.innerHTML = list.slice(0, 8).map(function (m) {
+                return '<button type="button" class="list-group-item list-group-item-action" onclick="grdPick('
+                    + m.memberId + ",'" + arg(m.memberName) + "'" + ')">' + esc(m.memberName)
+                    + (m.clubName ? ' <span class="text-muted small">' + esc(m.clubName) + '</span>' : '') + '</button>';
+            }).join('');
+            box.style.display = 'block';
+        } catch (e) { hideSuggest(); }
+    }
+
+    window.grdPick = function (id, name) {
+        if (!editing) return;
+        editing.memberId = id;
+        nameInput.value = unarg(name);
+        hideSuggest();
+        document.getElementById('grdFrom').focus();
+    };
+
+    async function commit() {
+        if (!editing) return;
+        var name = nameInput.value.trim();
+        if (!name) { closeEditor(); return; }
+        var err = document.getElementById('grdErr');
+        err.textContent = '';
+
+        var from = document.getElementById('grdFrom').value.trim();
+        var to = document.getElementById('grdTo').value.trim();
+        var day = editing.colKey;
+        // A time only means anything with a day to hang it on. Without one we save an untimed (heldag) row
+        // rather than invent a date — the same rule the personal schedule follows.
+        function stamp(t) {
+            if (!t || !day) return null;
+            var m = /^(\d{1,2})[:.]?(\d{2})?$/.exec(t);
+            if (!m) return null;
+            var hh = ('0' + m[1]).slice(-2), mm = m[2] || '00';
+            return day + ' ' + hh + ':' + mm;
+        }
+        if ((from || to) && !day) err.textContent = 'Tider kräver en dag — raden sparas som heldag.';
+
+        var payload = {
+            id: 0, competitionId: compId,
+            memberId: editing.memberId, displayName: name,
+            roleKey: editing.roleKey,
+            scopeType: editing.scopeType, scopeKey: editing.scopeKey,
+            startsAt: stamp(from), endsAt: stamp(to),
+            status: 'Planned', allowDuplicate: false
+        };
+        var d = await post('SaveAssignment', payload);
+        if (d.duplicate) {
+            if (!confirm(d.message)) return;
+            payload.allowDuplicate = true;
+            d = await post('SaveAssignment', payload);
+        }
+        if (!d.success) { err.textContent = d.message || 'Kunde inte spara.'; return; }
+
+        // Stay open for the next name in the same cell — that is the whole point of a grid.
+        nameInput.value = ''; editing.memberId = null;
+        document.getElementById('grdFrom').value = ''; document.getElementById('grdTo').value = '';
+        nameInput.focus();
+        await grdLoad();
+    }
+
+    window.grdRemove = async function (id, name) {
+        if (!confirm('Ta bort ' + unarg(name) + ' från den här rutan?')) return;
+        var d = await post('DeleteAssignment', { id: id, competitionId: compId });
+        if (!d.success) { alert(d.message || 'Kunde inte ta bort.'); return; }
+        await grdLoad();
+    };
+
+    // ---------------------------------------------------------------- roles
+
+    window.grdCreateRole = async function (name) {
+        name = (name || '').trim();
+        if (!name) return;
+        var d = await post('SaveRole', { competitionId: compId, displayName: name });
+        if (!d.success) { alert(d.message || 'Kunde inte skapa rollen.'); return; }
+        await grdLoad();
+        var nr = document.getElementById('grdNewRole');
+        if (nr) { nr.value = ''; nr.focus(); }
+    };
+
+    window.grdRenameRole = async function (roleKey) {
+        roleKey = unarg(roleKey);
+        var row = (grid.rows || []).find(function (r) { return r.roleKey === roleKey; });
+        var name = prompt('Vad kallar ni den här funktionen?', row ? row.roleName : '');
+        if (name == null) return;
+        name = name.trim();
+        if (!name) return;
+        // Renaming a BUILT-IN writes a competition-level override on the same key, so existing assignments
+        // keep working and simply start reading the arrangör's own word.
+        var d = await post('SaveRole', { competitionId: compId, roleKey: roleKey, displayName: name });
+        if (!d.success) { alert(d.message || 'Kunde inte byta namn.'); return; }
+        await grdLoad();
+    };
+
+    window.grdDeleteRole = async function (roleKey) {
+        roleKey = unarg(roleKey);
+        if (!confirm('Ta bort rollen? Uppdrag som redan ligger på den måste flyttas först.')) return;
+        var d = await post('DeleteRole', { competitionId: compId, roleKey: roleKey });
+        if (!d.success) { alert(d.message || 'Kunde inte ta bort rollen.'); return; }
+        await grdLoad();
+    };
+
+    // ---------------------------------------------------------------- copy day → day
+
+    window.grdCopyDay = async function (fromKey) {
+        fromKey = unarg(fromKey);
+        var others = (grid.columns || []).filter(function (c) { return c.key && c.key !== fromKey; });
+        if (!others.length) { alert('Det finns ingen annan dag att kopiera till.'); return; }
+        var msg = 'Kopiera hela dagens bemanning till vilken dag?\n\n'
+            + others.map(function (c, i) { return (i + 1) + '. ' + c.label; }).join('\n');
+        var pick = prompt(msg, '1');
+        if (pick == null) return;
+        var idx = parseInt(pick, 10) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= others.length) return;
+
+        var d = await post('CopyDay', { competitionId: compId, fromDate: fromKey, toDate: others[idx].key });
+        if (!d.success) { alert(d.message || 'Kunde inte kopiera.'); return; }
+        alert('Kopierade ' + d.copied + ' uppdrag.' + (d.skipped ? ' ' + d.skipped + ' fanns redan.' : ''));
+        await grdLoad();
+    };
+
+    // Load when the grid tab is first shown (and immediately if it is the default pane).
+    var tabBtn = document.querySelector('[data-bs-target="#bem-rutnat"]');
+    if (tabBtn) tabBtn.addEventListener('shown.bs.tab', function () { if (!grid.rows.length) grdLoad(); });
+    if (document.getElementById('bem-rutnat')?.classList.contains('active')) grdLoad();
+})();
+</script>

@@ -42,6 +42,7 @@ namespace HpskSite.Controllers
         private readonly StaffRequestService _request;
         private readonly StaffHelpService _help;
         private readonly StaffPassService _pass;
+        private readonly RoleCatalogService _roleCatalog;
         private readonly PrepDocumentStorage _docs;
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
         private readonly EmailService _email;
@@ -69,6 +70,7 @@ namespace HpskSite.Controllers
             StaffRequestService request,
             StaffHelpService help,
             StaffPassService pass,
+            RoleCatalogService roleCatalog,
             PrepDocumentStorage docs,
             HpskSite.Services.Schedule.CompetitionAgendaService agenda,
             EmailService email,
@@ -91,6 +93,7 @@ namespace HpskSite.Controllers
             _request = request;
             _help = help;
             _pass = pass;
+            _roleCatalog = roleCatalog;
             _docs = docs;
             _agenda = agenda;
             _email = email;
@@ -108,7 +111,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             var discipline = GetDiscipline(competitionId);
-            var roles = FunctionaryRoles.ForDiscipline(discipline).Select(r => new
+            var roles = _roleCatalog.ForCompetition(competitionId, discipline).Select(r => new
             {
                 key = r.Key,
                 name = r.DisplayName,
@@ -118,8 +121,88 @@ namespace HpskSite.Controllers
                 supportsFunctionTitle = r.SupportsFunctionTitle,
                 description = r.Description,
                 needs = r.Needs,
+                isCustom = _roleCatalog.IsCustom(competitionId, r.Key),
             });
             return Json(new { success = true, discipline, roles });
+        }
+
+        /// <summary>
+        /// Create a role from a typed name, or rename an existing one (including a built-in). Free naming
+        /// is the point: a club that calls it "Vapenkontroll" or "Starter" must not be forced onto our word
+        /// — being pushed onto a word they already use for a DIFFERENT job makes the data actively wrong.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveRole([FromBody] SaveStaffRoleRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            try
+            {
+                var key = _roleCatalog.SaveRole(request, GetDiscipline(request.CompetitionId), viewer.Id);
+                return Json(new { success = true, roleKey = key });
+            }
+            catch (ArgumentException ax)
+            {
+                return Json(new { success = false, message = ax.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SaveRole failed for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte spara rollen." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteRole([FromBody] DeleteStaffRoleRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            try
+            {
+                var (ok, msg) = _roleCatalog.DeleteRole(request.CompetitionId, request.RoleKey, GetDiscipline(request.CompetitionId));
+                return Json(new { success = ok, message = msg });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: DeleteRole failed for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte ta bort rollen." });
+            }
+        }
+
+        /// <summary>
+        /// The Bemanning grid: roles as rows, competition DAYS as columns, people in the cells.
+        /// <para>Day — not pass — is the column axis on purpose. Three days × five passes is fifteen columns
+        /// that never fit, and five identical cells for a whole-day person read as five people. The arrangör
+        /// who inspired this had the option in Excel and chose day columns with the time written in the cell;
+        /// so a person with no shift renders as a bare name, and a time chip appears only where one exists.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetGrid(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            try
+            {
+                var discipline = GetDiscipline(competitionId);
+                var resp = BuildGrid(competitionId, discipline);
+                return Json(resp);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetGrid failed for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Kunde inte läsa rutnätet." });
+            }
         }
 
         [HttpGet]
@@ -184,11 +267,13 @@ namespace HpskSite.Controllers
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
 
-            // Validate the role belongs to this competition's discipline.
+            // The role must exist in this competition's merged catalog (built-ins + arrangör-named rows).
+            // It is no longer a closed set — "Vapenkontroll" is as valid as "Startledare" once someone has
+            // created it — but it must still be a NAMED role, so everything downstream can group and count.
             var discipline = GetDiscipline(request.CompetitionId);
-            var role = FunctionaryRoles.Resolve(discipline, request.RoleKey);
+            var role = _roleCatalog.Resolve(request.CompetitionId, discipline, request.RoleKey);
             if (role == null)
-                return Json(new { success = false, message = "Rollen är inte giltig för denna gren." });
+                return Json(new { success = false, message = "Rollen finns inte. Skapa den först i rutnätet." });
 
             // Resolve/normalise the person: a member id autofills name (+ phone if not supplied).
             if (request.MemberId is > 0)
@@ -920,7 +1005,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Personen saknar konto och e-post — kan inte notifieras." });
 
             var meta = GetCompMeta(a.CompetitionId);
-            var roleName = FunctionaryRoles.Resolve(GetDiscipline(a.CompetitionId), a.RoleKey)?.DisplayName ?? a.RoleKey;
+            var roleName = _roleCatalog.NameFor(a.CompetitionId, GetDiscipline(a.CompetitionId), a.RoleKey);
             var where = string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
                 ? "hela tävlingen" : $"{a.ScopeType} {a.ScopeKey}".Trim();
             var subject = $"Funktionärsförfrågan: {roleName} – {meta.Name}";
@@ -1378,6 +1463,263 @@ namespace HpskSite.Controllers
                 return d == default ? null : d;
             }
             catch { return null; }
+        }
+
+        // ======================= Bemanning grid (roll × dag) =======================
+
+        /// <summary>
+        /// Projects the roster into the grid shape. Built ON TOP of <c>BuildRoster</c> rather than reading
+        /// StaffAssignment directly, so role names, scope labels, shift labels and the Fält station-chief
+        /// mirror stay identical to every other surface — the grid is a second VIEW, never a second truth.
+        /// </summary>
+        private GridResponse BuildGrid(int competitionId, string? discipline)
+        {
+            var roster = _staffing.BuildRoster(competitionId, discipline, canEdit: true);
+            var resp = new GridResponse { Discipline = discipline ?? "", CanEdit = true };
+
+            var all = roster.Groups.SelectMany(g => g.Assignments).ToList();
+
+            // ---- columns: every day the competition touches -------------------------------------
+            // Union of pass dates, explicit shift dates and the competition date, so a build-day pass or a
+            // Friday shift can't fall outside the grid. Sorted; an "undated" bucket is appended only when
+            // something actually lands in it (a heldag row on a multi-day comp pins no day — we bucket it
+            // rather than guessing, same rule the schedule uses).
+            var passes = SafeGetPasses(competitionId);
+            var dates = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var p in passes) if (!string.IsNullOrEmpty(p.Date)) dates.Add(p.Date);
+            foreach (var a in all) if (!string.IsNullOrEmpty(a.DateKey)) dates.Add(a.DateKey!);
+            if (GetCompetitionDate(competitionId) is { } cd) dates.Add(cd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+
+            var sv = CultureInfo.GetCultureInfo("sv-SE");
+            foreach (var d in dates)
+            {
+                var parsed = DateTime.TryParseExact(d, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
+                    ? dt : (DateTime?)null;
+                var dayPasses = passes.Where(p => p.Date == d).ToList();
+                resp.Columns.Add(new GridColumn
+                {
+                    Key = d,
+                    Label = parsed?.ToString("ddd d MMM", sv) ?? d,
+                    TimeLabel = DayTimeLabel(dayPasses),
+                    PassIds = dayPasses.Select(p => p.Id).ToList(),
+                });
+            }
+
+            var single = resp.Columns.Count == 1 ? resp.Columns[0].Key : null;
+            bool NeedsUndated() => all.Any(a => string.IsNullOrEmpty(a.DateKey)) && single == null;
+            if (NeedsUndated())
+                resp.Columns.Add(new GridColumn { Key = "", Label = "Utan datum", TimeLabel = null });
+
+            // ---- rows: one per role, split by scope where the role is scoped ---------------------
+            var catalog = _roleCatalog.ForCompetition(competitionId, discipline);
+            var clubs = ResolveClubNames(all);
+
+            foreach (var role in catalog)
+            {
+                var mine = all.Where(a => string.Equals(a.RoleKey, role.Key, StringComparison.OrdinalIgnoreCase)).ToList();
+                var scopeKeys = mine
+                    .Select(a => (a.ScopeType, a.ScopeKey, a.ScopeLabel))
+                    .Distinct()
+                    .OrderBy(x => x.ScopeKey, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (scopeKeys.Count == 0) scopeKeys.Add((null, null, ""));
+
+                foreach (var (scopeType, scopeKey, scopeLabel) in scopeKeys)
+                {
+                    var row = new GridRow
+                    {
+                        RoleKey = role.Key,
+                        RoleName = role.DisplayName,
+                        ScopeType = scopeType,
+                        ScopeKey = scopeKey,
+                        ScopeLabel = string.Equals(scopeLabel, "Hela tävlingen", StringComparison.OrdinalIgnoreCase) ? null : scopeLabel,
+                        IsCustom = _roleCatalog.IsCustom(competitionId, role.Key),
+                        SupportsTargetRange = role.SupportsTargetRange,
+                        SupportsFunctionTitle = role.SupportsFunctionTitle,
+                        DefaultScopeType = role.DefaultScopeType,
+                    };
+
+                    foreach (var a in mine.Where(a => a.ScopeType == scopeType && a.ScopeKey == scopeKey))
+                    {
+                        var colKey = a.DateKey ?? single ?? "";
+                        if (!row.Cells.TryGetValue(colKey, out var list))
+                            row.Cells[colKey] = list = new List<GridEntry>();
+                        list.Add(new GridEntry
+                        {
+                            Id = a.Id,
+                            MemberId = a.MemberId,
+                            DisplayName = a.DisplayName,
+                            ClubName = a.MemberId is int mid && clubs.TryGetValue(mid, out var cn) ? cn : null,
+                            // A whole-day person renders as a bare name; a chip appears only where a real
+                            // time exists. Five identical chips would read as five people.
+                            TimeLabel = a.ShiftLabel ?? a.PassLabel,
+                            ScopeLabel = row.ScopeLabel,
+                            Status = a.Status,
+                            IsResponsible = a.IsResponsible,
+                            IsExternal = a.MemberId is not > 0,
+                            ReadOnly = a.ReadOnly,
+                            Note = a.Note,
+                        });
+                        row.Filled++;
+                    }
+                    resp.Rows.Add(row);
+                }
+            }
+
+            resp.TotalAssigned = all.Count;
+            resp.ExternalCount = all.Count(a => a.MemberId is not > 0);
+            return resp;
+        }
+
+        /// <summary>
+        /// Clone every assignment on one competition day onto another. The grid's "fyll höger" — a two-day
+        /// competition usually staffs the second day almost identically, and retyping 40 rows is the single
+        /// biggest reason a plan stays in Excel.
+        /// <para>Idempotent by (person, role, scope, target day): running it twice adds nothing, so the
+        /// organiser can copy, hand-edit the differences, and copy again without breeding duplicates.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CopyDay([FromBody] CopyDayRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (string.IsNullOrWhiteSpace(request.ToDate) || request.FromDate == request.ToDate)
+                return Json(new { success = false, message = "Välj en annan måldag." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            if (!DateTime.TryParseExact(request.ToDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var toDate))
+                return Json(new { success = false, message = "Ogiltigt datum." });
+
+            try
+            {
+                var discipline = GetDiscipline(request.CompetitionId);
+                var passes = SafeGetPasses(request.CompetitionId);
+                var targetPassId = passes.FirstOrDefault(p => p.Date == request.ToDate)?.Id;
+                var passDateById = passes.ToDictionary(p => p.Id, p => p.Date);
+
+                var rows = _staffing.GetForCompetition(request.CompetitionId);
+
+                string? DayOf(StaffAssignment a)
+                {
+                    if (a.StartsAt is { } s) return s.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    if (a.PassId is int pid && passDateById.TryGetValue(pid, out var d)) return d;
+                    return null;
+                }
+
+                var source = rows.Where(a => DayOf(a) == request.FromDate).ToList();
+                if (source.Count == 0)
+                    return Json(new { success = false, message = "Det finns inget att kopiera från den dagen." });
+
+                // What already exists on the target day, so a re-run is a no-op.
+                var existing = new HashSet<string>(
+                    rows.Where(a => DayOf(a) == request.ToDate)
+                        .Select(a => $"{a.MemberId?.ToString() ?? a.DisplayName?.ToLowerInvariant()}|{a.RoleKey}|{a.ScopeType}|{a.ScopeKey}"),
+                    StringComparer.OrdinalIgnoreCase);
+
+                var copied = 0;
+                foreach (var a in source)
+                {
+                    var key = $"{a.MemberId?.ToString() ?? a.DisplayName?.ToLowerInvariant()}|{a.RoleKey}|{a.ScopeType}|{a.ScopeKey}";
+                    if (!existing.Add(key)) continue;
+
+                    // Keep the clock time, move the date. A shift that carried no time stays untimed.
+                    string? Shift(DateTime? t) => t is { } v
+                        ? toDate.Date.Add(v.TimeOfDay).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+                        : null;
+
+                    _staffing.Save(new SaveStaffAssignmentRequest
+                    {
+                        Id = 0,
+                        CompetitionId = request.CompetitionId,
+                        MemberId = a.MemberId,
+                        DisplayName = a.DisplayName,
+                        Phone = a.Phone,
+                        Email = a.Email,
+                        RoleKey = a.RoleKey,
+                        FunctionTitle = a.FunctionTitle,
+                        ScopeType = a.ScopeType,
+                        ScopeKey = a.ScopeKey,
+                        TargetFrom = a.TargetFrom,
+                        TargetTo = a.TargetTo,
+                        StartsAt = Shift(a.StartsAt),
+                        EndsAt = Shift(a.EndsAt),
+                        // Only attach a pass when the source row used one AND the target day has one;
+                        // otherwise the copy would silently inherit the wrong day's times.
+                        PassId = a.PassId != null ? targetPassId : null,
+                        IsResponsible = a.IsResponsible,
+                        HasAdminAccess = a.HasAdminAccess,
+                        // A fresh day is a fresh ask — an "Accepted" answer for Saturday says nothing about
+                        // Sunday, so the clone starts as Planerad and must be invited on its own.
+                        Status = StaffAssignmentStatus.Planned,
+                        Note = a.Note,
+                        AllowDuplicate = true,
+                    }, viewer.Id);
+                    copied++;
+                }
+
+                return Json(new { success = true, copied, skipped = source.Count - copied });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: CopyDay failed for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte kopiera dagen." });
+            }
+        }
+
+        private List<StaffPassView> SafeGetPasses(int competitionId)
+        {
+            try { return _pass.GetPasses(competitionId); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Staffing: pass lookup failed for competition {CompetitionId}", competitionId);
+                return new List<StaffPassView>();
+            }
+        }
+
+        private static string? DayTimeLabel(List<StaffPassView> dayPasses)
+        {
+            var starts = dayPasses.Select(p => p.StartTime).Where(t => !string.IsNullOrEmpty(t)).OrderBy(t => t, StringComparer.Ordinal).FirstOrDefault();
+            var ends = dayPasses.Select(p => p.EndTime).Where(t => !string.IsNullOrEmpty(t)).OrderByDescending(t => t, StringComparer.Ordinal).FirstOrDefault();
+            if (starts == null && ends == null) return null;
+            return $"{starts ?? "?"}–{ends ?? "?"}";
+        }
+
+        /// <summary>
+        /// Club per person, batched. Club is not decoration here: some competitions split any surplus
+        /// between the clubs that staffed the event, so it is the basis for that split — which is also why
+        /// it belongs to the CELL and not the row (the same function is often held by different clubs on
+        /// different days). Best-effort; a missing club just renders nothing.
+        /// </summary>
+        private Dictionary<int, string> ResolveClubNames(List<StaffAssignmentView> rows)
+        {
+            var result = new Dictionary<int, string>();
+            var memberIds = rows.Where(r => r.MemberId is > 0).Select(r => r.MemberId!.Value).Distinct().ToList();
+            if (memberIds.Count == 0) return result;
+
+            var clubNameById = new Dictionary<int, string>();
+            foreach (var mid in memberIds)
+            {
+                try
+                {
+                    var m = _memberService.GetById(mid);
+                    // primaryClubId is stored as a STRING on the member type — GetValue<int> returns 0.
+                    // Same read as SearchMembers, which is the proven one.
+                    var raw = m?.GetValue<string>("primaryClubId");
+                    if (string.IsNullOrEmpty(raw) || !int.TryParse(raw, out var clubId) || clubId <= 0) continue;
+                    if (!clubNameById.TryGetValue(clubId, out var name))
+                    {
+                        name = _clubService.GetClubNameById(clubId) ?? "";
+                        clubNameById[clubId] = name;
+                    }
+                    if (!string.IsNullOrEmpty(name)) result[mid] = name;
+                }
+                catch { /* one unreadable member must not blank the whole grid */ }
+            }
+            return result;
         }
 
         /// <summary>

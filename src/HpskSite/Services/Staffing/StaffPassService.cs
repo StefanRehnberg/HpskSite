@@ -12,8 +12,13 @@ namespace HpskSite.Services.Staffing
     public class StaffPassService
     {
         private readonly IScopeProvider _scopeProvider;
+        private readonly RoleCatalogService _roles;
 
-        public StaffPassService(IScopeProvider scopeProvider) => _scopeProvider = scopeProvider;
+        public StaffPassService(IScopeProvider scopeProvider, RoleCatalogService roles)
+        {
+            _scopeProvider = scopeProvider;
+            _roles = roles;
+        }
 
         // ---- passes ----
 
@@ -65,7 +70,7 @@ namespace HpskSite.Services.Staffing
                 {
                     ScopeKind = n.ScopeKind,
                     RoleKey = n.RoleKey,
-                    RoleName = FunctionaryRoles.Resolve(discipline, n.RoleKey)?.DisplayName ?? n.RoleKey,
+                    RoleName = _roles.NameFor(competitionId, discipline, n.RoleKey),
                     Count = n.Count,
                 }).ToList();
         }
@@ -102,7 +107,7 @@ namespace HpskSite.Services.Staffing
             bool isFalt = FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase);
             int stations = isFalt ? Math.Max(0, stationCount) : 0;
 
-            string RoleName(string key) => FunctionaryRoles.Resolve(discipline, key)?.DisplayName ?? key;
+            string RoleName(string key) => _roles.NameFor(competitionId, discipline, key);
             // filled counts keyed for fast lookup
             int FilledStation(int passId, string station, string role) => assignments.Count(a => a.PassId == passId
                 && string.Equals(a.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase)

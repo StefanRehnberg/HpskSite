@@ -165,6 +165,10 @@ namespace HpskSite.Composers
             // Documentation/COMPETITION_STAFFING_SYSTEM.md.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingService>();
             builder.Services.AddScoped<HpskSite.Services.Staffing.WorkBreakdownService>();
+            // THE ROLE CATALOG: built-in FunctionaryRoles + arrangör-named StaffRole rows, merged. The one
+            // place a role is resolved — never call FunctionaryRoles directly from a surface. Degrades to
+            // the built-ins if StaffRole is missing. Run create-staff-role-table.sql.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.RoleCatalogService>();
             // Phase 1.5: editable per-club/region planning templates. Run create-staffing-template-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingTemplateService>();
             // Materiel-quantity estimate (general Beställningslista from participant/class/series counts).

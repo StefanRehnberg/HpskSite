@@ -154,6 +154,10 @@ namespace HpskSite.Models.Staffing
         public string? ShiftLabel { get; set; }       // "13:00–15:00" or null (heldag)
         public int? PassId { get; set; }
         public string? PassLabel { get; set; }         // "Lör FM 06–13" resolved from the pass
+        /// <summary>"yyyy-MM-dd" — which competition DAY this row belongs to, from StartsAt or the linked
+        /// pass. NULL when neither pins a day down; the grid buckets those under "Utan datum" rather than
+        /// guessing, in keeping with the never-invent-a-time rule.</summary>
+        public string? DateKey { get; set; }
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;

@@ -29,8 +29,15 @@
 </p>
 
 <ul class="nav nav-tabs mb-3" id="bemSubNav" role="tablist">
+    @* Rutnätet is the AUTHORING surface and therefore the default — roll × dag, the shape arrangörer
+       already plan in. Personer/Roller/Behov/Värvning are untouched and remain the fallback. *@
     <li class="nav-item" role="presentation">
-        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#bem-personer" type="button" role="tab">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#bem-rutnat" type="button" role="tab">
+            <i class="bi bi-grid-3x3 me-1"></i>Rutnät
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bem-personer" type="button" role="tab">
             <i class="bi bi-people-fill me-1"></i>Personer
             <span class="badge bg-secondary ms-1" id="stfPeopleBadge" style="display:none"></span>
             <span class="badge bg-warning text-dark ms-1" id="stfQueueBadge" style="display:none" title="Anmälda som inte fått något uppdrag"></span>
@@ -64,7 +71,12 @@
         list cost ~120 px each — twelve screens of scrolling for a hundred helpers.
         Sorted so the organiser's queue floats to the top (anmälda utan uppdrag, then avböjt, then inbjudna).
     *@
-    <div class="tab-pane fade show active" id="bem-personer" role="tabpanel">
+    @* ---- TAB 0: Rutnät — roll × dag, the authoring surface ---- *@
+    <div class="tab-pane fade show active" id="bem-rutnat" role="tabpanel">
+        @await Html.PartialAsync("_StaffingGrid", ViewData)
+    </div>
+
+    <div class="tab-pane fade" id="bem-personer" role="tabpanel">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <div class="small" id="stfPeopleSummary"></div>
             <button type="button" class="btn btn-primary" onclick="stfOpenAdd('')">
@@ -1682,6 +1694,9 @@
         if (document.hidden) return;
         if (document.querySelector('.modal.show')) return;
         var t = activeSubTab();
+        // The grid owns its own refresh, and must NOT be re-rendered while a cell editor is open —
+        // that would blow away the half-typed name and the focus with it.
+        if (t === 'bem-rutnat') { if (window.grdLoad && !window.grdBusy) window.grdLoad(); return; }
         if (t === 'bem-roster') loadRoster();
         else if (t === 'bem-personer') loadPeople();
         else { /* Behov & täckning + Värvning have their own lighter refreshes */ loadCoverage(); }
@@ -1718,7 +1733,8 @@
     document.querySelectorAll('#bemSubNav button[data-bs-toggle="tab"]').forEach(function (btn) {
         btn.addEventListener('shown.bs.tab', function () {
             var t = activeSubTab();
-            if (t === 'bem-roster') loadRoster();
+            if (t === 'bem-rutnat') { if (window.grdLoad) window.grdLoad(); }
+            else if (t === 'bem-roster') loadRoster();
             else if (t === 'bem-personer') loadPeople();
             else if (t === 'bem-behov') { loadPasses(); }
             else if (t === 'bem-varvning') { loadScopes(); loadHelp(); }
