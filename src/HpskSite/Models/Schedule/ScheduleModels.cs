@@ -92,6 +92,32 @@ namespace HpskSite.Models.Schedule
             _ => "Skytte",
         };
 
+        /// <summary>
+        /// Says whose the row is, in words, next to the title. A programme point often carries the same
+        /// name as a job — "Vapenkontroll 09:00–12:00" is when the service is open, not an assignment —
+        /// and the only thing that distinguished them used to be a grey word in a right-hand column that
+        /// is hidden below 576px, i.e. on the phone where functionaries actually read this.
+        /// Ownership is stated positively ("Ditt uppdrag") rather than leaving the reader to infer it.
+        /// </summary>
+        public string OwnerLabel => Kind switch
+        {
+            ScheduleItemKind.Funktionar => "Ditt uppdrag",
+            ScheduleItemKind.Praktiskt => "Program",
+            _ => "Du skjuter",
+        };
+
+        public string OwnerBadgeClass => Kind switch
+        {
+            ScheduleItemKind.Funktionar => "bg-success-subtle text-success-emphasis border",
+            ScheduleItemKind.Praktiskt => "bg-body-secondary text-secondary border",
+            _ => "bg-primary-subtle text-primary-emphasis border",
+        };
+
+        /// <summary>Programme rows are context, not tasks — they must not read as loudly as your own.</summary>
+        public bool IsOwn => Kind != ScheduleItemKind.Praktiskt;
+
+        public string TitleClass => IsOwn ? "fw-semibold" : "text-body-secondary";
+
         /// <summary>Already finished — the view renders these muted.</summary>
         public bool IsPast => EndsAt != null ? EndsAt < DateTime.Now : StartsAt != null && StartsAt < DateTime.Now;
 

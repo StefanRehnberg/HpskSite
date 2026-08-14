@@ -59,6 +59,10 @@ else
                 <div class="d-flex align-items-baseline gap-2 flex-wrap">
                     <span class="fs-4 fw-bold">@Model.NextItem.TimeLabel</span>
                     <span class="fs-5">@Model.NextItem.Title</span>
+                    @* The most prominent thing on the page, so it most needs to say whose it is — the
+                       next item is often a programme point, and "Vapenkontroll" in big type reads as a
+                       job you have been given. *@
+                    <span class="badge fw-normal @Model.NextItem.OwnerBadgeClass">@Model.NextItem.OwnerLabel</span>
                     @if (!string.IsNullOrWhiteSpace(Model.NextItem.Where))
                     {
                         <span class="text-muted">· @Model.NextItem.Where</span>
@@ -104,8 +108,12 @@ else
                             <i class="bi @item.IconClass me-1 @item.AccentClass"></i>@item.TimeLabel
                         </div>
                         <div class="flex-grow-1">
-                            <div class="fw-semibold">
+                            <div class="@item.TitleClass">
                                 @item.Title
+                                @* Whose row is this? A programme point often shares its name with a job
+                                   ("Vapenkontroll"), so ownership is stated in words, always visible —
+                                   the old right-hand label was hidden on phones. *@
+                                <span class="badge fw-normal ms-1 @item.OwnerBadgeClass">@item.OwnerLabel</span>
                                 @if (item.IsResponsible)
                                 {
                                     <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-1">Ansvarig</span>
@@ -138,7 +146,7 @@ else
                                 <a href="@item.Link" class="small text-decoration-none d-print-none">@(item.LinkText ?? "Öppna") →</a>
                             }
                         </div>
-                        <div class="text-muted small text-nowrap d-none d-sm-block">@item.KindLabel</div>
+                        @* The kind used to live here, hidden below 576px. It is a badge next to the title now. *@
                     </div>
                 </div>
             }
