@@ -1,0 +1,25 @@
+@*
+    Avslutande länk till tävlingssidan — på ALLA sidor i evenemangssajten.
+
+    Anmälan, avgifter, laganmälan, startlistor och resultat bor på tävlingsnoden, och den som läst
+    klart en sida ska inte behöva leta sig tillbaka till startsidan för att komma dit.
+    ViewData["CompetitionUrl"] är alltid satt (controllern faller tillbaka på prod-URL:en).
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    var smfotUrl = ViewData["CompetitionUrl"] as string ?? "";
+}
+
+@if (!string.IsNullOrEmpty(smfotUrl))
+{
+    <section class="sm-section sm-foot">
+        <h2>Till tävlingssidan</h2>
+        <p>
+            Anmälan, avgifter, laganmälan och betalning sköts på tävlingens egen sida. Där publiceras
+            också <strong>startlistorna i vecka 34</strong> och resultaten under och efter tävlingen.
+        </p>
+        <a class="btn btn-primary btn-lg" href="@smfotUrl">
+            <i class="bi bi-box-arrow-up-right me-2"></i>SM i Springskytte 2026 — tävlingssidan
+        </a>
+    </section>
+}

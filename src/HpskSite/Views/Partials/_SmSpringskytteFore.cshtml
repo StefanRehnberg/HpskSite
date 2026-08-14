@@ -12,17 +12,12 @@
     var smfCompId = ViewData["CompetitionId"] as int? ?? 0;
     var smfScheduleUrl = smfCompId > 0 ? $"/mitt-schema?c={smfCompId}" : "/mitt-schema";
 
-    var smfHasSchemaTut = false;
-    var smfHasNotisTut = false;
-    try
-    {
-        var smfHome = Umbraco.ContentAtRoot().FirstOrDefault();
-        var smfHub = smfHome?.Children?.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
-        var smfTuts = smfHub?.Children?.Where(t => t.ContentType.Alias == "tutorial").ToList();
-        smfHasSchemaTut = smfTuts?.Any(t => (t.Value<string>("tutorialId") ?? "") == "tutorial-mitt-schema") ?? false;
-        smfHasNotisTut = smfTuts?.Any(t => (t.Value<string>("tutorialId") ?? "") == "tutorial-notiser") ?? false;
-    }
-    catch { }
+    // Filmlistorna slås upp i SmSpringskytte2026Controller (C#, inte Razor — explicita generics i
+    // ett Razor-kodblock parsas som HTML-taggar och fäller vyn utan felmeddelande).
+    var smfSchemaFilms = ViewData["ScheduleTutorials"] as IEnumerable<HpskSite.Controllers.SmTutorialLink>
+                         ?? Array.Empty<HpskSite.Controllers.SmTutorialLink>();
+    var smfNotisFilms = ViewData["NotisTutorials"] as IEnumerable<HpskSite.Controllers.SmTutorialLink>
+                        ?? Array.Empty<HpskSite.Controllers.SmTutorialLink>();
 }
 
 <div class="sm-cta">
@@ -43,10 +38,10 @@
                 <p class="small text-body-secondary mt-2 mb-0">
                     Kräver att du är inloggad på pistol.nu — du loggas in och skickas hit tillbaka.
                 </p>
-                @if (smfHasSchemaTut)
+                @foreach (var film in smfSchemaFilms)
                 {
-                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="TutorialHelper.open('tutorial-mitt-schema')">
-                        <i class="bi bi-play-circle me-1"></i>Se filmen: så funkar Mitt schema
+                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2 me-2" onclick="TutorialHelper.open('@film.Id')">
+                        <i class="bi bi-play-circle me-1"></i>Se filmen: @film.Title
                     </button>
                 }
             </div>
@@ -68,10 +63,10 @@
                     På iPhone krävs ett extra steg: lägg först till pistol.nu på hemskärmen, öppna sidan därifrån
                     och slå sedan på notiser. Det är en begränsning i iOS, inte i pistol.nu.
                 </p>
-                @if (smfHasNotisTut)
+                @foreach (var film in smfNotisFilms)
                 {
-                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="TutorialHelper.open('tutorial-notiser')">
-                        <i class="bi bi-play-circle me-1"></i>Se filmen: notiser på iPhone
+                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2 me-2" onclick="TutorialHelper.open('@film.Id')">
+                        <i class="bi bi-play-circle me-1"></i>Se filmen: @film.Title
                     </button>
                 }
             </div>

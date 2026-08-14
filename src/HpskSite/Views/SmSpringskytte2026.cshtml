@@ -132,14 +132,7 @@
                         Anmälan, avgifter, laganmälan och betalning sköts på tävlingens egen sida. Där publiceras
                         också startlistorna i vecka 34 och resultaten under och efter tävlingen.
                     </p>
-                    @if (!string.IsNullOrEmpty(compUrl))
-                    {
-                        <a class="btn btn-primary" href="@compUrl">Till tävlingssidan</a>
-                    }
-                    else
-                    {
-                        <p class="text-muted mb-0"><em>Länken till tävlingssidan kunde inte hämtas.</em></p>
-                    }
+                    <a class="btn btn-primary" href="@compUrl">Till tävlingssidan</a>
                 </div>
             </div>
             <div class="col-md-6">
@@ -215,5 +208,7 @@
             <p class="mb-0 mt-2">Arrangör: Hallands Pistolskyttekrets.</p>
         </div>
     </section>
+
+    @await Html.PartialAsync("_SmSpringskytteFot")
 
 </div>

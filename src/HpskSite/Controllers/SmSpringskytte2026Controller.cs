@@ -26,9 +26,19 @@ namespace HpskSite.Controllers
     /// in dev and prod; override with config key "SmSpringskytte2026:CompetitionUrlSegment" if the
     /// competition is ever renamed.
     /// </summary>
+    /// <summary>A playable tutorial film, surfaced as a button on the event site.</summary>
+    public record SmTutorialLink(string Id, string Title);
+
     [Route("sm-springskytte-2026")]
     public class SmSpringskytte2026Controller : Controller
     {
+        /// <summary>
+        /// Where the competition lives in production. Used only when the node can't be resolved (dev
+        /// databases don't have it) — the page must never lose the link to anmälan and startlistor,
+        /// which is the one thing every reader eventually needs.
+        /// </summary>
+        private const string FallbackCompetitionUrl = "/competitions/2026/halland/sm-springskytte-2026/";
+
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IConfiguration _configuration;
 
@@ -72,15 +82,60 @@ namespace HpskSite.Controllers
 
             var competition = ResolveCompetition(ctx);
 
+            var (scheduleTutorials, notisTutorials) = ResolveTutorials(ctx);
+
             ViewData["ActivePage"] = active;
             ViewData["Title"] = title;
             ViewData["CompetitionId"] = competition?.Id ?? 0;
-            ViewData["CompetitionUrl"] = competition?.Url() ?? "";
+            ViewData["CompetitionUrl"] = competition?.Url() ?? FallbackCompetitionUrl;
+            ViewData["ScheduleTutorials"] = scheduleTutorials;
+            ViewData["NotisTutorials"] = notisTutorials;
             ViewData["ContactName"] = competition?.Value<string>("competitionDirector") ?? "";
             ViewData["ContactEmail"] = competition?.Value<string>("contactEmail") ?? "";
             ViewData["ContactPhone"] = competition?.Value<string>("contactPhone") ?? "";
 
             return View(view, rootNode);
+        }
+
+        /// <summary>
+        /// Splits the published tutorials into the ones about Mitt schema and the ones about notiser.
+        ///
+        /// Matched on SUBJECT rather than a hardcoded id list: the catalogue grows (iPhone-notiser is
+        /// live, Mitt schema-guiden är på väg, fler kan komma) and a fixed list would silently keep new
+        /// films off the page. A tutorial without a youtubeId is skipped — the node is often created
+        /// before the film is uploaded, and a button that opens an empty ruta is worse than no button.
+        /// </summary>
+        private (List<SmTutorialLink> Schedule, List<SmTutorialLink> Notiser) ResolveTutorials(IUmbracoContext ctx)
+        {
+            var schedule = new List<SmTutorialLink>();
+            var notiser = new List<SmTutorialLink>();
+
+            try
+            {
+                var root = ctx.Content?.GetAtRoot().FirstOrDefault();
+                var hub = root?.Children.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
+                if (hub == null) return (schedule, notiser);
+
+                foreach (var t in hub.Children.Where(c => c.ContentType.Alias == "tutorial"))
+                {
+                    var id = t.Value<string>("tutorialId") ?? "";
+                    var youtubeId = t.Value<string>("youtubeId") ?? "";
+                    if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(youtubeId)) continue;
+
+                    var titleValue = t.Value<string>("tutorialTitle");
+                    if (string.IsNullOrWhiteSpace(titleValue)) titleValue = t.Name;
+
+                    var haystack = (id + " " + titleValue).ToLowerInvariant();
+                    if (haystack.Contains("notis")) notiser.Add(new SmTutorialLink(id, titleValue));
+                    else if (haystack.Contains("schema")) schedule.Add(new SmTutorialLink(id, titleValue));
+                }
+            }
+            catch
+            {
+                // A missing tutorial hub must not take the event site down.
+            }
+
+            return (schedule, notiser);
         }
 
         /// <summary>

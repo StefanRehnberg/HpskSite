@@ -307,6 +307,18 @@ a.sm-card .sm-card-more {
     border: 0;
 }
 
+/* ---------- Closing link to the competition ---------- */
+.sm-foot {
+    border-top: 3px solid var(--sm-accent);
+    padding-top: 1.25rem;
+    margin-top: 2.5rem;
+}
+
+.sm-foot > h2 {
+    border-bottom: 0;
+    padding-bottom: 0;
+}
+
 /* ---------- Misc ---------- */
 .sm-list-tight {
     padding-left: 1.15rem;
