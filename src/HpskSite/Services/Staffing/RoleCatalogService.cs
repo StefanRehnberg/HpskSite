@@ -60,6 +60,12 @@ namespace HpskSite.Services.Staffing
                 merged.Add(b);
             }
 
+            // IsActive=0 is a HIDE marker, not a soft delete: an arrangör who uses 5 of the 11 built-ins
+            // must be able to get the other 6 out of their grid. Hiding a built-in removes it from the
+            // catalog; unhiding is deleting the marker row.
+            var hidden = new HashSet<string>(
+                custom.Where(c => !c.IsActive).Select(c => c.RoleKey), StringComparer.OrdinalIgnoreCase);
+
             foreach (var c in custom.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ThenBy(c => c.DisplayName, StringComparer.CurrentCulture))
             {
                 if (!MatchesDiscipline(c, discipline)) continue;
@@ -72,6 +78,9 @@ namespace HpskSite.Services.Staffing
                     merged.Add(role);
                 }
             }
+
+            if (hidden.Count > 0)
+                merged = merged.Where(r => !hidden.Contains(r.Key)).ToList();
 
             _memo[memoKey] = merged;
             return merged;
@@ -175,6 +184,65 @@ namespace HpskSite.Services.Staffing
             Forget(req.CompetitionId);
             return key;
         }
+
+        /// <summary>
+        /// Hide a role from this competition's grid (or unhide it). Refuses to hide a role that still
+        /// carries crew — the row would vanish and take the people with it. Hiding writes an IsActive=0
+        /// marker row; unhiding deletes it, restoring the built-in.
+        /// </summary>
+        public (bool ok, string? message) SetHidden(int competitionId, string roleKey, bool hidden, string? discipline, int byMemberId)
+        {
+            if (string.IsNullOrWhiteSpace(roleKey)) return (false, "Roll saknas.");
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var row = db.SingleOrDefault<StaffRole>(
+                "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1 AND RoleKey = @2",
+                RoleOwnerType.Competition, competitionId, roleKey);
+
+            if (!hidden)
+            {
+                if (row is { IsActive: false }) db.Delete(row);
+                Forget(competitionId);
+                return (true, null);
+            }
+
+            var inUse = db.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
+                competitionId, roleKey);
+            if (inUse > 0)
+                return (false, $"Rollen används av {inUse} uppdrag. Flytta eller ta bort dem först.");
+
+            var name = Resolve(competitionId, discipline, roleKey)?.DisplayName ?? roleKey;
+            var now = DateTime.UtcNow;
+            if (row == null)
+            {
+                db.Insert(new StaffRole
+                {
+                    OwnerType = RoleOwnerType.Competition,
+                    OwnerId = competitionId,
+                    RoleKey = roleKey,
+                    DisplayName = name,
+                    IsActive = false,
+                    CreatedByMemberId = byMemberId,
+                    CreatedDate = now,
+                    ModifiedDate = now,
+                });
+            }
+            else
+            {
+                row.IsActive = false;
+                row.ModifiedDate = now;
+                db.Update(row);
+            }
+            Forget(competitionId);
+            return (true, null);
+        }
+
+        /// <summary>Roles the arrangör has hidden, so the UI can offer to bring them back.</summary>
+        public List<(string Key, string Name)> GetHidden(int competitionId)
+            => GetCustom(competitionId).Where(c => !c.IsActive)
+                .Select(c => (c.RoleKey, c.DisplayName)).ToList();
 
         /// <summary>
         /// Remove an arrangör-created role. Refuses while assignments still reference it — deleting would

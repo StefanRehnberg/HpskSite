@@ -506,6 +506,51 @@ namespace HpskSite.Services.Staffing
             return n > 0 ? (true, null) : (false, "Uppdraget hittades inte.");
         }
 
+        /// <summary>
+        /// Move one assignment to another day, keeping its clock time. Exists because the guards that
+        /// refuse to delete a day (or hide a role) while crew sit on it are correct but become a WALL
+        /// without a way out — the organiser could see the leftover column and had no means to clear it.
+        /// <para>Deliberately narrow: it touches StartsAt/EndsAt/PassId and nothing else, so it can never
+        /// blank a field the way a partial full-save would.</para>
+        /// <para>Returns a refusal for an untimed row on a day with no pass: pinning it would mean
+        /// inventing a clock time, and a fake 00:00 becomes a real 23:30 reminder the night before.</para>
+        /// </summary>
+        public (bool Ok, string? Message) MoveToDay(int assignmentId, int competitionId, DateTime day, int? targetPassId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var a = db.SingleOrDefault<StaffAssignment>(
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", assignmentId, competitionId);
+            if (a == null) return (false, "Uppdraget hittades inte.");
+
+            DateTime? Shift(DateTime? t) => t is { } v ? day.Date.Add(v.TimeOfDay) : null;
+
+            if (a.StartsAt == null)
+            {
+                if (targetPassId == null)
+                    return (false, "Uppdraget saknar tid, och dagen har inget skift att hänga det på. Ange en tid på uppdraget, eller lägg till ett skift på dagen.");
+                db.Execute("UPDATE StaffAssignment SET PassId = @0, ModifiedDate = @1 WHERE Id = @2",
+                    targetPassId, DateTime.UtcNow, assignmentId);
+                return (true, null);
+            }
+
+            db.Execute("UPDATE StaffAssignment SET StartsAt = @0, EndsAt = @1, PassId = @2, ModifiedDate = @3 WHERE Id = @4",
+                Shift(a.StartsAt), Shift(a.EndsAt), targetPassId, DateTime.UtcNow, assignmentId);
+            return (true, null);
+        }
+
+        /// <summary>
+        /// Set contact details on an existing roster row. Used by the grid to rescue an account-less helper
+        /// from being unreachable — with an e-mail they can at least be invited via a tokened link.
+        /// </summary>
+        public void SetContact(int assignmentId, int competitionId, string? email, string? phone)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute(
+                "UPDATE StaffAssignment SET Email = @0, Phone = @1, ModifiedDate = @2 WHERE Id = @3 AND CompetitionId = @4",
+                email, phone, DateTime.UtcNow, assignmentId, competitionId);
+        }
+
         /// <summary>Resolve display info for the external-invite page (comp name, role, scope, shift, status).</summary>
         public InviteResponseModel? GetInviteInfo(int assignmentId)
         {

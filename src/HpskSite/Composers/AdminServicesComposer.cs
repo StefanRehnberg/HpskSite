@@ -169,6 +169,10 @@ namespace HpskSite.Composers
             // place a role is resolved — never call FunctionaryRoles directly from a surface. Degrades to
             // the built-ins if StaffRole is missing. Run create-staff-role-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.RoleCatalogService>();
+            // THE DAY AXIS: the days you STAFF (incl. build-up/teardown) — not the days you COMPETE.
+            // Seeded from the competition span, owned by the arrangör. Shared by the Bemanning grid and
+            // Dagsprogram so they cannot disagree. Run create-staff-day-table.sql.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffDayService>();
             // Phase 1.5: editable per-club/region planning templates. Run create-staffing-template-table.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingTemplateService>();
             // Materiel-quantity estimate (general Beställningslista from participant/class/series counts).

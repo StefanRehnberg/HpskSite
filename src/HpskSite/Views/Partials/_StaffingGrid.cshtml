@@ -31,17 +31,23 @@
     #grdTable thead th { position: sticky; top: 0; z-index: 3; background: var(--bs-body-bg); border-bottom-width: 2px; }
     #grdTable .grd-rolecol { position: sticky; left: 0; z-index: 2; background: var(--bs-body-bg); min-width: 210px; max-width: 260px; box-shadow: 1px 0 0 var(--bs-border-color); }
     #grdTable thead .grd-rolecol { z-index: 4; }
-    #grdTable td.grd-cell { min-width: 190px; cursor: pointer; }
+    /* Wide enough that "Kristian Gellert  HSSK" stays on one line — a name broken over three lines is
+       unreadable, and every cell in a staffing plan is a name. */
+    #grdTable td.grd-cell { min-width: 250px; cursor: pointer; }
     #grdTable td.grd-cell:hover { background: var(--bs-tertiary-bg); }
-    #grdTable tr.grd-empty td.grd-cell { }
-    .grd-entry { display: flex; align-items: baseline; gap: .35rem; line-height: 1.25; padding: 1px 0; }
-    .grd-entry .grd-name { font-weight: 500; }
+    .grd-entry { display: flex; align-items: baseline; gap: .35rem; line-height: 1.3; padding: 1px 0; flex-wrap: nowrap; }
+    .grd-entry .grd-name { font-weight: 500; white-space: nowrap; }
     .grd-entry .grd-club { font-size: .75rem; color: var(--bs-secondary-color); }
     .grd-entry .grd-time { font-size: .75rem; }
     .grd-entry .grd-del { visibility: hidden; border: 0; background: none; color: var(--bs-danger); line-height: 1; padding: 0 2px; }
     .grd-entry:hover .grd-del { visibility: visible; }
-    .grd-add { font-size: .8rem; color: var(--bs-secondary-color); }
-    #grdTable td.grd-cell:hover .grd-add { color: var(--bs-primary); }
+    /* Empty cells stay QUIET. 14 rows x 5 days is 70 blue "+ lägg till" links shouting over the four
+       names that actually matter; Excel is silent in an empty cell and so is this. */
+    .grd-add { font-size: .8rem; color: var(--bs-primary); visibility: hidden; }
+    #grdTable td.grd-cell:hover .grd-add { visibility: visible; }
+    #grdTable td.grd-cell:empty::after { content: ''; }
+    .grd-daykind { font-size: .7rem; font-weight: 400; }
+    .grd-daylabel { font-size: .78rem; font-weight: 500; color: var(--bs-body-color); }
     .grd-rolename { font-weight: 600; }
     .grd-scope { font-size: .75rem; color: var(--bs-secondary-color); }
     .grd-roleacts { visibility: hidden; }
@@ -66,6 +72,7 @@
 </div>
 
 <div id="grdExternalWarn" class="alert alert-warning py-2 small" style="display:none"></div>
+<div id="grdHiddenRoles" class="small mb-2"></div>
 
 <div id="grdWrap" class="border rounded">
     <table class="table table-sm mb-0" id="grdTable">
@@ -143,14 +150,26 @@
 
     function render() {
         var cols = grid.columns || [];
-        var head = '<th class="grd-rolecol">Roll</th>';
-        cols.forEach(function (c, i) {
+        var head = '<th class="grd-rolecol">Roll'
+            + '<button type="button" class="btn btn-sm btn-link p-0 float-end" onclick="grdAddDay()" title="Lägg till en dag i planen — även bygg- eller återställningsdag">'
+            + '<i class="bi bi-calendar-plus"></i> dag</button></th>';
+        cols.forEach(function (c) {
+            var isPrep = c.kind && c.kind !== 'Tavlingsdag';
             head += '<th class="grd-cell">'
                 + '<div class="d-flex justify-content-between align-items-start gap-1">'
-                + '<div><div>' + esc(c.label) + '</div>'
+                + '<div>'
+                + '<div>' + esc(c.label)
+                + (isPrep ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis border fw-normal grd-daykind">' + esc(c.kindLabel) + '</span>' : '')
+                + (c.key && !c.isPlanned ? ' <span class="badge bg-warning-subtle text-warning-emphasis border fw-normal grd-daykind" title="Dagen finns inte i planen men har bemanning">ej i planen</span>' : '')
+                + '</div>'
+                + (c.dayLabel ? '<div class="grd-daylabel">' + esc(c.dayLabel) + '</div>' : '')
                 + (c.timeLabel ? '<div class="text-muted fw-normal" style="font-size:.75rem">' + esc(c.timeLabel) + '</div>' : '')
                 + '</div>'
-                + (cols.length > 1 && c.key ? '<button type="button" class="btn btn-sm btn-link p-0 grd-roleacts" title="Kopiera den här dagens bemanning till en annan dag" onclick="grdCopyDay(\'' + arg(c.key) + '\')"><i class="bi bi-arrow-right-square"></i></button>' : '')
+                + (c.key ? '<span class="grd-roleacts text-nowrap">'
+                    + (c.dayId ? '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Ändra dagen" onclick="grdEditDay(' + c.dayId + ')"><i class="bi bi-pencil"></i></button>' : '')
+                    + (cols.length > 1 ? '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Kopiera dagens bemanning till en annan dag" onclick="grdCopyDay(\'' + arg(c.key) + '\')"><i class="bi bi-arrow-right-square"></i></button>' : '')
+                    + (c.dayId && !c.hasAssignments ? '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort dagen" onclick="grdDeleteDay(' + c.dayId + ')"><i class="bi bi-x-lg"></i></button>' : '')
+                    + '</span>' : '')
                 + '</div></th>';
         });
         document.getElementById('grdHead').innerHTML = head;
@@ -175,13 +194,36 @@
         s.innerHTML = '<i class="bi bi-grid-3x3 me-1"></i><strong>' + (grid.totalAssigned || 0) + '</strong> uppdrag · '
             + (grid.rows || []).length + ' rader · ' + cols.length + ' dagar';
 
+        // Two different problems, two different messages. "Extern" is survivable; unreachable is not —
+        // that person will simply never be told they are working, which is the one thing this tool
+        // exists to prevent.
         var w = document.getElementById('grdExternalWarn');
-        if (grid.externalCount) {
+        var un = grid.unreachable || [];
+        if (un.length) {
+            w.className = 'alert alert-danger py-2 small';
             w.style.display = '';
-            w.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i><strong>' + grid.externalCount
-                + '</strong> personer saknar konto på pistol.nu. De får inget personligt schema och inga notiser — '
-                + 'be dem registrera sig, eller koppla raden till rätt medlem.';
+            w.innerHTML = '<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>' + un.length
+                + ' kan inte nås alls</strong> — varken konto eller e-post: ' + esc(un.slice(0, 12).join(', '))
+                + (un.length > 12 ? ' m.fl.' : '')
+                + '. Klicka på <i class="bi bi-exclamation-triangle-fill"></i> i rutan för att lägga till e-post, '
+                + 'eller be klubben registrera dem på pistol.nu.';
+        } else if (grid.externalCount) {
+            w.className = 'alert alert-warning py-2 small';
+            w.style.display = '';
+            w.innerHTML = '<i class="bi bi-info-circle me-1"></i><strong>' + grid.externalCount
+                + '</strong> personer saknar konto på pistol.nu. De kan bjudas in via e-post, men får '
+                + 'inget personligt schema och inga påminnelser förrän de registrerat sig.';
         } else w.style.display = 'none';
+
+        // Hidden roles are offered back, never lost.
+        var hr = document.getElementById('grdHiddenRoles');
+        var hidden = grid.hiddenRoles || [];
+        hr.innerHTML = hidden.length
+            ? '<span class="text-muted">Dolda roller:</span> ' + hidden.map(function (h) {
+                return '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" onclick="grdUnhideRole(\''
+                    + arg(h.roleKey) + '\')" title="Visa igen"><i class="bi bi-eye"></i> ' + esc(h.roleName) + '</button>';
+            }).join('')
+            : '';
     }
 
     function rowHtml(row) {
@@ -194,6 +236,7 @@
             + '</div>'
             + '<span class="grd-roleacts text-nowrap">'
             + '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Byt namn på rollen" onclick="grdRenameRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-pencil"></i></button>'
+            + (row.filled ? '' : '<button type="button" class="btn btn-sm btn-link p-0 me-1 text-secondary" title="Dölj rollen — vi använder den inte" onclick="grdHideRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-eye-slash"></i></button>')
             + (row.isCustom ? '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort rollen" onclick="grdDeleteRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-trash"></i></button>' : '')
             + '</span></div></td>';
 
@@ -213,8 +256,16 @@
             + (e.isResponsible ? '<i class="bi bi-star-fill text-warning" title="Ansvarig"></i>' : '')
             + '<span class="grd-name ' + cls + '">' + esc(e.displayName) + '</span>'
             + (e.clubName ? '<span class="grd-club">' + esc(e.clubName) + '</span>' : '')
-            + (e.isExternal ? '<span class="badge bg-warning-subtle text-warning-emphasis border grd-ext" title="Saknar konto — får inget schema och inga notiser">ext</span>' : '')
+            // An account-less helper WITH an e-mail can at least be invited by a tokened link; without one
+            // the row delivers nothing at all — so those two states must not look the same.
+            + (e.isExternal
+                ? '<button type="button" class="btn btn-link p-0 grd-ext ' + (e.hasContact ? 'text-secondary' : 'text-danger') + '"'
+                  + ' title="' + (e.hasContact ? 'Extern hjälpare — kan bjudas in via e-post' : 'Saknar konto OCH e-post — kan inte nås alls. Klicka för att lägga till e-post.') + '"'
+                  + ' onclick="event.stopPropagation();grdContact(' + e.id + ',\'' + arg(e.displayName) + '\',\'' + arg(e.email || '') + '\')">'
+                  + '<i class="bi bi-' + (e.hasContact ? 'envelope' : 'exclamation-triangle-fill') + '"></i></button>'
+                : '')
             + (e.timeLabel ? '<span class="badge bg-primary-subtle text-primary-emphasis border fw-normal grd-time">' + esc(e.timeLabel) + '</span>' : '')
+            + (e.readOnly ? '' : '<button type="button" class="grd-del text-secondary" title="Flytta till en annan dag" onclick="event.stopPropagation();grdMove(' + e.id + ',\'' + arg(e.displayName) + '\')"><i class="bi bi-arrow-left-right"></i></button>')
             + (e.readOnly ? '' : '<button type="button" class="grd-del" title="Ta bort" onclick="event.stopPropagation();grdRemove(' + e.id + ',\'' + arg(e.displayName) + '\')">&times;</button>')
             + '</div>';
     }
@@ -367,6 +418,22 @@
         await grdLoad();
     };
 
+    // The way out of the day/role guards: they refuse to drop crew on the floor, so there has to be
+    // somewhere to put them.
+    window.grdMove = async function (id, name) {
+        var days = (grid.columns || []).filter(function (c) { return c.key; });
+        if (!days.length) { alert('Det finns ingen dag att flytta till.'); return; }
+        var msg = 'Flytta ' + unarg(name) + ' till vilken dag?\n\n'
+            + days.map(function (c, i) { return (i + 1) + '. ' + c.label + (c.dayLabel ? ' — ' + c.dayLabel : ''); }).join('\n');
+        var pick = prompt(msg, '1');
+        if (pick == null) return;
+        var idx = parseInt(pick, 10) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= days.length) return;
+        var r = await post('MoveAssignmentToDay', { id: id, competitionId: compId, date: days[idx].key });
+        if (!r.success) { alert(r.message || 'Kunde inte flytta.'); return; }
+        await grdLoad();
+    };
+
     // ---------------------------------------------------------------- roles
 
     window.grdCreateRole = async function (name) {
@@ -398,6 +465,68 @@
         if (!confirm('Ta bort rollen? Uppdrag som redan ligger på den måste flyttas först.')) return;
         var d = await post('DeleteRole', { competitionId: compId, roleKey: roleKey });
         if (!d.success) { alert(d.message || 'Kunde inte ta bort rollen.'); return; }
+        await grdLoad();
+    };
+
+    // ---------------------------------------------------------------- days of the plan
+
+    // The days you STAFF are not the days you COMPETE: build-up, materiel and teardown all carry crew.
+    // So the arrangör adds days freely; the competition span only seeded the list.
+    window.grdAddDay = async function () {
+        var d = prompt('Vilket datum? (ÅÅÅÅ-MM-DD)', '');
+        if (!d) return;
+        var label = prompt('Vad kallar ni dagen? (t.ex. Iordningställande, Vapengrupp C — kan lämnas tomt)', '') || '';
+        var kind = prompt('Är det en tävlingsdag eller förberedelse?\n\n1 = Tävlingsdag\n2 = Förberedelse (bygga, materiel)\n3 = Efterarbete (återställning)', '1');
+        var k = kind === '2' ? 'Forberedelse' : kind === '3' ? 'Efterarbete' : 'Tavlingsdag';
+        var r = await post('SaveDay', { competitionId: compId, date: d.trim(), label: label.trim(), kind: k });
+        if (!r.success) { alert(r.message || 'Kunde inte lägga till dagen.'); return; }
+        await grdLoad();
+    };
+
+    window.grdEditDay = async function (dayId) {
+        var col = (grid.columns || []).find(function (c) { return c.dayId === dayId; });
+        if (!col) return;
+        var label = prompt('Vad kallar ni dagen?', col.dayLabel || '');
+        if (label == null) return;
+        var kind = prompt('1 = Tävlingsdag\n2 = Förberedelse\n3 = Efterarbete',
+            col.kind === 'Forberedelse' ? '2' : col.kind === 'Efterarbete' ? '3' : '1');
+        var k = kind === '2' ? 'Forberedelse' : kind === '3' ? 'Efterarbete' : 'Tavlingsdag';
+        var r = await post('SaveDay', { id: dayId, competitionId: compId, date: col.key, label: label.trim(), kind: k });
+        if (!r.success) { alert(r.message || 'Kunde inte spara dagen.'); return; }
+        await grdLoad();
+    };
+
+    window.grdDeleteDay = async function (dayId) {
+        if (!confirm('Ta bort dagen ur planen?')) return;
+        var r = await post('DeleteDay', { id: dayId, competitionId: compId });
+        if (!r.success) { alert(r.message || 'Kunde inte ta bort dagen.'); return; }
+        await grdLoad();
+    };
+
+    // ---------------------------------------------------------------- hide/show roles
+
+    window.grdHideRole = async function (roleKey) {
+        var r = await post('HideRole', { competitionId: compId, roleKey: unarg(roleKey), hidden: true });
+        if (!r.success) { alert(r.message || 'Kunde inte dölja rollen.'); return; }
+        await grdLoad();
+    };
+
+    window.grdUnhideRole = async function (roleKey) {
+        var r = await post('HideRole', { competitionId: compId, roleKey: unarg(roleKey), hidden: false });
+        if (!r.success) { alert(r.message || 'Kunde inte visa rollen.'); return; }
+        await grdLoad();
+    };
+
+    // ---------------------------------------------------------------- reach an account-less helper
+
+    window.grdContact = async function (id, name, current) {
+        var email = prompt('E-postadress till ' + unarg(name)
+            + '\n\nMed e-post kan hen få sin förfrågan och sitt uppdrag skickat till sig.\n'
+            + 'Utan konto på pistol.nu får hen dock inget personligt schema och inga påminnelser.',
+            unarg(current || ''));
+        if (email == null) return;
+        var r = await post('SetContact', { id: id, competitionId: compId, email: email.trim() });
+        if (!r.success) { alert(r.message || 'Kunde inte spara.'); return; }
         await grdLoad();
     };
 

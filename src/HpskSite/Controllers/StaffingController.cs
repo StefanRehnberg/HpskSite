@@ -43,6 +43,7 @@ namespace HpskSite.Controllers
         private readonly StaffHelpService _help;
         private readonly StaffPassService _pass;
         private readonly RoleCatalogService _roleCatalog;
+        private readonly StaffDayService _days;
         private readonly PrepDocumentStorage _docs;
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
         private readonly EmailService _email;
@@ -71,6 +72,7 @@ namespace HpskSite.Controllers
             StaffHelpService help,
             StaffPassService pass,
             RoleCatalogService roleCatalog,
+            StaffDayService days,
             PrepDocumentStorage docs,
             HpskSite.Services.Schedule.CompetitionAgendaService agenda,
             EmailService email,
@@ -94,6 +96,7 @@ namespace HpskSite.Controllers
             _help = help;
             _pass = pass;
             _roleCatalog = roleCatalog;
+            _days = days;
             _docs = docs;
             _agenda = agenda;
             _email = email;
@@ -194,8 +197,9 @@ namespace HpskSite.Controllers
 
             try
             {
+                var viewer = await ResolveViewerAsync();
                 var discipline = GetDiscipline(competitionId);
-                var resp = BuildGrid(competitionId, discipline);
+                var resp = BuildGrid(competitionId, discipline, viewer?.Id ?? 0);
                 return Json(resp);
             }
             catch (Exception ex)
@@ -1472,43 +1476,69 @@ namespace HpskSite.Controllers
         /// StaffAssignment directly, so role names, scope labels, shift labels and the Fält station-chief
         /// mirror stay identical to every other surface — the grid is a second VIEW, never a second truth.
         /// </summary>
-        private GridResponse BuildGrid(int competitionId, string? discipline)
+        private GridResponse BuildGrid(int competitionId, string? discipline, int viewerId)
         {
             var roster = _staffing.BuildRoster(competitionId, discipline, canEdit: true);
             var resp = new GridResponse { Discipline = discipline ?? "", CanEdit = true };
 
             var all = roster.Groups.SelectMany(g => g.Assignments).ToList();
 
-            // ---- columns: every day the competition touches -------------------------------------
-            // Union of pass dates, explicit shift dates and the competition date, so a build-day pass or a
-            // Friday shift can't fall outside the grid. Sorted; an "undated" bucket is appended only when
-            // something actually lands in it (a heldag row on a multi-day comp pins no day — we bucket it
-            // rather than guessing, same rule the schedule uses).
-            var passes = SafeGetPasses(competitionId);
-            var dates = new SortedSet<string>(StringComparer.Ordinal);
-            foreach (var p in passes) if (!string.IsNullOrEmpty(p.Date)) dates.Add(p.Date);
-            foreach (var a in all) if (!string.IsNullOrEmpty(a.DateKey)) dates.Add(a.DateKey!);
-            if (GetCompetitionDate(competitionId) is { } cd) dates.Add(cd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            // ---- columns: the DAYS OF THE PLAN --------------------------------------------------
+            // Owned by the arrangör (StaffDay), seeded once from the competition span. The days you STAFF
+            // are not the days you COMPETE — build-up, materiel runs and teardown carry crew and sit
+            // outside the span — so the span may only seed, never constrain.
+            // The competition date is deliberately NOT unioned in here: doing that produced a phantom
+            // column the organiser never asked for and could not remove. Dates that actually CARRY crew
+            // are unioned in, because work is proof that the day is part of the plan.
+            var days = _days.EnsureSeeded(competitionId, viewerId);
+            var withWork = new HashSet<string>(
+                all.Where(a => !string.IsNullOrEmpty(a.DateKey)).Select(a => a.DateKey!), StringComparer.Ordinal);
 
+            var passes = SafeGetPasses(competitionId);
             var sv = CultureInfo.GetCultureInfo("sv-SE");
-            foreach (var d in dates)
+            var byDate = new SortedDictionary<string, GridColumn>(StringComparer.Ordinal);
+
+            void AddColumn(string key, StaffDay? day)
             {
-                var parsed = DateTime.TryParseExact(d, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
+                if (byDate.ContainsKey(key)) return;
+                var parsed = DateTime.TryParseExact(key, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
                     ? dt : (DateTime?)null;
-                var dayPasses = passes.Where(p => p.Date == d).ToList();
-                resp.Columns.Add(new GridColumn
+                var dayPasses = passes.Where(p => p.Date == key).ToList();
+                var kind = day?.Kind ?? StaffDayKind.Competition;
+                byDate[key] = new GridColumn
                 {
-                    Key = d,
-                    Label = parsed?.ToString("ddd d MMM", sv) ?? d,
+                    Key = key,
+                    Label = parsed?.ToString("ddd d MMM", sv) ?? key,
+                    DayLabel = string.IsNullOrWhiteSpace(day?.Label) ? null : day!.Label,
+                    Kind = kind,
+                    KindLabel = StaffDayKind.Label(kind),
+                    IsPlanned = day != null,
+                    DayId = day?.Id ?? 0,
+                    HasAssignments = withWork.Contains(key),
                     TimeLabel = DayTimeLabel(dayPasses),
                     PassIds = dayPasses.Select(p => p.Id).ToList(),
-                });
+                };
             }
 
+            foreach (var d in days) AddColumn(d.DayDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), d);
+            foreach (var p in passes) if (!string.IsNullOrEmpty(p.Date)) AddColumn(p.Date!, null);
+            // Work on a day nobody planned still has to be visible — never drop people on the floor.
+            foreach (var key in withWork) AddColumn(key, null);
+
+            resp.Columns.AddRange(byDate.Values);
+
             var single = resp.Columns.Count == 1 ? resp.Columns[0].Key : null;
-            bool NeedsUndated() => all.Any(a => string.IsNullOrEmpty(a.DateKey)) && single == null;
-            if (NeedsUndated())
-                resp.Columns.Add(new GridColumn { Key = "", Label = "Utan datum", TimeLabel = null });
+            // The undated bucket appears ONLY when something is genuinely undated. On a single-day plan
+            // those rows belong to that day, so no bucket is needed at all.
+            if (all.Any(a => string.IsNullOrEmpty(a.DateKey)) && single == null)
+                resp.Columns.Add(new GridColumn
+                {
+                    Key = "",
+                    Label = "Utan datum",
+                    Kind = StaffDayKind.Competition,
+                    KindLabel = "",
+                    IsPlanned = false,
+                });
 
             // ---- rows: one per role, split by scope where the role is scoped ---------------------
             var catalog = _roleCatalog.ForCompetition(competitionId, discipline);
@@ -1557,6 +1587,8 @@ namespace HpskSite.Controllers
                             Status = a.Status,
                             IsResponsible = a.IsResponsible,
                             IsExternal = a.MemberId is not > 0,
+                            Email = a.Email,
+                            HasContact = a.MemberId is > 0 || !string.IsNullOrWhiteSpace(a.Email),
                             ReadOnly = a.ReadOnly,
                             Note = a.Note,
                         });
@@ -1568,7 +1600,138 @@ namespace HpskSite.Controllers
 
             resp.TotalAssigned = all.Count;
             resp.ExternalCount = all.Count(a => a.MemberId is not > 0);
+            // Who can't be reached at all: no account AND no e-mail. These are the rows that silently
+            // deliver nothing, and the organiser needs them as a list, not as a count.
+            resp.Unreachable = all
+                .Where(a => a.MemberId is not > 0 && string.IsNullOrWhiteSpace(a.Email))
+                .Select(a => a.DisplayName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            resp.HiddenRoles = _roleCatalog.GetHidden(competitionId)
+                .Select(h => new HiddenRoleView { RoleKey = h.Key, RoleName = h.Name }).ToList();
             return resp;
+        }
+
+        /// <summary>Add or edit a day of the plan — including a build/teardown day outside the competition.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveDay([FromBody] SaveStaffDayRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var (ok, msg, id) = _days.SaveDay(request, viewer.Id);
+                return Json(new { success = ok, message = msg, id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SaveDay failed for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte spara dagen." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteDay([FromBody] DeleteStaffDayRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || request.Id <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var (ok, msg) = _days.DeleteDay(request.Id, request.CompetitionId);
+                return Json(new { success = ok, message = msg });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: DeleteDay failed for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte ta bort dagen." });
+            }
+        }
+
+        /// <summary>Move an assignment to another day — the escape hatch that keeps the day/role guards
+        /// from becoming dead ends.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveAssignmentToDay([FromBody] MoveAssignmentRequest request)
+        {
+            if (request == null || request.Id <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
+            if (!await HasCompetitionAccessAsync(compId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            if (!DateTime.TryParseExact(request.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+                return Json(new { success = false, message = "Ogiltigt datum." });
+            try
+            {
+                var passId = SafeGetPasses(compId).FirstOrDefault(p => p.Date == request.Date)?.Id;
+                var (ok, msg) = _staffing.MoveToDay(request.Id, compId, day, passId);
+                return Json(new { success = ok, message = msg });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: MoveAssignmentToDay failed for {Id}", request.Id);
+                return Json(new { success = false, message = "Kunde inte flytta uppdraget." });
+            }
+        }
+
+        /// <summary>Hide a role this arrangör doesn't use (or bring it back). Their grid, their functions.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> HideRole([FromBody] HideStaffRoleRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var (ok, msg) = _roleCatalog.SetHidden(request.CompetitionId, request.RoleKey, request.Hidden,
+                    GetDiscipline(request.CompetitionId), viewer.Id);
+                return Json(new { success = ok, message = msg });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: HideRole failed for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte dölja rollen." });
+            }
+        }
+
+        /// <summary>
+        /// Give an account-less helper an e-mail (and phone) straight from the grid cell. Without this the
+        /// row is a dead end: it cannot be invited, reminded or told anything — which is the entire payoff
+        /// the organiser came here for.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetContact([FromBody] SetContactRequest request)
+        {
+            if (request == null || request.Id <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
+            if (!await HasCompetitionAccessAsync(compId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var email = (request.Email ?? "").Trim();
+            if (email.Length > 0 && (!email.Contains('@') || email.Contains(' ')))
+                return Json(new { success = false, message = "Ogiltig e-postadress." });
+            try
+            {
+                _staffing.SetContact(request.Id, compId, email.Length == 0 ? null : email,
+                    string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone!.Trim());
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SetContact failed for assignment {Id}", request.Id);
+                return Json(new { success = false, message = "Kunde inte spara kontaktuppgiften." });
+            }
         }
 
         /// <summary>

@@ -96,15 +96,27 @@ namespace HpskSite.Models.Staffing
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public bool IsResponsible { get; set; }
         public bool IsExternal { get; set; }        // no member account → no schedule, no push
+        public string? Email { get; set; }
+        /// <summary>Reachable at all: has an account, or at least an e-mail for a tokened invite.</summary>
+        public bool HasContact { get; set; }
         public bool ReadOnly { get; set; }
         public string? Note { get; set; }
     }
 
-    /// <summary>A column: one competition day. Passes on that day are the drill-in level (not built yet).</summary>
+    /// <summary>A column: one day of the plan (see <see cref="StaffDay"/>). Passes on that day are the
+    /// drill-in level (not built yet).</summary>
     public class GridColumn
     {
         public string Key { get; set; } = "";        // "yyyy-MM-dd", or "" for the undated bucket
-        public string Label { get; set; } = "";      // "Fre 21 aug"
+        public string Label { get; set; } = "";      // "fre 21 aug"
+        /// <summary>The arrangör's own word for the day — "Iordningställande", "Vapengrupp C".</summary>
+        public string? DayLabel { get; set; }
+        public string Kind { get; set; } = StaffDayKind.Competition;
+        public string KindLabel { get; set; } = "";
+        /// <summary>False = the day carries work but is not in the plan's day list (offer to add it).</summary>
+        public bool IsPlanned { get; set; }
+        public int DayId { get; set; }
+        public bool HasAssignments { get; set; }
         public string? TimeLabel { get; set; }       // "09:00–19:00" from the day's passes
         public List<int> PassIds { get; set; } = new();
     }
@@ -137,5 +149,16 @@ namespace HpskSite.Models.Staffing
         public int TotalAssigned { get; set; }
         /// <summary>Rows with no member account — they get no Mitt schema and no push.</summary>
         public int ExternalCount { get; set; }
+        /// <summary>No account AND no e-mail: these people cannot be told anything at all. A list, not a
+        /// count, because the organiser has to act on each name.</summary>
+        public List<string> Unreachable { get; set; } = new();
+        /// <summary>Built-in roles the arrangör hid, so the UI can offer them back.</summary>
+        public List<HiddenRoleView> HiddenRoles { get; set; } = new();
+    }
+
+    public class HiddenRoleView
+    {
+        public string RoleKey { get; set; } = "";
+        public string RoleName { get; set; } = "";
     }
 }
