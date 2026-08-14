@@ -359,7 +359,9 @@ namespace HpskSite.Services.Staffing
                     row.Phone = m.GetValue<string>("phoneNumber");
                 var pcid = m.GetValue<string>("primaryClubId");
                 if (!string.IsNullOrEmpty(pcid) && int.TryParse(pcid, out var clubId))
-                    row.ClubName = _clubService.GetClubNameById(clubId);
+                    // Same abbreviation as the grid — a person's club must read identically in the cell,
+                    // the person panel and the printout.
+                    row.ClubName = HpskSite.Helpers.ClubNameHelper.Shorten(_clubService.GetClubNameById(clubId) ?? "");
             }
             catch { /* contact enrichment is cosmetic */ }
         }

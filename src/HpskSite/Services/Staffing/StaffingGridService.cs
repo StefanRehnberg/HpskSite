@@ -239,8 +239,6 @@ namespace HpskSite.Services.Staffing
             resp.Unreachable = all
                 .Where(a => a.MemberId is not > 0 && string.IsNullOrWhiteSpace(a.Email))
                 .Select(a => a.DisplayName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            resp.HiddenRoles = _roles.GetHidden(competitionId)
-                .Select(h => new HiddenRoleView { RoleKey = h.Key, RoleName = h.Name }).ToList();
 
             // Volunteers with no assignment. They are, by definition, absent from every cell — so the
             // grid has to be told about them explicitly or they are invisible until someone goes looking.
@@ -370,7 +368,9 @@ namespace HpskSite.Services.Staffing
                         name = _clubService.GetClubNameById(clubId) ?? "";
                         clubNameById[clubId] = name;
                     }
-                    if (!string.IsNullOrEmpty(name)) result[mid] = name;
+                    // "Varbergs Pistolklubb" -> "Varbergs PK". A grid cell is a name plus a club plus a
+                    // time on one line; the unabbreviated club is what pushes it onto two.
+                    if (!string.IsNullOrEmpty(name)) result[mid] = HpskSite.Helpers.ClubNameHelper.Shorten(name);
                 }
                 catch { /* one unreadable member must not blank the whole grid */ }
             }

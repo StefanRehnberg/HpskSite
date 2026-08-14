@@ -173,13 +173,21 @@ namespace HpskSite.Controllers
         {
             if (request == null || request.CompetitionId <= 0)
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             try
             {
-                var (ok, msg) = _roleCatalog.DeleteRole(request.CompetitionId, request.RoleKey, GetDiscipline(request.CompetitionId));
-                return Json(new { success = ok, message = msg });
+                var (ok, msg, inUse) = _roleCatalog.DeleteRole(
+                    request.CompetitionId, request.RoleKey, GetDiscipline(request.CompetitionId),
+                    viewer.Id, request.DeleteAssignments);
+                // Not an error — the row carries crew and the arrangör hasn't said what should happen to
+                // them yet. Nothing was written; the client asks and calls back with DeleteAssignments.
+                if (!ok && msg == null && inUse > 0)
+                    return Json(new { success = false, requiresConfirm = true, inUse });
+                return Json(new { success = ok, message = msg, removedAssignments = inUse });
             }
             catch (Exception ex)
             {
@@ -1564,14 +1572,20 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteDay([FromBody] DeleteStaffDayRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || request.Id <= 0)
+            // Id OR DateKey — a column that exists only because assignments are dated there has no StaffDay
+            // row, and demanding an id made those columns permanent.
+            if (request == null || request.CompetitionId <= 0
+                || (request.Id <= 0 && string.IsNullOrWhiteSpace(request.DateKey)))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var (ok, msg) = _days.DeleteDay(request.Id, request.CompetitionId);
-                return Json(new { success = ok, message = msg });
+                var (ok, msg, inUse) = _days.DeleteDay(
+                    request.Id, request.CompetitionId, request.DateKey, request.DeleteAssignments);
+                if (!ok && msg == null && inUse > 0)
+                    return Json(new { success = false, requiresConfirm = true, inUse });
+                return Json(new { success = ok, message = msg, removedAssignments = inUse });
             }
             catch (Exception ex)
             {
@@ -1770,29 +1784,8 @@ namespace HpskSite.Controllers
             }
         }
 
-        /// <summary>Hide a role this arrangör doesn't use (or bring it back). Their grid, their functions.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> HideRole([FromBody] HideStaffRoleRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0)
-                return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            try
-            {
-                var (ok, msg) = _roleCatalog.SetHidden(request.CompetitionId, request.RoleKey, request.Hidden,
-                    GetDiscipline(request.CompetitionId), viewer.Id);
-                return Json(new { success = ok, message = msg });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Staffing: HideRole failed for competition {CompetitionId}", request.CompetitionId);
-                return Json(new { success = false, message = "Kunde inte dölja rollen." });
-            }
-        }
+        // HideRole is gone with the "Dolda roller" idea it existed for. DeleteRole removes any role now,
+        // built-in included; hiding lives on only as the storage trick inside RoleCatalogService.
 
         /// <summary>
         /// Give an account-less helper an e-mail (and phone) straight from the grid cell. Without this the

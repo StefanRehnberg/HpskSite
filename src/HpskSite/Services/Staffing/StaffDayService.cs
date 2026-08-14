@@ -136,20 +136,49 @@ namespace HpskSite.Services.Staffing
         /// Remove a day. Refuses while crew are booked on it — silently orphaning people into an
         /// "undated" bucket is how a plan quietly loses a build team.
         /// </summary>
-        public (bool ok, string? message) DeleteDay(int id, int competitionId)
+        /// <summary>
+        /// Remove a day column. Works from a <see cref="StaffDay"/> id OR from a bare date, because a
+        /// column can also exist purely because assignments are dated there ("ej i planen") — those had no
+        /// id, so there was no way to get rid of them at all.
+        /// <para>Crew is never dropped silently: with <paramref name="deleteAssignments"/> false this
+        /// returns ok=false plus the count and writes nothing, so the caller can ask first.</para>
+        /// </summary>
+        public (bool ok, string? message, int inUse) DeleteDay(
+            int id, int competitionId, string? dateKey, bool deleteAssignments)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var row = db.SingleOrDefault<StaffDay>(
-                "SELECT * FROM StaffDay WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-            if (row == null) return (false, "Dagen hittades inte.");
 
-            var n = CountAssignmentsOn(db, competitionId, row.DayDate);
+            var row = id > 0
+                ? db.SingleOrDefault<StaffDay>(
+                    "SELECT * FROM StaffDay WHERE Id = @0 AND CompetitionId = @1", id, competitionId)
+                : null;
+
+            DateTime date;
+            if (row != null) date = row.DayDate.Date;
+            else if (DateTime.TryParseExact(dateKey ?? "", "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                         DateTimeStyles.None, out var parsed)) date = parsed.Date;
+            else return (false, "Dagen hittades inte.", 0);
+
+            var n = CountAssignmentsOn(db, competitionId, date);
+            if (n > 0 && !deleteAssignments) return (false, null, n);
+
             if (n > 0)
-                return (false, $"{n} uppdrag ligger på den dagen. Flytta eller ta bort dem först.");
+            {
+                // Same day resolution as the count and as the grid — anything else would leave rows behind
+                // that keep re-creating the column the arrangör just removed.
+                db.Execute(@"
+                    DELETE sa FROM StaffAssignment sa
+                    LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
+                    WHERE sa.CompetitionId = @0
+                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @1",
+                    competitionId, date);
+            }
 
-            db.Execute("DELETE FROM StaffDay WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-            return (true, null);
+            if (row != null)
+                db.Execute("DELETE FROM StaffDay WHERE Id = @0 AND CompetitionId = @1", row.Id, competitionId);
+
+            return (true, null, n);
         }
 
         /// <summary>Which of the comp's days actually carry crew (drives the delete guard in the UI).</summary>

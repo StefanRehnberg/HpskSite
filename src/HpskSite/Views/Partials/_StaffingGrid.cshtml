@@ -26,21 +26,29 @@
 <style>
     /* Sticky role column is non-negotiable — the row must stay identifiable however wide the grid gets. */
     #grdWrap { overflow-x: auto; overflow-y: visible; }
-    #grdTable { border-collapse: separate; border-spacing: 0; min-width: 100%; }
+    /* table-layout:fixed — the column widths are decided by the LAYOUT, never by what happens to stand in
+       a cell. With auto layout a long club name ("Varbergs Pistolskytteklubb") on a nowrap line set the
+       column's min-content width, the table grew past the wrap, and the last day scrolled out of sight.
+       The real minimum is set from the column COUNT in js (grdSizeTable); below that the grid scrolls
+       sideways because it genuinely has to, not because of one long word. */
+    #grdTable { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; }
     #grdTable th, #grdTable td { border-bottom: 1px solid var(--bs-border-color); vertical-align: top; padding: .4rem .5rem; }
     #grdTable thead th { position: sticky; top: 0; z-index: 3; background: var(--bs-body-bg); border-bottom-width: 2px; }
-    #grdTable .grd-rolecol { position: sticky; left: 0; z-index: 2; background: var(--bs-body-bg); min-width: 210px; max-width: 260px; box-shadow: 1px 0 0 var(--bs-border-color); }
+    #grdTable .grd-rolecol { position: sticky; left: 0; z-index: 2; background: var(--bs-body-bg); width: 230px; box-shadow: 1px 0 0 var(--bs-border-color); overflow-wrap: anywhere; }
     #grdTable thead .grd-rolecol { z-index: 4; }
     /* Wide enough that "Kristian Gellert  HSSK" stays on one line — a name broken over three lines is
        unreadable, and every cell in a staffing plan is a name. */
     /* The CELL is not a button. Clicking the time — which plainly belongs to the person standing there —
        used to open "lägg till", because the whole <td> carried the handler. One target, one meaning:
        the person row opens the person, the add link adds. */
-    #grdTable td.grd-cell { min-width: 250px; }
-    .grd-entry { display: flex; align-items: baseline; gap: .2rem; line-height: 1.3; padding: 1px 0; flex-wrap: nowrap; }
+    .grd-entry { display: flex; align-items: baseline; gap: .2rem; line-height: 1.3; padding: 1px 0; flex-wrap: nowrap; min-width: 0; }
     /* Name + club + time are ONE target — they all describe the same person. */
-    .grd-person { display: inline-flex; align-items: baseline; gap: .35rem; background: none; border: 0;
+    .grd-person { display: inline-flex; align-items: baseline; gap: .35rem; background: none; border: 0; min-width: 0;
                   padding: 1px 3px; margin-left: -3px; text-align: left; color: inherit; border-radius: 3px; cursor: pointer; }
+    /* The TIME never truncates — "kl 09" is the whole point of the row. A long name or club gives way first,
+       with an ellipsis that says so; the full text is in the title and in the person panel. */
+    .grd-person .grd-time { flex: 0 0 auto; }
+    .grd-person .grd-name, .grd-person .grd-club { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .grd-person:hover { background: var(--bs-tertiary-bg); }
     .grd-person:hover .grd-name { text-decoration: underline; }
     .grd-person:focus-visible { outline: 2px solid var(--bs-primary); }
@@ -48,7 +56,7 @@
     .grd-need { font-size: .72rem; }
     td.grd-short { background: rgba(var(--bs-danger-rgb), .07); }
     td.grd-full { background: rgba(var(--bs-success-rgb), .05); }
-    .grd-entry .grd-club { font-size: .75rem; color: var(--bs-secondary-color); }
+    .grd-entry .grd-club { font-size: .75rem; color: var(--bs-secondary-color); white-space: nowrap; }
     .grd-entry .grd-time { font-size: .75rem; }
     .grd-entry .grd-del { visibility: hidden; border: 0; background: none; color: var(--bs-danger); line-height: 1; padding: 0 2px; }
     .grd-entry:hover .grd-del { visibility: visible; }
@@ -118,7 +126,6 @@
                 <li><button class="dropdown-item" type="button" onclick="grdLoad()">
                     <i class="bi bi-arrow-clockwise me-2"></i>Läs om</button></li>
                 @* Fylls i av renderAll — bara när det finns något att ta fram igen. *@
-                <span id="grdHiddenMenu"></span>
             </ul>
         </div>
     </div>
@@ -127,7 +134,6 @@
 @* The one thing the grid cannot show: people who are not in it yet. Hidden when there are none. *@
 <div id="grdVolunteers" class="mb-2"></div>
 <div id="grdClashes"></div>
-@* "Dolda roller"-raden låg här. Den flyttade in i Mer-menyn — se grdHiddenMenu. *@
 
 <div id="grdExternalWarn" class="alert alert-warning py-2 small" style="display:none"></div>
 
@@ -205,6 +211,15 @@
         }
     };
 
+    // How narrow a day column may get before the grid starts scrolling sideways instead. Below ~215px a
+    // "Kristian Gellert  HSSK  kl 09" row can't be read, and reading the plan is the whole job — but the
+    // floor is a FUNCTION OF THE COLUMN COUNT, so 3 days always fit a laptop and 8 days scroll honestly.
+    var GRD_ROLECOL = 230, GRD_DAYMIN = 215;
+    function grdSizeTable(dayCount) {
+        var t = document.getElementById('grdTable');
+        if (t) t.style.minWidth = (GRD_ROLECOL + Math.max(1, dayCount) * GRD_DAYMIN) + 'px';
+    }
+
     function render() {
         var cols = grid.columns || [];
         var head = '<th class="grd-rolecol">Roll'
@@ -225,11 +240,15 @@
                 + (c.key ? '<span class="grd-roleacts text-nowrap">'
                     + (c.dayId ? '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Ändra dagen" onclick="grdEditDay(' + c.dayId + ')"><i class="bi bi-pencil"></i></button>' : '')
                     + (cols.length > 1 ? '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Kopiera dagens bemanning till en annan dag" onclick="grdCopyDay(\'' + arg(c.key) + '\')"><i class="bi bi-arrow-right-square"></i></button>' : '')
-                    + (c.dayId && !c.hasAssignments ? '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort dagen" onclick="grdDeleteDay(' + c.dayId + ')"><i class="bi bi-x-lg"></i></button>' : '')
+                    // Always offered. It used to require a StaffDay row AND an empty day, which is exactly
+                    // the two cases that got stuck: a day someone had booked crew on, and a stray "ej i
+                    // planen" column that has no row to delete and so could never be removed at all.
+                    + '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort dagen" onclick="grdDeleteDay(' + (c.dayId || 0) + ',\'' + arg(c.key) + '\')"><i class="bi bi-x-lg"></i></button>'
                     + '</span>' : '')
                 + '</div></th>';
         });
         document.getElementById('grdHead').innerHTML = head;
+        grdSizeTable(cols.length);
 
         var body = (grid.rows || []).map(rowHtml).join('');
         document.getElementById('grdBody').innerHTML = body
@@ -315,19 +334,10 @@
                 + 'inget personligt schema och inga påminnelser förrän de registrerat sig.';
         } else w.style.display = 'none';
 
-        // Hidden roles live in the Mer menu, not as a permanent bar above the grid. A standing row of
-        // roles you deliberately got rid of is noise on every visit — but the way back must still exist,
-        // so it appears in the menu only while there is something to bring back.
-        var hm = document.getElementById('grdHiddenMenu');
-        var hidden = grid.hiddenRoles || [];
-        hm.innerHTML = hidden.length
-            ? '<li><hr class="dropdown-divider"></li>'
-              + '<li><h6 class="dropdown-header">Dolda roller</h6></li>'
-              + hidden.map(function (h) {
-                  return '<li><button class="dropdown-item" type="button" onclick="grdUnhideRole(\'' + arg(h.roleKey) + '\')">'
-                      + '<i class="bi bi-eye me-2"></i>Visa ' + esc(h.roleName) + '</button></li>';
-              }).join('')
-            : '';
+        // "Dolda roller" is gone — the whole idea, not just the bar. It only existed because built-in roles
+        // couldn't be deleted, so they had to be tucked away instead; that is our storage problem leaking
+        // onto the screen as a second, weaker kind of delete. Removal is now removal, and a role comes back
+        // by typing its name.
     }
 
     function rowHtml(row) {
@@ -343,8 +353,11 @@
             + '<span class="grd-roleacts text-nowrap">'
             + '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Hur många behövs per dag?" onclick="grdSetNeed(\'' + arg(row.roleKey) + '\')"><i class="bi bi-123"></i></button>'
             + '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Byt namn på rollen" onclick="grdRenameRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-pencil"></i></button>'
-            + (row.filled ? '' : '<button type="button" class="btn btn-sm btn-link p-0 me-1 text-secondary" title="Dölj rollen — vi använder den inte" onclick="grdHideRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-eye-slash"></i></button>')
-            + (row.isCustom ? '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort rollen" onclick="grdDeleteRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-trash"></i></button>' : '')
+            // ONE delete on EVERY row. Whether a role happens to be a built-in or was typed by this
+            // arrangör is our implementation detail; on screen it made Kassa undeletable and "Kassör"
+            // deletable, which is arbitrary to the person reading it. Roles are freely named, so they are
+            // freely removed — and getting one back is just typing its name again.
+            + '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort raden" onclick="grdDeleteRole(\'' + arg(row.roleKey) + '\')"><i class="bi bi-trash"></i></button>'
             + '</span></div></td>';
 
         (grid.columns || []).forEach(function (c) {
@@ -385,7 +398,9 @@
         // person. Splitting them meant clicking a time — obviously part of someone's row — landed on
         // "lägg till" instead.
         return '<div class="grd-entry">'
-            + '<button type="button" class="grd-person" title="Visa ' + esc(e.displayName) + '"'
+            // Name + club both in the title: either can be ellipsed when the column is narrow, and the
+            // tooltip is then the only way to read it without opening the panel.
+            + '<button type="button" class="grd-person" title="Visa ' + esc(e.displayName) + (e.clubName ? ', ' + esc(e.clubName) : '') + '"'
             + ' onclick="grdPerson(\'' + arg(e.memberId ? ('m:' + e.memberId) : ('n:' + (e.displayName || '').toLowerCase())) + '\')">'
             + (e.isResponsible ? '<i class="bi bi-star-fill text-warning" title="Ansvarig"></i>' : '')
             + '<span class="grd-name ' + cls + '">' + esc(e.displayName) + '</span>'
@@ -619,9 +634,18 @@
 
     window.grdDeleteRole = async function (roleKey) {
         roleKey = unarg(roleKey);
-        if (!confirm('Ta bort rollen? Uppdrag som redan ligger på den måste flyttas först.')) return;
-        var d = await post('DeleteRole', { competitionId: compId, roleKey: roleKey });
-        if (!d.success) { alert(d.message || 'Kunde inte ta bort rollen.'); return; }
+        var row = (grid.rows || []).find(function (r) { return r.roleKey === roleKey; });
+        var name = (row && row.roleName) || 'raden';
+        // Ask once, and only about the thing that is actually at stake. An empty row goes without ceremony;
+        // a row with people on it says how many, because that is the number the arrangör needs to decide on.
+        var d = await post('DeleteRole', { competitionId: compId, roleKey: roleKey, deleteAssignments: false });
+        if (!d.success && d.requiresConfirm) {
+            var n = d.inUse;
+            if (!confirm('Ta bort ' + name + '? ' + n + (n === 1 ? ' person är inbokad' : ' personer är inbokade')
+                + ' på raden och förlorar sitt uppdrag.')) return;
+            d = await post('DeleteRole', { competitionId: compId, roleKey: roleKey, deleteAssignments: true });
+        }
+        if (!d.success) { alert(d.message || 'Kunde inte ta bort raden.'); return; }
         await grdLoad();
     };
 
@@ -774,26 +798,21 @@
         await grdLoad();
     };
 
-    window.grdDeleteDay = async function (dayId) {
-        if (!confirm('Ta bort dagen ur planen?')) return;
-        var r = await post('DeleteDay', { id: dayId, competitionId: compId });
+    window.grdDeleteDay = async function (dayId, dateKey) {
+        dateKey = unarg(dateKey);
+        var col = (grid.columns || []).find(function (c) { return c.key === dateKey; });
+        var label = (col && col.label) || 'dagen';
+        var r = await post('DeleteDay', { id: dayId, competitionId: compId, dateKey: dateKey, deleteAssignments: false });
+        if (!r.success && r.requiresConfirm) {
+            var n = r.inUse;
+            if (!confirm('Ta bort ' + label + '? ' + n + (n === 1 ? ' uppdrag ligger' : ' uppdrag ligger')
+                + ' på dagen och tas bort med den.')) return;
+            r = await post('DeleteDay', { id: dayId, competitionId: compId, dateKey: dateKey, deleteAssignments: true });
+        }
         if (!r.success) { alert(r.message || 'Kunde inte ta bort dagen.'); return; }
         await grdLoad();
     };
 
-    // ---------------------------------------------------------------- hide/show roles
-
-    window.grdHideRole = async function (roleKey) {
-        var r = await post('HideRole', { competitionId: compId, roleKey: unarg(roleKey), hidden: true });
-        if (!r.success) { alert(r.message || 'Kunde inte dölja rollen.'); return; }
-        await grdLoad();
-    };
-
-    window.grdUnhideRole = async function (roleKey) {
-        var r = await post('HideRole', { competitionId: compId, roleKey: unarg(roleKey), hidden: false });
-        if (!r.success) { alert(r.message || 'Kunde inte visa rollen.'); return; }
-        await grdLoad();
-    };
 
     // ---------------------------------------------------------------- reach an account-less helper
 

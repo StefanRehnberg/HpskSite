@@ -74,6 +74,12 @@ namespace HpskSite.Models.Staffing
     {
         public int Id { get; set; }
         public int CompetitionId { get; set; }
+
+        /// <summary>"yyyy-MM-dd". Used when the column has no StaffDay row of its own ("ej i planen").</summary>
+        public string? DateKey { get; set; }
+
+        /// <summary>Second call — the arrangör has seen how many people stand on the day and confirmed.</summary>
+        public bool DeleteAssignments { get; set; }
     }
 
     /// <summary>Give a member-less roster row a way to be reached (e-post/mobil), from the grid cell.</summary>
@@ -165,11 +171,4 @@ namespace HpskSite.Models.Staffing
         public List<string> RoleKeys { get; set; } = new();
     }
 
-    /// <summary>Hide a built-in role for this competition (or unhide it).</summary>
-    public class HideStaffRoleRequest
-    {
-        public int CompetitionId { get; set; }
-        public string RoleKey { get; set; } = "";
-        public bool Hidden { get; set; } = true;
-    }
 }

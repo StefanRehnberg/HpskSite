@@ -71,6 +71,12 @@ namespace HpskSite.Models.Staffing
     {
         public int CompetitionId { get; set; }
         public string RoleKey { get; set; } = "";
+
+        /// <summary>
+        /// Second call. The first one reports how many people stand on the row and writes nothing; the
+        /// arrangör confirms, and only then are the assignments removed with it.
+        /// </summary>
+        public bool DeleteAssignments { get; set; }
     }
 
     /// <summary>Clone a whole competition day's crew onto another day ("fyll höger" in the grid).</summary>
@@ -179,8 +185,6 @@ namespace HpskSite.Models.Staffing
         /// <summary>No account AND no e-mail: these people cannot be told anything at all. A list, not a
         /// count, because the organiser has to act on each name.</summary>
         public List<string> Unreachable { get; set; } = new();
-        /// <summary>Built-in roles the arrangör hid, so the UI can offer them back.</summary>
-        public List<HiddenRoleView> HiddenRoles { get; set; } = new();
         /// <summary>Volunteered, nothing assigned yet — surfaced as a strip above the grid.</summary>
         public List<GridVolunteer> Volunteers { get; set; } = new();
         /// <summary>Same person, two posts, overlapping time, same day.</summary>
@@ -214,9 +218,4 @@ namespace HpskSite.Models.Staffing
         public string? NewName { get; set; }
     }
 
-    public class HiddenRoleView
-    {
-        public string RoleKey { get; set; } = "";
-        public string RoleName { get; set; } = "";
-    }
 }

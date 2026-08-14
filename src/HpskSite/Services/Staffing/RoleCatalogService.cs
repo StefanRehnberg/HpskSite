@@ -201,60 +201,6 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
-        /// Hide a role from this competition's grid (or unhide it). Refuses to hide a role that still
-        /// carries crew — the row would vanish and take the people with it. Hiding writes an IsActive=0
-        /// marker row; unhiding deletes it, restoring the built-in.
-        /// </summary>
-        public (bool ok, string? message) SetHidden(int competitionId, string roleKey, bool hidden, string? discipline, int byMemberId)
-        {
-            if (string.IsNullOrWhiteSpace(roleKey)) return (false, "Roll saknas.");
-
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var row = db.SingleOrDefault<StaffRole>(
-                "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1 AND RoleKey = @2",
-                RoleOwnerType.Competition, competitionId, roleKey);
-
-            if (!hidden)
-            {
-                if (row is { IsActive: false }) db.Delete(row);
-                Forget(competitionId);
-                return (true, null);
-            }
-
-            var inUse = db.ExecuteScalar<int>(
-                "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
-                competitionId, roleKey);
-            if (inUse > 0)
-                return (false, $"Rollen används av {inUse} uppdrag. Flytta eller ta bort dem först.");
-
-            var name = Resolve(competitionId, discipline, roleKey)?.DisplayName ?? roleKey;
-            var now = DateTime.UtcNow;
-            if (row == null)
-            {
-                db.Insert(new StaffRole
-                {
-                    OwnerType = RoleOwnerType.Competition,
-                    OwnerId = competitionId,
-                    RoleKey = roleKey,
-                    DisplayName = name,
-                    IsActive = false,
-                    CreatedByMemberId = byMemberId,
-                    CreatedDate = now,
-                    ModifiedDate = now,
-                });
-            }
-            else
-            {
-                row.IsActive = false;
-                row.ModifiedDate = now;
-                db.Update(row);
-            }
-            Forget(competitionId);
-            return (true, null);
-        }
-
-        /// <summary>
         /// Persist the arrangör's own running order for the whole grid. Alphabetical is tidy but splits
         /// the groups a plan is read in (Start/Mål together, Skjutplats together), so the order is theirs.
         /// <para>A built-in that gets dragged has no <see cref="StaffRole"/> row yet — one is created on
@@ -313,39 +259,72 @@ namespace HpskSite.Services.Staffing
             return (true, null);
         }
 
-        /// <summary>Roles the arrangör has hidden, so the UI can offer to bring them back.</summary>
-        public List<(string Key, string Name)> GetHidden(int competitionId)
-            => GetCustom(competitionId).Where(c => !c.IsActive)
-                .Select(c => (c.RoleKey, c.DisplayName)).ToList();
-
         /// <summary>
-        /// Remove an arrangör-created role. Refuses while assignments still reference it — deleting would
-        /// leave those rows rendering a raw slug in everyone's schedule. Deleting a row that merely renamed
-        /// a built-in restores the built-in name, which is why that case is allowed through.
+        /// Remove a role row from this competition's grid — any role, built-in or arrangör-created.
+        /// The two used to behave differently (a built-in could only be "hidden"), which put a distinction
+        /// that is purely about where we store the name onto the organiser's screen: Kassa had no delete
+        /// button and Kassör did. Roles are freely named here, so they are freely removed.
+        ///
+        /// A built-in isn't a row we can delete, so it is persisted as an IsActive=0 marker instead —
+        /// mechanism, not vocabulary. Typing the name again brings it back.
+        ///
+        /// Crew on the row is never dropped silently: with <paramref name="deleteAssignments"/> false this
+        /// returns ok=false with the count so the caller can ask, and nothing is written.
         /// </summary>
-        public (bool ok, string? message) DeleteRole(int competitionId, string roleKey, string? discipline)
+        public (bool ok, string? message, int inUse) DeleteRole(
+            int competitionId, string roleKey, string? discipline, int byMemberId, bool deleteAssignments)
         {
-            if (string.IsNullOrWhiteSpace(roleKey)) return (false, "Roll saknas.");
+            if (string.IsNullOrWhiteSpace(roleKey)) return (false, "Roll saknas.", 0);
 
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var row = scope.Database.SingleOrDefault<StaffRole>(
+            var db = scope.Database;
+
+            var inUse = db.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
+                competitionId, roleKey);
+            if (inUse > 0 && !deleteAssignments) return (false, null, inUse);
+
+            var name = Resolve(competitionId, discipline, roleKey)?.DisplayName ?? roleKey;
+            var row = db.SingleOrDefault<StaffRole>(
                 "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1 AND RoleKey = @2",
                 RoleOwnerType.Competition, competitionId, roleKey);
-            if (row == null) return (false, "Rollen är inte skapad för den här tävlingen.");
-
             var isBuiltIn = FunctionaryRoles.Resolve(discipline, roleKey) != null;
-            if (!isBuiltIn)
-            {
-                var inUse = scope.Database.ExecuteScalar<int>(
-                    "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
+
+            if (inUse > 0)
+                db.Execute("DELETE FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
                     competitionId, roleKey);
-                if (inUse > 0)
-                    return (false, $"Rollen används av {inUse} uppdrag. Flytta eller ta bort dem först.");
+
+            var now = DateTime.UtcNow;
+            if (isBuiltIn)
+            {
+                if (row == null)
+                {
+                    db.Insert(new StaffRole
+                    {
+                        OwnerType = RoleOwnerType.Competition,
+                        OwnerId = competitionId,
+                        RoleKey = roleKey,
+                        DisplayName = name,
+                        IsActive = false,
+                        CreatedByMemberId = byMemberId,
+                        CreatedDate = now,
+                        ModifiedDate = now,
+                    });
+                }
+                else
+                {
+                    row.IsActive = false;
+                    row.ModifiedDate = now;
+                    db.Update(row);
+                }
+            }
+            else if (row != null)
+            {
+                db.Delete(row);
             }
 
-            scope.Database.Delete(row);
             Forget(competitionId);
-            return (true, null);
+            return (true, null, inUse);
         }
 
         // ---------------------------------------------------------------- helpers
