@@ -33,11 +33,18 @@
     #grdTable thead .grd-rolecol { z-index: 4; }
     /* Wide enough that "Kristian Gellert  HSSK" stays on one line — a name broken over three lines is
        unreadable, and every cell in a staffing plan is a name. */
-    #grdTable td.grd-cell { min-width: 250px; cursor: pointer; }
-    #grdTable td.grd-cell:hover { background: var(--bs-tertiary-bg); }
-    .grd-entry { display: flex; align-items: baseline; gap: .35rem; line-height: 1.3; padding: 1px 0; flex-wrap: nowrap; }
+    /* The CELL is not a button. Clicking the time — which plainly belongs to the person standing there —
+       used to open "lägg till", because the whole <td> carried the handler. One target, one meaning:
+       the person row opens the person, the add link adds. */
+    #grdTable td.grd-cell { min-width: 250px; }
+    .grd-entry { display: flex; align-items: baseline; gap: .2rem; line-height: 1.3; padding: 1px 0; flex-wrap: nowrap; }
+    /* Name + club + time are ONE target — they all describe the same person. */
+    .grd-person { display: inline-flex; align-items: baseline; gap: .35rem; background: none; border: 0;
+                  padding: 1px 3px; margin-left: -3px; text-align: left; color: inherit; border-radius: 3px; cursor: pointer; }
+    .grd-person:hover { background: var(--bs-tertiary-bg); }
+    .grd-person:hover .grd-name { text-decoration: underline; }
+    .grd-person:focus-visible { outline: 2px solid var(--bs-primary); }
     .grd-entry .grd-name { font-weight: 500; white-space: nowrap; text-decoration: none; color: inherit; }
-    .grd-entry .grd-name:hover { text-decoration: underline; }
     .grd-need { font-size: .72rem; }
     td.grd-short { background: rgba(var(--bs-danger-rgb), .07); }
     td.grd-full { background: rgba(var(--bs-success-rgb), .05); }
@@ -47,9 +54,16 @@
     .grd-entry:hover .grd-del { visibility: visible; }
     /* Empty cells stay QUIET. 14 rows x 5 days is 70 blue "+ lägg till" links shouting over the four
        names that actually matter; Excel is silent in an empty cell and so is this. */
-    .grd-add { font-size: .8rem; color: var(--bs-primary); visibility: hidden; }
-    #grdTable td.grd-cell:hover .grd-add { visibility: visible; }
-    #grdTable td.grd-cell:empty::after { content: ''; }
+    /* Full cell width, so an empty cell is still a big target — and underlined on hover, exactly like a
+       name, so the two clickable things in a cell announce themselves the same way.
+       ALWAYS present, just faint. It was hover-revealed with visibility:hidden, which removes the element
+       from hit-testing entirely — so its own :hover could never fire and the underline never appeared.
+       Being always visible also means it works on a touch screen, where there is no hover at all. */
+    .grd-add { display: block; width: 100%; text-align: left; font-size: .78rem; background: none; border: 0;
+               padding: 2px 0; cursor: pointer; color: var(--bs-secondary-color); opacity: .55; }
+    #grdTable td.grd-cell:hover .grd-add { opacity: 1; color: var(--bs-primary); }
+    .grd-add:hover, .grd-add:focus-visible { opacity: 1; color: var(--bs-primary); text-decoration: underline; }
+    .grd-add:focus-visible { outline: 2px solid var(--bs-primary); border-radius: 3px; }
     .grd-daykind { font-size: .7rem; font-weight: 400; }
     .grd-daylabel { font-size: .78rem; font-weight: 500; color: var(--bs-body-color); }
     .grd-rolename { font-weight: 600; }
@@ -355,10 +369,11 @@
                 tally += '<div class="grd-need text-danger fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1"></i>'
                     + 'ingen ' + holes.map(function (x) { return esc(x.from) + '–' + esc(x.to); }).join(', ') + '</div>';
             }
-            h += '<td class="' + cls + '" onclick="grdOpenCell(event,\'' + idParts + "','" + arg(c.key) + '\')">'
+            h += '<td class="' + cls + '">'
                 + entries.map(entryHtml).join('')
                 + tally
-                + '<div class="grd-add"><i class="bi bi-plus"></i> lägg till</div>'
+                + '<button type="button" class="grd-add" onclick="grdOpenCell(event,\'' + idParts + "','" + arg(c.key) + '\')">'
+                + '<i class="bi bi-plus"></i> lägg till</button>'
                 + '</td>';
         });
         return h + '</tr>';
@@ -366,14 +381,17 @@
 
     function entryHtml(e) {
         var cls = e.isExternal ? 'text-warning-emphasis' : '';
+        // Name, club and time all describe the SAME person, so they are one click target that opens that
+        // person. Splitting them meant clicking a time — obviously part of someone's row — landed on
+        // "lägg till" instead.
         return '<div class="grd-entry">'
+            + '<button type="button" class="grd-person" title="Visa ' + esc(e.displayName) + '"'
+            + ' onclick="grdPerson(\'' + arg(e.memberId ? ('m:' + e.memberId) : ('n:' + (e.displayName || '').toLowerCase())) + '\')">'
             + (e.isResponsible ? '<i class="bi bi-star-fill text-warning" title="Ansvarig"></i>' : '')
-            // The name is the way into the person. Personer stopped being a place you navigate to and
-            // became a panel you open from whatever you are looking at.
-            + '<button type="button" class="btn btn-link p-0 border-0 align-baseline grd-name ' + cls + '"'
-            + ' title="Visa personen" onclick="event.stopPropagation();grdPerson(\'' + arg(e.memberId ? ('m:' + e.memberId) : ('n:' + (e.displayName || '').toLowerCase())) + '\')">'
-            + esc(e.displayName) + '</button>'
+            + '<span class="grd-name ' + cls + '">' + esc(e.displayName) + '</span>'
             + (e.clubName ? '<span class="grd-club">' + esc(e.clubName) + '</span>' : '')
+            + (e.timeLabel ? '<span class="badge bg-primary-subtle text-primary-emphasis border fw-normal grd-time">' + esc(e.timeLabel) + '</span>' : '')
+            + '</button>'
             // An account-less helper WITH an e-mail can at least be invited by a tokened link; without one
             // the row delivers nothing at all — so those two states must not look the same.
             + (e.isExternal
@@ -382,9 +400,8 @@
                   + ' onclick="event.stopPropagation();grdContact(' + e.id + ',\'' + arg(e.displayName) + '\',\'' + arg(e.email || '') + '\')">'
                   + '<i class="bi bi-' + (e.hasContact ? 'envelope' : 'exclamation-triangle-fill') + '"></i></button>'
                 : '')
-            + (e.timeLabel ? '<span class="badge bg-primary-subtle text-primary-emphasis border fw-normal grd-time">' + esc(e.timeLabel) + '</span>' : '')
-            + (e.readOnly ? '' : '<button type="button" class="grd-del text-secondary" title="Flytta till en annan dag" onclick="event.stopPropagation();grdMove(' + e.id + ',\'' + arg(e.displayName) + '\')"><i class="bi bi-arrow-left-right"></i></button>')
-            + (e.readOnly ? '' : '<button type="button" class="grd-del" title="Ta bort" onclick="event.stopPropagation();grdRemove(' + e.id + ',\'' + arg(e.displayName) + '\')">&times;</button>')
+            + (e.readOnly ? '' : '<button type="button" class="grd-del text-secondary" title="Flytta till en annan dag" onclick="grdMove(' + e.id + ',\'' + arg(e.displayName) + '\')"><i class="bi bi-arrow-left-right"></i></button>')
+            + (e.readOnly ? '' : '<button type="button" class="grd-del" title="Ta bort" onclick="grdRemove(' + e.id + ',\'' + arg(e.displayName) + '\')">&times;</button>')
             + '</div>';
     }
 
@@ -395,7 +412,9 @@
             roleKey: unarg(roleKey), scopeType: unarg(scopeType) || null,
             scopeKey: unarg(scopeKey) || null, colKey: unarg(colKey), memberId: null
         };
-        var cell = ev.currentTarget.getBoundingClientRect();
+        // Anchor to the CELL, not to the little add link inside it.
+        var host = ev.currentTarget.closest ? (ev.currentTarget.closest('td') || ev.currentTarget) : ev.currentTarget;
+        var cell = host.getBoundingClientRect();
         var ed = document.getElementById('grdEditor');
         ed.style.display = 'block';
         // Keep it on screen: flip up/left when the cell is near an edge.
@@ -441,9 +460,11 @@
                 var el = path[i];
                 if (!el || el.nodeType !== 1) continue;
                 if (el.id === 'grdEditor') return;
-                if (el.classList && el.classList.contains('grd-cell')) return;
+                // Only the add link, not the whole cell: clicking a PERSON should close a stale editor,
+                // it is no longer a way to open one.
+                if (el.classList && el.classList.contains('grd-add')) return;
             }
-        } else if (e.target.closest && (e.target.closest('#grdEditor') || e.target.closest('.grd-cell'))) {
+        } else if (e.target.closest && (e.target.closest('#grdEditor') || e.target.closest('.grd-add'))) {
             return;
         }
         closeEditor();
