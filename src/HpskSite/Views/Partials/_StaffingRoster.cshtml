@@ -1899,8 +1899,19 @@
                 ? '<span class="text-success"><i class="bi bi-person-check me-1"></i>Medlem på pistol.nu</span>'
                 : '<span class="text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>Saknar konto</span>')
             + '</div></div></div>'
-            + '<div class="form-text mb-3">Ändra namnet och tryck Enter — det gäller alla '
+            + '<div class="form-text mb-2">Ändra namnet och tryck Enter — det gäller alla '
             + asg.length + (asg.length === 1 ? ' uppdrag.' : ' uppdrag.') + '</div>';
+
+        // A link overwrites the typed name with the register's spelling. Usually right, occasionally wrong,
+        // and it used to happen silently and irreversibly — a person was renamed and nothing said so.
+        var orig = (asg.find(function (a) { return a.originalName; }) || {}).originalName;
+        if (orig && orig !== p.displayName) {
+            h += '<div class="alert alert-secondary py-2 small d-flex align-items-center gap-2 flex-wrap mb-3">'
+                + '<i class="bi bi-info-circle"></i>'
+                + '<span class="flex-grow-1">Hette <strong>' + esc(orig) + '</strong> i planen.</span>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfPersonUndo()">'
+                + '<i class="bi bi-arrow-counterclockwise me-1"></i>Ångra</button></div>';
+        }
 
         // --- reachability: the whole reason the plan is in pistol.nu at all -----------------------
         if (!p.memberId) {
@@ -1937,8 +1948,24 @@
                     + '<span class="badge ' + (STATE_CLS[SV_STATUS[a.status] || ''] || 'bg-secondary') + '">'
                     + esc(SV_STATUS[a.status] || a.status) + '</span>'
                     + (a.readOnly ? '' :
-                        '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Ändra"><i class="bi bi-pencil"></i></button>'
+                        // Splitting only means something on a row with real from–to times.
+                        (a.shiftLabel && a.shiftLabel.indexOf('–') > 0
+                            ? '<button type="button" class="btn btn-sm btn-outline-warning" onclick="stfSplitOpen(' + a.id + ')" title="Dela passet — någon annan tar resten"><i class="bi bi-scissors"></i></button>'
+                            : '')
+                      + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Ändra"><i class="bi bi-pencil"></i></button>'
                       + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>')
+                    + '</div>'
+                    + '<div class="list-group-item py-2 bg-body-tertiary" id="stfSplit' + a.id + '" style="display:none">'
+                    + '<div class="small fw-semibold mb-1">Dela passet ' + esc(a.shiftLabel || '') + '</div>'
+                    + '<div class="d-flex gap-2 align-items-start flex-wrap">'
+                    + '<div><label class="form-label small mb-0">Från kl</label>'
+                    + '<input type="text" class="form-control form-control-sm" id="stfSplitAt' + a.id + '" placeholder="09:00" style="width:90px"></div>'
+                    + '<div class="flex-grow-1 position-relative" style="min-width:200px">'
+                    + '<label class="form-label small mb-0">tar över</label>'
+                    + '<input type="text" class="form-control form-control-sm" id="stfSplitWho' + a.id + '" placeholder="Sök person…" autocomplete="off">'
+                    + '<div class="list-group position-absolute w-100 shadow" id="stfSplitRes' + a.id + '" style="z-index:5;display:none"></div>'
+                    + '</div></div>'
+                    + '<div class="form-text">Den som tar över står som Planerad tills hen tackat ja.</div>'
                     + '</div>';
             }).join('') + '</div>'
             : '<div class="text-muted small mb-2">Inga uppdrag än.</div>';
@@ -2042,6 +2069,45 @@
         input.addEventListener('blur', function () { setTimeout(hide, 200); });
     }
 
+    window.stfPersonUndo = async function () {
+        var p = findPerson(); if (!p) return;
+        var r = await stfPersonPost({ competitionId: compId, personKey: p.key }, 'UndoPersonIdentity');
+        if (!r.success) { alert(r.message || 'Kunde inte ångra.'); return; }
+        personKey = null;   // the key changes back to the free-text name
+        await loadPeople();
+        var back = people.find(function (x) { return (x.assignments || []).some(function (a) { return true; }); });
+        stfBackToList();
+        if (window.grdLoad) window.grdLoad();
+    };
+
+    /// "Han blev sjuk en timme in i passet." Cut here, someone else takes the rest — one action instead of
+    /// two edits with nothing tying them together and a silent hole between them.
+    window.stfSplitOpen = function (id) {
+        var box = document.getElementById('stfSplit' + id);
+        if (!box) return;
+        var open = box.style.display !== 'none';
+        box.style.display = open ? 'none' : '';
+        if (open) return;
+        document.getElementById('stfSplitAt' + id).focus();
+        wireMemberPicker('stfSplitWho' + id, 'stfSplitRes' + id, async function (m) {
+            await stfSplitDo(id, m.memberId, m.memberName);
+        }, true);
+        var who = document.getElementById('stfSplitWho' + id);
+        who.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); stfSplitDo(id, 0, who.value.trim()); }
+        });
+    };
+
+    async function stfSplitDo(id, memberId, name) {
+        var at = (document.getElementById('stfSplitAt' + id).value || '').trim();
+        if (!at) { alert('Ange klockslaget där passet delas.'); return; }
+        if (!memberId && !name) { alert('Ange vem som tar över.'); return; }
+        var r = await stfPersonPost({ competitionId: compId, id: id, at: at, memberId: memberId, newName: memberId ? null : name },
+            'SplitAssignment');
+        if (!r.success) { alert(r.message || 'Kunde inte dela passet.'); return; }
+        await loadPeople(); renderPerson(); if (window.grdLoad) window.grdLoad();
+    }
+
     window.stfPersonSaveEmail = async function () {
         var p = findPerson(); if (!p) return;
         var v = (document.getElementById('stfPEmail').value || '').trim();
@@ -2098,8 +2164,18 @@
                     + '<div class="small text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>'
                     + 'Ser ut som två personer i samma ruta. Dela upp den i två uppdrag först.</div></div>';
             }
+            // Written twice in the same plan — the commonest typo, and the member register can't see it.
+            var dup = (m.inPlan || []).length
+                ? '<div class="small mt-1 text-warning-emphasis"><i class="bi bi-files me-1"></i>'
+                  + 'Finns redan i planen som '
+                  + m.inPlan.map(function (x, j) {
+                      return '<button type="button" class="btn btn-sm btn-link p-0 align-baseline fw-semibold" onclick="stfMergeInPlan(' + i + ',' + j + ')">'
+                          + esc(x.name) + '</button> <span class="text-muted">(' + x.rowCount + ' uppdrag, ' + esc(x.reason) + ')</span>';
+                  }).join(', ') + ' — samma person?</div>'
+                : '';
+
             if (!(m.candidates || []).length) {
-                return '<div class="border rounded p-2 mb-2">' + head
+                return '<div class="border rounded p-2 mb-2">' + head + dup
                     + '<div class="small text-muted">Ingen medlem liknar namnet. '
                     + '<button type="button" class="btn btn-sm btn-link p-0 align-baseline" onclick="stfOpenPerson(\'' + pkey(m.key) + '\')">Öppna personen</button>'
                     + ' och lägg till e-post, så kan hen åtminstone bjudas in.</div></div>';
@@ -2109,7 +2185,7 @@
                 return '<option value="' + c.memberId + '"' + (j === 0 && m.confident ? ' selected' : '') + '>'
                     + esc(c.name) + (c.clubName ? ' — ' + esc(c.clubName) : '') + ' (' + esc(c.reason) + ')</option>';
             }).join('');
-            return '<div class="border rounded p-2 mb-2">' + head
+            return '<div class="border rounded p-2 mb-2">' + head + dup
                 + '<div class="d-flex gap-2 align-items-center flex-wrap mt-1">'
                 + '<select class="form-select form-select-sm" id="stfMatchSel' + i + '" style="max-width:420px">'
                 + '<option value="">— välj medlem —</option>' + opts + '</select>'
@@ -2120,6 +2196,22 @@
 
     function pkey(s) { return encodeURIComponent(s == null ? '' : s).replace(/'/g, '%27'); }
     function unpkey(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+
+    /// Merge a misspelling into the spelling already used elsewhere in the plan. A RENAME, not a link —
+    /// and it links too when the target is already tied to a member.
+    window.stfMergeInPlan = async function (i, j) {
+        var m = matchRows[i]; if (!m) return;
+        var t = (m.inPlan || [])[j]; if (!t) return;
+        if (!confirm('Är "' + m.name + '" samma person som "' + t.name + '"?\n\n'
+            + m.rowCount + ' uppdrag byter namn till ' + t.name + '.')) return;
+        var r = await stfPersonPost({
+            competitionId: compId, personKey: m.key, newName: t.name,
+            memberId: t.memberId > 0 ? t.memberId : 0
+        });
+        if (!r.success) { alert(r.message || 'Kunde inte slå ihop.'); return; }
+        await stfLoadMatches();
+        if (window.grdLoad) window.grdLoad();
+    };
 
     window.stfLinkOne = async function (i) {
         var m = matchRows[i]; if (!m) return;
@@ -2149,9 +2241,9 @@
         if (window.grdLoad) window.grdLoad();
     };
 
-    async function stfPersonPost(body) {
+    async function stfPersonPost(body, action) {
         try {
-            var r = await fetch('/umbraco/surface/Staffing/ApplyPersonIdentity', {
+            var r = await fetch('/umbraco/surface/Staffing/' + (action || 'ApplyPersonIdentity'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
                 body: JSON.stringify(body)

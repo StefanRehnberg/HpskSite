@@ -103,6 +103,7 @@
 
 @* The one thing the grid cannot show: people who are not in it yet. Hidden when there are none. *@
 <div id="grdVolunteers" class="mb-2"></div>
+<div id="grdClashes"></div>
 
 <div id="grdExternalWarn" class="alert alert-warning py-2 small" style="display:none"></div>
 <div id="grdHiddenRoles" class="small mb-2"></div>
@@ -231,10 +232,28 @@
                 return c.key && ((r.cells && r.cells[c.key]) || []).length < r.needed;
             }).length;
         }, 0);
+        var clashes = grid.clashes || [];
+        var timeGaps = (grid.rows || []).reduce(function (a, r) { return a + (r.gaps || []).length; }, 0);
         s.innerHTML = '<i class="bi bi-grid-3x3 me-1"></i><strong>' + (grid.totalAssigned || 0) + '</strong> uppdrag · '
             + (grid.rows || []).length + ' funktioner · ' + cols.filter(function (c) { return c.key; }).length + ' dagar'
             + (gaps ? ' · <span class="text-danger fw-semibold">' + gaps + (gaps === 1 ? ' ruta' : ' rutor') + ' saknar folk</span>' : '')
+            + (timeGaps ? ' · <span class="text-danger fw-semibold">' + timeGaps + (timeGaps === 1 ? ' lucka i tiden' : ' luckor i tiden') + '</span>' : '')
+            + (clashes.length ? ' · <button type="button" class="btn btn-sm btn-link p-0 align-baseline text-danger fw-semibold" onclick="grdShowClashes()">'
+                + clashes.length + (clashes.length === 1 ? ' dubbelbokning' : ' dubbelbokningar') + '</button>' : '')
             + ((grid.unreachable || []).length ? ' · <span class="text-danger">' + grid.unreachable.length + ' kan inte nås</span>' : '');
+
+        // The clash check used to render on the retired Roller view, which meant nobody ever saw it.
+        var cw = document.getElementById('grdClashes');
+        cw.innerHTML = clashes.length
+            ? '<div class="alert alert-danger py-2 small mb-2"><div class="fw-semibold mb-1">'
+              + '<i class="bi bi-exclamation-octagon me-1"></i>Samma person på två poster samtidigt</div>'
+              + clashes.slice(0, 8).map(function (c) {
+                  return '<div>· <button type="button" class="btn btn-link p-0 align-baseline fw-semibold" onclick="grdPerson(\''
+                      + arg(c.personKey) + '\')">' + esc(c.name) + '</button> — ' + esc(c.a) + ' vs ' + esc(c.b)
+                      + (c.dateKey ? ' <span class="text-muted">(' + esc(dayLabelOf(c.dateKey)) + ')</span>' : '') + '</div>';
+              }).join('') + (clashes.length > 8 ? '<div class="text-muted">…och ' + (clashes.length - 8) + ' till</div>' : '')
+              + '</div>'
+            : '';
 
         // Volunteers with no assignment: the only people the grid itself cannot show.
         var vw = document.getElementById('grdVolunteers');
@@ -311,6 +330,14 @@
                 tally = '<div class="grd-need ' + (short ? 'text-danger fw-semibold' : 'text-success') + '">'
                     + entries.length + '/' + need + (short ? ' — saknas ' + (need - entries.length) : '')
                     + '</div>';
+            }
+            // A count can be right while the DAY still has a hole in it: two people booked, but one went
+            // home at 09 and the next starts at 10. The count says 2/2; the hour between says otherwise.
+            var holes = (row.gaps || []).filter(function (x) { return x.dateKey === c.key; });
+            if (holes.length) {
+                cls += ' grd-short';
+                tally += '<div class="grd-need text-danger fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1"></i>'
+                    + 'ingen ' + holes.map(function (x) { return esc(x.from) + '–' + esc(x.to); }).join(', ') + '</div>';
             }
             h += '<td class="' + cls + '" onclick="grdOpenCell(event,\'' + idParts + "','" + arg(c.key) + '\')">'
                 + entries.map(entryHtml).join('')
@@ -549,6 +576,16 @@
     // Open the person behind a name. Personer is a panel now, not a destination.
     window.grdPerson = function (key) {
         if (window.stfOpenPerson) window.stfOpenPerson(unarg(key));
+    };
+
+    function dayLabelOf(key) {
+        var c = (grid.columns || []).find(function (x) { return x.key === key; });
+        return c ? c.label : key;
+    }
+
+    window.grdShowClashes = function () {
+        var el = document.getElementById('grdClashes');
+        if (el) el.scrollIntoView({ block: 'nearest' });
     };
 
     // How many of this role do we need, per day? Feeds the number in every cell on the row.

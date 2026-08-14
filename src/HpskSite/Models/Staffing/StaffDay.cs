@@ -108,6 +108,19 @@ namespace HpskSite.Models.Staffing
         /// <summary>One clear winner — safe to pre-select. Never means "linked automatically".</summary>
         public bool Confident { get; set; }
         public List<PersonMatchCandidate> Candidates { get; set; } = new();
+        /// <summary>Names already on THIS competition that look like the same person written twice — the
+        /// commonest typo, and one the member register cannot help with.</summary>
+        public List<PersonMatchInPlan> InPlan { get; set; } = new();
+    }
+
+    public class PersonMatchInPlan
+    {
+        public string Name { get; set; } = "";
+        /// <summary>Non-zero when that other name is already linked to a member, so merging links too.</summary>
+        public int MemberId { get; set; }
+        public int RowCount { get; set; }
+        public int Score { get; set; }
+        public string Reason { get; set; } = "";
     }
 
     public class PersonMatchCandidate

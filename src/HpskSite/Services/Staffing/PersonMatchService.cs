@@ -54,6 +54,30 @@ namespace HpskSite.Services.Staffing
 
             var members = LoadMembers();
 
+            // Everyone else already on this competition — because the commonest typo is not "typed a name
+            // no member has", it is "typed the SAME person twice, two ways". "Hanrik Stensson" got no
+            // suggestion at all while "Henrik Stensson" sat three rows away in the same plan.
+            List<StaffAssignment> everyone;
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                everyone = scope.Database.Fetch<StaffAssignment>(
+                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0", competitionId);
+            }
+            catch { everyone = rows; }
+
+            var inPlan = everyone
+                .Where(r => !string.IsNullOrWhiteSpace(r.DisplayName))
+                .GroupBy(r => r.DisplayName.Trim().ToLowerInvariant())
+                .Select(g => new
+                {
+                    Key = g.Key,
+                    Name = g.First().DisplayName.Trim(),
+                    MemberId = g.Select(x => x.MemberId).FirstOrDefault(x => x is > 0),
+                    Count = g.Count(),
+                })
+                .ToList();
+
             foreach (var grp in rows
                 .Where(r => !string.IsNullOrWhiteSpace(r.DisplayName))
                 .GroupBy(r => r.DisplayName.Trim().ToLowerInvariant())
@@ -100,6 +124,24 @@ namespace HpskSite.Services.Staffing
                         && (exact == 1
                             || (row.Candidates[0].Score >= 90
                                 && (row.Candidates.Count == 1 || row.Candidates[0].Score - row.Candidates[1].Score >= 20)));
+
+                    // …and the same-plan duplicates. A high score here means "you have written this person
+                    // twice" — a rename, not a link, and never auto-applied.
+                    row.InPlan = inPlan
+                        .Where(x => x.Key != grp.Key)
+                        .Select(x => new { x, r = Match(name, x.Name) })
+                        .Where(x => x.r.Score >= 70)
+                        .OrderByDescending(x => x.r.Score)
+                        .Take(3)
+                        .Select(x => new PersonMatchInPlan
+                        {
+                            Name = x.x.Name,
+                            MemberId = x.x.MemberId ?? 0,
+                            RowCount = x.x.Count,
+                            Score = x.r.Score,
+                            Reason = x.r.Reason,
+                        })
+                        .ToList();
                 }
                 result.Add(row);
             }
