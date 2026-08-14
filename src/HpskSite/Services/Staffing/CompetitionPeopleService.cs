@@ -265,9 +265,15 @@ namespace HpskSite.Services.Staffing
         /// AND *Säkerhetschef* — both are role=tavlingsledning, scope=All, no pass — so ignoring the title
         /// would block a normal appointment. Only an exact repeat of all five is treated as a duplicate.
         /// </summary>
+        /// <summary>
+        /// Same person, same role, same scope, same pass — <b>and the same DAY</b>. The day used to be
+        /// missing from the key, so putting someone on vapenkontroll on Saturday warned that they already
+        /// had it because they were on it on Friday. Working the same post on consecutive days is the
+        /// normal case in a staffing plan, not a mistake, and a warning that cries wolf gets clicked past.
+        /// </summary>
         public CompetitionPersonAssignment? FindDuplicate(int competitionId, string? discipline,
             int? memberId, string? displayName, string roleKey, string? functionTitle,
-            string? scopeType, string? scopeKey, int? passId, int excludeId)
+            string? scopeType, string? scopeKey, int? passId, int excludeId, string? dateKey = null)
         {
             var key = KeyFor(memberId, displayName);
             var person = Build(competitionId, discipline, canEdit: false, includePrep: false)
@@ -281,7 +287,8 @@ namespace HpskSite.Services.Staffing
                 && N(a.FunctionTitle) == N(functionTitle)
                 && N(a.ScopeType) == N(scopeType)
                 && N(a.ScopeKey) == N(scopeKey)
-                && (a.PassId ?? 0) == (passId ?? 0));
+                && (a.PassId ?? 0) == (passId ?? 0)
+                && N(a.DateKey) == N(dateKey));
         }
 
         // ---- helpers ----

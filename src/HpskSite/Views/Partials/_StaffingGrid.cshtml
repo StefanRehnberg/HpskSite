@@ -103,6 +103,8 @@
                     <i class="bi bi-printer me-2"></i>Skriv ut bemanningen</a></li>
                 <li><button class="dropdown-item" type="button" onclick="grdLoad()">
                     <i class="bi bi-arrow-clockwise me-2"></i>Läs om</button></li>
+                @* Fylls i av renderAll — bara när det finns något att ta fram igen. *@
+                <span id="grdHiddenMenu"></span>
             </ul>
         </div>
     </div>
@@ -111,9 +113,9 @@
 @* The one thing the grid cannot show: people who are not in it yet. Hidden when there are none. *@
 <div id="grdVolunteers" class="mb-2"></div>
 <div id="grdClashes"></div>
+@* "Dolda roller"-raden låg här. Den flyttade in i Mer-menyn — se grdHiddenMenu. *@
 
 <div id="grdExternalWarn" class="alert alert-warning py-2 small" style="display:none"></div>
-<div id="grdHiddenRoles" class="small mb-2"></div>
 
 <div id="grdWrap" class="border rounded">
     <table class="table table-sm mb-0" id="grdTable">
@@ -299,14 +301,18 @@
                 + 'inget personligt schema och inga påminnelser förrän de registrerat sig.';
         } else w.style.display = 'none';
 
-        // Hidden roles are offered back, never lost.
-        var hr = document.getElementById('grdHiddenRoles');
+        // Hidden roles live in the Mer menu, not as a permanent bar above the grid. A standing row of
+        // roles you deliberately got rid of is noise on every visit — but the way back must still exist,
+        // so it appears in the menu only while there is something to bring back.
+        var hm = document.getElementById('grdHiddenMenu');
         var hidden = grid.hiddenRoles || [];
-        hr.innerHTML = hidden.length
-            ? '<span class="text-muted">Dolda roller:</span> ' + hidden.map(function (h) {
-                return '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" onclick="grdUnhideRole(\''
-                    + arg(h.roleKey) + '\')" title="Visa igen"><i class="bi bi-eye"></i> ' + esc(h.roleName) + '</button>';
-            }).join('')
+        hm.innerHTML = hidden.length
+            ? '<li><hr class="dropdown-divider"></li>'
+              + '<li><h6 class="dropdown-header">Dolda roller</h6></li>'
+              + hidden.map(function (h) {
+                  return '<li><button class="dropdown-item" type="button" onclick="grdUnhideRole(\'' + arg(h.roleKey) + '\')">'
+                      + '<i class="bi bi-eye me-2"></i>Visa ' + esc(h.roleName) + '</button></li>';
+              }).join('')
             : '';
     }
 

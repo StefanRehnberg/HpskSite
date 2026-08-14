@@ -306,15 +306,27 @@ namespace HpskSite.Controllers
             // twice on the same skjutlag.
             if (!request.AllowDuplicate)
             {
+                // Resolve the day the same way everything else does: StartsAt.Date → DayDate. A duplicate
+                // is only a duplicate on the SAME day.
+                var dupDay = request.DayDate;
+                if (!string.IsNullOrWhiteSpace(request.StartsAt)
+                    && DateTime.TryParse(request.StartsAt, CultureInfo.GetCultureInfo("sv-SE"),
+                        DateTimeStyles.None, out var dupStart))
+                {
+                    dupDay = dupStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                }
+
                 var dup = _people.FindDuplicate(request.CompetitionId, discipline, request.MemberId,
                     request.DisplayName, request.RoleKey, request.FunctionTitle,
-                    request.ScopeType, request.ScopeKey, request.PassId, request.Id);
+                    request.ScopeType, request.ScopeKey, request.PassId, request.Id, dupDay);
                 if (dup != null)
                     return Json(new
                     {
                         success = false,
                         duplicate = true,
-                        message = $"{request.DisplayName} har redan uppdraget \"{dup.Label}\". Lägg till ändå?",
+                        message = $"{request.DisplayName} har redan uppdraget \"{dup.Label}\""
+                                  + (string.IsNullOrEmpty(dup.DayLabel) ? "" : $" den {dup.DayLabel}")
+                                  + ". Lägg till ändå?",
                     });
             }
 
