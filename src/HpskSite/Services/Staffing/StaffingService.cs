@@ -541,6 +541,87 @@ namespace HpskSite.Services.Staffing
             return (true, null);
         }
 
+        // ---- person-level writes: one human, every row -------------------------------------------
+
+        /// <summary>
+        /// Resolve a person key to the rows it owns. "m:{id}" → that member's rows; "n:{name}" → the
+        /// member-less rows carrying that name. Keeping this in ONE place is what makes the person actions
+        /// agree with <see cref="CompetitionPeopleService"/>, which groups by the same key.
+        /// </summary>
+        private List<StaffAssignment> RowsForPerson(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            int competitionId, string personKey)
+        {
+            if (string.IsNullOrWhiteSpace(personKey)) return new List<StaffAssignment>();
+            if (personKey.StartsWith("m:", StringComparison.Ordinal)
+                && int.TryParse(personKey[2..], out var mid) && mid > 0)
+            {
+                return db.Fetch<StaffAssignment>(
+                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1", competitionId, mid);
+            }
+            var name = personKey.StartsWith("n:", StringComparison.Ordinal) ? personKey[2..] : personKey;
+            return db.Fetch<StaffAssignment>(
+                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId IS NULL", competitionId)
+                .Where(r => string.Equals((r.DisplayName ?? "").Trim(), name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Point every assignment a person holds at a pistol.nu member — or hand them all to a different
+        /// person entirely.
+        ///
+        /// <para><b>Link vs replace is not cosmetic.</b> Linking says "this free-text row IS that member":
+        /// same human, so an Accepted answer and a check-in still stand. Replacing says "someone else does
+        /// this now": their predecessor's yes means nothing, so statuses reset to Planerad and check-ins
+        /// clear. Treating them the same is how a stand-in silently inherits a confirmation they never gave.</para>
+        /// </summary>
+        public PersonActionResult ApplyPersonIdentity(PersonActionRequest req)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var rows = RowsForPerson(db, req.CompetitionId, req.PersonKey);
+            if (rows.Count == 0) return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+
+            string? name = string.IsNullOrWhiteSpace(req.NewName) ? null : req.NewName.Trim();
+            int? memberId = req.MemberId > 0 ? req.MemberId : null;
+            string? phone = string.IsNullOrWhiteSpace(req.Phone) ? null : req.Phone.Trim();
+
+            if (memberId is int mid)
+            {
+                var m = _memberService.GetById(mid);
+                if (m == null) return new PersonActionResult { Success = false, Message = "Medlemmen hittades inte." };
+                // The member's own name wins — that is the whole point of linking, and it is what the
+                // functionary will see in their personal schedule.
+                name ??= ResolveMemberName(mid);
+                if (phone == null && m.HasProperty("phoneNumber")) phone = m.GetValue<string>("phoneNumber");
+            }
+
+            var now = DateTime.UtcNow;
+            var n = 0;
+            foreach (var r in rows)
+            {
+                if (memberId != null) r.MemberId = memberId;
+                if (name != null) r.DisplayName = name;
+                if (phone != null) r.Phone = phone;
+                if (!string.IsNullOrWhiteSpace(req.Email)) r.Email = req.Email.Trim();
+                if (req.IsReplacement)
+                {
+                    r.Status = StaffAssignmentStatus.Planned;
+                    r.CheckedInAt = null;
+                    // App access was granted to a login, not to a slot on the roster.
+                    r.HasAdminAccess = false;
+                }
+                r.ModifiedDate = now;
+                db.Update(r);
+                n++;
+            }
+
+            // A replacement or a link can change who holds Tävlingsledning, and that list is also the
+            // public "Tävlingsansvariga" block on the competition page.
+            try { SyncCompetitionManagers(req.CompetitionId); } catch { }
+
+            return new PersonActionResult { Success = true, Affected = n };
+        }
+
         /// <summary>
         /// Set contact details on an existing roster row. Used by the grid to rescue an account-less helper
         /// from being unreachable — with an e-mail they can at least be invited via a tokened link.

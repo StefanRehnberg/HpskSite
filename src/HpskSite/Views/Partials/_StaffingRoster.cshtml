@@ -110,6 +110,40 @@
     </div>
 
     @*
+        ---- Koppla personer till medlemmar ----
+        A staffing plan is typed from paper, so most people start as free text — 32 of 41 on the SM plan.
+        A free-text row delivers nothing: no personal schedule, no push, no club tally. Linking them one at
+        a time is 32 searches and will not happen, so we guess and let the organiser confirm a screenful.
+        Nothing is ever linked without a click: binding "Tommy" to the wrong Tommy would hand a stranger
+        someone else's shift, and would be invisible afterwards.
+    *@
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemMatchPanel" style="width:min(860px,96vw)">
+      <div class="offcanvas-header border-bottom">
+        <div>
+          <h5 class="offcanvas-title mb-0"><i class="bi bi-person-check me-2"></i>Koppla personer till medlemmar</h5>
+          <div class="small text-muted" id="stfMatchSummary"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+      </div>
+      <div class="offcanvas-body">
+        <p class="text-muted small">
+            Personer som skrivits in för hand får varken personligt schema eller notiser, och räknas inte
+            till klubbens funktionärer. Här gissar vi vem som menades — <strong>du bekräftar</strong>.
+            En koppling ändrar <em>alla</em> personens uppdrag på tävlingen.
+        </p>
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+            <button type="button" class="btn btn-sm btn-primary" id="stfMatchAllBtn" onclick="stfLinkAllConfident()">
+                <i class="bi bi-lightning-charge me-1"></i>Koppla alla säkra
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfLoadMatches()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Läs om
+            </button>
+        </div>
+        <div id="stfMatchList"><div class="text-muted small">Laddar…</div></div>
+      </div>
+    </div>
+
+    @*
         ---- Roller — RETIRED as a destination ----
         The grid answers "who has role X" with a day axis and a club column, so a second role-grouped list
         was a second place to edit the same rows. The markup stays here, permanently hidden, because a
@@ -744,6 +778,20 @@
     // volunteered for, when they said they're available, and what they own in Förberedelser.
     function personDetailHtml(p, keyEsc) {
         var h = '<tr class="table-active"><td colspan="6" class="pt-0">';
+
+        // Identity actions belong to the PERSON, not to one of their rows. Hans Reschke is five
+        // assignments; fixing a spelling or adding an address on one of them is how the data drifts.
+        var nameArg = encodeURIComponent(p.displayName || '').replace(/'/g, '%27');
+        h += '<div class="d-flex gap-1 flex-wrap py-2 border-bottom mb-2">'
+            + '<span class="text-muted small me-1 align-self-center">Gäller alla ' + (p.assignments || []).length + ' uppdrag:</span>'
+            + (p.memberId
+                ? '<span class="badge bg-success-subtle text-success-emphasis border align-self-center"><i class="bi bi-person-check me-1"></i>Kopplad till medlem</span>'
+                : '<button type="button" class="btn btn-sm btn-primary" onclick="stfPersonLink(\'' + keyEsc + '\',\'' + nameArg + '\')"><i class="bi bi-person-check me-1"></i>Koppla till medlem</button>')
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfPersonRename(\'' + keyEsc + '\',\'' + nameArg + '\')"><i class="bi bi-pencil me-1"></i>Byt namn</button>'
+            + (p.memberId ? '' : '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfPersonEmail(\'' + keyEsc + '\',\'' + nameArg + '\')"><i class="bi bi-envelope me-1"></i>E-post</button>')
+            + '<button type="button" class="btn btn-sm btn-outline-warning" onclick="stfPersonReplace(\'' + keyEsc + '\',\'' + nameArg + '\')"><i class="bi bi-arrow-left-right me-1"></i>Ersätt med annan person</button>'
+            + '</div>';
+
         h += '<div class="row g-3 py-2">';
 
         // --- uppdrag (editable rows) ---
@@ -1769,6 +1817,192 @@
         var v = document.getElementById('stfPplView'); if (v) v.value = '';
         peopleShown = PEOPLE_PAGE;
         renderPeople();
+    };
+
+    // ---- person identity ------------------------------------------------------------------------
+
+    var matchRows = [];
+
+    window.stfOpenMatch = function () {
+        var p = panel('bemMatchPanel'); if (p) p.show();
+        stfLoadMatches();
+    };
+
+    window.stfLoadMatches = async function () {
+        var host = document.getElementById('stfMatchList');
+        host.innerHTML = '<div class="text-muted small">Laddar…</div>';
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SuggestPersonMatches?competitionId=' + compId,
+                { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { host.innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kunde inte läsa.') + '</div>'; return; }
+            matchRows = d.people || [];
+            var sum = document.getElementById('stfMatchSummary');
+            if (sum) sum.textContent = matchRows.length
+                ? (matchRows.length + ' utan koppling · ' + d.confident + ' säkra förslag · ' + d.unmatched + ' utan träff')
+                : 'Alla personer är kopplade till medlemmar.';
+            var btn = document.getElementById('stfMatchAllBtn');
+            if (btn) btn.style.display = d.confident ? '' : 'none';
+            renderMatches();
+        } catch (e) {
+            host.innerHTML = '<div class="alert alert-warning">Kunde inte läsa förslagen.</div>';
+        }
+    };
+
+    function renderMatches() {
+        var host = document.getElementById('stfMatchList');
+        if (!matchRows.length) {
+            host.innerHTML = '<div class="alert alert-success mb-0"><i class="bi bi-check2-circle me-1"></i>'
+                + 'Alla på tävlingen är kopplade till en medlem.</div>';
+            return;
+        }
+        host.innerHTML = matchRows.map(function (m, i) {
+            var head = '<div class="fw-semibold">' + esc(m.name)
+                + ' <span class="text-muted fw-normal small">' + m.rowCount + (m.rowCount === 1 ? ' uppdrag' : ' uppdrag') + '</span>'
+                + (m.confident ? ' <span class="badge bg-success-subtle text-success-emphasis border fw-normal">säkert förslag</span>' : '')
+                + '</div>';
+
+            if (m.looksLikeTwoPeople) {
+                return '<div class="border rounded p-2 mb-2">' + head
+                    + '<div class="small text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>'
+                    + 'Ser ut som två personer i samma ruta. Dela upp den i två uppdrag först.</div></div>';
+            }
+            if (!(m.candidates || []).length) {
+                return '<div class="border rounded p-2 mb-2">' + head
+                    + '<div class="small text-muted">Ingen medlem liknar namnet. '
+                    + '<button type="button" class="btn btn-sm btn-link p-0 align-baseline" onclick="stfPersonEmail(\'' + pkey(m.key) + '\',\'' + pkey(m.name) + '\')">Lägg till e-post i stället</button>'
+                    + ' så kan hen åtminstone bjudas in.</div></div>';
+            }
+
+            var opts = m.candidates.map(function (c, j) {
+                return '<option value="' + c.memberId + '"' + (j === 0 && m.confident ? ' selected' : '') + '>'
+                    + esc(c.name) + (c.clubName ? ' — ' + esc(c.clubName) : '') + ' (' + esc(c.reason) + ')</option>';
+            }).join('');
+            return '<div class="border rounded p-2 mb-2">' + head
+                + '<div class="d-flex gap-2 align-items-center flex-wrap mt-1">'
+                + '<select class="form-select form-select-sm" id="stfMatchSel' + i + '" style="max-width:420px">'
+                + '<option value="">— välj medlem —</option>' + opts + '</select>'
+                + '<button type="button" class="btn btn-sm btn-primary" onclick="stfLinkOne(' + i + ')">Koppla</button>'
+                + '</div></div>';
+        }).join('');
+    }
+
+    function pkey(s) { return encodeURIComponent(s == null ? '' : s).replace(/'/g, '%27'); }
+    function unpkey(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+
+    window.stfLinkOne = async function (i) {
+        var m = matchRows[i]; if (!m) return;
+        var sel = document.getElementById('stfMatchSel' + i);
+        var id = sel ? parseInt(sel.value, 10) : 0;
+        if (!id) { alert('Välj en medlem först.'); return; }
+        var r = await stfPersonPost({ competitionId: compId, personKey: m.key, memberId: id });
+        if (!r.success) { alert(r.message || 'Kunde inte koppla.'); return; }
+        await stfLoadMatches();
+        if (window.grdLoad) window.grdLoad();
+    };
+
+    /// Only the ones with a single clear winner. Everything ambiguous still needs a human.
+    window.stfLinkAllConfident = async function () {
+        var todo = matchRows.filter(function (m) { return m.confident && (m.candidates || []).length; });
+        if (!todo.length) return;
+        if (!confirm('Koppla ' + todo.length + ' personer till de föreslagna medlemmarna?\n\n'
+            + todo.slice(0, 12).map(function (m) { return '· ' + m.name + ' → ' + m.candidates[0].name; }).join('\n')
+            + (todo.length > 12 ? '\n… och ' + (todo.length - 12) + ' till' : ''))) return;
+        var ok = 0;
+        for (var k = 0; k < todo.length; k++) {
+            var r = await stfPersonPost({ competitionId: compId, personKey: todo[k].key, memberId: todo[k].candidates[0].memberId });
+            if (r.success) ok++;
+        }
+        alert('Kopplade ' + ok + ' av ' + todo.length + '.');
+        await stfLoadMatches();
+        if (window.grdLoad) window.grdLoad();
+    };
+
+    async function stfPersonPost(body) {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/ApplyPersonIdentity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify(body)
+            });
+            return await r.json();
+        } catch (e) { return { success: false, message: 'Nätverksfel.' }; }
+    }
+
+    // ---- person actions, from the person panel: they touch EVERY row the human holds ----
+
+    window.stfPersonRename = async function (key, current) {
+        key = unpkey(key);
+        var n = prompt('Vad ska personen heta?\n\nÄndringen gäller alla hens uppdrag på tävlingen.', unpkey(current || ''));
+        if (n == null || !n.trim()) return;
+        var r = await stfPersonPost({ competitionId: compId, personKey: key, newName: n.trim() });
+        if (!r.success) { alert(r.message || 'Kunde inte byta namn.'); return; }
+        await loadPeople(); if (window.grdLoad) window.grdLoad();
+    };
+
+    window.stfPersonEmail = async function (key, name) {
+        key = unpkey(key);
+        var e = prompt('E-postadress till ' + unpkey(name) + '\n\nGäller alla hens uppdrag. Med e-post kan hen bjudas in även utan konto.', '');
+        if (e == null) return;
+        var r = await stfPersonPost({ competitionId: compId, personKey: key, email: e.trim() });
+        if (!r.success) { alert(r.message || 'Kunde inte spara.'); return; }
+        await loadPeople(); if (window.grdLoad) window.grdLoad(); if (matchRows.length) stfLoadMatches();
+    };
+
+    /// Someone else takes over ALL the work. A different human, so the predecessor's yes does not carry:
+    /// statuses reset and check-ins clear (the server enforces it).
+    window.stfPersonReplace = async function (key, name) {
+        key = unpkey(key);
+        var q = prompt('Vem tar över alla uppdrag från ' + unpkey(name) + '?\n\nSkriv namnet — vi söker medlem.', '');
+        if (q == null || !q.trim()) return;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SearchMembers?competitionId=' + compId + '&query=' + encodeURIComponent(q.trim()),
+                { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            var list = (d && d.members) ? d.members : [];
+            var memberId = 0, newName = q.trim();
+            if (list.length) {
+                var pick = prompt('Vem menar du?\n\n'
+                    + list.slice(0, 9).map(function (m, i) { return (i + 1) + '. ' + m.memberName + (m.clubName ? ' — ' + m.clubName : ''); }).join('\n')
+                    + '\n0. Ingen av dem — spara som fritext "' + newName + '"', '1');
+                if (pick == null) return;
+                var idx = parseInt(pick, 10);
+                if (idx >= 1 && idx <= Math.min(9, list.length)) {
+                    memberId = list[idx - 1].memberId; newName = list[idx - 1].memberName;
+                }
+            }
+            var res = await stfPersonPost({
+                competitionId: compId, personKey: key, memberId: memberId,
+                newName: memberId ? null : newName, isReplacement: true
+            });
+            if (!res.success) { alert(res.message || 'Kunde inte ersätta.'); return; }
+            alert('Flyttade ' + res.affected + ' uppdrag till ' + newName + '. Statusarna är återställda till Planerad — hen har inte svarat än.');
+            await loadPeople(); if (window.grdLoad) window.grdLoad();
+        } catch (e) { alert('Nätverksfel.'); }
+    };
+
+    window.stfPersonLink = async function (key, name) {
+        window.stfPersonReplaceOrLink(key, name, false);
+    };
+    window.stfPersonReplaceOrLink = async function (key, name, isReplacement) {
+        if (isReplacement) return window.stfPersonReplace(key, name);
+        key = unpkey(key);
+        var q = prompt('Vilken medlem på pistol.nu är ' + unpkey(name) + '?\n\nSkriv namnet.', unpkey(name));
+        if (q == null || !q.trim()) return;
+        var r = await fetch('/umbraco/surface/Staffing/SearchMembers?competitionId=' + compId + '&query=' + encodeURIComponent(q.trim()),
+            { headers: { 'Accept': 'application/json' } });
+        var d = await r.json();
+        var list = (d && d.members) ? d.members : [];
+        if (!list.length) { alert('Ingen medlem hittades.'); return; }
+        var pick = prompt('Vem menar du?\n\n' + list.slice(0, 9).map(function (m, i) {
+            return (i + 1) + '. ' + m.memberName + (m.clubName ? ' — ' + m.clubName : '');
+        }).join('\n'), '1');
+        if (pick == null) return;
+        var idx = parseInt(pick, 10);
+        if (!(idx >= 1 && idx <= Math.min(9, list.length))) return;
+        var res = await stfPersonPost({ competitionId: compId, personKey: key, memberId: list[idx - 1].memberId });
+        if (!res.success) { alert(res.message || 'Kunde inte koppla.'); return; }
+        await loadPeople(); if (window.grdLoad) window.grdLoad();
     };
 
     window.stfOpenBehov = function () {

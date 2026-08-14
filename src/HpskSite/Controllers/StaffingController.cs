@@ -44,6 +44,7 @@ namespace HpskSite.Controllers
         private readonly StaffPassService _pass;
         private readonly RoleCatalogService _roleCatalog;
         private readonly StaffDayService _days;
+        private readonly PersonMatchService _match;
         private readonly PrepDocumentStorage _docs;
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
         private readonly EmailService _email;
@@ -73,6 +74,7 @@ namespace HpskSite.Controllers
             StaffPassService pass,
             RoleCatalogService roleCatalog,
             StaffDayService days,
+            PersonMatchService match,
             PrepDocumentStorage docs,
             HpskSite.Services.Schedule.CompetitionAgendaService agenda,
             EmailService email,
@@ -97,6 +99,7 @@ namespace HpskSite.Controllers
             _pass = pass;
             _roleCatalog = roleCatalog;
             _days = days;
+            _match = match;
             _docs = docs;
             _agenda = agenda;
             _email = email;
@@ -1734,6 +1737,68 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Staffing: MoveAssignmentToDay failed for {Id}", request.Id);
                 return Json(new { success = false, message = "Kunde inte flytta uppdraget." });
+            }
+        }
+
+        /// <summary>
+        /// Which pistol.nu member did the organiser mean? One call for every free-text name on the
+        /// competition, so 32 unidentified helpers become one screen to confirm instead of 32 searches.
+        /// Suggestions only — nothing is ever linked without a human saying yes.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> SuggestPersonMatches(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var rows = _match.Suggest(competitionId);
+                return Json(new
+                {
+                    success = true,
+                    people = rows,
+                    total = rows.Count,
+                    confident = rows.Count(r => r.Confident),
+                    unmatched = rows.Count(r => r.Candidates.Count == 0 && !r.LooksLikeTwoPeople),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SuggestPersonMatches failed for {Comp}", competitionId);
+                return Json(new { success = false, message = "Kunde inte föreslå matchningar." });
+            }
+        }
+
+        /// <summary>
+        /// Apply an identity change to EVERY row a person holds — link to a member, rename, set contact,
+        /// or hand the work to someone else. Row-at-a-time editing is what let the same human end up with
+        /// three spellings and an e-mail on only one of them.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApplyPersonIdentity([FromBody] PersonActionRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.PersonKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            if (request.MemberId <= 0 && string.IsNullOrWhiteSpace(request.NewName)
+                && string.IsNullOrWhiteSpace(request.Email) && string.IsNullOrWhiteSpace(request.Phone))
+                return Json(new { success = false, message = "Inget att ändra." });
+
+            var email = (request.Email ?? "").Trim();
+            if (email.Length > 0 && (!email.Contains('@') || email.Contains(' ')))
+                return Json(new { success = false, message = "Ogiltig e-postadress." });
+
+            try
+            {
+                var r = _staffing.ApplyPersonIdentity(request);
+                return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: ApplyPersonIdentity failed for {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte spara ändringen." });
             }
         }
 
