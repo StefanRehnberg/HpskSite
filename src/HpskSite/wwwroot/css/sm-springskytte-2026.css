@@ -319,6 +319,15 @@ a.sm-card .sm-card-more {
     padding-bottom: 0;
 }
 
+/* Ändringar i en revidering av PM:et — en läsare som redan läst sidan ska kunna
+   hitta det som är nytt utan att läsa om allt. */
+.sm-rev {
+    border-left: 4px solid var(--sm-yellow);
+    background: rgba(224, 168, 0, 0.08);
+    padding: 0.65rem 0.9rem;
+    border-radius: 0 8px 8px 0;
+}
+
 /* ---------- Misc ---------- */
 .sm-list-tight {
     padding-left: 1.15rem;
