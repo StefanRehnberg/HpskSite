@@ -1,0 +1,80 @@
+@*
+    "Gör det här innan du åker" — Mitt schema + notiser.
+
+    Delad av hubben och funktionärssidan, så budskapet inte hinner glida isär.
+    Tutorialknapparna renderas bara om noden faktiskt finns (samma existenskoll som
+    _ParticipantNotices gör för tutorial-notiser) — annars länkar vi till en 404.
+
+    Kräver ViewData["CompetitionId"]. TutorialHelper laddas globalt av Master.cshtml.
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    var smfCompId = ViewData["CompetitionId"] as int? ?? 0;
+    var smfScheduleUrl = smfCompId > 0 ? $"/mitt-schema?c={smfCompId}" : "/mitt-schema";
+
+    var smfHasSchemaTut = false;
+    var smfHasNotisTut = false;
+    try
+    {
+        var smfHome = Umbraco.ContentAtRoot().FirstOrDefault();
+        var smfHub = smfHome?.Children?.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
+        var smfTuts = smfHub?.Children?.Where(t => t.ContentType.Alias == "tutorial").ToList();
+        smfHasSchemaTut = smfTuts?.Any(t => (t.Value<string>("tutorialId") ?? "") == "tutorial-mitt-schema") ?? false;
+        smfHasNotisTut = smfTuts?.Any(t => (t.Value<string>("tutorialId") ?? "") == "tutorial-notiser") ?? false;
+    }
+    catch { }
+}
+
+<div class="sm-cta">
+    <h2>Gör det här innan du åker</h2>
+
+    <div class="sm-cta-steps">
+        <div class="sm-cta-step">
+            <div class="sm-cta-num">1</div>
+            <div>
+                <h3>Öppna Mitt schema</h3>
+                <p>
+                    Dina egna starttider och funktionärspass, samlade i en tidslinje — och en påminnelse innan
+                    varje pass. Tävlar du <em>och</em> jobbar ser du båda delarna i samma vy.
+                </p>
+                <a class="btn btn-primary btn-lg" href="@smfScheduleUrl">
+                    <i class="bi bi-calendar-check me-2"></i>Öppna Mitt schema
+                </a>
+                <p class="small text-body-secondary mt-2 mb-0">
+                    Kräver att du är inloggad på pistol.nu — du loggas in och skickas hit tillbaka.
+                </p>
+                @if (smfHasSchemaTut)
+                {
+                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="TutorialHelper.open('tutorial-mitt-schema')">
+                        <i class="bi bi-play-circle me-1"></i>Se filmen: så funkar Mitt schema
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div class="sm-cta-step">
+            <div class="sm-cta-num">2</div>
+            <div>
+                <h3>Slå på notiser</h3>
+                <p>
+                    Så når arrangören dig när något ändras under dagen — tidsändringar, säkerhetsmeddelanden och
+                    när resultatlistan publiceras. Du slår på dem längst ned på Mitt schema.
+                </p>
+                <a class="btn btn-outline-primary btn-lg" href="@smfScheduleUrl">
+                    <i class="bi bi-bell me-2"></i>Slå på notiser
+                </a>
+                <p class="small text-body-secondary mt-2 mb-0">
+                    <i class="bi bi-apple me-1"></i>
+                    På iPhone krävs ett extra steg: lägg först till pistol.nu på hemskärmen, öppna sidan därifrån
+                    och slå sedan på notiser. Det är en begränsning i iOS, inte i pistol.nu.
+                </p>
+                @if (smfHasNotisTut)
+                {
+                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="TutorialHelper.open('tutorial-notiser')">
+                        <i class="bi bi-play-circle me-1"></i>Se filmen: notiser på iPhone
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+</div>

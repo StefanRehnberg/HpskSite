@@ -50,6 +50,8 @@
         <p class="mb-0"><strong>Väl mött i Halland!</strong></p>
     </section>
 
+    @await Html.PartialAsync("_SmSpringskytteFore")
+
     <section class="sm-section">
         <h2>Tidsplan</h2>
         <p>Startlistor publiceras i vecka 34. Tiderna för prisutdelning och stafettstart är ungefärliga.</p>
@@ -82,7 +84,7 @@
         </div>
         <p class="mt-3 mb-0">
             <strong>Vapenkontrollen öppnar redan fredag 21 augusti kl. 18.00–21.00</strong> för dig som kommer
-            kvällen innan. Söndagens vapenkontroll är öppen 7.30–9.30.
+            kvällen innan.
         </p>
     </section>
 
@@ -144,18 +146,13 @@
                 <div class="sm-card">
                     <h3>Under tävlingen</h3>
                     <ul class="sm-list-tight">
-                        <li><strong>Mitt schema</strong> — dina egna starttider och uppdrag, samlade på ett ställe. Kräver inloggning.</li>
                         <li><strong>Live-tävlan</strong> — resultaten uppdateras löpande på storskärm vid publikplatsen och i din telefon.</li>
+                        <li><strong>Mitt schema</strong> — dina egna starttider och uppdrag. Se rutan högst upp på sidan.</li>
                     </ul>
                     <div class="d-flex flex-wrap gap-2">
                         @if (compId > 0)
                         {
-                            <a class="btn btn-outline-primary" href="/mitt-schema?c=@compId">Mitt schema</a>
                             <a class="btn btn-outline-primary" href="/live?c=@compId" target="_blank" rel="noopener">Live-tävlan</a>
-                        }
-                        else
-                        {
-                            <a class="btn btn-outline-primary" href="/mitt-schema">Mitt schema</a>
                         }
                     </div>
                 </div>

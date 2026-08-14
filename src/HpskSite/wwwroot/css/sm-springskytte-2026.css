@@ -145,6 +145,58 @@ a.sm-card .sm-card-more {
     font-weight: 600;
 }
 
+/* ---------- "Gör det här innan du åker" ----------
+   Deliberately the loudest block on the page: Mitt schema and notiser are the two
+   things a participant must do BEFORE arriving, and there is no second chance in a
+   quarry with poor coverage. */
+.sm-cta {
+    border: 2px solid var(--sm-accent);
+    border-radius: 14px;
+    background: rgba(27, 79, 138, 0.05);
+    padding: 1.5rem 1.5rem 1.25rem;
+    margin-bottom: 2.25rem;
+}
+
+.sm-cta > h2 {
+    font-size: 1.45rem;
+    font-weight: 700;
+    margin-top: 0;
+    margin-bottom: 1.25rem;
+    color: var(--sm-accent);
+}
+
+.sm-cta-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.sm-cta-step {
+    display: flex;
+    gap: 0.9rem;
+    align-items: flex-start;
+}
+
+.sm-cta-step h3 {
+    margin-top: 0;
+    margin-bottom: 0.35rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.sm-cta-num {
+    flex: 0 0 2.1rem;
+    height: 2.1rem;
+    border-radius: 50%;
+    background: var(--sm-accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    line-height: 1;
+}
+
 /* ---------- Day schedule ---------- */
 .sm-day {
     border: 1px solid var(--bs-border-color);

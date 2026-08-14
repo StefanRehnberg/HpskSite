@@ -25,36 +25,16 @@
 
     @await Html.PartialAsync("_SmSpringskytteNav")
 
+    @await Html.PartialAsync("_SmSpringskytteFore")
+
     <section class="sm-section">
-        <h2>Ditt schema</h2>
-        <div class="row g-3">
-            <div class="col-md-6">
-                <div class="sm-card">
-                    <h3>📅 Mitt schema</h3>
-                    <p>
-                        Dina egna pass och tider under tävlingsdagen — och om du både tävlar och jobbar, båda delarna
-                        i samma tidslinje. Kräver att du är inloggad på pistol.nu.
-                    </p>
-                    @if (compId > 0)
-                    {
-                        <a class="btn btn-primary" href="/mitt-schema?c=@compId">Öppna mitt schema</a>
-                    }
-                    else
-                    {
-                        <a class="btn btn-primary" href="/mitt-schema">Öppna mitt schema</a>
-                    }
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="sm-card">
-                    <h3>✅ Mina uppdrag</h3>
-                    <p>
-                        Har du fått en förfrågan om ett funktionärsuppdrag som du inte svarat på ännu? Svara här, så vet
-                        vi hur vi kan planera.
-                    </p>
-                    <a class="btn btn-outline-primary" href="/mina-uppdrag">Mina uppdrag</a>
-                </div>
-            </div>
+        <h2>Har du svarat på din förfrågan?</h2>
+        <div class="sm-card">
+            <p>
+                Har du fått en förfrågan om ett funktionärsuppdrag som du inte svarat på ännu? Svara här, så vet vi
+                hur vi kan planera dagen.
+            </p>
+            <a class="btn btn-outline-primary" href="/mina-uppdrag">Mina uppdrag</a>
         </div>
     </section>
 
@@ -64,7 +44,7 @@
             <li><strong>Alla funktionärer bär gula eller orangea västar</strong> — så att tävlande hittar er direkt.</li>
             <li>
                 <strong>Vapenkontrollen</strong> är öppen fredag 21/8 kl. 18.00–21.00, lördag kl. 9.00–12.00 och
-                söndag kl. 7.30–9.30. Anmälan och utlämning av nummerlappar och föreningskuvert sker där.
+                söndag kl. 7.30–9.00. Anmälan och utlämning av nummerlappar och föreningskuvert sker där.
             </li>
             <li>
                 <strong>Inskjutning</strong> lördag kl. 10.00–11.00 och söndag kl. 8.30–9.30.
