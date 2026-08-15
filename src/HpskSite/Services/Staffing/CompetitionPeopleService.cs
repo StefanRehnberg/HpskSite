@@ -240,7 +240,21 @@ namespace HpskSite.Services.Staffing
             resp.DeclinedCount = resp.People.Count(p => p.Assignments.Any(a =>
                 string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)));
             resp.ExternalCount = resp.People.Count(p => p.IsExternal);
+            // ONE ROW PER PERSON. Leadership is collected per ASSIGNMENT, and since tävlingsledning is
+            // staffed per day a three-day SM produced three identical "Hans Reschke · Tävlingsledare"
+            // rows. This card answers "who leads this competition" — a question that has no day in it.
+            // Star and behörighet are merged across the days so a person who has either on any day
+            // keeps it here.
             resp.Leadership = resp.Leadership
+                .GroupBy(a => (a.PersonName ?? "").Trim().ToLowerInvariant()
+                            + "|" + (a.FunctionTitle ?? a.RoleName ?? "").Trim().ToLowerInvariant())
+                .Select(g =>
+                {
+                    var first = g.First();
+                    first.IsResponsible = g.Any(x => x.IsResponsible);
+                    first.HasAdminAccess = g.Any(x => x.HasAdminAccess);
+                    return first;
+                })
                 .OrderByDescending(a => a.IsResponsible)
                 .ThenBy(a => a.FunctionTitle, StringComparer.OrdinalIgnoreCase)
                 .ToList();
