@@ -12,6 +12,11 @@
         : $"Startlistor – {Model.CompetitionName}";
     var intervalSec = selected != null && !selected.IsStafett ? IntervalSeconds(selected.Config.DefaultInterval) : 60;
     var breakSec = selected != null && !selected.IsStafett ? IntervalSeconds(selected.Config.BreakDuration) : 300;
+    // Multi-pass (omgångar). Hoisted here on purpose: a `@{ }` block placed mid-markup breaks the
+    // view with an UmbracoCompilationException that carries no message. Inferred generics only —
+    // an explicit List<T> in a Razor code block is parsed as an HTML tag.
+    var multiPass = selected != null && !selected.IsStafett && selected.Config.HasMultiplePasses();
+    var passList = multiPass ? selected!.Config.EffectivePasses() : null;
 }
 @functions {
     static int ParseTimeToSeconds(string? time)
@@ -54,6 +59,9 @@
         .start-list-table tr.current-user { background:#d1e7dd; }
         .start-list-table tr.same-club { background:#e7f1ff; }
         .paus-row td { background:#fff3cd; text-align:center; font-weight:bold; font-size:12px; }
+        /* A pass boundary is a structural heading, not a break — heavier than .paus-row and left
+           aligned so it reads as a section start when the list is scanned or printed. */
+        .pass-row td { background:#e9ecef; border-top:2px solid #495057; font-weight:700; font-size:13px; letter-spacing:.02em; }
         .ledig-row td { background:#fafbfc; color:#8a94a0; font-style:italic; font-size:12px; }
         .ledig-row td.time { color:#8a94a0; font-weight:normal; }
         .list-header { border-left:4px solid #0d6efd; background:#eef2f7; padding:8px 12px; font-weight:600; margin-bottom:0; }
@@ -212,9 +220,25 @@
                 </tr>
             </thead>
             <tbody>
-                @{ string? prevTime = null; }
+                @{ string? prevTime = null; var shownPass = -1; }
                 @foreach (var s in selected.Config.Starters)
                 {
+                    // Pass heading. A multi-pass list has a long wait between passes, and the gap
+                    // logic below would otherwise label it "Paus" — which reads as a coffee break,
+                    // not as "come back at twelve". Derived from the pass boundaries, never from
+                    // the size of the hole. A single-pass list has one pass and shows no heading.
+                    var passIdx = multiPass ? selected.Config.PassIndexFor(s.StartTime) : 0;
+                    if (multiPass && passIdx != shownPass)
+                    {
+                        var passTime = passList[passIdx].FirstStartTime ?? "";
+                        if (passTime.Length >= 5) { passTime = passTime.Substring(0, 5); }
+                        <tr class="pass-row">
+                            <td colspan="6">Start @(passIdx + 1) – kl @passTime</td>
+                        </tr>
+                        shownPass = passIdx;
+                        prevTime = null;   // never draw a gap across a pass boundary
+                    }
+
                     if (prevTime != null && !string.IsNullOrEmpty(s.StartTime))
                     {
                         var pSec = ParseTimeToSeconds(prevTime);

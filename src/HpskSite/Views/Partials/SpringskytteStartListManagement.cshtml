@@ -84,23 +84,36 @@
                 <div class="border rounded p-3">
                     <div class="fw-bold small mb-2"><i class="bi bi-arrow-clockwise me-1"></i>Klasser &amp; tider</div>
                     <div class="mb-3">
-                        <label class="form-label small">Klasser i denna lista</label>
+                        <div class="d-flex justify-content-between align-items-baseline">
+                            <label class="form-label small mb-1">Klasser i denna lista</label>
+                            <!-- Live sum of the ticked classes. It is what the pass counts are
+                                 divided out of, so it belongs next to the classes, not buried in
+                                 the card summary. -->
+                            <span class="small fw-semibold" id="springSet_classTotal"></span>
+                        </div>
                         <div id="springSettingsClasses"></div>
                     </div>
+                    <!-- Starter (omgångar). One row = one start time + how many begin from it.
+                         The last row always takes "resten", so an efteranmälan lands there without
+                         anyone re-typing the counts. One row = the ordinary single-start list. -->
+                    <div class="mb-3">
+                        <label class="form-label small mb-1">Starter</label>
+                        <div id="springSet_passes"></div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm mt-1" onclick="springAddPassRow()">
+                            <i class="bi bi-plus-lg me-1"></i>Lägg till en start
+                        </button>
+                        <div class="form-text" id="springSet_passHint"></div>
+                    </div>
                     <div class="row g-2 mb-2">
-                        <div class="col-md-3">
-                            <label class="form-label small">Första starttid</label>
-                            <input type="text" class="form-control form-control-sm" id="springSet_firstStart" placeholder="HH:MM">
-                        </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <label class="form-label small">Intervall (MM:SS)</label>
                             <input type="text" class="form-control form-control-sm" id="springSet_interval" placeholder="MM:SS">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <label class="form-label small">Paus efter antal</label>
                             <input type="number" class="form-control form-control-sm" id="springSet_breakAfter" min="3" max="30">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <label class="form-label small">Pauslängd (MM:SS)</label>
                             <input type="text" class="form-control form-control-sm" id="springSet_breakDur" placeholder="MM:SS">
                         </div>
@@ -325,6 +338,7 @@ async function springLoadAll() {
                     listDate: list.listDate || '',
                     coveredClasses: list.coveredClasses || [],
                     firstStartTime: list.firstStartTime,
+                    passes: list.passes || [],
                     defaultInterval: list.defaultInterval,
                     breakAfterEvery: list.breakAfterEvery,
                     breakDuration: list.breakDuration,
@@ -521,7 +535,10 @@ function springBuildSettingsSummary(card) {
             <div class="mb-1">${classText}</div>
             <div>
                 ${card.listDate ? `<i class="bi bi-calendar-event me-1"></i>${escapeHtml(card.listDate)} · ` : ''}
-                <i class="bi bi-clock me-1"></i>Start ${escapeHtml(card.firstStartTime || '10:00')}
+                <i class="bi bi-clock me-1"></i>${(card.passes && card.passes.length > 1)
+                    ? card.passes.map((p, i) => `Start ${i + 1} ${escapeHtml(String(p.firstStartTime || '').substring(0, 5))}`
+                        + (p.count ? ` (${p.count} st)` : '')).join(' · ')
+                    : 'Start ' + escapeHtml(String(card.firstStartTime || '10:00').substring(0, 5))}
                 · Intervall ${escapeHtml(card.defaultInterval || '01:00')}
                 · Paus ${escapeHtml(card.breakDuration || '05:00')} efter ${card.breakAfterEvery || 10}
             </div>
@@ -640,10 +657,16 @@ function springOpenSettings(tempId) {
 
     // Time fields
     document.getElementById('springSet_date').value = card.listDate || '';
-    document.getElementById('springSet_firstStart').value = card.firstStartTime || '10:00';
     document.getElementById('springSet_interval').value = card.defaultInterval || '01:00';
     document.getElementById('springSet_breakAfter').value = card.breakAfterEvery || 10;
     document.getElementById('springSet_breakDur').value = card.breakDuration || '05:00';
+
+    // Starter (omgångar). A list generated before this feature has no passes array — it renders
+    // as the single start it already is, so the modal looks unchanged for every existing list.
+    springModalPasses = (card.passes && card.passes.length > 0)
+        ? card.passes.map(p => ({ firstStartTime: String(p.firstStartTime || '').substring(0, 5), count: p.count }))
+        : [{ firstStartTime: (card.firstStartTime || '10:00').substring(0, 5), count: null }];
+    springRenderPassRows();
 
     // Class checkboxes (working copy so Avbryt discards changes)
     springModalCtx.coveredClasses = [...(card.coveredClasses || [])];
@@ -651,11 +674,137 @@ function springOpenSettings(tempId) {
 
     bootstrap.Modal.getOrCreateInstance(document.getElementById('springSettingsModal')).show();
 
-    flatpickr('#springSet_firstStart', {
-        locale: 'sv', enableTime: true, noCalendar: true,
-        dateFormat: 'H:i', time_24hr: true, defaultHour: 10, defaultMinute: 0
-    });
+    springAttachPassPickers();
     flatpickr('#springSet_date', { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+}
+
+// ── Starter (omgångar) ────────────────────────────────────────────────────
+// Working copy for the open modal: [{ firstStartTime: "HH:MM", count: number|null }].
+let springModalPasses = [];
+
+function springRenderPassRows() {
+    const host = document.getElementById('springSet_passes');
+    if (!host) return;
+    // Remainder for the last pass, so the operator sees the split add up while typing.
+    const total = springSelectedStarterTotal();
+    const claimed = springModalPasses.slice(0, -1).reduce((a, p) => a + (p.count || 0), 0);
+    const rest = total - claimed;
+
+    host.innerHTML = springModalPasses.map((p, i) => {
+        const isLast = i === springModalPasses.length - 1;
+        const restText = total > 0
+            ? (rest > 0 ? `resten – ${rest} skytt${rest === 1 ? '' : 'ar'}` : 'resten – <strong>ingen kvar</strong>')
+            : 'resten av de startande';
+        return `
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="small fw-semibold" style="min-width:62px">Start ${i + 1}</span>
+            <input type="text" class="form-control form-control-sm spring-pass-time" data-i="${i}"
+                   value="${escapeHtml(p.firstStartTime || '')}" placeholder="HH:MM" style="max-width:110px">
+            ${isLast
+                ? `<span class="small flex-grow-1 ${rest <= 0 && total > 0 ? 'text-danger' : 'text-muted'}"
+                         id="springSet_restLabel">${restText}</span>`
+                : `<input type="number" class="form-control form-control-sm spring-pass-count" data-i="${i}" min="1"
+                          value="${p.count == null ? '' : p.count}" placeholder="antal" style="max-width:110px"
+                          oninput="springOnPassCountInput()">
+                   <span class="text-muted small flex-grow-1">startande</span>`}
+            ${springModalPasses.length > 1
+                ? `<button type="button" class="btn btn-outline-danger btn-sm" title="Ta bort denna start"
+                           onclick="springRemovePassRow(${i})"><i class="bi bi-trash"></i></button>`
+                : ''}
+        </div>`;
+    }).join('');
+
+    const hint = document.getElementById('springSet_passHint');
+    if (hint) {
+        hint.textContent = springModalPasses.length > 1
+            ? 'Skyttar med önskemål om tidig start placeras i den första starten, sen start i den sista. Övriga fyller på i ordning.'
+            : 'Lägg till en start till om alla inte ska starta från samma tid.';
+    }
+    springAttachPassPickers();
+}
+
+// Typing a count updates ONLY the remainder label. A full re-render here would steal focus from
+// the number field mid-keystroke.
+function springOnPassCountInput() {
+    springSyncPassRowsFromDom();
+    const el = document.getElementById('springSet_restLabel');
+    if (!el) return;
+    const total = springSelectedStarterTotal();
+    if (total <= 0) { el.textContent = 'resten av de startande'; return; }
+    const rest = total - springModalPasses.slice(0, -1).reduce((a, p) => a + (p.count || 0), 0);
+    el.classList.toggle('text-danger', rest <= 0);
+    el.classList.toggle('text-muted', rest > 0);
+    el.innerHTML = rest > 0
+        ? `resten – ${rest} skytt${rest === 1 ? '' : 'ar'}`
+        : 'resten – <strong>ingen kvar</strong>';
+}
+
+function springAttachPassPickers() {
+    document.querySelectorAll('#springSet_passes .spring-pass-time').forEach(el => {
+        if (el._flatpickrAttached) return;
+        el._flatpickrAttached = true;
+        flatpickr(el, {
+            locale: 'sv', enableTime: true, noCalendar: true,
+            dateFormat: 'H:i', time_24hr: true, defaultHour: 10, defaultMinute: 0,
+            onChange: () => springSyncPassRowsFromDom()
+        });
+    });
+}
+
+// DOM → working copy. Called before validating/generating and on every structural change, so a
+// half-typed row is never silently dropped.
+function springSyncPassRowsFromDom() {
+    document.querySelectorAll('#springSet_passes .spring-pass-time').forEach(el => {
+        const i = parseInt(el.dataset.i, 10);
+        if (springModalPasses[i]) springModalPasses[i].firstStartTime = (el.value || '').trim();
+    });
+    document.querySelectorAll('#springSet_passes .spring-pass-count').forEach(el => {
+        const i = parseInt(el.dataset.i, 10);
+        const n = parseInt(el.value, 10);
+        if (springModalPasses[i]) springModalPasses[i].count = Number.isFinite(n) && n > 0 ? n : null;
+    });
+    if (springModalPasses.length > 0) springModalPasses[springModalPasses.length - 1].count = null;
+}
+
+function springAddPassRow() {
+    springSyncPassRowsFromDom();
+    // Suggest two hours after the previous start — a plausible default that is always edited.
+    const prev = springModalPasses[springModalPasses.length - 1]?.firstStartTime || '10:00';
+    const m = String(prev).match(/^(\d{1,2}):(\d{2})/);
+    const next = m ? `${String((parseInt(m[1], 10) + 2) % 24).padStart(2, '0')}:${m[2]}` : '12:00';
+    springModalPasses.push({ firstStartTime: next, count: null });
+    springRenderPassRows();
+}
+
+function springRemovePassRow(i) {
+    springSyncPassRowsFromDom();
+    springModalPasses.splice(i, 1);
+    if (springModalPasses.length === 0) springModalPasses.push({ firstStartTime: '10:00', count: null });
+    springRenderPassRows();
+}
+
+// Returns an error string, or null when the passes are usable.
+function springValidatePasses(totalKnown) {
+    springSyncPassRowsFromDom();
+    const times = [];
+    for (let i = 0; i < springModalPasses.length; i++) {
+        const t = springModalPasses[i].firstStartTime || '';
+        if (!/^\d{1,2}:\d{2}$/.test(t)) return `Start ${i + 1} saknar en giltig starttid (HH:MM).`;
+        const sec = parseInt(t.split(':')[0], 10) * 60 + parseInt(t.split(':')[1], 10);
+        if (times.length && sec <= times[times.length - 1])
+            return `Start ${i + 1} (${t}) måste vara senare än start ${i}.`;
+        times.push(sec);
+        if (i < springModalPasses.length - 1 && !(springModalPasses[i].count > 0))
+            return `Ange hur många som ska starta i start ${i + 1}.`;
+    }
+    // Counts that already exceed the field would leave the last pass empty — worth saying now
+    // rather than after a rebuild.
+    if (totalKnown > 0 && springModalPasses.length > 1) {
+        const assigned = springModalPasses.slice(0, -1).reduce((a, p) => a + (p.count || 0), 0);
+        if (assigned >= totalKnown)
+            return `De tidigare starterna tar redan ${assigned} av ${totalKnown} startande — den sista starten blir tom.`;
+    }
+    return null;
 }
 
 function springRenderSettingsClasses() {
@@ -700,6 +849,36 @@ function springRenderSettingsClasses() {
     }
     document.getElementById('springSettingsClasses').innerHTML = html
         || '<div class="text-muted small">Inga klasser tillgängliga för denna tävling.</div>';
+    springUpdateClassTotal();
+}
+
+// How many shooters the ticked classes hold. Counted from the registrations (the per-class `count`
+// the classes endpoint already returns), NOT from the generated list — the whole point is to size
+// the passes BEFORE generating, and on a new list there is nothing generated yet.
+function springSelectedStarterTotal() {
+    if (!springModalCtx) return 0;
+    const picked = new Set(springModalCtx.coveredClasses || []);
+    return (springAvailableClasses || [])
+        .filter(c => picked.has(c.classId))
+        .reduce((sum, c) => sum + (c.count || 0), 0);
+}
+
+function springUpdateClassTotal() {
+    const el = document.getElementById('springSet_classTotal');
+    if (!el) return;
+    const n = springSelectedStarterTotal();
+    const nClasses = (springModalCtx?.coveredClasses || []).length;
+    el.innerHTML = n === 0
+        ? '<span class="text-muted fw-normal">Inga skyttar valda</span>'
+        : `<i class="bi bi-people me-1"></i>${n} skytt${n === 1 ? '' : 'ar'} `
+          + `<span class="text-muted fw-normal">i ${nClasses} klass${nClasses === 1 ? '' : 'er'}</span>`;
+    // The pass rows show "resten (N)", which moves with the ticked classes. Sync first: the rows
+    // are re-rendered from springModalPasses, so a time or count typed but not yet synced would
+    // otherwise be discarded by ticking a class.
+    if (document.getElementById('springSet_passes')) {
+        springSyncPassRowsFromDom();
+        springRenderPassRows();
+    }
 }
 
 function springToggleModalClass(classId, checked) {
@@ -709,6 +888,7 @@ function springToggleModalClass(classId, checked) {
     } else {
         springModalCtx.coveredClasses = springModalCtx.coveredClasses.filter(c => c !== classId);
     }
+    springUpdateClassTotal();
 }
 
 // Shared name validation — required, valid slug, unique among the OTHER lists (slug drives the URL).
@@ -782,6 +962,10 @@ async function springGenerateFromModal() {
     const nameErr = springNameSlugError(newName, card.tempId);
     if (nameErr) { showErr(nameErr); return; }
     if (springModalCtx.coveredClasses.length === 0) { showErr('Välj minst en klass för denna startlista.'); return; }
+    // Size the split against the CLASS SELECTION, not the already-generated list: a new list has
+    // no starters yet, and on an existing one the operator may have just changed the classes.
+    const passErr = springValidatePasses(springSelectedStarterTotal());
+    if (passErr) { showErr(passErr); return; }
 
     // Guard the destructive rebuild. Published list = extra-strong confirm.
     if (wasExisting) {
@@ -794,7 +978,9 @@ async function springGenerateFromModal() {
 
     card.listName = newName;
     card.listDate = (document.getElementById('springSet_date').value || '').trim();
-    card.firstStartTime = document.getElementById('springSet_firstStart').value || '10:00';
+    // Pass 1 is the list's first start; the server mirrors it back into firstStartTime.
+    card.passes = springModalPasses.map(p => ({ firstStartTime: p.firstStartTime, count: p.count }));
+    card.firstStartTime = card.passes[0].firstStartTime || '10:00';
     card.defaultInterval = document.getElementById('springSet_interval').value || '01:00';
     card.breakAfterEvery = parseInt(document.getElementById('springSet_breakAfter').value) || 10;
     card.breakDuration = document.getElementById('springSet_breakDur').value || '05:00';
@@ -807,6 +993,9 @@ async function springGenerateFromModal() {
     try {
         const requestData = {
             competitionId: springCompId,
+            // Only sent when the list genuinely has several starts. A single-start list posts the
+            // same body it always did, so it takes the server's unchanged single-pass path.
+            passes: (card.passes && card.passes.length > 1) ? card.passes : null,
             firstStartTime: card.firstStartTime,
             defaultInterval: card.defaultInterval,
             breakAfterEvery: card.breakAfterEvery,
@@ -830,6 +1019,11 @@ async function springGenerateFromModal() {
             if (!wasExisting) springFocusNameNodeId = data.nodeId; // focus the new list's name after reload
             bootstrap.Modal.getOrCreateInstance(document.getElementById('springSettingsModal')).hide();
             await springLoadAll();
+            // A wish that could not be honoured because its pass was full must be said out loud.
+            // Silently placing someone in the wrong pass is exactly the promise we set out to keep.
+            if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+                alert('Startlistan genererades, men:\n\n• ' + data.warnings.join('\n• '));
+            }
         } else {
             err.textContent = data.message || 'Fel vid generering.';
             err.classList.remove('d-none');

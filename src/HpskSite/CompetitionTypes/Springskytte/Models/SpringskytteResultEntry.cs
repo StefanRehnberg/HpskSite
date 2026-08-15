@@ -234,10 +234,33 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
     }
 
     /// <summary>
+    /// One start pass (omgång) within a list: a start time and how many starters begin from it.
+    /// Everything else — interval, break rules, classes — is shared by every pass in the list.
+    /// </summary>
+    public class SpringskytteStartPass
+    {
+        /// <summary>"HH:mm" (or "HH:mm:ss") — when this pass's first shooter starts.</summary>
+        public string FirstStartTime { get; set; } = "10:00";
+
+        /// <summary>
+        /// How many starters begin from this pass. Null or 0 means "resten" — every remaining
+        /// starter. The LAST pass is normally left open so the list can absorb an efteranmälan
+        /// without re-typing the counts.
+        /// </summary>
+        public int? Count { get; set; }
+    }
+
+    /// <summary>
     /// Configuration for Springskytte start list generation.
     /// </summary>
     public class SpringskytteStartListConfig
     {
+        /// <summary>
+        /// The list's FIRST start time. Kept as a plain field even though <see cref="Passes"/> can
+        /// hold several: it is the list's sort key across the competition (renumber ordering,
+        /// admin cards, "fortsätt på föregående lista"), and every legacy config has it. When
+        /// Passes is set this always mirrors Passes[0].FirstStartTime.
+        /// </summary>
         public string FirstStartTime { get; set; } = "10:00";
         public string DefaultInterval { get; set; } = "01:00";  // MM:SS between starts
         public int BreakAfterEvery { get; set; } = 10;  // Long break after N starters
@@ -246,6 +269,36 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string ListDate { get; set; } = "";  // Optional date (yyyy-MM-dd) — multi-day comps: same time on different days
         public List<string> CoveredClasses { get; set; } = new();  // Registration class patterns (e.g., ["A-D 21","A-H 35"])
         public List<SpringskytteStartListEntry> Starters { get; set; } = new();
+
+        /// <summary>
+        /// Start passes (omgångar) for this list — e.g. 25 starters from 10:00 and the rest from
+        /// 12:00. EMPTY means the legacy single-pass list: one pass at <see cref="FirstStartTime"/>.
+        /// Every legacy config therefore keeps working untouched, and <see cref="EffectivePasses"/>
+        /// is the only thing anyone should read.
+        ///
+        /// <para>Pass MEMBERSHIP is deliberately NOT stored per starter. It is derived from the
+        /// actual start time (see <see cref="PassIndexFor"/>), because an organiser can move a
+        /// single shooter to another time long after generation — a stored index would drift and
+        /// nothing would notice.</para>
+        /// </summary>
+        public List<SpringskytteStartPass> Passes { get; set; } = new();
+
+        /// <summary>
+        /// The passes to actually use: the configured ones, or a single legacy pass built from
+        /// <see cref="FirstStartTime"/>. Never returns empty.
+        /// </summary>
+        public List<SpringskytteStartPass> EffectivePasses()
+        {
+            var real = (Passes ?? new List<SpringskytteStartPass>())
+                .Where(p => !string.IsNullOrWhiteSpace(p?.FirstStartTime))
+                .ToList();
+            return real.Count > 0
+                ? real
+                : new List<SpringskytteStartPass> { new() { FirstStartTime = FirstStartTime, Count = null } };
+        }
+
+        /// <summary>True when this list actually runs in more than one pass.</summary>
+        public bool HasMultiplePasses() => EffectivePasses().Count > 1;
 
         // ===== Start-number assignment (per-list running sequence) =====
         // Numbering is a single running sequence within each list (NOT per weapon class), and numbers
@@ -279,6 +332,67 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public const int MaxNumberingHistory = 60;
     }
 
+    /// <summary>
+    /// Pass-boundary helpers. Extension methods rather than instance members so every reader —
+    /// controller, timeline, public view, print — resolves a boundary the same way.
+    /// </summary>
+    public static class SpringskyttePassHelper
+    {
+        /// <summary>How many bookable slots are offered after a pass's last starter.</summary>
+        public const int TrailingSlotsPerPass = 3;
+
+        /// <summary>Seconds since midnight for "HH:mm" / "HH:mm:ss"; int.MaxValue when unparsable.</summary>
+        public static int TimeToSeconds(string? time)
+        {
+            if (string.IsNullOrWhiteSpace(time)) return int.MaxValue;
+            var parts = time.Split(':');
+            if (parts.Length < 2) return int.MaxValue;
+            if (!int.TryParse(parts[0], out var h) || !int.TryParse(parts[1], out var m)) return int.MaxValue;
+            var s = 0;
+            if (parts.Length > 2) int.TryParse(parts[2], out s);
+            return h * 3600 + m * 60 + s;
+        }
+
+        /// <summary>
+        /// Each pass's start in seconds, ascending. One entry per pass; the first is the list's own
+        /// first start.
+        /// </summary>
+        public static List<int> PassStartSeconds(this SpringskytteStartListConfig config) =>
+            config.EffectivePasses()
+                .Select(p => TimeToSeconds(p.FirstStartTime))
+                .Where(t => t != int.MaxValue)
+                .OrderBy(t => t)
+                .ToList();
+
+        /// <summary>
+        /// Which pass a start time belongs to: the last pass beginning at or before it. A time
+        /// before the first pass (possible after a manual move) belongs to pass 0.
+        /// </summary>
+        public static int PassIndexFor(this SpringskytteStartListConfig config, string? startTime)
+        {
+            var starts = config.PassStartSeconds();
+            if (starts.Count == 0) return 0;
+            var t = TimeToSeconds(startTime);
+            if (t == int.MaxValue) return 0;
+            var idx = 0;
+            for (var i = 0; i < starts.Count; i++)
+                if (t >= starts[i]) idx = i;
+            return idx;
+        }
+
+        /// <summary>
+        /// The start of the NEXT pass after the one containing <paramref name="startTime"/>, in
+        /// seconds — or null when that is the last pass. This is the hard ceiling for offering
+        /// bookable slots: past it we are in the next pass, not in a break.
+        /// </summary>
+        public static int? NextPassStartAfter(this SpringskytteStartListConfig config, string? startTime)
+        {
+            var starts = config.PassStartSeconds();
+            var idx = config.PassIndexFor(startTime);
+            return idx + 1 < starts.Count ? starts[idx + 1] : null;
+        }
+    }
+
     /// <summary>One entry in a start list's start-number audit trail.</summary>
     public class SpringskytteNumberingEvent
     {
@@ -291,6 +405,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
     public class SpringskytteStartListRequest
     {
         public int CompetitionId { get; set; }
+
+        /// <summary>
+        /// Multi-pass split: e.g. 25 starters from 10:00 and the rest from 12:00. When null or
+        /// empty the list is generated exactly as before from <see cref="FirstStartTime"/> — that
+        /// is what keeps every existing caller (and every legacy list) behaving identically.
+        /// </summary>
+        public List<SpringskytteStartPass>? Passes { get; set; }
+
+        /// <summary>Single-pass shorthand, and pass 1's time when Passes is supplied.</summary>
         public string FirstStartTime { get; set; } = "10:00";
         public string DefaultInterval { get; set; } = "01:00";
         public int BreakAfterEvery { get; set; } = 10;

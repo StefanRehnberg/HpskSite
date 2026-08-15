@@ -1101,17 +1101,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 }
 
                 // Parse time parameters
-                var firstStart = TimeSpan.Parse(request.FirstStartTime);
                 var interval = TimeSpan.Parse("00:" + request.DefaultInterval);
                 var breakDuration = TimeSpan.Parse("00:" + request.BreakDuration);
                 int breakAfter = request.BreakAfterEvery > 0 ? request.BreakAfterEvery : 10;
 
-                // Build start list entries with list-local numbering (1, 2, 3...)
-                // Cross-list per-weapon-class numbering is done separately via RenumberSpringskytteStartLists
-                var starters = new List<SpringskytteStartListEntry>();
-                var currentTime = firstStart;
-                int startOrder = 1;
-                int sinceLastBreak = 0;
+                // Passes (omgångar). No passes supplied → ONE pass at FirstStartTime, which is
+                // byte-for-byte the old behaviour: same loop, same times, same order.
+                var passes = NormalizePasses(request);
+                var firstStart = TimeSpan.Parse(passes[0].FirstStartTime);
 
                 // Order: weapon class, then the shooter's start wish, then registration order.
                 // The wish sorts WITHIN the weapon class because a Springskytte start is per
@@ -1124,28 +1121,62 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .ThenBy(r => r.Id)
                     .ToList();
 
-                foreach (var reg in orderedRegistrations)
+                // Which pass each shooter runs in. Wishes decide first (tidig → earliest pass with
+                // room, sen → latest), everyone else fills the gaps in order.
+                var (passOf, passWarnings) = AssignPasses(orderedRegistrations, passes);
+
+                // Build start list entries with list-local numbering (1, 2, 3...)
+                // Cross-list per-weapon-class numbering is done separately via RenumberSpringskytteStartLists
+                var starters = new List<SpringskytteStartListEntry>();
+                int startOrder = 1;
+
+                for (var passIndex = 0; passIndex < passes.Count; passIndex++)
                 {
-                    // Insert long break if needed
-                    if (sinceLastBreak >= breakAfter && sinceLastBreak > 0)
+                    // Each pass restarts the clock AND the break counter — a break is "after N
+                    // starters in a row", and a two-hour wait between passes is already a break.
+                    var currentTime = TimeSpan.Parse(passes[passIndex].FirstStartTime);
+                    int sinceLastBreak = 0;
+
+                    foreach (var reg in orderedRegistrations)
                     {
-                        currentTime += breakDuration;
-                        sinceLastBreak = 0;
+                        if (passOf[reg.Id] != passIndex) continue;
+
+                        // Insert long break if needed
+                        if (sinceLastBreak >= breakAfter && sinceLastBreak > 0)
+                        {
+                            currentTime += breakDuration;
+                            sinceLastBreak = 0;
+                        }
+
+                        starters.Add(new SpringskytteStartListEntry
+                        {
+                            StartOrder = startOrder++,
+                            StartTime = currentTime.ToString(@"hh\:mm\:ss"),
+                            MemberId = reg.MemberId,
+                            Name = reg.MemberName,
+                            Club = reg.MemberClub,
+                            WeaponClass = ExtractWeaponClass(reg.MemberClass),
+                            AgeGenderClass = ExtractAgeGenderClass(reg.MemberClass)
+                        });
+
+                        currentTime += interval;
+                        sinceLastBreak++;
                     }
 
-                    starters.Add(new SpringskytteStartListEntry
+                    // A later pass that starts before the previous one ended would interleave two
+                    // sequences on one range. Refuse rather than produce a list nobody can run.
+                    if (passIndex + 1 < passes.Count)
                     {
-                        StartOrder = startOrder++,
-                        StartTime = currentTime.ToString(@"hh\:mm\:ss"),
-                        MemberId = reg.MemberId,
-                        Name = reg.MemberName,
-                        Club = reg.MemberClub,
-                        WeaponClass = ExtractWeaponClass(reg.MemberClass),
-                        AgeGenderClass = ExtractAgeGenderClass(reg.MemberClass)
-                    });
-
-                    currentTime += interval;
-                    sinceLastBreak++;
+                        var nextStart = TimeSpan.Parse(passes[passIndex + 1].FirstStartTime);
+                        if (nextStart < currentTime)
+                            return Json(new
+                            {
+                                success = false,
+                                message = $"Pass {passIndex + 2} startar {passes[passIndex + 1].FirstStartTime} men pass "
+                                        + $"{passIndex + 1} håller på till {currentTime:hh\\:mm}. Välj en senare starttid "
+                                        + "eller färre startande i det tidigare passet."
+                            });
+                    }
                 }
 
                 var competition = _contentService.GetById(request.CompetitionId);
@@ -1154,14 +1185,18 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var listName = !string.IsNullOrWhiteSpace(request.ListName) ? request.ListName : "Startlista";
                 var config = new SpringskytteStartListConfig
                 {
-                    FirstStartTime = request.FirstStartTime,
+                    // Mirrors pass 1 — the list's sort key across the competition.
+                    FirstStartTime = passes[0].FirstStartTime,
                     DefaultInterval = request.DefaultInterval,
                     BreakAfterEvery = breakAfter,
                     BreakDuration = request.BreakDuration,
                     ListName = listName,
                     ListDate = (request.ListDate ?? "").Trim(),
                     CoveredClasses = coveredClasses,
-                    Starters = starters
+                    Starters = starters,
+                    // Only persisted when it is a real multi-pass list, so a single-pass list's
+                    // stored JSON is unchanged from before this feature.
+                    Passes = passes.Count > 1 ? passes : new List<SpringskytteStartPass>()
                 };
 
                 // Regenerate rebuilds the config from scratch, so carry over everything about this list's
@@ -1253,7 +1288,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         startListContent.SetValue("configurationData", JsonConvert.SerializeObject(config));
                         startListContent.SetValue("teamFormat", "Springskytte");
                         startListContent.SetValue("generatedDate", DateTime.Now);
-                        startListContent.SetValue("startListContent", BuildStartListHtml(starters));
+                        startListContent.SetValue("startListContent", BuildStartListHtml(starters, config));
                         _contentService.Save(startListContent);
                         _contentService.Publish(startListContent, new[] { "*" });
                     }
@@ -1289,11 +1324,20 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     _logger.LogInformation("Generated Springskytte start list '{ListName}' for CompetitionId={CompetitionId}, {Count} starters, NodeId={NodeId}",
                         listName, request.CompetitionId, starters.Count, startListContent?.Id);
 
+                    var passSummary = passes.Count > 1
+                        ? " " + string.Join(", ", passes.Select((p, i) =>
+                            $"pass {i + 1} kl {p.FirstStartTime}: {starters.Count(s => config.PassIndexFor(s.StartTime) == i)} st"))
+                          + "."
+                        : "";
+
                     return Json(new
                     {
                         success = true,
-                        message = $"Startlista \"{listName}\" genererad med {starters.Count} startande.",
+                        message = $"Startlista \"{listName}\" genererad med {starters.Count} startande.{passSummary}",
                         nodeId = startListContent?.Id,
+                        // Surfaced, never silently swallowed: a wish that could not be honoured
+                        // because its pass was full is exactly what the organiser must know about.
+                        warnings = passWarnings,
                         starters
                     });
                 }
@@ -1305,6 +1349,100 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 _logger.LogError(ex, "Error generating Springskytte start list");
                 return Json(new { success = false, message = "Ett fel uppstod vid generering av startlista." });
             }
+        }
+
+        /// <summary>
+        /// The passes to generate from. A request without passes (every caller before 2026-08-15,
+        /// and every single-pass list) yields exactly one pass at FirstStartTime — so the generator
+        /// runs its original single-loop path unchanged.
+        /// Passes are sorted by time and blank/unparsable ones dropped; the LAST pass always takes
+        /// the remainder, whatever count was typed, so nobody can be left unplaced.
+        /// </summary>
+        private static List<SpringskytteStartPass> NormalizePasses(SpringskytteStartListRequest request)
+        {
+            var passes = (request.Passes ?? new List<SpringskytteStartPass>())
+                .Where(p => p != null && !string.IsNullOrWhiteSpace(p.FirstStartTime))
+                .Where(p => TimeSpan.TryParse(p.FirstStartTime, out _))
+                .Select(p => new SpringskytteStartPass
+                {
+                    FirstStartTime = p.FirstStartTime.Trim(),
+                    Count = p.Count > 0 ? p.Count : null
+                })
+                .OrderBy(p => SpringskyttePassHelper.TimeToSeconds(p.FirstStartTime))
+                .ToList();
+
+            if (passes.Count == 0)
+                passes.Add(new SpringskytteStartPass { FirstStartTime = request.FirstStartTime, Count = null });
+
+            passes[^1].Count = null;   // the tail always absorbs the remainder
+            return passes;
+        }
+
+        /// <summary>
+        /// Decides which pass each shooter starts in, honouring the tidig/sen wish.
+        ///
+        /// <para>The wish has to drive this EXPLICITLY rather than fall out of the sort. The sort is
+        /// weapon class first, so on a list covering both A and C a plain "first N" cut would put the
+        /// whole A block in pass 1 — including anyone in A who asked to start late.</para>
+        ///
+        /// <para>Order: "Tidig start" claims the earliest pass with room, "Sen start" the latest,
+        /// then everyone else fills what is left in sorted order. A wish that cannot be honoured
+        /// because its pass is full is reported, never silently dropped.</para>
+        /// </summary>
+        private static (Dictionary<int, int> PassOf, List<string> Warnings) AssignPasses(
+            List<HpskSite.Models.ViewModels.Competition.CompetitionRegistration> ordered,
+            List<SpringskytteStartPass> passes)
+        {
+            var passOf = new Dictionary<int, int>();
+            var warnings = new List<string>();
+
+            if (passes.Count == 1)
+            {
+                foreach (var r in ordered) passOf[r.Id] = 0;
+                return (passOf, warnings);
+            }
+
+            // Capacity per pass. The last pass is unbounded (it takes the remainder), and a
+            // configured count is capped so the totals can never exceed the field size.
+            var remaining = new int[passes.Count];
+            for (var i = 0; i < passes.Count; i++)
+                remaining[i] = i == passes.Count - 1 ? int.MaxValue : Math.Max(0, passes[i].Count ?? 0);
+
+            void Place(HpskSite.Models.ViewModels.Competition.CompetitionRegistration r,
+                int preferred, bool searchForward, string wishLabel)
+            {
+                // Try the preferred pass, then walk outward. Only the last pass is unbounded, so
+                // this always terminates with a placement.
+                var order = Enumerable.Range(0, passes.Count)
+                    .OrderBy(i => Math.Abs(i - preferred))
+                    .ThenBy(i => searchForward ? i : -i)
+                    .ToList();
+                foreach (var i in order)
+                {
+                    if (remaining[i] <= 0) continue;
+                    if (i != preferred && wishLabel.Length > 0)
+                        warnings.Add($"{r.MemberName}: önskade {wishLabel} men pass {preferred + 1} "
+                                   + $"(kl {passes[preferred].FirstStartTime}) var fullt — placerad i pass {i + 1} "
+                                   + $"(kl {passes[i].FirstStartTime}).");
+                    passOf[r.Id] = i;
+                    if (remaining[i] != int.MaxValue) remaining[i]--;
+                    return;
+                }
+                passOf[r.Id] = passes.Count - 1;   // unreachable in practice: the tail is unbounded
+            }
+
+            foreach (var r in ordered.Where(x => HpskSite.Models.StartPreference.Normalize(x.StartPreference)
+                                                 == HpskSite.Models.StartPreference.Early))
+                Place(r, 0, true, "tidig start");
+
+            foreach (var r in ordered.Where(x => HpskSite.Models.StartPreference.Normalize(x.StartPreference)
+                                                 == HpskSite.Models.StartPreference.Late))
+                Place(r, passes.Count - 1, false, "sen start");
+
+            foreach (var r in ordered.Where(x => !passOf.ContainsKey(x.Id)))
+                Place(r, 0, true, "");
+
+            return (passOf, warnings);
         }
 
         /// <summary>
@@ -1454,6 +1592,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         defaultInterval = config?.DefaultInterval ?? "01:00",
                         breakAfterEvery = config?.BreakAfterEvery ?? 10,
                         breakDuration = config?.BreakDuration ?? "05:00",
+                        // Only populated for a genuine multi-pass list; a single-pass list returns
+                        // an empty array and the settings modal shows its one start time as before.
+                        passes = config != null && config.HasMultiplePasses()
+                            ? config.EffectivePasses().Select((p, i) => new
+                            {
+                                firstStartTime = p.FirstStartTime,
+                                count = config.Starters.Count(s => config.PassIndexFor(s.StartTime) == i)
+                            }).ToList<object>()
+                            : new List<object>(),
                         // Projected (not the raw POCO) so each row carries its status. Every field the
                         // admin JS reads is kept — adding one, not replacing the shape.
                         // memberId is withheld from non-staff callers: start lists are public content by
@@ -1838,7 +1985,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         $"{DescribeNumbers(before)} → {DescribeNumbers(nums)}", by);
 
                     node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                    node.SetValue("startListContent", BuildStartListHtml(config.Starters));
+                    node.SetValue("startListContent", BuildStartListHtml(config.Starters, config));
                     _contentService.Save(node);
                     var publishResult = _contentService.Publish(node, new[] { "*" });
                     if (!publishResult.Success)
@@ -2934,22 +3081,60 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 }
 
                 // Compute gaps + trailing slots PER weapon class within the list (never mix classes).
+                //
+                // ⚠ Pass boundaries. This engine derives free slots purely from the HOLES between
+                // actual start times — it never reads FirstStartTime. On a multi-pass list the wait
+                // between passes is such a hole, so without the cap below a 10:25→12:00 boundary
+                // would be offered as ~95 bookable "paus" slots in the move / walk-in pickers.
+                // The organiser's rule (2026-08-15): a few slots straight after the last shooter of
+                // a pass, then nothing until the next pass starts. A legacy single-pass list has no
+                // boundary, so NextPassStartAfter returns null and every line below behaves exactly
+                // as it did before.
                 foreach (var grp in cfg.Starters.GroupBy(s => s.WeaponClass ?? ""))
                 {
                     var wcKey = grp.Key;
                     var sorted = grp.OrderBy(s => ParseStartTimeSeconds(s.StartTime)).ToList();
+
+                    void AddSlots(int from, int? hardCeiling, int? maxCount, string kind)
+                    {
+                        var added = 0;
+                        for (int slot = from + intervalSec;
+                             (hardCeiling == null || slot < hardCeiling.Value) && (maxCount == null || added < maxCount.Value);
+                             slot += intervalSec, added++)
+                            gapSlots.Add((slot, wcKey, new { time = SecondsToHms(slot), nodeId = node.Id, kind, weaponClass = wcKey }));
+                    }
+
                     int? prev = null;
                     foreach (var s in sorted)
                     {
                         var t = ParseStartTimeSeconds(s.StartTime);
                         if (prev.HasValue && t != int.MaxValue && (t - prev.Value) > intervalSec)
-                            for (int slot = prev.Value + intervalSec; slot < t; slot += intervalSec)
-                                gapSlots.Add((slot, wcKey, new { time = SecondsToHms(slot), nodeId = node.Id, kind = "paus", weaponClass = wcKey }));
+                        {
+                            var nextPass = cfg.NextPassStartAfter(SecondsToHms(prev.Value));
+                            if (nextPass.HasValue && nextPass.Value <= t)
+                            {
+                                // The hole spans a pass boundary: this is the end of a pass, not a
+                                // break inside one. Offer only the trailing slots, and never past
+                                // the next pass's first start.
+                                AddSlots(prev.Value, Math.Min(t, nextPass.Value),
+                                    SpringskyttePassHelper.TrailingSlotsPerPass, "efter");
+                            }
+                            else
+                            {
+                                // An ordinary break (or a shooter moved away) inside one pass.
+                                AddSlots(prev.Value, t, null, "paus");
+                            }
+                        }
                         if (t != int.MaxValue) prev = t;
                     }
+
                     if (prev.HasValue)
-                        for (int k = 1; k <= 3; k++)
-                            gapSlots.Add((prev.Value + k * intervalSec, wcKey, new { time = SecondsToHms(prev.Value + k * intervalSec), nodeId = node.Id, kind = "efter", weaponClass = wcKey }));
+                    {
+                        // After the class's last starter. Capped at the next pass too, for the case
+                        // where a weapon class simply has nobody in the later pass.
+                        var nextPass = cfg.NextPassStartAfter(SecondsToHms(prev.Value));
+                        AddSlots(prev.Value, nextPass, SpringskyttePassHelper.TrailingSlotsPerPass, "efter");
+                    }
                 }
             }
 
@@ -3204,7 +3389,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         $"#{startOrder} tilldelat {name}", await CurrentMemberNameAsync());
 
                 targetNode.SetValue("configurationData", JsonConvert.SerializeObject(targetConfig));
-                targetNode.SetValue("startListContent", BuildStartListHtml(targetConfig.Starters));
+                targetNode.SetValue("startListContent", BuildStartListHtml(targetConfig.Starters, targetConfig));
                 _contentService.Save(targetNode);
 
                 // Mirror onto the DB result row if one already exists (normally none for a fresh walk-in);
@@ -3515,7 +3700,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         cfg.Starters = cfg.Starters.Where(s => s.MemberId != request.MemberId).ToList();
                         bool official = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
                         node.SetValue("configurationData", JsonConvert.SerializeObject(cfg));
-                        node.SetValue("startListContent", BuildStartListHtml(cfg.Starters));
+                        node.SetValue("startListContent", BuildStartListHtml(cfg.Starters, cfg));
                         _contentService.Save(node);
                         if (official)
                         {
@@ -3843,14 +4028,35 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             return $"{ts.Minutes}:{ts.Seconds:D2}";
         }
 
-        private static string BuildStartListHtml(List<SpringskytteStartListEntry> starters)
+        /// <summary>
+        /// The cached start-list HTML (admin preview + print). <paramref name="config"/> is optional
+        /// and only used to draw pass headings — passing null keeps the exact pre-2026-08-15 output,
+        /// which is also what a single-pass list produces.
+        /// </summary>
+        private static string BuildStartListHtml(List<SpringskytteStartListEntry> starters,
+            SpringskytteStartListConfig? config = null)
         {
+            var passes = config != null && config.HasMultiplePasses() ? config.EffectivePasses() : null;
+
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("<table class='table table-sm table-striped'>");
             sb.AppendLine("<thead><tr><th>#</th><th>Starttid</th><th>Namn</th><th>Klubb</th><th>Vapen</th><th>Klass</th></tr></thead>");
             sb.AppendLine("<tbody>");
+            var shownPass = -1;
             foreach (var s in starters)
             {
+                if (passes != null)
+                {
+                    var idx = config!.PassIndexFor(s.StartTime);
+                    if (idx != shownPass)
+                    {
+                        shownPass = idx;
+                        var t = (passes[idx].FirstStartTime ?? "").Length >= 5
+                            ? passes[idx].FirstStartTime![..5]
+                            : passes[idx].FirstStartTime;
+                        sb.AppendLine($"<tr class='table-secondary'><td colspan='6'><strong>Start {idx + 1} – kl {t}</strong></td></tr>");
+                    }
+                }
                 sb.AppendLine($"<tr><td>{s.StartOrder}</td><td>{s.StartTime}</td><td>{s.Name}</td><td>{s.Club}</td><td>{s.WeaponClass}</td><td>{SpringskytteClasses.FormatWithAgeSpan(s.AgeGenderClass)}</td></tr>");
             }
             sb.AppendLine("</tbody></table>");

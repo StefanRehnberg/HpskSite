@@ -955,6 +955,60 @@ below ship together; verified 199/199 via `hpsk-verify/{row-actions-menu,notices
 - **Sortable Närvaro / Notis** — both boolean columns sort false-first ascending, so one click groups
   the rows the desk must chase.
 
+### Springskytte: flera starter (omgångar) i EN startlista (2026-08-15)
+
+A list could only have ONE first start time. Now it can hold several — e.g. 30 starters from 13:11
+and the rest from 16:11 — sharing one set of classes, one interval, one break rule and **one start
+number series**. Springskytte only; no migration, no doctype property.
+
+- **`SpringskytteStartPass { FirstStartTime, Count }` + `config.Passes`.** `Count` null = "resten";
+  the LAST pass is always forced open so an efteranmälan lands there without re-typing counts.
+  **`Passes` is only persisted when there is genuinely more than one**, so a single-pass list's
+  stored JSON is byte-identical to before. `EffectivePasses()` is the only thing anyone should read
+  — it synthesises the legacy single pass from `FirstStartTime`.
+- **`FirstStartTime` is kept and mirrors pass 1.** It is the list's sort key across the competition
+  (renumber ordering at `GetOrderedIndividualStartLists`, admin cards, follow-on numbering); removing
+  it would have rippled far wider than this feature.
+- **Pass membership is DERIVED from the start time** (`PassIndexFor`), never stored per starter. An
+  organiser can move one shooter to another time long after generation; a stored index would drift
+  and nothing would notice.
+- **⚠ THE TRAP — `BuildTimelineAsync` never reads `FirstStartTime`.** Free slots are derived purely
+  from the HOLES between actual start times, so without a cap the wait between two passes becomes
+  bookable "paus" slots: measured **144 fake slots** on a 3-hour boundary at 1-min intervals. The
+  organiser's rule (Stefan 2026-08-15): a few slots straight after the last shooter of a pass, then
+  nothing until the next pass. Implemented as `NextPassStartAfter` + `TrailingSlotsPerPass = 3`.
+  A legacy single-pass list has no boundary → returns null → every line behaves exactly as before.
+- **The wish decides the pass EXPLICITLY** (`AssignPasses`), it does not fall out of the sort. The
+  sort is weapon class first, so on a list covering A and C a plain "first N" cut would put the whole
+  A block in pass 1 — including anyone in A who asked to start late. Tidig claims the earliest pass
+  with room, sen the latest, everyone else fills the rest in order. **An unhonourable wish is
+  reported in `warnings` and alerted**, never silently dropped.
+- **Refuses an overlapping split**: a later pass starting before the previous one finished would
+  interleave two sequences on one range.
+- Each pass **restarts the break counter** — "paus efter 10 starter" is about a run of starters, and
+  a two-hour wait is already a break.
+- **Live class total** in the settings modal ("61 skyttar i 10 klasser") + a remainder on the last
+  pass row that counts down as the counts are typed — that number is what the split is divided out
+  of. Summed client-side from the per-class `count` the classes endpoint already returned; no
+  backend change. Sized from the CLASS SELECTION, not `card.starters` — a new list has no starters
+  yet and the operator may have just changed the classes. **Re-rendering the pass rows on a class
+  tick must `springSyncPassRowsFromDom()` first**, or a typed-but-unsynced time is discarded; and a
+  count keystroke updates only `#springSet_restLabel`, because a full re-render steals focus.
+- Surfaces: settings modal gets a repeatable **Starter** editor (`springModalPasses`,
+  `springValidatePasses`); card summary lists both starts; public `/startlista` and the cached HTML
+  draw a **`Start N – kl HH:MM`** heading (`.pass-row`) instead of letting the gap logic label the
+  boundary "Paus"; `GetSpringskytteStartLists` returns `passes` with live per-pass counts.
+- **Nothing else changed.** Numbering, live-tavlan, Mitt schema, startledare and the station screens
+  read actual start times and are untouched — verified, not assumed.
+- **Cross-discipline safety:** the whole diff is Springskytte files. `precisionStartList` is a SHARED
+  doctype, but `MyScheduleService` tells the shapes apart on `Starters` vs `Teams`, which a new field
+  cannot flip. Regression-verified against Precision (2576) and Fältskytte (**5312 Banfältet** — the
+  builder account is NOT a competition manager for 5282, so that comp only renders Access Denied and
+  asserts nothing) plus `/mitt-schema` on all three.
+- Verified 27/27 `hpsk-verify/startpass-verify.mjs` (incl. the free-slot cap + the cross-discipline
+  regression), 16/16 `startpass-modal-verify.mjs` — both restore the dev list to a single pass —
+  and 11/11 `startpass-total-verify.mjs` (read-only, never generates).
+
 ### Önskemål om starttid — the wish finally gets a consumer (2026-08-15)
 
 `ShootingClassEntry.StartPreference` has existed for years, was collected on some surfaces and
