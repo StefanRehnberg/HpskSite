@@ -460,16 +460,18 @@
                     <input class="form-check-input" type="checkbox" id="stfResponsible">
                     <label class="form-check-label" for="stfResponsible">Ansvarig för rollen/området</label>
                 </div>
-                <div class="form-check mb-3" id="stfAdminAccessWrap">
-                    <input class="form-check-input" type="checkbox" id="stfAdminAccess">
-                    <label class="form-check-label" for="stfAdminAccess">
-                        Ge behörighet att hantera tävlingen i pistol.nu
-                    </label>
-                    <div class="form-text" id="stfAdminAccessHelp">
-                        Personen kommer åt tävlingens administration (anmälningar, startlistor, resultat och
-                        funktionärssidorna). Behövs t.ex. för sekretariat, kassa och stationschefer — det gör
-                        dem <strong>inte</strong> till tävlingsledare. Kräver att personen är vald som medlem ovan.
-                    </div>
+                @* Behörigheten satt HÄR förut, som en kryssruta per uppdrag. Den lästes dock aldrig så:
+                   HasRosterAdminAccess frågar om personen har NÅGON rad med flaggan, så en bock på ett av
+                   fem uppdrag gav åtkomst till hela tävlingen — och att ta bort bocken på just den raden
+                   gjorde ingenting så länge någon annan rad hade den. Behörighet gäller tävlingen, alltså
+                   personen. Den bor nu på personkortet. Inputen finns kvar dold enbart för att spara-
+                   anropet ska skicka tillbaka oförändrat värde. *@
+                <input type="checkbox" id="stfAdminAccess" class="d-none">
+                <div class="alert alert-light border py-2 small mb-3" id="stfAdminAccessWrap">
+                    <i class="bi bi-shield-lock me-1"></i>
+                    <strong>Behörighet att hantera tävlingen</strong> hör till personen, inte till uppdraget —
+                    den sätts på personens kort och gäller då alla hens uppdrag.
+                    <span id="stfAdminAccessHelp" class="d-none"></span>
                 </div>
 
                 <div class="mb-1">
@@ -1197,21 +1199,14 @@
         syncAdminAccessAvailability();
     }
 
-    // The grant targets a login, so it needs a picked member. Free-text helper rows can't carry it —
-    // say so in place instead of silently dropping the flag server-side.
-    var ADMIN_ACCESS_HELP = document.getElementById('stfAdminAccessHelp').innerHTML;
+    // Behörigheten flyttade till personkortet; det som är kvar här är en förklarande rad. Funktionen
+    // behålls eftersom flera ställen kallar den, och den håller fortfarande den dolda inputen ärlig:
+    // en rad utan medlem kan inte bära åtkomst, för åtkomsten ges till en inloggning.
     function syncAdminAccessAvailability() {
         var box = document.getElementById('stfAdminAccess');
-        var help = document.getElementById('stfAdminAccessHelp');
+        if (!box) return;
         var mid = parseInt(document.getElementById('stfMemberId').value, 10) || 0;
-        if (mid > 0) {
-            box.disabled = false;
-            help.innerHTML = ADMIN_ACCESS_HELP;
-        } else {
-            box.disabled = true;
-            box.checked = false;
-            help.innerHTML = 'Behörighet kan bara ges till en vald pistol.nu-medlem — sök upp personen i fältet ovan.';
-        }
+        if (mid <= 0) box.checked = false;
     }
 
     function applyScopeFields() {
@@ -2061,6 +2056,27 @@
             }).join('') + '</div>'
             : '<div class="text-muted small mb-2">Inga uppdrag än.</div>';
 
+        // Behörigheten hör till PERSONEN — den ger åtkomst till tävlingen, inte till ett pass — så den
+        // sitter här och gäller alla hens uppdrag på en gång. Utan konto finns ingen inloggning att ge
+        // den till, och då säger raden det i stället för att vara ett dött reglage.
+        var accessKey = keyArg(p.key || '');
+        h += '<div class="border rounded p-2 mb-3">'
+            + (p.memberId
+                ? '<div class="form-check form-switch mb-0">'
+                  + '<input class="form-check-input" type="checkbox" role="switch" id="stfPersonAccess"'
+                  + (p.hasAdminAccess ? ' checked' : '')
+                  + ' onchange="stfSetPersonAccess(\'' + accessKey + '\',this.checked)">'
+                  + '<label class="form-check-label" for="stfPersonAccess">'
+                  + '<i class="bi bi-shield-lock me-1"></i>Får hantera tävlingen i pistol.nu</label>'
+                  + '<div class="form-text mb-0">Kommer åt anmälningar, startlistor, resultat och '
+                  + 'funktionärssidorna. Gör personen <strong>inte</strong> till tävlingsledare. '
+                  + 'Gäller alla ' + asg.length + (asg.length === 1 ? ' uppdrag.' : ' uppdrag.') + '</div>'
+                  + '</div>'
+                : '<div class="small text-muted"><i class="bi bi-shield-lock me-1"></i>'
+                  + '<strong>Behörighet att hantera tävlingen</strong> kan bara ges till någon med konto '
+                  + 'på pistol.nu — behörigheten ges till en inloggning. Koppla personen till en medlem först.</div>')
+            + '</div>';
+
         // It opened the BLANK add dialog — no person at all — from inside a card headed with someone's
         // name. So "ge ett uppdrag" on Hans's card let you hand it to anybody, which is what the button
         // looked least like doing. Prefilled and locked to the person whose card this is.
@@ -2163,6 +2179,20 @@
         });
         input.addEventListener('blur', function () { setTimeout(hide, 200); });
     }
+
+    window.stfSetPersonAccess = async function (k, grant) {
+        var r = await stfPersonPost({ competitionId: compId, personKey: fromKeyArg(k), grant: !!grant },
+                                    'SetPersonAdminAccess');
+        if (!r.success) {
+            alert(r.message || 'Kunde inte ändra behörigheten.');
+            var box = document.getElementById('stfPersonAccess');
+            if (box) box.checked = !grant;   // put the switch back where the data still is
+            return;
+        }
+        await loadPeople();
+        renderPerson();
+        if (window.grdLoad) window.grdLoad();
+    };
 
     window.stfPersonUndo = async function () {
         var p = findPerson(); if (!p) return;

@@ -142,6 +142,15 @@ namespace HpskSite.Models.Staffing
     /// Act on a PERSON, not a row. Name, e-mail and phone live on every assignment, so Hans Reschke is
     /// five rows — fixing a spelling or adding an address one row at a time is how the data drifts.
     /// </summary>
+    /// <summary>Grant/revoke competition admin access for a whole person, not for one uppdrag.</summary>
+    public class PersonAdminAccessRequest
+    {
+        public int CompetitionId { get; set; }
+        /// <summary>"m:{memberId}" or "n:{lowercased name}".</summary>
+        public string PersonKey { get; set; } = "";
+        public bool Grant { get; set; }
+    }
+
     public class PersonActionRequest
     {
         public int CompetitionId { get; set; }

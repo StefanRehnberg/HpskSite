@@ -1704,6 +1704,28 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>Grant or revoke the right to manage the competition — for the person, across all their
+        /// uppdrag. Person-level because that is how it has always been READ.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetPersonAdminAccess([FromBody] PersonAdminAccessRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.PersonKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var r = _staffing.SetPersonAdminAccess(request.CompetitionId, request.PersonKey, request.Grant);
+                return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SetPersonAdminAccess failed for {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte ändra behörigheten." });
+            }
+        }
+
         /// <summary>Cut a shift at a clock time and hand the tail to someone else — the mid-shift dropout.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]

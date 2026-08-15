@@ -632,6 +632,47 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
+        /// Grant or revoke the right to manage this competition in pistol.nu — for the PERSON, across every
+        /// assignment they hold.
+        ///
+        /// <para>The flag is stored per assignment, but it was never read that way: <see
+        /// cref="HasRosterAdminAccess"/> asks whether the member has <i>any</i> row with it set, and
+        /// <see cref="SyncCompetitionManagers"/> distincts by member. So ticking it on one of five rows
+        /// already granted access to the whole competition, and unticking it on that row left the access in
+        /// place via the other four — a switch that silently did nothing. Access is to the competition, so
+        /// it belongs to the person; this writes every row so the storage finally agrees with the meaning.</para>
+        ///
+        /// <para>Requires a member id: access is granted to a LOGIN, and a free-text helper has none.</para>
+        /// </summary>
+        public PersonActionResult SetPersonAdminAccess(int competitionId, string personKey, bool grant)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var rows = RowsForPerson(db, competitionId, personKey);
+            if (rows.Count == 0)
+                return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+            if (grant && !rows.Any(r => r.MemberId is > 0))
+                return new PersonActionResult
+                {
+                    Success = false,
+                    Message = "Personen saknar konto på pistol.nu. Koppla den till en medlem först — behörigheten ges till en inloggning."
+                };
+
+            var now = DateTime.UtcNow;
+            foreach (var r in rows)
+            {
+                var wanted = grant && r.MemberId is > 0;
+                if (r.HasAdminAccess == wanted) continue;
+                r.HasAdminAccess = wanted;
+                r.ModifiedDate = now;
+                db.Update(r);
+            }
+
+            SyncCompetitionManagers(competitionId);
+            return new PersonActionResult { Success = true, Affected = rows.Count };
+        }
+
+        /// <summary>
         /// Put back the name the organiser originally typed, and unlink. The escape hatch for a link that
         /// went to the wrong person — which is easy to do and, without this, impossible to notice or reverse.
         /// </summary>
