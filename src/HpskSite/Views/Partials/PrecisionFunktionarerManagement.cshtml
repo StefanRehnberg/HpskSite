@@ -22,8 +22,15 @@
 
 @Html.AntiForgeryToken()
 
+@* "Upprop — bemanning idag" (_StaffingDayOf) är DOLD tills efter SM 2026. Avbockningen skrevs och
+   lästes bara av den egna sektionen — inget gatas på den — och den kunde inte hållas per dag, så den
+   surnade direkt på en flerdagarstävling. Partialen och endpointen är kvar orörda; det här är enda
+   stället som gömmer den (plus Springskyttes motsvarighet). Se backlog.md → "Funktionärer: närvaro
+   och var-är-vem" för vad den ska ersättas med. *@
+@*
 @{ var sdVd = new ViewDataDictionary(ViewData); sdVd["CompetitionId"] = competitionId; sdVd["Discipline"] = ViewData["CompetitionType"]?.ToString() ?? "Precision"; }
 @await Html.PartialAsync("_StaffingDayOf", sdVd)
+*@
 
 <div class="row g-3" id="pfnSkjutlag">
     <div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>

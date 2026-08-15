@@ -19,8 +19,12 @@
 
 @Html.AntiForgeryToken()
 
+@* DOLD tills efter SM 2026 — se kommentaren i PrecisionFunktionarerManagement.cshtml och
+   backlog.md → "Funktionärer: närvaro och var-är-vem". *@
+@*
 @{ var sdVd = new ViewDataDictionary(ViewData); sdVd["CompetitionId"] = competitionId; sdVd["Discipline"] = "Springskytte"; }
 @await Html.PartialAsync("_StaffingDayOf", sdVd)
+*@
 
 <div class="row g-3" id="sfnClasses">
     <div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
