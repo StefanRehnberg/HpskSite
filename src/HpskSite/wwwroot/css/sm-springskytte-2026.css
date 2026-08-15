@@ -319,9 +319,10 @@ a.sm-card .sm-card-more {
     padding-bottom: 0;
 }
 
-/* Ändringar i en revidering av PM:et — en läsare som redan läst sidan ska kunna
-   hitta det som är nytt utan att läsa om allt. */
-.sm-rev {
+/* Framhävd notis. .sm-rev = sakuppgift ur en revidering av PM:et, .sm-note = villkor
+   läsaren inte får missa (t.ex. återbetalningsregeln). Samma utseende, olika anledning. */
+.sm-rev,
+.sm-note {
     border-left: 4px solid var(--sm-yellow);
     background: rgba(224, 168, 0, 0.08);
     padding: 0.65rem 0.9rem;
