@@ -1737,16 +1737,22 @@ not "start date inside window" — otherwise a comp running 1–31 Aug, or one a
 properties, no Umbraco nodes. Adds C# → full rebuild. Verified end-to-end 33/33 via
 `C:\Repos\hpsk-verify\schema-verify.mjs`. KB: `KnowledgeBase/docs/mitt-schema.md`.
 
-## Bemanning — the grid (roll × dag), open role catalog, person identity (2026-08-14)
+## Bemanning — the grid (roll × dag), open role catalog, person identity (2026-08-14 → 15)
 
 Rebuilt from a real SM springskytte staffing plan (`Bemanningsplan Spring SM 20226.xlsx`, 41 people,
 101 assignments, 3 days). Design rationale + what is still open: `bemanningsrutnat-skiss-2026-08-14.md`
-in the repo root (local, not committed). Verified 41/41 via `hpsk-verify/staffing-grid-verify.mjs`;
-the reality walkthrough (sickness, walk-ins, typos, mid-shift dropout) is `hans-verkligheten.mjs`.
+in the repo root (local, not committed).
+
+**Verify scripts** (all in `C:\Repos\hpsk-verify`): `staffing-grid-verify.mjs` (41, the regression to
+run after any change here) · `grid-fixes-verify.mjs` (19 — width, club abbreviation, delete-any-role,
+delete-any-day) · `personpanel-verify.mjs` (15 — the pencil, locked person) · `behorighet-verify.mjs`
+(11 — person-level app access) · `epost-verify.mjs` (10) · `deltagare-epost-verify.mjs` (13) ·
+`hans-verkligheten.mjs` (the reality walkthrough: sickness, walk-ins, typos, mid-shift dropout).
 
 **Migrations (all four run in prod 2026-08-14):** `create-staff-role-table.sql`,
 `create-staff-day-table.sql`, `add-daydate-to-staffassignment.sql`,
-`add-originalname-to-staffassignment.sql`. Adds C# → full rebuild.
+`add-originalname-to-staffassignment.sql`. Adds C# → full rebuild. **The 2026-08-15 batch adds no
+migration** — every change below is code-only.
 
 ### Bemanning IS the grid — there are no sub-tabs
 It used to be five (Rutnät / Personer / Roller / Behov & täckning / Värvning) and an organiser opening
@@ -1755,6 +1761,13 @@ menu of five is the same question with the buttons out of sight. Personer → cl
 Roller → deleted; Behov → the number lives in the cell; Värvning → one button. `#bem-roster` markup
 survives **hidden** because the add/edit dialog and a dozen helpers bind to its ids; `loadRoster()`
 early-returns while it is hidden. Delete the pane and those bindings together, not before.
+
+⚠️ **That early-return silently broke the pencil, and will break anything else that reads `groups`.**
+`groups` was filled as a *side effect of rendering* the retired view, so the assignment lookup was
+permanently empty and `stfEdit`'s own `if (!a) return` swallowed every click — no error, nothing.
+Fixed 2026-08-15 with `ensureAssignments()`, which fetches `GetRoster` on demand; it refetches on
+**every** open because nothing refills `groups` after a save while the pane is hidden, so a cache hit
+would show pre-edit values. Anything else that reaches into `groups` needs the same treatment.
 
 ### The day axis: `StaffDay`, not the competition span
 **The days you STAFF are not the days you COMPETE.** The source plan has Friday = iordningställande;
@@ -1782,6 +1795,19 @@ functions of which 5 existed. Worse than a missing word is a word the club alrea
 built-in; new key = new role; `IsActive=0` = hidden for this competition. Falls back to the built-ins
 if the table is missing, and every caller already falls back to the raw key.
 
+**"Dolda roller" is gone as a CONCEPT (2026-08-15)** — the bar, the Mer-menu entry, `HideRole`,
+`SetHidden`, `GetHidden`, `HiddenRoleView` and `HideStaffRoleRequest` were all deleted. It existed
+only because a built-in couldn't be deleted, which put our storage problem on screen as two kinds of
+delete: Kassa had no trash icon, Kassör did. **`DeleteRole` now removes any row**, built-in included —
+`IsActive=0` survives purely as the *mechanism* for a built-in (there is no row to delete), never as
+vocabulary. A role comes back by typing its name again.
+
+**Removal never drops crew silently.** `DeleteRole`/`DeleteDay` return `(ok:false, message:null,
+inUse:n)` on the first call and write **nothing**; the client asks with the count and calls back with
+`DeleteAssignments=true`. Same shape for both — copy it for any future "remove a thing people stand
+on". `DeleteDay` also takes a **`DateKey` instead of an id**, because an "ej i planen" column has no
+`StaffDay` row and previously could not be removed at all.
+
 ### Person identity: one human, many rows
 Name/e-mail/phone live on the **assignment**, so one person is often 3–5 rows.
 `StaffingService.ApplyPersonIdentity` acts on a **person key** (`m:{id}` / `n:{lowercased name}` — the
@@ -1797,6 +1823,55 @@ same key `CompetitionPeopleService` groups on) and touches every row.
   member register cannot see. Suggestions only; nothing is ever auto-linked.
 - `ReconcileManagersIntoRoster` is now a single `INSERT … WHERE NOT EXISTS`: the page loads roster and
   people in parallel and both called it, so read-then-insert duplicated the tävlingsledare.
+- **App access is a PERSON-level grant (`SetPersonAdminAccess`, 2026-08-15).** `HasAdminAccess` is
+  stored per assignment but was never *read* that way: `HasRosterAdminAccess` asks whether the member
+  has **any** row with it, and `SyncCompetitionManagers` distincts by member. So ticking it on one of
+  five rows granted the whole competition, and unticking it there did nothing while another row still
+  carried it — a switch that silently failed. It now writes every row of the person, and the
+  per-assignment checkbox is gone from the dialog (the input survives hidden so an ordinary save
+  round-trips the value unchanged — **no migration, existing data unchanged**). Requires a member id:
+  access is granted to a login, so a free-text helper is refused server-side, not just in the UI.
+- **Leadership is deduped per person**, not per assignment (`CompetitionPeopleService`). Since
+  tävlingsledning is staffed per day, a 3-day SM listed Hans three times on Förberedelser. Star and
+  admin-access are OR-ed across the days.
+
+### Club names are abbreviated in Bemanning
+`ClubNameHelper.Shorten` ("Varbergs Pistolklubb" → "Varbergs PK") is applied in `StaffingGridService`
+**and** `CompetitionPeopleService`, so cell, person panel and printout can't disagree. This is not
+cosmetic: the cell is one nowrap line of name + club + time, and an unabbreviated club is what pushed
+the column past the wrap (see below).
+
+### The grid's width is decided by the LAYOUT, never by cell content
+`#grdTable` is `table-layout: fixed`, and the minimum is computed from the **column count** in JS
+(`grdSizeTable`, 230 + n×215 px) rather than a `min-width` per cell. Under the old auto layout a long
+club name on a nowrap line set the column's min-content width, the table outgrew `#grdWrap`, and the
+last day scrolled out of sight — which reads as "the page got narrower". Names and clubs ellipsis when
+tight; **the time never truncates** and is in the tooltip either way. Three days fit a laptop; eight
+scroll because they genuinely must.
+
+### E-postlista — two of them, same idiom
+Bemanning: **Mer → E-postlista** (client-side, off the `people` projection). Anmälningar:
+**Åtgärder → E-postlista** → `RegistrationAdmin/GetParticipantEmails` (a separate endpoint, *not* a
+column on `GetCompetitionRegistrations` — that payload is a hot path re-rendered on every filter
+change, and this needs a member lookup per person). Both: semicolon-joined + copy, mailto uses
+**`?bcc=`**, dedupe on the **address**, and **who is missing is named as prominently as who is
+included** — a list that silently omits people reads as complete. Participants include **team
+members** (on a relay comp they may never appear as an individual registration); cancelled
+registrations are skipped.
+
+⚠️ `RegistrationAdminController.CanManageRegistrationsAsync` now holds the club-vs-region host check
+for registration data — `ExportCompetitionRegistrations` was migrated onto it. Written out per
+endpoint it has been got wrong repeatedly, always by checking only `clubId` and locking the krets out
+of its own SM (memory `competition-host-shape-auth`). Add new registration endpoints onto it.
+
+### Upprop (day-of check-in) is HIDDEN, not deleted (2026-08-15)
+The two `_StaffingDayOf` PartialAsync calls in `PrecisionFunktionarerManagement.cshtml` and
+`SpringskytteFunktionarerManagement.cshtml` are commented out; partial, service and endpoints are
+untouched. **Nothing else reads `StaffAssignment.CheckedInAt`** — verified: written by
+`Staffing/SetCheckedIn`, read only by the section that wrote it. It was pulled because it answered
+"who got ticked off" and, more decisively, `CheckedInAt` is **one timestamp per assignment**, so a
+Friday tick still read as "incheckad" on Sunday. Replacement requirements (per-DAY presence, "var är
+X kl 15", "vem bemannar Y kl 15") are in `backlog.md` → *Funktionärer: närvaro och var-är-vem*.
 
 ### Coverage and clashes live where the organiser is standing
 - Per-role need (`SetCrewNeed`) renders as `bemannat/behov` **in the cell**. The old coverage matrix was
