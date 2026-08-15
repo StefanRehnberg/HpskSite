@@ -357,7 +357,15 @@
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Person</label>
-                    <div class="position-relative">
+                    @* Opened from a person's card the identity is DECIDED — the header says whose card it
+                       is, so an editable name field there let you type someone else and hand the uppdrag
+                       to them while the panel still claimed to be about the first person. Locked, with a
+                       way out that is explicit rather than accidental. *@
+                    <div id="stfPersonLocked" class="d-flex justify-content-between align-items-center border rounded px-2 py-1 bg-body-tertiary" style="display:none !important">
+                        <span><i class="bi bi-person-fill me-2"></i><strong id="stfPersonLockedName"></strong></span>
+                        <button type="button" class="btn btn-sm btn-link p-0" onclick="stfUnlockPerson()">Byt person</button>
+                    </div>
+                    <div id="stfPersonPick"><div class="position-relative">
                         <input type="text" class="form-control" id="stfMemberSearch" placeholder="Sök medlem (namn eller e-post)…" autocomplete="off">
                         <div id="stfMemberResults" class="list-group position-absolute w-100 shadow" style="z-index:1080; display:none; max-height:240px; overflow:auto;"></div>
                     </div>
@@ -370,6 +378,7 @@
                         </div>
                     </div>
                     <div class="form-text">Sök en medlem för att fylla i namn och telefon, eller skriv ett fritt namn för en extern hjälpare.</div>
+                    </div>
                 </div>
 
                 <div class="row g-2">
@@ -985,11 +994,34 @@
         document.getElementById('stfName').value = p.displayName || '';
         document.getElementById('stfMemberSearch').value = p.displayName || '';
         if (p.phone) document.getElementById('stfPhone').value = p.phone;
+        stfLockPerson(p.displayName || '');
         // Prefill the pass from what they volunteered for, when the sign-up slot maps to exactly one skift.
         var sug = (p.volunteer && (p.volunteer.slots || []).map(function (s) { return s.suggestedPassId; }).filter(Boolean)) || [];
         if (sug.length) { var sel = document.getElementById('stfPass'); if (sel) sel.value = String(sug[0]); }
         renderExistingPanel(p);
     };
+
+    // The dialog is shared between "lägg till funktionär" (identity is the first question) and
+    // "ge NN ett uppdrag" (identity is already answered). Same form, two entry points, so the
+    // identity field is shown or locked rather than duplicated into a second dialog.
+    function stfLockPerson(name) {
+        var lock = document.getElementById('stfPersonLocked');
+        var pick = document.getElementById('stfPersonPick');
+        if (!lock || !pick) return;
+        document.getElementById('stfPersonLockedName').textContent = name || '(namn saknas)';
+        lock.style.setProperty('display', 'flex', 'important');
+        pick.style.display = 'none';
+    }
+
+    function stfUnlockPersonFields() {
+        var lock = document.getElementById('stfPersonLocked');
+        var pick = document.getElementById('stfPersonPick');
+        if (!lock || !pick) return;
+        lock.style.setProperty('display', 'none', 'important');
+        pick.style.display = '';
+    }
+
+    window.stfUnlockPerson = function () { stfUnlockPersonFields(); };
 
     window.stfNotifyPerson = function (k) {
         var p = personByKey(fromKeyArg(k));
@@ -1129,6 +1161,18 @@
         return null;
     }
 
+    // `groups` used to be filled as a side effect of rendering the Roller view. That view is retired and
+    // loadRoster() early-returns while it is hidden, so the lookup was ALWAYS empty and every pencil
+    // silently did nothing — stfEdit's own "if (!a) return". The edit dialog needs the full assignment
+    // (targetFrom/To, note, phone) which the people projection doesn't carry, so fetch it on demand.
+    async function ensureAssignments() {
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetRoster?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (d.success) groups = d.groups || [];
+        } catch (e) { /* caller falls back to telling the user */ }
+    }
+
     // ---- role select + field visibility ----
 
     function populateRoleSelect() {
@@ -1247,6 +1291,7 @@
     }
 
     function resetForm() {
+        stfUnlockPersonFields();   // a lock set by "ge NN ett uppdrag" must not survive into the next open
         document.getElementById('stfId').value = '0';
         document.getElementById('stfMemberId').value = '0';
         document.getElementById('stfMemberSearch').value = '';
@@ -1291,9 +1336,12 @@
         ensureModal().show();
     };
 
-    window.stfEdit = function (id) {
+    window.stfEdit = async function (id) {
+        // Always refetch: nothing refills `groups` after a save while the Roller pane is hidden, so a
+        // cached hit would open the dialog on the values as they were BEFORE the last edit.
+        await ensureAssignments();
         var a = findAssignment(id);
-        if (!a) return;
+        if (!a) { alert('Kunde inte läsa uppdraget. Prova att läsa om sidan.'); return; }
         resetForm();
         document.getElementById('stfModalTitle').textContent = 'Redigera funktionär';
         document.getElementById('stfId').value = a.id;
@@ -2013,8 +2061,12 @@
             }).join('') + '</div>'
             : '<div class="text-muted small mb-2">Inga uppdrag än.</div>';
 
-        h += '<button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="stfOpenAdd(\'\')">'
-            + '<i class="bi bi-plus-lg me-1"></i>Ge ett uppdrag</button>';
+        // It opened the BLANK add dialog — no person at all — from inside a card headed with someone's
+        // name. So "ge ett uppdrag" on Hans's card let you hand it to anybody, which is what the button
+        // looked least like doing. Prefilled and locked to the person whose card this is.
+        h += '<button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="stfAssignPerson(\''
+            + keyArg(p.key || '') + '\')">'
+            + '<i class="bi bi-plus-lg me-1"></i>Ge ' + esc((p.displayName || '').split(' ')[0] || 'personen') + ' ett uppdrag</button>';
 
         // --- context (only what exists) --------------------------------------------------------------
         var extras = [];
