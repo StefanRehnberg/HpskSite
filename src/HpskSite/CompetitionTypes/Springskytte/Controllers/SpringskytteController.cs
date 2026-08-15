@@ -1113,8 +1113,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 int startOrder = 1;
                 int sinceLastBreak = 0;
 
+                // Order: weapon class, then the shooter's start wish, then registration order.
+                // The wish sorts WITHIN the weapon class because a Springskytte start is per
+                // (member, vapengrupp) — moving someone "early" must not move them out of their
+                // own class block. Anything unreadable ranks as neutral (StartPreference.Rank),
+                // so a drifted stored value can never reshuffle a list.
                 var orderedRegistrations = registrations
                     .OrderBy(r => ExtractWeaponClass(r.MemberClass))
+                    .ThenBy(r => HpskSite.Models.StartPreference.Rank(r.StartPreference))
                     .ThenBy(r => r.Id)
                     .ToList();
 

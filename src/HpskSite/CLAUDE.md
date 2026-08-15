@@ -955,6 +955,54 @@ below ship together; verified 199/199 via `hpsk-verify/{row-actions-menu,notices
 - **Sortable Närvaro / Notis** — both boolean columns sort false-first ascending, so one click groups
   the rows the desk must chase.
 
+### Önskemål om starttid — the wish finally gets a consumer (2026-08-15)
+
+`ShootingClassEntry.StartPreference` has existed for years, was collected on some surfaces and
+**consumed by nothing**. Built for SM: the organiser can record a wish and the Springskytte
+generator sorts on it. No doctype property, no migration — the field already existed.
+
+- **`Models/StartPreference.cs`** is the ONE place the value is interpreted. **⚠ Six spellings are
+  in the wild** because nothing ever read the field: `"Inget"` · `"No Preference"` (the C# default
+  on `ShootingClassEntry`, so it sits on every untouched entry) · `""` (the repository's legacy
+  single-class fallback) · `"Tidig Start"`/`"Sen Start"` (the pickers) · `"Early"`/`"Late"` (the
+  deprecated display switch and the `AddLateRegistration` API example). A plain string compare
+  matches none of them reliably. Always `Normalize()` / `Rank()`; unreadable → neutral, so a
+  drifted value can never reshuffle a list. `normalizeStartPreference()` in
+  `CompetitionRegistrationManagement.cshtml` is the client mirror — keep the two in step.
+- **Carried, not dropped:** `UmbracoStartListRepository` used to discard the field when flattening
+  registrations, so generators never saw it. `CompetitionRegistration.StartPreference` now carries
+  it (per class).
+- **Consumed:** `GenerateSpringskytteStartList` sorts `weaponClass → StartPreference.Rank → Id`.
+  The wish sorts **within** the weapon class — a Springskytte start is per (member, vapengrupp),
+  so an early wish must not lift someone out of their own class block.
+- **⚠ Regeneration keeps NUMBERS but recomputes TIMES** (`ApplyNumbersToGeneratedList` is sticky per
+  (member, weaponClass)). Change the sort after a list is numbered and the numbers no longer run in
+  time order — the organiser must then run **"Numrera om"**. Best applied before the first generation.
+- **Set from the row's Åtgärder menu**, via its own narrow endpoint
+  **`RegistrationAdmin/SetStartPreference`** — deliberately NOT a field on
+  `UpdateCompetitionRegistration`, which recomputes the fee and can create a top-up invoice on save.
+  Recording a wish must never be one Spara away from invoicing. Writes `StartPreference` and nothing
+  else; `CanManageCompetitionDeskAsync` (carries the club-vs-region host check); refuses a
+  registration belonging to another competition and a class the registration lacks. Legacy
+  single-class registrations (no `shootingClasses` JSON) get the scalar `startPreference` property
+  written instead of being silently migrated to the JSON shape.
+- **Modal rows are per WEAPON GROUP on Springskytte**, per class elsewhere; one group row writes the
+  same wish to every class in the group, so storage stays per class. An already-slotted shooter is
+  told so on the spot — the wish is consumed at generation, so for them it changes nothing until a
+  regeneration. Footnote is honest per discipline: other disciplines say their generator does not
+  sort on it yet (a wish nobody honours is the bug being fixed).
+- Display: the previously **dead** `getPreferenceBadgeClass()` finally has a caller — the badge rides
+  alongside its class badge (a separate column could not say which class it belonged to on a
+  multi-class row). The existing Startpreferens filter and CSV column already worked.
+- **Not done (deliberate):** the shooter-facing picker. `SpringskytteRegistrationModal` hardcodes
+  `'Inget'` and the desk walk-in hardcodes `'Inget'`, so for SM no shooter-entered data exists —
+  the wishes arrive by mail. Precision-family public registration still collects it via the gear icon.
+- Verified 26/26 (`hpsk-verify/startpref-verify.mjs`, Springskytte incl. the generator reorder, with
+  restore) + 10/10 (`startpref-precision-verify.mjs`, per-class branch).
+  **⚠ Note for that script:** a stored start list can carry manual per-starter time edits, so the
+  baseline for a TIME assertion must be taken *after* a no-op regeneration — comparing against the
+  pre-regeneration times measures the manual edits, not the wish.
+
 ### Bank payment-reference lookup — samlingsfaktura (2026-08-07)
 
 Reported by the SM cashier: an individual reference (`3803-1120-1`) is on the registration row so

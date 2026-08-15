@@ -102,7 +102,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         {
                             shootingClasses = new List<ShootingClassEntry>
                             {
-                                new ShootingClassEntry { Class = legacyShootingClass, StartPreference = "" }
+                                // Legacy registrations keep the wish in the scalar property, which
+                                // is also where SetStartPreference writes it for this shape.
+                                new ShootingClassEntry
+                                {
+                                    Class = legacyShootingClass,
+                                    StartPreference = content.GetValue<string>("startPreference") ?? ""
+                                }
                             };
                             _logger.LogDebug("Using legacy shootingClass format for member {MemberId}: {Class}", memberId, legacyShootingClass);
                         }
@@ -155,6 +161,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             MemberClub = clubName,
                             RegistrationDate = registrationDate,
                             IsActive = true,
+                            // Carried so start-list generators can honour an early/late wish.
+                            // Per CLASS, which is how the wish is stored and how it is asked for.
+                            StartPreference = classEntry.StartPreference ?? "",
                             IsSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition")
                         });
 

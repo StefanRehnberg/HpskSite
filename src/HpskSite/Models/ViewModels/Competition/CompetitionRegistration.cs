@@ -14,6 +14,12 @@ namespace HpskSite.Models.ViewModels.Competition
         public bool IsActive { get; set; } = true;
         public bool IsSubCompetition { get; set; }
 
+        /// <summary>
+        /// The shooter's wish for an early/late start for THIS class. Read it through
+        /// <see cref="HpskSite.Models.StartPreference"/> — the raw stored values drifted.
+        /// </summary>
+        public string StartPreference { get; set; } = "";
+
         public override string ToString()
         {
             return $"{this.MemberName} - {this.MemberClass}";

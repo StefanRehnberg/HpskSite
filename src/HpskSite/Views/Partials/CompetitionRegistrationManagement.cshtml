@@ -1134,6 +1134,11 @@
                         <div id="competitionEditClassList" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;">
                             <!-- Populated from walkInAvailableClasses + reg.shootingClasses -->
                         </div>
+                        <!-- Read-only echo of any recorded start-time wish. This modal preserves the
+                             wish server-side but has no control for it (it lives in Åtgärder →
+                             "Önskemål om starttid"), and without this line a save here looks like it
+                             dropped the wish. -->
+                        <div id="competitionEditPrefNote" class="form-text mt-1 d-none"></div>
                     </div>
 
                     @if (dpEnabled)
@@ -1320,6 +1325,40 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" id="sendNoticeSubmit" onclick="confirmSendNotice()">
                     <i class="bi bi-send me-1"></i>Skicka
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Start-time wish (Åtgärder → "Önskemål om starttid"). Deliberately its own small modal
+     rather than a field in Redigera anmälan: that modal recomputes the fee and can create a
+     top-up invoice on save, and recording a wish must never be one Spara away from invoicing.
+     Rows are per WEAPON GROUP on Springskytte (a start is per member+vapengrupp) and per class
+     elsewhere. -->
+<div class="modal fade" id="startPreferenceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-clock-history me-2"></i>Önskemål om starttid
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="startPreferenceRegistrationId">
+                <p class="mb-3">
+                    <strong id="startPreferenceShooter">–</strong>
+                    <span class="text-muted small d-block" id="startPreferenceClub"></span>
+                </p>
+                <div id="startPreferenceRows"></div>
+                <div class="form-text mt-3" id="startPreferenceFootnote"></div>
+                <div class="alert alert-danger py-2 mt-3 mb-0 d-none" id="startPreferenceError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="startPreferenceSaveBtn" onclick="saveStartPreference()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
                 </button>
             </div>
         </div>
@@ -3374,7 +3413,15 @@ function displayCompetitionRegistrations() {
                 const classId = sc.class || sc.className || '';
                 const normalizedClass = normalizeShootingClass(classId);
                 const displayClass = window.formatAgeSpan ? window.formatAgeSpan(normalizedClass) : normalizedClass;
-                return `<span class="badge bg-primary me-1 mb-1" style="font-size: 0.85em;">${displayClass}</span>`;
+                const badge = `<span class="badge bg-primary me-1 mb-1" style="font-size: 0.85em;">${displayClass}</span>`;
+                // A recorded wish rides ALONGSIDE its class badge rather than in a column of its
+                // own: the wish is per class, and on a multi-class row a separate column could not
+                // say which class it belonged to.
+                const pref = normalizeStartPreference(sc.startPreference);
+                if (pref === 'Inget') return badge;
+                return badge + `<span class="badge ${getPreferenceBadgeClass(pref)} me-1 mb-1" style="font-size: 0.75em;"`
+                    + ` title="Önskemål om starttid för ${escapeAttr(displayClass)}">`
+                    + `<i class="bi bi-clock-history me-1"></i>${pref === 'Tidig Start' ? 'Tidig' : 'Sen'}</span>`;
             }).join('');
         }
 
@@ -3464,6 +3511,11 @@ function displayCompetitionRegistrations() {
                         <li>
                             <button class="dropdown-item" type="button" onclick="editCompetitionRegistration(${reg.id})">
                                 <i class="bi bi-pencil me-2 text-primary"></i>Redigera anmälan
+                            </button>
+                        </li>
+                        <li>
+                            <button class="dropdown-item" type="button" onclick="openStartPreferenceModal(${reg.id})">
+                                <i class="bi bi-clock-history me-2 text-primary"></i>Önskemål om starttid…
                             </button>
                         </li>
                         <li>
@@ -3825,6 +3877,30 @@ async function editCompetitionRegistration(registrationId) {
         renderEditSpringSlotRows();
     }
 
+    // Echo any recorded start-time wish (set from the row's Åtgärder menu, preserved here).
+    const prefNote = document.getElementById('competitionEditPrefNote');
+    if (prefNote) {
+        const wishes = (registration.shootingClasses || [])
+            .map(sc => ({
+                id: (sc.class || sc.className || '').trim(),
+                pref: normalizeStartPreference(sc.startPreference)
+            }))
+            .filter(w => w.id && w.pref !== 'Inget');
+        if (wishes.length === 0) {
+            prefNote.classList.add('d-none');
+            prefNote.innerHTML = '';
+        } else {
+            prefNote.classList.remove('d-none');
+            prefNote.innerHTML = '<i class="bi bi-clock-history me-1"></i>Önskemål om starttid: '
+                + wishes.map(w => {
+                    const norm = normalizeShootingClass(w.id);
+                    const label = window.formatAgeSpan ? window.formatAgeSpan(norm) : norm;
+                    return `${escapeAttr(label)} – ${w.pref === 'Tidig Start' ? 'tidig' : 'sen'} start`;
+                }).join(', ')
+                + '. Ändras via Åtgärder → Önskemål om starttid.';
+        }
+    }
+
     // Pre-fill the deltävling checkbox from the registration. Untoggling here will
     // recompute the fee downward (and surface a refund note); toggling on creates a
     // top-up invoice via the standard multi-invoice flow.
@@ -3983,6 +4059,173 @@ document.addEventListener('DOMContentLoaded', () => {
 function escapeAttr(s) {
     return String(s ?? '').replace(/[&<>"']/g, c =>
         ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── Önskemål om starttid ──────────────────────────────────────────────────
+// Client mirror of Models/StartPreference.cs. The stored vocabulary drifted for years while
+// nothing consumed the field, so six spellings are in the wild ("Inget", "No Preference", "",
+// "Tidig Start"/"Sen Start", "Early"/"Late"). Compare the raw string anywhere and the badge
+// and the filter silently disagree with the generator.
+function normalizeStartPreference(value) {
+    const v = String(value ?? '').trim().toLowerCase();
+    if (v === 'tidig start' || v === 'tidig' || v === 'early') return 'Tidig Start';
+    if (v === 'sen start' || v === 'sen' || v === 'late') return 'Sen Start';
+    return 'Inget';
+}
+
+// Rows are keyed per weapon group on Springskytte, per class elsewhere. Kept as module state
+// so Spara knows which classes each row stands for without re-deriving it from the DOM.
+let startPrefRowKeys = [];
+
+async function openStartPreferenceModal(registrationId) {
+    const reg = (competitionRegistrations || []).find(r => r.id === registrationId);
+    if (!reg) { alert('Anmälan hittades inte i listan. Ladda om sidan.'); return; }
+
+    document.getElementById('startPreferenceRegistrationId').value = registrationId;
+    document.getElementById('startPreferenceShooter').textContent = reg.memberName || '';
+    document.getElementById('startPreferenceClub').textContent = reg.memberClub || '';
+    const errEl = document.getElementById('startPreferenceError');
+    errEl.classList.add('d-none');
+    errEl.textContent = '';
+
+    // Which weapon groups already have a start time. The wish is consumed at GENERATION, so for
+    // an already-slotted shooter it changes nothing until the list is regenerated — saying that
+    // on the spot is the difference between a tool and a trap. Reuses the Edit modal's loader
+    // (it resets its own state on each call and the two modals are never open together).
+    document.getElementById('startPreferenceRows').innerHTML =
+        '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>Laddar…</div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('startPreferenceModal')).show();
+
+    if (walkInSpringskytteEnabled) {
+        await refreshEditSpringMembership(reg.memberId);
+    }
+    renderStartPreferenceRows(reg);
+}
+
+function renderStartPreferenceRows(reg) {
+    const host = document.getElementById('startPreferenceRows');
+    const classes = (reg.shootingClasses || [])
+        .map(sc => ({ id: (sc.class || sc.className || '').trim(), pref: normalizeStartPreference(sc.startPreference) }))
+        .filter(c => c.id);
+
+    startPrefRowKeys = [];
+
+    if (classes.length === 0) {
+        host.innerHTML = '<div class="alert alert-warning py-2 mb-0">Anmälan har inga klasser.</div>';
+        document.getElementById('startPreferenceSaveBtn').disabled = true;
+        return;
+    }
+    document.getElementById('startPreferenceSaveBtn').disabled = false;
+
+    if (walkInSpringskytteEnabled) {
+        // One row per weapon group: a Springskytte start is per (member, vapengrupp), so a
+        // shooter entered in both C-H 35 and C-D 35 still has ONE C start to wish about.
+        const groups = [];
+        classes.forEach(c => {
+            const wc = springClassWeapon(c.id);
+            let g = groups.find(x => x.wc === wc);
+            if (!g) { g = { wc, classIds: [], pref: 'Inget' }; groups.push(g); }
+            g.classIds.push(c.id);
+            // Any class in the group carrying a wish decides the group's displayed value.
+            if (c.pref !== 'Inget' && g.pref === 'Inget') g.pref = c.pref;
+        });
+        startPrefRowKeys = groups;
+        host.innerHTML = groups.map((g, i) => startPrefRowHtml(
+            i, `Vapengrupp ${escapeAttr(g.wc)}`, g.pref, editSpringStartsByWc[g.wc])).join('');
+    } else {
+        startPrefRowKeys = classes.map(c => ({ classIds: [c.id], pref: c.pref }));
+        host.innerHTML = classes.map((c, i) => {
+            const norm = normalizeShootingClass(c.id);
+            const label = window.formatAgeSpan ? window.formatAgeSpan(norm) : norm;
+            return startPrefRowHtml(i, escapeAttr(label), c.pref, null);
+        }).join('');
+    }
+
+    document.getElementById('startPreferenceFootnote').innerHTML = walkInSpringskytteEnabled
+        ? '<i class="bi bi-info-circle me-1"></i>Önskemålet styr sorteringen nästa gång startlistan genereras. '
+          + 'Tidiga önskemål läggs först i sin vapengrupp, sena sist.'
+        : '<i class="bi bi-info-circle me-1"></i>Den här tävlingsformens startlistegenerator sorterar ännu inte '
+          + 'på önskemål — noteringen syns i listan, i filtret och i CSV-exporten.';
+}
+
+function startPrefRowHtml(index, label, pref, existingStart) {
+    const warn = existingStart
+        ? `<div class="form-text text-warning mb-0 small"><i class="bi bi-exclamation-triangle me-1"></i>`
+          + `Har redan starttid kl ${escapeAttr(springTimeShort(existingStart.startTime))}`
+          + `${existingStart.official ? ' (publicerad)' : ''} – önskemålet gäller först vid omgenerering.</div>`
+        : '';
+    return `
+        <div class="mb-3">
+            <div class="d-flex align-items-center gap-2">
+                <label class="small fw-semibold mb-0" style="min-width:130px" for="startPrefSel_${index}">${label}</label>
+                <select class="form-select form-select-sm start-pref-select" id="startPrefSel_${index}" data-row="${index}">
+                    <option value="Inget"${pref === 'Inget' ? ' selected' : ''}>Ingen preferens</option>
+                    <option value="Tidig Start"${pref === 'Tidig Start' ? ' selected' : ''}>Tidig start</option>
+                    <option value="Sen Start"${pref === 'Sen Start' ? ' selected' : ''}>Sen start</option>
+                </select>
+            </div>
+            ${warn}
+        </div>`;
+}
+
+async function saveStartPreference() {
+    const registrationId = parseInt(document.getElementById('startPreferenceRegistrationId').value, 10);
+    const btn = document.getElementById('startPreferenceSaveBtn');
+    const errEl = document.getElementById('startPreferenceError');
+    errEl.classList.add('d-none');
+
+    // Expand each row back onto the classes it stands for — on Springskytte one weapon-group
+    // row writes the same wish to every class in that group, so storage stays per class.
+    const preferences = [];
+    document.querySelectorAll('#startPreferenceRows .start-pref-select').forEach(sel => {
+        const row = startPrefRowKeys[parseInt(sel.dataset.row, 10)];
+        if (!row) return;
+        row.classIds.forEach(id => preferences.push({ class: id, preference: sel.value }));
+    });
+
+    if (preferences.length === 0) {
+        errEl.textContent = 'Inga klasser att spara.';
+        errEl.classList.remove('d-none');
+        return;
+    }
+
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/umbraco/surface/RegistrationAdmin/SetStartPreference', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ competitionId, registrationId, preferences })
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            errEl.textContent = data.message || 'Kunde inte spara önskemålet.';
+            errEl.classList.remove('d-none');
+            return;
+        }
+
+        // Patch local state so the badges update without a full reload of the table.
+        const reg = (competitionRegistrations || []).find(r => r.id === registrationId);
+        if (reg && Array.isArray(reg.shootingClasses)) {
+            const byClass = {};
+            preferences.forEach(p => { byClass[p.class.toLowerCase()] = p.preference; });
+            reg.shootingClasses.forEach(sc => {
+                const key = String(sc.class || sc.className || '').trim().toLowerCase();
+                if (byClass[key] !== undefined) sc.startPreference = byClass[key];
+            });
+        }
+        filterCompetitionRegistrations();
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('startPreferenceModal')).hide();
+    } catch (err) {
+        errEl.textContent = 'Ett fel uppstod: ' + err.message;
+        errEl.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 function saveCompetitionRegistrationChanges() {

@@ -1402,6 +1402,103 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Record the shooter's wish for an early/late start, per class. Opened from the row's
+        /// Åtgärder menu, because the wishes arrive one shooter at a time by mail.
+        ///
+        /// <para>Deliberately its OWN endpoint rather than a field on UpdateCompetitionRegistration:
+        /// that one recomputes the fee, patches or creates a top-up invoice and runs capacity/slot
+        /// validation. Recording a harmless wish must not put the organiser one Spara away from
+        /// issuing an invoice. This writes StartPreference and nothing else.</para>
+        ///
+        /// <para>The wish is consumed when a start list is GENERATED (see the Springskytte
+        /// generator's sort). It never moves a shooter who already has a start time — the caller
+        /// is told as much so the organiser can decide about regenerating.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetStartPreference([FromBody] SetStartPreferenceRequest request)
+        {
+            try
+            {
+                if (request == null || request.RegistrationId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                if (!await CanManageCompetitionDeskAsync(competition, request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet att ändra önskemål om starttid." });
+
+                var registration = _contentService.GetById(request.RegistrationId);
+                if (registration == null || registration.ContentType.Alias != "competitionRegistration")
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
+
+                // Same guard as GetShooterInfo: a registration belonging to another competition
+                // must not be writable through a competitionId this user happens to be authorized for.
+                if (registration.GetValue<int>("competitionId") != request.CompetitionId)
+                    return Json(new { success = false, message = "Anmälan hör inte till denna tävling." });
+
+                var wanted = (request.Preferences ?? new List<StartPreferenceEntry>())
+                    .Where(p => !string.IsNullOrWhiteSpace(p.Class))
+                    .GroupBy(p => p.Class!.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => HpskSite.Models.StartPreference.Normalize(g.First().Preference),
+                        StringComparer.OrdinalIgnoreCase);
+
+                if (wanted.Count == 0)
+                    return Json(new { success = false, message = "Inga klasser angavs." });
+
+                var existing = HpskSite.Models.CompetitionRegistrationDocument
+                    .DeserializeShootingClasses(registration.GetValue<string>("shootingClasses") ?? "");
+
+                if (existing.Count > 0)
+                {
+                    // Only StartPreference is touched. Class and TeamNumber are carried through
+                    // untouched so this can never reshuffle a direktplacering slot.
+                    var unknown = wanted.Keys
+                        .Where(k => !existing.Any(c => string.Equals(c.Class?.Trim(), k, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    if (unknown.Count > 0)
+                        return Json(new { success = false, message = $"Anmälan saknar klassen {string.Join(", ", unknown)}." });
+
+                    foreach (var entry in existing)
+                    {
+                        if (wanted.TryGetValue(entry.Class?.Trim() ?? "", out var pref))
+                            entry.StartPreference = pref;
+                    }
+
+                    registration.SetValue("shootingClasses",
+                        HpskSite.Models.CompetitionRegistrationDocument.SerializeShootingClasses(existing));
+                }
+                else
+                {
+                    // Legacy single-class registration: no shootingClasses JSON at all. Write the
+                    // legacy scalar property rather than materialising a JSON array, so the shape
+                    // of an old registration is not silently changed by recording a wish.
+                    registration.SetValue("startPreference", wanted.Values.First());
+                }
+
+                var saveResult = _contentService.Save(registration);
+                if (!saveResult.Success)
+                    return Json(new { success = false, message = "Kunde inte spara önskemålet." });
+
+                _contentService.Publish(registration, new[] { "*" }, -1);
+
+                return Json(new
+                {
+                    success = true,
+                    preferences = wanted.Select(kv => new { @class = kv.Key, preference = kv.Value })
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Resolve a payment reference from a bank statement to something on the Anmälningar tab.
         ///
         /// Individual invoices are numbered "{competitionId}-{memberId}-{seq}" and appear on the
@@ -2541,6 +2638,25 @@ namespace HpskSite.Controllers
             /// <summary>Direktplacering team/slot for this class. When omitted on a class
             /// the registration already had, the existing entry's team is preserved.</summary>
             public int? TeamNumber { get; set; }
+        }
+
+        /// <summary>
+        /// Request model for SetStartPreference. Carries only the class → wish pairs; nothing
+        /// about fees, slots or classes, because that endpoint writes nothing else.
+        /// </summary>
+        public class SetStartPreferenceRequest
+        {
+            public int CompetitionId { get; set; }
+            public int RegistrationId { get; set; }
+            public List<StartPreferenceEntry>? Preferences { get; set; }
+        }
+
+        /// <summary>One class's start wish. Preference is normalized server-side, so any of the
+        /// historical spellings is accepted and an unreadable one becomes "Inget".</summary>
+        public class StartPreferenceEntry
+        {
+            public string? Class { get; set; }
+            public string? Preference { get; set; }
         }
 
         /// <summary>
