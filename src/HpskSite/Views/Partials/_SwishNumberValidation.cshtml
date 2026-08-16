@@ -1,0 +1,55 @@
+@*
+    Swish-number format validation, shared by CompetitionWizardModal and CompetitionEditModal.
+
+    It used to live inside CompetitionWizardModal, on the assumption — stated in a comment there —
+    that the edit modal "renders its swishNumber input alongside this one". That holds on AdminPage,
+    Club and RegionalPage, which include both partials. It does NOT hold on CompetitionManagement,
+    which includes ONLY the edit modal (CompetitionManagement.cshtml:990). There, every keystroke in
+    the Swish field threw "validateSwishNumberField is not defined" and the Validera button did
+    nothing — silently, since the failure is an inline-handler exception.
+
+    Both partials include this file, so the load guard below is what keeps the second include from
+    redefining the function on pages that render both.
+*@
+<script>
+if (!window.swishNumberValidationLoaded) {
+    window.swishNumberValidationLoaded = true;
+
+    // Swish exposes no public "is this number registered" endpoint, so this is a FORMAT-only
+    // check — the messaging is deliberately explicit about that, so nobody reads a green tick
+    // as proof that payments will arrive.
+    //
+    //   07XXXXXXXX  → privat Swish eller Swish för Företag (10 siffror)
+    //   123XXXXXXX  → Swish Handel-alias (10 siffror)
+    //
+    // Returns true when the field's current value matches one of those patterns.
+    window.validateSwishNumberField = function (input, statusElId, showAffirmative) {
+        var statusEl = document.getElementById(statusElId);
+        if (!input) return false;
+        var raw = (input.value || '').trim();
+        var normalized = raw.replace(/[\s-]/g, '');
+        var isValid = /^(07\d{8}|123\d{7})$/.test(normalized);
+
+        input.classList.toggle('is-invalid', raw.length > 0 && !isValid);
+        input.classList.toggle('is-valid', raw.length > 0 && isValid);
+
+        if (!statusEl) return isValid;
+        if (raw.length === 0) {
+            statusEl.className = 'form-text text-muted';
+            statusEl.innerHTML = '10 siffror som börjar med <strong>07</strong> (privat/Företag) eller <strong>123</strong> (Swish Handel).';
+        } else if (!isValid) {
+            statusEl.className = 'form-text text-danger';
+            statusEl.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Ogiltigt Swish-nummer. Måste vara 10 siffror som börjar med 07 (t.ex. 0701234567) eller 123 (t.ex. 1234567890).';
+        } else if (showAffirmative) {
+            statusEl.className = 'form-text text-success';
+            var label = normalized.startsWith('123') ? 'Swish Handel-alias' : 'privat/Företag-nummer';
+            statusEl.innerHTML = '<i class="bi bi-check-circle me-1"></i>Formatet ser bra ut (' + label + '). '
+                + '<small class="text-muted">OBS: kontrollen verifierar bara formatet, inte att numret är registrerat hos Swish — det får ni testköra med en liten testbetalning.</small>';
+        } else {
+            statusEl.className = 'form-text text-muted';
+            statusEl.innerHTML = '<i class="bi bi-check-circle text-success me-1"></i>Format-OK. Klicka <strong>Validera</strong> för mer detaljer.';
+        }
+        return isValid;
+    };
+}
+</script>

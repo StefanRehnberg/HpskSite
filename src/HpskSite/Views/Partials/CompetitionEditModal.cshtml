@@ -2053,3 +2053,9 @@ function collectEditDpConfig() {
 
 @* Include Manager Selection Modal *@
 @await Html.PartialAsync("ManagerSelectionModal")
+
+@* Swish-number format validation. This partial is rendered on pages that do NOT include
+   CompetitionWizardModal (CompetitionManagement is the one that matters), and the swishNumber
+   input's inline handlers call validateSwishNumberField — so this file has to bring it itself.
+   The partial guards against being defined twice where both modals are present. *@
+@await Html.PartialAsync("_SwishNumberValidation")
