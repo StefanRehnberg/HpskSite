@@ -8,6 +8,14 @@
     // Everything is derived from the saves scorers already make (GetPrecisionFunctionaryLoad) — no
     // heartbeat, honouring the cellular/battery constraint. Polls every 15 s (visibility-aware).
     var competitionId = ViewData["CompetitionId"];
+
+    // Finals results are entered in the SAME scoring screen, switched into finals mode by the
+    // ?phase=finals query parameter. Precision/MagnumPrecision have no other route into that mode
+    // (the older Finalsskjutlag buttons in CompetitionResultsManagement are gated off for the
+    // disciplines that use the Skjutledare view), so without a launcher here the finals series are
+    // simply unreachable and entry stops at the last qualifying series.
+    var numberOfFinalSeries = 0;
+    int.TryParse(ViewData["NumberOfFinalSeries"]?.ToString(), out numberOfFinalSeries);
 }
 
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -42,6 +50,18 @@
     (serier senaste 10 min) och vilka platser de matat in. En skytt som just satt sig syns först efter
     första sparade serien.
 </p>
+
+@if (numberOfFinalSeries > 0)
+{
+    <hr class="my-4" />
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <span class="fw-bold fs-5"><i class="bi bi-trophy me-1"></i>Final</span>
+        <span class="text-muted small">@numberOfFinalSeries finalserier</span>
+    </div>
+    <div class="row g-3" id="pfnFinals">
+        <div class="col-12 text-center text-muted py-3"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+    </div>
+}
 
 @await Html.PartialAsync("_EventMessageInbox")
 <script>
@@ -158,6 +178,79 @@
         if (window.EventInbox) window.EventInbox.openCompose('Skjutlag', String(n), 'Skjutlag ' + n);
     };
 
+    var hasFinals = @(numberOfFinalSeries > 0 ? "true" : "false");
+
+    // The finals launcher is deliberately tied to the finals START LIST, not to the finals series
+    // count: the scoring screen's finals mode loads its shooters from that list, so without one
+    // there is nothing to enter against. When it is missing we say what to do rather than showing
+    // a dead button.
+    async function loadFinals() {
+        if (!hasFinals) return;
+        var host = document.getElementById('pfnFinals');
+        if (!host) return;
+
+        var d;
+        try {
+            var r = await fetch('/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=' + compId,
+                { headers: { 'Accept': 'application/json' } });
+            d = await r.json();
+        } catch (e) {
+            host.innerHTML = '<div class="col-12 text-muted">Kunde inte läsa finalstartlistan.</div>';
+            return;
+        }
+
+        var exists = !!(d && (d.exists || d.Exists));
+        if (!exists) {
+            host.innerHTML = '<div class="col-12"><div class="alert alert-info mb-0">'
+                + '<i class="bi bi-info-circle me-1"></i>'
+                + '<strong>Ingen finalstartlista är skapad än.</strong>'
+                + '<div class="small mt-1">Finalresultaten matas in mot finalstartlistan, så den måste skapas '
+                + 'först. Gå till fliken <strong>Startlistor</strong> och välj hur finalen ska ställas upp. '
+                + 'Så länge den saknas kan bara grundomgångens serier matas in.</div>'
+                + '</div></div>';
+            return;
+        }
+
+        var cfg = d.startList || d.StartList || {};
+        var teams = cfg.teams || cfg.Teams || [];
+        if (!teams.length) {
+            host.innerHTML = '<div class="col-12"><div class="alert alert-warning mb-0">'
+                + '<i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan innehåller inga skjutlag.'
+                + '</div></div>';
+            return;
+        }
+
+        var isOfficial = !!(d.isOfficial || d.IsOfficial);
+        var notice = isOfficial ? '' :
+            '<div class="col-12"><div class="alert alert-warning py-2 mb-0 small">'
+            + '<i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad än. '
+            + 'Inmatningen fungerar ändå, men skyttarna kan inte se listan förrän du publicerar den.'
+            + '</div></div>';
+
+        host.innerHTML = notice + teams.map(function (t) {
+            var num = t.teamNumber != null ? t.teamNumber : t.TeamNumber;
+            var time = t.startTime || t.StartTime || '';
+            var label = t.label || t.Label || '';
+            var shooters = t.shooters || t.Shooters || [];
+            return '<div class="col-12 col-xl-6">'
+                + '<div class="card h-100">'
+                + '<div class="card-header d-flex justify-content-between align-items-center py-2 gap-2">'
+                + '<span><span class="fw-bold">Finalskjutlag ' + esc(num) + '</span>'
+                + (time ? '<span class="text-muted ms-1">' + esc(time) + '</span>' : '')
+                + (label ? '<span class="text-muted ms-1">· ' + esc(label) + '</span>' : '')
+                + '</span>'
+                + '<span class="badge bg-secondary">' + shooters.length + ' skyttar</span>'
+                + '</div>'
+                + '<div class="card-footer p-2">'
+                + '<a class="btn btn-primary w-100 mb-2" href="/station?c=' + compId + '&s=' + encodeURIComponent(num)
+                + '&phase=finals" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna finalinmatning</a>'
+                + '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + encodeURIComponent(num)
+                + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>'
+                + '</div>'
+                + '</div></div>';
+        }).join('');
+    }
+
     async function refresh() {
         try {
             var r = await fetch('/umbraco/surface/CompetitionResults/GetPrecisionFunctionaryLoad?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
@@ -187,10 +280,13 @@
     }
 
     refresh();
+    // Not on the 15 s poll — a finals start list is created once, not continuously. Re-read it when
+    // the operator comes back to the tab, which is when they'd return after creating it.
+    loadFinals();
     timer = setInterval(refresh, REFRESH);
     document.addEventListener('visibilitychange', function () {
         if (document.hidden) { if (timer) { clearInterval(timer); timer = null; } }
-        else if (!timer) { refresh(); timer = setInterval(refresh, REFRESH); }
+        else if (!timer) { refresh(); loadFinals(); timer = setInterval(refresh, REFRESH); }
     });
 })();
 </script>
