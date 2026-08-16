@@ -2258,6 +2258,27 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                                             title="Ändra vapenklass">
                                         <i class="bi bi-pencil-square"></i>
                                     </button>
+                                    <div class="dropdown d-inline-block ms-1">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle"
+                                                data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                                                title="Markera att skytten inte producerar fler resultat">
+                                            <i class="bi bi-person-dash"></i>
+                                        </button>
+                                        <ul class="dropdown-menu dropdown-menu-end">
+                                            <li><h6 class="dropdown-header">Deltagande</h6></li>
+                                            <li><a class="dropdown-item" href="#" onclick="resSetParticipantStatus(${shooterData.memberId}, '${shooterData.class}', 'DNS'); return false;">
+                                                <i class="bi bi-dash-circle me-2"></i>Ej start (DNS)
+                                            </a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="resSetParticipantStatus(${shooterData.memberId}, '${shooterData.class}', 'DNF'); return false;">
+                                                <i class="bi bi-x-octagon me-2"></i>Bruten (DNF)
+                                            </a></li>
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li><a class="dropdown-item" href="#" onclick="resClearParticipantStatus(${shooterData.memberId}, '${shooterData.class}'); return false;">
+                                                <i class="bi bi-arrow-counterclockwise me-2"></i>Ta bort status
+                                            </a></li>
+                                        </ul>
+                                    </div>
+                                    <span class="ms-2" id="shooterParticipantStatusBadge"></span>
                                 </div>
                             </div>
                         </div>
@@ -3626,6 +3647,67 @@ if (competitionData.hasFinalsRound) {
 }
 
 // --- Change Shooter Class ---
+
+// ── DNS / DNF ────────────────────────────────────────────────────────────────
+// Records that a shooter will produce no further results, so a missing series stops being
+// ambiguous between "still shooting", "never started" and "withdrew". The championship
+// särskjutning gate reads this before it will decide a medal on a tie.
+// The shooter keeps their placement on whatever they scored — this only explains the short total.
+
+async function resSetParticipantStatus(memberId, shootingClass, status) {
+    const label = status === 'DNS' ? 'ej start' : 'bruten';
+    if (!confirm(`Markera skytten som ${label}? Skytten behåller sina inmatade serier och sin placering, men markeras i resultatlistan.`)) return;
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    if (!token) { alert('Säkerhetstoken saknas. Ladda om sidan och försök igen.'); return; }
+
+    try {
+        const r = await fetch('/umbraco/surface/CompetitionResults/SetParticipantStatus', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId, memberId, shootingClass, status })
+        });
+        const d = await r.json();
+        if (d.success || d.Success) {
+            resRenderParticipantStatusBadge(d.label || d.Label);
+            loadResultsList();
+        } else {
+            alert(d.message || d.Message || 'Statusen kunde inte sparas.');
+        }
+    } catch (e) {
+        alert('Ett oväntat fel uppstod när statusen skulle sparas.');
+    }
+}
+
+async function resClearParticipantStatus(memberId, shootingClass) {
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    if (!token) { alert('Säkerhetstoken saknas. Ladda om sidan och försök igen.'); return; }
+
+    try {
+        const r = await fetch('/umbraco/surface/CompetitionResults/ClearParticipantStatus', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId, memberId, shootingClass })
+        });
+        const d = await r.json();
+        if (d.success || d.Success) {
+            resRenderParticipantStatusBadge(null);
+            loadResultsList();
+        } else {
+            alert(d.message || d.Message || 'Hittade ingen status att ta bort.');
+        }
+    } catch (e) {
+        alert('Ett oväntat fel uppstod när statusen skulle tas bort.');
+    }
+}
+
+function resRenderParticipantStatusBadge(label) {
+    const el = document.getElementById('shooterParticipantStatusBadge');
+    if (!el) return;
+    el.innerHTML = label
+        ? `<span class="badge bg-warning text-dark">${label}</span>`
+        : '';
+}
 
 function openChangeClassModal(memberId, name, currentClass) {
     document.getElementById('changeClassMemberId').value = memberId;

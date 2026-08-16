@@ -1362,9 +1362,12 @@ function loadStartListForEditing(startListId) {
         cache: 'no-store'  // Prevent browser caching
     })
         .then(response => response.json())
-        .then(data => {
+        .then(async data => {
             if (data.success) {
                 currentStartListConfig = data.configuration;
+                // Statuses must be in hand BEFORE rendering — the shooter rows draw their
+                // Ej start / Bruten badge straight from window.participantStatusByKey.
+                await loadParticipantStatuses();
                 displayStartListInEditor(data.configuration, data.isOfficial);
             } else {
                 showEditorError(data.message || 'Kunde inte ladda startlistan.');
@@ -1374,6 +1377,82 @@ function loadStartListForEditing(startListId) {
             console.error('Error loading start list for editing:', error);
             showEditorError('Ett oväntat fel uppstod när startlistan skulle laddas.');
         });
+}
+
+// ── DNS / DNF ────────────────────────────────────────────────────────────────
+// Marks that a shooter will produce no further results. Consumed by the championship
+// särskjutning gate, which must not decide a medal on a tie a later series could still break.
+
+// Keyed "memberId|classid" (lowercased) — mirrors ParticipantStatusService.Key on the server.
+window.participantStatusByKey = window.participantStatusByKey || {};
+
+async function loadParticipantStatuses() {
+    const competitionId = $('.competition-startlist-management').data('competition-id');
+    if (!competitionId) return;
+    try {
+        const r = await fetch('/umbraco/surface/CompetitionResults/GetParticipantStatuses?competitionId=' + competitionId);
+        const d = await r.json();
+        const map = {};
+        (d.statuses || d.Statuses || []).forEach(s => {
+            const mid = s.memberId ?? s.MemberId;
+            const cls = (s.shootingClass ?? s.ShootingClass ?? '').toLowerCase();
+            map[`${mid}|${cls}`] = { status: s.status ?? s.Status, label: s.label ?? s.Label };
+        });
+        window.participantStatusByKey = map;
+    } catch (e) {
+        // A missing status table must not stop the editor from opening — badges simply don't render.
+        console.warn('Could not load participant statuses', e);
+        window.participantStatusByKey = {};
+    }
+}
+
+async function setParticipantStatus(memberId, shootingClass, status) {
+    const competitionId = $('.competition-startlist-management').data('competition-id');
+    const label = status === 'DNS' ? 'ej start' : 'bruten';
+    if (!confirm(`Markera skytten som ${label}? Det påverkar resultatlistan.`)) return;
+
+    const token = getAntiForgeryToken();
+    if (!token) { showAlert('danger', 'Säkerhetstoken saknas. Försök ladda om sidan.'); return; }
+
+    try {
+        const r = await fetch('/umbraco/surface/CompetitionResults/SetParticipantStatus', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId, memberId, shootingClass, status })
+        });
+        const d = await r.json();
+        if (d.success || d.Success) {
+            showAlert('success', `Skytten är markerad som ${label}.`);
+            loadStartListForEditing(window.currentStartListId);
+        } else {
+            showAlert('danger', d.message || d.Message || 'Statusen kunde inte sparas.');
+        }
+    } catch (e) {
+        showAlert('danger', 'Ett oväntat fel uppstod när statusen skulle sparas.');
+    }
+}
+
+async function clearParticipantStatus(memberId, shootingClass) {
+    const competitionId = $('.competition-startlist-management').data('competition-id');
+    const token = getAntiForgeryToken();
+    if (!token) { showAlert('danger', 'Säkerhetstoken saknas. Försök ladda om sidan.'); return; }
+
+    try {
+        const r = await fetch('/umbraco/surface/CompetitionResults/ClearParticipantStatus', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId, memberId, shootingClass })
+        });
+        const d = await r.json();
+        if (d.success || d.Success) {
+            showAlert('success', 'Statusen är borttagen — skytten räknas som vanligt igen.');
+            loadStartListForEditing(window.currentStartListId);
+        } else {
+            showAlert('warning', d.message || d.Message || 'Hittade ingen status att ta bort.');
+        }
+    } catch (e) {
+        showAlert('danger', 'Ett oväntat fel uppstod när statusen skulle tas bort.');
+    }
 }
 
 // Display start list in editor
@@ -1431,6 +1510,13 @@ function createTeamCard(team, index, isOfficial) {
         team.shooters.forEach(shooter => {
             // Handle both camelCase (from API) and PascalCase (from raw JSON)
             const clubDisplay = shooter.club || shooter.Club || 'Okänd klubb';
+            // The class Id, which is what SetParticipantStatus keys on — read defensively for the
+            // same reason clubDisplay is: this JSON reaches us in both casings.
+            const shooterWeaponClass = shooter.weaponClass || shooter.WeaponClass || '';
+            const pstatus = (window.participantStatusByKey || {})[`${shooter.memberId}|${shooterWeaponClass.toLowerCase()}`];
+            const statusBadge = pstatus
+                ? `<span class="badge bg-warning text-dark" title="Skytten producerar inga fler resultat">${pstatus.label}</span>`
+                : '';
             shootersHtml += `
                 <div class="shooter-row d-flex align-items-center p-2 border-bottom" data-member-id="${shooter.memberId}" data-team="${team.teamNumber}">
                     <input type="checkbox" class="form-check-input me-2 shooter-checkbox"
@@ -1443,6 +1529,7 @@ function createTeamCard(team, index, isOfficial) {
                             </div>
                             <div class="d-flex align-items-center gap-1">
                                 <span class="badge bg-info">${shooter.weaponClass}</span>
+                                ${statusBadge}
                                 <div class="dropdown">
                                     <button class="btn btn-sm btn-link text-secondary p-1" data-bs-toggle="dropdown" aria-expanded="false">
                                         <i class="bi bi-three-dots-vertical"></i>
@@ -1460,6 +1547,16 @@ function createTeamCard(team, index, isOfficial) {
                                         </a></li>
                                         <li><a class="dropdown-item" href="#" onclick="openMoveShooterModal(${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}', ${team.teamNumber}); return false;">
                                             <i class="bi bi-arrows-move me-2"></i>Flytta till annat lag
+                                        </a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><a class="dropdown-item" href="#" onclick="setParticipantStatus(${shooter.memberId}, '${shooterWeaponClass}', 'DNS'); return false;">
+                                            <i class="bi bi-dash-circle me-2"></i>Markera som ej start
+                                        </a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="setParticipantStatus(${shooter.memberId}, '${shooterWeaponClass}', 'DNF'); return false;">
+                                            <i class="bi bi-x-octagon me-2"></i>Markera som bruten
+                                        </a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="clearParticipantStatus(${shooter.memberId}, '${shooterWeaponClass}'); return false;">
+                                            <i class="bi bi-arrow-counterclockwise me-2"></i>Ta bort status
                                         </a></li>
                                         <li><hr class="dropdown-divider"></li>
                                         <li><a class="dropdown-item text-danger" href="#" onclick="removeShooterFromTeam(${window.currentStartListId}, ${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}'); return false;">

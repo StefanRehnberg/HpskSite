@@ -129,6 +129,16 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         // Standard Medal Award (Standardmedalj): null/""/B/S
         public string? StandardMedal { get; set; }
 
+        /// <summary>
+        /// "DNS" / "DNF" when the shooter has a CompetitionParticipantStatus row, otherwise null.
+        /// The shooter keeps their placement on whatever they scored — this only explains why the
+        /// total is short, instead of leaving them looking like they shot badly.
+        /// </summary>
+        public string? ParticipationStatus { get; set; }
+
+        /// <summary>Swedish label for <see cref="ParticipationStatus"/> ("Ej start" / "Bruten"). Null when normal.</summary>
+        public string? ParticipationStatusLabel { get; set; }
+
         /// <summary>Cumulative shoot-off total across all rounds the shooter participated in. Null when no shoot-off.</summary>
         public int? ShootOffScore { get; set; }
 

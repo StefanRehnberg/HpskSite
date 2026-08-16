@@ -55,6 +55,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _adminAuthorizationService;
         private readonly EmailService _emailService;
         private readonly ShootOffService _shootOffService;
+        private readonly ParticipantStatusService _participantStatusService;
         private readonly StandardMedalMaterializationService _medalMaterialization;
 
         public CompetitionResultsController(
@@ -76,6 +77,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService adminAuthorizationService,
             EmailService emailService,
             ShootOffService shootOffService,
+            ParticipantStatusService participantStatusService,
             StandardMedalMaterializationService medalMaterialization)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -93,6 +95,7 @@ namespace HpskSite.Controllers
             _adminAuthorizationService = adminAuthorizationService;
             _emailService = emailService;
             _shootOffService = shootOffService;
+            _participantStatusService = participantStatusService;
             _medalMaterialization = medalMaterialization;
         }
 
@@ -174,8 +177,13 @@ namespace HpskSite.Controllers
                     return Json(new ResultEntryResponse
                     {
                         Success = false,
+                        // Don't state the cause as fact — a unique-key violation here is usually a
+                        // concurrent save (retrying works) but can also be a schema problem that no
+                        // amount of retrying will clear. Telling the operator it "was already saved"
+                        // sends them off looking for a colleague who doesn't exist.
                         Message = resultId == -1
-                            ? "Resultatet sparades redan av en annan funktionär. Försök igen."
+                            ? "Resultatet kunde inte sparas. Serien kan ha sparats av en annan funktionär samtidigt — försök igen. "
+                              + "Om felet kvarstår, anmäl det; skytten kan då inte matas in i den här klassen utan att felet åtgärdas."
                             : "Ett fel uppstod vid sparande av resultatet."
                     });
                 }
@@ -1765,8 +1773,17 @@ namespace HpskSite.Controllers
             }
             catch (Microsoft.Data.SqlClient.SqlException sqlEx) when (sqlEx.Number == 2627 || sqlEx.Number == 2601)
             {
-                _logger.LogWarning(sqlEx, "Unique constraint violation saving result for MemberId {MemberId} — likely concurrent save by another range master",
-                    request.ShooterMemberId);
+                // 2627/2601 has more than one cause and they need different responses. A genuine
+                // concurrent save by a second range master is transient and retrying works. A
+                // unique index that is missing ShootingClass is NOT transient: the MERGE matches on
+                // all four columns, so a multi-class shooter's second class can never be inserted
+                // and retrying loops forever. Name both, and log the class so the two are
+                // distinguishable in a log rather than guessed at.
+                _logger.LogWarning(sqlEx,
+                    "Unique constraint violation (SQL {SqlNumber}) saving series {SeriesNumber} for MemberId {MemberId} in class {ShootingClass}, competition {CompetitionId}. " +
+                    "Either a concurrent save by another range master, or the unique index on the result table is missing ShootingClass " +
+                    "(see Migrations/fix-multiclass-results.sql) — the latter blocks multi-class shooters permanently and is not retryable.",
+                    sqlEx.Number, request.SeriesNumber, request.ShooterMemberId, request.ShooterClass, request.CompetitionId);
                 return -1; // Signal constraint violation to caller
             }
             catch (Exception ex)
@@ -3212,6 +3229,111 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Set DNS / DNF for one shooter in one class. Same authorisation as shoot-off entry —
+        /// this is result data, and it changes how the shooter appears in the published list.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetParticipantStatus([FromBody] ParticipantStatusRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 ||
+                    string.IsNullOrWhiteSpace(request.ShootingClass))
+                {
+                    return Json(new { Success = false, Message = "Ogiltig begäran." });
+                }
+
+                if (!CompetitionParticipantStatus.IsValidStatus(request.Status))
+                    return Json(new { Success = false, Message = "Ogiltig status. Tillåtna värden är DNS och DNF." });
+
+                if (!await CanManageCompetitionResults(request.CompetitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                var actingMemberId = await GetCurrentMemberIdOrZero();
+                var (ok, err) = await _participantStatusService.SetStatusAsync(
+                    request.CompetitionId, request.MemberId, request.ShootingClass,
+                    request.Status!, request.FromSeriesNumber, request.Note, actingMemberId);
+
+                if (!ok) return Json(new { Success = false, Message = err ?? "Kunde inte spara." });
+
+                return Json(new
+                {
+                    Success = true,
+                    Status = request.Status,
+                    Label = CompetitionParticipantStatus.DisplayLabel(request.Status)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in SetParticipantStatus");
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>Clear DNS / DNF — the shooter counts as a normal participant again.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ClearParticipantStatus([FromBody] ParticipantStatusRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 ||
+                    string.IsNullOrWhiteSpace(request.ShootingClass))
+                {
+                    return Json(new { Success = false, Message = "Ogiltig begäran." });
+                }
+
+                if (!await CanManageCompetitionResults(request.CompetitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                var (ok, err) = await _participantStatusService.ClearStatusAsync(
+                    request.CompetitionId, request.MemberId, request.ShootingClass);
+
+                return Json(new { Success = ok, Message = err });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in ClearParticipantStatus");
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>Every DNS / DNF row for a competition, for the admin screens.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetParticipantStatuses(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return Json(new { Success = false, Message = "Ogiltigt tävlings-ID." });
+
+                if (!await CanManageCompetitionResults(competitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                var statuses = await _participantStatusService.GetForCompetitionAsync(competitionId);
+                return Json(new
+                {
+                    Success = true,
+                    Statuses = statuses.Select(s => new
+                    {
+                        s.MemberId,
+                        s.ShootingClass,
+                        s.Status,
+                        Label = CompetitionParticipantStatus.DisplayLabel(s.Status),
+                        s.FromSeriesNumber,
+                        s.Note,
+                        s.SetAt
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in GetParticipantStatuses");
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
         private async Task<bool> CanManageCompetitionResults(int competitionId)
         {
             if (await _adminAuthorizationService.IsCurrentUserAdminAsync()) return true;
@@ -3318,6 +3440,66 @@ namespace HpskSite.Controllers
         }
 
 
+        /// <summary>
+        /// MemberIds standing on the competition's finals start list, i.e. the shooters who
+        /// were taken through to the final. Returns an empty set when no finals start list
+        /// has been generated yet — callers must treat that as "unknown", not as "nobody".
+        /// </summary>
+        /// <remarks>
+        /// Read regardless of <c>isOfficialFinalsStartList</c> on purpose: that flag is reset
+        /// to false on every generation and only flipped when the organiser presses Publicera,
+        /// so gating on it would make a perfectly good list look like it has no finalists.
+        /// </remarks>
+        private HashSet<int> GetFinalistMemberIds(int competitionId)
+        {
+            var finalists = new HashSet<int>();
+            try
+            {
+                var children = _contentService.GetPagedChildren(competitionId, 0, 50, out _);
+                var finalsNode = children.FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+
+                // Backward compatibility: older competitions keep start lists under a hub node.
+                if (finalsNode == null)
+                {
+                    var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+                    if (hub != null)
+                    {
+                        finalsNode = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
+                            .Where(c => c.ContentType.Alias == "finalsStartList")
+                            .OrderByDescending(c => c.CreateDate)
+                            .FirstOrDefault();
+                    }
+                }
+
+                var configData = finalsNode?.GetValue<string>("configurationData");
+                if (string.IsNullOrWhiteSpace(configData)) return finalists;
+
+                var config = Newtonsoft.Json.JsonConvert
+                    .DeserializeObject<CompetitionTypes.Precision.Models.StartListConfiguration>(configData);
+
+                var teams = config?.Teams;
+                if (teams == null) return finalists;
+
+                foreach (var team in teams)
+                {
+                    var shooters = team.Shooters;
+                    if (shooters == null) continue;
+                    foreach (var shooter in shooters)
+                    {
+                        if (shooter.MemberId > 0) finalists.Add(shooter.MemberId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // A broken finals list must never take the result list down with it. An empty
+                // set is the safe answer — the caller then refuses to award medals by
+                // särskjutning rather than awarding them on incomplete data.
+                _logger.LogWarning(ex, "Could not read finals start list for competition {CompetitionId}", competitionId);
+            }
+            return finalists;
+        }
+
         private async Task<FinalResults> CalculateFinalResults(List<PrecisionResultEntry> results, int competitionId, List<ClassMergeAction>? merges = null)
         {
             if (!results.Any())
@@ -3351,6 +3533,14 @@ namespace HpskSite.Controllers
             }
             _logger.LogInformation("Shooter lookup cache built with {Count} entries", shooterLookup.Count);
 
+            // DNS / DNF. Loaded once for the whole competition and probed per shooter below.
+            // NOTE: the status table stores the class *Id* ("C1", "A_opt_1"), while ShooterResult
+            // below carries the display *Name* ("C 1", "A Opt 1"). The lookup must therefore happen
+            // while the raw id is still in scope — probing on the display name silently matches
+            // nothing for every class where Id and Name differ.
+            var participantStatuses = await _participantStatusService.GetForCompetitionAsync(competitionId);
+            var statusLookup = ParticipantStatusService.BuildLookup(participantStatuses);
+
             var shooterResults = results
                 .GroupBy(r => new { r.MemberId, r.ShootingClass })
                 .Select(g =>
@@ -3364,13 +3554,20 @@ namespace HpskSite.Controllers
                         ? shooterInfo
                         : ("Unknown Shooter", "Unknown Club");
 
+                    statusLookup.TryGetValue(
+                        ParticipantStatusService.Key(memberId, shootingClass), out var participantStatus);
+
                     return new ShooterResult
                     {
                         MemberId = memberId,
                         Name = name,
                         Club = club,
                         ShootingClass = ShootingClasses.GetById(shootingClass)?.Name ?? shootingClass,
-                        Results = memberResults
+                        Results = memberResults,
+                        ParticipationStatus = participantStatus?.Status,
+                        ParticipationStatusLabel = participantStatus == null
+                            ? null
+                            : CompetitionParticipantStatus.DisplayLabel(participantStatus.Status)
                     };
                 })
                 .ToList();
@@ -3441,15 +3638,54 @@ namespace HpskSite.Controllers
             // in Championship competitions, re-rank the tied slice using shoot-off entries.
             // Other ranks and non-championship competitions fall through to the existing
             // X-count + countback already applied above.
+            //
+            // A särskjutning decides a MEDAL, so it can only ever follow the round that
+            // produces the final standings — never a qualifying round. Two shooters level
+            // after the grundomgång are not tied for a medal; they simply both go through
+            // to the final, which is what separates them.
             var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
             if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
             {
+                // Who was taken to the final. Only looked up when there is a final to be taken
+                // to; an empty set means no finals start list exists yet, which is "unknown"
+                // rather than "nobody" — see the fallback in HasShotEverythingDue below.
+                var finalistMemberIds = hasFinalsRound ? GetFinalistMemberIds(competitionId) : new HashSet<int>();
+                var finalistsKnown = finalistMemberIds.Count > 0;
+
+                // A tied shooter can be given a medal only once they have shot everything they
+                // were due to shoot: the qualifying series for everyone, plus the finals series
+                // for those taken to the final. Checked per shooter and not per class on
+                // purpose — shooters cut before the final never shoot those series at all, and
+                // must not hold back the medal decision for the finalists.
+                bool HasShotEverythingDue(ShooterResult shooter)
+                {
+                    // DNS / DNF settles the question outright: no further results are coming, so
+                    // the shooter is as finished as they will ever be. Without this the gate would
+                    // wait forever for series that will never be entered.
+                    if (shooter.ParticipationStatus != null) return true;
+
+                    // With a finals round but no finals start list to read, we cannot tell who
+                    // is due the finals series, so nobody counts as finished. That is what
+                    // keeps a plain qualifying-round tie from being mistaken for a medal tie.
+                    int lastSeriesDue = !hasFinalsRound || (finalistsKnown && !finalistMemberIds.Contains(shooter.MemberId))
+                        ? qualificationSeriesCount
+                        : numberOfSeriesOrStations;
+
+                    for (int series = 1; series <= lastSeriesDue; series++)
+                    {
+                        if (!shooter.Results.Any(r => r.SeriesNumber == series)) return false;
+                    }
+                    return true;
+                }
+
                 var shootOffEntries = await _shootOffService.GetEntriesForCompetitionAsync(competitionId);
                 var entriesByMember = shootOffEntries.ToLookup(e => e.MemberId);
 
                 foreach (var classGroup in classGroups)
                 {
-                    var tiedRaw = ShootOffService.DetectTiedMedalGroups(classGroup.Shooters, classGroup.ClassName);
+                    var tiedRaw = ShootOffService.DetectTiedMedalGroups(classGroup.Shooters, classGroup.ClassName)
+                        .Where(g => g.Shooters.All(HasShotEverythingDue))
+                        .ToList();
                     if (tiedRaw.Count == 0) continue;
 
                     ShootOffService.ApplyShootOffOverride(classGroup.Shooters, tiedRaw, entriesByMember);
@@ -4054,6 +4290,26 @@ namespace HpskSite.Controllers
         public int MemberId { get; set; }
         public string ShootingClass { get; set; } = "";
         public int Round { get; set; }
+    }
+
+    /// <summary>
+    /// Set or clear DNS / DNF. ShootingClass is the class *Id* ("C1", "A_opt_1"), not the display
+    /// name — the status is stored per class because a multi-class shooter can withdraw from one
+    /// class and finish another.
+    /// </summary>
+    public class ParticipantStatusRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
+
+        /// <summary>"DNS" or "DNF". Ignored by ClearParticipantStatus.</summary>
+        public string? Status { get; set; }
+
+        /// <summary>First series NOT shot. Ignored for DNS, which never started.</summary>
+        public int? FromSeriesNumber { get; set; }
+
+        public string? Note { get; set; }
     }
 
     /// <summary>

@@ -115,6 +115,11 @@ namespace HpskSite.Composers
             // Särskjutning (shoot-off) entries for tied medal positions in championship competitions
             builder.Services.AddScoped<ShootOffService>();
 
+            // DNS / DNF — tells "no more results are coming" apart from "still shooting".
+            // Consumed by the särskjutning gate, which must not award a medal on a tie that a
+            // later series could still break.
+            builder.Services.AddScoped<ParticipantStatusService>();
+
             // Fältskytte (Normal/Poäng/Magnumfält) Särskjutning — separate service since Fältskytte
             // uses a different result-entry shape (per-station hits/figures/poängmål)
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteShootOffService>();
