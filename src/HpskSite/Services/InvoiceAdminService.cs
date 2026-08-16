@@ -2,6 +2,7 @@ using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.PropertyEditors;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
+using Umbraco.Cms.Core.Cache;
 using Umbraco.Extensions;
 using Microsoft.Extensions.Logging;
 using HpskSite.Models;
@@ -19,17 +20,86 @@ namespace HpskSite.Services
         private readonly IContentService _contentService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberService _memberService;
+        private readonly AppCaches _appCaches;
+
+        /// <summary>
+        /// Content-tree scan cache. Deliberately under the "admin_invoices_" prefix so the existing
+        /// InvalidateInvoiceCaches() (ClearByRegex("^admin_invoices_")) already drops it whenever an
+        /// invoice is marked paid, cancelled or created — no new invalidation call sites.
+        /// </summary>
+        private const string TreeScanCacheKey = "admin_invoices_treescan";
+        private const string ClubMembersCacheKey = "admin_invoices_clubmembers_{0}";
+
+        /// <summary>
+        /// Short on purpose. The scan only has to survive one operator's burst of filter/page/view
+        /// switches — each of which used to re-walk the whole tree — not to stay fresh for minutes.
+        /// </summary>
+        private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromSeconds(60);
 
         public InvoiceAdminService(
             ILogger<InvoiceAdminService> logger,
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
-            IMemberService memberService)
+            IMemberService memberService,
+            AppCaches appCaches)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
             _umbracoContextAccessor = umbracoContextAccessor ?? throw new ArgumentNullException(nameof(umbracoContextAccessor));
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
+            _appCaches = appCaches ?? throw new ArgumentNullException(nameof(appCaches));
+        }
+
+        /// <summary>
+        /// The four node sets the whole aggregation is built from. Everything downstream filters
+        /// these in memory, so scanning the tree once per minute serves every view and every page.
+        /// </summary>
+        private sealed class ContentScan
+        {
+            public List<IContent> Competitions { get; init; } = new();
+            public List<IContent> InvoiceHubs { get; init; } = new();
+            public List<IContent> TeamRegistrations { get; init; } = new();
+            public List<IContent> RegistrationHubs { get; init; } = new();
+            public List<IContent> Clubs { get; init; } = new();
+        }
+
+        /// <summary>
+        /// Scan the content tree for the nodes the invoice views need, cached briefly.
+        ///
+        /// This used to run on EVERY call — every filter change, every page step, every view switch —
+        /// and it walked the tree exhaustively: one GetPagedChildren per node, including one per
+        /// registration and one per invoice. On a site with real data that is the whole 20–30 s.
+        /// </summary>
+        private ContentScan GetContentScan()
+        {
+            var cached = _appCaches.RuntimeCache.Get(TreeScanCacheKey) as ContentScan;
+            if (cached != null) return cached;
+
+            var started = DateTime.UtcNow;
+            var scan = new ContentScan();
+
+            foreach (var root in _contentService.GetRootContent())
+            {
+                foreach (var node in GetFlatDescendants(root))
+                {
+                    switch (node.ContentType.Alias)
+                    {
+                        case "competition": scan.Competitions.Add(node); break;
+                        case "registrationInvoicesHub": scan.InvoiceHubs.Add(node); break;
+                        case "competitionTeamRegistration": scan.TeamRegistrations.Add(node); break;
+                        case "competitionRegistrationsHub": scan.RegistrationHubs.Add(node); break;
+                        case "club": scan.Clubs.Add(node); break;
+                    }
+                }
+            }
+
+            _logger.LogInformation(
+                "Invoice content scan: {Competitions} competitions, {Hubs} invoice hubs, {Teams} team registrations, {Clubs} clubs in {Ms} ms",
+                scan.Competitions.Count, scan.InvoiceHubs.Count, scan.TeamRegistrations.Count, scan.Clubs.Count,
+                (int)(DateTime.UtcNow - started).TotalMilliseconds);
+
+            _appCaches.RuntimeCache.Insert(TreeScanCacheKey, () => scan, ScanCacheDuration);
+            return scan;
         }
 
         /// <summary>
@@ -45,21 +115,12 @@ namespace HpskSite.Services
                 _logger.LogInformation("Starting invoice aggregation with filters: CompetitionId={CompetitionId}, Status={Status}, ActiveOnly={ActiveOnly}",
                     filters.CompetitionId, filters.PaymentStatus, filters.ActiveCompetitionsOnly);
 
-                // Step 1: Get all competitions, invoice hubs, and team registrations efficiently (single-pass BFS)
-                var allCompetitions = new List<IContent>();
-                var allInvoicesHubs = new List<IContent>();
-                var allTeamRegDocs = new List<IContent>();
-                var allRegistrationHubs = new List<IContent>();
-
-                var rootContent = _contentService.GetRootContent();
-                foreach (var root in rootContent)
-                {
-                    var descendants = GetFlatDescendants(root);
-                    allCompetitions.AddRange(descendants.Where(c => c.ContentType.Alias == "competition"));
-                    allInvoicesHubs.AddRange(descendants.Where(c => c.ContentType.Alias == "registrationInvoicesHub"));
-                    allTeamRegDocs.AddRange(descendants.Where(c => c.ContentType.Alias == "competitionTeamRegistration"));
-                    allRegistrationHubs.AddRange(descendants.Where(c => c.ContentType.Alias == "competitionRegistrationsHub"));
-                }
+                // Step 1: the content-tree scan — cached, pruned, and shared by every view and page.
+                var scan = GetContentScan();
+                var allCompetitions = scan.Competitions;
+                var allInvoicesHubs = scan.InvoiceHubs;
+                var allTeamRegDocs = scan.TeamRegistrations;
+                var allRegistrationHubs = scan.RegistrationHubs;
 
                 _logger.LogInformation("Found {CompetitionCount} competitions and {HubCount} invoice hubs",
                     allCompetitions.Count, allInvoicesHubs.Count);
@@ -103,13 +164,9 @@ namespace HpskSite.Services
                 // that belongs to it, OR by the region itself.
                 if (!string.IsNullOrEmpty(filters.Region))
                 {
-                    // Build club regions lookup
-                    var allClubs = new List<IContent>();
-                    foreach (var root in rootContent)
-                    {
-                        var descendants = GetFlatDescendants(root);
-                        allClubs.AddRange(descendants.Where(c => c.ContentType.Alias == "club"));
-                    }
+                    // Club regions lookup — clubs come from the same cached scan. This block used to
+                    // walk the ENTIRE tree a SECOND time, on top of Step 1, just to find club nodes.
+                    var allClubs = scan.Clubs;
                     var clubRegions = allClubs.ToDictionary(
                         club => club.Id,
                         club => NormalizeRegionCode(club.GetValue<string>("regionalFederation"))
@@ -288,27 +345,7 @@ namespace HpskSite.Services
         {
             var result = new List<InvoiceInfo>();
 
-            // Build set of member IDs belonging to this club
-            var clubMemberIds = new HashSet<string>();
-            int pageIndex = 0;
-            const int pageSize = 500;
-            long totalRecords;
-            do
-            {
-                var members = _memberService.GetAll(pageIndex, pageSize, out totalRecords);
-                foreach (var member in members)
-                {
-                    var primaryClubIdRaw = member.GetValue("primaryClubId")?.ToString();
-                    if (!string.IsNullOrEmpty(primaryClubIdRaw)
-                        && int.TryParse(primaryClubIdRaw, out var memberClubId)
-                        && memberClubId == clubId)
-                    {
-                        clubMemberIds.Add(member.Id.ToString());
-                    }
-                }
-                pageIndex++;
-            } while (pageIndex * pageSize < totalRecords);
-
+            var clubMemberIds = GetClubMemberIds(clubId);
             if (clubMemberIds.Count == 0) return result;
 
             _logger.LogInformation("Found {MemberCount} members for club {ClubId}", clubMemberIds.Count, clubId);
@@ -390,8 +427,90 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Efficient flat BFS traversal (non-recursive)
-        /// Pattern from CompetitionAdminController.GetFlatDescendants()
+        /// MemberIds whose primary club is <paramref name="clubId"/>, cached briefly.
+        ///
+        /// This pages through the ENTIRE member register (thousands of members, 500 at a time) and
+        /// used to run on every single request for the "Medlemmars fakturor" view — including every
+        /// page step through the results, where the answer cannot have changed.
+        ///
+        /// Cached per club rather than as one big lookup: an operator works one club at a time, and
+        /// this way a site admin flipping between clubs doesn't pay for all of them at once.
+        /// </summary>
+        private HashSet<string> GetClubMemberIds(int clubId)
+        {
+            var cacheKey = string.Format(ClubMembersCacheKey, clubId);
+            if (_appCaches.RuntimeCache.Get(cacheKey) is HashSet<string> cached) return cached;
+
+            var clubMemberIds = new HashSet<string>();
+            int pageIndex = 0;
+            const int pageSize = 500;
+            long totalRecords;
+            do
+            {
+                var members = _memberService.GetAll(pageIndex, pageSize, out totalRecords);
+                foreach (var member in members)
+                {
+                    var primaryClubIdRaw = member.GetValue("primaryClubId")?.ToString();
+                    if (!string.IsNullOrEmpty(primaryClubIdRaw)
+                        && int.TryParse(primaryClubIdRaw, out var memberClubId)
+                        && memberClubId == clubId)
+                    {
+                        clubMemberIds.Add(member.Id.ToString());
+                    }
+                }
+                pageIndex++;
+            } while (pageIndex * pageSize < totalRecords);
+
+            _appCaches.RuntimeCache.Insert(cacheKey, () => clubMemberIds, ScanCacheDuration);
+            return clubMemberIds;
+        }
+
+        /// <summary>
+        /// Node types the scan records but never descends into: nothing the aggregation collects
+        /// (competition · registrationInvoicesHub · competitionTeamRegistration ·
+        /// competitionRegistrationsHub · club) can live underneath any of them.
+        ///
+        /// Each entry saves one GetPagedChildren per node of that type, and the counts are what
+        /// matter: ~500 clubs each with their events and news, plus a start list, finals start list
+        /// and result node per competition. That traffic was pure waste — the nodes were fetched,
+        /// examined and thrown away.
+        ///
+        /// ⚠ Adding a type here is a claim that NOTHING the aggregation needs can appear below it.
+        /// Check against the five aliases collected in GetContentScan before extending this.
+        /// </summary>
+        private static readonly HashSet<string> DoNotDescend = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Invoices are read per hub, on demand, by GetInvoicesFromHub.
+            "registrationInvoicesHub",
+            "registrationInvoice",
+            // Club events and news. Competitions do not live under a club — they hang off
+            // competitionsHub — so the club node itself is all this needs.
+            "club",
+            // Per-competition leaves.
+            "precisionStartList",
+            "finalsStartList",
+            "competitionResult",
+            "competitionRegistration",
+            "competitionTeamRegistration",
+        };
+
+        /// <summary>
+        /// Flat BFS traversal, PRUNED to the branches the invoice views actually need.
+        ///
+        /// The unpruned version enqueued every node in the tree and issued one GetPagedChildren per
+        /// node — so the cost grew with the number of registrations and invoices, which is exactly
+        /// what grows fastest on this site. Two branches are cut:
+        ///
+        ///   registrationInvoicesHub  — its children are the invoices, and those are read on demand
+        ///                              per hub by GetInvoicesFromHub. Walking them here bought
+        ///                              nothing and cost one query per invoice.
+        ///   competitionRegistrationsHub — the aggregation needs the competitionTeamRegistration
+        ///                              children (for club/team mapping) but nothing below them.
+        ///                              Registrations are leaves; enqueuing them cost one query each
+        ///                              to discover they have no children.
+        ///
+        /// ⚠ The team-registration children are added straight to the result and NOT enqueued.
+        /// Doing both would add them twice, and every downstream lookup is keyed on their ids.
         /// </summary>
         private List<IContent> GetFlatDescendants(IContent root)
         {
@@ -404,7 +523,25 @@ namespace HpskSite.Services
                 var current = queue.Dequeue();
                 result.Add(current);
 
+                if (DoNotDescend.Contains(current.ContentType.Alias))
+                {
+                    continue;
+                }
+
                 var children = _contentService.GetPagedChildren(current.Id, 0, int.MaxValue, out _);
+
+                if (current.ContentType.Alias == "competitionRegistrationsHub")
+                {
+                    foreach (var child in children)
+                    {
+                        if (child.ContentType.Alias == "competitionTeamRegistration")
+                        {
+                            result.Add(child);
+                        }
+                    }
+                    continue;
+                }
+
                 foreach (var child in children)
                 {
                     queue.Enqueue(child);
