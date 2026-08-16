@@ -604,8 +604,21 @@ if (stringValue.TrimStart().StartsWith("[")) {
 
 **Umbraco operator setup**: add two properties to `competitionResult` doctype — see "Document Type Properties — Required Additions" section. Without them, sub-comp publish + sub-comp merge silently fail.
 
-### Särskjutning (Shoot-Off) for Championship Medal Positions ✅ (2026-05-19)
+### Särskjutning (Shoot-Off) for Championship Medal Positions ✅ (2026-05-19, gate corrected 2026-08-16)
 **Rule:** In Championship competitions (`competitionScope` ∈ {`Svenskt Mästerskap`, `Landsdelsmästerskap`, `Kretsmästerskap`, `Klubbmästerskap`}), tied medal positions 1–3 are resolved **only** by a 5-shot shoot-off. **None of the normal tie-breakers apply at medal positions** — not X-count, not series countback. Repeat rounds until separated. Ranks 4+ continue to use X-count + countback as before.
+
+**⚠️ WHEN it applies is part of the rule (corrected 2026-08-16).** For over a year the entire gate was `IsChampionshipScope(scope)` — the code had no notion of *when* in the competition a tie counts. On a 7+3 championship that surfaced the Särskjutning card as soon as two shooters tied after **series 7**, i.e. after the grundomgång and before the final that actually separates them. Reported by Tomelilla PK. `TotalScore` sums whatever series happen to be entered, so a 7-series total looked like a final standing. A shoot-off decides a MEDAL, so it can only follow the round that produces the final standings.
+
+The gate now also requires each tied shooter to have shot **everything they were due**:
+- Qualifying series for everyone, plus the finals series for whoever is on the `finalsStartList`.
+- Finalists are read by `CompetitionResultsController.GetFinalistMemberIds` — **ignoring `isOfficialFinalsStartList`**, which is reset to false on every generation and only flipped by the organiser's Publicera. Gating on it would hide a perfectly good list.
+- **No finals start list yet = "unknown", NOT "nobody".** The organiser is stuck exactly there when the bug bites; treating an empty finalist set as "nobody is a finalist" would judge everyone on the qualifying series and reinstate the original bug unchanged.
+- Checked **per shooter**, not per class — shooters cut before the final never shoot those series and must not hold back the finalists' medal.
+- DNS/DNF short-circuits it to "finished" (see below), otherwise the gate would wait forever for series that will never arrive.
+
+**Fältskytte is deliberately untouched by this** — it has no finals concept and shoot-offs there follow the whole competition (confirmed with Stefan 2026-08-16). Applying the same condition would have disabled Fältskytte särskjutning entirely.
+
+Verified 25/25 `hpsk-verify/participant-status-verify.mjs` (builds + deletes a throwaway Klubbmästerskap, so no dev data is mutated).
 
 **Scope:** Precision, Duell, Milsnabb, MagnumPrecision, NationellHelmatch (all five share the same code path through `CompetitionResultsController.CalculateFinalResults`). **Fältskytte is also done** — Normal/Poäng/Magnumfält, shipped 2026-05-20, via its own `FaltskytteShootOffEntry` table + per-variation comparers (see "Fältskytte Särskjutning" section below). Springskytte (full re-run) is intentionally not implemented (vanishingly rare; would re-run the whole event).
 
@@ -621,6 +634,34 @@ if (stringValue.TrimStart().StartsWith("[")) {
 **Tests:** `HpskSite.Tests/Services/ShootOffServiceTests.cs` — 16 tests (scope helper, tie detection, single/multi-round resolution, rank-4 ignored, X-count divergence still tied, triple-tie).
 
 **Manual operator steps:** Run `Migrations/create-competition-shootoffs-table.sql` in SSMS. No new doctype properties — all state lives in SQL.
+
+### DNS / DNF for the precision family ✅ (2026-08-16)
+**Why:** a missing result row was ambiguous between *still shooting*, *never started* and *withdrew*. Nothing could tell them apart, so anything asking "is this shooter finished?" had to guess. The särskjutning gate above is the first real consumer. Before this the precision family had **nothing** — Springskytte has full DNS/DNF (`SpringskytteResultEntry.Status`), Fältskytte has DNS on `FaltskyttePatrolMember.Status` that only frees a patrol slot and never touches results.
+
+**⚠️ It cannot live on the result-entry rows.** `PrecisionResultEntry.Shots` is `NVARCHAR(50) NOT NULL` and `ValidateResultRequest` demands exactly five valid shots — where `"0"` is valid. A placeholder row is indistinguishable from a genuine zero series. Springskytte's trick of writing an empty row (`Shots="[]"`) is therefore **not portable here**. Hence a separate table.
+
+- **Table `CompetitionParticipantStatus`**, keyed `(CompetitionId, MemberId, ShootingClass)` — the same identity key as `CompetitionShootOffEntry`, so regenerating start lists or merging classes cannot orphan a status. Class is in the key because a multi-class shooter can withdraw from one class and finish another.
+- **Nullable `FromSeriesNumber`** = first series NOT shot. One field covers every case: null/1 = never took part, qual+1 = skipped the final, 9 = broke off after 8. Forced to null for DNS, which never started.
+- `Services/ParticipantStatusService.cs` + `SetParticipantStatus` / `ClearParticipantStatus` / `GetParticipantStatuses` on `CompetitionResultsController` (same three-tier auth as shoot-off entry). Reads swallow a missing table and return empty, so an un-migrated environment degrades to today's behaviour instead of taking the result list down.
+- **A DNF keeps their placement, ranked on their partial sum**, marked "Bruten" (Stefan's call 2026-08-16) — not unranked-at-the-bottom like Springskytte. Before this, a shooter who skipped the final just looked like they had shot badly, publicly. A DNF tied at a medal place was judged too unlikely to design around, so a withdrawn shooter *can* land in a tied group.
+- **UI:** the start-list editor's per-shooter kebab menu (with a status badge next to the class badge) and the results-entry shooter card's participation menu. Deliberately **not** on `/station` — that screen is for shots, not administration.
+
+**⚠️ The Id-vs-Name trap.** The table stores the class **Id** (`C1`, `A_opt_1`); `PrecisionShooterResult.ShootingClass` carries the display **Name** (`C 1`, `A Opt 1`). The lookup in `CalculateFinalResults` happens while the raw id is still in scope — probing on the display name silently matches nothing for every class where they differ. Same trap already present in `ChangeShooterClass`, which writes Name where everything else writes Id.
+
+**Operator step:** run `Migrations/create-competition-participant-status-table.sql` in SSMS. Guarded **per object**, not per table — a table-level guard skips index creation forever after a partial failure. **Visual Studio's static T-SQL analysis does not evaluate the guards** and reports "already exists" per CREATE in its Error List; those are design-time messages, not execution errors. The script ends with a verification query (expect 9 columns, 3 indexes). Run in prod 2026-08-16.
+
+Verified 13/13 `hpsk-verify/dnsdnf-ui-verify.mjs` (full round trip: menu → database → badge → cleanup).
+
+### Finals result entry (Precision / MagnumPrecision) ✅ (2026-08-16)
+**The finals mode always worked; nothing in the UI could reach it.** The scoring screen switches into finals mode on `?phase=finals`, loads the finals start list and sets the first series to `qualificationSeriesCount + 1`. `SaveResult` never capped below `numberOfSeriesOrStations` either. But the **only** link in the codebase producing `phase=finals` sat inside the Finalsskjutlag block in `CompetitionResultsManagement.cshtml`, which is wrapped in `@if (!isStationPage && !supportsSkjutledareView)` — and `supportsSkjutledareView` is true for exactly Precision and MagnumPrecision. Those disciplines launch their scoring screens from the **Funktionärer** tab instead, which built its list from the qualifying start list only and linked without `phase`. Result: `currentPhase` stayed `'qualification'` and entry stopped at the last qualifying series. Reported by Tomelilla PK, who could not get past series 7 of 10.
+
+Fixed with a **Final section on the Funktionärer tab** (`PrecisionFunktionarerManagement.cshtml`) — where Precision already has its entry points — rather than opening up a block that was deliberately switched off for these disciplines.
+- Renders only when `numberOfFinalSeries > 0` (reads `ViewData["NumberOfFinalSeries"]`, set in `CompetitionManagement.cshtml:46`).
+- **Tied to the finals START LIST, not the finals series count** — finals mode loads its shooters from that list, so without one there is nothing to enter against. Missing list → an explanation pointing at the Startlistor tab, never a dead button.
+- Not gated on `isOfficialFinalsStartList` (same reasoning as the särskjutning gate); an unpublished list warns instead.
+- Loaded once plus on tab re-entry, **not** on the 15 s poll — a finals start list is created once, not continuously.
+
+Verified 21/21 `hpsk-verify/finals-entry-verify.mjs`, including that entry really starts on series 4 when the qualifying round is 3, and both branches (with and without a finals start list).
 
 ### Standard Medals — A-family pooling rule ✅ (2026-05-17)
 **Rule:** When standard medals are calculated, shooters in AM, AP, AG, and the open A class are pooled into a single "A family" ranking — percentage quotas (top 1/9 silver, top 1/3 bronze) are computed across the combined pool. Fixed-score thresholds (267/277 for 6 series, etc.) apply identically to every A-family subgroup. **A_Opt is NOT in the pool** — it's a parallel weapon group with its own ranking.
@@ -739,6 +780,8 @@ Each is a separate `WeaponClass` enum value (`A_M`, `A_P`, `A_G`) with 3 compete
 **Configuration:**
 - Competition must have `swishNumber` property configured (10 digits starting with 0)
 - At least one of `registrationFee`, `juniorRegistrationFee`, `subCompetitionFee` must be > 0
+
+**Swish-number validation lives in `Views/Partials/_SwishNumberValidation.cshtml`** (extracted 2026-08-16), included by both `CompetitionWizardModal` and `CompetitionEditModal`, guarded by `window.swishNumberValidationLoaded` so rendering both doesn't redefine it. It used to sit inside the wizard modal on the assumption — stated in a comment there — that the edit modal "renders its swishNumber input alongside this one". That holds on AdminPage, Club and RegionalPage, which include both partials, but **`CompetitionManagement.cshtml` includes ONLY the edit modal** — so on the page organisers actually edit their competition from, every keystroke in the Swish field threw `validateSwishNumberField is not defined` and the Validera button did nothing. **Silently**, because exceptions in inline `oninput`/`onclick` attributes surface nowhere in the UI. Format-only check (Swish exposes no "is this number registered" endpoint) and the copy is deliberate about that. Verified 13/13 `hpsk-verify/swish-validation-verify.mjs`.
 - Payment button only shows when these conditions are met
 
 **Fee Types (all Textstring on `competition` doctype):**
@@ -776,9 +819,15 @@ All fee math flows through `Services/RegistrationFeeCalculator.cs`. Never duplic
 
 1. **Database Schema** (`PrecisionResultEntry` table):
    ```sql
-   UNIQUE CONSTRAINT: (CompetitionId, MemberId, SeriesNumber)
+   UNIQUE INDEX: (CompetitionId, MemberId, ShootingClass, SeriesNumber)
    -- TeamNumber and Position are now INFORMATIONAL only
    ```
+
+   **⚠️ ShootingClass MUST be in that key**, and the schema files were wrong about it until 2026-08-16. A shooter can compete in several weapon classes in the same competition and then legitimately has one result per class for the same series number. `SaveResultToDatabase`'s MERGE matches on all four columns; leave `ShootingClass` out of the index and that MERGE finds no match, tries to INSERT, and trips the unique index. The save then **fails hard and is not retryable** — the shooter can hold results in exactly one weapon class per series number and the other is permanently blocked.
+
+   Prod was corrected by `Migrations/fix-multiclass-results.sql` on 2026-02-20 (verified still in place 2026-08-16: index `UX_PrecisionResultEntry_CompetitionMemberClassSeries`, all four columns). But `create-precision-result-entry-tables.sql` and `_prod-schema-sync-additive.sql` kept creating the OLD three-column index, so **any newly created database reintroduced the bug** — both are fixed now. The sister tables (`DuellResultEntry`, `MilsnabbResultEntry`, `MagnumPrecisionResultEntry`, `NationellHelmatchResultEntry`) were created after the fix and always had the correct shape.
+
+   The failure was hard to diagnose because both the user message and the log **asserted the wrong cause**: "Resultatet sparades redan av en annan funktionär. Försök igen." and `"likely concurrent save by another range master"`. SQL 2627/2601 has at least two causes here — a genuine concurrent save (transient, retry works) and this schema fault (deterministic, retry never works). Both now name both causes, and the log carries class, series and competition so they can be told apart afterwards.
 
 2. **Results Controller** (`CompetitionResultsController.cs`):
    - `SaveResultToDatabase`: Queries by MemberId instead of position
@@ -818,6 +867,23 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 **Migration:** Database migration `precision-results-identity-based-v1` drops and recreates `PrecisionResultEntry` table with new schema (beta - existing data can be scraped).
 
 **See Also:** [Late Registration Workflow Documentation](Documentation/LATE_REGISTRATION_WORKFLOW.md) for complete implementation details
+
+### Fakturor page performance ✅ (2026-08-16)
+Club Admin → Fakturor (and the site-wide / regional invoice lists) took **~12 s per load and did it again on every filter change, page step and view switch** — exactly what an organiser does when reconciling and consolidating club invoices. The existing controller cache only helped on an *exact* repeat: its key contains `page`, `viewType`, `excludePaid` and the filters, so every new combination was a fresh 12 s.
+
+Two causes, both in `Services/InvoiceAdminService.cs`:
+1. **The tree walk.** `GetFlatDescendants` enqueued every node and issued one `GetPagedChildren` **per node** — one query per registration and one per invoice, then discarded them, so cost grew with what grows fastest on this site. The region filter walked the whole tree a **second** time just to find club nodes. Now pruned, collecting all five needed aliases (`competition`, `registrationInvoicesHub`, `competitionTeamRegistration`, `competitionRegistrationsHub`, `club`) in one pass and cached 60 s.
+   - Don't descend into `registrationInvoicesHub` — invoices are read per hub by `GetInvoicesFromHub` anyway.
+   - Under `competitionRegistrationsHub`, take the `competitionTeamRegistration` children and stop. They ARE direct children of the hub (`CompetitionTeamService.cs:1432`), so this is complete.
+   - **⚠️ Add those children straight to the result and do NOT also enqueue them** — doing both adds them twice, and every downstream lookup is keyed on their ids.
+   - `DoNotDescend` is a claim that nothing the aggregation collects can appear below a type. Check against the five aliases before extending it.
+2. **`GetMemberInvoices` paged the ENTIRE member register** (500 at a time) on every request, including every page step through the results where the answer cannot have changed. Now cached per club.
+
+**Both cache keys sit under the `admin_invoices_` prefix on purpose** — the existing `InvalidateInvoiceCaches()` (`ClearByRegex("^admin_invoices_")`) already drops them on create / mark-paid / cancel, so there are **no new invalidation call sites** to remember. The client-side request-sequence guard against the "Inga fakturor" flicker already existed.
+
+Measured in dev: 12670/12581/12130/11927/12727 ms → **33–40 ms warm**, ~5 s for the first scan after the cache expires.
+
+**⚠️ How to prove a change here didn't drop invoices:** `hpsk-verify/invoice-perf-verify.mjs` fingerprints the invoice set per view. Run A/B against an **identical data state** — stash only the service, rebuild, measure, restore. A first attempt compared snapshots taken either side of other verify scripts and appeared to lose team invoices; that was **mutating test scripts** (consolidated-paid-cascade marks invoices paid, and `excludePaid=true` then hides them), not the pruning. Clean A/B: identical sets in all five views.
 
 ### Cashier Workflow & Multi-Class Walk-In ✅ (2026-05-06)
 
