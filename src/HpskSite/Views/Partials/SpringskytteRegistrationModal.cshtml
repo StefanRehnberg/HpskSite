@@ -79,6 +79,17 @@
                     <p class="text-muted small mb-2"><i class="bi bi-person me-1"></i>Anmäler: <strong>@regMemberName</strong> (@regClubName)</p>
                 }
 
+                @* "Tävlar för" — which of the shooter's OWN clubs this entry is filed under.
+                   Distinct from the club dropdown above, which only narrows the member list.
+                   Hidden unless the shooter belongs to more than one club. *@
+                <div class="mb-3 d-none" id="springRegClubBlock">
+                    <label for="springRegRepresentingClub" class="form-label fw-bold">
+                        <i class="bi bi-shield me-1"></i>Tävlar för
+                    </label>
+                    <select class="form-select form-select-sm" id="springRegRepresentingClub"></select>
+                    <div class="form-text small">Medlem i flera klubbar — välj vilken som gäller i den här tävlingen.</div>
+                </div>
+
                 <!-- Existing registration notice -->
                 <div id="springRegExistingNotice" class="alert alert-info small py-2 px-3" style="display:none;">
                     <i class="bi bi-info-circle me-1"></i>
@@ -326,7 +337,12 @@ function springRegApplyExisting() {
 // --- Init: populate club dropdown for admins ---
 (function() {
     const clubSelect = document.getElementById('springRegClubSelect');
-    if (!clubSelect) return; // regular member, no dropdowns
+    if (!clubSelect) {
+        // Regular member: no target dropdowns, but they may still belong to several clubs
+        // and get to choose which one this entry counts for.
+        springRegLoadRepresentingClubs(springRegConfig.memberId);
+        return;
+    }
 
     springRegConfig.clubs.forEach(c => {
         const opt = document.createElement('option');
@@ -344,6 +360,7 @@ function springRegApplyExisting() {
                 memberSelect.value = springRegConfig.memberId;
                 springRegSelectedTargetMemberId = springRegConfig.memberId;
                 springRegShowTargetInfo(springRegConfig.memberName, springRegConfig.clubName);
+                springRegLoadRepresentingClubs(springRegConfig.memberId);
             }
         });
     }
@@ -411,7 +428,44 @@ function springRegOnMemberSelected() {
         if (infoDiv) infoDiv.style.display = 'none';
         springRegCheckExisting(null);
     }
+    springRegLoadRepresentingClubs(springRegSelectedTargetMemberId);
     springRegUpdateSummary();
+}
+
+// "Tävlar för": the shooter's own club affiliation for this competition. A shooter belonging
+// to several clubs may enter one competition for their primary club and another for a second
+// club; the row stays hidden when there is only one, so it never appears for most shooters.
+async function springRegLoadRepresentingClubs(memberId) {
+    const block = document.getElementById('springRegClubBlock');
+    const sel = document.getElementById('springRegRepresentingClub');
+    if (!block || !sel) return;
+
+    block.classList.add('d-none');
+    sel.innerHTML = '';
+    if (!memberId) return;
+
+    try {
+        const resp = await fetch(
+            `/umbraco/surface/Competition/GetMemberClubs?memberId=${encodeURIComponent(memberId)}&competitionId=${@competitionId}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const data = await resp.json();
+        if (!data.success || !Array.isArray(data.clubs) || data.clubs.length < 2) return;
+        // A slow response must not attach one shooter's clubs to another.
+        if (springRegSelectedTargetMemberId !== parseInt(memberId)) return;
+
+        sel.innerHTML = data.clubs.map(c =>
+            `<option value="${c.id}"${c.isPrimary ? ' selected' : ''}>` +
+            `${springRegEscape(c.name)}${c.isPrimary ? ' (primär)' : ''}</option>`).join('');
+        block.classList.remove('d-none');
+    } catch (e) {
+        // Non-fatal: with no picker the server files the entry under the primary club.
+        console.error('Kunde inte hämta klubbar', e);
+    }
+}
+
+function springRegEscape(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function springRegShowTargetInfo(name, clubName) {
@@ -505,6 +559,14 @@ async function springRegSubmit() {
         var subCompCheck = document.getElementById('springRegSubCompetition');
         if (subCompCheck && subCompCheck.checked) {
             formData.append('isSubCompetition', 'true');
+        }
+
+        // "Tävlar för" — only sent when the shooter actually had a choice; otherwise the
+        // server files the entry under their primary club as before.
+        const repBlock = document.getElementById('springRegClubBlock');
+        const repSel = document.getElementById('springRegRepresentingClub');
+        if (repBlock && !repBlock.classList.contains('d-none') && repSel && repSel.value) {
+            formData.append('representingClubId', repSel.value);
         }
 
         const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
@@ -727,6 +789,7 @@ document.getElementById('registrationModal')?.addEventListener('hidden.bs.modal'
             if (springRegConfig.memberId) memberSelect.value = springRegConfig.memberId;
         });
     }
+    springRegLoadRepresentingClubs(springRegConfig.memberId);
 
     springRegUpdateSummary();
 });

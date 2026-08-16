@@ -31,6 +31,8 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly DirektplaceringStartListService _dpStartListService;
         private readonly InvoiceAuditService _auditService;
+        private readonly MemberClubService _memberClubService;
+        private readonly RegistrationClubPropagationService _clubPropagationService;
         // Used to create a fresh DI scope for deferred background work. The controller's
         // own scoped services (_contentService, _dpStartListService) get disposed when the
         // HTTP request ends — capturing them in a Task.Run lambda that fires later leaks
@@ -55,9 +57,13 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             DirektplaceringStartListService dpStartListService,
             InvoiceAuditService auditService,
+            MemberClubService memberClubService,
+            RegistrationClubPropagationService clubPropagationService,
             IServiceScopeFactory scopeFactory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberClubService = memberClubService;
+            _clubPropagationService = clubPropagationService;
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
@@ -112,12 +118,18 @@ namespace HpskSite.Controllers
 
         #region Registration System (Mock)
 
+        /// <param name="representingClubId">
+        /// The club the shooter competes FOR in this competition. Optional, and only honoured when
+        /// the shooter is actually a member of it — a shooter with several club memberships may
+        /// enter for any of them, and everyone else has exactly one option, so the picker is hidden
+        /// and this arrives absent. Absent / not a member of it → the primary club, as before.
+        /// </param>
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RegisterForCompetition(int competitionId,
             string selectedClasses = "", string startPreference = "Inget", int? targetMemberId = null,
             string startPreferencesJson = "", bool isSubCompetition = false,
-            string teamAssignmentsJson = "")
+            string teamAssignmentsJson = "", int? representingClubId = null)
         {
             try
             {
@@ -253,12 +265,13 @@ namespace HpskSite.Controllers
                 }
 
                 var memberName = targetMember.Name;
-                var primaryClubIdStr = targetMember.GetValue<string>("primaryClubId");
-                int? clubId = null;
-                if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var parsedClubId))
-                {
-                    clubId = parsedClubId;
-                }
+
+                // Which club does this shooter compete FOR? Defaults to their primary club; a
+                // shooter who belongs to several clubs may pick another of theirs (Eva is primary
+                // at X but shoots some disciplines for Y). Anything they are not a member of is
+                // silently ignored rather than rejected — see MemberClubService.ResolveRegistrationClubId.
+                var resolvedClubId = _memberClubService.ResolveRegistrationClubId(targetMember, representingClubId);
+                int? clubId = resolvedClubId > 0 ? resolvedClubId : null;
 
                 // Validate selected class
                 if (string.IsNullOrEmpty(selectedClasses))
@@ -390,6 +403,9 @@ namespace HpskSite.Controllers
                 bool isUpdate = false;
                 decimal oldFee = 0;
                 decimal newFee = 0;
+                // Set when re-registering moved an EXISTING registration to a different club, so the
+                // change can be pushed out to any start list that already snapshotted the old one.
+                int? registrationClubChangedTo = null;
 
                 // Calculate new fee (per-class base/junior + optional deltävling surcharge)
                 newFee = RegistrationFeeCalculator.Calculate(competition, selectedClassesList, isSubCompetition);
@@ -451,7 +467,23 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Set/update properties that can change
+                // Set/update properties that can change.
+                //
+                // clubId is re-applied on the UPDATE path too, but ONLY when the caller actually
+                // asked for a club. Re-registering (adding a class, say) must not silently drag a
+                // shooter who was correctly filed under their second club back to their primary
+                // one — which is exactly what stamping the resolved default here unconditionally
+                // would do, because the resolver falls back to primary whenever nothing is asked for.
+                if (isUpdate && representingClubId is > 0 && clubId.HasValue)
+                {
+                    var previousClubId = registration.GetValue<int>("clubId");
+                    if (previousClubId != clubId.Value)
+                    {
+                        registration.SetValue("clubId", clubId.Value);
+                        registrationClubChangedTo = clubId.Value;
+                    }
+                }
+
                 registration.SetValue("shootingClasses", shootingClassesJson);
                 registration.SetValue("registrationDate", DateTime.Now); // Update to current timestamp
                 registration.SetValue("registeredBy", currentMemberData.Name); // Track who performed the registration/update
@@ -605,6 +637,26 @@ namespace HpskSite.Controllers
                         paymentService.ReconcileRegistrationInvoiceAsync(compIdForInvoice, registrationId_forPublish)
                             .GetAwaiter().GetResult();
                     }, $"reconcile invoice for registration {registrationId_forPublish}");
+                }
+
+                // A club correction on an existing registration must reach the start lists that
+                // already snapshotted the old club — the result list reads the start list first,
+                // so the registration alone is not enough once a list exists. Best-effort: the
+                // registration is committed either way.
+                if (registrationClubChangedTo is > 0)
+                {
+                    try
+                    {
+                        var newClubName = _clubService.GetClubNameById(registrationClubChangedTo.Value);
+                        if (!string.IsNullOrWhiteSpace(newClubName))
+                            await _clubPropagationService.PropagateAsync(competitionId, targetMember.Id, newClubName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Could not propagate club change for member {MemberId} in competition {CompetitionId}",
+                            targetMember.Id, competitionId);
+                    }
                 }
 
                 int registrationId = registration.Id;
@@ -954,6 +1006,77 @@ namespace HpskSite.Controllers
         #endregion
 
         #region Enhanced Registration APIs
+
+        /// <summary>
+        /// The clubs a shooter may compete for — their primary club plus every club on
+        /// <c>memberClubIds</c> — primary first. Feeds the "Tävlar för"-picker on every
+        /// registration surface and the club dropdown in Redigera anmälan.
+        ///
+        /// <para>Returns <c>clubs</c> even when there is only one, so each caller can decide
+        /// for itself whether to render a picker; the shared rule is to hide it below two
+        /// options rather than show a dropdown that cannot be changed.</para>
+        ///
+        /// <para><b>Auth.</b> Anyone may read their OWN clubs. Reading someone else's requires
+        /// the same standing as registering them: site admin, a manager/desk role on the
+        /// competition, or club admin / skjutledare for a club that shooter belongs to. Club
+        /// membership is not secret, but it is personal data, so it is not handed to any
+        /// logged-in member who asks.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMemberClubs(int memberId, int? competitionId = null)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var currentMemberData = _memberService.GetById(currentMember.Key);
+                if (currentMemberData == null)
+                    return Json(new { success = false, message = "Kunde inte hämta din profil." });
+
+                var target = memberId > 0 ? _memberService.GetById(memberId) : null;
+                if (target == null)
+                    return Json(new { success = false, message = "Medlemmen kunde inte hittas." });
+
+                bool allowed = target.Id == currentMemberData.Id
+                    || await _authorizationService.IsCurrentUserAdminAsync();
+
+                if (!allowed && competitionId is > 0)
+                    allowed = await _authorizationService.HasCompetitionStaffAccessAsync(competitionId.Value);
+
+                if (!allowed)
+                {
+                    // Club admin / skjutledare for ANY of the target's clubs, not just the primary
+                    // one — the whole point of this feature is that a shooter has more than one.
+                    foreach (var clubId in _memberClubService.GetAllClubIds(target))
+                    {
+                        if (await _authorizationService.IsClubAdminForClub(clubId)
+                            || await _authorizationService.IsSkjutledareForClub(clubId))
+                        {
+                            allowed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!allowed)
+                    return Json(new { success = false, message = "Ingen behörighet." });
+
+                var options = _memberClubService.GetClubOptions(target);
+                return Json(new
+                {
+                    success = true,
+                    memberId = target.Id,
+                    clubs = options.Select(o => new { id = o.Id, name = o.Name, isPrimary = o.IsPrimary })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetMemberClubs failed for member {MemberId}", memberId);
+                return Json(new { success = false, message = "Kunde inte hämta klubbar." });
+            }
+        }
 
         [HttpGet]
         public async Task<IActionResult> GetCurrentUserRegistrationInfo()
@@ -1677,6 +1800,10 @@ namespace HpskSite.Controllers
                             memberId = memberId,
                             memberName = content.GetValue<string>("memberName") ?? "Unknown Member",
                             memberClub = clubName,
+                            // The stored club id (0 on legacy rows whose club was only ever derived
+                            // at read time). The Redigera-anmälan club dropdown needs the ID, not
+                            // just the resolved name, to know which option is currently selected.
+                            memberClubId = clubId,
                             shootingClasses = shootingClassesWithNames,
                             registrationDate = content.GetValue<DateTime>("registrationDate"),
                             isActive = content.GetValue<bool>("isActive"),

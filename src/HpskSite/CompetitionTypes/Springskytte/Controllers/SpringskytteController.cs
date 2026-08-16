@@ -32,6 +32,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private readonly SpringskytteScoringService _scoringService;
         private readonly StandardMedalMaterializationService _medalMaterialization;
         private readonly CompetitionTeamService _teamService;
+        private readonly MemberClubService _memberClubService;
 
         public SpringskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -49,9 +50,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             ClubService clubService,
             AdminAuthorizationService adminAuthorizationService,
             StandardMedalMaterializationService medalMaterialization,
-            CompetitionTeamService teamService)
+            CompetitionTeamService teamService,
+            MemberClubService memberClubService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberClubService = memberClubService;
             _contentService = contentService;
             _memberService = memberService;
             _contentTypeService = contentTypeService;
@@ -387,7 +390,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Build shooter results with names
                 var memberIds = entries.Select(e => e.MemberId).Distinct().ToList();
-                var memberDict = LoadMemberInfo(memberIds);
+                var memberDict = LoadMemberInfo(memberIds, competitionId);
 
                 var shooterResults = entries.Select(e =>
                 {
@@ -560,7 +563,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return Json(new { success = false, message = "Inga deltävlingsresultat hittades." });
 
                 var memberIds = entries.Select(e => e.MemberId).Distinct().ToList();
-                var memberDict = LoadMemberInfo(memberIds);
+                var memberDict = LoadMemberInfo(memberIds, competitionId);
 
                 var shooterResults = entries.Select(e =>
                 {
@@ -776,7 +779,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 {
                     using var db = _umbracoDatabaseFactory.CreateDatabase();
                     var entries = await db.FetchAsync<SpringskytteResultEntry>("WHERE CompetitionId = @0", competitionId);
-                    var memberDict = LoadMemberInfo(entries.Select(e => e.MemberId).Distinct().ToList());
+                    var memberDict = LoadMemberInfo(entries.Select(e => e.MemberId).Distinct().ToList(), competitionId);
                     var shooters = entries.Select(e =>
                     {
                         var (name, club) = memberDict.TryGetValue(e.MemberId, out var info) ? info : ($"Skytt {e.MemberId}", "Okänd klubb");
@@ -823,7 +826,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return Json(new { success = false, message = "Inga resultat hittades." });
 
                 var memberIds = entries.Select(e => e.MemberId).Distinct().ToList();
-                var memberDict = LoadMemberInfo(memberIds);
+                var memberDict = LoadMemberInfo(memberIds, competitionId);
 
                 var shooterResults = entries.Select(e =>
                 {
@@ -3331,7 +3334,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 targetConfig.Starters ??= new List<SpringskytteStartListEntry>();
 
                 // Resolve display name / club (fall back to the member record).
-                var info = LoadMemberInfo(new List<int> { request.MemberId });
+                var info = LoadMemberInfo(new List<int> { request.MemberId }, request.CompetitionId);
                 var name = info.TryGetValue(request.MemberId, out var mi) && !string.IsNullOrWhiteSpace(mi.Name)
                     ? mi.Name : $"Skytt {request.MemberId}";
                 var club = info.TryGetValue(request.MemberId, out var mc) ? mc.Club : "";
@@ -3744,7 +3747,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     "WHERE CompetitionId = @0", competitionId);
 
                 var memberIds = entries.Select(e => e.MemberId).Distinct().ToList();
-                var memberDict = LoadMemberInfo(memberIds);
+                var memberDict = LoadMemberInfo(memberIds, competitionId);
 
                 var tieBreaker = new SpringskytteTieBreaker();
 
@@ -3954,9 +3957,22 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             return false;
         }
 
-        private Dictionary<int, (string Name, string Club)> LoadMemberInfo(List<int> memberIds)
+        /// <summary>
+        /// Names and clubs for a set of shooters.
+        ///
+        /// <para><b>Pass <paramref name="competitionId"/> whenever the result is shown in the
+        /// context of a competition.</b> The club a shooter competes for is a property of their
+        /// REGISTRATION, not of the member record: a shooter who is primary at one club may enter
+        /// this competition for another club they belong to. Reading the member's primary club
+        /// alone printed the club they did not compete for. Falls back to the primary club for
+        /// registrations that carry no club (legacy rows) and for shooters with no registration
+        /// at all.</para>
+        /// </summary>
+        private Dictionary<int, (string Name, string Club)> LoadMemberInfo(List<int> memberIds, int competitionId = 0)
         {
             var dict = new Dictionary<int, (string Name, string Club)>();
+            var registrationClubs = _memberClubService.GetRegistrationClubIds(competitionId);
+
             foreach (var memberId in memberIds)
             {
                 try
@@ -3970,8 +3986,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         if (string.IsNullOrEmpty(name)) name = member.Name ?? $"Skytt {memberId}";
 
                         var clubName = "Okänd klubb";
-                        var primaryClubIdStr = member.GetValue<string>("primaryClubId");
-                        if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var clubId) && clubId > 0)
+                        if (!registrationClubs.TryGetValue(memberId, out var clubId) || clubId <= 0)
+                            clubId = _memberClubService.GetPrimaryClubId(member);
+                        if (clubId > 0)
                         {
                             clubName = _clubService.GetClubNameById(clubId) ?? "Okänd klubb";
                         }
@@ -4033,7 +4050,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// and only used to draw pass headings — passing null keeps the exact pre-2026-08-15 output,
         /// which is also what a single-pass list produces.
         /// </summary>
-        private static string BuildStartListHtml(List<SpringskytteStartListEntry> starters,
+        /// <remarks>
+        /// <c>internal</c> rather than <c>private</c> so <see cref="HpskSite.Services.RegistrationClubPropagationService"/>
+        /// can refresh the cached blob after a shooter's club is corrected, without duplicating the markup.
+        /// </remarks>
+        internal static string BuildStartListHtml(List<SpringskytteStartListEntry> starters,
             SpringskytteStartListConfig? config = null)
         {
             var passes = config != null && config.HasMultiplePasses() ? config.EffectivePasses() : null;

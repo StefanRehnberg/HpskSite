@@ -848,6 +848,15 @@
                     <input type="hidden" id="walkInSelectedMemberId" value="">
                 </div>
 
+                @* Only rendered once a shooter with MORE THAN ONE club is picked. At the desk the
+                   common case is one club, and a dropdown with a single option is just another
+                   thing to read past. *@
+                <div class="mb-3 d-none" id="walkInClubBlock">
+                    <label for="walkInClubSelect" class="form-label fw-bold">Tävlar för</label>
+                    <select class="form-select" id="walkInClubSelect"></select>
+                    <div class="form-text">Skytten är medlem i flera klubbar. Välj vilken hen tävlar för.</div>
+                </div>
+
                 @if (springskytteEnabled)
                 {
                     @* Springskytte: A/C weapon-group checkboxes + ONE spelled-out age-class dropdown,
@@ -1122,8 +1131,15 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="competitionEditMemberClub" class="form-label">Klubb</label>
-                                <input type="text" class="form-control" id="competitionEditMemberClub" readonly />
+                                <label for="competitionEditMemberClub" class="form-label">Tävlar för</label>
+                                @* A shooter who belongs to several clubs may enter for any of them —
+                                   the dropdown is how that gets corrected after the fact. It is
+                                   disabled (not hidden) when there is only one club, so the field
+                                   stays in the same place for every shooter. *@
+                                <select class="form-select" id="competitionEditMemberClub" disabled>
+                                    <option value="">Laddar…</option>
+                                </select>
+                                <div id="competitionEditClubHint" class="form-text d-none"></div>
                             </div>
                         </div>
                     </div>
@@ -3797,6 +3813,83 @@ function testHubCreation() {
     });
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Tävlar för — which of the shooter's clubs a registration is filed under
+//
+// A shooter may belong to several clubs (primaryClubId + memberClubIds) and may enter a
+// competition for any of them. Until 2026-08 the registration always took their PRIMARY club
+// with no way to say otherwise, so the only fix for "anmäld för fel klubb" was to edit the
+// member's primary club — which changes them everywhere, for every competition.
+// ──────────────────────────────────────────────────────────────────────
+
+// Cache per member: the modal can be opened repeatedly on the same shooter, and club
+// membership does not change while the operator works the desk.
+const memberClubsCache = {};
+
+async function fetchMemberClubs(memberId) {
+    if (!memberId) return [];
+    if (memberClubsCache[memberId]) return memberClubsCache[memberId];
+    const compId = $('.competition-registration-management').data('competition-id');
+    try {
+        const resp = await fetch(
+            `/umbraco/surface/Competition/GetMemberClubs?memberId=${encodeURIComponent(memberId)}&competitionId=${encodeURIComponent(compId)}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const data = await resp.json();
+        const clubs = (data && data.success && Array.isArray(data.clubs)) ? data.clubs : [];
+        memberClubsCache[memberId] = clubs;
+        return clubs;
+    } catch (e) {
+        console.error('Kunde inte hämta skyttens klubbar', e);
+        return [];
+    }
+}
+
+async function populateEditClubSelect(registration) {
+    const sel = document.getElementById('competitionEditMemberClub');
+    const hint = document.getElementById('competitionEditClubHint');
+    if (!sel) return;
+
+    sel.disabled = true;
+    hint.classList.add('d-none');
+    sel.innerHTML = '<option value="">Laddar…</option>';
+
+    const clubs = await fetchMemberClubs(registration.memberId);
+    const currentId = parseInt(registration.memberClubId, 10) || 0;
+
+    // Guard against a slow response landing after the operator moved to another shooter.
+    const openRegId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
+    if (openRegId !== registration.id) return;
+
+    if (clubs.length === 0) {
+        // No club list (lookup failed, or the member has no resolvable club). Fall back to
+        // showing what the registration says rather than an empty control that implies the
+        // shooter has no club.
+        sel.innerHTML = `<option value="${currentId}">${escapeAttr(registration.memberClub || 'Okänd klubb')}</option>`;
+        sel.disabled = true;
+        return;
+    }
+
+    let options = clubs.map(c =>
+        `<option value="${c.id}"${c.id === currentId ? ' selected' : ''}>` +
+        `${escapeAttr(c.name)}${c.isPrimary ? ' (primär)' : ''}</option>`).join('');
+
+    // The registration may be filed under a club the shooter has since left. Keep it as a
+    // selectable option so simply saving the modal cannot silently move them somewhere else —
+    // the server treats an unchanged club as a no-op, so this round-trips safely.
+    if (currentId > 0 && !clubs.some(c => c.id === currentId)) {
+        options = `<option value="${currentId}" selected>` +
+                  `${escapeAttr(registration.memberClub || 'Okänd klubb')} (ej medlem längre)</option>` + options;
+    }
+
+    sel.innerHTML = options;
+    sel.disabled = clubs.length < 2 && !(currentId > 0 && !clubs.some(c => c.id === currentId));
+
+    if (!sel.disabled) {
+        hint.textContent = 'Skytten är medlem i flera klubbar. Välj vilken hen tävlar för i den här tävlingen.';
+        hint.classList.remove('d-none');
+    }
+}
+
 async function editCompetitionRegistration(registrationId) {
     const registration = competitionRegistrations.find(r => r.id === registrationId);
     if (!registration) return;
@@ -3804,7 +3897,9 @@ async function editCompetitionRegistration(registrationId) {
     // Header fields
     document.getElementById('competitionEditRegistrationId').value = registration.id;
     document.getElementById('competitionEditMemberName').value = registration.memberName || '';
-    document.getElementById('competitionEditMemberClub').value = registration.memberClub || '';
+    // Fire-and-forget: the club dropdown needs a round trip, and nothing else in this modal
+    // depends on it, so the operator sees the classes immediately.
+    populateEditClubSelect(registration);
 
     // Build the class checklist from the competition's allowed classes (same source the
     // walk-in modal uses). Pre-check the registration's current classes.
@@ -4286,6 +4381,15 @@ function saveCompetitionRegistrationChanges() {
         isSubCompetition
     };
 
+    // Tävlar för. Only sent when it actually differs from what the registration holds, so an
+    // ordinary class edit never carries a club change — and a disabled dropdown (single-club
+    // shooter) can never move anyone.
+    const clubSel = document.getElementById('competitionEditMemberClub');
+    const pickedClubId = clubSel && !clubSel.disabled ? parseInt(clubSel.value, 10) : 0;
+    if (pickedClubId > 0 && pickedClubId !== (parseInt(reg?.memberClubId, 10) || 0)) {
+        data.clubId = pickedClubId;
+    }
+
     // Springskytte start-time picks for weapon groups the shooter isn't slotted in yet. Read
     // BEFORE the save — hiding the modal tears the rows down.
     const springPicks = walkInSpringskytteEnabled
@@ -4361,6 +4465,12 @@ function saveCompetitionRegistrationChanges() {
             // a manual-reconciliation warning when invoice is already paid).
             if (result.feeChangeNote) {
                 alert(result.feeChangeNote);
+            }
+            // A club change also rewrites the shooter's club in any already-generated start
+            // list / patrol list. Say so — otherwise the operator has no way to know whether
+            // the public lists were left showing the old club.
+            if (result.clubPropagationNote) {
+                alert(result.clubPropagationNote);
             }
             const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
             loadCompetitionRegistrations();
@@ -5468,6 +5578,9 @@ async function openWalkInRegistrationModal() {
     document.getElementById('walkInSelectedMemberId').value = '';
     document.getElementById('walkInError').classList.add('d-none');
     document.getElementById('walkInSubmitBtn').disabled = true;
+    // Hide the club picker until a shooter is picked — a stale one from the previous walk-in
+    // would offer the wrong shooter's clubs.
+    document.getElementById('walkInClubBlock')?.classList.add('d-none');
 
     // Reset the deltävling opt-in on each open so a stale tick from a previous walk-in
     // doesn't silently surcharge the next shooter.
@@ -5801,7 +5914,30 @@ function selectWalkInMember(memberId, memberName, clubName) {
     sel.classList.remove('text-muted');
     document.getElementById('walkInMemberResults').innerHTML = '';
     document.getElementById('walkInMemberSearch').value = memberName;
+    populateWalkInClubSelect(memberId);
     refreshWalkInSubmitState();
+}
+
+// Show "Tävlar för" only when there is a genuine choice to make. Not awaited by the caller:
+// the club defaults server-side to the shooter's primary club, so the desk can submit before
+// the lookup lands and still get the right answer.
+async function populateWalkInClubSelect(memberId) {
+    const block = document.getElementById('walkInClubBlock');
+    const sel = document.getElementById('walkInClubSelect');
+    if (!block || !sel) return;
+
+    block.classList.add('d-none');
+    sel.innerHTML = '';
+
+    const clubs = await fetchMemberClubs(memberId);
+    // Guard against a slow response for a shooter the operator has already moved on from.
+    if (parseInt(document.getElementById('walkInSelectedMemberId').value, 10) !== parseInt(memberId, 10)) return;
+    if (clubs.length < 2) return;
+
+    sel.innerHTML = clubs.map(c =>
+        `<option value="${c.id}"${c.isPrimary ? ' selected' : ''}>` +
+        `${escapeWalkIn(c.name)}${c.isPrimary ? ' (primär)' : ''}</option>`).join('');
+    block.classList.remove('d-none');
 }
 
 function refreshWalkInSubmitState() {
@@ -5855,13 +5991,19 @@ async function submitWalkInRegistration() {
         const token = $('input[name="__RequestVerificationToken"]').val();
         const subCompCb = document.getElementById('walkInSubCompetitionCheckbox');
         const isSubCompetition = !!(subCompCb && subCompCb.checked);
+        // Tävlar för — only present for a multi-club shooter; otherwise the server falls back
+        // to their primary club.
+        const walkInClubSel = document.getElementById('walkInClubSelect');
+        const clubBlockVisible = !document.getElementById('walkInClubBlock')?.classList.contains('d-none');
+        const clubId = (clubBlockVisible && walkInClubSel?.value) ? parseInt(walkInClubSel.value, 10) : null;
+
         const response = await fetch('/umbraco/surface/RegistrationAdmin/AddLateRegistration', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': token
             },
-            body: JSON.stringify({ competitionId, memberId, classes, isSubCompetition })
+            body: JSON.stringify({ competitionId, memberId, classes, isSubCompetition, clubId })
         });
         const data = await response.json();
 

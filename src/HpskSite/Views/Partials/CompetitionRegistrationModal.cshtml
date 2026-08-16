@@ -55,6 +55,19 @@
 								</select>
 							</div>
 						</div>
+						@* "Tävlar för" — which of the shooter's OWN clubs this entry is filed under.
+						   Deliberately separate from the club dropdown above: that one narrows the
+						   member list an organiser picks from, this one is the shooter's own club
+						   affiliation for this competition. Rendered only when the selected shooter
+						   belongs to more than one club, so it never appears for the vast majority. *@
+						<div class="row g-2 mt-1 d-none" id="representingClubRow">
+							<div class="col-12">
+								<label for="representingClubSelect" class="form-label mb-1 small">Tävlar för:</label>
+								<select class="form-select form-select-sm" id="representingClubSelect"></select>
+								<div class="form-text small">Du är medlem i flera klubbar. Välj vilken du tävlar för i den här tävlingen.</div>
+							</div>
+						</div>
+
 						<!-- Quick-create new member (admin only) -->
 						<div id="quickCreateSection" style="display:none" class="mt-2">
 							<button type="button" class="btn btn-outline-success btn-sm" id="quickCreateToggleBtn" onclick="toggleQuickCreateForm()">

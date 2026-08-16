@@ -842,6 +842,14 @@ async function submitAllClassesRegistration(classIds, startPreferencesMap) {
     const subCompCheckbox = document.getElementById('subCompetitionCheckbox');
     formData.append('isSubCompetition', (subCompCheckbox && subCompCheckbox.checked) ? 'true' : 'false');
 
+    // "Tävlar för". Only sent when the row is actually shown (shooter has >1 club); the server
+    // falls back to the shooter's primary club when it is absent.
+    const representingRow = document.getElementById('representingClubRow');
+    const representingSel = document.getElementById('representingClubSelect');
+    if (representingRow && !representingRow.classList.contains('d-none') && representingSel?.value) {
+        formData.append('representingClubId', representingSel.value);
+    }
+
     const response = await fetch('/umbraco/surface/Competition/RegisterForCompetition', {
         method: 'POST',
         body: formData,
@@ -1464,6 +1472,7 @@ async function setupRegistrationTargetUI(userInfo) {
                 if (userInfo.memberId) {
                     memberSelect.value = userInfo.memberId;
                     selectedTargetMemberId = userInfo.memberId;
+                    loadRepresentingClubs(userInfo.memberId);
                     updateRegistrationButton();
                     showSelectedMemberInfo({
                         id: userInfo.memberId,
@@ -1485,6 +1494,7 @@ async function setupRegistrationTargetUI(userInfo) {
 
         // Pre-select current user
         selectedTargetMemberId = userInfo.memberId;
+        loadRepresentingClubs(userInfo.memberId);
         updateRegistrationButton();
 
         // Show member info
@@ -1642,6 +1652,7 @@ async function handleMemberSelection() {
         hideSelectedMemberInfo();
         document.getElementById('onBehalfOfMemberId').value = '';
         selectedTargetMemberId = null;
+        loadRepresentingClubs(null);
         updateRegistrationButton(); // Update button state when no member selected
         return;
     }
@@ -1658,6 +1669,7 @@ async function handleMemberSelection() {
             showSelectedMemberInfo(data.member);
             document.getElementById('onBehalfOfMemberId').value = selectedMemberId;
             selectedTargetMemberId = selectedMemberId;
+            loadRepresentingClubs(selectedMemberId);
             updateRegistrationButton(); // Update button state when member selected
 
             // Query existing registrations for the selected member
@@ -1673,6 +1685,51 @@ async function handleMemberSelection() {
         updateRegistrationButton(); // Update button state on error
         showRegistrationTargetError('Error loading member details');
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// "Tävlar för" — the shooter's own club affiliation for THIS competition
+//
+// A shooter may belong to several clubs (primaryClubId + memberClubIds) and may legitimately
+// enter one competition for their primary club and another for a second club. Before this the
+// registration always took the primary club with no way to say otherwise.
+//
+// The row stays hidden unless the shooter actually has a choice, which is the overwhelming
+// majority of registrations — a dropdown with one option is just noise on the form.
+// ──────────────────────────────────────────────────────────────────────
+async function loadRepresentingClubs(memberId) {
+    const row = document.getElementById('representingClubRow');
+    const sel = document.getElementById('representingClubSelect');
+    if (!row || !sel) return;
+
+    row.classList.add('d-none');
+    sel.innerHTML = '';
+    if (!memberId) return;
+
+    try {
+        const resp = await fetch(
+            `/umbraco/surface/Competition/GetMemberClubs?memberId=${encodeURIComponent(memberId)}&competitionId=${encodeURIComponent(COMPETITION_ID)}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const data = await resp.json();
+        if (!data.success || !Array.isArray(data.clubs) || data.clubs.length < 2) return;
+
+        // A slow response must not attach one shooter's clubs to another.
+        if (String(selectedTargetMemberId) !== String(memberId)) return;
+
+        sel.innerHTML = data.clubs.map(c =>
+            `<option value="${c.id}"${c.isPrimary ? ' selected' : ''}>` +
+            `${escapeHtmlForClub(c.name)}${c.isPrimary ? ' (primär)' : ''}</option>`).join('');
+        row.classList.remove('d-none');
+    } catch (e) {
+        // Non-fatal: with no picker the server files the entry under the primary club, which
+        // is exactly the pre-existing behaviour.
+        console.error('Kunde inte hämta dina klubbar', e);
+    }
+}
+
+function escapeHtmlForClub(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function showSelectedMemberInfo(member) {
@@ -2393,6 +2450,12 @@ async function registerAndJoinPatrol() {
         regFormData.append('startPreference', 'Inget');
         var subCompCheckbox = document.getElementById('subCompetitionCheckbox');
         if (subCompCheckbox && subCompCheckbox.checked) regFormData.append('isSubCompetition', 'true');
+        // "Tävlar för" — same rule as the normal submit path.
+        var repRow = document.getElementById('representingClubRow');
+        var repSel = document.getElementById('representingClubSelect');
+        if (repRow && !repRow.classList.contains('d-none') && repSel && repSel.value) {
+            regFormData.append('representingClubId', repSel.value);
+        }
 
         var resp = await fetch('/umbraco/surface/Competition/RegisterForCompetition', {
             method: 'POST',

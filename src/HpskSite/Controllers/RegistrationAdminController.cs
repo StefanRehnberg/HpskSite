@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -34,6 +35,9 @@ namespace HpskSite.Controllers
         private readonly UmbracoStartListRepository _startListRepository;
         private readonly CompetitionTeamService _teamService;
         private readonly ConsolidatedInvoiceService _consolidatedService;
+        private readonly MemberClubService _memberClubService;
+        private readonly RegistrationClubPropagationService _clubPropagationService;
+        private readonly ILogger<RegistrationAdminController> _logger;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -53,9 +57,15 @@ namespace HpskSite.Controllers
             StartListHtmlRenderer startListRenderer,
             UmbracoStartListRepository startListRepository,
             CompetitionTeamService teamService,
-            ConsolidatedInvoiceService consolidatedService)
+            ConsolidatedInvoiceService consolidatedService,
+            MemberClubService memberClubService,
+            RegistrationClubPropagationService clubPropagationService,
+            ILogger<RegistrationAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberClubService = memberClubService;
+            _clubPropagationService = clubPropagationService;
+            _logger = logger;
             _memberService = memberService;
             _memberManager = memberManager;
             _contentService = contentService;
@@ -334,11 +344,74 @@ namespace HpskSite.Controllers
                 if (registration.HasProperty("isSubCompetition"))
                     registration.SetValue("isSubCompetition", request.IsSubCompetition);
 
+                // Club correction. A shooter who belongs to several clubs may compete for any of
+                // them, and the club picked at registration is the one thing the organiser most
+                // often has to fix afterwards ("Eva is primary at X but shoots this one for Y").
+                //
+                // Refused rather than silently ignored when the shooter is not a member of the
+                // requested club: unlike the registration path — where the value arrives from a
+                // picker that may legitimately be absent — here the operator has explicitly chosen
+                // a club and must be told if it did not stick.
+                var registrationMemberId = registration.GetValue<int>("memberId");
+                var previousClubId = registration.GetValue<int>("clubId");
+                string? newClubName = null;
+                if (request.ClubId is > 0 && request.ClubId.Value != previousClubId)
+                {
+                    var shooter = registrationMemberId > 0 ? _memberService.GetById(registrationMemberId) : null;
+                    if (shooter == null)
+                        return Json(new { success = false, message = "Skytten kunde inte hittas." });
+
+                    if (!_memberClubService.IsMemberOfClub(shooter, request.ClubId.Value))
+                        return Json(new
+                        {
+                            success = false,
+                            message = "Skytten är inte medlem i den valda klubben. "
+                                    + "Lägg till klubben på medlemmen först (Klubbadmin → Medlemmar)."
+                        });
+
+                    newClubName = _clubService.GetClubNameById(request.ClubId.Value);
+                    registration.SetValue("clubId", request.ClubId.Value);
+                }
+
                 var saveResult = _contentService.Save(registration);
                 if (!saveResult.Success)
                     return Json(new { success = false, message = "Failed to save registration" });
 
                 _contentService.Publish(registration, new[] { "*" }, -1);
+
+                // Push the corrected club into every start list / patrol row that already
+                // snapshotted the old one. Without this the Anmälningar table would show the new
+                // club while the public start list and the result list kept the old one, with
+                // nothing on screen saying so. Best-effort — the registration is already committed.
+                var clubPropagationNote = "";
+                if (!string.IsNullOrWhiteSpace(newClubName) && registrationMemberId > 0)
+                {
+                    try
+                    {
+                        var propagation = await _clubPropagationService
+                            .PropagateAsync(competitionId, registrationMemberId, newClubName);
+                        if (propagation.AnythingChanged)
+                        {
+                            var parts = new List<string>();
+                            if (propagation.UpdatedStartLists.Count > 0)
+                                parts.Add(propagation.UpdatedStartLists.Count == 1
+                                    ? $"startlistan \"{propagation.UpdatedStartLists[0]}\""
+                                    : $"{propagation.UpdatedStartLists.Count} startlistor");
+                            if (propagation.UpdatedPatrolRows > 0)
+                                parts.Add("patrullistan");
+                            if (propagation.RegeneratedDirektplacering)
+                                parts.Add("startlistan (omgenererad)");
+                            clubPropagationNote = $"Klubben uppdaterades även i {string.Join(" och ", parts)}.";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Club propagation failed after updating registration {RegistrationId}", request.RegistrationId);
+                        clubPropagationNote = "Klubben ändrades på anmälan, men kunde inte uppdateras i "
+                                            + "startlistan. Kontrollera startlistan.";
+                    }
+                }
 
                 // Direktplacering: any add/remove or slot reshuffle changes per-team occupancy,
                 // so drop the availability cache and regenerate the auto-built start list so
@@ -476,7 +549,8 @@ namespace HpskSite.Controllers
                     success = true,
                     message = "Registration updated successfully",
                     feeChangeNote,
-                    topUpInvoiceId
+                    topUpInvoiceId,
+                    clubPropagationNote
                 });
             }
             catch (Exception ex)
@@ -698,8 +772,14 @@ namespace HpskSite.Controllers
                 registration.SetValue("memberId", request.MemberId);
                 registration.SetValue("memberName", member.Name);
 
-                // Get member's club
-                var clubId = member.GetValue<int>("primaryClubId");
+                // Which club the shooter competes for. Defaults to their primary club; the desk can
+                // pick another club the shooter belongs to (a member of two clubs may enter for
+                // either). Anything they are not a member of falls back to primary.
+                //
+                // NB the old code here read primaryClubId with GetValue<int> on a STRING property,
+                // which yields 0 — every walk-in registration was stored with clubId=0 and only
+                // looked correct because the read paths fall back to the member's primary club.
+                var clubId = _memberClubService.ResolveRegistrationClubId(member, request.ClubId);
                 var clubName = clubId > 0 ? _clubService.GetClubNameById(clubId) : "";
                 registration.SetValue("clubId", clubId);
 
@@ -2628,6 +2708,12 @@ namespace HpskSite.Controllers
             public string? StartPreference { get; set; }
             public List<UpdateRegistrationClass>? ShootingClasses { get; set; }
             public bool IsSubCompetition { get; set; } // mirrors the registration's existing flag
+            /// <summary>
+            /// Which of the shooter's clubs this registration is filed under. Omit to leave the
+            /// club alone. Only honoured when the shooter belongs to it — a stale id from an old
+            /// page must not silently move a registration to a club the shooter has left.
+            /// </summary>
+            public int? ClubId { get; set; }
         }
 
         /// <summary>One class entry in an UpdateRegistrationRequest.</summary>
@@ -2691,6 +2777,10 @@ namespace HpskSite.Controllers
             /// the registration so subsequent fee recomputes via RegistrationFeeCalculator add
             /// the surcharge consistently. Defaults to false when the cashier doesn't tick it.</summary>
             public bool IsSubCompetition { get; set; }
+            /// <summary>Which of the shooter's clubs they compete for. Null / not one of their
+            /// clubs → their primary club. The desk only shows the picker for multi-club shooters,
+            /// so null is the normal case.</summary>
+            public int? ClubId { get; set; }
         }
 
         /// <summary>

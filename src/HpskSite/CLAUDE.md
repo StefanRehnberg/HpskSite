@@ -941,6 +941,74 @@ Measured in dev: 12670/12581/12130/11927/12727 ms → **33–40 ms warm**, ~5 s 
 - Maps a class id to a `weapon:subcategory` bucket. Within-bucket ticks auto-untick siblings; across-bucket ticks are independent.
 - Subcategory derivation: `_Jun` → jun, `_Vet_` → vet, contains `Dam` → dam, else open. Springskytte composite ids (containing `-`) get a unique bucket per id so multi-class registration there is unaffected.
 
+### "Tävlar för" — en anmälan kan gälla vilken som helst av skyttens klubbar (2026-08-16)
+
+A member has a `primaryClubId` **plus** a CSV of additional clubs in `memberClubIds`, and has had
+for years — but every registration path read only the primary one, so a shooter who competes for
+their second club in one discipline could not say so. The only "fix" available to an organiser was
+to edit the member's primary club, which changes them everywhere, for every competition.
+
+**`Services/MemberClubService.cs` is the ONE place a member's clubs are resolved.** `GetClubOptions`
+(primary first, unresolvable clubs dropped), `IsMemberOfClub`, `ResolveRegistrationClubId` and
+`GetRegistrationClubIds(competitionId)` (memberId → the club their registration is filed under).
+- **⚠️ `primaryClubId` is a STRING property.** `GetValue<int>("primaryClubId")` does not convert it
+  and silently yields **0**. `AddLateRegistration` did exactly that, so **every walk-in registration
+  was stored with `clubId=0`** and only looked right because the read paths fall back to the
+  member's primary club. Always go through `GetPrimaryClubId`.
+
+**Surfaces.** `representingClubId` on `CompetitionController.RegisterForCompetition` (public
+precision modal + Springskytte modal), `ClubId` on `AddLateRegistration` (walk-in) and on
+`UpdateCompetitionRegistration` (Redigera anmälan, where the static club field became a dropdown).
+Every picker is **hidden below two options** — a dropdown that cannot be changed is noise on a form
+almost every shooter fills in.
+- **Silent fallback on the REGISTRATION paths, hard refusal on the EDIT path.** On registration the
+  value comes from a control that is legitimately absent, so an unusable id falls back to primary.
+  In Redigera anmälan the operator has explicitly chosen, so a club the shooter does not belong to
+  is refused with a message naming the fix. Same rule, opposite handling — don't unify them.
+- **⚠️ Re-registration must not stamp the club unconditionally.** `RegisterForCompetition`'s update
+  branch applies the club **only when `representingClubId` was actually sent**. Stamping the
+  resolved default there would drag a correctly-filed shooter back to their primary club every time
+  they added a class, because the resolver falls back to primary whenever nothing is asked for.
+
+**⚠️ The club is SNAPSHOTTED in three places, and the result list reads the START LIST first**
+(`CompetitionResultsController.GetShooterNameAndClub`). Correcting the registration alone leaves the
+public start list and result list showing the old club with nothing on screen saying so. Hence
+`Services/RegistrationClubPropagationService.cs`, which **rewrites in place and never regenerates**
+(a club correction must be safe between series; regenerating reshuffles skjutlag and times):
+1. `precisionStartList` / `finalsStartList` `configurationData` — parsed as a **JObject**, because
+   that doctype carries at least three different config shapes. Patches `Teams[].Shooters[]`
+   (precision/finals) and `Starters[]` (Springskytte), then re-renders the cached HTML blob via
+   `StartListHtmlRenderer` or `SpringskytteController.BuildStartListHtml` (made `internal` for this).
+2. `FaltskyttePatrolMember.ClubName` — targeted SQL UPDATE.
+3. **Stafett lists are deliberately skipped** — their `Club` is the TEAM's club, not the shooter's.
+- **⚠️ Direktplacering must NOT be patched.** `DirektplaceringStartListService` writes its
+  `precisionStartList` node with its own anonymous config shape and its own bespoke HTML;
+  deserializing that into a `StartListConfiguration` and re-rendering would silently replace the
+  whole list's markup. DP lists are fully derived from the registrations, so it calls
+  `Regenerate` instead.
+- Only re-publishes a node that was **already published** — publishing a draft start list as a side
+  effect of a club correction would make an unfinished list public.
+
+**⚠️ Springskytte's RESULT list never read the registration at all.** `LoadMemberInfo` resolved the
+club straight off the member record, so start-list propagation alone would still have printed the
+wrong club. It now takes a `competitionId` and prefers `GetRegistrationClubIds`, falling back to the
+primary club for legacy rows and for shooters with no registration.
+
+**Lag/stafett.** `GetRegisteredMembersInClasses` and `GetRegisteredMembersForClub` now bucket by the
+**registration's** club (a shooter entered for club Y belongs in Y's lag urval, and used to show up
+in X's and be missing from Y's). `GetClubMembers` (the stafett picker) tests `IsMemberOfClub` rather
+than primary-only. **NB `GetClubMembers` also requires the `Users` member-group role**, which is a
+separate pre-existing filter — a member without it is invisible there regardless.
+
+Verified 76/76 across `hpsk-verify/clubswap-{verify,registration-verify,team-verify}.mjs` (every
+mutation reverted, with the revert itself asserted). **Two traps for whoever writes the next test
+here:** the precision editor endpoint returns an *empty configuration, not an error*, for a
+Springskytte list — read those via `GetSpringskytteStartLists`; and `FaltskytteController` shortens
+club names at read time (`ClubNameHelper.Shorten`), so a patrol row reads "Falkenbergs PK" for a
+stored "Falkenbergs Pistolklubb".
+
+Adds C# → full rebuild. No migration, no doctype property, no Umbraco node.
+
 ### Efteranmälan av lag/stafett vid registreringsbordet (2026-08-11)
 
 **What:** the desk can create lag AND stafettlag after sista anmälningsdag. Individual walk-in

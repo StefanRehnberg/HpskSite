@@ -48,6 +48,11 @@ builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Controllers.Umbra
 builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Controllers.StartListGenerator>();
 builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Controllers.StartListHtmlRenderer>();
 
+// Club-per-registration: resolving a member's clubs, and pushing a corrected club out to the
+// start lists / patrol rows that already snapshotted the old one.
+builder.Services.AddScoped<HpskSite.Services.MemberClubService>();
+builder.Services.AddScoped<HpskSite.Services.RegistrationClubPropagationService>();
+
 // Configure data protection to persist keys in file system (prevents logout on app pool recycle)
 // Keys are stored in App_Data/DataProtection-Keys which is writable on most shared hosting
 var keysPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "DataProtection-Keys");

@@ -20,6 +20,7 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
         private readonly PaymentService _paymentService;
+        private readonly MemberClubService _memberClubService;
         private readonly ILogger<CompetitionTeamService> _logger;
 
         public CompetitionTeamService(
@@ -30,8 +31,10 @@ namespace HpskSite.Services
             IMemberService memberService,
             IContentService contentService,
             PaymentService paymentService,
+            MemberClubService memberClubService,
             ILogger<CompetitionTeamService> logger)
         {
+            _memberClubService = memberClubService;
             _databaseFactory = databaseFactory;
             _umbracoContextAccessor = umbracoContextAccessor;
             _authorizationService = authorizationService;
@@ -868,15 +871,12 @@ namespace HpskSite.Services
                     var memberId = reg.GetValue<int>("memberId");
                     if (memberId <= 0) continue;
 
-                    // Get club ID from member
-                    var member = _memberService.GetById(memberId);
-                    var memberClubId = 0;
-                    if (member != null)
-                    {
-                        var primaryClubIdStr = member.GetValue<string>("primaryClubId");
-                        if (!string.IsNullOrEmpty(primaryClubIdStr))
-                            int.TryParse(primaryClubIdStr, out memberClubId);
-                    }
+                    // Same rule as GetRegisteredMembersInClasses: the club on the REGISTRATION
+                    // decides which club's team may claim this shooter, falling back to their
+                    // primary club only for registrations predating a stored clubId.
+                    var memberClubId = reg.GetValue<int>("clubId");
+                    if (memberClubId <= 0)
+                        memberClubId = _memberClubService.GetPrimaryClubId(_memberService.GetById(memberId));
 
                     if (memberClubId != clubId) continue;
 
@@ -932,9 +932,11 @@ namespace HpskSite.Services
                 var allMembers = _memberService.GetAll(0, 5000, out totalRecords);
                 foreach (var member in allMembers)
                 {
-                    var primaryClubIdStr = member.GetValue<string>("primaryClubId");
-                    if (string.IsNullOrEmpty(primaryClubIdStr)) continue;
-                    if (!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != clubId) continue;
+                    // Everyone who belongs to the club, primary OR additional. A stafettlag is
+                    // picked from the club's members, and a shooter whose primary club is another
+                    // one is still a member here and eligible for this club's team — the old
+                    // primary-only test made them unpickable with no way to say why.
+                    if (!_memberClubService.IsMemberOfClub(member, clubId)) continue;
 
                     // Check member is approved (has "Users" role, not just "PendingApproval")
                     var roles = _memberService.GetAllRoles(member.Id);
@@ -1251,15 +1253,13 @@ namespace HpskSite.Services
                     var memberName = reg.GetValue<string>("memberName") ?? "";
                     var memberClub = reg.GetValue<string>("memberClub") ?? "";
 
-                    // Get club ID from member
-                    var member = _memberService.GetById(memberId);
-                    var clubId = 0;
-                    if (member != null)
-                    {
-                        var primaryClubIdStr = member.GetValue<string>("primaryClubId");
-                        if (!string.IsNullOrEmpty(primaryClubIdStr))
-                            int.TryParse(primaryClubIdStr, out clubId);
-                    }
+                    // Which club's team may pick this shooter. The REGISTRATION's club decides,
+                    // not the member's primary one: a shooter who is primary at X but entered this
+                    // competition for Y belongs in Y's lag here — reading the primary club offered
+                    // them to the wrong club and hid them from the right one.
+                    var clubId = reg.GetValue<int>("clubId");
+                    if (clubId <= 0)
+                        clubId = _memberClubService.GetPrimaryClubId(_memberService.GetById(memberId));
 
                     if (isSpringskytte)
                     {
