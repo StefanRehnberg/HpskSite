@@ -34,11 +34,23 @@ namespace HpskSite.Controllers
         private readonly AppCaches _appCaches;
         private readonly SeriesCalculationService _seriesCalculationService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly IUmbracoDatabaseFactory _databaseFactory;
+
+        /// <summary>Row shape for the registration-count query in GetCompetitionsList.</summary>
+        private class RegistrationParentCountRow
+        {
+            public int ParentId { get; set; }
+            public int GrandParentId { get; set; }
+            public int Cnt { get; set; }
+        }
 
         // Cache configuration
         private const string SeriesListCacheKey = "admin_series_list";
         private const string CompetitionsListCacheKey = "admin_competitions_list_{0}_{1}"; // year, includeCompleted
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+        // Deliberately under the admin_competitions_list_ prefix — see the comment at the query.
+        private const string RegistrationCountsCacheKey = "admin_competitions_list_regcounts";
+        private static readonly TimeSpan RegistrationCountsCacheDuration = TimeSpan.FromSeconds(60);
 
         public CompetitionAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -65,6 +77,7 @@ namespace HpskSite.Controllers
             _seriesCalculationService = seriesCalculationService;
             _appCaches = appCaches;
             _umbracoContextAccessor = umbracoContextAccessor;
+            _databaseFactory = databaseFactory;
         }
 
 
@@ -335,10 +348,14 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Get all competitions with basic info for the admin list (OPTIMIZED)
-        /// Supports server-side filtering by year, completed status, type, and region
+        /// Supports server-side filtering by year, completed status, type, region and club scope
         /// </summary>
+        /// <param name="clubScope">
+        /// "all" (default) = show everything, "noInternal" = hide klubbinterna (isClubOnly) comps,
+        /// "noClub" = hide every club-hosted comp so only krets/nationella remain.
+        /// </param>
         [HttpGet]
-        public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null, string? region = null)
+        public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null, string? region = null, string? clubScope = null)
         {
             // --- AUTH: fetch member + roles ONCE (instead of ~12 redundant DB calls) ---
             var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -451,9 +468,10 @@ namespace HpskSite.Controllers
                 string? cacheKey = null;
                 var cacheKeyType = type ?? "all";
                 var cacheKeyRegion = region ?? "all";
+                var cacheKeyClubScope = string.IsNullOrEmpty(clubScope) ? "all" : clubScope;
                 if (isSiteAdmin)
                 {
-                    cacheKey = string.Format(CompetitionsListCacheKey, filterYear, includeCompleted) + $"_{cacheKeyType}_{cacheKeyRegion}";
+                    cacheKey = string.Format(CompetitionsListCacheKey, filterYear, includeCompleted) + $"_{cacheKeyType}_{cacheKeyRegion}_{cacheKeyClubScope}";
                     var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                     if (cachedResult != null)
                     {
@@ -487,6 +505,9 @@ namespace HpskSite.Controllers
                     .ToList();
 
                 // Build club -> region lookup from published cache (only if needed for region filtering)
+                // Resolved once, not per competition — the filter runs over every node in the hub.
+                var wantedType = string.IsNullOrEmpty(type) ? null : Models.CompetitionTypes.GetFuzzy(type);
+
                 var clubRegionLookup = new Dictionary<int, string>();
                 if (!string.IsNullOrEmpty(effectiveRegion) || (effectiveRegions != null && effectiveRegions.Any()))
                 {
@@ -531,11 +552,34 @@ namespace HpskSite.Controllers
                             if (isCompleted) return false;
                         }
 
-                        // Type filter
+                        // Type filter. The dropdown sends a canonical CompetitionTypes id, but the
+                        // stored property has historically held both ids ("MagnumFalt") and display
+                        // names, so match through GetFuzzy and only fall back to a literal compare
+                        // when the value is not a known type at all.
                         if (!string.IsNullOrEmpty(type))
                         {
                             var compType = comp.Value<string>("competitionType") ?? "";
-                            if (!compType.Equals(type, StringComparison.OrdinalIgnoreCase))
+                            var actualType = wantedType == null ? null : Models.CompetitionTypes.GetFuzzy(compType);
+                            if (wantedType != null && actualType != null)
+                            {
+                                if (!wantedType.Id.Equals(actualType.Id, StringComparison.OrdinalIgnoreCase))
+                                    return false;
+                            }
+                            else if (!compType.Equals(type, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return false;
+                            }
+                        }
+
+                        // Club-scope filter - the list is dominated by club competitions, so an
+                        // admin needs to be able to fold them away without losing krets/nationella.
+                        if (!string.IsNullOrEmpty(clubScope) && !clubScope.Equals("all", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var compClubIdScope = comp.Value<int?>("clubId") ?? 0;
+                            if (clubScope.Equals("noClub", StringComparison.OrdinalIgnoreCase) && compClubIdScope > 0)
+                                return false;
+                            if (clubScope.Equals("noInternal", StringComparison.OrdinalIgnoreCase)
+                                && compClubIdScope > 0 && comp.Value<bool>("isClubOnly"))
                                 return false;
                         }
 
@@ -579,6 +623,52 @@ namespace HpskSite.Controllers
                     })
                     .ToList();
 
+                // Registration counts come from the DB, not the published cache: public
+                // registrations are Save()d but never Publish()ed, so comp.Children never sees
+                // them and the column read 0 for every row. Both layouts exist in the tree
+                // (registration directly under the competition, or under a registrations hub),
+                // so resolve the owning competition from parent AND grandparent.
+                // The row set is the same for every caller, filter combination and page, so it is
+                // cached independently of the response cache above (which only site admins get, and
+                // only on an exact filter repeat). The key sits under the admin_competitions_list_
+                // prefix on purpose: InvalidateCompetitionCaches() already drops that whole prefix,
+                // so there are no new invalidation call sites to remember.
+                var regCountByCompetition = new Dictionary<int, int>();
+                try
+                {
+                    var regRows = _appCaches.RuntimeCache.GetCacheItem(
+                        RegistrationCountsCacheKey,
+                        () =>
+                        {
+                            using var db = _databaseFactory.CreateDatabase();
+                            return db.Fetch<RegistrationParentCountRow>(@"
+                                SELECT reg.parentId AS ParentId, hub.parentId AS GrandParentId, COUNT(*) AS Cnt
+                                FROM umbracoNode reg
+                                JOIN umbracoContent c ON c.nodeId = reg.id
+                                JOIN umbracoNode hub ON hub.id = reg.parentId
+                                WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
+                                GROUP BY reg.parentId, hub.parentId");
+                        },
+                        RegistrationCountsCacheDuration) as List<RegistrationParentCountRow>;
+
+                    if (regRows != null)
+                    {
+                        var competitionIdSet = filteredCompetitions.Select(c => c.Id).ToHashSet();
+                        foreach (var r in regRows)
+                        {
+                            var owner = competitionIdSet.Contains(r.ParentId)
+                                ? r.ParentId
+                                : (competitionIdSet.Contains(r.GrandParentId) ? r.GrandParentId : 0);
+                            if (owner == 0) continue;
+                            regCountByCompetition[owner] = regCountByCompetition.GetValueOrDefault(owner) + r.Cnt;
+                        }
+                    }
+                }
+                catch
+                {
+                    // A failed count must not take the whole admin list down - fall back to 0.
+                }
+
                 // Build competition list — parent lookup via .Parent (no DB calls needed)
                 var competitions = filteredCompetitions
                     .Select(comp =>
@@ -621,8 +711,8 @@ namespace HpskSite.Controllers
                             status = "Scheduled";
                         }
 
-                        // Count registrations from children (published cache)
-                        var regCount = comp.Children.Count(c => c.ContentType.Alias == "competitionRegistration");
+                        // Count registrations from the SQL lookup built above (see comment there)
+                        var regCount = regCountByCompetition.GetValueOrDefault(comp.Id, 0);
 
                         return new
                         {

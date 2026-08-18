@@ -569,6 +569,37 @@ if (stringValue.TrimStart().StartsWith("[")) {
 - GET GetCompetitionsList - Returns all competitions (site admins) or filtered by managed clubs (club admins)
 - POST CreateCompetition, CopyCompetition, DeleteCompetition - Require appropriate authorization
 
+**⚠️ THE COMPETITION LIST EXISTS THREE TIMES** — `AdminCompetitionsList.cshtml` (site), the Tävlingar
+sub-tab in `RegionalAdminPanel.cshtml` (krets) and the Tävlingar tab in `ClubAdminPanel.cshtml`
+(klubb). All three call the same `GetCompetitionsList` endpoint but each hand-rolls its own filters,
+row markup and badges, so a fix applied to one silently leaves the other two behind. Check all three.
+
+**Discipline dropdown (2026-08-18):** all three used to build the Tävlingstyp options from the rows
+that happened to be loaded, so a discipline with no competition in the current year/krets/klubb was
+simply missing from the filter. They now share **`Views/Partials/_CompetitionTypeCatalogue.cshtml`**
+(`hpskLoadCompetitionTypes` / `hpskFillCompetitionTypeSelect` / `hpskCompetitionTypeLabel`), which
+fetches the canonical `CompetitionTypes.All` from `GetCompetitionTypes`. Include that partial rather
+than writing a fourth copy. The dropdown sends the type **id**; server-side the filter matches through
+`CompetitionTypes.GetFuzzy` on both sides because the stored `competitionType` property holds ids
+("MagnumFalt") on some competitions and display names on others — a literal compare returns nothing.
+
+**Scope badges** are the same pair everywhere: solid `bg-primary` **"Klubb"** = club-hosted and open
+to other clubs; `bg-primary-subtle` + lock **"Endast klubb"** = `isClubOnly`, the club's own members
+only. Both are blue on purpose — the old yellow read as a warning, which an internal competition is
+not. **Reading these in a test requires scoping to the name cell**: the status column uses
+`bg-warning` ("Kommande") and `bg-primary` ("Pågående") too.
+
+**`clubScope` filter** (`all` / `noInternal` / `noClub`) folds club competitions away server-side, so
+the list isn't drowned by them. Krets defaults to `noInternal`, which preserves its long-standing
+behaviour of hiding klubbinterna — that used to be a hard client-side filter with no way back.
+
+**Anmälningar column:** counted in SQL, not from `comp.Children`. Public registrations are `Save()`d
+but never `Publish()`ed, so the published cache never saw them and the column read **0 on every row**.
+The rows are cached 60 s under `admin_competitions_list_regcounts` — deliberately under the
+`admin_competitions_list_` prefix that `InvalidateCompetitionCaches()` already clears, so there are no
+new invalidation call sites. Verified 25/25 via `hpsk-verify/comptype-filter-verify.mjs` (all three
+lists; needs a temporary Administrators grant for the site-admin page — see that script's header).
+
 ### Class Merging System ✅ COMPLETE (2026-03-31)
 **Location:** CompetitionResultsManagement.cshtml → "Uppdatera" button → merge modal
 

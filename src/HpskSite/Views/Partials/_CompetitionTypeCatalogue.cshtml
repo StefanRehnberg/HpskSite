@@ -1,0 +1,66 @@
+@*
+ * Shared canonical competition-type (discipline) catalogue.
+ *
+ * The three admin competition lists — AdminCompetitionsList (site), RegionalAdminPanel (krets)
+ * and ClubAdminPanel (klubb) — each used to build their Tävlingstyp dropdown from the rows that
+ * happened to be loaded, so a discipline with no competition in the current year/krets/klubb was
+ * simply missing from the filter. Same bug, three copies. This partial is the one place the
+ * catalogue is fetched and rendered; include it wherever a discipline dropdown is needed.
+ *
+ * Exposes: hpskLoadCompetitionTypes() -> Promise, hpskFillCompetitionTypeSelect(select, current),
+ *          hpskCompetitionTypeLabel(rawType), hpskCompetitionTypes (array).
+ * Guarded so multiple includes on one page are harmless.
+*@
+<script>
+(function () {
+    if (window.hpskCompetitionTypesLoaded) return;
+    window.hpskCompetitionTypesLoaded = true;
+
+    window.hpskCompetitionTypes = [];
+    var pending = null;
+
+    window.hpskLoadCompetitionTypes = function () {
+        if (pending) return pending;
+        pending = fetch('/umbraco/surface/CompetitionAdmin/GetCompetitionTypes', { credentials: 'include' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.success && Array.isArray(d.data)) window.hpskCompetitionTypes = d.data;
+                return window.hpskCompetitionTypes;
+            })
+            .catch(function () { return window.hpskCompetitionTypes; });
+        return pending;
+    };
+
+    function esc(text) {
+        var d = document.createElement('div');
+        d.textContent = text == null ? '' : text;
+        return d.innerHTML;
+    }
+
+    // The stored competitionType property holds ids ("MagnumFalt") on some competitions and
+    // display names on others, so match on a normalized form rather than a literal compare.
+    function normalize(v) {
+        return (v == null ? '' : v.toString()).toLowerCase()
+            .replace(/\s+/g, '')
+            .replace(/[åä]/g, 'a').replace(/ö/g, 'o').replace(/é/g, 'e');
+    }
+
+    window.hpskCompetitionTypeLabel = function (rawType) {
+        if (!rawType) return '-';
+        var wanted = normalize(rawType);
+        var hit = window.hpskCompetitionTypes.find(function (t) {
+            return normalize(t.id) === wanted || normalize(t.name) === wanted;
+        });
+        return hit ? hit.name : rawType;
+    };
+
+    window.hpskFillCompetitionTypeSelect = function (select, currentValue) {
+        if (!select) return;
+        var current = currentValue || '';
+        select.innerHTML = '<option value="">Alla typer</option>' +
+            window.hpskCompetitionTypes.map(function (t) {
+                return '<option value="' + esc(t.id) + '"' + (t.id === current ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+            }).join('');
+    };
+})();
+</script>

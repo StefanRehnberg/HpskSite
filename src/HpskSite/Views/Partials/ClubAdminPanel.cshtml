@@ -8,6 +8,8 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
+@await Html.PartialAsync("_CompetitionTypeCatalogue")
+
 <div class="club-admin-panel">
     <!-- Personuppgiftsbiträdesavtal (DPA) acceptance gate — populated by loadDpaGate().
          Shown only while the DPA is NOT yet accepted. Once accepted, this stays hidden and the
@@ -3584,14 +3586,11 @@ function clearClubCompetitionFilters() {
     loadClubCompetitions();
 }
 
-function populateClubTypeFilter(competitions) {
-    const select = document.getElementById('clubTypeFilter');
-    if (!select) return;
-    const types = [...new Set((competitions || []).map(c => c.type).filter(t => t))].sort();
-    clubCompetitionTypesCache = types;
-    const current = clubCompetitionsFilters.type || '';
-    select.innerHTML = '<option value="">Alla typer</option>' +
-        types.map(t => `<option value="${escapeHtml(t)}" ${t === current ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+function populateClubTypeFilter() {
+    // Shared catalogue - see _CompetitionTypeCatalogue.cshtml. Built from the full discipline list
+    // rather than the club's loaded rows, so a discipline the club hasn't run is still selectable.
+    clubCompetitionTypesCache = window.hpskCompetitionTypes.map(t => t.id);
+    window.hpskFillCompetitionTypeSelect(document.getElementById('clubTypeFilter'), clubCompetitionsFilters.type || '');
 }
 
 // Load Club Competitions
@@ -3600,6 +3599,7 @@ function loadClubCompetitions() {
     container.innerHTML = '<div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar tävlingar...</span></div></div>';
 
     populateClubYearFilter();
+    window.hpskLoadCompetitionTypes().then(populateClubTypeFilter);
 
     // Build URL with server-side filters
     const params = [];
@@ -3625,10 +3625,6 @@ function loadClubCompetitions() {
                 const noClubComps = data.isSiteAdmin
                     ? []
                     : (data.data || []).filter(comp => !comp.clubId || comp.clubId <= 0);
-                // Populate type dropdown from full club result on first load (when no type filter active)
-                if (!clubCompetitionsFilters.type && clubCompetitionTypesCache.length === 0) {
-                    populateClubTypeFilter(clubCompetitions);
-                }
                 displayClubCompetitions(clubCompetitions, noClubComps);
             } else {
                 container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda tävlingar.</div>';
@@ -3665,14 +3661,16 @@ function displayClubCompetitions(competitions, noClubComps) {
     competitions.forEach(comp => {
         const startDate = comp.startDate ? new Date(comp.startDate).toLocaleDateString('sv-SE') : '-';
         const statusBadge = getCompetitionStatusBadge(comp.status);
+        // Same badge pair as the site admin + krets lists - solid blue = open to other clubs,
+        // subtle blue + lock = klubbintern. The old yellow read as a warning, which it is not.
         const scopeBadge = comp.isClubOnly
-            ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
-            : '<span class="badge bg-primary ms-2"><i class="bi bi-building me-1"></i>Öppen/inbjudan</span>';
+            ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
+            : '<span class="badge bg-primary ms-2" title="Öppen för andra klubbar"><i class="bi bi-building me-1"></i>Öppen/inbjudan</span>';
 
         html += `
             <tr>
                 <td><strong>${escapeHtml(comp.name)}</strong>${scopeBadge}</td>
-                <td><span class="badge bg-secondary">${escapeHtml(comp.type)}</span></td>
+                <td><span class="badge bg-secondary">${escapeHtml(window.hpskCompetitionTypeLabel(comp.type))}</span></td>
                 <td>${startDate}</td>
                 <td>${statusBadge}</td>
                 <td><span class="badge bg-info">${comp.registrationCount || 0}</span></td>

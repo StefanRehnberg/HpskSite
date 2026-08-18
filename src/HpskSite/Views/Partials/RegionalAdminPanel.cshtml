@@ -218,20 +218,29 @@
                             <label for="regionCompTypeFilter" class="form-label">Tävlingstyp</label>
                             <select class="form-select" id="regionCompTypeFilter" onchange="onRegionCompTypeFilterChange()">
                                 <option value="">Alla typer</option>
+                                <!-- Populated from the shared discipline catalogue -->
                             </select>
                         </div>
                         <div class="col-md-3">
+                            <label for="regionCompClubScopeFilter" class="form-label">Klubbtävlingar</label>
+                            <select class="form-select" id="regionCompClubScopeFilter" onchange="onRegionCompClubScopeFilterChange()">
+                                <option value="noInternal">Dölj klubbinterna</option>
+                                <option value="all">Visa alla</option>
+                                <option value="noClub">Dölj alla klubbtävlingar</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-secondary w-100" onclick="clearRegionCompFilters()">
+                                <i class="bi bi-x-circle me-1"></i>Rensa filter
+                            </button>
+                        </div>
+                        <div class="col-12">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="regionCompShowCompleted" onchange="onRegionCompShowCompletedChange()">
                                 <label class="form-check-label" for="regionCompShowCompleted">
                                     Visa avslutade tävlingar
                                 </label>
                             </div>
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-outline-secondary w-100" onclick="clearRegionCompFilters()">
-                                <i class="bi bi-x-circle me-1"></i>Rensa filter
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -1050,6 +1059,8 @@
 })();
 </script>
 
+@await Html.PartialAsync("_CompetitionTypeCatalogue")
+
 @* ============================================================
    Tävlingar sub-tab — admin of competitions in the region.
    Reuses CompetitionWizardModal / CompetitionEditModal / CompetitionAdvertEditModal
@@ -1075,7 +1086,10 @@
     var regionCompFilters = {
         year: new Date().getFullYear(),
         includeCompleted: false,
-        type: ''
+        type: '',
+        // Klubbinterna are hidden by default (they belong to the club's own admin page), but the
+        // krets can now choose to see them - or to hide club-hosted competitions entirely.
+        clubScope: 'noInternal'
     };
     var regionCompTypesCache = [];
     var regionCompLoaded = false;
@@ -1104,33 +1118,29 @@
         regionCompFilters.type = document.getElementById('regionCompTypeFilter').value;
         loadRegionCompetitions();
     };
+    window.onRegionCompClubScopeFilterChange = function() {
+        regionCompFilters.clubScope = document.getElementById('regionCompClubScopeFilter').value;
+        loadRegionCompetitions();
+    };
     window.onRegionCompShowCompletedChange = function() {
         regionCompFilters.includeCompleted = document.getElementById('regionCompShowCompleted').checked;
         loadRegionCompetitions();
     };
     window.clearRegionCompFilters = function() {
-        regionCompFilters = { year: new Date().getFullYear(), includeCompleted: false, type: '' };
+        regionCompFilters = { year: new Date().getFullYear(), includeCompleted: false, type: '', clubScope: 'noInternal' };
         document.getElementById('regionCompYearFilter').value = regionCompFilters.year;
         document.getElementById('regionCompTypeFilter').value = '';
+        document.getElementById('regionCompClubScopeFilter').value = 'noInternal';
         document.getElementById('regionCompShowCompleted').checked = false;
         loadRegionCompetitions();
     };
 
-    function populateRegionCompTypeFilter(comps) {
-        var typeSet = new Set();
-        comps.forEach(function(c) { if (c.type) typeSet.add(c.type); });
-        var types = Array.from(typeSet).sort();
-        regionCompTypesCache = types;
-        var sel = document.getElementById('regionCompTypeFilter');
-        var current = regionCompFilters.type || '';
-        sel.innerHTML = '<option value="">Alla typer</option>';
-        types.forEach(function(t) {
-            var opt = document.createElement('option');
-            opt.value = t;
-            opt.textContent = t;
-            if (t === current) opt.selected = true;
-            sel.appendChild(opt);
-        });
+    function populateRegionCompTypeFilter() {
+        // Shared catalogue - see _CompetitionTypeCatalogue.cshtml. Built from the full discipline
+        // list, not from the loaded rows, so a discipline the krets hasn't run this year is still
+        // selectable.
+        regionCompTypesCache = window.hpskCompetitionTypes.map(function(t) { return t.id; });
+        window.hpskFillCompetitionTypeSelect(document.getElementById('regionCompTypeFilter'), regionCompFilters.type || '');
     }
 
     function getRegionCompetitionStatusBadge(status) {
@@ -1148,11 +1158,15 @@
         container.innerHTML = '<div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar tävlingar...</span></div></div>';
 
         populateRegionCompYearFilter();
+        window.hpskLoadCompetitionTypes().then(populateRegionCompTypeFilter);
 
         var params = [];
         if (regionCompFilters.year) params.push('year=' + regionCompFilters.year);
         params.push('includeCompleted=' + regionCompFilters.includeCompleted);
         if (regionCompFilters.type) params.push('type=' + encodeURIComponent(regionCompFilters.type));
+        if (regionCompFilters.clubScope && regionCompFilters.clubScope !== 'all') {
+            params.push('clubScope=' + encodeURIComponent(regionCompFilters.clubScope));
+        }
         if (regionCode) params.push('region=' + encodeURIComponent(regionCode));
         var url = '/umbraco/surface/CompetitionAdmin/GetCompetitionsList?' + params.join('&');
 
@@ -1163,13 +1177,9 @@
                     container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda tävlingar.</div>';
                     return;
                 }
-                // Hide isClubOnly comps — these are private to a specific club's
-                // members; managed by that club's admin, not at the regional level.
-                var comps = (data.data || []).filter(function(c) { return !c.isClubOnly; });
-                if (!regionCompFilters.type && regionCompTypesCache.length === 0) {
-                    populateRegionCompTypeFilter(comps);
-                }
-                displayRegionCompetitions(comps);
+                // Klubbinterna used to be dropped here unconditionally; the Klubbtävlingar
+                // filter now decides, and the server applies it (so the empty state is honest).
+                displayRegionCompetitions(data.data || []);
             })
             .catch(function(err) {
                 console.error('Error loading region competitions:', err);
@@ -1192,13 +1202,18 @@
             var statusBadge = getRegionCompetitionStatusBadge(comp.status);
             var nameEsc = rcEscapeHtml(comp.name);
             var typeEsc = rcEscapeHtml(comp.type);
+            var typeLabelEsc = rcEscapeHtml(window.hpskCompetitionTypeLabel(comp.type));
             var externalBadge = comp.isExternal
                 ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
                 : '';
             // Host badge: club-hosted (invitation) vs krets-hosted vs national.
             var scopeBadge;
             if (comp.clubId && comp.clubId > 0) {
-                scopeBadge = '<span class="badge bg-primary ms-2"><i class="bi bi-building me-1"></i>Klubb</span>';
+                // Same two badges as the site admin list: solid blue = club-hosted but open to
+                // other clubs, subtle blue + lock = klubbintern.
+                scopeBadge = comp.isClubOnly
+                    ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Klubbtävling - endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
+                    : '<span class="badge bg-primary ms-2" title="Klubbtävling - öppen för andra klubbar"><i class="bi bi-building me-1"></i>Klubb</span>';
             } else if (comp.regionalFederation) {
                 scopeBadge = '<span class="badge bg-info text-dark ms-2"><i class="bi bi-diagram-3 me-1"></i>Krets</span>';
             } else {
@@ -1214,7 +1229,7 @@
             html +=
                 '<tr>' +
                   '<td><strong>' + nameEsc + '</strong>' + externalBadge + scopeBadge + '</td>' +
-                  '<td><span class="badge bg-secondary">' + typeEsc + '</span></td>' +
+                  '<td><span class="badge bg-secondary">' + typeLabelEsc + '</span></td>' +
                   '<td>' + startDate + '</td>' +
                   '<td>' + statusBadge + '</td>' +
                   '<td><span class="badge bg-info">' + (comp.registrationCount || 0) + '</span></td>' +

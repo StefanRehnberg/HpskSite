@@ -58,20 +58,29 @@
                     <label for="typeFilter" class="form-label">Tävlingstyp</label>
                     <select class="form-select" id="typeFilter" onchange="onTypeFilterChange()">
                         <option value="">Alla typer</option>
+                        <!-- Populated by JavaScript from the full discipline catalogue -->
                     </select>
                 </div>
                 <div class="col-md-3">
+                    <label for="clubScopeFilter" class="form-label">Klubbtävlingar</label>
+                    <select class="form-select" id="clubScopeFilter" onchange="onClubScopeFilterChange()">
+                        <option value="">Visa alla</option>
+                        <option value="noInternal">Dölj klubbinterna</option>
+                        <option value="noClub">Dölj alla klubbtävlingar</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                        <i class="bi bi-x-circle me-1"></i>Rensa filter
+                    </button>
+                </div>
+                <div class="col-12">
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="showCompleted" onchange="onShowCompletedChange()">
                         <label class="form-check-label" for="showCompleted">
                             Visa avslutade tävlingar
                         </label>
                     </div>
-                </div>
-                <div class="col-md-3">
-                    <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
-                        <i class="bi bi-x-circle me-1"></i>Rensa filter
-                    </button>
                 </div>
             </div>
         </div>
@@ -123,7 +132,7 @@
             {externalBadge}
             {scopeBadge}
         </td>
-        <td><span class="badge bg-secondary">{type}</span></td>
+        <td><span class="badge bg-secondary">{typeLabel}</span></td>
         <td>{competitionDate}</td>
         <td><span class="badge bg-{statusClass}">{statusText}</span></td>
         <td class="text-center">
@@ -148,6 +157,8 @@
     </tr>
 </script>
 
+@await Html.PartialAsync("_CompetitionTypeCatalogue")
+
 <!-- Anti-forgery token for AJAX -->
 @Html.AntiForgeryToken()
 
@@ -163,8 +174,14 @@ let serverFilters = {
     year: new Date().getFullYear(),
     includeCompleted: false,
     type: '',
-    region: ''
+    region: '',
+    clubScope: ''
 };
+
+// Canonical discipline catalogue (id + display name), loaded once from the server so the
+// Tävlingstyp dropdown lists every discipline - not just the ones that happen to appear
+// among the currently filtered rows.
+let competitionTypeCatalogue = [];
 
 // Populate year filter dropdown (2024 to current year + 1)
 function populateYearFilter() {
@@ -192,6 +209,11 @@ function onShowCompletedChange() {
 
 function onTypeFilterChange() {
     serverFilters.type = document.getElementById('typeFilter').value;
+    loadCompetitionsList();
+}
+
+function onClubScopeFilterChange() {
+    serverFilters.clubScope = document.getElementById('clubScopeFilter').value;
     loadCompetitionsList();
 }
 
@@ -293,6 +315,12 @@ function initCompetitionsList() {
     // Populate year filter on page load
     populateYearFilter();
 
+    // Discipline dropdown comes from the canonical catalogue, independent of which rows load
+    // (re-render only if rows already arrived, so we don't race the list load)
+    loadCompetitionTypeCatalogue().then(() => {
+        if (allCompetitions.length > 0) renderCompetitions();
+    });
+
     // Load immediately if competitions tab is active (default)
     // loadCompetitionsRegions() will call loadCompetitionsList() after setting up filters
     if (competitionsTab && competitionsTab.classList.contains('active')) {
@@ -346,6 +374,9 @@ function loadCompetitionsList() {
     if (serverFilters.region) {
         url += `&region=${encodeURIComponent(serverFilters.region)}`;
     }
+    if (serverFilters.clubScope) {
+        url += `&clubScope=${encodeURIComponent(serverFilters.clubScope)}`;
+    }
 
     fetch(url, {
         method: 'GET',
@@ -369,17 +400,13 @@ function loadCompetitionsList() {
             allCompetitions = data.data || [];
             filteredCompetitions = allCompetitions; // No client-side filter needed
 
-            if (allCompetitions.length === 0 && !serverFilters.type) {
+            if (allCompetitions.length === 0) {
                 tableContainer.classList.add('d-none');
                 noCompetitionsAlert.classList.remove('d-none');
                 tbody.innerHTML = '';
             } else {
                 tableContainer.classList.remove('d-none');
                 noCompetitionsAlert.classList.add('d-none');
-                // Only populate types on first load (when no type filter is set)
-                if (!serverFilters.type && availableTypes.length === 0) {
-                    populateTypeFilter();
-                }
                 renderCompetitions();
             }
         })
@@ -390,15 +417,19 @@ function loadCompetitionsList() {
         });
 }
 
-function populateTypeFilter() {
-    // Populate type filter from loaded data and cache it
-    const typeFilter = document.getElementById('typeFilter');
-    availableTypes = [...new Set(allCompetitions.map(c => c.type).filter(t => t))].sort();
-
-    const currentValue = serverFilters.type || '';
-    typeFilter.innerHTML = '<option value="">Alla typer</option>' +
-        availableTypes.map(t => `<option value="${escapeHtml(t)}" ${t === currentValue ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+function loadCompetitionTypeCatalogue() {
+    // Catalogue + rendering live in _CompetitionTypeCatalogue.cshtml, shared with the krets and
+    // klubb competition lists so the dropdown can't drift between the three.
+    return window.hpskLoadCompetitionTypes().then(populateTypeFilter);
 }
+
+function populateTypeFilter() {
+    competitionTypeCatalogue = window.hpskCompetitionTypes;
+    availableTypes = competitionTypeCatalogue.map(t => t.id);
+    window.hpskFillCompetitionTypeSelect(document.getElementById('typeFilter'), serverFilters.type || '');
+}
+
+const competitionTypeLabel = rawType => window.hpskCompetitionTypeLabel(rawType);
 
 function clearFilters() {
     // Reset to defaults: current year, hide completed, no type filter, no region filter
@@ -406,6 +437,7 @@ function clearFilters() {
     document.getElementById('yearFilter').value = currentYear.toString();
     document.getElementById('typeFilter').value = '';
     document.getElementById('regionFilter').value = '';
+    document.getElementById('clubScopeFilter').value = '';
     document.getElementById('showCompleted').checked = false;
 
     // Update server filters and reload
@@ -413,6 +445,7 @@ function clearFilters() {
     serverFilters.includeCompleted = false;
     serverFilters.type = '';
     serverFilters.region = '';
+    serverFilters.clubScope = '';
     loadCompetitionsList();
 }
 
@@ -502,9 +535,12 @@ function renderCompetitionRow(comp, template) {
     // competition, so a mis-scoped comp is recognisable rather than "missing".
     let scopeBadge;
     if (comp.clubId && comp.clubId > 0) {
+        // Both are club-hosted; the difference is who may enter. "Klubb" is open to other clubs,
+        // "Endast klubb" is internal (isClubOnly). Both kept in the blue family - the old yellow
+        // read as a warning, which an internal competition is not.
         scopeBadge = comp.isClubOnly
-            ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
-            : '<span class="badge bg-primary ms-2"><i class="bi bi-building me-1"></i>Klubb</span>';
+            ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Klubbtävling - endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
+            : '<span class="badge bg-primary ms-2" title="Klubbtävling - öppen för andra klubbar"><i class="bi bi-building me-1"></i>Klubb</span>';
     } else if (comp.regionalFederation) {
         scopeBadge = '<span class="badge bg-info text-dark ms-2"><i class="bi bi-diagram-3 me-1"></i>Krets</span>';
     } else {
@@ -532,6 +568,7 @@ function renderCompetitionRow(comp, template) {
         .replace(/{id}/g, comp.id)
         .replace(/{name}/g, escapeHtml(comp.name))
         .replace(/{nameEscaped}/g, escapeHtml(comp.name).replace(/'/g, "\\'"))
+        .replace(/{typeLabel}/g, escapeHtml(competitionTypeLabel(comp.type)))
         .replace(/{type}/g, escapeHtml(comp.type || '-'))
         .replace(/{competitionDate}/g, formatDate(comp.startDate))
         .replace(/{statusText}/g, statusInfo.text)
