@@ -556,6 +556,65 @@ if (stringValue.TrimStart().StartsWith("[")) {
 - Preserves HTML content with data attributes
 - Integration with Umbraco RTE storage format
 
+### Serieberäkning per gren — ISeriesScoreSource (2026-08-18)
+
+**The six calculation strategies were never the precision-only part.** `IndividualSumAll` /
+`BestOf` / `WinsCount` / `FixedPoints` / `DynamicPoints` / `ClubTeamBestOf` only ever read
+`ShooterCompetitionScore.TotalScore` and `.XCount` — they never touch shots, series or targets, so
+they work for any discipline unchanged. What was precision-only was the **fetch layer**:
+`SeriesCalculationService` mapped `competitionType` to a result table with
+`_ => "PrecisionResultEntry"` as the fallback. A Fältskytte series therefore queried the wrong
+table, got zero rows, built empty standings, and the page **hid the container** — which reads as
+"inga resultat än", not as a bug. Reported from Säters Fältserie 2026 in prod, where the strategy
+was configured correctly the whole time.
+
+**`CompetitionTypes/Common/SeriesCalculation/ScoreSources/ISeriesScoreSource`** is now the seam.
+The service injects `IEnumerable<ISeriesScoreSource>` and picks the first that `Supports` the
+series' competition type; a new discipline is one class plus one line in `AdminServicesComposer`.
+- `PrecisionFamilySeriesScoreSource` — the old logic, lifted out unchanged. **Keeps the
+  empty/unknown-type fallback to Precision**, which legacy series nodes with no `competitionType`
+  rely on.
+- `FaltskytteSeriesScoreSource` — Fältskytte + MagnumFält (they share `FaltskytteResultEntry`).
+
+**Fältskytte specifics**, all mirroring what `GetFaltskytteResults` already does for one round:
+- **Scoring mode is resolved PER ROUND** via `FaltskytteScoringMode.Resolve(config, property)` —
+  never the competition's `scoringMode` property alone, which is a stale-able mirror (see the
+  Fältkonfigurator section). Normalfält: total = träff, tie-break = figurer. Poängfält: total =
+  träff+figurer, tie-break = poängmålssumman.
+- **Shoot-off stations (`IsShootOffOnly`) are excluded.** A särskjutning decides a placement inside
+  one round; letting it into the series total would pay a shooter twice for a tie.
+- **Names and clubs come from the patrol snapshot**, not the member register, so a shooter who
+  changed club mid-series is credited to the club they actually shot for in each round. Club
+  standings group on an id, so the snapshot's club NAME is resolved through `ClubService`; an
+  unresolvable name gets a **stable synthetic negative id** rather than collapsing every unknown
+  club into one "0" bucket.
+- Patrol-member lookup is chunked (the `IN (@0)` ~2100-parameter cap).
+- **Per-round merge configs are deliberately NOT applied.** A class merged in round 3 but not in
+  round 5 would split one shooter across two standings rows.
+- **A series only carries ONE secondary number**, so normalfält's third SHB tie-break (poängmål)
+  can't be represented. Träff → figurer is as far as the series ranks.
+
+**Column headings follow the discipline.** `SeriesResultData` gained `ScoreLabel` /
+`SecondaryLabel`; `CompetitionSeries.cshtml` reads them instead of hardcoding "Totalt"/"X", so a
+fältserie shows **Träff / Fig.** or **Poäng / Poängmål**. A series mixing both modes takes its
+headings from round 1 but still scores each round by that round's own mode.
+
+**An unsupported discipline now says so** (`UnsupportedMessage`) instead of rendering nothing —
+a Springskytte series used to be indistinguishable from "no results yet".
+
+**⚠️ `seriesSortOrder` is not a doctype property in dev** — `CreateCompetition` logs
+`No PropertyType exists with the supplied alias "seriesSortOrder"` and swallows it. The service
+reads it as `GetValue<int?>(...) ?? int.MaxValue`, so rounds fall back to ordering by
+`competitionDate`. Check whether prod actually has the property before relying on the manual order.
+
+No migration, no doctype property, no Umbraco node. Adds C# → **full rebuild**. Verified 38/38 via
+`hpsk-verify/faltserie-verify.mjs`, which builds a throwaway 3-round Fältskytte series seeded from
+competition 5282's real rows, asserts every cell and total against SQL ground truth (plus the
+shoot-off exclusion, both scoring modes, the rendered page, and a Hallandsserien-2202 regression),
+then deletes the fixture. **Its teardown sweeps by node NAME, not only by the ids it captured** — a
+competition that saves but fails to publish never reaches the id list and would then block
+`DeleteSeries` forever; `faltserie-cleanup.mjs` does the same sweep for a killed run.
+
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)
 

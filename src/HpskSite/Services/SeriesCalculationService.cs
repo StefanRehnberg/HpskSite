@@ -1,20 +1,16 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Services;
-using Umbraco.Cms.Infrastructure.Persistence;
 using HpskSite.CompetitionTypes.Common.SeriesCalculation;
 using HpskSite.CompetitionTypes.Common.SeriesCalculation.Models;
-using HpskSite.CompetitionTypes.Precision.Models;
-using HpskSite.CompetitionTypes.Milsnabb.Models;
+using HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources;
 
 namespace HpskSite.Services
 {
     public class SeriesCalculationService
     {
-        private readonly IUmbracoDatabaseFactory _umbracoDatabaseFactory;
         private readonly IContentService _contentService;
-        private readonly IMemberService _memberService;
-        private readonly ClubService _clubService;
+        private readonly IEnumerable<ISeriesScoreSource> _scoreSources;
         private readonly IMemoryCache _cache;
         private readonly ILogger<SeriesCalculationService> _logger;
 
@@ -22,17 +18,13 @@ namespace HpskSite.Services
         private const string CacheKeyPrefix = "SeriesResults_";
 
         public SeriesCalculationService(
-            IUmbracoDatabaseFactory umbracoDatabaseFactory,
             IContentService contentService,
-            IMemberService memberService,
-            ClubService clubService,
+            IEnumerable<ISeriesScoreSource> scoreSources,
             IMemoryCache cache,
             ILogger<SeriesCalculationService> logger)
         {
-            _umbracoDatabaseFactory = umbracoDatabaseFactory;
             _contentService = contentService;
-            _memberService = memberService;
-            _clubService = clubService;
+            _scoreSources = scoreSources;
             _cache = cache;
             _logger = logger;
         }
@@ -87,10 +79,13 @@ namespace HpskSite.Services
             }
 
             // Get child competitions ordered by sortOrder then date
-            var competitions = _contentService.GetPagedChildren(seriesContentId, 0, int.MaxValue, out _)
+            var childCompetitions = _contentService.GetPagedChildren(seriesContentId, 0, int.MaxValue, out _)
                 .Where(c => c.ContentType.Alias == "competition")
                 .OrderBy(c => c.GetValue<int?>("seriesSortOrder") ?? int.MaxValue)
                 .ThenBy(c => c.GetValue<DateTime>("competitionDate"))
+                .ToList();
+
+            var competitions = childCompetitions
                 .Select(c => new SeriesCompetitionInfo
                 {
                     CompetitionId = c.Id,
@@ -112,55 +107,27 @@ namespace HpskSite.Services
                 };
             }
 
-            // Batch-fetch all results for all competitions
-            var competitionIds = competitions.Select(c => c.CompetitionId).ToList();
-            var allResults = await FetchResultsForCompetitions(competitionIds);
-
-            // Build shooter lookup (MemberId -> Name, Club, ClubId)
-            var allMemberIds = allResults.Values
-                .SelectMany(r => r)
-                .Select(r => r.MemberId)
-                .Distinct()
-                .ToList();
-
-            var shooterLookup = BuildShooterLookup(allMemberIds);
-
-            // Aggregate results by competition: competitionId -> list of ShooterCompetitionScore
-            var competitionResults = new Dictionary<int, List<ShooterCompetitionScore>>();
-            foreach (var compId in competitionIds)
+            // All competitions in a series are the same discipline; the first one names it.
+            var competitionType = childCompetitions[0].GetValue<string>("competitionType") ?? "";
+            var scoreSource = _scoreSources.FirstOrDefault(s => s.Supports(competitionType));
+            if (scoreSource == null)
             {
-                if (!allResults.TryGetValue(compId, out var results))
+                _logger.LogInformation(
+                    "Series {SeriesId} is of competition type '{CompetitionType}', which has no series score source",
+                    seriesContentId, competitionType);
+                return new SeriesResultData
                 {
-                    competitionResults[compId] = new List<ShooterCompetitionScore>();
-                    continue;
-                }
-
-                // Group by (MemberId, ShootingClass) and calculate totals
-                var scores = results
-                    .GroupBy(r => new { r.MemberId, r.ShootingClass })
-                    .Select(g =>
-                    {
-                        var totalScore = g.Sum(r => CalculateTotalFromShots(r.Shots));
-                        var xCount = g.Sum(r => CalculateXCountFromShots(r.Shots));
-                        var (name, club, clubId) = shooterLookup.TryGetValue(g.Key.MemberId, out var info)
-                            ? info
-                            : ("Okänd skytt", "Okänd klubb", 0);
-
-                        return new ShooterCompetitionScore
-                        {
-                            MemberId = g.Key.MemberId,
-                            Name = name,
-                            Club = club,
-                            ClubId = clubId,
-                            ShootingClass = g.Key.ShootingClass,
-                            TotalScore = totalScore,
-                            XCount = xCount
-                        };
-                    })
-                    .ToList();
-
-                competitionResults[compId] = scores;
+                    StrategyId = strategy.Id,
+                    StrategyName = strategy.Name,
+                    CalculatedAt = DateTime.UtcNow,
+                    Competitions = competitions,
+                    Sections = new List<SeriesResultSection>(),
+                    UnsupportedMessage = $"Serieberäkning stöds inte för tävlingstypen {competitionType}."
+                };
             }
+
+            var competitionIds = competitions.Select(c => c.CompetitionId).ToList();
+            var scores = await scoreSource.FetchAsync(competitionIds, competitionType);
 
             // Build context and calculate
             var context = new SeriesCalculationContext
@@ -169,10 +136,12 @@ namespace HpskSite.Services
                 SeriesName = series.GetValue<string>("seriesName") ?? series.Name,
                 Competitions = competitions,
                 Parameters = parameters,
-                CompetitionResults = competitionResults
+                CompetitionResults = scores.ByCompetition
             };
 
             var result = strategy.Calculate(context);
+            result.ScoreLabel = scores.ScoreLabel;
+            result.SecondaryLabel = scores.SecondaryLabel;
 
             // Cache the result
             _cache.Set(cacheKey, result, CacheDuration);
@@ -215,106 +184,6 @@ namespace HpskSite.Services
         {
             _cache.Remove(CacheKeyPrefix + seriesId);
             _logger.LogDebug("Invalidated series results cache for series {SeriesId}", seriesId);
-        }
-
-        private async Task<Dictionary<int, List<PrecisionResultEntry>>> FetchResultsForCompetitions(List<int> competitionIds)
-        {
-            var result = new Dictionary<int, List<PrecisionResultEntry>>();
-            if (!competitionIds.Any()) return result;
-
-            try
-            {
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-
-                // Determine table based on competition type (all competitions in a series should be same type)
-                var firstComp = _contentService.GetById(competitionIds.First());
-                var compType = firstComp?.GetValue<string>("competitionType") ?? "Precision";
-                var tableName = compType switch
-                {
-                    "Milsnabb" => "MilsnabbResultEntry",
-                    "Duell" => "DuellResultEntry",
-                    "NationellHelmatch" => "NationellHelmatchResultEntry",
-                    "MagnumPrecision" => "MagnumPrecisionResultEntry",
-                    _ => "PrecisionResultEntry"
-                };
-
-                // Build parameterized IN clause
-                var paramNames = competitionIds.Select((id, i) => $"@{i}").ToArray();
-                var inClause = string.Join(",", paramNames);
-                var sql = $"SELECT * FROM [{tableName}] WHERE CompetitionId IN ({inClause}) ORDER BY CompetitionId, MemberId, SeriesNumber";
-
-                var allResults = await db.FetchAsync<PrecisionResultEntry>(sql, competitionIds.Cast<object>().ToArray());
-
-                foreach (var group in allResults.GroupBy(r => r.CompetitionId))
-                {
-                    result[group.Key] = group.ToList();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error fetching results for competitions {CompetitionIds}", string.Join(",", competitionIds));
-            }
-
-            return result;
-        }
-
-        private Dictionary<int, (string Name, string Club, int ClubId)> BuildShooterLookup(List<int> memberIds)
-        {
-            var lookup = new Dictionary<int, (string Name, string Club, int ClubId)>();
-
-            foreach (var memberId in memberIds)
-            {
-                try
-                {
-                    var member = _memberService.GetById(memberId);
-                    if (member != null)
-                    {
-                        var name = member.Name ?? "Okänd";
-                        var clubId = member.GetValue<int>("primaryClubId");
-                        var clubName = clubId > 0
-                            ? (_clubService.GetClubNameById(clubId) ?? "Okänd klubb")
-                            : "Okänd klubb";
-                        lookup[memberId] = (name, clubName, clubId);
-                    }
-                    else
-                    {
-                        lookup[memberId] = ("Okänd skytt", "Okänd klubb", 0);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to look up member {MemberId}", memberId);
-                    lookup[memberId] = ("Okänd skytt", "Okänd klubb", 0);
-                }
-            }
-
-            return lookup;
-        }
-
-        private static int CalculateTotalFromShots(string shotsJson)
-        {
-            try
-            {
-                var shots = Newtonsoft.Json.JsonConvert.DeserializeObject<string[]>(shotsJson) ?? Array.Empty<string>();
-                return shots.Sum(shot => shot.ToUpper() == "X" ? 10 : (int.TryParse(shot, out int value) ? value : 0));
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static int CalculateXCountFromShots(string shotsJson)
-        {
-            try
-            {
-                var shots = Newtonsoft.Json.JsonConvert.DeserializeObject<string[]>(shotsJson) ?? Array.Empty<string>();
-                return shots.Count(shot => shot.ToUpper() == "X");
-            }
-            catch
-            {
-                return 0;
-            }
         }
     }
 }

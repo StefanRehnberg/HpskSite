@@ -2,6 +2,7 @@ using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using HpskSite.Services;
 using HpskSite.Models.Configuration;
+using HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources;
 using HpskSite.CompetitionTypes.Faltskytte.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,8 +34,12 @@ namespace HpskSite.Composers
             // Register DocumentService as scoped (uses IScopeProvider)
             builder.Services.AddScoped<DocumentService>();
 
-            // Register SeriesCalculationService as scoped
+            // Register SeriesCalculationService as scoped, plus the per-discipline score sources it
+            // dispatches over. A new discipline gets series standings by adding an ISeriesScoreSource
+            // here — the calculation strategies themselves are discipline-agnostic.
             builder.Services.AddScoped<SeriesCalculationService>();
+            builder.Services.AddScoped<ISeriesScoreSource, PrecisionFamilySeriesScoreSource>();
+            builder.Services.AddScoped<ISeriesScoreSource, FaltskytteSeriesScoreSource>();
 
             // Register CompetitionTeamService as scoped
             builder.Services.AddScoped<CompetitionTeamService>();

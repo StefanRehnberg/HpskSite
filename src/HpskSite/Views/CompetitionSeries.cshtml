@@ -1,4 +1,4 @@
-@using Umbraco.Cms.Web.Common.PublishedModels;
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
 @using Umbraco.Extensions;
 @using HpskSite.Extensions
 @inject HpskSite.Services.AdminAuthorizationService AuthService
@@ -555,6 +555,11 @@ function toggleSeriesDescription() {
         const errorMsg = document.getElementById('seriesResultsErrorMessage');
         const isAdmin = @(hasAdminAccess ? "true" : "false");
 
+        // Column headings follow the discipline: Totalt/X for precision, Träff/Fig. or Poäng/Poängmål
+        // for fältskytte. Set from the payload on every load, defaulted for older cached responses.
+        let scoreLabel = 'Totalt';
+        let secondaryLabel = 'X';
+
         function loadSeriesResults(forceRefresh) {
             const url = '/umbraco/surface/CompetitionAdmin/GetSeriesResults?seriesId=' + seriesId
                 + (forceRefresh ? '&forceRefresh=true' : '');
@@ -575,8 +580,20 @@ function toggleSeriesDescription() {
                     }
 
                     const result = data.data;
+                    scoreLabel = result.scoreLabel || 'Totalt';
+                    secondaryLabel = result.secondaryLabel || 'X';
+
                     if (!result.sections || result.sections.length === 0) {
-                        document.getElementById('seriesResultsContainer').style.display = 'none';
+                        // An unsupported discipline is worth saying out loud — an empty container
+                        // reads as "no results yet" and sends the organiser looking for a data bug.
+                        if (result.unsupportedMessage) {
+                            document.getElementById('seriesResultsContainer').style.display = 'block';
+                            container.style.display = 'block';
+                            container.innerHTML = '<div class="alert alert-secondary mb-0">'
+                                + escapeHtmlSeries(result.unsupportedMessage) + '</div>';
+                        } else {
+                            document.getElementById('seriesResultsContainer').style.display = 'none';
+                        }
                         return;
                     }
 
@@ -665,7 +682,8 @@ function toggleSeriesDescription() {
             const numCompCols = competitions.length;
             const omgPct = 7;
             const totalPct = 9;
-            const xPct = 4;
+            // A longer secondary heading needs more room than "X".
+            const xPct = secondaryLabel.length > 4 ? 8 : 4;
             const rankPct = 3;
             const numericShare = numCompCols * omgPct + totalPct + xPct + rankPct;
             const textShare = 100 - numericShare;
@@ -687,8 +705,8 @@ function toggleSeriesDescription() {
                 competitions.forEach(function(comp, idx) {
                     html += '<th class="text-center" style="width:' + omgPct + '%" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
                 });
-                html += '<th class="text-center" style="width:' + totalPct + '%"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
-                html += '<th class="text-center" style="width:' + xPct + '%">X</th>';
+                html += '<th class="text-center" style="width:' + totalPct + '%"><strong>' + (usesPoints ? 'Poäng' : scoreLabel) + '</strong></th>';
+                html += '<th class="text-center" style="width:' + xPct + '%">' + escapeHtmlSeries(secondaryLabel) + '</th>';
                 html += '</tr></thead>';
                 html += '<tbody>';
 
@@ -743,7 +761,7 @@ function toggleSeriesDescription() {
                     html += '</div>';
                     html += '<div class="text-end">';
                     html += '<div class="fw-bold">' + row.totalSeriesScore + '</div>';
-                    html += '<small class="text-muted">' + row.totalXCount + ' &times;</small>';
+                    html += '<small class="text-muted">' + row.totalXCount + ' ' + escapeHtmlSeries(secondaryLabel) + '</small>';
                     html += '</div>';
                     html += '</div>';
 
@@ -804,7 +822,7 @@ function toggleSeriesDescription() {
                 competitions.forEach(function(comp, idx) {
                     html += '<th class="text-center" style="width:' + omgPctC + '%" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
                 });
-                html += '<th class="text-center" style="width:' + totalPctC + '%"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
+                html += '<th class="text-center" style="width:' + totalPctC + '%"><strong>' + (usesPoints ? 'Poäng' : scoreLabel) + '</strong></th>';
                 html += '</tr></thead>';
                 html += '<tbody>';
 

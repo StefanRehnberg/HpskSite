@@ -7,6 +7,18 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Models
         public DateTime CalculatedAt { get; set; }
         public List<SeriesCompetitionInfo> Competitions { get; set; } = new();
         public List<SeriesResultSection> Sections { get; set; } = new();
+
+        /// <summary>Heading for the total column — "Totalt" (precision), "Träff" or "Poäng" (fält).</summary>
+        public string ScoreLabel { get; set; } = "Totalt";
+
+        /// <summary>Heading for the secondary/tie-break column — "X", "Fig." or "Poängmål".</summary>
+        public string SecondaryLabel { get; set; } = "X";
+
+        /// <summary>
+        /// Set when the series' discipline has no score source, so the page can say so instead of
+        /// silently rendering nothing. Null on a normal calculation.
+        /// </summary>
+        public string? UnsupportedMessage { get; set; }
     }
 
     public class SeriesResultSection
