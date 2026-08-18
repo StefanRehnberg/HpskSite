@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 @await Html.PartialAsync("_CompetitionTypeCatalogue")
+@await Html.PartialAsync("_CompetitionListRenderer")
 
 <div class="club-admin-panel">
     <!-- Personuppgiftsbiträdesavtal (DPA) acceptance gate — populated by loadDpaGate().
@@ -3640,6 +3641,7 @@ function loadClubCompetitions() {
         });
 }
 
+
 function displayClubCompetitions(competitions, noClubComps) {
     const container = document.getElementById('competitionsTableContainer');
 
@@ -3659,59 +3661,18 @@ function displayClubCompetitions(competitions, noClubComps) {
         return;
     }
 
-    let html = noClubHint + '<div class="table-responsive"><table class="table table-striped">';
-    html += '<thead><tr><th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th><th>Anmälningar</th><th>Åtgärder</th></tr></thead><tbody>';
-
-    competitions.forEach(comp => {
-        const startDate = comp.startDate ? new Date(comp.startDate).toLocaleDateString('sv-SE') : '-';
-        const statusBadge = getCompetitionStatusBadge(comp.status);
-        // Same badge pair as the site admin + krets lists - solid blue = open to other clubs,
-        // subtle blue + lock = klubbintern. The old yellow read as a warning, which it is not.
-        const scopeBadge = comp.isClubOnly
-            ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
-            : '<span class="badge bg-primary ms-2" title="Öppen för andra klubbar"><i class="bi bi-building me-1"></i>Öppen/inbjudan</span>';
-
-        html += `
-            <tr>
-                <td><strong>${escapeHtml(comp.name)}</strong>${scopeBadge}</td>
-                <td><span class="badge bg-secondary">${escapeHtml(window.hpskCompetitionTypeLabel(comp.type))}</span></td>
-                <td>${startDate}</td>
-                <td>${statusBadge}</td>
-                <td><span class="badge bg-info">${comp.registrationCount || 0}</span></td>
-                <td>
-                    <a href="/competitions/${comp.id}/" class="btn btn-sm btn-outline-secondary" title="Öppna" target="_blank">
-                        <i class="bi bi-eye"></i>
-                    </a>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editClubCompetition(${comp.id}, '${escapeHtml(comp.type)}')" title="Redigera">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-info" onclick="copyClubCompetition(${comp.id}, '${escapeHtml(comp.type)}')" title="Kopiera">
-                        <i class="bi bi-files"></i>
-                    </button>
-                    <a href="/competitionmanagement?competitionId=${comp.id}" class="btn btn-sm btn-outline-info" title="Hantera tävling">
-                        <i class="bi bi-gear"></i>
-                    </a>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteClubCompetition(${comp.id}, '${escapeHtml(comp.name)}')" title="Radera">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </td>
-            </tr>
-        `;
+    // Table, rows and badges come from _CompetitionListRenderer.cshtml, shared with the
+    // site-admin and krets lists. editClubCompetition/copyClubCompetition take (id, type).
+    container.innerHTML = noClubHint + window.hpskRenderCompetitionTable(competitions, {
+        kind: 'klubb',
+        edit: 'editClubCompetition',
+        editArgs: 'typeOnly',
+        copy: 'copyClubCompetition',
+        copyArgs: 'idAndType',
+        del: 'deleteClubCompetition'
     });
-
-    html += '</tbody></table></div>';
-    container.innerHTML = html;
 }
 
-function getCompetitionStatusBadge(status) {
-    const badges = {
-        'Draft': '<span class="badge bg-secondary">Utkast</span>',
-        'Scheduled': '<span class="badge bg-info">Schemalagd</span>',
-        'Active': '<span class="badge bg-success">Aktiv</span>',
-        'Completed': '<span class="badge bg-dark">Avslutad</span>'
-    };
-    return badges[status] || '<span class="badge bg-secondary">-</span>';
-}
 
 function escapeHtml(text) {
     if (!text) return '';

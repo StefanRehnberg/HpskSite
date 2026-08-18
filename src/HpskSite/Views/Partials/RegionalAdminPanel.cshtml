@@ -1060,6 +1060,7 @@
 </script>
 
 @await Html.PartialAsync("_CompetitionTypeCatalogue")
+@await Html.PartialAsync("_CompetitionListRenderer")
 
 @* ============================================================
    Tävlingar sub-tab — admin of competitions in the region.
@@ -1143,15 +1144,6 @@
         window.hpskFillCompetitionTypeSelect(document.getElementById('regionCompTypeFilter'), regionCompFilters.type || '');
     }
 
-    function getRegionCompetitionStatusBadge(status) {
-        var badges = {
-            'Draft': '<span class="badge bg-secondary">Utkast</span>',
-            'Scheduled': '<span class="badge bg-info">Schemalagd</span>',
-            'Active': '<span class="badge bg-success">Aktiv</span>',
-            'Completed': '<span class="badge bg-dark">Avslutad</span>'
-        };
-        return badges[status] || '<span class="badge bg-secondary">-</span>';
-    }
 
     function loadRegionCompetitions() {
         var container = document.getElementById('regionAdminCompetitionsTableContainer');
@@ -1187,65 +1179,21 @@
             });
     }
 
+
     function displayRegionCompetitions(competitions) {
         var container = document.getElementById('regionAdminCompetitionsTableContainer');
         if (!competitions || competitions.length === 0) {
             container.innerHTML = '<div class="alert alert-info">Inga tävlingar i kretsen för valda filter.</div>';
             return;
         }
-
-        var html = '<div class="table-responsive"><table class="table table-striped">';
-        html += '<thead><tr><th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th><th>Anmälningar</th><th class="text-end">Åtgärder</th></tr></thead><tbody>';
-
-        competitions.forEach(function(comp) {
-            var startDate = comp.startDate ? new Date(comp.startDate).toLocaleDateString('sv-SE') : '-';
-            var statusBadge = getRegionCompetitionStatusBadge(comp.status);
-            var nameEsc = rcEscapeHtml(comp.name);
-            var typeEsc = rcEscapeHtml(comp.type);
-            var typeLabelEsc = rcEscapeHtml(window.hpskCompetitionTypeLabel(comp.type));
-            var externalBadge = comp.isExternal
-                ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
-                : '';
-            // Host badge: club-hosted (invitation) vs krets-hosted vs national.
-            var scopeBadge;
-            if (comp.clubId && comp.clubId > 0) {
-                // Same two badges as the site admin list: solid blue = club-hosted but open to
-                // other clubs, subtle blue + lock = klubbintern.
-                scopeBadge = comp.isClubOnly
-                    ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Klubbtävling - endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
-                    : '<span class="badge bg-primary ms-2" title="Klubbtävling - öppen för andra klubbar"><i class="bi bi-building me-1"></i>Klubb</span>';
-            } else if (comp.regionalFederation) {
-                scopeBadge = '<span class="badge bg-info text-dark ms-2"><i class="bi bi-diagram-3 me-1"></i>Krets</span>';
-            } else {
-                scopeBadge = '<span class="badge bg-dark ms-2"><i class="bi bi-globe me-1"></i>Nationell</span>';
-            }
-            var uploadBtns = '';
-            if (comp.isExternal) {
-                uploadBtns =
-                    '<button class="btn btn-sm btn-outline-success" onclick="openUploadInvitationModal(' + comp.id + ', \'' + nameEsc.replace(/'/g, "\\'") + '\')" title="Ladda upp inbjudan"><i class="bi bi-file-earmark-arrow-up"></i></button>' +
-                    ' <button class="btn btn-sm btn-outline-warning" onclick="openUploadResultListModal(' + comp.id + ', \'' + nameEsc.replace(/'/g, "\\'") + '\')" title="Ladda upp resultatlista"><i class="bi bi-file-earmark-bar-graph"></i></button>';
-            }
-
-            html +=
-                '<tr>' +
-                  '<td><strong>' + nameEsc + '</strong>' + externalBadge + scopeBadge + '</td>' +
-                  '<td><span class="badge bg-secondary">' + typeLabelEsc + '</span></td>' +
-                  '<td>' + startDate + '</td>' +
-                  '<td>' + statusBadge + '</td>' +
-                  '<td><span class="badge bg-info">' + (comp.registrationCount || 0) + '</span></td>' +
-                  '<td class="text-end">' +
-                    '<a href="/competitions/' + comp.id + '/" class="btn btn-sm btn-outline-secondary" title="Öppna" target="_blank"><i class="bi bi-eye"></i></a> ' +
-                    '<button class="btn btn-sm btn-outline-primary" onclick="editRegionCompetition(' + comp.id + ', ' + (comp.isExternal ? 'true' : 'false') + ', \'' + typeEsc.replace(/'/g, "\\'") + '\')" title="Redigera"><i class="bi bi-pencil"></i></button> ' +
-                    '<button class="btn btn-sm btn-outline-info" onclick="copyRegionCompetition(' + comp.id + ')" title="Kopiera"><i class="bi bi-files"></i></button> ' +
-                    '<a href="/competitionmanagement?competitionId=' + comp.id + '" class="btn btn-sm btn-outline-info" title="Hantera tävling"><i class="bi bi-gear"></i></a> ' +
-                    uploadBtns + ' ' +
-                    '<button class="btn btn-sm btn-outline-danger" onclick="deleteRegionCompetition(' + comp.id + ', \'' + nameEsc.replace(/'/g, "\\'") + '\')" title="Radera"><i class="bi bi-trash"></i></button>' +
-                  '</td>' +
-                '</tr>';
+        // Table, rows and badges come from _CompetitionListRenderer.cshtml, shared with the
+        // site-admin and klubb lists.
+        container.innerHTML = window.hpskRenderCompetitionTable(competitions, {
+            kind: 'krets',
+            edit: 'editRegionCompetition',
+            copy: 'copyRegionCompetition',
+            del: 'deleteRegionCompetition'
         });
-
-        html += '</tbody></table></div>';
-        container.innerHTML = html;
     }
 
     // Expose loadCompetitionsList globally so the wizard / edit modal callbacks refresh the list

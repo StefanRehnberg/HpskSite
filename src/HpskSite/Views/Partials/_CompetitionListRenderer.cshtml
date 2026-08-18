@@ -1,0 +1,199 @@
+@*
+    ONE renderer for the competition list, shared by all three surfaces that show it:
+      * AdminCompetitionsList.cshtml   (site admin)
+      * RegionalAdminPanel.cshtml      (krets → Tävlingar)
+      * ClubAdminPanel.cshtml          (klubb → Tävlingar)
+
+    All three call the same GetCompetitionsList endpoint but each used to hand-roll its own
+    row markup, status badges, date formatting and scope badges — so a fix landed on one and
+    silently skipped the other two. That is how the discipline-dropdown bug shipped on all
+    three at once while the club page also kept a stale yellow badge. Same trap as
+    startlist-dual-renderer, with three renderers instead of two.
+
+    The discipline catalogue is shared separately in _CompetitionTypeCatalogue.cshtml; this
+    partial covers everything else the row draws. Include BOTH partials on any new surface
+    rather than writing a fourth copy.
+
+    Differences between the surfaces are parameters, not copies — pass a scope object:
+      kind           'site' | 'krets' | 'klubb'  (only affects the scope-badge wording)
+      groupBySeries  true on the site list, which groups rows under their series
+      edit/copy/del  names of the page's existing callbacks, used to build the onclick
+      manageUrl      false to drop the kugghjul link (default true)
+
+    Upload buttons appear only where the page actually has the upload modals, detected at
+    render time — so a surface gets them by including the modals, not by editing this file.
+*@
+@if (ViewData["_hpskCompListRendererRendered"] == null)
+{
+    ViewData["_hpskCompListRendererRendered"] = true;
+    <script>
+    // Guarded: several of these pages include this partial alongside others that may already
+    // have pulled it in, and redefining mid-page would drop callbacks already bound.
+    if (!window.hpskCompListRendererLoaded) {
+        window.hpskCompListRendererLoaded = true;
+
+        window.hpskCompEscape = function (text) {
+            if (text === null || text === undefined || text === '') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        };
+
+        // For a value going into an onclick="..." attribute: escape as HTML first, then
+        // protect the quote that would close the JS string literal.
+        const attr = t => window.hpskCompEscape(t).replace(/'/g, "\\'");
+
+        window.hpskFormatCompetitionDate = function (dateStr) {
+            if (!dateStr) return '-';
+            const d = new Date(dateStr);
+            return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('sv-SE');
+        };
+
+        // Status comes from the SERVER (`status`), which already applies the same
+        // finished-the-day-after-end-date rule as the "visa även avslutade" filter. The site
+        // list used to recompute it in JS with a different vocabulary (Öppen/Kommande), so
+        // the three pages could disagree about the same competition.
+        window.hpskCompetitionStatusBadge = function (comp) {
+            const map = {
+                'Draft':     { cls: 'secondary', text: 'Utkast' },
+                'Scheduled': { cls: 'info',      text: 'Schemalagd' },
+                'Active':    { cls: 'success',   text: 'Pågående' },
+                'Completed': { cls: 'dark',      text: 'Avslutad' }
+            };
+            const s = map[comp.status] || { cls: 'secondary', text: '-' };
+            return `<span class="badge bg-${s.cls}">${s.text}</span>`;
+        };
+
+        // The registration window is what the site list's old "Öppen" / "Kommande" badges
+        // really described. Kept as its own badge so that information survives the move to
+        // the server status — and the krets and klubb lists gain it.
+        window.hpskCompetitionRegistrationBadge = function (comp) {
+            const now = new Date();
+            const open = comp.registrationOpenDate ? new Date(comp.registrationOpenDate) : null;
+            const close = comp.registrationCloseDate ? new Date(comp.registrationCloseDate) : null;
+            if (open && close && open <= now && close >= now) {
+                return ' <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle" title="Anmälan är öppen just nu">Anmälan öppen</span>';
+            }
+            if (open && open > now) {
+                return ` <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Anmälan öppnar ${window.hpskFormatCompetitionDate(comp.registrationOpenDate)}">Anmälan öppnar ${window.hpskFormatCompetitionDate(comp.registrationOpenDate)}</span>`;
+            }
+            return '';
+        };
+
+        window.hpskCompetitionExternalBadge = function (comp) {
+            return comp.isExternal
+                ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
+                : '';
+        };
+
+        // Both club badges stay in the BLUE family on purpose — the old yellow read as a
+        // warning, which an internal competition is not.
+        window.hpskCompetitionScopeBadge = function (comp, scope) {
+            const kind = (scope && scope.kind) || 'site';
+            if (comp.clubId && comp.clubId > 0) {
+                if (comp.isClubOnly) {
+                    return '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Klubbtävling – endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>';
+                }
+                // On a club's own page "Klubb" says nothing the page hasn't said already, so
+                // that surface names what the badge is actually for: who may enter.
+                const label = kind === 'klubb' ? 'Öppen/inbjudan' : 'Klubb';
+                return `<span class="badge bg-primary ms-2" title="Klubbtävling – öppen för andra klubbar"><i class="bi bi-building me-1"></i>${label}</span>`;
+            }
+            if (comp.regionalFederation) {
+                return '<span class="badge bg-info text-dark ms-2"><i class="bi bi-diagram-3 me-1"></i>Krets</span>';
+            }
+            return '<span class="badge bg-dark ms-2"><i class="bi bi-globe me-1"></i>Nationell</span>';
+        };
+
+        window.hpskRenderCompetitionRow = function (comp, scope) {
+            scope = scope || {};
+            const name = window.hpskCompEscape(comp.name);
+            const typeLabel = window.hpskCompEscape(window.hpskCompetitionTypeLabel(comp.type));
+            const call = (fn, args) => `${fn}(${args.join(', ')})`;
+
+            // Only offered where the page carries the modals — see the header note.
+            let uploads = '';
+            if (comp.isExternal) {
+                if (typeof window.openUploadInvitationModal === 'function') {
+                    uploads += `<button class="btn btn-sm btn-outline-success" onclick="${call('openUploadInvitationModal', [comp.id, `'${attr(comp.name)}'`])}" title="Ladda upp inbjudan"><i class="bi bi-file-earmark-arrow-up"></i></button> `;
+                }
+                if (typeof window.openUploadResultListModal === 'function') {
+                    uploads += `<button class="btn btn-sm btn-outline-warning" onclick="${call('openUploadResultListModal', [comp.id, `'${attr(comp.name)}'`])}" title="Ladda upp resultatlista"><i class="bi bi-file-earmark-bar-graph"></i></button> `;
+                }
+            }
+
+            const editFn = scope.edit || 'openAdminEditModal';
+            const copyFn = scope.copy || 'openAdminCopyModal';
+            const delFn = scope.del || 'openDeleteModal';
+            const editArgs = (scope.editArgs || 'full') === 'typeOnly'
+                ? [comp.id, `'${attr(comp.type)}'`]
+                : [comp.id, comp.isExternal ? 'true' : 'false', `'${attr(comp.type)}'`];
+            const copyArgs = (scope.copyArgs || 'idOnly') === 'idAndType'
+                ? [comp.id, `'${attr(comp.type)}'`]
+                : [comp.id];
+
+            const manage = scope.manageUrl === false ? '' :
+                `<a href="/competitionmanagement?competitionId=${comp.id}" class="btn btn-sm btn-outline-info" title="Hantera tävling"><i class="bi bi-gear"></i></a> `;
+
+            return `<tr data-competition-id="${comp.id}">
+                <td><strong>${name}</strong>${window.hpskCompetitionExternalBadge(comp)}${window.hpskCompetitionScopeBadge(comp, scope)}</td>
+                <td><span class="badge bg-secondary">${typeLabel}</span></td>
+                <td>${window.hpskFormatCompetitionDate(comp.startDate)}</td>
+                <td>${window.hpskCompetitionStatusBadge(comp)}${window.hpskCompetitionRegistrationBadge(comp)}</td>
+                <td class="text-center"><span class="badge bg-info">${comp.registrationCount || 0}</span></td>
+                <td class="text-end">
+                    <a class="btn btn-sm btn-outline-secondary" href="/competitions/${comp.id}/" title="Visa" target="_blank"><i class="bi bi-eye"></i></a>
+                    <button class="btn btn-sm btn-outline-primary" onclick="${call(editFn, editArgs)}" title="Redigera"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-outline-info" onclick="${call(copyFn, copyArgs)}" title="Kopiera"><i class="bi bi-files"></i></button>
+                    ${manage}${uploads}<button class="btn btn-sm btn-outline-danger" onclick="${call(delFn, [comp.id, `'${attr(comp.name)}'`])}" title="Ta bort"><i class="bi bi-trash"></i></button>
+                </td>
+            </tr>`;
+        };
+
+        window.HPSK_COMP_LIST_COLSPAN = 6;
+
+        // Row stream, optionally grouped under series headers. Returns <tr>s only, so a page
+        // with its own <thead> in markup (the site list) can inject straight into its tbody.
+        window.hpskRenderCompetitionRows = function (competitions, scope) {
+            scope = scope || {};
+            const rows = c => c.map(x => window.hpskRenderCompetitionRow(x, scope)).join('');
+            if (!scope.groupBySeries) return rows(competitions || []);
+
+            const bySeries = {};
+            const loose = [];
+            (competitions || []).forEach(comp => {
+                if (comp.seriesId && comp.seriesName) {
+                    (bySeries[comp.seriesId] = bySeries[comp.seriesId]
+                        || { seriesName: comp.seriesName, competitions: [] }).competitions.push(comp);
+                } else {
+                    loose.push(comp);
+                }
+            });
+
+            const cs = window.HPSK_COMP_LIST_COLSPAN;
+            let html = '';
+            if (loose.length) {
+                html += `<tr class="table-secondary"><td colspan="${cs}" class="fw-bold"><i class="bi bi-calendar me-2"></i>Individuella tävlingar <span class="badge bg-secondary ms-2">${loose.length}</span></td></tr>`;
+                html += rows(loose);
+            }
+            Object.values(bySeries)
+                .sort((a, b) => b.seriesName.localeCompare(a.seriesName, 'sv'))
+                .forEach(g => {
+                    html += `<tr class="table-primary"><td colspan="${cs}" class="fw-bold"><i class="bi bi-collection me-2"></i>Tävlingar som ingår i: ${window.hpskCompEscape(g.seriesName)} <span class="badge bg-primary ms-2">${g.competitions.length}</span></td></tr>`;
+                    html += rows(g.competitions);
+                });
+            return html;
+        };
+
+        // Whole table incl. <thead>, for the krets and klubb panels which render into a bare
+        // container. Same header row the site list has in markup.
+        window.hpskRenderCompetitionTable = function (competitions, scope) {
+            return '<div class="table-responsive"><table class="table table-striped">'
+                + '<thead><tr><th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th>'
+                + '<th class="text-center">Anmälningar</th><th class="text-end">Åtgärder</th></tr></thead>'
+                + '<tbody>' + window.hpskRenderCompetitionRows(competitions, scope) + '</tbody>'
+                + '</table></div>';
+        };
+    }
+    </script>
+}

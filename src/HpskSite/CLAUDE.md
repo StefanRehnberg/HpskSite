@@ -628,10 +628,36 @@ competition that saves but fails to publish never reaches the id list and would 
 - GET GetCompetitionsList - Returns all competitions (site admins) or filtered by managed clubs (club admins)
 - POST CreateCompetition, CopyCompetition, DeleteCompetition - Require appropriate authorization
 
-**⚠️ THE COMPETITION LIST EXISTS THREE TIMES** — `AdminCompetitionsList.cshtml` (site), the Tävlingar
-sub-tab in `RegionalAdminPanel.cshtml` (krets) and the Tävlingar tab in `ClubAdminPanel.cshtml`
-(klubb). All three call the same `GetCompetitionsList` endpoint but each hand-rolls its own filters,
-row markup and badges, so a fix applied to one silently leaves the other two behind. Check all three.
+**THE COMPETITION LIST IS SHOWN ON THREE SURFACES BUT RENDERED ONCE** (consolidated 2026-08-18) —
+`AdminCompetitionsList.cshtml` (site), the Tävlingar sub-tab in `RegionalAdminPanel.cshtml` (krets)
+and the Tävlingar tab in `ClubAdminPanel.cshtml` (klubb). All three call the same
+`GetCompetitionsList` and now draw every row through **`Views/Partials/_CompetitionListRenderer.cshtml`**
+(`hpskRenderCompetitionRow` / `hpskRenderCompetitionRows` / `hpskRenderCompetitionTable`, plus the
+status / registration / scope / extern badge helpers). **Include that partial — and
+`_CompetitionTypeCatalogue.cshtml` — on any new surface rather than writing a fourth copy.** They
+previously hand-rolled row markup, badges and status independently, which is how the discipline-dropdown
+bug shipped on all three at once while the club page also kept a stale yellow badge (same trap as
+`startlist-dual-renderer`, with three renderers instead of two).
+
+Surface differences are **parameters**, not copies: `{kind, groupBySeries, edit, copy, del, editArgs,
+copyArgs, manageUrl}`. Only `kind` changes visible output — a club's own page badges an open
+club-hosted comp "Öppen/inbjudan" instead of "Klubb", since "Klubb" says nothing new there. The
+per-page callback names (`openAdminEditModal` vs `editRegionCompetition` vs `editClubCompetition`) and
+their differing signatures are what `edit`/`editArgs` exist for.
+- **Upload buttons are capability-detected**, not configured: they render only where
+  `window.openUploadInvitationModal` / `openUploadResultListModal` exist, so a surface gets them by
+  including the upload modals. The klubb list previously had neither the buttons nor the Extern badge.
+- **Status comes from the server's `status` field on every list.** The site list used to recompute it
+  in JS with a *different vocabulary* (Öppen / Kommande / Pågående / Avslutad) than the krets and klubb
+  lists showed for the same competition (Utkast / Schemalagd / Aktiv / Avslutad). One vocabulary now:
+  **Utkast / Schemalagd / Pågående / Avslutad**. The registration-window information the old site
+  wording carried survives as a separate `hpskCompetitionRegistrationBadge` ("Anmälan öppen" /
+  "Anmälan öppnar …"), which the krets and klubb lists gain.
+- ⚠️ **Reading badges in a test still requires scoping to the name cell** — and now the STATUS cell
+  carries `bg-warning-subtle` too (the "Anmälan öppnar" badge), on top of the status colours.
+- Verified 23/23 `hpsk-verify/complist-shared-renderer-verify.mjs` (asserts the SAME competition
+  renders identical type/date/status/anmälningar cells on all three surfaces, which is the drift the
+  consolidation exists to prevent) plus 25/25 `comptype-filter-verify.mjs` unchanged.
 
 **Discipline dropdown (2026-08-18):** all three used to build the Tävlingstyp options from the rows
 that happened to be loaded, so a discipline with no competition in the current year/krets/klubb was

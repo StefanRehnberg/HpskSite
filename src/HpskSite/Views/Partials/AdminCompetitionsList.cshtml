@@ -124,40 +124,8 @@
     </div>
 </div>
 
-<!-- HTML Template for Competition Row -->
-<script type="text/html" id="competition-row-template">
-    <tr data-competition-id="{id}">
-        <td>
-            {name}
-            {externalBadge}
-            {scopeBadge}
-        </td>
-        <td><span class="badge bg-secondary">{typeLabel}</span></td>
-        <td>{competitionDate}</td>
-        <td><span class="badge bg-{statusClass}">{statusText}</span></td>
-        <td class="text-center">
-            <span class="badge bg-info">{registrationCount}</span>
-        </td>
-        <td class="text-end">
-            <a class="btn btn-sm btn-outline-secondary" href="/competitions/{id}/" title="Visa" target="_blank">
-                <i class="bi bi-eye"></i>
-            </a>
-            <button class="btn btn-sm btn-outline-primary" onclick="openAdminEditModal({id}, {isExternal}, '{type}')" title="Redigera">
-                <i class="bi bi-pencil"></i>
-            </button>
-            <button class="btn btn-sm btn-outline-info" onclick="openAdminCopyModal({id})" title="Kopiera">
-                <i class="bi bi-files"></i>
-            </button>
-            {uploadInvitationButton}
-            {uploadResultListButton}
-            <button class="btn btn-sm btn-outline-danger" onclick="openDeleteModal({id}, '{nameEscaped}')" title="Ta bort">
-                <i class="bi bi-trash"></i>
-            </button>
-        </td>
-    </tr>
-</script>
-
 @await Html.PartialAsync("_CompetitionTypeCatalogue")
+@await Html.PartialAsync("_CompetitionListRenderer")
 
 <!-- Anti-forgery token for AJAX -->
 @Html.AntiForgeryToken()
@@ -449,187 +417,34 @@ function clearFilters() {
     loadCompetitionsList();
 }
 
+
 function renderCompetitions() {
     const tbody = document.getElementById('competitionsTableBody');
     const tableContainer = document.getElementById('competitionsTableContainer');
     const noCompetitionsAlert = document.getElementById('noCompetitionsAlert');
-    const template = document.getElementById('competition-row-template').innerHTML;
 
     if (filteredCompetitions.length === 0) {
         tableContainer.classList.add('d-none');
         noCompetitionsAlert.classList.remove('d-none');
         tbody.innerHTML = '';
-    } else {
-        tableContainer.classList.remove('d-none');
-        noCompetitionsAlert.classList.add('d-none');
-
-        // Group competitions by series
-        const groupedCompetitions = {};
-        const noSeriesCompetitions = [];
-
-        filteredCompetitions.forEach(comp => {
-            if (comp.seriesId && comp.seriesName) {
-                if (!groupedCompetitions[comp.seriesId]) {
-                    groupedCompetitions[comp.seriesId] = {
-                        seriesName: comp.seriesName,
-                        competitions: []
-                    };
-                }
-                groupedCompetitions[comp.seriesId].competitions.push(comp);
-            } else {
-                noSeriesCompetitions.push(comp);
-            }
-        });
-
-        // Render groups
-        let html = '';
-
-        // Render competitions not in any series first
-        if (noSeriesCompetitions.length > 0) {
-            html += `<tr class="table-secondary">
-                <td colspan="6" class="fw-bold">
-                    <i class="bi bi-calendar me-2"></i>Individuella tävlingar
-                    <span class="badge bg-secondary ms-2">${noSeriesCompetitions.length}</span>
-                </td>
-            </tr>`;
-
-            noSeriesCompetitions.forEach(comp => {
-                html += renderCompetitionRow(comp, template);
-            });
-        }
-
-        // Render series groups
-        const seriesGroups = Object.values(groupedCompetitions).sort((a, b) =>
-            b.seriesName.localeCompare(a.seriesName, 'sv')
-        );
-
-        seriesGroups.forEach(group => {
-            // Series header row
-            html += `<tr class="table-primary">
-                <td colspan="6" class="fw-bold">
-                    <i class="bi bi-collection me-2"></i>Tävlingar som ingår i: ${escapeHtml(group.seriesName)}
-                    <span class="badge bg-primary ms-2">${group.competitions.length}</span>
-                </td>
-            </tr>`;
-
-            // Competitions in this series
-            group.competitions.forEach(comp => {
-                html += renderCompetitionRow(comp, template);
-            });
-        });
-
-        tbody.innerHTML = html;
-    }
-}
-
-function renderCompetitionRow(comp, template) {
-    const status = calculateStatus(comp);
-    const statusInfo = getCompetitionStatusInfo(status);
-
-    // Add external badge if applicable
-    const externalBadge = comp.isExternal
-        ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
-        : '';
-
-    // Host/scope badge — makes it obvious whether a row is a club, krets or national
-    // competition, so a mis-scoped comp is recognisable rather than "missing".
-    let scopeBadge;
-    if (comp.clubId && comp.clubId > 0) {
-        // Both are club-hosted; the difference is who may enter. "Klubb" is open to other clubs,
-        // "Endast klubb" is internal (isClubOnly). Both kept in the blue family - the old yellow
-        // read as a warning, which an internal competition is not.
-        scopeBadge = comp.isClubOnly
-            ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Klubbtävling - endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
-            : '<span class="badge bg-primary ms-2" title="Klubbtävling - öppen för andra klubbar"><i class="bi bi-building me-1"></i>Klubb</span>';
-    } else if (comp.regionalFederation) {
-        scopeBadge = '<span class="badge bg-info text-dark ms-2"><i class="bi bi-diagram-3 me-1"></i>Krets</span>';
-    } else {
-        scopeBadge = '<span class="badge bg-dark ms-2"><i class="bi bi-globe me-1"></i>Nationell</span>';
+        return;
     }
 
-    // Generate upload buttons (only for external competitions)
-    const nameEscaped = escapeHtml(comp.name).replace(/'/g, "\\'");
-    const uploadInvitationButton = comp.isExternal
-        ? `<button class="btn btn-sm btn-outline-success"
-                   onclick="openUploadInvitationModal(${comp.id}, '${nameEscaped}')"
-                   title="Ladda upp inbjudan">
-               <i class="bi bi-file-earmark-arrow-up"></i>
-           </button>`
-        : '';
-    const uploadResultListButton = comp.isExternal
-        ? `<button class="btn btn-sm btn-outline-warning"
-                   onclick="openUploadResultListModal(${comp.id}, '${nameEscaped}')"
-                   title="Ladda upp resultatlista">
-               <i class="bi bi-file-earmark-bar-graph"></i>
-           </button>`
-        : '';
-
-    return template
-        .replace(/{id}/g, comp.id)
-        .replace(/{name}/g, escapeHtml(comp.name))
-        .replace(/{nameEscaped}/g, escapeHtml(comp.name).replace(/'/g, "\\'"))
-        .replace(/{typeLabel}/g, escapeHtml(competitionTypeLabel(comp.type)))
-        .replace(/{type}/g, escapeHtml(comp.type || '-'))
-        .replace(/{competitionDate}/g, formatDate(comp.startDate))
-        .replace(/{statusText}/g, statusInfo.text)
-        .replace(/{statusClass}/g, statusInfo.badgeClass)
-        .replace(/{registrationCount}/g, comp.registrationCount || 0)
-        .replace(/{externalBadge}/g, externalBadge)
-        .replace(/{scopeBadge}/g, scopeBadge)
-        .replace(/{isExternal}/g, comp.isExternal ? 'true' : 'false')
-        .replace(/{uploadInvitationButton}/g, uploadInvitationButton)
-        .replace(/{uploadResultListButton}/g, uploadResultListButton);
+    tableContainer.classList.remove('d-none');
+    noCompetitionsAlert.classList.add('d-none');
+    // Rows, badges and the series grouping come from _CompetitionListRenderer.cshtml, shared
+    // with the krets and klubb lists. This page keeps its own <thead> in markup.
+    tbody.innerHTML = window.hpskRenderCompetitionRows(filteredCompetitions, {
+        kind: 'site',
+        groupBySeries: true,
+        edit: 'openAdminEditModal',
+        copy: 'openAdminCopyModal',
+        del: 'openDeleteModal'
+    });
 }
 
-function calculateStatus(comp) {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Strip time for date-only comparison
 
-    const compDate = comp.startDate ? new Date(comp.startDate) : null;
-    const compDateOnly = compDate ? new Date(compDate.getFullYear(), compDate.getMonth(), compDate.getDate()) : null;
 
-    // Calculate effective end date (use endDate if valid, otherwise fall back to compDate)
-    const compEndDate = comp.endDate ? new Date(comp.endDate) : null;
-    const compEndDateOnly = compEndDate ? new Date(compEndDate.getFullYear(), compEndDate.getMonth(), compEndDate.getDate()) : null;
-    const hasValidEnd = compEndDateOnly && compEndDateOnly.getFullYear() > 1900 && compDateOnly && compEndDateOnly >= compDateOnly;
-    const effectiveEnd = hasValidEnd ? compEndDateOnly : compDateOnly;
-
-    const regOpen = comp.registrationOpenDate ? new Date(comp.registrationOpenDate) : null;
-    const regClose = comp.registrationCloseDate ? new Date(comp.registrationCloseDate) : null;
-
-    // If isActive AND effective end date >= today (competition not yet finished)
-    if (comp.isActive && effectiveEnd && effectiveEnd >= today) {
-        // Check if registration is currently open
-        if (regOpen && regClose && regOpen <= now && regClose >= now) {
-            return 'open'; // Anmälan öppen
-        }
-        // Check if registration hasn't opened yet
-        else if (regOpen && regOpen > now) {
-            return 'upcoming'; // Anmälan öppnar snart
-        }
-        // Check if competition is ongoing (between start and end date)
-        else if (compDateOnly && today >= compDateOnly && today <= effectiveEnd) {
-            return 'ongoing'; // Pågående tävling
-        }
-        // Check if registration closed but competition is in future
-        else if (regClose && regClose < now && compDateOnly && compDateOnly > today) {
-            return 'ongoing'; // Pågående tävling
-        }
-    }
-
-    // Otherwise it's completed/closed
-    return 'closed'; // Avslutad
-}
-
-function getCompetitionStatusInfo(status) {
-    const statusMap = {
-        'open': { text: 'Öppen', badgeClass: 'success' },
-        'upcoming': { text: 'Kommande', badgeClass: 'warning' },
-        'ongoing': { text: 'Pågående', badgeClass: 'primary' },
-        'closed': { text: 'Avslutad', badgeClass: 'secondary' }
-    };
-    return statusMap[status] || statusMap['closed'];
-}
 
 function formatDate(dateStr) {
     if (!dateStr) return '-';
