@@ -72,3 +72,13 @@ appsettings.Development.json
 # Prospect club member export — contains real personnummer/PII, keep out of git
 /MemberData/
 /src/HpskSite/wwwroot/assets/skjuthandboken/
+
+# Local working notes — session logs, findings, design sketches, handoffs.
+# One rule instead of one exclude line per file: anything dropped in here is ignored,
+# so a new findings file never has to be added anywhere. This is working material, NOT
+# project documentation — that belongs in src/HpskSite/Documentation/ and is committed.
+# README.md is deliberately tracked so the folder and its purpose survive a fresh clone.
+# (backlog.md stays at the repo root: it is referenced by name from CLAUDE.md and two
+# views, and is excluded via .git/info/exclude.)
+/notes/*
+!/notes/README.md

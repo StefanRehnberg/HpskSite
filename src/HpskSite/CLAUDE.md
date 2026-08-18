@@ -1976,8 +1976,9 @@ properties, no Umbraco nodes. Adds C# → full rebuild. Verified end-to-end 33/3
 ## Bemanning — the grid (roll × dag), open role catalog, person identity (2026-08-14 → 15)
 
 Rebuilt from a real SM springskytte staffing plan (`Bemanningsplan Spring SM 20226.xlsx`, 41 people,
-101 assignments, 3 days). Design rationale + what is still open: `bemanningsrutnat-skiss-2026-08-14.md`
-in the repo root (local, not committed).
+101 assignments, 3 days). Design rationale + what is still open:
+`notes/bemanningsrutnat-skiss-2026-08-14.md` (local working notes — see `notes/README.md`; the
+folder is gitignored, so the file is not in a fresh clone).
 
 **Verify scripts** (all in `C:\Repos\hpsk-verify`): `staffing-grid-verify.mjs` (41, the regression to
 run after any change here) · `grid-fixes-verify.mjs` (19 — width, club abbreviation, delete-any-role,

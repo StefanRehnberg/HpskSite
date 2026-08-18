@@ -107,7 +107,7 @@ namespace HpskSite.Controllers
             {
                 // Authentication gate (2026-08-05). This endpoint had NO authorization at all:
                 // an anonymous caller with only an antiforgery token could persist a result row
-                // for any competition — proven against dev, see authsweep-findings-2026-08-05.md.
+                // for any competition — proven against dev, see notes/authsweep-findings-2026-08-05.md.
                 // Deliberately authentication-only, NOT the three-tier role check: deciding *which*
                 // logged-in member may enter results is a separate change that has to accept the
                 // hosting krets's admins (see memory competition-host-shape-auth), and it is not
