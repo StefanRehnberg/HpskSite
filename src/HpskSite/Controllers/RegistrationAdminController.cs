@@ -162,7 +162,7 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, message = "Error loading registrations: " + ex.Message });
+                return Json(new { success = false, message = "Kunde inte läsa anmälningarna: " + ex.Message });
             }
         }
 
@@ -224,7 +224,7 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, message = "Error loading competitions: " + ex.Message });
+                return Json(new { success = false, message = "Kunde inte läsa tävlingarna: " + ex.Message });
             }
         }
 
@@ -243,7 +243,7 @@ namespace HpskSite.Controllers
             {
                 var registration = _contentService.GetById(request.RegistrationId);
                 if (registration == null)
-                    return Json(new { success = false, message = "Registration not found" });
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
 
                 var competitionId = registration.GetValue<int>("competitionId");
                 var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
@@ -375,7 +375,7 @@ namespace HpskSite.Controllers
 
                 var saveResult = _contentService.Save(registration);
                 if (!saveResult.Success)
-                    return Json(new { success = false, message = "Failed to save registration" });
+                    return Json(new { success = false, message = "Kunde inte spara anmälan." });
 
                 _contentService.Publish(registration, new[] { "*" }, -1);
 
@@ -547,7 +547,7 @@ namespace HpskSite.Controllers
                 return Json(new
                 {
                     success = true,
-                    message = "Registration updated successfully",
+                    message = "Anmälan uppdaterad.",
                     feeChangeNote,
                     topUpInvoiceId,
                     clubPropagationNote
@@ -555,7 +555,7 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, message = "Error updating registration: " + ex.Message });
+                return Json(new { success = false, message = "Kunde inte uppdatera anmälan: " + ex.Message });
             }
         }
 
@@ -623,7 +623,7 @@ namespace HpskSite.Controllers
                 var registration = _contentService.GetById(request.RegistrationId);
                 if (registration == null)
                 {
-                    return Json(new { success = false, message = "Registration not found" });
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
                 }
 
                 // Four-tier auth — same rule as the rest of the per-competition surface so the
@@ -684,16 +684,16 @@ namespace HpskSite.Controllers
                 var result = _contentService.Delete(registration);
                 if (result.Success)
                 {
-                    return Json(new { success = true, message = "Registration deleted successfully" });
+                    return Json(new { success = true, message = "Anmälan borttagen." });
                 }
                 else
                 {
-                    return Json(new { success = false, message = "Failed to delete registration" });
+                    return Json(new { success = false, message = "Kunde inte ta bort anmälan." });
                 }
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, message = "Error deleting registration: " + ex.Message });
+                return Json(new { success = false, message = "Kunde inte ta bort anmälan: " + ex.Message });
             }
         }
 
@@ -711,7 +711,7 @@ namespace HpskSite.Controllers
                 var competition = _contentService.GetById(request.CompetitionId);
                 if (competition == null)
                 {
-                    return Json(new { success = false, message = "Competition not found" });
+                    return Json(new { success = false, message = "Tävling hittades inte." });
                 }
 
                 // Authorization: site admin / competition manager / club admin / skjutledare
@@ -747,7 +747,7 @@ namespace HpskSite.Controllers
                 var member = _memberService.GetById(request.MemberId);
                 if (member == null)
                 {
-                    return Json(new { success = false, message = "Member not found" });
+                    return Json(new { success = false, message = "Skytten kunde inte hittas." });
                 }
 
                 // Check if member is already registered
@@ -846,7 +846,7 @@ namespace HpskSite.Controllers
                 var saveResult = _contentService.Save(registration);
                 if (!saveResult.Success)
                 {
-                    return Json(new { success = false, message = "Failed to save registration" });
+                    return Json(new { success = false, message = "Kunde inte spara anmälan." });
                 }
 
                 _contentService.Publish(registration, new[] { "*" }, -1);
@@ -878,7 +878,7 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, message = "Error creating late registration: " + ex.Message });
+                return Json(new { success = false, message = "Kunde inte skapa anmälan: " + ex.Message });
             }
         }
 
