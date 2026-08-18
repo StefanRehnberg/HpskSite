@@ -754,7 +754,10 @@ namespace HpskSite.Controllers
                 var existingRegistration = await CheckExistingRegistration(request.CompetitionId, request.MemberId);
                 if (existingRegistration != null)
                 {
-                    return Json(new { success = false, message = $"{member.Name} is already registered for this competition" });
+                    // Swedish, and it says what to do instead: the desk hits this after picking
+                    // shooter + klass + starttid, so "already registered" alone leaves them stuck.
+                    // Adding a second klass to an existing anmälan is Redigera anmälan, not a new one.
+                    return Json(new { success = false, message = $"{member.Name} är redan anmäld till den här tävlingen. Använd Åtgärder → Redigera anmälan för att lägga till en klass eller ändra starttid." });
                 }
 
                 // Find or create the competition registrations hub

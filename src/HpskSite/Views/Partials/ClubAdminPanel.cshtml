@@ -2179,8 +2179,12 @@ function renderMemberMarkenDetail(data) {
     const signed = p && p.signedOff;
     const part1 = gf.part1Met || (p && p.part1Met);
     const part2 = gf.part2Met || (p && p.part2Met);
-    const seriesRows = (gf.bestSeries || []).map(s =>
-        `<li>${escapeMedalHtml(s.weaponGroup)}: <strong>${s.score}</strong> (krav ${s.threshold})${s.source ? ' <span class="text-muted">' + escapeMedalHtml(s.source === 'Tävling' ? (s.label || 'tävling') : 'guldserie') + '</span>' : ''}</li>`).join('');
+    // The date answers "when was this shot?" — a club admin validating a Guldfodring needs it to
+    // tell this year's series apart and to spot a serie entered under the wrong date.
+    const seriesRows = (gf.bestSeries || []).map(s => {
+        const sd = s.date ? new Date(s.date).toLocaleDateString('sv-SE') : '';
+        return `<li>${sd ? '<span class="text-nowrap">' + escapeMedalHtml(sd) + '</span> · ' : ''}${escapeMedalHtml(s.weaponGroup)}: <strong>${s.score}</strong> (krav ${s.threshold})${s.source ? ' <span class="text-muted">' + escapeMedalHtml(s.source === 'Tävling' ? (s.label || 'tävling') : 'guldserie') + '</span>' : ''}</li>`;
+    }).join('');
 
     // Read-only status — the year completes automatically when both parts are validated.
     const bothDone = gf.candidateBothMet || (p && p.fulfilled);

@@ -392,7 +392,7 @@
             <!-- Registrations Table -->
             <div id="competitionRegistrationsTableContainer" class="d-none">
                 <div class="table-responsive">
-                    <table class="table table-striped table-hover" id="competitionRegistrationsTable">
+                    <table class="table table-striped table-hover desk-sticky-actions" id="competitionRegistrationsTable">
                         <thead>
                             <tr>
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('memberName')">Medlem <span class="sort-ind" data-sort="memberName"></span></th>
@@ -403,7 +403,7 @@
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('paymentStatus')">Status <span class="sort-ind" data-sort="paymentStatus"></span></th>
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionRegistrations('isCheckedIn')">Närvaro <span class="sort-ind" data-sort="isCheckedIn"></span></th>
                                 <th class="sortable-col text-center" style="cursor:pointer;" title="Kan nås med push-notis" onclick="sortCompetitionRegistrations('hasPushSubscription')">Notis <span class="sort-ind" data-sort="hasPushSubscription"></span></th>
-                                <th class="text-end">Åtgärder</th>
+                                <th class="text-end desk-actions-col">Åtgärder</th>
                             </tr>
                         </thead>
                         <tbody id="competitionRegistrationsTableBody">
@@ -439,7 +439,7 @@
         <div class="collapse show" id="teamsCollapse">
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-striped table-hover">
+                    <table class="table table-striped table-hover desk-sticky-actions">
                         <thead>
                             <tr>
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('teamName')">Lagnamn <span class="team-sort-ind" data-sort="teamName"></span></th>
@@ -448,7 +448,7 @@
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('clubName')">Klubb <span class="team-sort-ind" data-sort="clubName"></span></th>
                                 <th>Deltagare</th>
                                 <th class="sortable-col" style="cursor:pointer;" onclick="sortCompetitionTeams('paymentStatus')">Status <span class="team-sort-ind" data-sort="paymentStatus"></span></th>
-                                <th class="text-end">Åtgärder</th>
+                                <th class="text-end desk-actions-col">Åtgärder</th>
                             </tr>
                         </thead>
                         <tbody id="competitionTeamsTableBody"></tbody>
@@ -1833,7 +1833,7 @@ function renderCompetitionTeams() {
             <td style="font-size:0.85em; max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtmlSafe(t.clubName || '')}">${escapeHtmlSafe(shortenClubName(t.clubName || ''))}</td>
             <td class="small">${members}</td>
             <td>${statusBadge}</td>
-            <td class="text-end">
+            <td class="text-end desk-actions-col">
                 <div class="dropdown">
                     <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
                             data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
@@ -3500,7 +3500,7 @@ function displayCompetitionRegistrations() {
                     ? `<i class="bi bi-broadcast text-success fs-5" title="Kan nås med push-notis"></i>`
                     : `<i class="bi bi-broadcast text-muted fs-5" style="opacity:.3;" title="Ingen enhet registrerad för push — en notis syns bara i appen"></i>`}
             </td>
-            <td>
+            <td class="desk-actions-col">
                 <!-- One labelled "Åtgärder" menu per row rather than a variable-length icon
                      strip. The row had outgrown the strip (5 buttons, 2 of them conditional,
                      so the positions shifted per row) and delete sat one mis-tap away from
