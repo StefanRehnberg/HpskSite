@@ -9,8 +9,8 @@
     ViewBag.Title = "SM i Springskytte 2026 — Obbhult, Varberg";
     ViewBag.MetaDescription = "Allt du behöver veta om Svenska Mästerskapen i springskytte 22–23 augusti 2026 i Släryds grustag, Obbhult utanför Varberg. Tidsplan, banor, PM, service och funktionärsinfo.";
 
+    // CompetitionId läses inte här — _SmSpringskytteFore hämtar det själv ur ViewData.
     var compUrl = ViewData["CompetitionUrl"] as string ?? "";
-    var compId = ViewData["CompetitionId"] as int? ?? 0;
     var contactName = ViewData["ContactName"] as string ?? "";
     var contactEmail = ViewData["ContactEmail"] as string ?? "";
     var contactPhone = ViewData["ContactPhone"] as string ?? "";
@@ -54,7 +54,10 @@
 
     <section class="sm-section">
         <h2>Tidsplan</h2>
-        <p>Startlistor publiceras i vecka 34. Tiderna för prisutdelning och stafettstart är ungefärliga.</p>
+        <p>
+            <a href="/sm-springskytte-2026/startlistor">Startlistorna finns här som PDF</a> — din exakta
+            starttid står där. Tiderna för prisutdelning och stafettstart är ungefärliga.
+        </p>
         <div class="row g-3">
             <div class="col-md-6">
                 <div class="sm-day">
@@ -123,34 +126,28 @@
     </section>
 
     <section class="sm-section">
-        <h2>Anmälan, startlistor och resultat</h2>
+        <h2>Startlistor och anmälan</h2>
         <div class="row g-3">
             <div class="col-md-6">
                 <div class="sm-card">
-                    <h3>Tävlingssidan</h3>
+                    <h3>📄 Startlistor</h3>
                     <p>
-                        Anmälan, avgifter, laganmälan och betalning sköts på tävlingens egen sida. Där publiceras
-                        också startlistorna i vecka 34 och resultaten under och efter tävlingen.
+                        Startlistorna för vapengrupp C och A finns här som PDF — ditt startnummer och din
+                        starttid.
                     </p>
-                    <a class="btn btn-primary" href="@compUrl">Till tävlingssidan</a>
-                    <p class="sm-note mt-3 mb-0">
-                        <strong>Inbetalda startavgifter återbetalas inte efter 15 augusti.</strong>
-                    </p>
+                    <a class="btn btn-primary" href="/sm-springskytte-2026/startlistor">Till startlistorna</a>
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="sm-card">
-                    <h3>Under tävlingen</h3>
-                    <ul class="sm-list-tight">
-                        <li><strong>Live-tävlan</strong> — resultaten uppdateras löpande på storskärm vid publikplatsen och i din telefon.</li>
-                        <li><strong>Mitt schema</strong> — dina egna starttider och uppdrag. Se rutan högst upp på sidan.</li>
-                    </ul>
-                    <div class="d-flex flex-wrap gap-2">
-                        @if (compId > 0)
-                        {
-                            <a class="btn btn-outline-primary" href="/live?c=@compId" target="_blank" rel="noopener">Live-tävlan</a>
-                        }
-                    </div>
+                    <h3>Tävlingssidan</h3>
+                    <p>
+                        Anmälan, avgifter, laganmälan och betalning sköts på tävlingens egen sida.
+                    </p>
+                    <a class="btn btn-outline-primary" href="@compUrl">Till tävlingssidan</a>
+                    <p class="sm-note mt-3 mb-0">
+                        <strong>Inbetalda startavgifter återbetalas inte efter 15 augusti.</strong>
+                    </p>
                 </div>
             </div>
         </div>

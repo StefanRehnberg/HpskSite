@@ -43,6 +43,7 @@ namespace HpskSite.Services.Schedule
         private readonly ParticipantAudienceResolver _audience;
         private readonly AppCaches _appCaches;
         private readonly HpskSite.Services.Staffing.RoleCatalogService _roles;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<MyScheduleService> _logger;
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
@@ -61,6 +62,7 @@ namespace HpskSite.Services.Schedule
             ParticipantAudienceResolver audience,
             AppCaches appCaches,
             HpskSite.Services.Staffing.RoleCatalogService roles,
+            IConfiguration configuration,
             ILogger<MyScheduleService> logger)
         {
             _ctxFactory = ctxFactory;
@@ -68,8 +70,37 @@ namespace HpskSite.Services.Schedule
             _audience = audience;
             _appCaches = appCaches;
             _roles = roles;
+            _configuration = configuration;
             _logger = logger;
         }
+
+        /// <summary>
+        /// Config path listing competitions whose start lists live OUTSIDE pistol.nu. Matched on URL
+        /// SEGMENT, not id, so one setting works in dev and prod (ids differ per database). Lives in
+        /// the tracked appsettings.json rather than the gitignored appsettings.Production.json, so it
+        /// cannot be lost on a deploy.
+        /// </summary>
+        public const string ExternalStartListConfigKey = "Schedule:ExternalStartListCompetitions";
+
+        /// <summary>
+        /// For a competition whose start lists are published elsewhere, "Startlistan är inte publicerad
+        /// än" is a lie that would stand for the whole event — the list is never coming. The warning is
+        /// replaced by a pointer instead. Empty config = every competition behaves exactly as before.
+        /// Pure + public so the matching is unit-testable without an Umbraco context.
+        /// </summary>
+        public static bool MatchesExternalStartListSegment(string[]? configuredSegments, string? urlSegment)
+        {
+            if (configuredSegments == null || configuredSegments.Length == 0) return false;
+            if (string.IsNullOrWhiteSpace(urlSegment)) return false;
+
+            return configuredSegments.Any(s => !string.IsNullOrWhiteSpace(s)
+                                               && string.Equals(s.Trim(), urlSegment.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool HasExternalStartLists(IPublishedContent comp)
+            => MatchesExternalStartListSegment(
+                _configuration.GetSection(ExternalStartListConfigKey).Get<string[]>(),
+                comp.UrlSegment);
 
         // ---------------------------------------------------------------- public API
 
@@ -189,10 +220,19 @@ namespace HpskSite.Services.Schedule
                 s.IsRegistered = SafeIsRegistered(competitionId, memberId);
                 if (s.IsRegistered && !items.Any(i => i.Kind == ScheduleItemKind.Skytte))
                 {
+                    // StartListPending stays true either way — it's what makes the schedule card render
+                    // at all for a shooter with no shooting rows. Only the wording changes.
                     s.StartListPending = true;
-                    s.Warnings.Add(isFalt
-                        ? "Patrullistan är inte publicerad än — dina starttider visas så snart arrangören publicerar den."
-                        : "Startlistan är inte publicerad än — dina starttider visas så snart arrangören publicerar den.");
+                    if (HasExternalStartLists(comp))
+                    {
+                        s.Warnings.Add("Startlistan publiceras inte i pistol.nu för den här tävlingen — din starttid hittar du hos arrangören.");
+                    }
+                    else
+                    {
+                        s.Warnings.Add(isFalt
+                            ? "Patrullistan är inte publicerad än — dina starttider visas så snart arrangören publicerar den."
+                            : "Startlistan är inte publicerad än — dina starttider visas så snart arrangören publicerar den.");
+                    }
                 }
 
                 DetectConflicts(items);

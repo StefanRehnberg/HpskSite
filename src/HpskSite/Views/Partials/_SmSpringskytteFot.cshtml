@@ -1,13 +1,16 @@
 @*
     Avslutande länk till tävlingssidan — på ALLA sidor i evenemangssajten.
 
-    Anmälan, avgifter, laganmälan, startlistor och resultat bor på tävlingsnoden, och den som läst
-    klart en sida ska inte behöva leta sig tillbaka till startsidan för att komma dit.
+    Anmälan, avgifter, laganmälan och betalning bor på tävlingsnoden, och den som läst klart en sida
+    ska inte behöva leta sig tillbaka till startsidan för att komma dit. Startlistor och resultat bor
+    däremot HÄR som PDF (beslut 2026-08-18) — tävlingsledningen kör inte pistol.nu:s startlistor eller
+    resultathantering för det här SM:et.
     ViewData["CompetitionUrl"] är alltid satt (controllern faller tillbaka på prod-URL:en).
 *@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     var smfotUrl = ViewData["CompetitionUrl"] as string ?? "";
+    var smfotActive = ViewData["ActivePage"] as string ?? "";
 }
 
 @if (!string.IsNullOrEmpty(smfotUrl))
@@ -15,8 +18,14 @@
     <section class="sm-section sm-foot">
         <h2>Till tävlingssidan</h2>
         <p>
-            Anmälan, avgifter, laganmälan och betalning sköts på tävlingens egen sida. Där publiceras
-            också <strong>startlistorna i vecka 34</strong> och resultaten under och efter tävlingen.
+            <strong>Anmälan, avgifter, laganmälan och betalning</strong> sköts på tävlingens egen sida.
+            @if (smfotActive != "startlistor")
+            {
+                <text>
+                    Startlistorna hittar du under
+                    <a href="/sm-springskytte-2026/startlistor">Startlistor &amp; resultat</a>.
+                </text>
+            }
         </p>
         <a class="btn btn-primary btn-lg" href="@smfotUrl">
             <i class="bi bi-box-arrow-up-right me-2"></i>SM i Springskytte 2026 — tävlingssidan

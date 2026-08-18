@@ -9,8 +9,7 @@
     ViewBag.Title = "För funktionärer — SM i Springskytte 2026";
     ViewBag.MetaDescription = "Funktionärsinformation för SM i Springskytte 2026: roller på skjutområdet, tider, västar och länk till ditt personliga schema.";
 
-    var compId = ViewData["CompetitionId"] as int? ?? 0;
-    var compUrl = ViewData["CompetitionUrl"] as string ?? "";
+    // CompetitionId läses inte här — _SmSpringskytteFore hämtar det själv ur ViewData.
 }
 
 <link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
@@ -150,11 +149,12 @@
             <a class="btn btn-outline-primary btn-sm" href="/sm-springskytte-2026/pm">📋 Hela tävlings-PM:et</a>
             <a class="btn btn-outline-primary btn-sm" href="/sm-springskytte-2026/banor">🗺️ Banor och skjutområden</a>
             <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/tavlings-pm.pdf" target="_blank" rel="noopener">📄 PM som PDF</a>
+            <a class="btn btn-outline-primary btn-sm" href="/sm-springskytte-2026/startlistor">📄 Startlistor</a>
         </p>
-        @if (!string.IsNullOrEmpty(compUrl))
-        {
-            <p class="mb-0">Startlistorna publiceras i vecka 34 på <a href="@compUrl">tävlingssidan</a>.</p>
-        }
+        <p class="mb-0">
+            <a href="/sm-springskytte-2026/startlistor">Startlistorna finns här som PDF</a> — ladda ner dem
+            innan du åker, täckningen i grustaget är svag.
+        </p>
     </section>
 
     @await Html.PartialAsync("_SmSpringskytteFot")

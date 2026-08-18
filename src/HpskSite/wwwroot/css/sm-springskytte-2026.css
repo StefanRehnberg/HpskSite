@@ -345,6 +345,75 @@ a.sm-card .sm-card-more {
     margin: 0 0.75rem 0.5rem 0;
 }
 
+/* ---------- Dokumentlista (startlistor + resultat) ----------
+   Hela raden är klickbar och minst 56 px hög: den vanligaste läsaren står utomhus
+   med handskar på och letar sin starttid. */
+.sm-doc-list {
+    display: grid;
+    gap: 0.6rem;
+}
+
+a.sm-doc {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    min-height: 56px;
+    padding: 0.85rem 1rem;
+    border: 1px solid rgba(18, 35, 58, 0.15);
+    border-left: 4px solid var(--sm-accent);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--sm-ink);
+    text-decoration: none;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+a.sm-doc:hover,
+a.sm-doc:focus-visible {
+    box-shadow: 0 6px 18px rgba(18, 35, 58, 0.14);
+    transform: translateY(-1px);
+    color: var(--sm-accent);
+}
+
+.sm-doc-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+    flex: 0 0 auto;
+}
+
+.sm-doc-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.sm-doc-title {
+    display: block;
+    font-weight: 600;
+}
+
+.sm-doc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+
+.sm-doc-status {
+    background: rgba(224, 168, 0, 0.18);
+    color: #6b4d00;
+    border-radius: 999px;
+    padding: 0 0.5rem;
+    font-weight: 600;
+    opacity: 1;
+}
+
+.sm-doc-arrow {
+    flex: 0 0 auto;
+    font-size: 1.15rem;
+    opacity: 0.55;
+}
+
 @media print {
     .sm-nav,
     .sm-hero-facts {

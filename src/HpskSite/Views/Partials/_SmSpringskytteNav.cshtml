@@ -7,9 +7,14 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     var active = ViewData["ActivePage"] as string ?? "";
+
+    // Fliken nämner resultat först när det finns resultat att visa — vi vet inte om de kommer.
+    var hasResults = ViewData["HasResultDocuments"] as bool? ?? false;
+    var docsLabel = hasResults ? "Startlistor & resultat" : "Startlistor";
 }
 <nav class="sm-nav" aria-label="Sidor om SM i Springskytte 2026">
     <a href="/sm-springskytte-2026" class="@(active == "start" ? "active" : "")">Start</a>
+    <a href="/sm-springskytte-2026/startlistor" class="@(active == "startlistor" ? "active" : "")">@docsLabel</a>
     <a href="/sm-springskytte-2026/pm" class="@(active == "pm" ? "active" : "")">Tävlings-PM</a>
     <a href="/sm-springskytte-2026/banor" class="@(active == "banor" ? "active" : "")">Banor &amp; skjutområden</a>
     <a href="/sm-springskytte-2026/service" class="@(active == "service" ? "active" : "")">Service &amp; boende</a>

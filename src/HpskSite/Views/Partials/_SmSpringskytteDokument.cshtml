@@ -1,0 +1,34 @@
+@*
+    En rad i dokumentlistan på /sm-springskytte-2026/startlistor.
+
+    NB: ingen top-level <style> här — det 500:ar i en partial. Styling ligger i
+    /css/sm-springskytte-2026.css.
+*@
+@using System.Globalization
+@model HpskSite.Controllers.SmDocument
+@{
+    var sizeKb = Model.SizeBytes > 0 ? (Model.SizeBytes + 1023) / 1024 : 0;
+    // Utan explicit sv-SE blir det "18 August" — serverns kultur är inte svensk.
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+}
+<a class="sm-doc" href="@Model.Url" target="_blank" rel="noopener">
+    <span class="sm-doc-icon" aria-hidden="true">📄</span>
+    <span class="sm-doc-body">
+        <span class="sm-doc-title">@Model.Title</span>
+        <span class="sm-doc-meta">
+            @if (!string.IsNullOrEmpty(Model.Status))
+            {
+                <span class="sm-doc-status">@Model.Status</span>
+            }
+            @if (Model.UpdatedAt.HasValue)
+            {
+                <span>Uppdaterad @Model.UpdatedAt.Value.ToString("d MMMM HH:mm", sv)</span>
+            }
+            @if (sizeKb > 0)
+            {
+                <span>PDF, @sizeKb kB</span>
+            }
+        </span>
+    </span>
+    <span class="sm-doc-arrow" aria-hidden="true">↓</span>
+</a>

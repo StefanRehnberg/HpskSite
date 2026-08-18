@@ -1,0 +1,116 @@
+@*
+    /sm-springskytte-2026/startlistor — startlistorna som PDF.
+
+    Tävlingsledningen kör inte pistol.nu:s startlistor eller resultathantering för det här SM:et
+    (beslut 2026-08-18). Vi vet INTE om resultat kommer att anslås, och skriver därför ingenting om
+    dem: resultatsektionen renderas bara om det faktiskt ligger en resultatfil i mappen. Ett tomt
+    löfte är samma fel som en felaktig uppgift.
+
+    Allt på sidan läses ur filnamnen av SmSpringskytte2026Controller.ResolveDocuments() — en ny lista
+    publiceras genom att lägga filen i mappen, aldrig genom att deploya kod.
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+
+    var docs = ViewData["Documents"] as IEnumerable<HpskSite.Controllers.SmDocument>
+               ?? Array.Empty<HpskSite.Controllers.SmDocument>();
+
+    var startLists = docs.Where(d => d.Category == "Startlistor").ToList();
+    var results = docs.Where(d => d.Category == "Resultat").ToList();
+    var other = docs.Where(d => d.Category == "Övriga dokument").ToList();
+
+    var heading = results.Any() ? "Startlistor och resultat" : "Startlistor";
+    ViewBag.Title = heading + " — SM i Springskytte 2026";
+    ViewBag.MetaDescription = "Startlistor för SM i springskytte 2026 i Obbhult, vapengrupp C (lördag 22 augusti) och vapengrupp A (söndag 23 augusti).";
+}
+
+<link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="container sm-page my-4">
+
+    <header class="sm-hero">
+        <div class="sm-kicker">SM i Springskytte 2026</div>
+        <h1>@heading</h1>
+        <p class="sm-hero-sub">Ladda ner som PDF — spara den i telefonen innan du åker</p>
+    </header>
+
+    @await Html.PartialAsync("_SmSpringskytteNav")
+
+    <section class="sm-section">
+        <h2>Startlistor</h2>
+        @if (startLists.Any())
+        {
+            <p>
+                Startlistorna är sorterade på vapengrupp. Ditt startnummer står i kolumnen längst till
+                vänster — <strong>nummerlappen hämtar du i vapenkontrollen</strong> och den ska bäras väl
+                synlig på ryggen.
+            </p>
+            <div class="sm-doc-list">
+                @foreach (var doc in startLists)
+                {
+                    @await Html.PartialAsync("_SmSpringskytteDokument", doc)
+                }
+            </div>
+            @if (startLists.Any(d => d.Status == "Preliminär"))
+            {
+                <p class="sm-note mt-3">
+                    <strong>Listorna är preliminära.</strong> Kontrollera din starttid igen när du kommer
+                    till tävlingsplatsen — ändringar anslås vid sekretariatet.
+                </p>
+            }
+        }
+        else
+        {
+            <div class="sm-card">
+                <p class="mb-0">Startlistorna publiceras här så snart de är klara.</p>
+            </div>
+        }
+    </section>
+
+    @* Renderas bara när det finns resultat. Vi vet inte om några kommer, och en tom sektion som
+       lovar dem är missvisande. Lägg en fil som börjar på "Resultat" i mappen och den dyker upp. *@
+    @if (results.Any())
+    {
+        <section class="sm-section">
+            <h2>Resultat</h2>
+            <div class="sm-doc-list">
+                @foreach (var doc in results)
+                {
+                    @await Html.PartialAsync("_SmSpringskytteDokument", doc)
+                }
+            </div>
+        </section>
+    }
+
+    @if (other.Any())
+    {
+        <section class="sm-section">
+            <h2>Övriga dokument</h2>
+            <div class="sm-doc-list">
+                @foreach (var doc in other)
+                {
+                    @await Html.PartialAsync("_SmSpringskytteDokument", doc)
+                }
+            </div>
+        </section>
+    }
+
+    <section class="sm-section">
+        <h2>Ladda ner innan du åker</h2>
+        <div class="sm-card">
+            <p>
+                Täckningen i grustaget kan vara svag. Öppna filerna hemma eller på vägen så du har dem
+                kvar offline.
+            </p>
+            <p class="sm-downloads mb-0">
+                <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/tavlings-pm.pdf" target="_blank" rel="noopener">📄 Tävlings-PM som PDF</a>
+                <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/oversiktsbilder.pdf" target="_blank" rel="noopener">🗺️ Översiktsbilder</a>
+                <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/oversikt-skjutomrade-c.pdf" target="_blank" rel="noopener">🎯 Skjutområde C</a>
+            </p>
+        </div>
+    </section>
+
+    @await Html.PartialAsync("_SmSpringskytteFot")
+
+</div>

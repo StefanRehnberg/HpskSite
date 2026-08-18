@@ -13,6 +13,7 @@ namespace HpskSite.Controllers
     ///   /sm-springskytte-2026/banor        → löpslingor + skjutområden (kartor)
     ///   /sm-springskytte-2026/service      → servering, parkering, boende
     ///   /sm-springskytte-2026/funktionarer → funktionärsinfo + länkar till schema/bemanning
+    ///   /sm-springskytte-2026/startlistor  → startlistorna som PDF (+ resultat om sådana dyker upp)
     ///
     /// Routed controller, no Umbraco node (same pattern as /mitt-schema, /styrelse, /siktbild) — the
     /// content is fixed for this one event, so a doctype + backoffice setup buys nothing and would be
@@ -21,13 +22,22 @@ namespace HpskSite.Controllers
     /// The page is PUBLIC and rendered server-side: participants open it at a quarry with poor coverage,
     /// so it must not depend on a client fetch or a login completing.
     ///
-    /// The competition NODE (anmälan, startlistor, resultat, live) stays where it is — this site only
-    /// links to it. The node is resolved by URL segment rather than a hardcoded id so the same code works
-    /// in dev and prod; override with config key "SmSpringskytte2026:CompetitionUrlSegment" if the
-    /// competition is ever renamed.
+    /// The competition NODE keeps anmälan, avgifter, laganmälan och betalning — this site only links to
+    /// it. Tävlingsledningen kör dock INTE startlistor eller resultat i pistol.nu för det här SM:et
+    /// (beslut 2026-08-18): startlistorna anslås som PDF på /startlistor. Om resultat kommer att anslås
+    /// vet vi inte, så INGEN sida får utfästa något om resultat — inte live-resultat, inte "publiceras
+    /// efter tävlingen" — och inte starttider i Mitt schema.
+    /// The node is resolved by URL segment rather than a hardcoded id so the same code works in dev and
+    /// prod; override with config key "SmSpringskytte2026:CompetitionUrlSegment" if it is ever renamed.
     /// </summary>
     /// <summary>A playable tutorial film, surfaced as a button on the event site.</summary>
     public record SmTutorialLink(string Id, string Title);
+
+    /// <summary>
+    /// A PDF published on /sm-springskytte-2026/startlistor. <paramref name="UpdatedAt"/> comes from the
+    /// file itself so a stale copy can never masquerade as the current one.
+    /// </summary>
+    public record SmDocument(string Category, string Title, string Url, string Status, DateTime? UpdatedAt, long SizeBytes, int SortKey);
 
     [Route("sm-springskytte-2026")]
     public class SmSpringskytte2026Controller : Controller
@@ -39,8 +49,39 @@ namespace HpskSite.Controllers
         /// </summary>
         private const string FallbackCompetitionUrl = "/competitions/2026/halland/sm-springskytte-2026/";
 
+        /// <summary>
+        /// Where the published PDFs live, relative to wwwroot.
+        ///
+        /// PUBLISHING A DOCUMENT IS A FILE UPLOAD — NEVER A CODE CHANGE. Everything on screen is read
+        /// off the file itself, so a new start list or result list needs no deploy:
+        ///   - the heading is the FILE NAME (minus extension, see <see cref="TitleFrom"/>)
+        ///   - the section comes from the first word: "Startlista…" / "Resultat…" (anything else lands
+        ///     under Övriga dokument rather than being hidden)
+        ///   - a "(preliminär)" or "prel" token anywhere in the name renders the Preliminär badge, and
+        ///     is stripped from the heading. Drop it and the badge is gone — that is the whole
+        ///     preliminär → definitiv switch.
+        ///   - "Uppdaterad …" is the file's own timestamp, so a replaced file can never look stale
+        ///   - an optional leading number ("1 Startlista …") orders the list and is stripped from the
+        ///     heading. Without it the section is alphabetical, which is not chronological.
+        /// </summary>
+        private const string DocumentFolder = "files/sm-springskytte-2026/dokument";
+
+        private const string CategoryStartLists = "Startlistor";
+        private const string CategoryResults = "Resultat";
+        private const string CategoryOther = "Övriga dokument";
+
+        /// <summary>Tokens that mark a document as preliminary. Matched case-insensitively.</summary>
+        private static readonly string[] PreliminaryTokens = { "(preliminär)", "preliminär", "preliminar", "prel" };
+
+        /// <summary>
+        /// Single letters that are weapon groups and must stay capitalised when a kebab-cased file name
+        /// is turned into a heading. Deliberately NOT every single letter — "i" is a Swedish word.
+        /// </summary>
+        private static readonly string[] WeaponGroupLetters = { "a", "b", "c", "r", "l", "m" };
+
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IConfiguration _configuration;
+        private readonly IWebHostEnvironment _environment;
 
         // The competition node moves rarely; a short cache keeps a mail-out spike off the content tree.
         private static readonly object CacheLock = new();
@@ -48,10 +89,14 @@ namespace HpskSite.Controllers
         private static DateTime _cachedAt = DateTime.MinValue;
         private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
-        public SmSpringskytte2026Controller(IUmbracoContextAccessor umbracoContextAccessor, IConfiguration configuration)
+        public SmSpringskytte2026Controller(
+            IUmbracoContextAccessor umbracoContextAccessor,
+            IConfiguration configuration,
+            IWebHostEnvironment environment)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _configuration = configuration;
+            _environment = environment;
         }
 
         [HttpGet("")]
@@ -68,6 +113,10 @@ namespace HpskSite.Controllers
 
         [HttpGet("funktionarer")]
         public IActionResult Funktionarer() => Page("SmSpringskytte2026Funktionarer", "funktionarer", "För funktionärer — SM i Springskytte 2026");
+
+        [HttpGet("startlistor")]
+        // Vyn sätter ViewBag.Title själv utifrån vad som faktiskt ligger i mappen.
+        public IActionResult Startlistor() => Page("SmSpringskytte2026Startlistor", "startlistor", "Startlistor — SM i Springskytte 2026");
 
         private IActionResult Page(string view, string active, string title)
         {
@@ -94,7 +143,155 @@ namespace HpskSite.Controllers
             ViewData["ContactEmail"] = competition?.Value<string>("contactEmail") ?? "";
             ViewData["ContactPhone"] = competition?.Value<string>("contactPhone") ?? "";
 
+            // Slås upp här i C# och inte i vyn: en explicit generic i ett Razor-kodblock parsas som
+            // HTML-tagg och fäller vyn utan felmeddelande.
+            var documents = ResolveDocuments();
+            ViewData["Documents"] = documents;
+
+            // Navigeringen och sidrubriken nämner resultat först när det FINNS resultat att visa — vi
+            // vet inte om de kommer, och en flik som lovar dem är samma slags missvisande löfte som en
+            // tom resultatsektion. Ligger i ViewData eftersom navigeringspartialen är delad.
+            ViewData["HasResultDocuments"] = documents.Any(d => d.Category == CategoryResults);
+
             return View(view, rootNode);
+        }
+
+        /// <summary>
+        /// Läser de publicerade PDF:erna från disk och beskriver dem helt utifrån filnamnet — se
+        /// <see cref="DocumentFolder"/>. Ingen kuraterad lista finns kvar: en ny startlista eller
+        /// resultatlista publiceras genom att lägga filen i mappen, aldrig genom att deploya kod.
+        /// Kastar aldrig: saknad mapp ger tom lista och sidan säger att listorna inte är klara än.
+        /// </summary>
+        private List<SmDocument> ResolveDocuments()
+        {
+            var documents = new List<SmDocument>();
+
+            try
+            {
+                var root = _environment.WebRootPath;
+                if (string.IsNullOrEmpty(root)) return documents;
+
+                var folder = Path.Combine(root, DocumentFolder.Replace('/', Path.DirectorySeparatorChar));
+                if (!Directory.Exists(folder)) return documents;
+
+                foreach (var path in Directory.GetFiles(folder, "*.pdf"))
+                {
+                    var name = Path.GetFileNameWithoutExtension(path);
+                    var (sortKey, withoutNumber) = SplitLeadingNumber(name);
+                    var (isPreliminary, withoutStatus) = StripPreliminaryToken(withoutNumber);
+
+                    documents.Add(Describe(
+                        CategoryFor(withoutStatus),
+                        TitleFrom(withoutStatus),
+                        isPreliminary ? "Preliminär" : "",
+                        sortKey,
+                        path));
+                }
+
+                // Ett ledande nummer i filnamnet vinner; annars alfabetiskt på rubriken, vilket är
+                // förutsägbart men inte kronologiskt (A-listan är söndag, C-listan lördag).
+                documents = documents
+                    .OrderBy(d => d.SortKey)
+                    .ThenBy(d => d.Title, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), true))
+                    .ToList();
+            }
+            catch
+            {
+                // Diskfel får inte ta ner evenemangssajten.
+            }
+
+            return documents;
+        }
+
+        /// <summary>
+        /// Optional leading order number ("1 Startlista …", "2. Resultat …"). Returns int.MaxValue when
+        /// absent so unnumbered files sort after numbered ones instead of jumping to the top.
+        /// </summary>
+        private static (int SortKey, string Remaining) SplitLeadingNumber(string name)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(name.TrimStart(), @"^(\d{1,3})[\.\)]?[\s_-]+(.+)$");
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var n))
+                return (n, match.Groups[2].Value);
+
+            return (int.MaxValue, name);
+        }
+
+        /// <summary>
+        /// Detects and removes the preliminär marker. Removing it from the heading matters — otherwise
+        /// the word shows up twice, once as text and once as a badge.
+        /// </summary>
+        private static (bool IsPreliminary, string Remaining) StripPreliminaryToken(string name)
+        {
+            foreach (var token in PreliminaryTokens)
+            {
+                var index = name.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+                if (index < 0) continue;
+
+                // "prel" must be a whole word — it is a substring of "preliminär" and could otherwise
+                // fire inside an unrelated word.
+                if (token == "prel" && !IsWholeWord(name, index, token.Length)) continue;
+
+                return (true, name.Remove(index, token.Length));
+            }
+
+            return (false, name);
+        }
+
+        private static bool IsWholeWord(string text, int index, int length)
+        {
+            var before = index == 0 || !char.IsLetter(text[index - 1]);
+            var afterIndex = index + length;
+            var after = afterIndex >= text.Length || !char.IsLetter(text[afterIndex]);
+            return before && after;
+        }
+
+        private static string CategoryFor(string name)
+        {
+            var trimmed = name.TrimStart(' ', '-', '_');
+            if (trimmed.StartsWith("startlista", StringComparison.OrdinalIgnoreCase)) return CategoryStartLists;
+            if (trimmed.StartsWith("resultat", StringComparison.OrdinalIgnoreCase)) return CategoryResults;
+            return CategoryOther;
+        }
+
+        /// <summary>
+        /// The file name IS the heading, so whoever uploads it decides the wording. A name written with
+        /// real spaces is used verbatim; a kebab-cased one gets its separators turned into spaces (and
+        /// its weapon-group letters re-capitalised), so both naming styles read well.
+        /// </summary>
+        private static string TitleFrom(string name)
+        {
+            var work = name.Trim(' ', '-', '_');
+            if (work.Length == 0) return "Dokument";
+
+            if (!work.Contains(' '))
+            {
+                var words = work.Split(new[] { '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(w => WeaponGroupLetters.Contains(w, StringComparer.OrdinalIgnoreCase)
+                        ? w.ToUpperInvariant()
+                        : w);
+                work = string.Join(' ', words);
+            }
+
+            // Collapse the double space a stripped "(preliminär)" leaves behind.
+            work = System.Text.RegularExpressions.Regex.Replace(work, @"\s{2,}", " ").Trim(' ', '-', '_');
+            if (work.Length == 0) return "Dokument";
+
+            return char.ToUpper(work[0]) + work[1..];
+        }
+
+        private SmDocument Describe(string category, string title, string status, int sortKey, string path)
+        {
+            var info = new FileInfo(path);
+            return new SmDocument(
+                category,
+                title,
+                // Uri-escaped: file names are allowed to contain spaces and å/ä/ö, since the name is
+                // what the reader sees. An unescaped space breaks the href.
+                $"/{DocumentFolder}/{Uri.EscapeDataString(Path.GetFileName(path))}",
+                status,
+                info.LastWriteTime,
+                info.Length,
+                sortKey);
         }
 
         /// <summary>
