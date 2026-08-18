@@ -389,6 +389,12 @@
                  Sits above the table because it explains what the table is currently showing. -->
             <div id="paymentRefBanner" class="alert d-none py-2"></div>
 
+            <!-- Kvittot på vad en sparning gjorde (avgiftsändring, klubbspridning). Detta var
+                 alert() förut, vilket LÅSER fliken tills någon klickar OK — en klassändring
+                 returnerar alltid en avgiftsnot, så varje klassändring frös bordet. Servern är
+                 klar på under en sekund; det som såg ut som en frysning var dialogen. -->
+            <div id="deskSaveNotice" class="alert d-none py-2 alert-dismissible fade show"></div>
+
             <!-- Registrations Table -->
             <div id="competitionRegistrationsTableContainer" class="d-none">
                 <div class="table-responsive">
@@ -3060,6 +3066,24 @@ function showConsolidatedRefBanner(d, matchedRegs, matchedTeams) {
          </div>`);
 }
 
+// Non-blocking replacement for the post-save alert()s. A native alert freezes the whole tab
+// until it is dismissed, and the desk hits this on every class change — which is what the
+// 2026-08-05 shift reported as a ~40 s freeze it had to kill the tab out of. Scrolled into view
+// so it can't be missed the way an off-screen banner would be.
+function showDeskSaveNotice(notes, variant) {
+    const el = document.getElementById('deskSaveNotice');
+    const list = (Array.isArray(notes) ? notes : [notes]).filter(Boolean);
+    if (!el || list.length === 0) return;
+    el.className = `alert alert-${variant || 'info'} py-2 alert-dismissible fade show`;
+    el.innerHTML = `<i class="bi bi-info-circle me-2"></i>`
+        + (list.length === 1
+            ? escapeHtmlSafe(list[0])
+            : '<ul class="mb-0 ps-3">' + list.map(n => `<li>${escapeHtmlSafe(n)}</li>`).join('') + '</ul>')
+        + '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Stäng"></button>';
+    el.classList.remove('d-none');
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
 function showPaymentRefBanner(variant, icon, html) {
     let el = document.getElementById('paymentRefBanner');
     if (!el) return;
@@ -4461,17 +4485,14 @@ function saveCompetitionRegistrationChanges() {
                 }
             }
             bootstrap.Modal.getInstance(document.getElementById('competitionEditRegistrationModal')).hide();
-            // Surface fee-change feedback (e.g. "Faktura uppdaterat: 150 → 300 kr" or
-            // a manual-reconciliation warning when invoice is already paid).
-            if (result.feeChangeNote) {
-                alert(result.feeChangeNote);
-            }
-            // A club change also rewrites the shooter's club in any already-generated start
-            // list / patrol list. Say so — otherwise the operator has no way to know whether
-            // the public lists were left showing the old club.
-            if (result.clubPropagationNote) {
-                alert(result.clubPropagationNote);
-            }
+            // Fee-change feedback (e.g. "Faktura uppdaterat: 150 → 300 kr", or a
+            // manual-reconciliation warning when the invoice is already paid), plus the club
+            // note: a club change rewrites the shooter's club in any already-generated start
+            // list / patrol list, and the operator otherwise has no way to know whether the
+            // public lists were left showing the old club.
+            // Shown as ONE non-blocking banner. These were two alert()s, i.e. up to two native
+            // dialogs that freeze the tab — and a class change always produces the fee note.
+            showDeskSaveNotice([result.feeChangeNote, result.clubPropagationNote], 'info');
             const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
             loadCompetitionRegistrations();
 

@@ -900,7 +900,10 @@
 								}
 								@if (!isSpringskytte)
 								{
-									<li><i class="bi bi-list-ol"></i> Antal serier: <strong>@(numberOfFinalSeries > 0 ? $"{numberOfSeriesOrStations - numberOfFinalSeries} + {numberOfFinalSeries}" : $"{numberOfSeriesOrStations}")</strong></li>
+									@* Fältskytte/MagnumFält räknar STATIONER, inte serier — samma property
+									   (numberOfSeriesOrStations) bär båda, så bara ordet skiljer. Fältskytte har
+									   heller ingen final, så grundomgång + final-uppdelningen gäller bara serier. *@
+									<li><i class="bi bi-list-ol"></i> @(isFaltskytte ? "Antal stationer" : "Antal serier"): <strong>@(!isFaltskytte && numberOfFinalSeries > 0 ? $"{numberOfSeriesOrStations - numberOfFinalSeries} + {numberOfFinalSeries}" : $"{numberOfSeriesOrStations}")</strong></li>
 								}
 								@if (!isExternal)
 								{
