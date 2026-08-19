@@ -206,11 +206,17 @@ namespace HpskSite.Controllers
                 }
 
                 // Feature popularity over the last 30 days — bucket each logged path into a
-                // named feature and count engaged sessions + page views per feature. Same
-                // "engaged session" filter as the daily/weekly charts (≥ 2 distinct paths in
-                // the window) so cookie-blind scrapers don't inflate the public buckets.
-                // Members-only features (Styrelse, Fältkonfig) are login-gated, so their
-                // counts are genuine usage. Paths come from the route table / nav menu.
+                // named feature and count engaged sessions + page views per feature. The
+                // "engaged session" filter (≥ 2 distinct paths in the window, same as the
+                // daily/weekly charts) exists to stop cookie-blind scrapers inflating the
+                // PUBLIC buckets — so it is applied to those only. The login-gated pages
+                // (Styrelse, Fältkonfig, Resultatinmatning, Mitt schema) can't be reached by a
+                // scraper at all, and a station tablet or a shooter opening a QR/push link
+                // often logs exactly ONE path for a whole day — filtering those would report
+                // zero usage for pages that were used all day. Paths come from the route table
+                // / nav menu. NOTE: query strings are never logged, so the admin Resultat tab
+                // (/competitionmanagement?competitionId=) can't be split out — the
+                // "Resultatinmatning" bucket is the dedicated staff page /station.
                 var featureRows = await db.FetchAsync<FeatureUsageRow>(
                     @"SELECT Feature, COUNT(DISTINCT SessionHash) AS Sessions, COUNT(*) AS PageViews
                       FROM (
@@ -226,17 +232,25 @@ namespace HpskSite.Controllers
                                   WHEN LOWER(v.[Path]) LIKE '/competitions%'  THEN 'Tävlingar'
                                   WHEN LOWER(v.[Path]) LIKE '/marken%'        THEN 'Märken'
                                   WHEN LOWER(v.[Path]) LIKE '/live%'          THEN 'Live-resultat'
+                                  WHEN LOWER(v.[Path]) LIKE '/station%'       THEN 'Resultatinmatning'
+                                  WHEN LOWER(v.[Path]) LIKE '/mitt-schema%'   THEN 'Mitt schema'
                                   ELSE NULL
-                              END AS Feature
+                              END AS Feature,
+                              CASE WHEN LOWER(v.[Path]) LIKE '/styrelse%'
+                                     OR LOWER(v.[Path]) LIKE '/faltkonfig%'
+                                     OR LOWER(v.[Path]) LIKE '/station%'
+                                     OR LOWER(v.[Path]) LIKE '/mitt-schema%'
+                                   THEN 1 ELSE 0 END AS LoginGated,
+                              CASE WHEN e.SessionHash IS NULL THEN 0 ELSE 1 END AS Engaged
                           FROM [VisitorLogs] v
-                          JOIN (
+                          LEFT JOIN (
                               SELECT SessionHash FROM [VisitorLogs]
                               WHERE VisitedAt >= @0
                               GROUP BY SessionHash HAVING COUNT(DISTINCT [Path]) >= 2
                           ) e ON e.SessionHash = v.SessionHash
                           WHERE v.VisitedAt >= @0
                       ) t
-                      WHERE Feature IS NOT NULL
+                      WHERE Feature IS NOT NULL AND (Engaged = 1 OR LoginGated = 1)
                       GROUP BY Feature
                       ORDER BY Sessions DESC",
                     dailyStart);
