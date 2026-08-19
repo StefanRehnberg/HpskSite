@@ -852,10 +852,28 @@ namespace HpskSite.Services
 
         /// <summary>
         /// Checks whether the current user is allowed to manage (mark paid, cancel, resend, etc.)
-        /// a specific competition invoice. The four-tier rule is: site admin OR competition manager
-        /// for the invoice's competition OR club admin for the competition's club OR skjutledare
-        /// for the competition's club. Returns false if the invoice or its competition cannot be
-        /// resolved.
+        /// a specific competition invoice: site admin OR competition manager for the invoice's
+        /// competition OR club admin for the competition's club (which folds in that club's regional
+        /// admins) OR, on a region-hosted competition, an admin of the hosting region. Returns false
+        /// if the invoice or its competition cannot be resolved.
+        ///
+        /// <para><b>Skjutledare was removed here 2026-08-19 (Stefan's call).</b> A Skjutledare is a
+        /// RANGE-MASTER role — they run the firing line, approve training steps and manage the
+        /// competition's practical side. Nothing about that implies authority over money, and this
+        /// right is the one that lets someone mark a payment received, makulera an invoice, issue a
+        /// kreditfaktura and mail payment reminders. The same removal was applied to the five
+        /// reminder/Bokföringsunderlag endpoints in <c>InvoiceAdminController</c> that repeated the
+        /// check inline, so the finance surface is now consistent — a partial tightening would just
+        /// mean a Skjutledare who cannot mark an invoice paid can still mail reminders about it.</para>
+        ///
+        /// <para><b>The escape hatch, if a specific Skjutledare genuinely handles the money:</b> tick
+        /// app access on their Bemanning row, or name them a tävlingsansvarig. Both feed
+        /// <see cref="HasCompetitionManagementAccess"/> above, which is checked first here — that is
+        /// the intended, per-competition, revocable way to say "this person runs the sekretariat",
+        /// and it is why no separate invoice permission was introduced.</para>
+        ///
+        /// <para>NB this changes nothing on a REGION-HOSTED competition (an SM): the Skjutledare
+        /// branch only ever ran inside <c>clubId &gt; 0</c>, so it was already unreachable there.</para>
         /// </summary>
         public async Task<bool> CanManageCompetitionInvoice(int invoiceId)
         {
@@ -880,7 +898,7 @@ namespace HpskSite.Services
                 if (clubId > 0)
                 {
                     if (await IsClubAdminForClub(clubId)) return true;   // includes regional admin
-                    if (await IsSkjutledareForClub(clubId)) return true;
+                    // NO Skjutledare here — see the remarks above. Range-master ≠ finance role.
                 }
                 else if (competition != null)
                 {

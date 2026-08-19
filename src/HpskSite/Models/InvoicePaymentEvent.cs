@@ -22,6 +22,15 @@ namespace HpskSite.Models
         public const string PaymentSent    = "PaymentSent";        // payer (shooter or club) CLAIMS they have paid — NOT organizer-confirmed receipt
         public const string PaymentSentCleared = "PaymentSentCleared"; // payer withdrew the "betald"-claim
 
+        // ── samlingsfaktura ──────────────────────────────────────────────────────────────────────
+        // Folding an invoice into a samlingsfaktura redirects who pays it and LOCKS it against
+        // cancellation, but until 2026-08-19 it left no trace on the invoice at all: the parent's own
+        // Created row was written with byMemberId null, and the covered children got nothing. So
+        // "who decided that Varbergs PK owes 2 400 kr for these seven entries?" was unanswerable.
+        // These two are logged on each CHILD; the parent keeps its Created row (now with an actor).
+        public const string Consolidated   = "Consolidated";           // folded into a samlingsfaktura
+        public const string ConsolidationCancelled = "ConsolidationCancelled"; // parent makulerad, invoice payable on its own again
+
         /// <summary>Resolves a paymentStatus value into the event type that should be logged when transitioning to it.</summary>
         public static string FromStatus(string paymentStatus) => paymentStatus switch
         {

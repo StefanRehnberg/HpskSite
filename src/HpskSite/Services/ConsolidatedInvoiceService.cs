@@ -31,17 +31,20 @@ namespace HpskSite.Services
         private readonly IContentService _contentService;
         private readonly PaymentService _paymentService;
         private readonly ClubService _clubService;
+        private readonly InvoiceAuditService _auditService;
         private readonly ILogger<ConsolidatedInvoiceService> _logger;
 
         public ConsolidatedInvoiceService(
             IContentService contentService,
             PaymentService paymentService,
             ClubService clubService,
+            InvoiceAuditService auditService,
             ILogger<ConsolidatedInvoiceService> logger)
         {
             _contentService = contentService;
             _paymentService = paymentService;
             _clubService = clubService;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -328,7 +331,7 @@ namespace HpskSite.Services
         /// Re-validates from scratch; never trusts the caller's list.
         /// </summary>
         public async Task<(bool success, string message, List<CreatedParent> parents, List<Candidate> rejected)>
-            CreateAsync(int payerClubId, int[] invoiceIds, int actingMemberId)
+            CreateAsync(int payerClubId, int[] invoiceIds, int actingMemberId, string? actingMemberName = null)
         {
             var missing = _paymentService.MissingInvoiceProperties();
             if (missing.Count > 0)
@@ -404,7 +407,9 @@ namespace HpskSite.Services
                         totalAmount: group.Total,                  // sum of STORED child amounts
                         paymentMethod: "Swish",
                         extraProperties: extra,
-                        auditNote: $"Samlingsfaktura skapad för {covered.Count} anmälningar ({payerName})");
+                        auditNote: $"Samlingsfaktura skapad för {covered.Count} anmälningar ({payerName})",
+                        actorMemberId: actingMemberId > 0 ? actingMemberId : null,
+                        actorMemberName: actingMemberName);
 
                     if (parent == null)
                     {
@@ -438,12 +443,34 @@ namespace HpskSite.Services
                         continue;
                     }
 
+                    var parentNumber = parent.GetValue<string>("invoiceNumber") ?? parent.Id.ToString();
+
+                    // Trace on every CHILD, not just the parent. Reconciling starts from a single
+                    // shooter's invoice ("why can't I pay this?"), and without a row here that invoice
+                    // silently changes behaviour — still Pending, but no longer payable on its own.
+                    // Best-effort: the money is already correctly linked, so a failed log must not
+                    // undo it (the audit service swallows its own exceptions too).
+                    foreach (var childId in covered)
+                    {
+                        var child = _contentService.GetById(childId);
+                        _ = _auditService.LogAsync(
+                            invoiceId: childId,
+                            competitionId: group.CompetitionId,
+                            eventType: InvoicePaymentEventTypes.Consolidated,
+                            byMemberId: actingMemberId > 0 ? actingMemberId : null,
+                            byMemberName: actingMemberName,
+                            amount: child == null ? null : ReadDecimal(child, "totalAmount"),
+                            reference: child?.GetValue<string>("invoiceNumber"),
+                            notes: $"Ingår nu i samlingsfaktura {parentNumber} som {payerName} betalar "
+                                 + $"({covered.Count} fakturor, {group.Total:0.##} kr totalt).");
+                    }
+
                     parents.Add(new CreatedParent
                     {
                         CompetitionId = group.CompetitionId,
                         CompetitionName = group.CompetitionName,
                         ParentInvoiceId = parent.Id,
-                        ParentInvoiceNumber = parent.GetValue<string>("invoiceNumber") ?? "",
+                        ParentInvoiceNumber = parentNumber,
                         Total = group.Total,
                         CoveredCount = covered.Count
                     });
@@ -488,7 +515,7 @@ namespace HpskSite.Services
         /// correction is a kreditfaktura, never a cancellation.
         /// </summary>
         public (bool success, string message, int freedCount, int? payerClubId, string parentStatus)
-            CancelUnpaidParent(int parentInvoiceId)
+            CancelUnpaidParent(int parentInvoiceId, int actingMemberId = 0, string? actingMemberName = null)
         {
             var parent = _contentService.GetById(parentInvoiceId);
             if (parent == null || parent.ContentType.Alias != "registrationInvoice")
@@ -519,6 +546,25 @@ namespace HpskSite.Services
             if (!_contentService.Save(parent).Success)
                 return (false, "Kunde inte makulera samlingsfakturan.", 0, payerClubId, status);
             _contentService.Publish(parent, new[] { "*" }, -1);
+
+            // Close the loop on the children. Without this an invoice shows "Ingår i samlingsfaktura X"
+            // as the last thing that ever happened to it, even after it was freed — which reads as
+            // still covered to whoever is reconciling.
+            var cancelledParentNumber = parent.GetValue<string>("invoiceNumber") ?? parentInvoiceId.ToString();
+            var cancelledCompetitionId = ReadInt(parent, "competitionId");
+            foreach (var childId in covered)
+            {
+                var child = _contentService.GetById(childId);
+                _ = _auditService.LogAsync(
+                    invoiceId: childId,
+                    competitionId: cancelledCompetitionId,
+                    eventType: InvoicePaymentEventTypes.ConsolidationCancelled,
+                    byMemberId: actingMemberId > 0 ? actingMemberId : null,
+                    byMemberName: actingMemberName,
+                    amount: child == null ? null : ReadDecimal(child, "totalAmount"),
+                    reference: child?.GetValue<string>("invoiceNumber"),
+                    notes: $"Samlingsfaktura {cancelledParentNumber} makulerad — fakturan betalas åter separat.");
+            }
 
             return (true,
                 covered.Count == 0

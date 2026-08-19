@@ -293,7 +293,7 @@ namespace HpskSite.Controllers
             var actorData = actor == null ? null : _memberService.GetByEmail(actor.Email ?? "");
 
             var (success, message, parents, rejected) = await _consolidatedService.CreateAsync(
-                request.PayerClubId, request.InvoiceIds, actorData?.Id ?? 0);
+                request.PayerClubId, request.InvoiceIds, actorData?.Id ?? 0, actorData?.Name);
 
             if (success) InvalidateInvoiceCaches();
 
@@ -338,11 +338,13 @@ namespace HpskSite.Controllers
             if (!isPayer && !isOrganiser)
                 return Json(new { success = false, message = "Du har inte behörighet att makulera den fakturan." });
 
-            var (success, message, freed, _, status) = _consolidatedService.CancelUnpaidParent(request.InvoiceId);
+            var (cancelActorId, cancelActorName) = await GetCurrentActorAsync();
+            var (success, message, freed, _, status) =
+                _consolidatedService.CancelUnpaidParent(request.InvoiceId, cancelActorId ?? 0, cancelActorName);
             if (success)
             {
                 InvalidateInvoiceCaches();
-                var (actorId, actorName) = await GetCurrentActorAsync();
+                var (actorId, actorName) = (cancelActorId, cancelActorName);
                 _ = _auditService.LogAsync(
                     invoiceId: request.InvoiceId,
                     competitionId: 0,
@@ -1093,8 +1095,10 @@ namespace HpskSite.Controllers
                 var competitionClubId = competition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
+                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
+                    // remarks explain why, and how to grant a sekretariat person access instead.
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
                 }
                 else
                 {
@@ -1236,8 +1240,10 @@ namespace HpskSite.Controllers
                 var competitionClubId = competition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
+                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
+                    // remarks explain why, and how to grant a sekretariat person access instead.
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
                 }
                 else
                 {
@@ -1295,8 +1301,10 @@ namespace HpskSite.Controllers
                 var competitionClubId = competition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
+                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
+                    // remarks explain why, and how to grant a sekretariat person access instead.
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
                 }
                 else
                 {
@@ -1407,8 +1415,10 @@ namespace HpskSite.Controllers
                 var competitionClubId = competition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
+                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
+                    // remarks explain why, and how to grant a sekretariat person access instead.
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
                 }
                 else
                 {
@@ -1517,8 +1527,10 @@ namespace HpskSite.Controllers
                 var competitionClubId = competition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
+                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
+                    // remarks explain why, and how to grant a sekretariat person access instead.
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
                 }
                 else
                 {

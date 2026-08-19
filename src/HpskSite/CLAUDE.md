@@ -1207,6 +1207,57 @@ un-fixed build: 7 of those 23 fail there**, so the script actually discriminates
 consolidated-invoice, 27/27 creditnote, 19/19 paid-cascade, late-team e2e green. Adds C# → full
 rebuild. No SQL, no doctype property.
 
+### Samlingsfaktura: audit trail, and Skjutledare off the finance surface (2026-08-19)
+
+**Consolidation left almost no trace.** `ConsolidatedInvoiceService.CreateAsync` accepted an
+`actingMemberId` and **never used it**, and `PaymentService.CreateStandaloneInvoiceAsync` wrote the
+parent's `Created` audit row with `byMemberId`/`byMemberName` hardcoded `null`. The covered CHILDREN
+got no row at all. So "who decided Varbergs PK owes 2 400 kr for these seven entries?" was
+unanswerable — on an operation that redirects who pays and **locks the children against
+cancellation**.
+
+- `CreateStandaloneInvoiceAsync` takes optional `actorMemberId` / `actorMemberName` (optional only so
+  older callers compile — **pass them**), and the consolidation now does.
+- Two new event types in `InvoicePaymentEventTypes`: **`Consolidated`** and
+  **`ConsolidationCancelled`**, logged on each CHILD naming the parent, the payer and the actor.
+  Reconciling starts from one shooter's invoice ("why can't I pay this?"), and without a child row
+  that invoice silently changes behaviour — still Pending, but no longer payable on its own.
+- `CancelUnpaidParent` gained optional actor args and logs the release, so the history doesn't end at
+  "Ingår i samlingsfaktura X" forever after the invoice was freed.
+- Swedish labels added to the history renderer in `CompetitionRegistrationManagement.cshtml`
+  (`labelFor`/`colorFor`). That map falls back to the raw type, so a missed label degrades, not breaks.
+- ⚠️ **`GetInvoiceHistory` returns NEWEST FIRST** (`ORDER BY OccurredAt DESC, Id DESC`). The most
+  recent row is `[0]`, not the last — a test that used `.pop()` read the oldest and looked wrong.
+- Logging is **best-effort and after the money is linked**: a failed audit write must never undo a
+  correct consolidation.
+
+**Skjutledare removed from the invoice/finance surface (Stefan's call).** `IsSkjutledareForClub` was
+OR-ed into `CanManageCompetitionInvoice` *and* repeated inline in five `InvoiceAdminController`
+endpoints, so a range-master of the organising club could mark payments received, makulera invoices,
+mail payment reminders and export Bokföringsunderlag. **Removed from all six**, deliberately together:
+a partial tightening leaves someone who cannot mark an invoice paid still able to mail reminders
+about it. `HasCompetitionStaffAccessAsync` keeps Skjutledare — that is the range, which is the role.
+
+- **No new "invoice permission" was introduced, on purpose.** Anyone who can consolidate can already
+  mark a payment received and issue a kreditfaktura, so a separate gate would grant *less* than what
+  the same people already hold — pure friction, no security gain, and one more thing a
+  low-computer-literacy club admin must know to set, whose failure mode is a silent lockout on
+  competition day. Accountability is served by the audit trail above instead.
+- **The escape hatch for a genuine sekretariat/kassa person: Bemanning app access, or name them
+  tävlingsansvarig.** Both feed `HasCompetitionManagementAccess`, which is checked first — per
+  competition, revocable, person-level. `HasCompetitionManagementAccess`'s own doc comment already
+  names this persona ("a Sekretariat- eller Kassaansvarig needs the same page without being appointed
+  tävlingsledare").
+- ⚠️ **This changes NOTHING on a region-hosted competition (an SM).** The Skjutledare branch only ever
+  ran inside `clubId > 0`; SM Springskytte 2026 has `clubId` unset and `regionalFederation = Halland`
+  (verified in dev), so it was already unreachable there. Don't expect this to affect SM behaviour.
+
+Verified 17/17 `hpsk-verify/skjutledare-invoice-gate-verify.mjs` — grants Skjutledare to a spare
+member on a CLUB-hosted comp, asserts all eight finance endpoints refuse AND that the /station pad
+still renders, reads and saves, then revokes. **A/B'd: 7 of 8 finance assertions fail on the old
+build** (it really did mark an invoice paid and makulera it). Audit trail: 24/24
+`consolidation-audit-verify.mjs`. Adds C# → full rebuild. No SQL, no doctype property.
+
 ### Anmälningar row Åtgärder menu, shooter info, push column, reference lookup (2026-08-07)
 
 Desk batch on the Anmälningar tab (`CompetitionRegistrationManagement.cshtml`). All five items

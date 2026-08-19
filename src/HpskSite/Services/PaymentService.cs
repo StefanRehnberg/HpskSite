@@ -502,7 +502,12 @@ namespace HpskSite.Services
             decimal totalAmount,
             string paymentMethod,
             IDictionary<string, object?> extraProperties,
-            string auditNote)
+            string auditNote,
+            // Who is doing this. Optional only so the older callers keep compiling; PASS IT. A
+            // samlingsfaktura redirects who owes what, and an audit row with no actor cannot answer
+            // the one question it exists for.
+            int? actorMemberId = null,
+            string? actorMemberName = null)
         {
             try
             {
@@ -579,8 +584,8 @@ namespace HpskSite.Services
                     invoiceId: invoice.Id,
                     competitionId: competitionId,
                     eventType: InvoicePaymentEventTypes.Created,
-                    byMemberId: null,
-                    byMemberName: null,
+                    byMemberId: actorMemberId,
+                    byMemberName: actorMemberName,
                     paymentMethod: null,
                     amount: totalAmount,
                     reference: invoiceNumber,

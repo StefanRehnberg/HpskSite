@@ -6375,7 +6375,9 @@ function renderInvoiceHistory(data) {
         Transferred: 'Överförd till annan skytt',
         StatusChanged: 'Status ändrad',
         PaymentSent: 'Betalning anmäld av betalaren',
-        PaymentSentCleared: 'Betalningsanmälan återkallad'
+        PaymentSentCleared: 'Betalningsanmälan återkallad',
+        Consolidated: 'Lagd i samlingsfaktura',
+        ConsolidationCancelled: 'Frisläppt ur samlingsfaktura'
     })[t] || t;
     const colorFor = t => ({
         Created: 'secondary',
@@ -6388,7 +6390,9 @@ function renderInvoiceHistory(data) {
         Transferred: 'warning',
         StatusChanged: 'secondary',
         PaymentSent: 'info',
-        PaymentSentCleared: 'secondary'
+        PaymentSentCleared: 'secondary',
+        Consolidated: 'primary',
+        ConsolidationCancelled: 'secondary'
     })[t] || 'secondary';
 
     // The reference is normally the invoice number, identical on every row — hoist it into the
