@@ -660,6 +660,24 @@ namespace HpskSite.Services
                 + "(då frigörs fakturorna), eller skapa en kreditfaktura.";
 
         /// <summary>
+        /// Swedish explanation for a refused PAYMENT of a covered invoice — a different situation from
+        /// a refused cancel, so it needs different words. Nothing has gone wrong here: the club chose to
+        /// pay this fee through a samlingsfaktura, so collecting it separately as well would take the
+        /// money twice. Name the parent rather than just saying no.
+        ///
+        /// Deliberately ONE SHORT SENTENCE, unlike <see cref="CoveredByConsolidationMessage"/>. The
+        /// team-QR modals on the public competition page render a failure message as the BUTTON LABEL
+        /// (`CompetitionTeamRegistrationModal` / `StafettRegistrationModal`), so a two-sentence
+        /// explanation there breaks the layout instead of helping. The way out — makulera the
+        /// samlingsfaktura, or credit it — belongs on the Fakturor surface, where it is already
+        /// explained and where the person who can actually do it is standing.
+        /// </summary>
+        public static string CoveredByConsolidationPaymentMessage(string parentInvoiceNumber, bool parentIsPaid) =>
+            parentIsPaid
+                ? $"Avgiften ingår i samlingsfaktura {parentInvoiceNumber} — redan betald."
+                : $"Avgiften betalas via samlingsfaktura {parentInvoiceNumber}.";
+
+        /// <summary>
         /// Properties the consolidated-invoice / credit-note flow needs on the `registrationInvoice`
         /// doctype. Missing ones must be reported to the operator, never written through: SetValue on
         /// a non-existent property is a silent no-op, so a parent invoice would save "successfully"

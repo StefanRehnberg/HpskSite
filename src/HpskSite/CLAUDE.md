@@ -1169,9 +1169,43 @@ so the gap was purely the missing UI. Discipline-agnostic: renders whenever `all
    list is a hot path and this is only needed when the operator clicks. Deferred Springskytte roster
    → no contacts → chooser degrades to "Mig själv" with an explanation.
 
-**⚠️ Still open:** both team-QR endpoints compute the amount from the competition's fee **property**
-rather than the invoice's `totalAmount`. When they disagree (fee edited after invoicing) the QR and
-the invoice ask for different sums. Pre-existing, affects the public flow equally.
+### Team QR: amount from the invoice, and never twice for the same money (2026-08-19)
+
+**Both team-QR endpoints priced the QR from the competition's fee property**
+(`teamRegistrationFee` / `stafettRegistrationFee`) rather than from the invoice — including on the
+branch that REUSES an existing pending invoice. Edit the fee after invoicing and the QR and the
+invoice ask for different sums; reproduced at 477 kr QR against a 400 kr invoice. The individual
+shooter path never had this: it goes through `EnsureOutstandingInvoiceAsync` and bills what is owed.
+
+**Worse, and newer: a team already covered by a samlingsfaktura could still be charged separately.**
+Consolidation leaves the child at `paymentStatus = "Pending"` and only sets `settledByInvoiceId`, and
+these two endpoints refused solely on `"Paid"` — so the desk got a live QR, and
+`SendTeamQRCodeEmail` actually **sent** one, for money the club was already paying through the
+parent. `IsCoveredByOpenConsolidation` had been wired to guard *cancelling* and *re-pricing* such an
+invoice (commit `683c97b`); paying it is the third case and was missed. Team invoices are squarely in
+scope — they carry no `invoiceKind`, they appear in the club's *outgoing* list, and `683c97b`'s own
+persona test consolidates a team invoice with individual ones.
+
+**`SwishController.ResolveTeamQrAmount(invoiceId, feeFallback)` is now the single answer to "how much
+should this QR be for", and both endpoints go through it** — the on-screen QR and the mailed QR can
+no longer disagree, and the mail's printed amount + audit row use the same number.
+- Refuses when `IsCoveredByOpenConsolidation`, when Paid, and when the invoice is makulerad.
+- Otherwise takes `ConsolidatedInvoiceService.GetBalance().AmountDue`. **Not `totalAmount` directly** —
+  an issued invoice is never edited, so a kreditfaktura reduces what is owed without touching it, and
+  `GetBalance` is where that is derived (read its doc comment before adding another QR site).
+- **The fee survives as a FALLBACK, deliberately.** A legacy invoice with no readable amount now logs
+  a warning and produces today's QR rather than leaving the registration desk unable to take payment.
+- `PaymentService.CoveredByConsolidationPaymentMessage` is a *separate*, deliberately **one-sentence**
+  message from `CoveredByConsolidationMessage`: refusing a payment is not refusing a cancel, and
+  ⚠️ the public team modals render a failure as the **button label**, so a two-sentence explanation
+  breaks the layout there instead of helping.
+
+Verified 23/23 `hpsk-verify/teamqr-consolidation-verify.mjs` (bumps the real fee and asserts the QR
+ignores it, consolidates the team invoice and asserts both endpoints refuse, then makulerar and
+asserts it is payable again — every mutation reverted and the revert asserted). **A/B'd against the
+un-fixed build: 7 of those 23 fail there**, so the script actually discriminates. Regression: 43/43
+consolidated-invoice, 27/27 creditnote, 19/19 paid-cascade, late-team e2e green. Adds C# → full
+rebuild. No SQL, no doctype property.
 
 ### Anmälningar row Åtgärder menu, shooter info, push column, reference lookup (2026-08-07)
 

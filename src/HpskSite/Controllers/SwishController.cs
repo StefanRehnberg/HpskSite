@@ -522,6 +522,50 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// How much a team QR should collect for <paramref name="invoiceId"/>, and whether it may be
+        /// collected at all. Both team-QR endpoints go through here so the on-screen QR and the mailed
+        /// QR can never disagree, and so neither of them can charge for something already being paid.
+        ///
+        /// Two things the fee property alone cannot know:
+        /// • The club may be paying this invoice through a SAMLINGSFAKTURA. A covered child keeps
+        ///   paymentStatus "Pending" (only <c>settledByInvoiceId</c> is set), so a status check does not
+        ///   see it and the desk would happily hand out a second QR for money already on its way.
+        ///   <see cref="PaymentService.IsCoveredByOpenConsolidation"/> is the same predicate that guards
+        ///   cancelling and re-pricing such an invoice; paying it is the third case.
+        /// • A kreditfaktura reduces what is owed without ever editing the issued invoice, which is why
+        ///   <see cref="ConsolidatedInvoiceService.GetBalance"/> exists — and why reading `totalAmount`
+        ///   directly is not enough either.
+        ///
+        /// The fee is kept as a FALLBACK rather than removed: if a legacy invoice has no readable
+        /// amount, producing today's (possibly wrong) QR still beats leaving the registration desk with
+        /// no way to take payment at all. That case is logged, because it means bad invoice data.
+        /// </summary>
+        private (bool ok, decimal amount, string? refusal) ResolveTeamQrAmount(int invoiceId, decimal feeFallback)
+        {
+            if (_paymentService.IsCoveredByOpenConsolidation(invoiceId, out var parent, out var parentPaid))
+                return (false, 0m, PaymentService.CoveredByConsolidationPaymentMessage(parent, parentPaid));
+
+            var balance = _consolidatedService.GetBalance(invoiceId);
+            var status = ConsolidatedInvoiceService.NormalizeStatus(balance.Status);
+
+            if (string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase))
+                return (false, 0m, "Lagavgiften har redan betalats.");
+            if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                return (false, 0m, "Fakturan är makulerad. Skapa en ny anmälan eller kontakta arrangören.");
+
+            if (balance.AmountDue > 0m)
+                return (true, balance.AmountDue, null);
+
+            _logger.LogWarning(
+                "Team invoice {InvoiceId} has status {Status} but no amount due; falling back to the competition fee {Fee}",
+                invoiceId, status, feeFallback);
+
+            return feeFallback > 0m
+                ? (true, feeFallback, null)
+                : (false, 0m, "Ingen lagavgift är konfigurerad.");
+        }
+
+        /// <summary>
         /// Generate Swish QR code for team registration payment
         /// </summary>
         [HttpGet]
@@ -562,7 +606,6 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ingen lagavgift är konfigurerad." });
 
                 var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
-                var amountString = teamFee.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
                 // Find the team registration doc for invoice linking
                 int teamRegistrationDocId = 0;
@@ -610,6 +653,12 @@ namespace HpskSite.Controllers
                 if (invoice == null)
                     return Json(new { success = false, message = "Kunde inte skapa faktura." });
 
+                // The amount comes from the INVOICE, not the fee property — see ResolveTeamQrAmount.
+                var (amountOk, teamAmount, amountRefusal) = ResolveTeamQrAmount(invoice.Id, teamFee);
+                if (!amountOk)
+                    return Json(new { success = false, message = amountRefusal });
+
+                var amountString = teamAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
                 var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
                 var message = $"Lag: {invoiceNumber}";
 
@@ -630,7 +679,8 @@ namespace HpskSite.Controllers
                     success = true,
                     qrCode = teamQrDataUri,
                     swishAppUrl = teamSwishAppUrl,
-                    amount = teamFee,
+                    // Must be the same number the QR encodes — the dialog prints it next to the code.
+                    amount = teamAmount,
                     teamName = team.TeamName,
                     teamClass = team.TeamClass,
                     clubName = clubName,
@@ -1330,7 +1380,6 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ingen e-postadress registrerad." });
 
                 var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
-                var amountString = teamFee.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
                 var teamMemberId = $"team-{teamId}";
 
                 // Find team registration doc for invoice linking
@@ -1366,6 +1415,14 @@ namespace HpskSite.Controllers
                     invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
                 }
 
+                // Same invoice-derived amount and same refusals as the on-screen QR — a mailed QR that
+                // disagreed with the dialog would be worse than either being wrong on its own.
+                var (mailAmountOk, teamAmount, mailAmountRefusal) = ResolveTeamQrAmount(invoice.Id, teamFee);
+                if (!mailAmountOk)
+                    return Json(new { success = false, message = mailAmountRefusal });
+
+                var amountString = teamAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+
                 // Payment reference stays "Lag: …" for a relay too — GenerateTeamPaymentQR builds it
                 // that way, and the on-screen QR and the mailed QR must carry the SAME reference or
                 // the organiser cannot reconcile the payment.
@@ -1382,7 +1439,7 @@ namespace HpskSite.Controllers
                     recipient.Name ?? "Medlem",
                     $"{competition.Name} - {kindLabel}: {team.TeamName}",
                     qrCodeBytes,
-                    teamFee,
+                    teamAmount,
                     $"{kindLabel}klass: {team.TeamClass}",
                     invoiceNumber,
                     normalizedSwishNumber,
@@ -1399,7 +1456,7 @@ namespace HpskSite.Controllers
                     eventType: InvoicePaymentEventTypes.EmailSent,
                     byMemberId: callerData.Id,
                     byMemberName: callerData.Name,
-                    amount: teamFee,
+                    amount: teamAmount,
                     reference: invoiceNumber,
                     notes: $"{kindLabel}-QR mejlad till {recipient.Email} ({kindLabel.ToLower()}: {team.TeamName})");
 
