@@ -131,6 +131,20 @@
         <!-- Section B: Medlemsstatistik -->
         <h5 class="mt-4 mb-3"><i class="bi bi-people me-2"></i>Medlemsstatistik</h5>
         <div class="row g-3 mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <h6 class="card-title mb-0">Nya medlemmar per dag (30d)</h6>
+                            <span class="text-muted small" id="statNewMembersDayTotal"></span>
+                        </div>
+                        <div style="position:relative;height:200px"><canvas id="chartNewMembersDay"></canvas></div>
+                        <p class="text-muted small mb-0 mt-2" id="chartNewMembersDayEmpty" style="display:none;">Inga nya medlemmar de senaste 30 dagarna.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-4">
             <div class="col-md-7">
                 <div class="card h-100">
                     <div class="card-body">
@@ -881,6 +895,54 @@
         document.getElementById('statTrainingMatchesTotal').textContent = d.trainingMatchesTotal;
         document.getElementById('statTrainingMatches30dBadge').textContent = d.trainingMatches30d > 0
             ? '+' + d.trainingMatches30d + ' senaste 30d' : '';
+
+        // Section B: New members per day, last 30 days (bar chart).
+        // Every day is in the payload, zeros included, so a bulk club import reads as one
+        // spike on its own date instead of being smoothed into the month bar below.
+        if (d.newMembersPerDay && d.newMembersPerDay.length) {
+            const dayTotal = d.newMembersPerDay.reduce((s, x) => s + x.count, 0);
+            const totalEl = document.getElementById('statNewMembersDayTotal');
+            if (totalEl) totalEl.textContent = dayTotal + (dayTotal === 1 ? ' ny medlem' : ' nya medlemmar');
+            const dayEmpty = document.getElementById('chartNewMembersDayEmpty');
+            if (dayEmpty) dayEmpty.style.display = dayTotal > 0 ? 'none' : '';
+
+            destroyChart('chartNewMembersDay');
+            const dayCtx = document.getElementById('chartNewMembersDay').getContext('2d');
+            chartInstances['chartNewMembersDay'] = new Chart(dayCtx, {
+                type: 'bar',
+                data: {
+                    // Short label on the axis (18/8), full Swedish date in the tooltip title.
+                    labels: d.newMembersPerDay.map(x => {
+                        const p = x.day.split('-');
+                        return parseInt(p[2], 10) + '/' + parseInt(p[1], 10);
+                    }),
+                    datasets: [{
+                        label: 'Nya medlemmar',
+                        data: d.newMembersPerDay.map(x => x.count),
+                        backgroundColor: colors.primary + 'cc',
+                        borderColor: colors.primary,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: items => new Date(d.newMembersPerDay[items[0].dataIndex].day + 'T00:00:00')
+                                    .toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })
+                            }
+                        }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                        x: { ticks: { color: colors.text, maxRotation: 0, autoSkip: true, maxTicksLimit: 15 }, grid: { display: false } }
+                    }
+                }
+            });
+        }
 
         // Section B: New members per month (bar chart)
         if (d.newMembersPerMonth && d.newMembersPerMonth.length) {

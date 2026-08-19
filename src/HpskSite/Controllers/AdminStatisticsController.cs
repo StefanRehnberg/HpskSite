@@ -425,6 +425,22 @@ namespace HpskSite.Controllers
             int totalMembers = approvedMembers.Count;
             int newMembers30d = approvedMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
 
+            // New members per day (last 30 days, oldest first). Every day in the window is
+            // emitted, zeros included, so the x-axis is a real calendar — a bulk club import
+            // shows up as one spike rather than being smoothed away by gaps. Same
+            // approvedMembers set as everything else here, so the demo club is already gone.
+            var newMembersPerDay = Enumerable.Range(0, 30)
+                .Select(i =>
+                {
+                    var day = today.AddDays(-29 + i);
+                    return new
+                    {
+                        day = day.ToString("yyyy-MM-dd"),
+                        count = approvedMembers.Count(m => m.CreateDate.Date == day)
+                    };
+                })
+                .ToList();
+
             // New members per month (last 12 months)
             var newMembersPerMonth = Enumerable.Range(0, 12)
                 .Select(i =>
@@ -1272,6 +1288,7 @@ namespace HpskSite.Controllers
                         newClubs30d,
                         competitionsThisYear = competitionsThisYearCount,
                         trainingMatches30d,
+                        newMembersPerDay,
                         newMembersPerMonth,
                         membersByRegion,
                         competitionsByDiscipline,
@@ -1340,6 +1357,7 @@ namespace HpskSite.Controllers
                 newClubs30d = 0,
                 competitionsThisYear = 0,
                 trainingMatches30d = 0,
+                newMembersPerDay,
                 newMembersPerMonth,
                 membersByRegion,
                 competitionsByDiscipline = new List<object>(),
