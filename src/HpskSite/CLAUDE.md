@@ -1288,6 +1288,51 @@ Verified 15/15 `hpsk-verify/team-delete-invoice-verify.mjs`. **A/B'd: 8 of 15 fa
 including the covered-team deletion succeeding. Regression: lag-gender 20/20, lag-multiteam 15/15,
 lag-conflict-dialog 14/14, clubswap-team 13/13, late-team e2e green, organiser-consolidation 31/31.
 
+### Samlingsfaktura åt BÅDA hållen på klubbens Fakturor-sida (2026-08-20)
+
+**The asymmetry Stefan spotted:** a club admin could bundle what the club OWES ("att betala" → tick
+rows → Betala valda) but not what it is OWED. To bill another club they had to leave their own page
+entirely and go to the competition. The receivables view is the more natural home for "send them one
+bill"; the competition's Anmälningar tab is for the desk on the day. Both now exist.
+
+**⚠️ The two directions are NOT the same operation with the roles swapped — get this right or the
+wrong party is invoiced:**
+- **Payer flow** (unchanged): the club bundles its own debts. The parent is created in the
+  **organiser's** ledger, addressed to the club clicking. `payerClubId` = me.
+- **Receivable flow** (new): the club is the **utställare**. The parent is created in **its own**
+  ledger, addressed to the debtor. `payerClubId` = the other club.
+
+`InvoiceAdmin/GetClubReceivableDebtors(clubId)` groups the club's receivables by debtor, scoped
+exactly like the incoming invoice list (`competition.clubId == clubId`) so the payee resolved for the
+parent is this club. A club owing itself is skipped — that is the host's own entries, settled
+internally. Competitions come from `InvoiceAdminService.GetCompetitionsHostedByClub`, which goes
+through the **cached** tree scan; walking the tree again is what made the Fakturor page take 12 s.
+
+**One dialog, two sources.** `Views/Partials/_ConsolidateByClubModal.cshtml` holds the whole
+pick-club → review → issue flow; only `fetchGroups` differs (one competition vs a club's
+receivables). The competition page's bespoke copy was deleted in favour of it. Both send
+`organiserScope: true` — both are the utställare direction.
+
+**Different control on purpose:** paying ticks rows ("which of my debts do I settle together"),
+invoicing picks a club ("bill them for everything they owe me"). Same page, two questions.
+
+**A debtor owing across several competitions** gets one samlingsfaktura PER competition, because that
+is what the engine produces and each competition has its own payee. The picker says so before you
+commit and the success panel links every parent it created.
+
+⚠️ **JS trap that cost a debugging round.** The partial's entry point is an `async function` declared
+inside an `if (!window.X) { … }` guard. Annex B's web-compat hoisting that leaks a block-level
+`function` to global scope **does not apply to `async` (or generator) declarations** — they stay
+block-scoped. The script rendered complete and parsed fine, yet the caller got
+`hpskOpenConsolidateModal is not defined`. Both consolidation partials now **export explicitly**
+(`window.x = x`) instead of relying on hoisting; do the same in any new guarded partial.
+
+Verified 19/19 `hpsk-verify/club-receivable-consolidation-verify.mjs`, which asserts the DIRECTION
+explicitly — the parent appears in the issuing club's "att få betalt för" and its `memberId` is
+`club-{debtor}` — plus that the bar shows only in the receivables view and the payer tick column only
+in the payer views. Refactor regression: organiser 31/31, club payer flow 17/17, consolidated-invoice
+42/42, persona-authorization-matrix 21/21.
+
 ### Samlingsfaktura från Anmälningar-fliken — arrangörssidan (2026-08-20)
 
 **The samlingsfaktura was a PULL model and that was the whole problem.** Only the PAYING club could

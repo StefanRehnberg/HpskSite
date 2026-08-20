@@ -109,6 +109,21 @@
             </button>
         </div>
     </div>
+    @* The RECEIVABLE side. The pay bar above bundles what the club OWES; this bundles what it is
+       OWED, which until 2026-08-20 could only be done by leaving this page and going to the
+       competition. Different question, so a different control: paying is "which of my debts do I
+       settle together" (tick rows), invoicing is "bill this club for everything they owe me" (pick a
+       club). Shown only in "att få betalt för", where the club is the utställare. *@
+    <div class="alert alert-primary d-none align-items-center justify-content-between flex-wrap gap-2"
+         id="clubReceivableBar" role="region" aria-label="Fakturera en klubb">
+        <div>
+            <i class="bi bi-receipt-cutoff me-2"></i>
+            Har en klubb flera obetalda poster hos er? Skicka <strong>en</strong> räkning.
+        </div>
+        <button type="button" class="btn btn-sm btn-primary" id="clubReceivablePay">
+            <i class="bi bi-receipt-cutoff me-1"></i>Samlingsfaktura till en klubb
+        </button>
+    </div>
     <div class="alert alert-warning d-none small" id="clubConsolidationUnavailable"></div>
 
     <div class="table-responsive" id="clubInvoicesTableContainer">
@@ -167,8 +182,10 @@
 @* Shared kreditfaktura dialog (also used by the krets Fakturor tab). *@
 @await Html.PartialAsync("_CreditNoteModal")
 
-@* Shared samlingsfaktura preview rendering (also used by the organiser's Anmälningar tab). *@
+@* Shared samlingsfaktura preview rendering + the utställare dialog (both also used by the
+   organiser's Anmälningar tab). *@
 @await Html.PartialAsync("_ConsolidatePreview")
+@await Html.PartialAsync("_ConsolidateByClubModal")
 
 @* Confirmation for "Betala valda". Shows what will actually be created BEFORE anything is written:
    one faktura per tävling, who receives each payment, and anything that had to be dropped. A
@@ -388,6 +405,7 @@ function loadClubInvoices() {
             // The rows just changed, so any prior tick refers to rows that may be gone.
             clubResetSelection();
             clubApplySelectionMode();
+    clubApplyReceivableMode();
         })
         .catch(error => {
             if (mySeq !== clubInvoiceLoadSeq) return;
@@ -407,6 +425,34 @@ let clubConsolidationReady = null;   // null = not asked yet
 function clubSelectionAllowed() {
     const vt = document.getElementById('clubInvoiceViewType')?.value || 'outgoing';
     return (vt === 'outgoing' || vt === 'members') && clubConsolidationReady === true;
+}
+
+// The mirror of the pay bar: shown only where the club is the RECIPIENT, i.e. the one issuing.
+function clubReceivableAllowed() {
+    const vt = document.getElementById('clubInvoiceViewType')?.value || 'outgoing';
+    return vt === 'incoming' && clubConsolidationReady === true;
+}
+
+function clubApplyReceivableMode() {
+    const bar = document.getElementById('clubReceivableBar');
+    if (!bar) return;
+    const on = clubReceivableAllowed();
+    bar.classList.toggle('d-none', !on);
+    bar.classList.toggle('d-flex', on);
+}
+
+function openClubReceivableConsolidate() {
+    hpskOpenConsolidateModal({
+        intro: 'Slår ihop en klubbs obetalda poster hos er till EN faktura, utställd av er förening. '
+             + 'Klubben behöver inte logga in för att betala den.',
+        emptyText: 'Ingen annan klubb har obetalda fakturor på era tävlingar.',
+        fetchGroups: async () => {
+            const r = await fetch(`/umbraco/surface/InvoiceAdmin/GetClubReceivableDebtors?clubId=${clubId}`,
+                { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            return r.json();
+        },
+        onDone: () => loadClubInvoices()
+    });
 }
 
 function clubResetSelection() {
@@ -487,6 +533,7 @@ async function clubCheckConsolidationReady() {
         clubConsolidationReady = false;
     }
     clubApplySelectionMode();
+    clubApplyReceivableMode();
 }
 
 function clubBindPayBar() {
@@ -503,6 +550,7 @@ function clubBindPayBar() {
         clubResetSelection();
     });
     document.getElementById('clubPayBarPay')?.addEventListener('click', clubOpenConsolidateModal);
+    document.getElementById('clubReceivablePay')?.addEventListener('click', openClubReceivableConsolidate);
     document.getElementById('clubConsolidateConfirm')?.addEventListener('click', clubDoConsolidate);
 }
 

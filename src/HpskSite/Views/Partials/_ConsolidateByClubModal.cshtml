@@ -1,0 +1,257 @@
+@*
+    "Samlingsfaktura till en klubb" — pick one club, review, issue. Shared by the two surfaces that
+    need it, because they are the same operation asked from two directions:
+
+      * Anmälningar (tävling)        — the desk on the day: "this club standing here owes me for four
+                                       entries, give them one bill".
+      * Klubbens Fakturor, "att få   — the treasurer a week later: "Varbergs owes us across two
+        betalt för"                    competitions, send the bill".
+
+    Both are the ORGANISER/utställare direction: the parent invoice is created in the issuing
+    organisation's ledger and addressed to the DEBTOR club, so `payerClubId` is the other club, not
+    the one clicking. (The payer-side flow on the same Fakturor page is the mirror image — there the
+    club bundles its own debts and the parent is created in the organiser's ledger. Different
+    direction, different control, deliberately.)
+
+    Only the SOURCE differs, so that is the only thing injected: a function returning
+    { clubs: [{ clubId, clubName, invoiceCount, total, invoices[], competitions[]? }] }.
+
+    Preview/confirm rendering comes from _ConsolidatePreview.cshtml — include that too.
+    Guarded so including it twice on one page cannot redefine anything.
+*@
+<div class="modal fade" id="hpskConsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-receipt-cutoff me-2"></i>Samlingsfaktura till en klubb</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small" id="hpskConsIntro"></p>
+
+                <div id="hpskConsLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="ms-2">Hämtar obetalda fakturor…</span>
+                </div>
+
+                <div id="hpskConsPick" class="d-none">
+                    <label class="form-label fw-semibold" for="hpskConsClub">Vilken klubb ska faktureras?</label>
+                    <select class="form-select" id="hpskConsClub"></select>
+                    <div class="form-text">Bara klubbar med mer än en obetald faktura kan slås ihop.</div>
+                    <div id="hpskConsClubInvoices" class="mt-3"></div>
+                </div>
+
+                <div id="hpskConsPreview" class="d-none">
+                    <div class="alert alert-warning d-none" id="hpskConsWarning"></div>
+                    <div id="hpskConsGroups"></div>
+                    <div class="d-none" id="hpskConsRejectedWrap">
+                        <hr>
+                        <h6 class="text-muted"><i class="bi bi-exclamation-circle me-1"></i>Kan inte tas med</h6>
+                        <ul class="small mb-0" id="hpskConsRejected"></ul>
+                    </div>
+                </div>
+
+                <div class="alert alert-info d-none" id="hpskConsEmpty"></div>
+                <div class="alert alert-danger d-none" id="hpskConsError"></div>
+                <div class="alert alert-success d-none" id="hpskConsSuccess"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-outline-secondary d-none" id="hpskConsBack">Tillbaka</button>
+                <button type="button" class="btn btn-primary d-none" id="hpskConsNext">Granska</button>
+                <button type="button" class="btn btn-primary d-none" id="hpskConsConfirm">Skapa samlingsfaktura</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+if (!window.hpskConsolidateByClubLoaded) {
+window.hpskConsolidateByClubLoaded = true;
+
+let hpskConsClubs = [];
+let hpskConsSel = { clubId: 0, invoiceIds: [] };
+let hpskConsOnDone = null;
+
+function hpskConsShow(step) {
+    const set = (id, on) => document.getElementById(id)?.classList.toggle('d-none', !on);
+    set('hpskConsLoading', step === 'loading');
+    set('hpskConsPick', step === 'pick');
+    set('hpskConsPreview', step === 'preview');
+    set('hpskConsBack', step === 'preview');
+    set('hpskConsNext', step === 'pick');
+    set('hpskConsConfirm', step === 'preview');
+}
+
+function hpskConsFail(msg) {
+    hpskConsShow('none');
+    const el = document.getElementById('hpskConsError');
+    el.textContent = msg;
+    el.classList.remove('d-none');
+}
+
+/**
+ * @@param {object} opts
+ *   fetchGroups : async () => ({ success, clubs, message })
+ *   intro       : sentence under the title
+ *   emptyText   : shown when no club has more than one unpaid invoice
+ *   onDone      : called after a successful create (refresh the caller's list)
+ */
+async function hpskOpenConsolidateModal(opts) {
+    hpskConsOnDone = opts.onDone || null;
+    document.getElementById('hpskConsIntro').textContent = opts.intro || '';
+    ['hpskConsError', 'hpskConsSuccess', 'hpskConsEmpty'].forEach(id =>
+        document.getElementById(id)?.classList.add('d-none'));
+    hpskConsShow('loading');
+    new bootstrap.Modal(document.getElementById('hpskConsModal')).show();
+
+    let data;
+    try { data = await opts.fetchGroups(); }
+    catch (e) { hpskConsFail('Nätverksfel när fakturorna skulle hämtas.'); return; }
+    if (!data || !data.success) { hpskConsFail((data && data.message) || 'Kunde inte hämta fakturorna.'); return; }
+
+    // A single invoice needs no samlingsfaktura — the service refuses to mint a second document for
+    // the same money, so offering those clubs would only produce a confusing "betalas direkt".
+    hpskConsClubs = (data.clubs || []).filter(c => c.invoiceCount > 1);
+    if (!hpskConsClubs.length) {
+        hpskConsShow('none');
+        const el = document.getElementById('hpskConsEmpty');
+        el.textContent = (data.clubs || []).length
+            ? 'Ingen klubb har mer än en obetald faktura — de betalas var för sig.'
+            : (opts.emptyText || 'Det finns inga obetalda fakturor att slå ihop.');
+        el.classList.remove('d-none');
+        return;
+    }
+
+    const sel = document.getElementById('hpskConsClub');
+    sel.innerHTML = hpskConsClubs.map(c =>
+        `<option value="${c.clubId}">${hpskConsEsc(c.clubName)} — ${c.invoiceCount} fakturor, ${Number(c.total).toFixed(2)} kr</option>`
+    ).join('');
+    sel.onchange = hpskConsRenderClub;
+    hpskConsRenderClub();
+    hpskConsShow('pick');
+}
+
+function hpskConsRenderClub() {
+    const clubId = parseInt(document.getElementById('hpskConsClub').value, 10);
+    const club = hpskConsClubs.find(c => c.clubId === clubId);
+    const wrap = document.getElementById('hpskConsClubInvoices');
+    if (!club) { wrap.innerHTML = ''; return; }
+
+    hpskConsSel = { clubId, invoiceIds: club.invoices.map(i => i.id) };
+
+    // When the debtor owes across several competitions, say so here: the engine makes one parent PER
+    // competition, so they will receive one bill per arrangemang and should not be surprised by it.
+    const perComp = (club.competitions || []);
+    const body = perComp.length > 1
+        ? perComp.map(c => `
+            <div class="mb-2">
+                <div class="small fw-semibold">${hpskConsEsc(c.competitionName)}</div>
+                <ul class="small text-muted mb-0">
+                    ${c.invoices.map(i => hpskConsLine(i)).join('')}
+                </ul>
+            </div>`).join('')
+        : `<ul class="small text-muted mb-0">${club.invoices.map(i => hpskConsLine(i)).join('')}</ul>`;
+
+    wrap.innerHTML = `
+        <div class="card"><div class="card-body py-2">
+            <div class="d-flex justify-content-between">
+                <strong>${hpskConsEsc(club.clubName)}</strong>
+                <span class="fw-bold">${Number(club.total).toFixed(2)} kr</span>
+            </div>
+            ${perComp.length > 1
+                ? `<div class="small text-warning mt-1"><i class="bi bi-info-circle me-1"></i>`
+                  + `Fordran över ${perComp.length} tävlingar — en samlingsfaktura skapas per tävling.</div>`
+                : ''}
+            <div class="mt-2">${body}</div>
+        </div></div>`;
+}
+
+function hpskConsLine(i) {
+    return `<li>${hpskConsEsc(i.invoiceNumber)} · ${hpskConsEsc(i.name)}`
+        + `${i.isTeam ? ' <span class="badge bg-secondary">lag</span>' : ''}`
+        + ` · ${Number(i.amount).toFixed(2)} kr</li>`;
+}
+
+function hpskConsToken() {
+    return document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+}
+
+async function hpskConsPreviewStep() {
+    if (!hpskConsSel.invoiceIds.length) return;
+    hpskConsShow('loading');
+    let data;
+    try {
+        const r = await fetch('/umbraco/surface/InvoiceAdmin/PreviewConsolidation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': hpskConsToken() },
+            body: JSON.stringify({ payerClubId: hpskConsSel.clubId, invoiceIds: hpskConsSel.invoiceIds, organiserScope: true })
+        });
+        data = await r.json();
+    } catch (e) { hpskConsFail('Nätverksfel vid kontroll av fakturorna.'); return; }
+    if (!data.success) { hpskConsFail(data.message || 'Kunde inte kontrollera fakturorna.'); return; }
+
+    const anyPayable = hpskRenderConsolidatePreview({
+        groups: document.getElementById('hpskConsGroups'),
+        rejectedWrap: document.getElementById('hpskConsRejectedWrap'),
+        rejected: document.getElementById('hpskConsRejected'),
+        warning: document.getElementById('hpskConsWarning')
+    }, data);
+
+    hpskConsShow('preview');
+    document.getElementById('hpskConsConfirm').disabled = !anyPayable;
+}
+
+async function hpskConsCreate() {
+    const btn = document.getElementById('hpskConsConfirm');
+    btn.disabled = true;
+    try {
+        const r = await fetch('/umbraco/surface/InvoiceAdmin/CreateConsolidatedInvoices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': hpskConsToken() },
+            body: JSON.stringify({ payerClubId: hpskConsSel.clubId, invoiceIds: hpskConsSel.invoiceIds, organiserScope: true })
+        });
+        const d = await r.json();
+        if (!d.success) {
+            const err = document.getElementById('hpskConsError');
+            err.textContent = d.message || 'Kunde inte skapa samlingsfakturan.';
+            err.classList.remove('d-none');
+            btn.disabled = false;
+            return;
+        }
+        hpskConsShow('none');
+        const okEl = document.getElementById('hpskConsSuccess');
+        // The invoice document is what the debtor's treasurer actually needs — belopp, referens and a
+        // bankgiro-QR. Hand over every parent that was created, not just the first.
+        const parents = (d.parents || []).filter(x => x.parentInvoiceId);
+        okEl.innerHTML = hpskConsolidateSuccessHtml(d) + (parents.length
+            ? '<hr>' + parents.map(x =>
+                `<a class="btn btn-sm btn-outline-primary me-2 mb-1" target="_blank" rel="noopener"
+                    href="/faktura/${x.parentInvoiceId}"><i class="bi bi-printer me-1"></i>`
+                + `Öppna fakturan (${hpskConsEsc(x.parentInvoiceNumber || '')})</a>`).join('')
+            : '');
+        okEl.classList.remove('d-none');
+        if (typeof hpskConsOnDone === 'function') hpskConsOnDone();
+    } catch (e) {
+        const err = document.getElementById('hpskConsError');
+        err.textContent = 'Nätverksfel.';
+        err.classList.remove('d-none');
+        btn.disabled = false;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('hpskConsNext')?.addEventListener('click', hpskConsPreviewStep);
+    document.getElementById('hpskConsBack')?.addEventListener('click', () => hpskConsShow('pick'));
+    document.getElementById('hpskConsConfirm')?.addEventListener('click', hpskConsCreate);
+});
+
+// ⚠️ EXPORT EXPLICITLY — do not rely on hoisting out of this guard block.
+// A plain `function` declared inside a block leaks to global scope under Annex B's web-compat rules,
+// which is why _ConsolidatePreview.cshtml's helpers happen to work. An `async function` (or a
+// generator) does NOT: it stays block-scoped. This partial's entry point is async, so without this
+// line the caller gets "hpskOpenConsolidateModal is not defined" while the script is present and
+// fully parsed on the page — a confusing failure that cost a debugging round.
+window.hpskOpenConsolidateModal = hpskOpenConsolidateModal;
+}
+</script>

@@ -239,6 +239,94 @@ namespace HpskSite.Controllers
         /// for their second club must land in that club's bill; see <see cref="MemberClubService"/> and
         /// the "Tävlar för" section in CLAUDE.md. Team invoices (`team-{id}`) take the TEAM's club.
         /// </summary>
+        /// <summary>
+        /// The club's RECEIVABLES, grouped by the club that owes them — the data behind
+        /// "Skapa samlingsfaktura" in the Fakturor tab's *"att få betalt för"* view (2026-08-20).
+        ///
+        /// **The direction is the whole point, and it is the opposite of the payer flow.** When a club
+        /// bundles what it OWES, the parent is created in the ORGANISER's ledger and addressed to
+        /// itself — `payerClubId` is the club clicking. Here the club is the **utställare**: the parent
+        /// lands in its OWN ledger, addressed to the debtor, and `payerClubId` is the other club.
+        ///
+        /// Why it needed its own surface: the checkbox column was gated to the payer views
+        /// (`clubSelectionAllowed`), on the reasoning that "in att få betalt för the club is the
+        /// recipient, so there is nothing to pay". True, but it left the club able to bundle what it
+        /// owes and not what it is owed — and to do the latter it had to leave its own page entirely
+        /// and go to the competition. The receivables view is the more natural home for "send them one
+        /// bill"; the competition page is for the desk on the day.
+        ///
+        /// Scoped exactly like the incoming invoice list: competitions this club HOSTS
+        /// (`competition.clubId == clubId`), so the payee resolved for the parent is this club.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClubReceivableDebtors(int clubId)
+        {
+            if (clubId <= 0)
+                return Json(new { success = false, message = "Ingen förening angiven." });
+            // The club is issuing invoices in its own name, so club-admin rights over it are the bar.
+            if (!await _authService.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Du har inte behörighet att fakturera för den föreningen." });
+
+            try
+            {
+                var hosted = _invoiceService.GetCompetitionsHostedByClub(clubId);
+
+                // debtorClubId -> competitionId -> invoices
+                var byDebtor = new Dictionary<int, Dictionary<int, List<PayerInvoice>>>();
+                foreach (var comp in hosted)
+                {
+                    foreach (var kv in BuildPayerClubGroups(comp.Id))
+                    {
+                        // A club owing itself is not a receivable — that is the host's own entries,
+                        // which it settles internally rather than invoicing.
+                        if (kv.Key == clubId) continue;
+                        if (!byDebtor.TryGetValue(kv.Key, out var perComp))
+                            byDebtor[kv.Key] = perComp = new Dictionary<int, List<PayerInvoice>>();
+                        perComp[comp.Id] = kv.Value;
+                    }
+                }
+
+                var clubs = byDebtor.Select(d => new
+                {
+                    clubId = d.Key,
+                    clubName = _clubService.GetClubNameById(d.Key) ?? $"Förening #{d.Key}",
+                    invoiceCount = d.Value.Sum(c => c.Value.Count),
+                    total = d.Value.Sum(c => c.Value.Sum(i => i.Amount)),
+                    // One samlingsfaktura per competition is what the engine produces, so the debtor
+                    // owing across two competitions gets two bills. Show that split up front.
+                    competitions = d.Value.Select(c => new
+                    {
+                        competitionId = c.Key,
+                        competitionName = hosted.FirstOrDefault(h => h.Id == c.Key)?.Name ?? "",
+                        invoices = c.Value.Select(i => new
+                        {
+                            id = i.InvoiceId,
+                            invoiceNumber = i.InvoiceNumber,
+                            name = i.Label,
+                            amount = i.Amount,
+                            isTeam = i.IsTeam
+                        })
+                    }),
+                    invoices = d.Value.SelectMany(c => c.Value).Select(i => new
+                    {
+                        id = i.InvoiceId,
+                        invoiceNumber = i.InvoiceNumber,
+                        name = i.Label,
+                        amount = i.Amount,
+                        isTeam = i.IsTeam
+                    })
+                })
+                .OrderByDescending(c => c.invoiceCount).ThenBy(c => c.clubName)
+                .ToList();
+
+                return Json(new { success = true, clubs });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Kunde inte hämta fordringarna: " + ex.Message });
+            }
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetCompetitionPayerClubs(int competitionId)
         {

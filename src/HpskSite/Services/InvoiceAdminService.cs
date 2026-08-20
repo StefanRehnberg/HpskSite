@@ -405,6 +405,23 @@ namespace HpskSite.Services
         public static IEnumerable<InvoiceInfo> MoneyRows(IEnumerable<InvoiceInfo> invoices) =>
             invoices.Where(i => i.InvoiceKind != "consolidated" && i.InvoiceKind != "creditNote");
 
+        /// <summary>
+        /// The competitions this club HOSTS — the same scoping the "att få betalt för" invoice view
+        /// uses (<c>competition.clubId == clubId</c>), so a caller building receivables sees exactly
+        /// the rows that list shows.
+        ///
+        /// Goes through the cached tree scan rather than walking the content tree again: that walk is
+        /// what took the Fakturor page from 12 s to 33 ms when it was pruned and cached, and a second
+        /// unrelated caller re-introducing it would quietly undo that.
+        /// </summary>
+        public List<IContent> GetCompetitionsHostedByClub(int clubId)
+        {
+            if (clubId <= 0) return new List<IContent>();
+            return GetContentScan().Competitions
+                .Where(c => c.GetValue<int>("clubId") == clubId)
+                .ToList();
+        }
+
         public static string NormalizeRegionCode(string? raw)
         {
             var value = (raw ?? "").Trim();

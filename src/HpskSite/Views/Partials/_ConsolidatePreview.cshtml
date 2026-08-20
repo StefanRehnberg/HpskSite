@@ -85,7 +85,10 @@ function hpskRenderConsolidatePreview(els, data) {
     return payable.length > 0;
 }
 
-/** Success text after CreateConsolidatedInvoices, including any per-competition failures. */
+/**
+ * Success text after CreateConsolidatedInvoices, including any per-competition failures.
+ * Exported explicitly at the bottom — see the note there.
+ */
 function hpskConsolidateSuccessHtml(d) {
     const failed = (d.parents || []).filter(x => x.error);
     return hpskConsEsc(d.message)
@@ -94,5 +97,12 @@ function hpskConsolidateSuccessHtml(d) {
                 `<li>${hpskConsEsc(x.competitionName)}: ${hpskConsEsc(x.error)}</li>`).join('') + '</ul>'
             : '');
 }
+
+// Exported explicitly rather than leaning on Annex B hoisting out of this guard block. These
+// three happen to be PLAIN functions, which do leak to global scope; an async one would not,
+// and that difference already caused a "not defined" on a fully-parsed script once. Be explicit.
+window.hpskConsEsc = hpskConsEsc;
+window.hpskRenderConsolidatePreview = hpskRenderConsolidatePreview;
+window.hpskConsolidateSuccessHtml = hpskConsolidateSuccessHtml;
 }
 </script>
