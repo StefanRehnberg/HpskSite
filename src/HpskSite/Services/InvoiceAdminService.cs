@@ -422,6 +422,26 @@ namespace HpskSite.Services
                 .ToList();
         }
 
+        /// <summary>
+        /// The competitions the REGION hosts in its own name — the other host shape. A competition is
+        /// hosted either by a club (<c>clubId</c> set) or by the krets itself (<c>clubId</c> unset,
+        /// region code on the competition's own <c>regionalFederation</c>); an SM is the latter.
+        ///
+        /// Same predicate the region's Fakturor tab uses for "egna tävlingar"
+        /// (<c>RegionOwnCompetitionsOnly</c>): region matches AND <c>clubId &lt;= 0</c>. Without the
+        /// second half this would also sweep in every club-hosted competition in the region, whose
+        /// invoices belong to those clubs and not to the krets.
+        /// </summary>
+        public List<IContent> GetCompetitionsHostedByRegion(string regionCode)
+        {
+            var wanted = NormalizeRegionCode(regionCode);
+            if (wanted.Length == 0) return new List<IContent>();
+            return GetContentScan().Competitions
+                .Where(c => c.GetValue<int>("clubId") <= 0
+                         && NormalizeRegionCode(c.GetValue<string>("regionalFederation")) == wanted)
+                .ToList();
+        }
+
         public static string NormalizeRegionCode(string? raw)
         {
             var value = (raw ?? "").Trim();

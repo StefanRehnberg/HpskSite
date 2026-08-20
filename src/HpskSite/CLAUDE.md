@@ -1302,11 +1302,25 @@ wrong party is invoiced:**
 - **Receivable flow** (new): the club is the **utställare**. The parent is created in **its own**
   ledger, addressed to the debtor. `payerClubId` = the other club.
 
-`InvoiceAdmin/GetClubReceivableDebtors(clubId)` groups the club's receivables by debtor, scoped
-exactly like the incoming invoice list (`competition.clubId == clubId`) so the payee resolved for the
-parent is this club. A club owing itself is skipped — that is the host's own entries, settled
-internally. Competitions come from `InvoiceAdminService.GetCompetitionsHostedByClub`, which goes
-through the **cached** tree scan; walking the tree again is what made the Fakturor page take 12 s.
+**⚠️ BOTH HOST SHAPES — regions arrange competitions too.** A competition is hosted either by a club
+(`clubId` set) or by the **krets** itself (`clubId` unset, `regionalFederation` set); an SM is the
+latter, so a region carries fordringar exactly like a club. `GetClubReceivableDebtors` therefore takes
+`clubId` **or** `region`, and the button exists on both surfaces: the club's Fakturor tab
+(`ClubAdminInvoicesList`) and the krets's (`AdminInvoicesList` with `LockedRegionCode`, which is the
+page the SM organiser actually looks at). Serving only the club shape is the mistake this codebase has
+made four separate times — see `IsRegionHostAdminAsync`.
+- Club scope = `GetCompetitionsHostedByClub` (`clubId == x`); region scope =
+  `GetCompetitionsHostedByRegion` (region matches **and `clubId <= 0`**). Without that second half the
+  krets would sweep in every club-hosted competition in the region, whose invoices belong to those clubs.
+- Both go through the **cached** tree scan; walking the tree again is what made the Fakturor page take 12 s.
+- A club owing **itself** is skipped on the club shape (own entries, settled internally). A krets is
+  not a club, so on the region shape every club is a legitimate debtor.
+- The krets tab shows the bar unconditionally — that tab *is* the "egna tävlingar" view. The club page
+  must instead follow the att-betala / att-få-betalt-för switch.
+- ⚠️ **Region code casing:** pass the node's casing (`"Halland"`). `IsRegionalAdminForRegion` compares
+  the member group `RegionalAdmin_{code}` **exactly**, while competition matching goes through
+  `NormalizeRegionCode`, which lowercases. A lowercased code finds the right competitions and is then
+  refused by auth — which reads as a permission problem rather than a casing one.
 
 **One dialog, two sources.** `Views/Partials/_ConsolidateByClubModal.cshtml` holds the whole
 pick-club → review → issue flow; only `fetchGroups` differs (one competition vs a club's
@@ -1327,11 +1341,20 @@ block-scoped. The script rendered complete and parsed fine, yet the caller got
 `hpskOpenConsolidateModal is not defined`. Both consolidation partials now **export explicitly**
 (`window.x = x`) instead of relying on hoisting; do the same in any new guarded partial.
 
-Verified 19/19 `hpsk-verify/club-receivable-consolidation-verify.mjs`, which asserts the DIRECTION
-explicitly — the parent appears in the issuing club's "att få betalt för" and its `memberId` is
-`club-{debtor}` — plus that the bar shows only in the receivables view and the payer tick column only
-in the payer views. Refactor regression: organiser 31/31, club payer flow 17/17, consolidated-invoice
-42/42, persona-authorization-matrix 21/21.
+Verified 19/19 `hpsk-verify/club-receivable-consolidation-verify.mjs` and 19/19
+`region-receivable-consolidation-verify.mjs`. Both assert the DIRECTION explicitly — the parent
+appears in the ISSUING organisation's own list with `memberId = club-{debtor}` — because nothing else
+would catch a flip. The region suite also asserts every competition behind the fordran is
+region-hosted, and covers the **multi-competition** case: a debtor owing across two of the krets's
+competitions gets **two** parents, one per tävling, together summing to the whole fordran. (A first
+version of that test read only the first `/faktura/` link and called the total wrong — the engine was
+right.) Refactor regression: organiser 31/31, club payer flow 17/17, consolidated-invoice 42/42,
+persona-authorization-matrix 21/21.
+
+Two region suites stay red and are **pre-existing**: `region-own-invoices` 11/12 (both queries hit the
+`pageSize=50` cap, so `own < wide` cannot hold) and `region-invoices-tab` 9/10 (a **stale test** —
+it expects the banner wording *"Visar fakturor för tävlingar i"* while the markup has said
+*"…egna tävlingar"* for some time; the banner was not touched here).
 
 ### Samlingsfaktura från Anmälningar-fliken — arrangörssidan (2026-08-20)
 

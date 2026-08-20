@@ -259,17 +259,36 @@ namespace HpskSite.Controllers
         /// (`competition.clubId == clubId`), so the payee resolved for the parent is this club.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetClubReceivableDebtors(int clubId)
+        public async Task<IActionResult> GetClubReceivableDebtors(int clubId = 0, string region = "")
         {
-            if (clubId <= 0)
-                return Json(new { success = false, message = "Ingen förening angiven." });
-            // The club is issuing invoices in its own name, so club-admin rights over it are the bar.
-            if (!await _authService.IsClubAdminForClub(clubId))
-                return Json(new { success = false, message = "Du har inte behörighet att fakturera för den föreningen." });
+            // ⚠️ BOTH HOST SHAPES. A competition is hosted either by a club (clubId set) or by the
+            // KRETS itself (clubId unset, regionalFederation set) — an SM is the latter, and regions
+            // arrange competitions and carry receivables exactly like clubs do. Serving only the club
+            // shape is the mistake this codebase has made four separate times; see
+            // AdminAuthorizationService.IsRegionHostAdminAsync.
+            var wantRegion = (region ?? "").Trim();
+            if (clubId <= 0 && wantRegion.Length == 0)
+                return Json(new { success = false, message = "Ingen förening eller krets angiven." });
+
+            // The organisation is issuing invoices in its own name, so admin rights over IT are the bar.
+            //
+            // ⚠️ Pass the region code in the casing the region NODE uses ("Halland"), which is what
+            // RegionalAdminPanel supplies via data-locked-region. IsRegionalAdminForRegion builds the
+            // member-group name `RegionalAdmin_{code}` and compares it EXACTLY, while competition
+            // matching goes through NormalizeRegionCode, which lowercases. So a lowercased code still
+            // finds the right competitions but is refused by auth — a mismatch that reads as a
+            // permission problem rather than a casing one.
+            var allowed = clubId > 0
+                ? await _authService.IsClubAdminForClub(clubId)
+                : await _authService.IsRegionalAdminForRegion(wantRegion);
+            if (!allowed)
+                return Json(new { success = false, message = "Du har inte behörighet att fakturera för den organisationen." });
 
             try
             {
-                var hosted = _invoiceService.GetCompetitionsHostedByClub(clubId);
+                var hosted = clubId > 0
+                    ? _invoiceService.GetCompetitionsHostedByClub(clubId)
+                    : _invoiceService.GetCompetitionsHostedByRegion(wantRegion);
 
                 // debtorClubId -> competitionId -> invoices
                 var byDebtor = new Dictionary<int, Dictionary<int, List<PayerInvoice>>>();
@@ -277,9 +296,10 @@ namespace HpskSite.Controllers
                 {
                     foreach (var kv in BuildPayerClubGroups(comp.Id))
                     {
-                        // A club owing itself is not a receivable — that is the host's own entries,
-                        // which it settles internally rather than invoicing.
-                        if (kv.Key == clubId) continue;
+                        // A club owing ITSELF is not a receivable — those are the host's own entries,
+                        // settled internally rather than invoiced. A krets is not a club, so on the
+                        // region shape every club is a legitimate debtor and nothing is skipped.
+                        if (clubId > 0 && kv.Key == clubId) continue;
                         if (!byDebtor.TryGetValue(kv.Key, out var perComp))
                             byDebtor[kv.Key] = perComp = new Dictionary<int, List<PayerInvoice>>();
                         perComp[comp.Id] = kv.Value;

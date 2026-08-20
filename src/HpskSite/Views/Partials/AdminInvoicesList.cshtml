@@ -152,6 +152,24 @@
         </div>
     </div>
 
+    @* The receivable side for a KRETS. Regions arrange competitions and carry fordringar exactly like
+       clubs do — an SM is region-hosted — so the krets needs the same "send them one bill" action the
+       club's Fakturor tab has. Only on the region-locked view: the site-wide admin list spans every
+       organisation at once and has no single utställare to issue in the name of. *@
+    @if (isRegionLocked)
+    {
+        <div class="alert alert-primary d-none align-items-center justify-content-between flex-wrap gap-2"
+             id="regionReceivableBar" role="region" aria-label="Fakturera en klubb">
+            <div>
+                <i class="bi bi-receipt-cutoff me-2"></i>
+                Har en klubb flera obetalda poster på kretsens tävlingar? Skicka <strong>en</strong> räkning.
+            </div>
+            <button type="button" class="btn btn-sm btn-primary" id="regionReceivablePay">
+                <i class="bi bi-receipt-cutoff me-1"></i>Samlingsfaktura till en klubb
+            </button>
+        </div>
+    }
+
     <!-- Loading State -->
     <div class="spinner-border text-primary d-none" id="invoicesLoadingSpinner" role="status">
         <span class="visually-hidden">Laddar...</span>
@@ -819,3 +837,41 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 </script>
+
+@if (isRegionLocked)
+{
+    @* Shared samlingsfaktura dialog + preview rendering. Same flow the club Fakturor tab and the
+       organiser Anmalningar tab use; only the SOURCE of the groups differs. *@
+    @await Html.PartialAsync("_ConsolidatePreview")
+    @await Html.PartialAsync("_ConsolidateByClubModal")
+    <script>
+    (function () {
+        const regionCode = document.querySelector('[data-locked-region]')?.dataset.lockedRegion || '';
+        if (!regionCode) return;
+
+        function openRegionReceivableConsolidate() {
+            hpskOpenConsolidateModal({
+                intro: 'Slar ihop en klubbs obetalda poster pa kretsens egna tavlingar till EN faktura, '
+                     + 'utstalld av kretsen. Klubben behover inte logga in for att betala den.',
+                emptyText: 'Ingen klubb har obetalda fakturor pa kretsens egna tavlingar.',
+                fetchGroups: async () => {
+                    const r = await fetch(
+                        '/umbraco/surface/InvoiceAdmin/GetClubReceivableDebtors?region=' + encodeURIComponent(regionCode),
+                        { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                    return r.json();
+                },
+                onDone: () => { if (typeof loadInvoicesList === 'function') loadInvoicesList(); }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const bar = document.getElementById('regionReceivableBar');
+            // The krets tab IS the "egna tavlingar" view, so the bar is simply always on here --
+            // unlike the club page, where it has to follow the att-betala / att-fa-betalt-for switch.
+            if (bar) { bar.classList.remove('d-none'); bar.classList.add('d-flex'); }
+            document.getElementById('regionReceivablePay')
+                ?.addEventListener('click', openRegionReceivableConsolidate);
+        });
+    })();
+    </script>
+}
