@@ -100,62 +100,104 @@
             <i class="bi bi-shield-check me-2"></i>
             <strong>Kretsadministration</strong> - Du kan hantera dokument, texter och bilder för @regionName här.
         </div>
-        <button class="btn btn-info text-white" onclick="showRegionEmailModal()">
-            <i class="bi bi-envelope me-2"></i>Skicka mail
-        </button>
     </div>
 
-    <!-- Admin Sub-Tabs -->
-    <ul class="nav nav-tabs mb-3" id="regionAdminTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="regionDocuments-tab" data-bs-toggle="tab" data-bs-target="#regionDocumentsTab" type="button">
-                <i class="bi bi-file-earmark-text me-2"></i>Dokument
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionEvents-tab" data-bs-toggle="tab" data-bs-target="#regionEventsTab" type="button">
-                <i class="bi bi-calendar-event me-2"></i>Händelser
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionAdminCompetitions-tab" data-bs-toggle="tab" data-bs-target="#regionAdminCompetitionsTab" type="button"
-                    data-region-code="@(ViewBag.regionCode as string ?? "")">
-                <i class="bi bi-trophy me-2"></i>Tävlingar
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionInvoices-tab" data-bs-toggle="tab" data-bs-target="#regionInvoicesTab" type="button">
-                <i class="bi bi-receipt me-2"></i>Fakturor
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button">
-                <i class="bi bi-gear me-2"></i>Inställningar
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <a class="nav-link" href="/styrelse?type=1&id=@regionContentId">
-                <i class="bi bi-clipboard-check me-2"></i>Styrelse
-            </a>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionCertifications-tab" data-bs-toggle="tab" data-bs-target="#regionCertificationsTab" type="button">
-                <i class="bi bi-mortarboard me-2"></i>Certifieringar
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionChampions-tab" data-bs-toggle="tab" data-bs-target="#regionChampionsTab" type="button">
-                <i class="bi bi-trophy-fill me-2"></i>Mästare
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regionStats-tab" data-bs-toggle="tab" data-bs-target="#regionStatsTab" type="button">
-                <i class="bi bi-graph-up me-2"></i>Statistik
-            </button>
-        </li>
-    </ul>
+    <!-- Admin navigation — grouped vertical rail (≥lg) / grouped section picker (phones + tablets).
+         Mirrors ClubAdminPanel: same four headings (the last one named for the krets instead of the
+         club), same icons, same order within each group, so an admin who knows one page knows the
+         other. Both drive the SAME Bootstrap tabs below; every button id and data-bs-target is
+         UNCHANGED so the existing lazy-loaders keep working — they bind by button id, not by the
+         old <ul> structure. -->
+    <div class="row g-3 admin-nav-layout">
 
-    <!-- Sub-Tab Content -->
+        <!-- Small screens (< lg): full-width grouped section picker -->
+        <div class="col-12 d-lg-none">
+            <label for="regionAdminTabMobileSelect" class="form-label small text-muted mb-1">Välj sektion</label>
+            <select class="form-select" id="regionAdminTabMobileSelect" aria-label="Välj adminsektion">
+                <optgroup label="Kalender &amp; tävlingar">
+                    <option value="#regionEventsTab">Händelser</option>
+                    <option value="#regionAdminCompetitionsTab">Tävlingar</option>
+                </optgroup>
+                <optgroup label="Medlemmar">
+                    <option value="#regionCertificationsTab">Certifieringar</option>
+                </optgroup>
+                <optgroup label="Utmärkelser">
+                    <option value="#regionChampionsTab">Mästare</option>
+                </optgroup>
+                <optgroup label="Kretsen">
+                    <option value="/styrelse?type=1&id=@regionContentId">Styrelsearbete ↗</option>
+                    <option value="#regionInvoicesTab">Fakturor</option>
+                    <option value="#regionSettingsTab">Inställningar</option>
+                    <option value="#regionDocumentsTab" selected>Dokument</option>
+                    <option value="#regionStatsTab">Statistik</option>
+                </optgroup>
+                <optgroup label="Åtgärder">
+                    <option value="action:email">Skicka mail…</option>
+                </optgroup>
+            </select>
+        </div>
+
+        <!-- Large screens (≥ lg): grouped vertical rail -->
+        <div class="col-lg-auto d-none d-lg-block">
+            <nav class="nav nav-pills flex-column admin-rail" id="regionAdminTabs" role="tablist" aria-orientation="vertical">
+                <div class="admin-rail-group">Kalender &amp; tävlingar</div>
+                <button class="nav-link" id="regionEvents-tab" data-bs-toggle="tab" data-bs-target="#regionEventsTab" type="button" role="tab" aria-controls="regionEventsTab" aria-selected="false">
+                    <i class="bi bi-calendar-event me-2"></i>Händelser
+                </button>
+                <button class="nav-link" id="regionAdminCompetitions-tab" data-bs-toggle="tab" data-bs-target="#regionAdminCompetitionsTab" type="button" role="tab" aria-controls="regionAdminCompetitionsTab" aria-selected="false"
+                        data-region-code="@(ViewBag.regionCode as string ?? "")">
+                    <i class="bi bi-trophy me-2"></i>Tävlingar
+                </button>
+
+                <div class="admin-rail-group">Medlemmar</div>
+                <button class="nav-link" id="regionCertifications-tab" data-bs-toggle="tab" data-bs-target="#regionCertificationsTab" type="button" role="tab" aria-controls="regionCertificationsTab" aria-selected="false">
+                    <i class="bi bi-mortarboard me-2"></i>Certifieringar
+                </button>
+
+                <div class="admin-rail-group">Utmärkelser</div>
+                <button class="nav-link" id="regionChampions-tab" data-bs-toggle="tab" data-bs-target="#regionChampionsTab" type="button" role="tab" aria-controls="regionChampionsTab" aria-selected="false">
+                    <i class="bi bi-trophy-fill me-2"></i>Mästare
+                </button>
+
+                <div class="admin-rail-group">Kretsen</div>
+                <a class="nav-link d-flex align-items-center" href="/styrelse?type=1&id=@regionContentId">
+                    <i class="bi bi-clipboard-check me-2"></i>Styrelsearbete
+                    <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar styrelsesidan"></i>
+                </a>
+                <button class="nav-link" id="regionInvoices-tab" data-bs-toggle="tab" data-bs-target="#regionInvoicesTab" type="button" role="tab" aria-controls="regionInvoicesTab" aria-selected="false">
+                    <i class="bi bi-receipt me-2"></i>Fakturor
+                </button>
+                <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button" role="tab" aria-controls="regionSettingsTab" aria-selected="false">
+                    <i class="bi bi-gear me-2"></i>Inställningar
+                </button>
+                @* Dokument stays the default tab, as it has always been — the content pane below
+                   carries `show active`. It simply now sits in its group rather than first in a row. *@
+                @* Renamed from regionDocuments-tab (2026-08-20): that id is ALSO used by the public
+                   region navigation (RegionalNavigation.cshtml) for its own Dokument tab, so the page
+                   carried two elements with the same id. Nothing bound to it — the lazy-loaders use
+                   regionEvents-tab / regionSettings-tab / regionAdminCompetitions-tab, which are
+                   unique — but getElementById returned the PUBLIC one, which is invalid HTML and a
+                   trap for anything that ever does bind here. *@
+                <button class="nav-link active" id="regionAdminDocuments-tab" data-bs-toggle="tab" data-bs-target="#regionDocumentsTab" type="button" role="tab" aria-controls="regionDocumentsTab" aria-selected="true">
+                    <i class="bi bi-file-earmark-text me-2"></i>Dokument
+                </button>
+                <button class="nav-link" id="regionStats-tab" data-bs-toggle="tab" data-bs-target="#regionStatsTab" type="button" role="tab" aria-controls="regionStatsTab" aria-selected="false">
+                    <i class="bi bi-graph-up me-2"></i>Statistik
+                </button>
+
+                @* Skicka mail is an ACTION, not a section — it opens a dialog rather than swapping a
+                   pane. It sits below a divider so the rail still reads as "sections above, things
+                   that DO something below", and it is deliberately not a .nav-link so Bootstrap's Tab
+                   plugin never treats it as a tab and never tries to make it the active one. *@
+                <hr class="admin-rail-sep">
+                <button type="button" class="admin-rail-action" id="regionEmail-action" onclick="showRegionEmailModal()">
+                    <i class="bi bi-envelope me-2"></i>Skicka mail
+                </button>
+            </nav>
+        </div>
+
+        <!-- Sub-Tab Content -->
+        <div class="col-lg">
     <div class="tab-content" id="regionAdminTabContent">
         <!-- Documents Sub-Tab -->
         <div class="tab-pane fade show active" id="regionDocumentsTab">
@@ -457,6 +499,8 @@
             @await Html.PartialAsync("RegionalStatistics")
         </div>
     </div>
+        </div><!-- /.col-lg (content column) -->
+    </div><!-- /.row.admin-nav-layout -->
 </div>
 
 <!-- Region Email Modal -->
@@ -1300,9 +1344,114 @@
         }
     }
 })();
+
+// Small-screen section picker <-> Bootstrap tabs (the rail is hidden < lg).
+(function () {
+    var sel = document.getElementById('regionAdminTabMobileSelect');
+    if (!sel) return;
+    // What the picker is showing before the user changes it, so an ACTION option can put it back —
+    // otherwise the picker would sit on "Skicka mail…" while the pane behind it is something else.
+    var lastPane = sel.value;
+    sel.addEventListener('change', function () {
+        // An ACTION option runs something and restores the picker; it is not a destination.
+        if (sel.value.indexOf('action:') === 0) {
+            var action = sel.value.slice('action:'.length);
+            sel.value = lastPane;
+            if (action === 'email' && typeof showRegionEmailModal === 'function') showRegionEmailModal();
+            return;
+        }
+        // A URL-valued option (Styrelsearbete) navigates away instead of switching a pane.
+        if (sel.value && sel.value.charAt(0) !== '#') { window.location.href = sel.value; return; }
+        lastPane = sel.value;
+        var btn = document.querySelector('#regionAdminTabs [data-bs-target="' + sel.value + '"]');
+        if (!btn) return;
+        // ⚠️ click(), not bootstrap.Tab.show(). Bootstrap's delegated handler switches the tab either
+        // way, but the Tävlingar loader binds to CLICK rather than shown.bs.tab (see the comment
+        // above — the event did not reach it reliably in prod). Showing the tab programmatically
+        // would switch the pane and never load the competitions on a phone.
+        btn.click();
+    });
+    // Keep the picker in sync when a tab is shown any other way.
+    document.querySelectorAll('#regionAdminTabs [data-bs-toggle="tab"]').forEach(function (b) {
+        b.addEventListener('shown.bs.tab', function (e) {
+            var target = e.target.getAttribute('data-bs-target');
+            if (target) { lastPane = target; if (sel.value !== target) sel.value = target; }
+        });
+    });
+})();
 </script>
 
 <style>
+/* Grouped vertical admin navigation rail (≥ lg) — same rules as ClubAdminPanel's, scoped to this
+   panel. Kept as a copy rather than lifted into theme.css: both are panel-local styling today, and
+   moving them is a separate change that would touch two working pages at once. If a third admin
+   surface ever needs the rail, extract then. */
+.regional-admin-panel .admin-rail {
+    position: sticky;
+    top: 1rem;
+    gap: 2px;
+    /* Fixed width so the rail doesn't keep growing with a wide col-lg-auto on large screens. */
+    width: 250px;
+    /* Its own surface, so it reads as a panel rather than floating text. */
+    background-color: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.5rem;
+    padding: 8px;
+}
+.regional-admin-panel .admin-rail-group {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    padding: 14px 12px 4px;
+}
+.regional-admin-panel .admin-rail-group:first-child {
+    padding-top: 2px;
+}
+.regional-admin-panel .admin-rail .nav-link {
+    text-align: left;
+    color: var(--bs-body-color);
+    border-radius: 8px;
+    padding: 8px 12px;
+    border-left: 3px solid transparent;
+}
+.regional-admin-panel .admin-rail .nav-link:hover {
+    /* One step up from the rail's own tertiary surface so hover stays visible. */
+    background-color: var(--bs-secondary-bg);
+}
+.regional-admin-panel .admin-rail .nav-link.active {
+    /* -text-emphasis on -bg-subtle is Bootstrap's contrast-safe pairing in BOTH themes. */
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
+    font-weight: 600;
+    border-left-color: var(--bs-primary);
+}
+/* Actions live below the sections. Same geometry as a rail item so the column stays even, but it
+   never takes the active state — it opens a dialog rather than selecting a section. */
+.regional-admin-panel .admin-rail-sep {
+    margin: 10px 6px 6px;
+    opacity: 0.25;
+}
+.regional-admin-panel .admin-rail-action {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    border-left: 3px solid transparent;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--bs-body-color);
+}
+.regional-admin-panel .admin-rail-action:hover {
+    background-color: var(--bs-secondary-bg);
+}
+.regional-admin-panel .admin-rail-action:focus-visible {
+    outline: 2px solid var(--bs-primary);
+    outline-offset: -2px;
+}
+
 .regional-admin-panel .nav-tabs .nav-link {
     color: var(--bs-secondary-color);
 }

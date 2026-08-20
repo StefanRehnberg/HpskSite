@@ -1288,6 +1288,47 @@ Verified 15/15 `hpsk-verify/team-delete-invoice-verify.mjs`. **A/B'd: 8 of 15 fa
 including the covered-team deletion succeeding. Regression: lag-gender 20/20, lag-multiteam 15/15,
 lag-conflict-dialog 14/14, clubswap-team 13/13, late-team e2e green, organiser-consolidation 31/31.
 
+### Kretsens adminpanel — grupperad vertikal räls (2026-08-20)
+
+Same treatment `ClubAdminPanel` got on 2026-07-05, now on `RegionalAdminPanel`: the horizontal
+`nav-tabs` bar wrapped to several rows once the krets had nine sections. Layout is a `.row`: a
+`col-lg-auto` rail (`.admin-rail`, `nav nav-pills flex-column`, sticky, fixed 250px) plus a `col-lg`
+content column holding the unchanged `#regionAdminTabContent`.
+
+**Same four headings as the club, in the same order, with the same icons** — *Kalender & tävlingar* /
+*Medlemmar* / *Utmärkelser* / *Kretsen* (the club's fourth is *Klubben*). An admin who knows one page
+knows the other. Below `lg` the rail is replaced by a grouped `<select>`
+(`#regionAdminTabMobileSelect`), exactly like the club's.
+
+**Every tab-button id and `data-bs-target` is unchanged**, because the lazy-loaders bind by button id
+— a rename there breaks loading silently rather than visibly. Dokument stays the default tab (its
+pane still carries `show active`); it simply sits in its group now instead of first in a row.
+
+⚠️ **The picker calls `btn.click()`, NOT `bootstrap.Tab.show()`.** The Tävlingar loader binds to
+**click** rather than `shown.bs.tab` (see the comment at its binding — the event did not reach it
+reliably in prod). Showing the tab programmatically switches the pane and never loads the
+competitions on a phone. Clicking satisfies both binding styles, since Bootstrap's delegated handler
+switches the tab either way.
+
+⚠️ **Fixed a duplicate DOM id while in here:** the admin Dokument button was `regionDocuments-tab`,
+which `RegionalNavigation.cshtml` **also** uses for the PUBLIC region page's Dokument tab. Two
+elements, one id, on the same page — `getElementById` returned the public one. Nothing bound to it
+(the loaders use the unique `regionEvents-tab` / `regionSettings-tab` / `regionAdminCompetitions-tab`),
+so it had never broken anything, but it is invalid HTML and a trap. The admin one is now
+`regionAdminDocuments-tab`; the pane id `#regionDocumentsTab` is unchanged.
+
+**"Skicka mail" moved from the header into the rail** (Stefan). It is an ACTION, not a section, so it
+sits below a divider at the bottom and is deliberately **not** a `.nav-link` — Bootstrap's Tab plugin
+must never treat it as a tab or try to make it active. In the picker, which has no divider
+affordance, it becomes an `Åtgärder` optgroup with the sentinel value `action:email`; the handler runs
+it and then **restores the picker to the current section**, since an action is not a destination.
+
+Verified 43/43 `hpsk-verify/region-admin-rail-verify.mjs`. Razor views are runtime-compiled, so
+`dotnet build` validates none of this — **loading the page is the compile check**, and that is half
+of what the suite is for. It also asserts every old tab id still maps to its old pane, that the
+click-bound competitions loader really fires from the picker, and that the mail action leaves the
+selected section alone. Regression: region-receivable 19/19, region-hosted-invoices 12/12.
+
 ### Samlingsfaktura åt BÅDA hållen på klubbens Fakturor-sida (2026-08-20)
 
 **The asymmetry Stefan spotted:** a club admin could bundle what the club OWES ("att betala" → tick
