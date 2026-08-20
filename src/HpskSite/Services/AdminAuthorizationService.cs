@@ -891,27 +891,51 @@ namespace HpskSite.Services
                 var competitionId = invoice.Value<int>("competitionId");
                 if (competitionId <= 0) return false;
 
+                return await CanManageCompetitionFinanceAsync(competitionId);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The same finance right as <see cref="CanManageCompetitionInvoice"/> but keyed on the
+        /// COMPETITION rather than one invoice — for surfaces that act on a competition's invoices as a
+        /// set (the organiser-side samlingsfaktura on the Anmälningar tab) and would otherwise have to
+        /// resolve an arbitrary invoice just to ask the question.
+        ///
+        /// Extracted 2026-08-20 so the two cannot drift: the per-invoice check now resolves the
+        /// competition and defers here. Every rule described on <see cref="CanManageCompetitionInvoice"/>
+        /// — including the two host shapes and the deliberate exclusion of Skjutledare — lives here.
+        /// </summary>
+        public async Task<bool> CanManageCompetitionFinanceAsync(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return false;
+                if (await IsCurrentUserAdminAsync()) return true;
                 if (await IsCompetitionManager(competitionId)) return true;
 
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                    return false;
+
                 var competition = ctx.Content.GetById(competitionId);
-                var clubId = competition?.Value<int>("clubId") ?? 0;
+                if (competition == null) return false;
+
+                var clubId = competition.Value<int>("clubId");
                 if (clubId > 0)
                 {
                     if (await IsClubAdminForClub(clubId)) return true;   // includes regional admin
-                    // NO Skjutledare here — see the remarks above. Range-master ≠ finance role.
-                }
-                else if (competition != null)
-                {
-                    // REGION-HOSTED competition (no club): the krets is the organiser, so its admins are
-                    // the ones entitled to mark payments received. Without this a region-organised
-                    // competition — which is what an SM is — has no organiser who can confirm a payment
-                    // unless someone was separately named a competition manager on it.
-                    var regionCode = (competition.Value<string>("regionalFederation") ?? "").Trim();
-                    if (!string.IsNullOrWhiteSpace(regionCode) && await IsRegionalAdminForRegion(regionCode))
-                        return true;
+                    // NO Skjutledare here — range-master ≠ finance role. See the remarks above.
+                    return false;
                 }
 
-                return false;
+                // REGION-HOSTED competition (no club): the krets is the organiser, so its admins are the
+                // ones entitled to act on the money. Without this a region-organised competition — which
+                // is what an SM is — has no organiser who can confirm a payment unless someone was
+                // separately named a competition manager on it.
+                return await IsRegionHostAdminAsync(clubId, competition.Value<string>("regionalFederation"));
             }
             catch
             {

@@ -167,6 +167,9 @@
 @* Shared kreditfaktura dialog (also used by the krets Fakturor tab). *@
 @await Html.PartialAsync("_CreditNoteModal")
 
+@* Shared samlingsfaktura preview rendering (also used by the organiser's Anmälningar tab). *@
+@await Html.PartialAsync("_ConsolidatePreview")
+
 @* Confirmation for "Betala valda". Shows what will actually be created BEFORE anything is written:
    one faktura per tävling, who receives each payment, and anything that had to be dropped. A
    selection spanning tävlingar/mottagare can never be one payment, so that is stated plainly. *@
@@ -551,54 +554,16 @@ async function clubOpenConsolidateModal() {
     clubConsolidatePlan = ids;
     document.getElementById('clubConsolidateBody').classList.remove('d-none');
 
-    const warnEl = document.getElementById('clubConsolidateWarning');
-    warnEl.classList.toggle('d-none', !data.warning);
-    if (data.warning) warnEl.textContent = data.warning;
+    // Rendering lives in _ConsolidatePreview.cshtml, shared with the organiser's Anmälningar tab —
+    // two copies of this markup would drift the moment one side gained a field.
+    const anyPayable = hpskRenderConsolidatePreview({
+        groups: document.getElementById('clubConsolidateGroups'),
+        rejectedWrap: document.getElementById('clubConsolidateRejectedWrap'),
+        rejected: document.getElementById('clubConsolidateRejected'),
+        warning: document.getElementById('clubConsolidateWarning')
+    }, data);
 
-    const groups = data.groups || [];
-    // A group with no resolvable recipient is refused by the server (a payment claim needs someone to
-    // pay), so say that HERE rather than letting the user press Skapa and get a failure back.
-    const payableGroups = groups.filter(g => g.payeeKey && g.payeeKey.length > 0);
-    document.getElementById('clubConsolidateGroups').innerHTML = groups.length === 0
-        ? '<p class="text-muted mb-0">Inga av de valda fakturorna kan betalas nu.</p>'
-        : groups.map(g => {
-            const blocked = !g.payeeKey || g.payeeKey.length === 0;
-            return `
-            <div class="card mb-2 ${blocked ? 'border-danger' : ''}">
-                <div class="card-body py-2">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <strong>${clubEsc(g.competitionName)}</strong><br>
-                            <span class="small text-muted">
-                                Betalas till ${clubEsc(g.payeeName)}
-                                ${g.hasBgNumber ? ` <span class="text-muted">· bankgiro ${clubEsc(g.bgNumber)}</span>` : ''}
-                                ${(g.hasSwishNumber || g.hasBgNumber || blocked) ? '' : ' <span class="text-danger">(varken Swish-nummer eller bankgiro angivet)</span>'}
-                            </span>
-                        </div>
-                        <div class="text-end">
-                            <div class="fw-bold">${Number(g.total).toFixed(2)} kr</div>
-                            <div class="small text-muted">${g.invoices.length} anmälningar</div>
-                        </div>
-                    </div>
-                    <div class="small mt-2">
-                        ${blocked
-                            ? '<span class="badge bg-danger">Ingen tydlig mottagare — kan inte betalas här</span>'
-                            : g.needsParent
-                                ? '<span class="badge bg-primary">En samlingsfaktura skapas</span>'
-                                : '<span class="badge bg-secondary">Endast en faktura — betalas direkt, ingen samlingsfaktura</span>'}
-                    </div>
-                    <ul class="small text-muted mb-0 mt-2">
-                        ${g.invoices.map(i => `<li>${clubEsc(i.invoiceNumber)} · ${clubEsc(i.memberName)} · ${Number(i.amount).toFixed(2)} kr</li>`).join('')}
-                    </ul>
-                </div>
-            </div>`; }).join('');
-
-    const rejected = data.rejected || [];
-    document.getElementById('clubConsolidateRejectedWrap').classList.toggle('d-none', rejected.length === 0);
-    document.getElementById('clubConsolidateRejected').innerHTML = rejected
-        .map(r => `<li>${clubEsc(r.invoiceNumber || '')} ${clubEsc(r.memberName || '')} — ${clubEsc(r.reason || '')}</li>`).join('');
-
-    document.getElementById('clubConsolidateConfirm').disabled = payableGroups.length === 0;
+    document.getElementById('clubConsolidateConfirm').disabled = !anyPayable;
 }
 
 async function clubDoConsolidate() {
@@ -620,11 +585,7 @@ async function clubDoConsolidate() {
             return;
         }
         const okEl = document.getElementById('clubConsolidateSuccess');
-        const failedGroups = (d.parents || []).filter(x => x.error);
-        okEl.innerHTML = clubEsc(d.message)
-            + (failedGroups.length
-                ? '<ul class="mb-0 mt-2">' + failedGroups.map(x => `<li>${clubEsc(x.competitionName)}: ${clubEsc(x.error)}</li>`).join('') + '</ul>'
-                : '');
+        okEl.innerHTML = hpskConsolidateSuccessHtml(d);
         okEl.classList.remove('d-none');
         document.getElementById('clubConsolidateBody').classList.add('d-none');
         clubResetSelection();

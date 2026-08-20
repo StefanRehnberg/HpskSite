@@ -1,0 +1,98 @@
+@*
+    Shared rendering for the samlingsfaktura confirmation — what WILL be created, before anything is
+    written: one invoice per competition, who receives each payment, and what had to be dropped.
+
+    Two surfaces use it and must not drift apart (the competition list was rendered three separate
+    times until 2026-08-18; this is the same trap with two):
+      * the paying club's Fakturor tab   (ClubAdminInvoicesList — "Betala valda")
+      * the organiser's Anmälningar tab  (CompetitionRegistrationManagement — "Slå ihop fakturor")
+
+    Only the RENDERING is shared. Each surface keeps its own selection model, because they select
+    different things: the club ticks rows in its invoice table, the organiser picks a club and takes
+    that club's invoices wholesale.
+
+    Guarded so including it twice on one page cannot redefine the functions.
+*@
+<script>
+if (!window.hpskConsolidatePreviewLoaded) {
+window.hpskConsolidatePreviewLoaded = true;
+
+function hpskConsEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+/**
+ * Render a PreviewConsolidation response.
+ *
+ * @@param {object} els  - {groups, rejectedWrap, rejected, warning} DOM elements
+ * @@param {object} data - the endpoint's JSON
+ * @@returns {boolean} whether anything can actually be created (drives the confirm button)
+ */
+function hpskRenderConsolidatePreview(els, data) {
+    if (els.warning) {
+        els.warning.classList.toggle('d-none', !data.warning);
+        if (data.warning) els.warning.textContent = data.warning;
+    }
+
+    const groups = data.groups || [];
+    // A group with no resolvable recipient is refused by the server (a payment claim needs someone to
+    // pay), so say it HERE rather than letting the user press Skapa and get a failure back.
+    const payable = groups.filter(g => g.payeeKey && g.payeeKey.length > 0);
+
+    els.groups.innerHTML = groups.length === 0
+        ? '<p class="text-muted mb-0">Inga av de valda fakturorna kan betalas nu.</p>'
+        : groups.map(g => {
+            const blocked = !g.payeeKey || g.payeeKey.length === 0;
+            return `
+            <div class="card mb-2 ${blocked ? 'border-danger' : ''}">
+                <div class="card-body py-2">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong>${hpskConsEsc(g.competitionName)}</strong><br>
+                            <span class="small text-muted">
+                                Betalas till ${hpskConsEsc(g.payeeName)}
+                                ${g.hasBgNumber ? ` <span class="text-muted">· bankgiro ${hpskConsEsc(g.bgNumber)}</span>` : ''}
+                                ${(g.hasSwishNumber || g.hasBgNumber || blocked) ? '' : ' <span class="text-danger">(varken Swish-nummer eller bankgiro angivet)</span>'}
+                            </span>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-bold">${Number(g.total).toFixed(2)} kr</div>
+                            <div class="small text-muted">${g.invoices.length} anmälningar</div>
+                        </div>
+                    </div>
+                    <div class="small mt-2">
+                        ${blocked
+                            ? '<span class="badge bg-danger">Ingen tydlig mottagare — kan inte betalas här</span>'
+                            : g.needsParent
+                                ? '<span class="badge bg-primary">En samlingsfaktura skapas</span>'
+                                : '<span class="badge bg-secondary">Endast en faktura — betalas direkt, ingen samlingsfaktura</span>'}
+                    </div>
+                    <ul class="small text-muted mb-0 mt-2">
+                        ${g.invoices.map(i => `<li>${hpskConsEsc(i.invoiceNumber)} · ${hpskConsEsc(i.memberName)} · ${Number(i.amount).toFixed(2)} kr</li>`).join('')}
+                    </ul>
+                </div>
+            </div>`; }).join('');
+
+    const rejected = data.rejected || [];
+    if (els.rejectedWrap) els.rejectedWrap.classList.toggle('d-none', rejected.length === 0);
+    if (els.rejected) {
+        els.rejected.innerHTML = rejected
+            .map(r => `<li>${hpskConsEsc(r.invoiceNumber || '')} ${hpskConsEsc(r.memberName || '')} — ${hpskConsEsc(r.reason || '')}</li>`)
+            .join('');
+    }
+
+    return payable.length > 0;
+}
+
+/** Success text after CreateConsolidatedInvoices, including any per-competition failures. */
+function hpskConsolidateSuccessHtml(d) {
+    const failed = (d.parents || []).filter(x => x.error);
+    return hpskConsEsc(d.message)
+        + (failed.length
+            ? '<ul class="mb-0 mt-2">' + failed.map(x =>
+                `<li>${hpskConsEsc(x.competitionName)}: ${hpskConsEsc(x.error)}</li>`).join('') + '</ul>'
+            : '');
+}
+}
+</script>

@@ -1258,6 +1258,79 @@ still renders, reads and saves, then revokes. **A/B'd: 7 of 8 finance assertions
 build** (it really did mark an invoice paid and makulera it). Audit trail: 24/24
 `consolidation-audit-verify.mjs`. Adds C# → full rebuild. No SQL, no doctype property.
 
+### Samlingsfaktura från Anmälningar-fliken — arrangörssidan (2026-08-20)
+
+**The samlingsfaktura was a PULL model and that was the whole problem.** Only the PAYING club could
+build one, on its own klubbsida → Fakturor — the page the clubs who most need it have never opened.
+Clubs that pay for several lag or several members just want a räkning to Swish/BG. Now the
+**tävlingssekreteraren** can issue it from where they already stand: Anmälningar → **Åtgärder →
+Betalningar → "Samlingsfaktura – en räkning till en klubb"**.
+
+The motivation sits with the organiser (they want to be paid) rather than the club (which wants to
+*not yet* pay and logs in never), and it inverts who must understand the concept: nobody outside the
+sekretariat does — the club just receives one bill.
+
+- **`InvoiceAdmin/GetCompetitionPayerClubs(competitionId)`** groups the competition's consolidatable
+  invoices by the club that would pay each one. **The club is the REGISTRATION's club, not the
+  member's `primaryClubId`** (see "Tävlar för"); team invoices take the TEAM's club. Eligibility is
+  `ConsolidatedInvoiceService.Inspect` — never re-implement those rules, that is how the two drift.
+- **Clubs with a single invoice are not offered.** The service refuses to mint a second document for
+  the same money, so they would only produce a confusing "betalas direkt".
+- **Two steps, and the confirm button exists only on step 2** — pick the club, then see exactly what
+  will be created. Nothing can be issued from a screen that has not shown what it issues. On success
+  the dialog hands over `/faktura/{id}`, which is the artefact the treasurer actually needs (belopp,
+  referens, bankgiro-QR).
+- **Rendering is shared with the club's Fakturor tab** via `Views/Partials/_ConsolidatePreview.cshtml`
+  (`hpskRenderConsolidatePreview` / `hpskConsolidateSuccessHtml`, guarded against double-include).
+  Only the rendering — each surface keeps its own selection model, because they select different
+  things. Same lesson as the competition list that was rendered three times until 2026-08-18.
+
+**Authorization: no new permission.** `PreviewConsolidation` / `CreateConsolidatedInvoices` accept the
+payer side as before, OR an organiser holding the finance right on the competition **every** selected
+invoice belongs to (`CanManageCompetitionInvoice` per invoice). That right already allows MarkAsPaid,
+CancelInvoice and CreateCreditNote, so this grants nothing the holder did not have — a separate
+"fakturabehörighet" would grant *less* than they already hold, and its failure mode is a silent
+lockout on competition day. A sekretariat/kassa person who is not a club admin gets in the way that
+already exists: **Bemanning app access, or named tävlingsansvarig** (both feed
+`HasCompetitionManagementAccess`). Accountability comes from the audit trail, not a gate.
+- `AdminAuthorizationService.CanManageCompetitionFinanceAsync(competitionId)` was extracted so the
+  per-invoice and per-competition questions cannot drift; `CanManageCompetitionInvoice` now defers to it.
+
+**⚠️ "One club at a time" is scoped to the ORGANISER path via `ConsolidationRequest.OrganiserScope`,
+and that scoping was learned the hard way.** Two earlier cuts were wrong:
+1. Checking the *caller* — `CanPayForClubAsync` short-circuits for a site admin, so the check silently
+   did not apply to exactly the person who can see the whole field. The e2e caught it.
+2. Then checking the *selection* for everyone — which broke two legitimate things at once. A club
+   paying for a member registered as competing for ANOTHER club is still **one payer**; the
+   registration club has nothing to do with who pays. And `consolidated-invoice-verify` previews a
+   broad selection to discover what is eligible — Preview writes nothing, so refusing it is the wrong
+   answer to "tell me what would happen". That cut took the suite from 42/42 to 0 eligible.
+
+3. Then gating the check on the client's `organiserScope` flag alone — which left a **hole**, and
+   `persona-authorization-matrix` caught it: on the legacy call shape an organiser could bill an
+   arbitrary club (the test picked one in Östergötland) for invoices that were not theirs. Create was
+   refused only by accident, because that fixture's invoice happened to be covered already.
+
+Final shape — `SelectionBelongsToPayerClub` runs when **`!isPayerSide || request.OrganiserScope`**:
+- **Not payer side** ⇒ the caller got in as the organiser, so they are not an admin of the paying club
+  and must bill the club the invoices really belong to. Intrinsic, so it cannot be skipped by omitting
+  a flag.
+- **`OrganiserScope`** still matters for the case the first condition misses: a sekreterare who *is*
+  also a club admin of the paying club would otherwise fall through to the club page's deliberately
+  permissive path.
+- The club's own Fakturor page sends neither and is byte-for-byte unchanged (42/42).
+
+What guarantees one bill to one club at the structural level is the single `payerClubId` per action;
+this check adds the organiser-specific property on top. The flag is not a security boundary — the
+finance right is — and it only ever tightens.
+
+Verified 31/31 `hpsk-verify/organiser-consolidation-verify.mjs` — drives the real menu → modal →
+picker → preview → create, then checks server-side that the children are covered, that the audit
+trail recorded it, and that a cross-club selection is refused **and writes nothing**. The guard is
+tested BEFORE anything is consolidated: afterwards the invoices are ineligible for their own reasons
+and a mixed selection would be refused by the wrong rule, passing while proving nothing.
+Adds C# → full rebuild. No SQL, no doctype property.
+
 ### Anmälningar row Åtgärder menu, shooter info, push column, reference lookup (2026-08-07)
 
 Desk batch on the Anmälningar tab (`CompetitionRegistrationManagement.cshtml`). All five items

@@ -33,6 +33,8 @@ namespace HpskSite.Controllers
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly AppCaches _appCaches;
         private readonly ConsolidatedInvoiceService _consolidatedService;
+        private readonly MemberClubService _memberClubService;
+        private readonly IUmbracoDatabaseFactory _databaseFactory;
 
         // Cache configuration
         // NB `region` MUST be part of the key: it's a filter on the result set, so leaving it out
@@ -66,10 +68,13 @@ namespace HpskSite.Controllers
             IContentService contentService,
             IMemberService memberService,
             IMemberManager memberManager,
-            ConsolidatedInvoiceService consolidatedService)
+            ConsolidatedInvoiceService consolidatedService,
+            MemberClubService memberClubService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _consolidatedService = consolidatedService;
+            _memberClubService = memberClubService;
+            _databaseFactory = databaseFactory;
             _authService = authService;
             _invoiceService = invoiceService;
             _paymentService = paymentService;
@@ -222,6 +227,143 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// The competition's unpaid invoices grouped by the club that would pay them — the data behind
+        /// the organiser-side samlingsfaktura on the Anmälningar tab (2026-08-20).
+        ///
+        /// Why this exists: the samlingsfaktura was a PULL model. Only the paying club could build one,
+        /// on its own klubbsida, which is the page the clubs who most need it have never opened. The
+        /// motivation sits with the organiser — they want to be paid — so the desk gets the same
+        /// operation. Nobody outside the sekretariat then has to know what a samlingsfaktura is.
+        ///
+        /// **The club is the REGISTRATION's club, not the member's `primaryClubId`.** A shooter entered
+        /// for their second club must land in that club's bill; see <see cref="MemberClubService"/> and
+        /// the "Tävlar för" section in CLAUDE.md. Team invoices (`team-{id}`) take the TEAM's club.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetCompetitionPayerClubs(int competitionId)
+        {
+            if (competitionId <= 0)
+                return Json(new { success = false, message = "Ingen tävling angiven." });
+            if (!await _authService.CanManageCompetitionFinanceAsync(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet att hantera den här tävlingens fakturor." });
+
+            try
+            {
+                var byClub = BuildPayerClubGroups(competitionId);
+
+                var clubs = byClub
+                    .Select(kv => new
+                    {
+                        clubId = kv.Key,
+                        clubName = _clubService.GetClubNameById(kv.Key) ?? $"Förening #{kv.Key}",
+                        invoiceCount = kv.Value.Count,
+                        total = kv.Value.Sum(i => i.Amount),
+                        invoices = kv.Value.Select(i => new
+                        {
+                            id = i.InvoiceId,
+                            invoiceNumber = i.InvoiceNumber,
+                            name = i.Label,
+                            amount = i.Amount,
+                            isTeam = i.IsTeam
+                        })
+                    })
+                    // Most invoices first: the club with several entries is the whole reason this exists.
+                    .OrderByDescending(c => c.invoiceCount).ThenBy(c => c.clubName)
+                    .ToList();
+
+                return Json(new { success = true, clubs });
+            }
+            catch (Exception ex)
+            {
+                // This controller has no injected logger; surface the reason like its siblings do.
+                return Json(new { success = false, message = "Kunde inte hämta fakturorna: " + ex.Message });
+            }
+        }
+
+        private sealed class PayerInvoice
+        {
+            public int InvoiceId { get; init; }
+            public string InvoiceNumber { get; init; } = "";
+            public string Label { get; init; } = "";
+            public decimal Amount { get; init; }
+            public bool IsTeam { get; init; }
+        }
+
+        /// <summary>
+        /// The competition's consolidatable invoices, keyed by the club that would pay each one. Used by
+        /// both the picker and the server-side ownership guard, so the screen and the rule can never
+        /// disagree about which club an invoice belongs to.
+        /// </summary>
+        private Dictionary<int, List<PayerInvoice>> BuildPayerClubGroups(int competitionId)
+        {
+            var byClub = new Dictionary<int, List<PayerInvoice>>();
+
+            var hub = _contentService.GetPagedChildren(competitionId, 0, 200, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (hub == null) return byClub;
+
+            // Registration → club, resolved once for the whole competition rather than per invoice.
+            var regClubs = _memberClubService.GetRegistrationClubIds(competitionId);
+
+            // Team → club. One query; a competition has tens of teams, not thousands.
+            var teamClubs = new Dictionary<int, int>();
+            var teamNames = new Dictionary<int, string>();
+            using (var db = _databaseFactory.CreateDatabase())
+            {
+                foreach (var t in db.Fetch<CompetitionTeamDto>(
+                    "SELECT * FROM CompetitionTeam WHERE CompetitionId = @0", competitionId))
+                {
+                    teamClubs[t.Id] = t.ClubId;
+                    teamNames[t.Id] = t.TeamName;
+                }
+            }
+
+            foreach (var invoice in _contentService.GetPagedChildren(hub.Id, 0, 2000, out _))
+            {
+                if (invoice.ContentType.Alias != "registrationInvoice") continue;
+
+                // Only what can actually be consolidated. Inspect() is the single source of truth for
+                // that (Pending, no invoiceKind, not already covered, amount > 0); duplicating its rules
+                // here is how the two drift.
+                var candidate = _consolidatedService.Inspect(invoice.Id);
+                if (!candidate.Eligible) continue;
+
+                var memberId = invoice.GetValue<string>("memberId") ?? "";
+                var isTeam = memberId.StartsWith("team-");
+                var label = candidate.MemberName;
+                int clubId = 0;
+
+                if (isTeam)
+                {
+                    if (int.TryParse(memberId.Substring(5), out var teamId))
+                    {
+                        teamClubs.TryGetValue(teamId, out clubId);
+                        if (teamNames.TryGetValue(teamId, out var tn) && !string.IsNullOrWhiteSpace(tn)) label = tn;
+                    }
+                }
+                else if (int.TryParse(memberId, out var mid))
+                {
+                    if (!regClubs.TryGetValue(mid, out clubId) || clubId <= 0)
+                        clubId = _memberClubService.GetPrimaryClubId(_memberService.GetById(mid));
+                }
+
+                if (clubId <= 0) continue;   // nobody identifiable to bill
+
+                if (!byClub.TryGetValue(clubId, out var list)) byClub[clubId] = list = new List<PayerInvoice>();
+                list.Add(new PayerInvoice
+                {
+                    InvoiceId = candidate.InvoiceId,
+                    InvoiceNumber = candidate.InvoiceNumber,
+                    Label = label,
+                    Amount = candidate.Amount,
+                    IsTeam = isTeam
+                });
+            }
+
+            return byClub;
+        }
+
+        /// <summary>
         /// Dry run: group the selected invoices per competition and say which are payable and why the
         /// rest are not. Read-only — nothing is written, so the UI can show a confirmation safely.
         /// </summary>
@@ -233,8 +375,24 @@ namespace HpskSite.Controllers
             if (request == null || request.InvoiceIds == null || request.InvoiceIds.Length == 0)
                 return Json(new { success = false, message = "Inga fakturor valda." });
 
-            if (!await CanPayForClubAsync(request.PayerClubId))
-                return Json(new { success = false, message = "Du har inte behörighet att betala för den föreningen." });
+            // Payer side (the club builds its own bill) OR organiser side (the sekretariat issues it).
+            var isPayerSide = await CanPayForClubAsync(request.PayerClubId);
+            if (!isPayerSide)
+            {
+                var (ok, reason) = await CanOrganiseConsolidationAsync(request.PayerClubId, request.InvoiceIds);
+                if (!ok) return Json(new { success = false, message = reason ?? "Du har inte behörighet att betala för den föreningen." });
+            }
+
+            // One club at a time. Applies when the caller got in as the ORGANISER (they are not an
+            // admin of the paying club, so they must bill the club the invoices really belong to),
+            // and also whenever the request says it came from the organiser UI - which matters when
+            // the sekreterare happens to ALSO be a club admin of the paying club and would otherwise
+            // fall through to the club page's deliberately permissive path.
+            if (!isPayerSide || request.OrganiserScope)
+            {
+                var (single, mixedReason) = SelectionBelongsToPayerClub(request.PayerClubId, request.InvoiceIds);
+                if (!single) return Json(new { success = false, message = mixedReason });
+            }
 
             var preview = _consolidatedService.Preview(request.InvoiceIds);
             return Json(new
@@ -286,8 +444,24 @@ namespace HpskSite.Controllers
             if (request == null || request.InvoiceIds == null || request.InvoiceIds.Length == 0)
                 return Json(new { success = false, message = "Inga fakturor valda." });
 
-            if (!await CanPayForClubAsync(request.PayerClubId))
-                return Json(new { success = false, message = "Du har inte behörighet att betala för den föreningen." });
+            // Payer side (the club builds its own bill) OR organiser side (the sekretariat issues it).
+            var isPayerSide = await CanPayForClubAsync(request.PayerClubId);
+            if (!isPayerSide)
+            {
+                var (ok, reason) = await CanOrganiseConsolidationAsync(request.PayerClubId, request.InvoiceIds);
+                if (!ok) return Json(new { success = false, message = reason ?? "Du har inte behörighet att betala för den föreningen." });
+            }
+
+            // One club at a time. Applies when the caller got in as the ORGANISER (they are not an
+            // admin of the paying club, so they must bill the club the invoices really belong to),
+            // and also whenever the request says it came from the organiser UI - which matters when
+            // the sekreterare happens to ALSO be a club admin of the paying club and would otherwise
+            // fall through to the club page's deliberately permissive path.
+            if (!isPayerSide || request.OrganiserScope)
+            {
+                var (single, mixedReason) = SelectionBelongsToPayerClub(request.PayerClubId, request.InvoiceIds);
+                if (!single) return Json(new { success = false, message = mixedReason });
+            }
 
             var actor = await _memberManager.GetCurrentMemberAsync();
             var actorData = actor == null ? null : _memberService.GetByEmail(actor.Email ?? "");
@@ -450,6 +624,79 @@ namespace HpskSite.Controllers
             if (payerClubId <= 0) return false;
             if (await _authService.IsCurrentUserAdminAsync()) return true;
             return await _authService.IsClubAdminForClub(payerClubId);
+        }
+
+        /// <summary>
+        /// May the current user consolidate this selection as the ORGANISER — i.e. issue the bill rather
+        /// than pay it? Two conditions, both required (2026-08-20):
+        ///
+        /// 1. They hold the finance right on the competition every selected invoice belongs to. No new
+        ///    permission was introduced: this is the same right that already allows MarkAsPaid,
+        ///    CancelInvoice and CreateCreditNote, so it grants nothing the holder did not already have.
+        ///    Checked per invoice, so a selection cannot smuggle in one from another competition.
+        ///
+        /// 2. **Every invoice actually belongs to the payer club** — Stefan's "one club at a time" rule.
+        ///    On the payer path this is implicit (a club admin can only reach their own club's
+        ///    invoices), but an organiser sees the whole field, and stamping one `payerClubId` onto a
+        ///    mixed selection would bill club A for club B's shooters. That is the specific accident
+        ///    worth refusing outright rather than warning about.
+        ///
+        /// Returns the reason on failure so the UI can say which of the two it was.
+        /// </summary>
+        private async Task<(bool ok, string? reason)> CanOrganiseConsolidationAsync(int payerClubId, int[] invoiceIds)
+        {
+            if (payerClubId <= 0) return (false, "Ingen betalande förening angiven.");
+            if (invoiceIds == null || invoiceIds.Length == 0) return (false, "Inga fakturor valda.");
+
+            foreach (var id in invoiceIds)
+            {
+                if (!await _authService.CanManageCompetitionInvoice(id))
+                    return (false, "Du har inte behörighet att fakturera för den här tävlingen.");
+            }
+            return (true, null);
+        }
+
+        /// <summary>
+        /// Stefan's "one club at a time" rule for the ORGANISER path: every selected invoice must be one
+        /// the picker actually offered for <paramref name="payerClubId"/> on that competition.
+        ///
+        /// **Why it is scoped to that path and not applied to everyone.** A first cut enforced
+        /// homogeneity on every caller and broke two legitimate things at once: the club's own "Betala
+        /// valda", where a club pays for a member who is registered as competing for ANOTHER club (the
+        /// payer is still one club — the registration club is irrelevant to who pays), and the discovery
+        /// pattern where a caller previews a broad selection to learn what is eligible. Preview writes
+        /// nothing; refusing it is the wrong answer to "tell me what would happen".
+        ///
+        /// Structurally the endpoint already guarantees one payer per action — a single
+        /// <c>payerClubId</c> means one bill to one club. What this adds is the organiser-specific
+        /// property: the sekretariat sees the whole field, so it must not be able to sweep another
+        /// club's shooters into the bill it is issuing.
+        ///
+        /// <paramref name="organiserScope"/> comes from the client, which is safe because it only ever
+        /// TIGHTENS: omitting it yields the long-standing behaviour the caller was already authorised
+        /// for, and setting it adds a check. It is not a security boundary — the finance right is.
+        /// </summary>
+        private (bool ok, string? reason) SelectionBelongsToPayerClub(int payerClubId, int[] invoiceIds)
+        {
+            var owned = new HashSet<int>();
+            var seenCompetitions = new HashSet<int>();
+
+            foreach (var id in invoiceIds)
+            {
+                var inv = _contentService.GetById(id);
+                if (inv == null) continue;
+                var compId = ConsolidatedInvoiceService.ReadInt(inv, "competitionId");
+                if (compId <= 0 || !seenCompetitions.Add(compId)) continue;
+
+                if (BuildPayerClubGroups(compId).TryGetValue(payerClubId, out var list))
+                    foreach (var i in list) owned.Add(i.InvoiceId);
+            }
+
+            if (invoiceIds.Any(id => !owned.Contains(id)))
+                return (false, "Alla valda fakturor måste tillhöra samma förening — "
+                             + "gör en samlingsfaktura per förening.");
+
+            return (true, null);
         }
 
         /// <summary>
@@ -1782,5 +2029,15 @@ namespace HpskSite.Controllers
         /// <summary>The club that will pay — not necessarily the club that issued the invoices.</summary>
         public int PayerClubId { get; set; }
         public int[]? InvoiceIds { get; set; }
+
+        /// <summary>
+        /// Sent by the organiser's samlingsfaktura on the Anmälningar tab, but the server does NOT
+        /// depend on it: "one club at a time" is intrinsic to the organiser authorization branch, so it
+        /// cannot be skipped by omitting a flag. An earlier cut did gate on this and left a hole —
+        /// an organiser could bill an arbitrary club for invoices that were not theirs by using the
+        /// legacy call shape. Kept only so the intent is visible in the request. See
+        /// <c>SelectionBelongsToPayerClub</c>.
+        /// </summary>
+        public bool OrganiserScope { get; set; }
     }
 }

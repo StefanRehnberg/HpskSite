@@ -146,6 +146,15 @@
                     </li>
                 }
                 <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header">Betalningar</h6></li>
+                @* The organiser-side samlingsfaktura. Until 2026-08-20 only the PAYING club could build
+                   one, on its own klubbsida — the page the clubs who most need it have never opened. *@
+                <li>
+                    <button class="dropdown-item" type="button" onclick="openOrganiserConsolidateModal()">
+                        <i class="bi bi-receipt-cutoff me-2 text-primary"></i>Samlingsfaktura – en räkning till en klubb
+                    </button>
+                </li>
+                <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Kommunikation</h6></li>
                 <li>
                     <button class="dropdown-item" type="button" onclick="openSendRemindersModal()">
@@ -1416,6 +1425,63 @@
         </div>
     </div>
 </div>
+
+@* ── Samlingsfaktura, arrangörssidan (2026-08-20) ──────────────────────────────────────────────
+   ONE CLUB AT A TIME, deliberately (Stefan). The engine groups per payee and could do several in a
+   sweep, but an organiser sees the whole field and a mixed selection stamped with one payerClubId
+   would bill club A for club B's shooters. The server refuses that too — this UI just never offers
+   it. Individuals and lag are listed together because one bill legitimately covers both. *@
+<div class="modal fade" id="organiserConsolidateModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-receipt-cutoff me-2"></i>Samlingsfaktura till en klubb</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    Slår ihop en klubbs obetalda anmälningar och lagavgifter till <strong>en</strong> faktura
+                    som klubben betalar i ett svep. Klubben behöver inte logga in.
+                </p>
+
+                <div id="orgConsLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="ms-2">Hämtar obetalda fakturor…</span>
+                </div>
+
+                <div id="orgConsPick" class="d-none">
+                    <label class="form-label fw-semibold" for="orgConsClub">Vilken klubb ska betala?</label>
+                    <select class="form-select" id="orgConsClub"></select>
+                    <div class="form-text">Bara klubbar som har mer än en obetald faktura kan slås ihop.</div>
+                    <div id="orgConsClubInvoices" class="mt-3"></div>
+                </div>
+
+                <div id="orgConsPreview" class="d-none">
+                    <div class="alert alert-warning d-none" id="orgConsWarning"></div>
+                    <div id="orgConsGroups"></div>
+                    <div class="d-none" id="orgConsRejectedWrap">
+                        <hr>
+                        <h6 class="text-muted"><i class="bi bi-exclamation-circle me-1"></i>Kan inte tas med</h6>
+                        <ul class="small mb-0" id="orgConsRejected"></ul>
+                    </div>
+                </div>
+
+                <div class="alert alert-info d-none" id="orgConsEmpty"></div>
+                <div class="alert alert-danger d-none" id="orgConsError"></div>
+                <div class="alert alert-success d-none" id="orgConsSuccess"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-outline-secondary d-none" id="orgConsBack">Tillbaka</button>
+                <button type="button" class="btn btn-primary d-none" id="orgConsNext">Granska</button>
+                <button type="button" class="btn btn-primary d-none" id="orgConsConfirm">Skapa samlingsfaktura</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Shared samlingsfaktura preview rendering (also used by the club's Fakturor tab). *@
+@await Html.PartialAsync("_ConsolidatePreview")
 
 <script>
 // ── Timestamps ────────────────────────────────────────────────────────────
@@ -3759,6 +3825,167 @@ function peCopy(ev) {
         box.removeAttribute('readonly'); box.select(); box.setAttribute('readonly', 'readonly');
     });
 }
+
+// ==================== Samlingsfaktura, arrangörssidan (2026-08-20) ====================
+// Two steps on purpose: pick the club, THEN see exactly what will be created. The confirm button only
+// appears on step 2, so nothing can be issued from a screen that hasn't shown what it issues.
+let orgConsClubs = [];
+let orgConsSelection = { clubId: 0, invoiceIds: [] };
+
+function orgConsShow(step) {
+    const set = (id, on) => document.getElementById(id)?.classList.toggle('d-none', !on);
+    set('orgConsLoading', step === 'loading');
+    set('orgConsPick', step === 'pick');
+    set('orgConsPreview', step === 'preview');
+    set('orgConsBack', step === 'preview');
+    set('orgConsNext', step === 'pick');
+    set('orgConsConfirm', step === 'preview');
+    if (step !== 'done') set('orgConsSuccess', false);
+    if (step !== 'error') set('orgConsError', false);
+}
+
+function orgConsFail(msg) {
+    orgConsShow('none');
+    const el = document.getElementById('orgConsError');
+    el.textContent = msg;
+    el.classList.remove('d-none');
+}
+
+async function openOrganiserConsolidateModal() {
+    const compId = $('.competition-registration-management').data('competition-id');
+    if (!compId) return;
+
+    const modalEl = document.getElementById('organiserConsolidateModal');
+    ['orgConsError', 'orgConsSuccess', 'orgConsEmpty'].forEach(id =>
+        document.getElementById(id)?.classList.add('d-none'));
+    orgConsShow('loading');
+    new bootstrap.Modal(modalEl).show();
+
+    let data;
+    try {
+        const r = await fetch(`/umbraco/surface/InvoiceAdmin/GetCompetitionPayerClubs?competitionId=${compId}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        data = await r.json();
+    } catch (e) {
+        orgConsFail('Nätverksfel när fakturorna skulle hämtas.');
+        return;
+    }
+    if (!data.success) { orgConsFail(data.message || 'Kunde inte hämta fakturorna.'); return; }
+
+    // A single invoice needs no samlingsfaktura — the service refuses to mint a second document for
+    // the same money, so offering those clubs here would only produce a confusing "betalas direkt".
+    orgConsClubs = (data.clubs || []).filter(c => c.invoiceCount > 1);
+    if (!orgConsClubs.length) {
+        orgConsShow('none');
+        const el = document.getElementById('orgConsEmpty');
+        el.textContent = (data.clubs || []).length
+            ? 'Ingen klubb har mer än en obetald faktura på den här tävlingen — de betalas var för sig.'
+            : 'Det finns inga obetalda fakturor att slå ihop på den här tävlingen.';
+        el.classList.remove('d-none');
+        return;
+    }
+
+    const sel = document.getElementById('orgConsClub');
+    sel.innerHTML = orgConsClubs.map(c =>
+        `<option value="${c.clubId}">${escapeHtmlSafe(c.clubName)} — ${c.invoiceCount} fakturor, ${Number(c.total).toFixed(2)} kr</option>`
+    ).join('');
+    sel.onchange = orgConsRenderClub;
+    orgConsRenderClub();
+    orgConsShow('pick');
+}
+
+function orgConsRenderClub() {
+    const clubId = parseInt(document.getElementById('orgConsClub').value, 10);
+    const club = orgConsClubs.find(c => c.clubId === clubId);
+    const wrap = document.getElementById('orgConsClubInvoices');
+    if (!club) { wrap.innerHTML = ''; return; }
+
+    orgConsSelection = { clubId, invoiceIds: club.invoices.map(i => i.id) };
+    wrap.innerHTML = `
+        <div class="card"><div class="card-body py-2">
+            <div class="d-flex justify-content-between">
+                <strong>${escapeHtmlSafe(club.clubName)}</strong>
+                <span class="fw-bold">${Number(club.total).toFixed(2)} kr</span>
+            </div>
+            <ul class="small text-muted mb-0 mt-2">
+                ${club.invoices.map(i => `<li>${escapeHtmlSafe(i.invoiceNumber)} · ${escapeHtmlSafe(i.name)}`
+                    + `${i.isTeam ? ' <span class="badge bg-secondary">lag</span>' : ''}`
+                    + ` · ${Number(i.amount).toFixed(2)} kr</li>`).join('')}
+            </ul>
+        </div></div>`;
+}
+
+async function orgConsPreviewStep() {
+    if (!orgConsSelection.invoiceIds.length) return;
+    orgConsShow('loading');
+    const token = $('input[name="__RequestVerificationToken"]').val();
+    let data;
+    try {
+        const r = await fetch('/umbraco/surface/InvoiceAdmin/PreviewConsolidation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ payerClubId: orgConsSelection.clubId, invoiceIds: orgConsSelection.invoiceIds, organiserScope: true })
+        });
+        data = await r.json();
+    } catch (e) { orgConsFail('Nätverksfel vid kontroll av fakturorna.'); return; }
+    if (!data.success) { orgConsFail(data.message || 'Kunde inte kontrollera fakturorna.'); return; }
+
+    // Same renderer as the club's Fakturor tab — see _ConsolidatePreview.cshtml.
+    const anyPayable = hpskRenderConsolidatePreview({
+        groups: document.getElementById('orgConsGroups'),
+        rejectedWrap: document.getElementById('orgConsRejectedWrap'),
+        rejected: document.getElementById('orgConsRejected'),
+        warning: document.getElementById('orgConsWarning')
+    }, data);
+
+    orgConsShow('preview');
+    document.getElementById('orgConsConfirm').disabled = !anyPayable;
+}
+
+async function orgConsCreate() {
+    const btn = document.getElementById('orgConsConfirm');
+    btn.disabled = true;
+    const token = $('input[name="__RequestVerificationToken"]').val();
+    try {
+        const r = await fetch('/umbraco/surface/InvoiceAdmin/CreateConsolidatedInvoices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ payerClubId: orgConsSelection.clubId, invoiceIds: orgConsSelection.invoiceIds, organiserScope: true })
+        });
+        const d = await r.json();
+        if (!d.success) {
+            const err = document.getElementById('orgConsError');
+            err.textContent = d.message || 'Kunde inte skapa samlingsfakturan.';
+            err.classList.remove('d-none');
+            btn.disabled = false;
+            return;
+        }
+        orgConsShow('none');
+        const parent = (d.parents || []).find(x => x.parentInvoiceId);
+        const okEl = document.getElementById('orgConsSuccess');
+        // The invoice document is the thing the club's treasurer actually needs — belopp, referens
+        // and a bankgiro-QR to scan. Hand over the link rather than making them hunt for it.
+        okEl.innerHTML = hpskConsolidateSuccessHtml(d) + (parent
+            ? `<hr><a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener"
+                     href="/faktura/${parent.parentInvoiceId}">
+                   <i class="bi bi-printer me-1"></i>Öppna fakturan (${escapeHtmlSafe(parent.parentInvoiceNumber || '')})
+               </a>`
+            : '');
+        okEl.classList.remove('d-none');
+        loadCompetitionRegistrations();
+    } catch (e) {
+        const err = document.getElementById('orgConsError');
+        err.textContent = 'Nätverksfel.';
+        err.classList.remove('d-none');
+        btn.disabled = false;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('orgConsNext')?.addEventListener('click', orgConsPreviewStep);
+    document.getElementById('orgConsBack')?.addEventListener('click', () => orgConsShow('pick'));
+    document.getElementById('orgConsConfirm')?.addEventListener('click', orgConsCreate);
+});
 
 function openBokforingsUnderlag() {
     const currentCompetitionId = $('.competition-registration-management').data('competition-id');
