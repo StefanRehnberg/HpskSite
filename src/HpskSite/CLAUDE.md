@@ -1258,6 +1258,36 @@ still renders, reads and saves, then revokes. **A/B'd: 7 of 8 finance assertions
 build** (it really did mark an invoice paid and makulera it). Audit trail: 24/24
 `consolidation-audit-verify.mjs`. Adds C# → full rebuild. No SQL, no doctype property.
 
+### Borttaget lag makulerar sin avgift (2026-08-20)
+
+**A half-applied fix, found in prod at SM.** `DeleteCompetitionRegistration` has cancelled an
+individual's pending invoices for a long time — its own comment explains that an orphan otherwise
+keeps showing under "Utestående betalningar" with no shooter to chase. **The team path never got the
+same rule**: `DeleteTeamAsync` did `DELETE FROM CompetitionTeam` plus `DeleteTeamRegistrationDoc` and
+nothing else. Three test teams deleted during SM preparation left 450 kr of "unpaid" invoices that
+inflated the krets's Fakturor page and were offered to the organiser's samlingsfaktura picker.
+
+`CompetitionTeamService.CancelTeamInvoicesAsync` now runs **before** the row is deleted:
+- Cancels every **Pending** invoice on `team-{id}`; Paid ones are untouched (the money was collected
+  and the books need to see it). **Every** one, not the first — prod has duplicates minted a second
+  apart by two code paths, and leaving the second behind recreates the phantom.
+- ⚠️ **Refuses the whole deletion when an invoice is covered by an open samlingsfaktura.** The A/B
+  showed the old code cheerfully deleting such a team, leaving the club paying a total that includes
+  a lag that no longer exists — nothing recalculates a parent. The correction there is to makulera the
+  samlingsfaktura or issue a kreditfaktura, and the refusal says so.
+- A failure to *reason* about the money also aborts: a silent orphan is the thing being prevented.
+- The actor is threaded from the controller so the makulering is attributable — "Laget borttaget"
+  with no name is an audit row nobody can act on.
+
+**Existing orphans must still be cleaned by hand** — an unpaid invoice is räkenskapsinformation, so it
+is makulerad, never deleted. `hpsk-verify/cancel-orphan-team-invoices.mjs <compId>` lists them
+(**dry run by default**, `--apply` to act, `--base` for prod) and skips any covered by a
+samlingsfaktura.
+
+Verified 15/15 `hpsk-verify/team-delete-invoice-verify.mjs`. **A/B'd: 8 of 15 fail on the old build**,
+including the covered-team deletion succeeding. Regression: lag-gender 20/20, lag-multiteam 15/15,
+lag-conflict-dialog 14/14, clubswap-team 13/13, late-team e2e green, organiser-consolidation 31/31.
+
 ### Samlingsfaktura från Anmälningar-fliken — arrangörssidan (2026-08-20)
 
 **The samlingsfaktura was a PULL model and that was the whole problem.** Only the PAYING club could

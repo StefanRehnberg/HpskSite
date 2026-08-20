@@ -179,7 +179,10 @@ namespace HpskSite.Controllers
                 if (!await CanManageTeamAsync(teamClubId, memberData.GetValue<string>("primaryClubId"), request.TeamId))
                     return Json(new { success = false, message = "Du har inte behörighet att ta bort det här laget." });
 
-                var (success, message) = await _teamService.DeleteTeamAsync(request.TeamId);
+                // Actor goes through so the invoice makulering the delete performs is attributable —
+                // "Laget borttaget" with no name is the kind of audit row nobody can act on later.
+                var (success, message) = await _teamService.DeleteTeamAsync(
+                    request.TeamId, memberData.Id, memberData.Name);
                 return Json(new { success, message });
             }
             catch (Exception ex)

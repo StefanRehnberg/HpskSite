@@ -277,12 +277,33 @@ namespace HpskSite.Services
                 : (false, "Du kunde inte hittas i laget.");
         }
 
-        public async Task<(bool success, string message)> DeleteTeamAsync(int teamId)
+        /// <summary>
+        /// Delete a team, cancelling its unpaid invoice first.
+        ///
+        /// **Why the invoice part exists (added 2026-08-20).** Deleting an INDIVIDUAL registration has
+        /// cancelled its pending invoices for a long time — see
+        /// <c>RegistrationAdminController.DeleteCompetitionRegistration</c>, which explains that an
+        /// orphaned invoice keeps showing up under "Utestående betalningar" with no shooter to chase.
+        /// That rule was never applied to the TEAM path, so a deleted lag left its avgift behind as a
+        /// phantom debt. Found in prod at SM Springskytte 2026: three test teams deleted during
+        /// preparation left 450 kr of "unpaid" invoices that inflated the krets's Fakturor page and got
+        /// offered to the organiser's samlingsfaktura picker. Same rule, both paths, now.
+        ///
+        /// Paid invoices are left untouched — the money really was collected and the books need to see
+        /// it. Cancelling happens BEFORE the row is deleted so a refusal can abort the whole thing.
+        /// </summary>
+        public async Task<(bool success, string message)> DeleteTeamAsync(
+            int teamId, int? actorMemberId = null, string? actorMemberName = null)
         {
             using var db = _databaseFactory.CreateDatabase();
             var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>($"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
             if (team == null)
                 return (false, "Laget kunde inte hittas.");
+
+            var (invoicesOk, invoiceMessage) =
+                await CancelTeamInvoicesAsync(team, actorMemberId, actorMemberName);
+            if (!invoicesOk)
+                return (false, invoiceMessage);
 
             var deleted = await db.ExecuteAsync("DELETE FROM CompetitionTeam WHERE Id = @0", teamId);
             if (deleted <= 0)
@@ -299,6 +320,75 @@ namespace HpskSite.Services
             }
 
             return (true, "Laget har tagits bort.");
+        }
+
+        /// <summary>
+        /// Cancel the team's unpaid invoices ahead of deleting it. Returns false to ABORT the deletion.
+        ///
+        /// Refuses outright when an invoice is covered by an open samlingsfaktura: the club is in the
+        /// middle of paying a total that includes this lag, nothing recalculates a parent, and letting
+        /// the lag vanish underneath them would leave them paying for a team that no longer exists.
+        /// Makulera the samlingsfaktura (or credit it) first — the same rule
+        /// <see cref="PaymentService.UpdatePaymentStatusAsync"/> already enforces everywhere else.
+        ///
+        /// Cancels EVERY pending invoice on the team, not just the first: prod has proven that a
+        /// registration can carry duplicates minted a second apart by two code paths, and leaving the
+        /// second one behind would recreate exactly the phantom this method exists to prevent.
+        /// </summary>
+        private async Task<(bool ok, string message)> CancelTeamInvoicesAsync(
+            CompetitionTeamDto team, int? actorMemberId, string? actorMemberName)
+        {
+            try
+            {
+                var competition = _contentService.GetById(team.CompetitionId);
+                if (competition == null) return (true, "");   // nothing to reconcile against
+
+                var hubs = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                    .Where(c => c.ContentType.Alias == "registrationInvoicesHub")
+                    .ToList();
+                if (hubs.Count == 0) return (true, "");
+
+                var teamMemberId = $"team-{team.Id}";
+                var invoices = hubs
+                    .SelectMany(h => _contentService.GetPagedChildren(h.Id, 0, 1000, out _))
+                    .Where(c => c.ContentType.Alias == "registrationInvoice")
+                    .Where(c => (c.GetValue<string>("memberId") ?? "") == teamMemberId)
+                    .ToList();
+
+                foreach (var inv in invoices)
+                {
+                    // Same tolerant read the individual delete path uses — paymentStatus is sometimes
+                    // stored JSON-wrapped (["Paid"]) in older data.
+                    var status = (inv.GetValue<string>("paymentStatus") ?? "Pending")
+                        .Trim().Trim('[', ']').Trim('"', '\'').Trim();
+                    if (status != "Pending") continue;      // Paid and Cancelled are left alone
+
+                    if (_paymentService.IsCoveredByOpenConsolidation(inv.Id, out var parent, out var parentPaid))
+                    {
+                        return (false,
+                            $"Lagets avgift ingår i samlingsfaktura {parent}"
+                            + (parentPaid ? ", som redan är betald" : "")
+                            + ". Makulera samlingsfakturan först, eller skapa en kreditfaktura.");
+                    }
+
+                    await _paymentService.UpdatePaymentStatusAsync(
+                        invoiceId: inv.Id,
+                        paymentStatus: "Cancelled",
+                        notes: "Laget borttaget",
+                        actorMemberId: actorMemberId,
+                        actorMemberName: actorMemberName,
+                        sendReceiptOnPaid: false);
+                }
+
+                return (true, "");
+            }
+            catch (Exception ex)
+            {
+                // Do NOT delete the team if we could not reason about its money: a silent orphan is
+                // exactly the failure this guard exists to prevent.
+                _logger.LogError(ex, "Could not cancel invoices for team {TeamId}; aborting the delete", team.Id);
+                return (false, "Lagets fakturor kunde inte kontrolleras — laget togs inte bort.");
+            }
         }
 
         public async Task<(bool success, string message)> UpdateTeamAsync(
