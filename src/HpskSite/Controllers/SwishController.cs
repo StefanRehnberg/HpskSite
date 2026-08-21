@@ -1169,54 +1169,31 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du har inga aktiva anmälningar för denna tävling." });
                 }
 
-                // Calculate total amount (per-class base/junior fee + optional deltävling surcharge)
-                var classesForCalc = userShootingClasses.Count > 0
-                    ? (IReadOnlyCollection<string>)userShootingClasses
-                    : new[] { string.Empty };
-                var totalAmount = RegistrationFeeCalculator.Calculate(competition, classesForCalc, registeredIsSubCompetition);
+                // Same billing entry point as GenerateQRCode, and for the same two reasons.
+                //
+                // (1) AMOUNT. This path used to recompute the FULL fee and bill that, so a shooter who
+                //     had already paid for two classes and added a third got a QR for everything again.
+                //     EnsureOutstandingInvoiceAsync bills only what is still owed (Paid invoices are
+                //     never touched).
+                // (2) DUPLICATES. Its own existence check read the PUBLISHED cache and keyed on the
+                //     MEMBER rather than the registration — so it missed an invoice the eager
+                //     background job had just written, and minted a second one. That is one half of
+                //     the phantom-invoice pairs found in prod 2026-08-20; see the gate comment on
+                //     PaymentService.CreateInvoiceAsync for the other half.
+                var billing = await _paymentService.EnsureOutstandingInvoiceAsync(competitionId, userRegistrationId.Value);
+
+                if (billing.PendingInvoice == null || billing.Outstanding <= 0)
+                {
+                    var nothingDue = billing.SumPaid > 0
+                        ? "Anmälan är betald. Om avgiften har minskat hanteras eventuell återbetalning av arrangören."
+                        : "Ingen anmälningsavgift är konfigurerad.";
+                    return Json(new { success = false, message = nothingDue });
+                }
+
+                var invoice = billing.PendingInvoice;
+                var totalAmount = billing.Outstanding;
                 var amountString = totalAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-
-                if (totalAmount <= 0)
-                {
-                    return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad." });
-                }
-
-                // Check for existing invoice for the TARGET MEMBER (not the logged-in user)
-                var memberId = searchMemberId;
-                var existingInvoicePublished = await _paymentService.GetExistingInvoiceForMember(competitionId, memberId);
-
-                IContent? invoice;
-                string invoiceNumber;
-                if (existingInvoicePublished != null)
-                {
-                    _logger.LogInformation("Using existing invoice {InvoiceId} for member {MemberId}", existingInvoicePublished.Id, memberId);
-                    // Convert IPublishedContent to IContent
-                    invoice = Services.ContentService.GetById(existingInvoicePublished.Key);
-                    if (invoice == null)
-                    {
-                        return Json(new { success = false, message = "Kunde inte hämta fakturadata." });
-                    }
-                    invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
-                }
-                else
-                {
-                    _logger.LogInformation("Creating new invoice for member {MemberId} in competition {CompetitionId}", memberId, competitionId);
-
-                    // Create new invoice for the registered member (not the logged-in user)
-                    invoice = await _paymentService.CreateInvoiceAsync(
-                        competitionId,
-                        targetMemberIdFromReg ?? currentMember.Id.ToString(),
-                        targetMemberNameFromReg ?? currentMember.Name ?? "Okänd medlem",
-                        userRegistrationId.Value,
-                        totalAmount,
-                        "Swish");
-
-                    if (invoice == null)
-                    {
-                        return Json(new { success = false, message = "Kunde inte skapa faktura för betalning." });
-                    }
-                    invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
-                }
+                var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
 
                 // Generate QR code message
                 var message = $"Betalning: {invoiceNumber}";

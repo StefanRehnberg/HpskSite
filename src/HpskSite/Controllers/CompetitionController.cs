@@ -1514,6 +1514,10 @@ namespace HpskSite.Controllers
                 var transactionIdMap = new Dictionary<int, string>();      // registrationId -> existing transactionId (if any)
                 var paidAmountMap = new Dictionary<int, decimal>();        // registrationId -> sum of actual paid amounts (fallback to billed)
                 var pendingAmountMap = new Dictionary<int, decimal>();     // registrationId -> sum of all Pending invoices
+                // Sum of the BILLED totals of Paid invoices — deliberately not paidAmountMap, which
+                // carries what was actually collected. What a registration still OWES is measured
+                // against what it was billed; a cash-rounding variance is not a debt.
+                var paidBilledMap = new Dictionary<int, decimal>();        // registrationId -> sum of Paid invoices' totalAmount
                 var hasVarianceMap = new Dictionary<int, bool>();          // registrationId -> any paid invoice where actual != billed
                 var paymentSentMap = new Dictionary<int, (DateTime date, string by)>(); // registrationId -> payer "betalning anmäld" claim
                 var invoiceToRegIds = new Dictionary<int, List<int>>();    // invoiceId -> registrationId(s) it covers (for mapping audit events back)
@@ -1548,6 +1552,7 @@ namespace HpskSite.Controllers
                             if (invoiceStatus == "Paid")
                             {
                                 paidAmountMap[invoiceRegistrationId] = paidAmountMap.GetValueOrDefault(invoiceRegistrationId) + paidContribution;
+                                paidBilledMap[invoiceRegistrationId] = paidBilledMap.GetValueOrDefault(invoiceRegistrationId) + invoiceAmount;
                                 if (paidVariance) hasVarianceMap[invoiceRegistrationId] = true;
                             }
                             else if (invoiceStatus == "Pending")
@@ -1589,6 +1594,7 @@ namespace HpskSite.Controllers
                                 if (invoiceStatus == "Paid")
                                 {
                                     paidAmountMap[regId] = paidAmountMap.GetValueOrDefault(regId) + perRegActual;
+                                    paidBilledMap[regId] = paidBilledMap.GetValueOrDefault(regId) + perRegAmount;
                                     if (paidVariance) hasVarianceMap[regId] = true;
                                 }
                                 else if (invoiceStatus == "Pending")
@@ -1772,12 +1778,34 @@ namespace HpskSite.Controllers
                         // 0 kr while the QR (which always recomputes via the calculator)
                         // shows the real fee. Surface the expected fee here so both surfaces
                         // agree — the invoice gets created lazily on QR-generate / mark-paid.
+                        var classIdsForFee = shootingClasses.Select(sc => sc.Class).ToList();
+                        var isSubCompForFee = content.GetValue<bool>("isSubCompetition");
+                        var fullFee = RegistrationFeeCalculator.Calculate(competition, classIdsForFee, isSubCompForFee);
+
                         if (paymentAmount == 0m && invoiceId == 0)
                         {
-                            var classIds = shootingClasses.Select(sc => sc.Class).ToList();
-                            var isSubComp = content.GetValue<bool>("isSubCompetition");
-                            paymentAmount = RegistrationFeeCalculator.Calculate(competition, classIds, isSubComp);
+                            paymentAmount = fullFee;
                         }
+
+                        // ── What "Väntande" means, in one place ────────────────────────────────
+                        // What this registration still OWES = its fee minus what has been paid
+                        // against it. Deliberately NOT the sum of its Pending invoice rows, which
+                        // is what every summary used to show.
+                        //
+                        // Why it matters (SM Springskytte, 2026-08-20): a registration with a
+                        // duplicate invoice — one Paid, one Pending for the same 400 kr — had a
+                        // row reading "Betald" (the newest invoice) while the heading counted the
+                        // stale Pending row, so the same screen claimed 1000 kr and 600 kr at once.
+                        // Both numbers were faithfully computed; they were answering different
+                        // questions under the same word.
+                        //
+                        // Derived from the fee, this figure cannot double-count: a phantom invoice,
+                        // a top-up, and a samlingsfaktura covering the same money all collapse into
+                        // one debt. A registration with no invoice yet still owes its fee — it
+                        // shows here, and the "Saknar faktura" row explains why it cannot be
+                        // collected until the invoice exists.
+                        var paidBilled = paidBilledMap.TryGetValue(content.Id, out var pb) ? pb : 0m;
+                        var outstandingAmount = Math.Max(0m, fullFee - paidBilled);
 
                         // Now that invoices are created eagerly, a fee-bearing registration with
                         // no invoice is an error/edge ("No Invoice" → "Saknar Faktura"); a 0-fee
@@ -1814,6 +1842,11 @@ namespace HpskSite.Controllers
                             transactionId = existingTxnId,
                             paidAmount = paidAmount,
                             pendingAmount = pendingAmount,
+                            // What the registration still owes. This is the number "Väntande" means;
+                            // pendingAmount above is kept for the invoice-row views, which count a
+                            // different thing and must therefore be labelled differently.
+                            outstandingAmount = outstandingAmount,
+                            fullFee = fullFee,
                             hasVariance = hasVariance,
                             isCheckedIn = content.GetValue<bool>("isCheckedIn"),
                             isSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition"),

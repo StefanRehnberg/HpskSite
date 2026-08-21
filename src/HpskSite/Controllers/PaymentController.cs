@@ -82,35 +82,34 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du kan bara skapa fakturor för dina egna anmälningar." });
                 }
 
-                // Calculate total amount based on number of classes
-                var totalAmount = _paymentService.CalculateRegistrationTotal(competitionId, registrationId);
-                if (totalAmount <= 0)
-                {
-                    return Json(new { success = false, message = "Kunde inte beräkna totalbelopp." });
-                }
+                // Reconcile-and-return rather than mint. This endpoint used to compute the full fee
+                // and create an invoice unconditionally, with no existence check of any kind — one
+                // POST, one new invoice, every time. Nothing in the UI calls it, but it is a live
+                // POST endpoint and it was the bluntest of the duplicate-minting paths found on
+                // 2026-08-20. EnsureOutstandingInvoiceAsync gives the registration's single
+                // outstanding invoice, creating it only if it genuinely does not exist, and bills the
+                // delta rather than the whole fee again.
+                var billing = await _paymentService.EnsureOutstandingInvoiceAsync(competitionId, registrationId);
+                var invoice = billing.PendingInvoice;
+                var totalAmount = billing.Outstanding;
 
-                // Create the invoice
-                var invoice = await _paymentService.CreateInvoiceAsync(
-                    competitionId,
-                    currentMember.Id.ToString(),
-                    currentMember.Name ?? "Okänd medlem",
-                    registrationId,
-                    totalAmount,
-                    paymentMethod);
-
-                if (invoice != null)
+                if (invoice == null || totalAmount <= 0)
                 {
-                    return Json(new {
-                        success = true,
-                        message = $"Faktura skapad för {totalAmount:C}",
-                        invoiceId = invoice.Id,
-                        amount = totalAmount
+                    return Json(new
+                    {
+                        success = false,
+                        message = billing.SumPaid > 0
+                            ? "Anmälan är redan betald."
+                            : "Kunde inte beräkna totalbelopp."
                     });
                 }
-                else
-                {
-                    return Json(new { success = false, message = "Ett fel uppstod vid skapandet av fakturan." });
-                }
+
+                return Json(new {
+                    success = true,
+                    message = $"Faktura på {totalAmount:C} att betala",
+                    invoiceId = invoice.Id,
+                    amount = totalAmount
+                });
             }
             catch (Exception ex)
             {

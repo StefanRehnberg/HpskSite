@@ -79,7 +79,16 @@
         <div class="col-md-4">
             <div class="card">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">Väntande</h6>
+                    @* Deliberately NOT "Väntande". This page lists invoice ROWS, so this total is
+                       the sum of unpaid rows — which is a different number from what the payers
+                       still owe whenever a stale or superseded invoice is among them. Both numbers
+                       were once called "Väntande" on adjacent screens and disagreed by 850 kr at
+                       SM 2026; one word, one meaning. See CompetitionController.outstandingAmount. *@
+                    <h6 class="card-subtitle mb-2 text-muted">
+                        Obetalda fakturarader
+                        <i class="bi bi-info-circle ms-1 text-muted"
+                           title="Summan av obetalda fakturarader. Det som återstår att kräva in per anmälan visas på tävlingens Anmälningar-flik — de kan skilja sig om en anmälan har en gammal faktura kvar."></i>
+                    </h6>
                     <h4 class="card-title mb-0 text-warning" id="clubPendingAmount">- kr</h4>
                 </div>
             </div>
@@ -693,6 +702,14 @@ function renderClubInvoices(invoices) {
             kindBadge = ` <a class="badge bg-secondary text-decoration-none" href="/faktura/${invoice.settledByInvoiceId}"
                              target="_blank" rel="noopener"
                              title="Betalas via en samlingsfaktura – öppna den">Ingår i samlingsfaktura${parentNr ? ' ' + clubEsc(parentNr) : ''}</a>`;
+        }
+
+        // An invoice whose lag has been deleted. It is not a debt anyone can pay — nobody is going
+        // to settle a fee for a team that does not exist — but it looks exactly like one in this
+        // list, which is where the money gets reconciled. Say so on the row, next to the makulera
+        // button that resolves it.
+        if (invoice.isOrphanedTeamInvoice) {
+            kindBadge += ' <span class="badge bg-danger" title="Laget är borttaget – fakturan står kvar. Makulera den med krysset till höger.">Föräldralös – laget är borttaget</span>';
         }
 
         // Crediting belongs to the ORGANISER, so offer it in the "att få betalt för" view only — in the

@@ -137,7 +137,14 @@
         <div class="col-md-3">
             <div class="card">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">Väntande</h6>
+                    @* Deliberately NOT "Väntande" — see the same card in ClubAdminInvoicesList.
+                       This is a sum of invoice ROWS; what the payers still owe is a per-anmälan
+                       figure and lives on the competition's Anmälningar tab. *@
+                    <h6 class="card-subtitle mb-2 text-muted">
+                        Obetalda fakturarader
+                        <i class="bi bi-info-circle ms-1 text-muted"
+                           title="Summan av obetalda fakturarader. Det som återstår att kräva in per anmälan visas på tävlingens Anmälningar-flik — de kan skilja sig om en anmälan har en gammal faktura kvar."></i>
+                    </h6>
                     <h4 class="card-title mb-0 text-warning" id="pendingAmount">- kr</h4>
                 </div>
             </div>
@@ -591,6 +598,11 @@ function renderInvoices(invoices) {
             kindBadge = ` <a class="badge bg-secondary text-decoration-none" href="/faktura/${invoice.settledByInvoiceId}"
                              target="_blank" rel="noopener"
                              title="Betalas via en samlingsfaktura – öppna den">Ingår i samlingsfaktura${parentNr ? ' ' + escapeHtml(parentNr) : ''}</a>`;
+        }
+        // See the same badge in ClubAdminInvoicesList: the krets's list is where these are actually
+        // seen, so name the junk here instead of leaving it to read as a real debt.
+        if (invoice.isOrphanedTeamInvoice) {
+            kindBadge += ' <span class="badge bg-danger" title="Laget är borttaget – fakturan står kvar. Makulera den med krysset till höger.">Föräldralös – laget är borttaget</span>';
         }
         const hideIfNotConsolidated = (isConsolidated && invoice.paymentStatus !== 'Cancelled') ? '' : 'd-none';
 

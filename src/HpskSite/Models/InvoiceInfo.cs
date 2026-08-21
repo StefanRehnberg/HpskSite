@@ -64,6 +64,21 @@ namespace HpskSite.Models
         public int CoveredCount { get; set; }
 
         /// <summary>
+        /// A team invoice (<c>memberId</c> = <c>team-{id}</c>) whose team no longer exists.
+        ///
+        /// Deleting a team used to leave its unpaid invoice behind (fixed 2026-08-20 in
+        /// <c>CompetitionTeamService.DeleteTeamAsync</c>), and the rows that were already orphaned
+        /// stay — an unpaid invoice is räkenskapsinformation, so it is makulerad by hand, never
+        /// deleted. Until someone does that it sits in the list looking like a real debt: at SM
+        /// 2026 three of them inflated the krets's Fakturor page by 450 kr.
+        ///
+        /// The list is the one place the junk is actually VISIBLE, so it is labelled here rather
+        /// than filtered out. <c>GetCompetitionPayerClubs</c> already skips these — correct, but
+        /// silently, which is its own problem.
+        /// </summary>
+        public bool IsOrphanedTeamInvoice { get; set; }
+
+        /// <summary>
         /// Payment status: "Pending", "Paid", "Cancelled", "Failed", "Refunded"
         /// </summary>
         public string PaymentStatus { get; set; } = "Pending";

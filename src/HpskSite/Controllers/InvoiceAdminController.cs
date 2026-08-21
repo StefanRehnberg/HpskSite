@@ -357,29 +357,59 @@ namespace HpskSite.Controllers
 
             try
             {
-                var byClub = BuildPayerClubGroups(competitionId);
+                // Ask for the excluded rows too — the picker shows the whole field and says why a row
+                // cannot be taken, rather than quietly leaving it out. A number that cannot be
+                // reconciled against the Fakturor list beside it is worse than an awkward one.
+                var orphans = new List<PayerInvoice>();
+                var byClub = BuildPayerClubGroups(competitionId, includeExcluded: true, orphansOut: orphans);
 
                 var clubs = byClub
                     .Select(kv => new
                     {
                         clubId = kv.Key,
                         clubName = _clubService.GetClubNameById(kv.Key) ?? $"Förening #{kv.Key}",
-                        invoiceCount = kv.Value.Count,
-                        total = kv.Value.Sum(i => i.Amount),
-                        invoices = kv.Value.Select(i => new
-                        {
-                            id = i.InvoiceId,
-                            invoiceNumber = i.InvoiceNumber,
-                            name = i.Label,
-                            amount = i.Amount,
-                            isTeam = i.IsTeam
-                        })
+                        // Counts and totals describe what would actually be BILLED, so they count
+                        // only the selectable rows. The excluded ones are shown, never summed —
+                        // adding them would put money in the total that no invoice will ask for.
+                        invoiceCount = kv.Value.Count(i => i.Selectable),
+                        total = kv.Value.Where(i => i.Selectable).Sum(i => i.Amount),
+                        excludedCount = kv.Value.Count(i => !i.Selectable),
+                        invoices = kv.Value
+                            // Selectable first; within each, the excluded ones keep their order so the
+                            // reasons read as a list rather than being scattered through the rows.
+                            .OrderByDescending(i => i.Selectable)
+                            .Select(i => new
+                            {
+                                id = i.InvoiceId,
+                                invoiceNumber = i.InvoiceNumber,
+                                name = i.Label,
+                                amount = i.Amount,
+                                isTeam = i.IsTeam,
+                                selectable = i.Selectable,
+                                excludedReason = i.ExcludedReason
+                            })
                     })
                     // Most invoices first: the club with several entries is the whole reason this exists.
                     .OrderByDescending(c => c.invoiceCount).ThenBy(c => c.clubName)
                     .ToList();
 
-                return Json(new { success = true, clubs });
+                // Reported rather than merely skipped. These have no club to bill, so they can never
+                // be part of a samlingsfaktura — but the organiser is looking at a Fakturor list that
+                // DOES show them, and an unexplained gap between the two screens is what sent people
+                // hunting at SM 2026.
+                var orphanRows = orphans
+                    .OrderBy(o => o.InvoiceNumber)
+                    .Select(o => new
+                    {
+                        id = o.InvoiceId,
+                        invoiceNumber = o.InvoiceNumber,
+                        name = o.Label,
+                        amount = o.Amount,
+                        reason = o.ExcludedReason
+                    })
+                    .ToList();
+
+                return Json(new { success = true, clubs, orphans = orphanRows });
             }
             catch (Exception ex)
             {
@@ -395,6 +425,16 @@ namespace HpskSite.Controllers
             public string Label { get; init; } = "";
             public decimal Amount { get; init; }
             public bool IsTeam { get; init; }
+
+            /// <summary>
+            /// False when the row cannot go into a samlingsfaktura. It is still returned — see
+            /// <see cref="ExcludedReason"/> — because silently omitting it is what made the picker
+            /// impossible to reconcile against the invoice list next to it.
+            /// </summary>
+            public bool Selectable { get; init; } = true;
+
+            /// <summary>Plain-language reason the row cannot be included; empty when it can.</summary>
+            public string ExcludedReason { get; init; } = "";
         }
 
         /// <summary>
@@ -402,7 +442,22 @@ namespace HpskSite.Controllers
         /// both the picker and the server-side ownership guard, so the screen and the rule can never
         /// disagree about which club an invoice belongs to.
         /// </summary>
-        private Dictionary<int, List<PayerInvoice>> BuildPayerClubGroups(int competitionId)
+        /// <param name="includeExcluded">
+        /// Opt IN to also getting the rows that CANNOT be consolidated, each carrying its reason.
+        /// Only the picker wants those — it exists to show the organiser the whole field. The other
+        /// two callers ask ownership and receivable questions where an unusable row would either
+        /// inflate a debt or let an ineligible invoice pass a guard, so the default stays "eligible
+        /// only" and adding the reasons cannot silently change their behaviour.
+        /// </param>
+        /// <param name="orphansOut">
+        /// Receives invoices with no payer club at all — a team invoice whose team was deleted.
+        /// They are deliberately NOT put in a pseudo-club group: a group with nothing selectable is
+        /// dropped by the picker's "more than one invoice" filter, so they would disappear all over
+        /// again. The picker names them in a note instead, which is the point — skipping them is the
+        /// right outcome, arrived at invisibly.
+        /// </param>
+        private Dictionary<int, List<PayerInvoice>> BuildPayerClubGroups(
+            int competitionId, bool includeExcluded = false, List<PayerInvoice>? orphansOut = null)
         {
             var byClub = new Dictionary<int, List<PayerInvoice>>();
 
@@ -426,20 +481,46 @@ namespace HpskSite.Controllers
                 }
             }
 
+            // What each ANMÄLAN still owes — the question the picker has to ask. Asking each INVOICE
+            // for its status instead is what offered Daniel Borg's 400 kr at SM 2026: a leftover
+            // invoice still said Pending long after the registration had been paid through its twin.
+            // Read-only by construction; EnsureOutstandingInvoiceAsync would answer the same question
+            // but MUTATES, which a picker must never do.
+            var owedByRegistration = _paymentService.GetOutstandingByRegistration(competitionId);
+
             foreach (var invoice in _contentService.GetPagedChildren(hub.Id, 0, 2000, out _))
             {
                 if (invoice.ContentType.Alias != "registrationInvoice") continue;
 
-                // Only what can actually be consolidated. Inspect() is the single source of truth for
-                // that (Pending, no invoiceKind, not already covered, amount > 0); duplicating its rules
-                // here is how the two drift.
+                // Inspect() is the single source of truth for consolidatability (Pending, no
+                // invoiceKind, not already covered, amount > 0); duplicating its rules here is how the
+                // two drift. An ineligible row is now KEPT and labelled rather than dropped.
                 var candidate = _consolidatedService.Inspect(invoice.Id);
-                if (!candidate.Eligible) continue;
 
                 var memberId = invoice.GetValue<string>("memberId") ?? "";
                 var isTeam = memberId.StartsWith("team-");
+
+                // What "show the excluded rows too" is allowed to mean. Without these two guards the
+                // picker fills with history — 203 of 207 rows on a real dev competition — and the
+                // signal disappears into it, which is a different way of hiding the same thing.
+                //
+                //  * A samlingsfaktura or kreditfaktura is the OUTPUT of this operation, not an
+                //    entry in it. Listing parents as "cannot be included" is nonsense, and reading
+                //    their `club-{id}` memberId as an unresolvable club labelled them ORPHANED —
+                //    a 45 550 kr parent announced as a deleted team.
+                //  * A settled invoice is not outstanding, so nobody looking at "who still owes
+                //    what" expects to see it.
+                //
+                // What remains is exactly what an organiser would expect in the picker and be
+                // puzzled not to find: unpaid, ordinary invoices.
+                var kind = invoice.GetValue<string>("invoiceKind") ?? "";
+                if (kind == "consolidated" || kind == "creditNote") continue;
+                var rawStatus = (invoice.GetValue<string>("paymentStatus") ?? "").Trim().Trim('[', ']').Trim('"');
+                if (rawStatus != "Pending") continue;
                 var label = candidate.MemberName;
                 int clubId = 0;
+                var selectable = candidate.Eligible;
+                var reason = candidate.Eligible ? "" : (candidate.Reason ?? "Kan inte ingå i en samlingsfaktura.");
 
                 if (isTeam)
                 {
@@ -447,15 +528,61 @@ namespace HpskSite.Controllers
                     {
                         teamClubs.TryGetValue(teamId, out clubId);
                         if (teamNames.TryGetValue(teamId, out var tn) && !string.IsNullOrWhiteSpace(tn)) label = tn;
+
+                        // The team is gone but its invoice stayed. This used to fall through the
+                        // clubId <= 0 skip below and vanish — the right outcome reached silently,
+                        // which left the organiser comparing a picker against a Fakturor list that
+                        // showed rows the picker did not.
+                        if (!teamClubs.ContainsKey(teamId))
+                        {
+                            selectable = false;
+                            reason = "Laget är borttaget – makulera fakturan i Fakturor-vyn.";
+                            if (string.IsNullOrWhiteSpace(label)) label = $"Borttaget lag (faktura {candidate.InvoiceNumber})";
+                        }
                     }
                 }
                 else if (int.TryParse(memberId, out var mid))
                 {
                     if (!regClubs.TryGetValue(mid, out clubId) || clubId <= 0)
                         clubId = _memberClubService.GetPrimaryClubId(_memberService.GetById(mid));
+
+                    // Ask the ANMÄLAN, not the invoice. An invoice that is Pending on a registration
+                    // owing nothing is a leftover, and billing a club for it is billing them twice.
+                    var registrationId = invoice.GetValue<int>("registrationId");
+                    if (selectable && registrationId > 0
+                        && owedByRegistration.TryGetValue(registrationId, out var owed) && owed <= 0m)
+                    {
+                        selectable = false;
+                        reason = "Anmälan är redan betald – fakturan är en kvarleva.";
+                    }
                 }
 
-                if (clubId <= 0) continue;   // nobody identifiable to bill
+                // Still no identifiable payer: an orphaned team already carries its own reason above,
+                // so anything reaching here has no club at all and there is no group to show it in.
+                if (!selectable && !includeExcluded) continue;
+
+                if (clubId <= 0)
+                {
+                    // Only a TEAM invoice can be genuinely orphaned — its team row is gone. Anything
+                    // else without a resolvable club is a data oddity, not junk to advertise, so it
+                    // is skipped as before rather than announced under a label that would be wrong.
+                    if (isTeam)
+                    {
+                        orphansOut?.Add(new PayerInvoice
+                        {
+                            InvoiceId = candidate.InvoiceId,
+                            InvoiceNumber = candidate.InvoiceNumber,
+                            Label = label,
+                            Amount = candidate.Amount,
+                            IsTeam = true,
+                            Selectable = false,
+                            ExcludedReason = string.IsNullOrWhiteSpace(reason)
+                                ? "Laget är borttaget – makulera fakturan i Fakturor-vyn."
+                                : reason
+                        });
+                    }
+                    continue;
+                }
 
                 if (!byClub.TryGetValue(clubId, out var list)) byClub[clubId] = list = new List<PayerInvoice>();
                 list.Add(new PayerInvoice
@@ -464,12 +591,15 @@ namespace HpskSite.Controllers
                     InvoiceNumber = candidate.InvoiceNumber,
                     Label = label,
                     Amount = candidate.Amount,
-                    IsTeam = isTeam
+                    IsTeam = isTeam,
+                    Selectable = selectable,
+                    ExcludedReason = reason
                 });
             }
 
             return byClub;
         }
+
 
         /// <summary>
         /// Dry run: group the selected invoices per competition and say which are payable and why the

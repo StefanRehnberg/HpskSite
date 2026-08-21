@@ -21,6 +21,7 @@ namespace HpskSite.Services
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberService _memberService;
         private readonly AppCaches _appCaches;
+        private readonly Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory _databaseFactory;
 
         /// <summary>
         /// Content-tree scan cache. Deliberately under the "admin_invoices_" prefix so the existing
@@ -29,6 +30,7 @@ namespace HpskSite.Services
         /// </summary>
         private const string TreeScanCacheKey = "admin_invoices_treescan";
         private const string ClubMembersCacheKey = "admin_invoices_clubmembers_{0}";
+        private const string LiveTeamIdsCacheKey = "admin_invoices_liveteamids";
 
         /// <summary>
         /// Short on purpose. The scan only has to survive one operator's burst of filter/page/view
@@ -41,8 +43,10 @@ namespace HpskSite.Services
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberService memberService,
-            AppCaches appCaches)
+            AppCaches appCaches,
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory)
         {
+            _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
             _umbracoContextAccessor = umbracoContextAccessor ?? throw new ArgumentNullException(nameof(umbracoContextAccessor));
@@ -253,6 +257,22 @@ namespace HpskSite.Services
                     .Skip((filters.Page - 1) * filters.PageSize)
                     .Take(filters.PageSize)
                     .ToList();
+
+                // Flag orphaned team invoices — only on the page being returned, so the lookup
+                // costs one query regardless of how large the unfiltered set is.
+                var teamRows = paginatedInvoices
+                    .Select(i => (invoice: i, teamId: TeamIdFromMemberId(i.MemberId)))
+                    .Where(x => x.teamId.HasValue)
+                    .ToList();
+                if (teamRows.Count > 0)
+                {
+                    var liveTeamIds = GetLiveTeamIds();
+                    if (liveTeamIds != null)
+                    {
+                        foreach (var (invoice, teamId) in teamRows)
+                            invoice.IsOrphanedTeamInvoice = !liveTeamIds.Contains(teamId!.Value);
+                    }
+                }
 
                 return new InvoiceAggregationResult
                 {
@@ -726,6 +746,47 @@ namespace HpskSite.Services
                 PaymentSentDate = invoiceNode.GetValue<DateTime?>("paymentSentDate"),
                 PaymentSentBy = invoiceNode.GetValue<string>("paymentSentBy")
             };
+        }
+
+        /// <summary>
+        /// Every team id that still exists, for spotting invoices whose team is gone.
+        ///
+        /// One query for the whole table rather than one per invoice — the list renders hundreds of
+        /// rows and this is a hot path (the Fakturor page was 12 s per click until the tree scan was
+        /// pruned; don't put a per-row query back). Cached under the "admin_invoices_" prefix so the
+        /// existing InvalidateInvoiceCaches() drops it with everything else.
+        ///
+        /// A failure here returns null, which is read as "can't tell" — no row is labelled orphaned.
+        /// Wrongly branding a live team's invoice as junk is far worse than missing one.
+        /// </summary>
+        private HashSet<int>? GetLiveTeamIds()
+        {
+            var cached = _appCaches.RuntimeCache.Get(LiveTeamIdsCacheKey) as HashSet<int>;
+            if (cached != null) return cached;
+
+            try
+            {
+                using var scope = _databaseFactory.CreateDatabase();
+                var ids = scope.Fetch<int>("SELECT Id FROM CompetitionTeam");
+                var set = new HashSet<int>(ids);
+                _appCaches.RuntimeCache.Insert(LiveTeamIdsCacheKey, () => set, ScanCacheDuration);
+                return set;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read live team ids; orphaned team invoices will not be labelled");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// The team id inside a <c>team-{id}</c> memberId, or null when this is not a team invoice.
+        /// </summary>
+        private static int? TeamIdFromMemberId(string? memberId)
+        {
+            if (string.IsNullOrEmpty(memberId) || !memberId.StartsWith("team-", StringComparison.Ordinal))
+                return null;
+            return int.TryParse(memberId.AsSpan(5), out var id) ? id : null;
         }
 
         /// <summary>

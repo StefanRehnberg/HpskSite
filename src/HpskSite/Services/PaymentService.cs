@@ -352,7 +352,120 @@ namespace HpskSite.Services
             return hub?.Id;
         }
 
+        // The same conspiracy that minted duplicate invoice HUBS mints duplicate INVOICES, one level
+        // down. Every path that bills a registration does check-then-create with nothing in between:
+        // the eager background job (EnsureRegistrationInvoiceAsync), the payment path
+        // (ReconcileRegistrationInvoiceAsync via EnsureOutstandingInvoiceAsync), the QR-email path and
+        // the cashier top-up. Found in prod 2026-08-20: two invoices for the same registration created
+        // ONE SECOND apart (3803-5432-1/-2, Daniel Borg, SM Springskytte) and a second pair created in
+        // the SAME second carrying the SAME invoice number (4001-3876-1, Henrik Forsberg) — the
+        // number generator had read the same state in both threads. The shooter pays one and the other
+        // stands for ever as a phantom debt.
+        //
+        // Why the collision is likelier than it looks: the eager job is deliberately DELAYED 12 s
+        // (CompetitionController), which parks it right where a human clicks "Betala med Swish" on the
+        // page they just landed on. The delay does not cause the race, but it aims it.
+        //
+        // Serialize per registration and re-check against the DB, exactly as _invoiceHubGates does.
+        // This is a DEDUPLICATOR, not a gate: it never suppresses an invoice that does not exist yet,
+        // so the "Skapa saknade fakturor" repair keeps having nothing to repair.
+        private static readonly ConcurrentDictionary<string, object> _registrationInvoiceGates = new();
+
+        /// <summary>
+        /// Create the registration's invoice — or hand back the one that already exists.
+        ///
+        /// The delta/top-up model assumes a registration has AT MOST ONE outstanding (Pending)
+        /// invoice: every reader picks "the single Pending invoice" and bills the difference against
+        /// the Paid ones. That invariant was assumed everywhere and enforced nowhere. It is enforced
+        /// here, under a per-registration lock, so a racing second caller gets the first caller's
+        /// invoice instead of minting a twin.
+        ///
+        /// A caller asking for a different amount than the outstanding invoice carries is asking for
+        /// the invoice to be re-priced (that is what the top-up model does), so the amount is patched
+        /// rather than silently ignored — UNLESS a samlingsfaktura is already charging for it, since
+        /// nothing recalculates a parent and that correction is a kreditfaktura, not a re-price.
+        /// </summary>
         public Task<IContent?> CreateInvoiceAsync(
+            int competitionId,
+            string memberId,
+            string memberName,
+            int registrationId,
+            decimal totalAmount,
+            string paymentMethod = "Swish")
+        {
+            if (registrationId <= 0)
+            {
+                _logger.LogWarning("CreateInvoiceAsync called with invalid registrationId: {RegistrationId}", registrationId);
+                return Task.FromResult<IContent?>(null);
+            }
+
+            var gate = _registrationInvoiceGates.GetOrAdd($"{competitionId}:{registrationId}", _ => new object());
+            lock (gate)
+            {
+                var existing = FindPendingInvoiceForRegistrationFromDb(competitionId, registrationId);
+                if (existing != null)
+                {
+                    var settledBy = existing.GetValue<int>("settledByInvoiceId");
+                    var current = existing.GetValue<decimal>("totalAmount");
+
+                    if (settledBy > 0)
+                    {
+                        _logger.LogInformation(
+                            "Reusing outstanding invoice {InvoiceId} for registration {RegistrationId} instead of creating a duplicate; amount left at {Amount} kr because samlingsfaktura {ParentId} is charging for it.",
+                            existing.Id, registrationId, current, settledBy);
+                        return Task.FromResult<IContent?>(existing);
+                    }
+
+                    if (current != totalAmount)
+                    {
+                        existing.SetValue("totalAmount", totalAmount);
+                        if (_contentService.Save(existing).Success)
+                        {
+                            _contentService.Publish(existing, new[] { "*" }, -1);
+                            InvalidateInvoiceListCaches();
+                        }
+                        _logger.LogInformation(
+                            "Reusing outstanding invoice {InvoiceId} for registration {RegistrationId} instead of creating a duplicate; re-priced {Old} kr -> {New} kr.",
+                            existing.Id, registrationId, current, totalAmount);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "Reusing outstanding invoice {InvoiceId} for registration {RegistrationId} instead of creating a duplicate.",
+                            existing.Id, registrationId);
+                    }
+
+                    return Task.FromResult<IContent?>(existing);
+                }
+
+                return CreateInvoiceCoreAsync(competitionId, memberId, memberName, registrationId, totalAmount, paymentMethod);
+            }
+        }
+
+        /// <summary>
+        /// The registration's single outstanding (Pending) invoice, read from the DB rather than the
+        /// published cache — the cache lags behind an invoice a background job saved moments earlier,
+        /// which is half of how the duplicates got minted in the first place.
+        /// </summary>
+        private IContent? FindPendingInvoiceForRegistrationFromDb(int competitionId, int registrationId)
+        {
+            var hubId = FindInvoicesHubIdFromDb(competitionId);
+            if (hubId == null) return null;
+
+            return _contentService.GetPagedChildren(hubId.Value, 0, 1000, out _)
+                .Where(c => c.ContentType.Alias == "registrationInvoice")
+                .Where(c => (c.GetValue<string>("paymentStatus") ?? "Pending").Trim().Trim('[', ']').Trim('"') == "Pending")
+                .Where(c => c.GetValue<int>("registrationId") == registrationId
+                            || (c.GetValue<string>("relatedRegistrationIds") ?? "").Contains(registrationId.ToString()))
+                // Newest first, so this picks the SAME invoice the readers call "the outstanding one"
+                // (GetInvoiceTotalsForRegistration / ReconcileRegistrationInvoiceAsync both walk the
+                // list Id-descending). Legacy registrations that already carry two Pending rows would
+                // otherwise be re-priced on one invoice and read from the other.
+                .OrderByDescending(c => c.Id)
+                .FirstOrDefault();
+        }
+
+        private Task<IContent?> CreateInvoiceCoreAsync(
             int competitionId,
             string memberId,
             string memberName,
@@ -745,12 +858,7 @@ namespace HpskSite.Services
                 var existing = FindActiveInvoiceForRegistration(competition, registrationId, memberId);
                 if (existing != null)
                 {
-                    if (registration.GetValue<int>("invoiceId") != existing.Id)
-                    {
-                        registration.SetValue("invoiceId", existing.Id);
-                        if (_contentService.Save(registration).Success)
-                            _contentService.Publish(registration, new[] { "*" }, -1);
-                    }
+                    LinkInvoiceToRegistration(registrationId, existing.Id);
                     return existing;
                 }
 
@@ -769,15 +877,49 @@ namespace HpskSite.Services
                 var invoice = await CreateInvoiceAsync(competitionId, memberId.ToString(), memberName, registrationId, fee, "Swish");
                 if (invoice == null) return null;
 
-                registration.SetValue("invoiceId", invoice.Id);
-                if (_contentService.Save(registration).Success)
-                    _contentService.Publish(registration, new[] { "*" }, -1);
+                LinkInvoiceToRegistration(registrationId, invoice.Id);
                 return invoice;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "EnsureRegistrationInvoiceAsync failed for registration {RegistrationId}", registrationId);
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Point the registration at its invoice, safely under concurrency.
+        ///
+        /// The naive version — keep the IContent you fetched at the top of the method, SetValue,
+        /// Save — throws <c>InvalidOperationException: Cannot save a non-current version</c> the
+        /// moment a second thread saves the same registration first, because the copy in hand is now
+        /// stale. That exception used to surface as "Ingen anmälningsavgift är konfigurerad för denna
+        /// tävling", since the caller reads a null return as "no fee" — a wholly misleading message
+        /// for what is a write conflict. It also fired AFTER the invoice had been created, so the
+        /// registration ended up with an invoice its own pointer did not name: exactly the state the
+        /// prod duplicates were found in.
+        ///
+        /// Re-read immediately before writing, skip the write when the pointer is already right
+        /// (which is the common case, and the case every racing loser hits), and never let a failed
+        /// pointer update destroy the invoice that was successfully created.
+        /// </summary>
+        private void LinkInvoiceToRegistration(int registrationId, int invoiceId)
+        {
+            try
+            {
+                var current = _contentService.GetById(registrationId);
+                if (current == null || current.ContentType.Alias != "competitionRegistration") return;
+                if (current.GetValue<int>("invoiceId") == invoiceId) return;
+
+                current.SetValue("invoiceId", invoiceId);
+                if (_contentService.Save(current).Success)
+                    _contentService.Publish(current, new[] { "*" }, -1);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort: the invoice exists and is found by registrationId regardless of this
+                // pointer, so a lost race here must not fail the caller.
+                _logger.LogWarning(ex, "Could not point registration {RegistrationId} at invoice {InvoiceId}", registrationId, invoiceId);
             }
         }
 
@@ -854,9 +996,7 @@ namespace HpskSite.Services
                         var created = await CreateInvoiceAsync(competitionId, memberId.ToString(), memberName, registrationId, delta, "Swish");
                         if (created != null && sumPaid == 0m)
                         {
-                            registration.SetValue("invoiceId", created.Id);
-                            if (_contentService.Save(registration).Success)
-                                _contentService.Publish(registration, new[] { "*" }, -1);
+                            LinkInvoiceToRegistration(registrationId, created.Id);
                         }
                     }
                 }
@@ -920,6 +1060,78 @@ namespace HpskSite.Services
             }
 
             result.Outstanding = Math.Max(0m, result.FullFee - result.SumPaid);
+            return result;
+        }
+
+        /// <summary>
+        /// What every registration in a competition still OWES, keyed by registration id. Read-only.
+        ///
+        /// The batch twin of <see cref="GetInvoiceTotalsForRegistration"/>, which costs a hub scan
+        /// per registration and so cannot be called in a loop over a competition's invoices — the
+        /// samlingsfaktura picker needs the answer for hundreds of rows at once, on a page that took
+        /// 12 s per click until its tree scans were pruned.
+        ///
+        /// Same definition as everywhere else: fee − what has been paid against it, floored at zero.
+        /// Derived from the FEE rather than from Pending invoice rows, so a stale duplicate invoice
+        /// contributes nothing. That is what stops the picker offering a club a phantom debt: at SM
+        /// 2026 Daniel Borg's 400 kr was offered for consolidation while his registration was in
+        /// fact fully paid, because the leftover invoice still said Pending.
+        ///
+        /// A registration with NO invoice still owes its fee — the debt is real even though nothing
+        /// can be collected until the invoice exists.
+        /// </summary>
+        public Dictionary<int, decimal> GetOutstandingByRegistration(int competitionId)
+        {
+            var result = new Dictionary<int, decimal>();
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return result;
+
+            var children = _contentService.GetPagedChildren(competitionId, 0, 200, out _).ToList();
+
+            // Sum the BILLED totals of Paid invoices per registration. Not actualPaidAmount: a debt
+            // is measured against what was billed, and a cash-rounding variance is not a debt.
+            var paidBilled = new Dictionary<int, decimal>();
+            var invoicesHub = children.FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (invoicesHub != null)
+            {
+                foreach (var invoice in _contentService.GetPagedChildren(invoicesHub.Id, 0, 2000, out _))
+                {
+                    if (invoice.ContentType.Alias != "registrationInvoice") continue;
+
+                    // A samlingsfaktura carries the SAME money as the invoices it covers, and a credit
+                    // note is a deduction — counting either as a payment here would double-count.
+                    var kind = invoice.GetValue<string>("invoiceKind") ?? "";
+                    if (kind == "consolidated" || kind == "creditNote") continue;
+
+                    var status = (invoice.GetValue<string>("paymentStatus") ?? "Pending").Trim().Trim('[', ']').Trim('"');
+                    if (status != "Paid") continue;
+
+                    var regId = invoice.GetValue<int>("registrationId");
+                    if (regId <= 0) continue;
+
+                    paidBilled[regId] = paidBilled.GetValueOrDefault(regId) + invoice.GetValue<decimal>("totalAmount");
+                }
+            }
+
+            var registrationsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+            if (registrationsHub == null) return result;
+
+            foreach (var registration in _contentService.GetPagedChildren(registrationsHub.Id, 0, 2000, out _))
+            {
+                if (registration.ContentType.Alias != "competitionRegistration") continue;
+
+                var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
+                    registration.GetValue<string>("shootingClasses") ?? "");
+                var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
+                var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
+                var classesForCalc = classCodes.Count > 0
+                    ? (IReadOnlyCollection<string>)classCodes
+                    : new[] { string.Empty };
+
+                var fee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+                result[registration.Id] = Math.Max(0m, fee - paidBilled.GetValueOrDefault(registration.Id));
+            }
+
             return result;
         }
 

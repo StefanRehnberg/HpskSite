@@ -3215,11 +3215,18 @@ function updatePaymentSummary() {
         const status = r.paymentStatus || 'No Invoice';
         // Amounts come from aggregates so multi-invoice regs (paid + top-up pending) sum correctly.
         paidAmount += Number(r.paidAmount) || 0;
-        pendingAmount += Number(r.pendingAmount) || 0;
-        // Counts still bucket by the actionable status so buckets sum to total registrations.
+        // "Väntande" = what the ANMÄLAN still owes (fee − paid), not the sum of its Pending
+        // invoice rows. The two disagree whenever a stale invoice lingers, and the row status
+        // follows the debt — so counting rows here is what made the heading contradict the list
+        // right underneath it. See outstandingAmount in CompetitionController.
+        const owed = Number(r.outstandingAmount) || 0;
+        pendingAmount += owed;
+        // The count follows the same definition as the amount: anyone who still owes something.
+        // Bucketing by invoice status instead let a row read "Betald" while its money sat in the
+        // Väntande total — one registration counted in one card and paid for in the other.
+        if (owed > 0) pendingCount++;
         if (status === 'Paid') paidCount++;
-        else if (status === 'Pending') pendingCount++;
-        else if (status === 'No Invoice') noInvoiceCount++;
+        if (status === 'No Invoice') noInvoiceCount++;
         totalStarts += Array.isArray(r.shootingClasses) ? r.shootingClasses.length : 0;
     });
 
