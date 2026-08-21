@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using HpskSite.Models.ViewModels.Training;
 using NPoco;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -43,6 +43,40 @@ namespace HpskSite.Services
                 sql.Append("AND Status <> @0", Marken.StatusRejected);
             sql.Append("ORDER BY BadgeFamily, LevelOrdinal DESC, AchievedYear DESC, Id DESC");
             return await db.FetchAsync<MemberBadge>(sql);
+        }
+
+        /// <summary>
+        /// The highest VERIFIED Pistolskyttemärket base valör (Brons/Silver/Guld) held by each of the
+        /// given members, in ONE query per chunk. Members holding none are absent from the result.
+        /// Exists so the Skyttetrappan roster can credit hundreds of members without a query each.
+        /// ⚠️ Chunked at 1000 — `IN (@0)` caps out around 2100 parameters and fails silently past it.
+        /// </summary>
+        public async Task<Dictionary<int, MemberBadge>> GetHighestBaseValorForMembersAsync(IEnumerable<int> memberIds)
+        {
+            var result = new Dictionary<int, MemberBadge>();
+            var ids = memberIds.Distinct().ToList();
+            if (ids.Count == 0) return result;
+
+            using var db = _databaseFactory.CreateDatabase();
+            foreach (var chunk in ids.Chunk(1000))
+            {
+                var sql = new Sql(
+                    "WHERE BadgeFamily = @0 AND Status = @1 AND Level IN (@2, @3, @4) AND MemberId IN (@5)",
+                    Marken.FamilyPistolskytte, Marken.StatusVerified,
+                    Marken.LevelBrons, Marken.LevelSilver, Marken.LevelGuld,
+                    chunk.ToArray());
+
+                foreach (var badge in await db.FetchAsync<MemberBadge>(sql))
+                {
+                    if (result.TryGetValue(badge.MemberId, out var held)
+                        && Marken.LevelOrdinal(held.Level) >= Marken.LevelOrdinal(badge.Level))
+                        continue;
+
+                    result[badge.MemberId] = badge;
+                }
+            }
+
+            return result;
         }
 
         public async Task<int> InsertBadgeAsync(MemberBadge badge)
@@ -327,6 +361,12 @@ namespace HpskSite.Services
                 var stepsInLevel = completedSteps.Where(c => c.LevelId == levelId).ToList();
                 bool allDone = def.Steps.All(s => stepsInLevel.Any(c => c.StepNumber == s.StepNumber));
                 if (!allDone) continue;
+
+                // A marke must NEVER be derived from steps that were themselves credited from a marke
+                // (TrainingBadgeCreditService, for veterans joining with an old guldmarke). Otherwise a
+                // member holding only Guld would have Brons and Silver manufactured for them, stamped
+                // "Automatiskt fran Skyttetrappan", with no functionary and nothing actually shot here.
+                if (stepsInLevel.Any(c => c.FromBadge)) continue;
 
                 var last = stepsInLevel.OrderByDescending(c => c.CompletedDate).First();
                 var badge = new MemberBadge

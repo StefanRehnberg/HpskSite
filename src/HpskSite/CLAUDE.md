@@ -378,6 +378,57 @@ client-side must go through those.
 
 Adds C# → full rebuild. No migration, no doctype property, no Umbraco node.
 
+### Veteranen som redan har märket börjar på nivå 4 (2026-08-21)
+
+Självservice från nivå 4 löser ingenting för den som **redan** haft guldmärket i tjugo år: positionen
+härleds ur avklarade steg, så en nyregistrerad veteran satt fast på Nybörjartrappa Brons steg 1 och
+skulle behöva skjuta om hela nybörjartrappan för att komma åt sin egen nivå.
+**`TrainingBadgeCreditService` räknar nybörjartrappan som avklarad utifrån en hållen
+Pistolskyttemärkes-valör** — märket ÄR beviset. Registreras av klubben som förut under
+**Klubbadministration → Märken** (`Marken/AwardBadge`), så ingen ny adminyta behövdes.
+
+**Krediten är HÄRLEDD, aldrig lagrad.** `MemberProgress.SaveToMember` **strippar** varje
+`FromBadge`-steg och tjänsten återskapar dem vid läsning. Följderna är hela poängen:
+- Ett märke som makuleras, avvisas eller rättas tar sin kredit med sig. Lagrade steg hade lämnat en
+  nybörjartrappa stående på ingenting, och nivå 1-3 kan inte ångras (se ovan) — alltså ett läge bara
+  en sajtadmin kunde reda ut.
+- **Ingen läsning skriver.** Första utsågan sparade medlemmen vid varje sidladdning.
+- Valören avgör hur långt: silver krediterar nivå 1-2 (nivå 3 är fortfarande funktionärens), guld
+  krediterar 1-3 → position 4/1. **Alla** nivåer upp till valören, inte bara den den mappar mot — den
+  som håller guld har passerat brons och silver.
+
+**⚠️ Krediten måste appliceras överallt där en trappa materialiseras**, annars säger sidorna emot
+varandra: `GetTrainingOverview` (både rostern och den inloggade), `GetMemberProgress`, `GetLeaderboard`,
+och **`CompleteStep`/`UncompleteStep` — positionsgrinden läser `CurrentLevel`/`CurrentStep`**, så utan
+krediten står veteranen på 1/1 och kan aldrig markera sitt riktiga steg. Roster och topplista går via
+`ApplyManyAsync` + `MarkenLedgerService.GetHighestBaseValorForMembersAsync` — **EN** fråga för hela
+listan, chunkad på 1000 (`IN (@0)` tar slut kring 2100 parametrar och gör det tyst).
+
+**⚠️ Ping-pong-skyddet i `SyncTrappaBadgesAsync` är inte teoretiskt — det är bärande på en väg.**
+Den hoppar över en nivå vars steg är `FromBadge`. `MarkenController.SyncTrappaForMemberAsync` läser
+den LAGRADE JSON:en och kan aldrig se en kredit, men **`TrainingController.CompleteStep` skickar in
+den krediterade in-memory-progressen**. Utan guarden: en funktionär godkänner ett nivå-1-steg för en
+veteran som håller guld → hela nivån ser klar ut → **brons och silver myntas som officiella märken**,
+stämplade "Automatiskt från Skyttetrappan", utan funktionär och utan att något skjutits här.
+
+**`StepCompletion.Source`** ersätter den tidigare `SelfReported`-boolen: tre äkta olika provänser
+(`Functionary` / `SelfReported` / `Badge`) hålls inte isär av två bool-flaggor. `SelfReported` och
+`FromBadge` finns kvar som härledda properties, så klienten läser dem oförändrat ur payloaden.
+**Null Source i äldre lagrad JSON = Functionary**, vilket är rätt.
+
+**⚠️ `AchievedYear` slår `AchievedDate` när de säger emot varandra.** `AwardBadge` stämplar
+`AchievedDate = DateTime.Now` även för ett märke från 1998, så datumet är en bokföringsstämpel och
+ÅRET är fakta. Att lita på datumet daterade veteranens hela nybörjartrappa till idag.
+
+Verifierat 31/31 `hpsk-verify/trappa-veteran-verify.mjs` (silver → nivå 1-2, guld → 4/1, att inga
+märken tillverkas av krediten, och att märket bort tar krediten med sig men lämnar skyttens egna steg).
+Hela fixturen är reversibel just därför att krediten är härledd. Regression: 40/40 self-service.
+**Ej täckt:** att ett *overifierat* märke inte krediterar — regeln finns (`Status = Verified`), men
+`AwardBadge` skapar alltid Verified och ingen endpoint sätter annan status på en valör, så tillståndet
+går inte att framkalla via API:et.
+
+Adds C# → full rebuild. No migration, no doctype property, no Umbraco node.
+
 ### Training Groups System
 
 **Database Tables:** `TrainingGroups`, `TrainingGroupMembers` (see `Scripts/CreateTrainingGroupTables.sql`)

@@ -148,15 +148,20 @@ namespace HpskSite.Models.ViewModels.Training
                 member.SetValue("trainingNotes", Notes);
             }
 
-            // Serialize completed steps to JSON
-            var completedStepsJson = System.Text.Json.JsonSerializer.Serialize(CompletedSteps);
+            // Serialize completed steps to JSON.
+            // ⚠️ Badge-credited steps are DERIVED (TrainingBadgeCreditService re-applies them on every
+            // read) and are deliberately NOT stored. Storing them would make the credit permanent, so
+            // a märke that is later makulerad or rejected would leave the beginner ladder standing
+            // with nothing behind it. Storage holds only what was actually done on this site.
+            var stepsToStore = CompletedSteps.Where(c => !c.FromBadge).ToList();
+            var completedStepsJson = System.Text.Json.JsonSerializer.Serialize(stepsToStore);
             member.SetValue("completedTrainingSteps", completedStepsJson);
         }
 
         /// <summary>
         /// Mark a step as completed and advance progress
         /// </summary>
-        public void CompleteStep(int levelId, int stepNumber, string? instructorName = null, string? notes = null, bool selfReported = false)
+        public void CompleteStep(int levelId, int stepNumber, string? instructorName = null, string? notes = null, string? source = null)
         {
             // Add completion record
             var completion = new StepCompletion
@@ -166,7 +171,7 @@ namespace HpskSite.Models.ViewModels.Training
                 CompletedDate = DateTime.Now,
                 InstructorName = instructorName,
                 Notes = notes,
-                SelfReported = selfReported
+                Source = source ?? StepCompletionSources.Functionary
             };
 
             CompletedSteps.Add(completion);
@@ -198,6 +203,30 @@ namespace HpskSite.Models.ViewModels.Training
             {
                 TrainingStartDate = DateTime.Now;
             }
+        }
+
+        /// <summary>
+        /// Credit a step the member never shot here, because they already hold the marke that step
+        /// leads up to. Dated from the marke, not today, so the history reads honestly.
+        /// Does NOT recalculate the position - the caller credits a whole batch and then calls
+        /// <see cref="CalculateCurrentPosition"/> once.
+        /// </summary>
+        public void CreditStepFromBadge(int levelId, int stepNumber, DateTime achievedAt, string? notes = null)
+        {
+            if (IsStepCompleted(levelId, stepNumber)) return;
+
+            CompletedSteps.Add(new StepCompletion
+            {
+                LevelId = levelId,
+                StepNumber = stepNumber,
+                CompletedDate = achievedAt,
+                InstructorName = null,
+                Notes = notes,
+                Source = StepCompletionSources.Badge
+            });
+
+            LastActivityDate = DateTime.Now;
+            TrainingStartDate ??= achievedAt;
         }
 
         /// <summary>

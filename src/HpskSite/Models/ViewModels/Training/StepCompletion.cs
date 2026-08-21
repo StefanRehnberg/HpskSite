@@ -1,5 +1,22 @@
-namespace HpskSite.Models.ViewModels.Training
+﻿namespace HpskSite.Models.ViewModels.Training
 {
+    /// <summary>
+    /// Where a <see cref="StepCompletion"/> came from. Three genuinely different things - a
+    /// functionary's sign-off, the shooter's own note, and a credit for a marke earned before
+    /// pistol.nu existed - so they get one field rather than a pile of booleans.
+    /// </summary>
+    public static class StepCompletionSources
+    {
+        /// <summary>Approved by a trainer / skjutledare / club admin / site admin.</summary>
+        public const string Functionary = "Functionary";
+
+        /// <summary>Ticked by the shooter (levels 4+ only).</summary>
+        public const string SelfReported = "SelfReported";
+
+        /// <summary>Credited from a held Pistolskyttemarke valor, not shot here.</summary>
+        public const string Badge = "Badge";
+    }
+
     /// <summary>
     /// Represents a completed training step with metadata
     /// </summary>
@@ -12,12 +29,24 @@ namespace HpskSite.Models.ViewModels.Training
         public string? Notes { get; set; }
 
         /// <summary>
-        /// True when the shooter ticked this step themselves instead of having it approved by a
-        /// functionary. Only possible from <see cref="TrainingDefinitions.SelfServiceMinLevel"/> and up.
-        /// Absent in older stored JSON, which deserialises to false - correct, since everything
-        /// recorded before self-service existed was functionary-approved.
+        /// Where this completion came from - see <see cref="StepCompletionSources"/>.
+        /// Null in older stored JSON, which reads as Functionary: correct, since everything recorded
+        /// before self-service existed was functionary-approved.
         /// </summary>
-        public bool SelfReported { get; set; }
+        public string? Source { get; set; }
+
+        /// <summary>
+        /// The shooter ticked this step themselves. Only possible from
+        /// <see cref="TrainingDefinitions.SelfServiceMinLevel"/> and up.
+        /// Derived - the client reads this off the JSON payload.
+        /// </summary>
+        public bool SelfReported => Source == StepCompletionSources.SelfReported;
+
+        /// <summary>
+        /// Credited from a Pistolskyttemarke the member already held (a veteran joining pistol.nu with
+        /// a decades-old guldmarke). Never shot on this site, so it must never mint a marke back.
+        /// </summary>
+        public bool FromBadge => Source == StepCompletionSources.Badge;
 
         /// <summary>
         /// Get unique identifier for this step

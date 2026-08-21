@@ -1,4 +1,4 @@
-using Umbraco.Cms.Core.Composing;
+﻿using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using HpskSite.Services;
 using HpskSite.Models.Configuration;
@@ -30,6 +30,9 @@ namespace HpskSite.Composers
 
             // Register TrainingGroupService as scoped
             builder.Services.AddScoped<TrainingGroupService>();
+
+            // Credits Skyttetrappan levels 1-3 from a Pistolskyttemarke the member already holds
+            builder.Services.AddScoped<TrainingBadgeCreditService>();
 
             // Register DocumentService as scoped (uses IScopeProvider)
             builder.Services.AddScoped<DocumentService>();

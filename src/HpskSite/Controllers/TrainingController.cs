@@ -23,6 +23,7 @@ namespace HpskSite.Controllers
         private readonly TrainingGroupService _trainingGroupService;
         private readonly EmailService _emailService;
         private readonly MarkenLedgerService _markenLedger;
+        private readonly TrainingBadgeCreditService _badgeCredit;
         private readonly ILogger<TrainingController> _logger;
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -40,6 +41,7 @@ namespace HpskSite.Controllers
             TrainingGroupService trainingGroupService,
             EmailService emailService,
             MarkenLedgerService markenLedger,
+            TrainingBadgeCreditService badgeCredit,
             ILogger<TrainingController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -50,6 +52,7 @@ namespace HpskSite.Controllers
             _trainingGroupService = trainingGroupService;
             _emailService = emailService;
             _markenLedger = markenLedger;
+            _badgeCredit = badgeCredit;
             _logger = logger;
         }
 
@@ -84,6 +87,10 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Held-märke credit for the whole roster in ONE query, so a veteran shows the same
+                // level here as on their own page. Must run before Statistics are calculated.
+                await _badgeCredit.ApplyManyAsync(overview.MemberProgress);
+
                 // Get current member's progress if logged in
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
                 MemberProgress? currentMemberProgress = null;
@@ -94,6 +101,11 @@ namespace HpskSite.Controllers
                     {
                         var clubName = GetMemberPrimaryClubName(currentMemberData);
                         currentMemberProgress = MemberProgress.FromMember(currentMemberData, clubName);
+
+                        // The current member is returned as a separate object, so they need the credit
+                        // applied here too - the roster pass above operates on different instances.
+                        await _badgeCredit.ApplyAsync(currentMemberData.Id, currentMemberProgress);
+
                         overview.CurrentMemberProgress = currentMemberProgress;
                     }
                 }
@@ -192,6 +204,7 @@ namespace HpskSite.Controllers
 
                 var clubName = GetMemberPrimaryClubName(member);
                 var progress = MemberProgress.FromMember(member, clubName);
+                await _badgeCredit.ApplyAsync(member.Id, progress);
 
                 // Get current level and step details
                 var currentLevel = TrainingDefinitions.GetLevel(progress.CurrentLevel);
@@ -261,11 +274,20 @@ namespace HpskSite.Controllers
                 progress.CurrentStep = 1;
                 progress.LastActivityDate = DateTime.Now;
 
-                // Save to member
+                // Save to member (the credit below is derived and deliberately not stored)
                 progress.SaveToMember(member);
                 _memberService.Save(member);
 
-                return Json(new { success = true, message = "Training started successfully!" });
+                // A member who already holds a Pistolskyttemärke does not start at Nybörjartrappa
+                // Brons - the märke IS the proof those levels are behind them. Applied after the save
+                // purely so the response can report where they actually land.
+                await _badgeCredit.ApplyAsync(member.Id, progress);
+
+                return Json(new {
+                    success = true,
+                    message = "Training started successfully!",
+                    data = new { progress.CurrentLevel, progress.CurrentStep }
+                });
             }
             catch (Exception ex)
             {
@@ -309,6 +331,11 @@ namespace HpskSite.Controllers
 
                 var progress = MemberProgress.FromMember(member);
 
+                // The self-service position gate below reads CurrentLevel/CurrentStep, so a veteran's
+                // held-märke credit has to be applied before it - otherwise they are stuck on
+                // Nybörjartrappa Brons steg 1 and can never reach their real position.
+                await _badgeCredit.ApplyAsync(memberId, progress);
+
                 // Check if step is already completed
                 if (progress.IsStepCompleted(levelId, stepNumber))
                 {
@@ -332,7 +359,8 @@ namespace HpskSite.Controllers
                 var instructorName = isSelfService ? null : (instructor?.Name ?? "Admin");
 
                 // Complete the step
-                progress.CompleteStep(levelId, stepNumber, instructorName, notes, isSelfService);
+                progress.CompleteStep(levelId, stepNumber, instructorName, notes,
+                    isSelfService ? StepCompletionSources.SelfReported : StepCompletionSources.Functionary);
 
                 // Save progress
                 progress.SaveToMember(member);
@@ -492,6 +520,8 @@ namespace HpskSite.Controllers
                 }
 
                 var progress = MemberProgress.FromMember(member);
+                await _badgeCredit.ApplyAsync(memberId, progress);
+
                 var completion = progress.GetCompletion(levelId, stepNumber);
                 if (completion == null)
                 {
@@ -543,10 +573,20 @@ namespace HpskSite.Controllers
 
                 var leaderboard = new List<object>();
 
+                // Materialize first, credit held märken in ONE query, then render - otherwise a
+                // veteran sits at Nybörjartrappa Brons on the leaderboard while their own page shows
+                // Guldmärkesskytt 1, and the sort below puts them in the wrong place.
+                var entries = new List<(IMember Member, MemberProgress Progress)>();
                 foreach (var member in allMembers)
                 {
                     if (scope != null && !scope.Contains(member.Id)) continue;
-                    var progress = MemberProgress.FromMember(member);
+                    var memberProgress = MemberProgress.FromMember(member);
+                    if (memberProgress.IsActive) entries.Add((member, memberProgress));
+                }
+                await _badgeCredit.ApplyManyAsync(entries.Select(e => e.Progress));
+
+                foreach (var (member, progress) in entries)
+                {
                     if (progress.IsActive)
                     {
                         var clubName = GetMemberPrimaryClubName(member);

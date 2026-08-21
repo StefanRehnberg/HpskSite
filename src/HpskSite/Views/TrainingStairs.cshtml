@@ -882,6 +882,7 @@ function displayTrainingLevels(levels) {
                                                 <strong>Steg ${step.stepNumber}:</strong> ${step.description}
                                                 ${step.isCompetitionRequired ? '<span class="competition-required ms-2">(Tävling krävs)</span>' : ''}
                                                 ${completion?.selfReported ? '<span class="badge bg-light text-muted border ms-2" title="Du har markerat det här steget själv">Egen notering</span>' : ''}
+                                                ${completion?.fromBadge ? '<span class="badge bg-light text-muted border ms-2" title="Tillgodoräknat från ett Pistolskyttemärke du redan hade">Från märket</span>' : ''}
                                                 ${canSelfReport(level.levelId, step.stepNumber) ? '<span class="badge bg-warning-subtle text-dark border ms-2">Klicka för att markera klart</span>' : ''}
                                             </div>
                                         </div>
@@ -1292,7 +1293,8 @@ function showStepDetails(levelId, stepNumber) {
             ${isCurrentStep && !isCompleted ? '<span class="badge bg-warning"><i class="bi bi-arrow-right-circle"></i> Pågående</span>' : ''}
             ${!isCompleted && !isCurrentStep ? '<span class="badge bg-secondary">Inte påbörjat</span>' : ''}
             ${completion?.selfReported ? '<div class="small text-muted mt-1">Markerat av dig själv.</div>' : ''}
-            ${completion && !completion.selfReported && completion.instructorName ? `<div class="small text-muted mt-1">Godkänt av ${escapeHtml(completion.instructorName)}.</div>` : ''}
+            ${completion?.fromBadge ? `<div class="small text-muted mt-1">${escapeHtml(completion.notes || 'Tillgodoräknat från ett märke du redan hade')}.</div>` : ''}
+            ${completion && !completion.selfReported && !completion.fromBadge && completion.instructorName ? `<div class="small text-muted mt-1">Godkänt av ${escapeHtml(completion.instructorName)}.</div>` : ''}
         </div>
 
         ${!isCompleted && currentMemberProgress && !selfServiceLevel && !isAdmin ? `
@@ -1302,6 +1304,10 @@ function showStepDetails(levelId, stepNumber) {
                 eller klubbadmin. Det är för att de sista stegen ger dig ett officiellt märke, och
                 märket måste signeras av en funktionär. Från <strong>Guldmärkesskytt 1</strong> och
                 uppåt sköter du trappan själv.
+                <hr class="my-2">
+                <strong>Har du redan Pistolskyttemärket?</strong> Be din klubb registrera det under
+                <em>Klubbadministration → Märken</em>. Då räknas nybörjartrappan som avklarad – du behöver
+                inte skjuta om den – och du börjar direkt på den valör du har nått.
             </div>
         ` : ''}
 
