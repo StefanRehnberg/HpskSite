@@ -149,6 +149,97 @@ namespace HpskSite.Controllers
         }
 
         // ---------------------------------------------------------------
+        // DryRun — what WOULD happen, written nowhere
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// Reports what <see cref="Commit"/> would do with the same mapping and rows: how many
+        /// members get updated, how many get created, what gets skipped and why — plus which key
+        /// resolved each row. Writes nothing.
+        ///
+        /// Exists because the club admin had no way to see the one number that mattered. On
+        /// 2026-08-21 an export quirk turned 142 updates into 142 creates and 141 duplicate
+        /// accounts; the tell was there before the first write, invisible to the only person in a
+        /// position to recognise it. Commit's own stop calls the SAME BuildPlan, so the numbers
+        /// shown here are the numbers the import acts on.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DryRun(int clubId, string mappingJson, string rowsJson)
+        {
+            if (!await IsAuthorizedAsync(clubId))
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            Dictionary<string, string> mapping;
+            List<Dictionary<string, string>> rows;
+            try
+            {
+                mapping = JsonSerializer.Deserialize<Dictionary<string, string>>(mappingJson ?? "{}")
+                          ?? new Dictionary<string, string>();
+                rows = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(rowsJson ?? "[]")
+                       ?? new List<Dictionary<string, string>>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[MemberImport.DryRun] Bad payload for club {ClubId}", clubId);
+                return Json(new { success = false, message = "Ogiltigt dataformat: " + ex.Message });
+            }
+
+            var (allMembers, byPnr, byEmail) = LoadMemberIndexes();
+            var plan = BuildPlan(rows, mapping, byPnr, byEmail, BuildNameIndex(allMembers));
+            int clubMemberCount = CountClubMembers(allMembers, clubId);
+
+            bool pnrMapped = mapping.Values.Any(a =>
+                string.Equals((a ?? "").Trim(), "personNumber", StringComparison.OrdinalIgnoreCase));
+
+            // The shape that caused the incident: a roster that exists, and a file matching none of
+            // it. Called out here as well as in Commit so the admin meets it while still deciding.
+            bool suspicious = plan.WouldUpdate == 0 && plan.WouldCreate >= 10 && clubMemberCount >= 10;
+
+            _logger.LogInformation(
+                "[MemberImport.DryRun] Club {ClubId}: {Update} update, {Create} create, {Skip} skip " +
+                "(pnr {Pnr}, email {Email}, in-file {InFile}), {Clash} name clashes, suspicious={Suspicious}",
+                clubId, plan.WouldUpdate, plan.WouldCreate, plan.WouldSkip,
+                plan.MatchedByPnr, plan.MatchedByEmail, plan.MatchedInFile, plan.NameClashes, suspicious);
+
+            // Cap the per-row detail — the counts above are always complete.
+            const int detailCap = 500;
+
+            return Json(new
+            {
+                success = true,
+                totalRows = plan.TotalRows,
+                wouldUpdate = plan.WouldUpdate,
+                wouldCreate = plan.WouldCreate,
+                wouldSkip = plan.WouldSkip,
+                matchedByPnr = plan.MatchedByPnr,
+                matchedByEmail = plan.MatchedByEmail,
+                matchedInFile = plan.MatchedInFile,
+                cleanedEmails = plan.CleanedEmails,
+                nameClashes = plan.NameClashes,
+                clubMemberCount,
+                pnrMapped,
+                suspicious,
+                truncated = plan.Rows.Count > detailCap,
+                rows = plan.Rows.Take(detailCap).Select(r => new
+                {
+                    rowNumber = r.RowNumber,
+                    action = r.Action,
+                    name = r.Name,
+                    email = r.Email,
+                    rawEmail = r.RawEmail,
+                    matchedOn = r.MatchedOn,
+                    matchedName = r.MatchedName,
+                    matchedMemberId = r.MatchedMemberId,
+                    reason = r.Reason,
+                    nameClashWith = r.NameClashWith
+                })
+            });
+        }
+
+        // ---------------------------------------------------------------
         // Commit — create/update members from the confirmed mapping
         // ---------------------------------------------------------------
         [HttpPost]
@@ -188,24 +279,7 @@ namespace HpskSite.Controllers
             }
 
             // Pre-load all members once (performance rule: no per-row lookups).
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                .ToList();
-
-            var byPnr = new Dictionary<string, IMember>();
-            var byEmail = new Dictionary<string, IMember>(StringComparer.OrdinalIgnoreCase);
-            foreach (var m in allMembers)
-            {
-                var pnrKey = NormalizePnrKey(m.GetValue("personNumber")?.ToString());
-                if (!string.IsNullOrEmpty(pnrKey) && !byPnr.ContainsKey(pnrKey))
-                {
-                    byPnr[pnrKey] = m;
-                }
-                if (!string.IsNullOrWhiteSpace(m.Email) && !byEmail.ContainsKey(m.Email))
-                {
-                    byEmail[m.Email] = m;
-                }
-            }
+            var (allMembers, byPnr, byEmail) = LoadMemberIndexes();
 
             // ---- Pre-flight: refuse a run that would duplicate the club's whole roster ----
             // WHY: on 2026-08-21 an export whose email cells carried a trailing ';' matched NONE of
@@ -216,7 +290,11 @@ namespace HpskSite.Controllers
             // the admin may legitimately be adding a wholly new group of people.
             if (!force)
             {
-                var (wouldMatch, wouldCreate) = PreflightMatchCounts(rows, mapping, byPnr, byEmail);
+                // Same calculation the "Testkör" button shows the admin — one code path, so the
+                // stop can never contradict the dry run they just looked at.
+                var plan = BuildPlan(rows, mapping, byPnr, byEmail, BuildNameIndex(allMembers));
+                int wouldMatch = plan.WouldUpdate;
+                int wouldCreate = plan.WouldCreate;
                 int clubMemberCount = CountClubMembers(allMembers, clubId);
 
                 if (wouldMatch == 0 && wouldCreate >= 10 && clubMemberCount >= 10)
@@ -529,34 +607,216 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// How many rows would MATCH an existing member, and how many would be created new.
-        /// Read-only — same keys and same order (personnummer, then email) as the write loop.
+        /// Loads every person-member once and builds the two dedup indexes. Shared by DryRun and
+        /// Commit so the two can never resolve a row differently.
+        ///
+        /// Email indexing runs in two passes on purpose: every member's address exactly as stored
+        /// first, then normalized variants only for keys still free. So an exact hit always beats a
+        /// cleaned one — which matters while accounts created by the 2026-08-21 import still carry a
+        /// trailing ';'. A clean file row then lands on the real member, not the broken twin, and a
+        /// broken twin that has no clean counterpart is still reachable instead of being duplicated
+        /// a third time.
         /// </summary>
-        private static (int WouldMatch, int WouldCreate) PreflightMatchCounts(
+        private (List<IMember> All, Dictionary<string, IMember> ByPnr, Dictionary<string, IMember> ByEmail)
+            LoadMemberIndexes()
+        {
+            var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
+                .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                .ToList();
+
+            var byPnr = new Dictionary<string, IMember>();
+            var byEmail = new Dictionary<string, IMember>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var m in allMembers)
+            {
+                var pnrKey = NormalizePnrKey(m.GetValue("personNumber")?.ToString());
+                if (!string.IsNullOrEmpty(pnrKey))
+                {
+                    byPnr.TryAdd(pnrKey, m);
+                }
+                if (!string.IsNullOrWhiteSpace(m.Email))
+                {
+                    byEmail.TryAdd(m.Email, m);
+                }
+            }
+
+            foreach (var m in allMembers)
+            {
+                var normalized = NormalizeEmail(m.Email);
+                if (normalized.Length > 0)
+                {
+                    byEmail.TryAdd(normalized, m);
+                }
+            }
+
+            return (allMembers, byPnr, byEmail);
+        }
+
+        /// <summary>What the import would do with one source row. Purely descriptive — nothing is written.</summary>
+        private sealed class PlanRow
+        {
+            public int RowNumber { get; set; }
+            /// <summary>"update", "create" or "skip" — mirrors the write loop's three outcomes.</summary>
+            public string Action { get; set; } = "";
+            public string Name { get; set; } = "";
+            public string Email { get; set; } = "";
+            /// <summary>Set only when cleaning changed the cell, so the admin can see what was in the file.</summary>
+            public string? RawEmail { get; set; }
+            /// <summary>"personnummer", "e-post", "rad N i filen" — which key resolved the row.</summary>
+            public string? MatchedOn { get; set; }
+            public string? MatchedName { get; set; }
+            public int? MatchedMemberId { get; set; }
+            /// <summary>Why a skipped row was skipped.</summary>
+            public string? Reason { get; set; }
+            /// <summary>
+            /// A row that would CREATE someone whose display name already exists. The likeliest
+            /// remaining duplicate shape: same person, different address, so no key matches.
+            /// A warning only — namesakes and genuine renames land here too.
+            /// </summary>
+            public string? NameClashWith { get; set; }
+        }
+
+        private sealed class ImportPlan
+        {
+            public int TotalRows { get; set; }
+            public int WouldUpdate { get; set; }
+            public int WouldCreate { get; set; }
+            public int WouldSkip { get; set; }
+            public int MatchedByPnr { get; set; }
+            public int MatchedByEmail { get; set; }
+            public int MatchedInFile { get; set; }
+            public int CleanedEmails { get; set; }
+            public int NameClashes { get; set; }
+            public List<PlanRow> Rows { get; } = new();
+        }
+
+        /// <summary>
+        /// Works out what the import WOULD do, without writing anything. Deliberately mirrors the
+        /// write loop step for step — same keys, same order (personnummer, then email), same
+        /// skip rules, and the same in-loop index growth so a person listed twice in one file is
+        /// reported as an update on the second row rather than a second create. If this and the
+        /// write loop ever disagree, the dry run is lying, which is worse than having none.
+        /// </summary>
+        private static ImportPlan BuildPlan(
             List<Dictionary<string, string>> rows,
             Dictionary<string, string> mapping,
             Dictionary<string, IMember> byPnr,
-            Dictionary<string, IMember> byEmail)
+            Dictionary<string, IMember> byEmail,
+            Dictionary<string, IMember> byName)
         {
-            int match = 0, create = 0;
+            var plan = new ImportPlan { TotalRows = rows.Count };
 
+            // Keys "created" earlier in this same run. Kept separate from byPnr/byEmail so the
+            // caller's real indexes are never mutated by a read-only calculation.
+            var createdPnr = new Dictionary<string, int>(StringComparer.Ordinal);
+            var createdEmail = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            int rowNumber = 0;
             foreach (var row in rows)
             {
+                rowNumber++;
                 var values = CollapseRow(row, mapping);
-                values.TryGetValue("email", out var rawEmail);
-                values.TryGetValue("personNumber", out var pnr);
 
+                values.TryGetValue("email", out var rawEmailValue);
+                values.TryGetValue("personNumber", out var pnr);
+                values.TryGetValue("firstName", out var firstName);
+                values.TryGetValue("lastName", out var lastName);
+
+                var rawEmail = (rawEmailValue ?? "").Trim();
                 var email = NormalizeEmail(rawEmail);
                 var pnrKey = NormalizePnrKey(pnr);
+                var displayName = $"{firstName} {lastName}".Trim();
 
-                bool matched = (!string.IsNullOrEmpty(pnrKey) && byPnr.ContainsKey(pnrKey))
-                               || (!string.IsNullOrEmpty(email) && byEmail.ContainsKey(email));
+                var entry = new PlanRow
+                {
+                    RowNumber = rowNumber,
+                    Name = displayName,
+                    Email = email,
+                    RawEmail = string.Equals(email, rawEmail, StringComparison.Ordinal) ? null : rawEmail
+                };
+                if (entry.RawEmail != null) plan.CleanedEmails++;
 
-                if (matched) match++;
-                else if (IsValidEmail(email)) create++;   // rows without a usable login are skipped, not created
+                // ---- Resolve exactly as the write loop does: personnummer, then email ----
+                if (!string.IsNullOrEmpty(pnrKey) && byPnr.TryGetValue(pnrKey, out var byPnrHit))
+                {
+                    entry.Action = "update";
+                    entry.MatchedOn = "personnummer";
+                    entry.MatchedName = byPnrHit.Name;
+                    entry.MatchedMemberId = byPnrHit.Id;
+                    plan.MatchedByPnr++;
+                }
+                else if (!string.IsNullOrEmpty(email) && byEmail.TryGetValue(email, out var byEmailHit))
+                {
+                    entry.Action = "update";
+                    entry.MatchedOn = "e-post";
+                    entry.MatchedName = byEmailHit.Name;
+                    entry.MatchedMemberId = byEmailHit.Id;
+                    plan.MatchedByEmail++;
+                }
+                else if (!string.IsNullOrEmpty(pnrKey) && createdPnr.TryGetValue(pnrKey, out var pnrRow))
+                {
+                    entry.Action = "update";
+                    entry.MatchedOn = $"rad {pnrRow} i filen (samma personnummer)";
+                    plan.MatchedInFile++;
+                }
+                else if (!string.IsNullOrEmpty(email) && createdEmail.TryGetValue(email, out var emailRow))
+                {
+                    entry.Action = "update";
+                    entry.MatchedOn = $"rad {emailRow} i filen (samma e-post)";
+                    plan.MatchedInFile++;
+                }
+                else if (string.IsNullOrWhiteSpace(email))
+                {
+                    entry.Action = "skip";
+                    entry.Reason = "saknar e-post och matchar ingen befintlig medlem";
+                }
+                else if (!IsValidEmail(email))
+                {
+                    entry.Action = "skip";
+                    entry.Reason = entry.RawEmail != null
+                        ? $"ogiltig e-post \"{rawEmail}\" (tolkad som \"{email}\")"
+                        : $"ogiltig e-post \"{email}\"";
+                }
+                else
+                {
+                    entry.Action = "create";
+                    if (!string.IsNullOrEmpty(pnrKey)) createdPnr.TryAdd(pnrKey, rowNumber);
+                    createdEmail.TryAdd(email, rowNumber);
+
+                    // Only meaningful for a create — an update already found its person.
+                    if (!string.IsNullOrWhiteSpace(displayName) && byName.TryGetValue(displayName, out var sameName))
+                    {
+                        entry.NameClashWith = $"{sameName.Name} ({sameName.Email})";
+                        plan.NameClashes++;
+                    }
+                }
+
+                switch (entry.Action)
+                {
+                    case "update": plan.WouldUpdate++; break;
+                    case "create": plan.WouldCreate++; break;
+                    default: plan.WouldSkip++; break;
+                }
+
+                plan.Rows.Add(entry);
             }
 
-            return (match, create);
+            return plan;
+        }
+
+        /// <summary>
+        /// Display name → member, for the name-clash warning. First wins; members whose name is
+        /// blank are skipped. Never used to match a row — only to flag one for human review.
+        /// </summary>
+        private static Dictionary<string, IMember> BuildNameIndex(List<IMember> allMembers)
+        {
+            var byName = new Dictionary<string, IMember>(StringComparer.OrdinalIgnoreCase);
+            foreach (var m in allMembers)
+            {
+                var name = (m.Name ?? "").Trim();
+                if (name.Length > 0) byName.TryAdd(name, m);
+            }
+            return byName;
         }
 
         /// <summary>

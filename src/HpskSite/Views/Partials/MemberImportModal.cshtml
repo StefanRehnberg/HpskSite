@@ -61,6 +61,7 @@
                             Avbryt
                         </button>
                     </div>
+                    <div id="mi_dryRunResult" style="display:none;"></div>
                     <div class="table-responsive">
                         <table class="table table-sm table-hover align-middle">
                             <thead>
@@ -84,6 +85,9 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                     <i class="bi bi-x-circle me-1"></i>Stäng
+                </button>
+                <button type="button" class="btn btn-outline-primary" id="mi_dryRunBtn" style="display:none;" onclick="miDryRun()">
+                    <i class="bi bi-clipboard-check me-1"></i>Testkör
                 </button>
                 <button type="button" class="btn btn-success" id="mi_importBtn" style="display:none;" onclick="miCommit()">
                     <i class="bi bi-download me-1"></i>Importera
@@ -137,6 +141,7 @@
         miEl('mi_step_mapping').style.display = 'none';
         miEl('mi_step_result').style.display = 'none';
         miEl('mi_importBtn').style.display = 'none';
+        miEl('mi_dryRunBtn').style.display = 'none';
         miEl('mi_mappingBody').innerHTML = '';
         miHideConfirm();
     };
@@ -232,11 +237,17 @@
         miEl('mi_step_mapping').style.display = '';
         miEl('mi_step_result').style.display = 'none';
         miEl('mi_importBtn').style.display = '';
+        miEl('mi_dryRunBtn').style.display = '';
         miOnMappingChange(); // reflect any auto-suggested Guldmärke mapping in the hint
     }
 
     // Contextual explanation of the two-part Guldmärke mapping (number vs award date/year).
     window.miOnMappingChange = function () {
+        // A dry run is only true for the mapping it was run with — drop it so stale
+        // counts can never be the thing the admin presses Importera on.
+        var dr = miEl('mi_dryRunResult');
+        if (dr) { dr.style.display = 'none'; dr.innerHTML = ''; }
+
         var hint = miEl('mi_targetHint');
         if (!hint) return;
         var selects = document.querySelectorAll('#mi_mappingBody .mi-map-select');
@@ -392,6 +403,158 @@
         miEl('mi_confirmProceed').style.display = 'none';
         panel.style.display = '';
         panel.scrollIntoView({ block: 'nearest' });
+    }
+
+    // ---- Testkör: what the import WOULD do. Writes nothing. ----
+    window.miDryRun = function () {
+        var btn = miEl('mi_dryRunBtn');
+        var orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Testkör...';
+        miHideConfirm();
+
+        var fd = new FormData();
+        fd.append('clubId', miEl('mi_clubId').value);
+        fd.append('mappingJson', JSON.stringify(miCollectMapping()));
+        fd.append('rowsJson', JSON.stringify(miState.rows));
+
+        fetch('/umbraco/surface/MemberImport/DryRun', {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': miToken() },
+            body: fd
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            if (!data.success) {
+                miShowConfirmError(data.message || 'Okänt fel');
+                return;
+            }
+            miRenderDryRun(data);
+        })
+        .catch(function (err) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            console.error('DryRun error:', err);
+            miShowConfirmError(err.message);
+        });
+    };
+
+    function miActionBadge(action) {
+        if (action === 'update') return '<span class="badge bg-success">Uppdateras</span>';
+        if (action === 'create') return '<span class="badge bg-primary">Skapas ny</span>';
+        return '<span class="badge bg-secondary">Hoppas över</span>';
+    }
+
+    function miRenderDryRun(d) {
+        var el = miEl('mi_dryRunResult');
+
+        // Headline counts. These are always for the WHOLE file, even when the row list is capped.
+        var head =
+            '<div class="card mb-3"><div class="card-body">' +
+            '<h6 class="card-title mb-3"><i class="bi bi-clipboard-check me-1"></i>Testkörning — ingenting har sparats</h6>' +
+            '<div class="row text-center g-2 mb-3">' +
+            '<div class="col"><div class="fs-4 fw-bold text-success">' + d.wouldUpdate + '</div>' +
+                '<div class="small text-muted">uppdateras</div></div>' +
+            '<div class="col"><div class="fs-4 fw-bold text-primary">' + d.wouldCreate + '</div>' +
+                '<div class="small text-muted">skapas som nya</div></div>' +
+            '<div class="col"><div class="fs-4 fw-bold text-secondary">' + d.wouldSkip + '</div>' +
+                '<div class="small text-muted">hoppas över</div></div>' +
+            '<div class="col"><div class="fs-4 fw-bold">' + d.totalRows + '</div>' +
+                '<div class="small text-muted">rader i filen</div></div>' +
+            '</div>';
+
+        // How each match was resolved — this is what tells you the key is working.
+        var keys = [];
+        if (d.matchedByPnr > 0) keys.push('<strong>' + d.matchedByPnr + '</strong> via personnummer');
+        if (d.matchedByEmail > 0) keys.push('<strong>' + d.matchedByEmail + '</strong> via e-post');
+        if (d.matchedInFile > 0) keys.push('<strong>' + d.matchedInFile + '</strong> mot en tidigare rad i filen');
+        head += '<div class="small text-muted">Klubben har <strong>' + d.clubMemberCount +
+            '</strong> medlemmar sedan tidigare.' +
+            (keys.length ? ' Matchat: ' + keys.join(', ') + '.' : '') +
+            (d.pnrMapped ? '' : ' Ingen personnummerkolumn är mappad, så e-post är enda nyckeln.') +
+            '</div></div></div>';
+
+        var warnings = '';
+
+        // The incident shape: a roster exists and the file matches none of it.
+        if (d.suspicious) {
+            warnings +=
+                '<div class="alert alert-danger"><i class="bi bi-exclamation-octagon me-1"></i>' +
+                '<strong>Alla ' + d.wouldCreate + ' rader skulle skapas som nya, och ingen matchar någon av ' +
+                'klubbens ' + d.clubMemberCount + ' befintliga medlemmar.</strong> Det brukar betyda att ' +
+                'matchningsnyckeln inte stämmer — inte att alla är nya. Kontrollera att kolumnen med e-post ' +
+                '(och personnummer, om det finns) är rätt mappad och skriven exakt som på pistol.nu. ' +
+                'Importen stoppas och frågar innan den kör.</div>';
+        }
+        if (d.cleanedEmails > 0) {
+            warnings +=
+                '<div class="alert alert-info small"><i class="bi bi-scissors me-1"></i><strong>' +
+                d.cleanedEmails + '</strong> e-postcell' + (d.cleanedEmails === 1 ? '' : 'er') +
+                ' hade extra tecken runt adressen och städas före matchningen. Se kolumnen "I filen" nedan.</div>';
+        }
+        if (d.nameClashes > 0) {
+            warnings +=
+                '<div class="alert alert-warning small"><i class="bi bi-people me-1"></i><strong>' +
+                d.nameClashes + '</strong> rad' + (d.nameClashes === 1 ? '' : 'er') +
+                ' skulle skapa en ny medlem med ett namn som redan finns. Det kan vara samma person med en ' +
+                'annan e-postadress — då blir den nya posten en dubblett. Kan också vara två personer med ' +
+                'samma namn. Kontrollera de markerade raderna nedan.</div>';
+        }
+
+        // Per-row detail, most actionable first: skipped, then name clashes, then the rest.
+        var rows = (d.rows || []).slice();
+        var rank = { 'skip': 0, 'create': 1, 'update': 2 };
+        rows.sort(function (a, b) {
+            var ra = a.nameClashWith ? -1 : rank[a.action];
+            var rb = b.nameClashWith ? -1 : rank[b.action];
+            if (ra !== rb) return ra - rb;
+            return a.rowNumber - b.rowNumber;
+        });
+
+        var body = '';
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            var note = '';
+            if (r.reason) {
+                note = '<span class="text-danger">' + miEscape(r.reason) + '</span>';
+            } else if (r.nameClashWith) {
+                note = '<span class="text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                    'Namnet finns redan: ' + miEscape(r.nameClashWith) + '</span>';
+            } else if (r.matchedName) {
+                note = 'Matchar <strong>' + miEscape(r.matchedName) + '</strong> (' +
+                    miEscape(r.matchedOn) + ')';
+            } else if (r.matchedOn) {
+                note = 'Matchar ' + miEscape(r.matchedOn);
+            }
+
+            body +=
+                '<tr>' +
+                '<td class="text-muted small">' + r.rowNumber + '</td>' +
+                '<td>' + miActionBadge(r.action) + '</td>' +
+                '<td>' + miEscape(r.name || '') + '</td>' +
+                '<td class="small">' + miEscape(r.email || '') + '</td>' +
+                '<td class="small text-muted">' + (r.rawEmail ? '<code>' + miEscape(r.rawEmail) + '</code>' : '') + '</td>' +
+                '<td class="small">' + note + '</td>' +
+                '</tr>';
+        }
+
+        var table =
+            '<div class="table-responsive" style="max-height:22rem;overflow-y:auto;">' +
+            '<table class="table table-sm table-hover align-middle mb-0">' +
+            '<thead class="table-light"><tr>' +
+            '<th>Rad</th><th>Vad händer</th><th>Namn</th><th>E-post</th><th>I filen</th><th>Kommentar</th>' +
+            '</tr></thead><tbody>' + body + '</tbody></table></div>';
+
+        if (d.truncated) {
+            table += '<div class="small text-muted mt-1">Listan visar de första ' + rows.length +
+                ' raderna. Siffrorna ovan gäller hela filen.</div>';
+        }
+
+        el.innerHTML = head + warnings + table;
+        el.style.display = '';
+        el.scrollIntoView({ block: 'nearest' });
     }
 
     function miCollectMapping() {
