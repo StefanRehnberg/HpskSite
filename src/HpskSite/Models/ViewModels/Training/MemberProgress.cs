@@ -1,4 +1,4 @@
-using Umbraco.Cms.Core.Models;
+﻿using Umbraco.Cms.Core.Models;
 
 namespace HpskSite.Models.ViewModels.Training
 {
@@ -156,7 +156,7 @@ namespace HpskSite.Models.ViewModels.Training
         /// <summary>
         /// Mark a step as completed and advance progress
         /// </summary>
-        public void CompleteStep(int levelId, int stepNumber, string? instructorName = null, string? notes = null)
+        public void CompleteStep(int levelId, int stepNumber, string? instructorName = null, string? notes = null, bool selfReported = false)
         {
             // Add completion record
             var completion = new StepCompletion
@@ -165,7 +165,8 @@ namespace HpskSite.Models.ViewModels.Training
                 StepNumber = stepNumber,
                 CompletedDate = DateTime.Now,
                 InstructorName = instructorName,
-                Notes = notes
+                Notes = notes,
+                SelfReported = selfReported
             };
 
             CompletedSteps.Add(completion);
@@ -197,6 +198,28 @@ namespace HpskSite.Models.ViewModels.Training
             {
                 TrainingStartDate = DateTime.Now;
             }
+        }
+
+        /// <summary>
+        /// Remove a completion (mis-click undo) and recalculate the current position.
+        /// Returns true when something was actually removed.
+        /// </summary>
+        public bool UncompleteStep(int levelId, int stepNumber)
+        {
+            var removed = CompletedSteps.RemoveAll(c => c.LevelId == levelId && c.StepNumber == stepNumber);
+            if (removed == 0) return false;
+
+            CalculateCurrentPosition();
+            LastActivityDate = DateTime.Now;
+            return true;
+        }
+
+        /// <summary>
+        /// Get a stored completion, or null if the step is not completed.
+        /// </summary>
+        public StepCompletion? GetCompletion(int levelId, int stepNumber)
+        {
+            return CompletedSteps.FirstOrDefault(c => c.LevelId == levelId && c.StepNumber == stepNumber);
         }
 
         /// <summary>

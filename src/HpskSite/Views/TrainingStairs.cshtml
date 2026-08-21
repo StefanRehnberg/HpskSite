@@ -1,4 +1,4 @@
-@using Umbraco.Cms.Core.Security
+﻿@using Umbraco.Cms.Core.Security
 @using HpskSite.Models.ViewModels.Training
 @inject IMemberManager MemberManager
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
@@ -252,7 +252,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Markera Steg som Slutfört</h5>
+                <h5 class="modal-title" id="completeStepModalTitle">Markera Steg som Slutfört</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -261,7 +261,7 @@
                     <input type="hidden" id="completeLevelId" name="levelId">
                     <input type="hidden" id="completeStepNumber" name="stepNumber">
 
-                    <div class="mb-3">
+                    <div class="mb-3" id="completeStepMemberRow">
                         <label class="form-label"><strong>Medlem:</strong></label>
                         <p id="completeMemberName" class="form-control-plaintext"></p>
                     </div>
@@ -276,12 +276,18 @@
                         <textarea class="form-control" id="completeNotes" name="notes" rows="3"
                                   placeholder="T.ex. resultat, datum, eller andra kommentarer..."></textarea>
                     </div>
+
+                    <div class="alert alert-light border small mb-0" id="completeStepSelfHint" style="display:none;">
+                        <i class="bi bi-info-circle"></i>
+                        Det här är din egen anteckning i trappan. Den ger inget märke och behöver inte
+                        godkännas av någon – du kan ändra dig efteråt om du klickat fel.
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-success" onclick="submitStepCompletion()">
-                    <i class="bi bi-check-circle"></i> Markera som Slutfört
+                    <i class="bi bi-check-circle"></i> <span id="completeStepSubmitLabel">Markera som Slutfört</span>
                 </button>
             </div>
         </div>
@@ -569,6 +575,11 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <script>
+// Fran denna niva far skytten sjalv bocka av sina steg. Niva 1-3 (Nyborjartrappan) avslutas med
+// att ett officiellt Pistolskyttemarke myntas och godkanns darfor av tranare/skjutledare/klubbadmin.
+// Maste matcha TrainingDefinitions.SelfServiceMinLevel.
+const SELF_SERVICE_MIN_LEVEL = 4;
+
 let isAdmin = false;
 let isSiteAdmin = false;
 let isSkjutledare = false;
@@ -583,6 +594,47 @@ let clubRegionMap = {};
 let myTrainingGroups = [];
 let selectedTrainingGroupId = null;
 let selectedMemberForAdd = null;
+
+// currentMemberProgress is plain JSON from the server, so it has no methods - these read the
+// completedSteps array instead. (Earlier code called currentMemberProgress.isStepCompleted(...),
+// which was always undefined and made every step look unfinished.)
+function myCompletion(levelId, stepNumber) {
+    const steps = currentMemberProgress?.completedSteps;
+    if (!Array.isArray(steps)) return null;
+    return steps.find(c => c.levelId === levelId && c.stepNumber === stepNumber) || null;
+}
+
+function hasCompletedStep(levelId, stepNumber) {
+    return myCompletion(levelId, stepNumber) !== null;
+}
+
+function isMyCurrentStep(levelId, stepNumber) {
+    return !!currentMemberProgress
+        && currentMemberProgress.currentLevel === levelId
+        && currentMemberProgress.currentStep === stepNumber;
+}
+
+// The newest completion in the ladder. Undo is only offered here, so a shooter cannot unpick a
+// step from the middle and leave the position calculation guessing.
+function isMyLatestCompletion(levelId, stepNumber) {
+    const steps = currentMemberProgress?.completedSteps;
+    if (!Array.isArray(steps) || steps.length === 0) return false;
+
+    const latest = steps.reduce((a, b) =>
+        (b.levelId > a.levelId || (b.levelId === a.levelId && b.stepNumber > a.stepNumber)) ? b : a);
+
+    return latest.levelId === levelId && latest.stepNumber === stepNumber;
+}
+
+// A shooter may tick their own next step from SELF_SERVICE_MIN_LEVEL and up. Mirrors
+// TrainingController.CanSelfReport - the server is still the authority.
+function canSelfReport(levelId, stepNumber) {
+    return !!currentMemberProgress
+        && !!currentMemberProgress.trainingStartDate
+        && levelId >= SELF_SERVICE_MIN_LEVEL
+        && isMyCurrentStep(levelId, stepNumber)
+        && !hasCompletedStep(levelId, stepNumber);
+}
 
 document.addEventListener('DOMContentLoaded', function() {
     loadTrainingData();
@@ -808,13 +860,14 @@ function displayTrainingLevels(levels) {
                                 let stepClass = 'pending';
                                 let icon = '<i class="bi bi-circle"></i>';
 
+                                let completion = null;
+
                                 if (currentMemberProgress) {
-                                    if (currentMemberProgress.isStepCompleted &&
-                                        currentMemberProgress.isStepCompleted(level.levelId, step.stepNumber)) {
+                                    completion = myCompletion(level.levelId, step.stepNumber);
+                                    if (completion) {
                                         stepClass = 'completed';
                                         icon = '<i class="bi bi-check-circle-fill text-success"></i>';
-                                    } else if (level.levelId === currentMemberProgress.currentLevel &&
-                                             step.stepNumber === currentMemberProgress.currentStep) {
+                                    } else if (isMyCurrentStep(level.levelId, step.stepNumber)) {
                                         stepClass = 'current';
                                         icon = '<i class="bi bi-arrow-right-circle-fill text-warning"></i>';
                                     }
@@ -828,6 +881,8 @@ function displayTrainingLevels(levels) {
                                             <div class="flex-grow-1">
                                                 <strong>Steg ${step.stepNumber}:</strong> ${step.description}
                                                 ${step.isCompetitionRequired ? '<span class="competition-required ms-2">(Tävling krävs)</span>' : ''}
+                                                ${completion?.selfReported ? '<span class="badge bg-light text-muted border ms-2" title="Du har markerat det här steget själv">Egen notering</span>' : ''}
+                                                ${canSelfReport(level.levelId, step.stepNumber) ? '<span class="badge bg-warning-subtle text-dark border ms-2">Klicka för att markera klart</span>' : ''}
                                             </div>
                                         </div>
                                     </div>
@@ -1219,15 +1274,10 @@ function showStepDetails(levelId, stepNumber) {
     document.getElementById('stepModalTitle').textContent =
         `${level.name} - Steg ${step.stepNumber}`;
 
-    let isCompleted = false;
-    let isCurrentStep = false;
-
-    if (currentMemberProgress) {
-        isCompleted = currentMemberProgress.isStepCompleted &&
-                     currentMemberProgress.isStepCompleted(levelId, stepNumber);
-        isCurrentStep = currentMemberProgress.currentLevel === levelId &&
-                       currentMemberProgress.currentStep === stepNumber;
-    }
+    const completion = currentMemberProgress ? myCompletion(levelId, stepNumber) : null;
+    const isCompleted = !!completion;
+    const isCurrentStep = isMyCurrentStep(levelId, stepNumber);
+    const selfServiceLevel = levelId >= SELF_SERVICE_MIN_LEVEL;
 
     document.getElementById('stepModalBody').innerHTML = `
         <div class="mb-3">
@@ -1239,9 +1289,21 @@ function showStepDetails(levelId, stepNumber) {
         <div class="mb-3">
             <h6>Status:</h6>
             ${isCompleted ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Slutfört</span>' : ''}
-            ${isCurrentStep ? '<span class="badge bg-warning"><i class="bi bi-arrow-right-circle"></i> Pågående</span>' : ''}
+            ${isCurrentStep && !isCompleted ? '<span class="badge bg-warning"><i class="bi bi-arrow-right-circle"></i> Pågående</span>' : ''}
             ${!isCompleted && !isCurrentStep ? '<span class="badge bg-secondary">Inte påbörjat</span>' : ''}
+            ${completion?.selfReported ? '<div class="small text-muted mt-1">Markerat av dig själv.</div>' : ''}
+            ${completion && !completion.selfReported && completion.instructorName ? `<div class="small text-muted mt-1">Godkänt av ${escapeHtml(completion.instructorName)}.</div>` : ''}
         </div>
+
+        ${!isCompleted && currentMemberProgress && !selfServiceLevel && !isAdmin ? `
+            <div class="alert alert-light border small mb-0">
+                <i class="bi bi-info-circle"></i>
+                Stegen i nybörjartrappan (brons, silver och guld) markeras av din tränare, skjutledare
+                eller klubbadmin. Det är för att de sista stegen ger dig ett officiellt märke, och
+                märket måste signeras av en funktionär. Från <strong>Guldmärkesskytt 1</strong> och
+                uppåt sköter du trappan själv.
+            </div>
+        ` : ''}
 
         ${step.notes ? `
             <div class="mb-3">
@@ -1258,6 +1320,22 @@ function showStepDetails(levelId, stepNumber) {
         footerHtml += `
             <button type="button" class="btn btn-success" onclick="showCompleteStepModal(${currentMemberProgress.memberId}, '${currentMemberProgress.memberName}', ${levelId}, ${stepNumber})">
                 <i class="bi bi-check-circle"></i> Markera som Slutfört
+            </button>
+        `;
+    } else if (canSelfReport(levelId, stepNumber)) {
+        footerHtml += `
+            <button type="button" class="btn btn-success" onclick="showCompleteStepModal(${currentMemberProgress.memberId}, '${escapeHtml(currentMemberProgress.memberName)}', ${levelId}, ${stepNumber}, true)">
+                <i class="bi bi-check-circle"></i> Jag har klarat det
+            </button>
+        `;
+    }
+
+    // Own mis-click undo: only self-reported steps, and only the most recent one so the ladder
+    // cannot be unpicked from the middle.
+    if (completion?.selfReported && isMyLatestCompletion(levelId, stepNumber)) {
+        footerHtml += `
+            <button type="button" class="btn btn-outline-secondary" onclick="undoSelfReportedStep(${currentMemberProgress.memberId}, ${levelId}, ${stepNumber})">
+                <i class="bi bi-arrow-counterclockwise"></i> Ångra
             </button>
         `;
     }
@@ -1955,7 +2033,7 @@ async function sendGroupMessage() {
     }
 }
 
-function showCompleteStepModal(memberId, memberName, levelId = null, stepNumber = null) {
+function showCompleteStepModal(memberId, memberName, levelId = null, stepNumber = null, selfMode = false) {
     // Validate that levelId and stepNumber are provided
     if (!levelId || !stepNumber) {
         alert('Kunde inte hitta stegets information');
@@ -1977,6 +2055,15 @@ function showCompleteStepModal(memberId, memberName, levelId = null, stepNumber 
     document.getElementById('completeStepDescription').textContent =
         `${level.name} - Steg ${stepNumber}: ${step.description}`;
     document.getElementById('completeNotes').value = '';
+
+    // Same endpoint either way, but a shooter marking their own step should not be read as
+    // approving somebody - the wording follows who is clicking.
+    document.getElementById('completeStepModalTitle').textContent =
+        selfMode ? 'Markera steget som klart' : 'Markera Steg som Slutfört';
+    document.getElementById('completeStepMemberRow').style.display = selfMode ? 'none' : '';
+    document.getElementById('completeStepSubmitLabel').textContent =
+        selfMode ? 'Jag har klarat det' : 'Markera som Slutfört';
+    document.getElementById('completeStepSelfHint').style.display = selfMode ? '' : 'none';
 
     new bootstrap.Modal(document.getElementById('completeStepModal')).show();
 }
@@ -2016,6 +2103,36 @@ async function submitStepCompletion() {
     } catch (error) {
         console.error('Error completing step:', error);
         alert('Ett fel uppstod vid slutförande av steg');
+    }
+}
+
+async function undoSelfReportedStep(memberId, levelId, stepNumber) {
+    if (!confirm('Ta bort din markering av det här steget?')) return;
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', memberId);
+        formData.append('levelId', levelId);
+        formData.append('stepNumber', stepNumber);
+
+        const response = await fetch('/umbraco/surface/Training/UncompleteStep', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('stepModal'))?.hide();
+            refreshData();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error undoing step:', error);
+        alert('Ett fel uppstod när markeringen skulle tas bort');
     }
 }
 

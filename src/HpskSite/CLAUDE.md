@@ -307,8 +307,8 @@ Add to hpskMember type in backoffice:
 
 ### API Endpoints (TrainingController.cs)
 **Public:** GetTrainingOverview, GetLeaderboard, GetMemberProgress
-**Member:** StartTraining
-**Admin/Trainer/Skjutledare:** CompleteStep, GetMemberProgress?memberId=X
+**Member:** StartTraining, CompleteStep (own next step, levels 4+ only), UncompleteStep (own self-reported step)
+**Admin/Trainer/Skjutledare:** CompleteStep (any step), GetMemberProgress?memberId=X
 **Site Admin only:** ResetProgress
 
 ### Step Approval Authorization
@@ -319,6 +319,64 @@ Training step approval (`CompleteStep`) uses a four-tier authorization check:
 4. **Club Admin** — can approve members at their club (`IsClubAdminForClub`)
 
 The same tiers apply to `GetMemberProgress` when viewing another member's progress.
+
+### Self-service from level 4 up (2026-08-21)
+
+**A shooter may tick their OWN steps from level 4 (Guldmärkesskytt 1) and up. Levels 1-3 stay
+functionary-approved.** `TrainingDefinitions.SelfServiceMinLevel` / `IsSelfServiceLevel` is the ONE
+place that boundary is expressed — don't re-test `levelId >= 4` inline.
+
+**⚠️ The reason is the märke, not the shooter's rank.** Finishing level 1, 2 or 3 calls
+`MarkenLedgerService.SyncTrappaBadgesAsync`, which mints the official Pistolskyttemärke (brons /
+silver / guld) into the märkesledger stamped with the approving functionary. Nobody signs off their
+own märke, so those steps cannot be self-reported. Levels 4-9 mint nothing and are the shooter's own
+bookkeeping. An earlier proposal gated self-service on *holding* the guldmärke — that is circular:
+the trappa is what awards it, so the gate would open exactly when the beginner ladder is already
+finished. Express the rule as "does this step have an official consequence", never as
+"what does this shooter hold".
+
+**Server rules** (`CompleteStep` → `CanSelfReport`): the caller must be the target member, the level
+must be self-service, and the step must be the member's **current** position — so the ladder cannot
+be skipped to Rekordtrappan. The refusal message explains which rule bit; a beginner is told who
+approves their step instead of getting "Access denied".
+
+**Other behaviour differences for a self-reported step:**
+- `StepCompletion.SelfReported = true` (absent in older stored JSON → false, which is correct —
+  everything recorded before this existed was functionary-approved).
+- `InstructorName` stays **null**: nobody signed it off. Don't stamp the shooter's own name there.
+- **No approval email.** Mailing the shooter about something they just ticked is noise.
+- The badge sync is additionally guarded on `!isSelfService` — belt and braces if the boundary
+  ever moves.
+
+**`UncompleteStep`** exists for the mis-click, and is deliberately restricted to levels 4+: undoing a
+level 1-3 step would leave an already-minted märke behind with nothing backing it, so correcting those
+stays a site-admin `ResetProgress` matter. **Whoever may approve a 4+ step may also undo it** — the
+same four tiers, via the shared `ResolveStepAuthorityAsync` helper, so approving and undoing cannot
+drift apart. Without that symmetry a trainer's mis-tick could only be cleared by a site admin. A
+shooter may undo only their **own self-reported** steps: a functionary's sign-off is not theirs to
+withdraw.
+
+Verified 40/40 `hpsk-verify/trappa-selfservice-verify.mjs`. **⚠️ Read its fixture note before editing
+it:** it takes the shooter to level 4 with ONE functionary-approved step (4,1), because
+`CalculateCurrentPosition` takes the highest completed step and `SyncTrappaBadgesAsync` needs ALL of a
+level's steps — so the whole run mints no märke and is fully reversible by a club admin. Going the long
+way (18 steps through the beginner ladder) would mint three märken and need a site admin to clean up.
+**There is no `admin.claude@pistol.nu` in dev** — a first version of the script "passed" its negative
+assertions while every admin call was silently anonymous. The functionary is `builder.claude`
+(ClubAdmin_2604, so authorized for Haaplinge GoAss members).
+
+**View** (`TrainingStairs.cshtml`): `SELF_SERVICE_MIN_LEVEL` must match the C# constant.
+`canSelfReport()` mirrors `CanSelfReport` — the server is still the authority. The step modal shows
+a "Jag har klarat det" button on a self-service step, an **Ångra** button on the newest self-reported
+one, and on levels 1-3 an explanation of who approves instead of a dead button.
+
+**⚠️ Fixed while here: `currentMemberProgress.isStepCompleted(...)` was always undefined.** The
+payload is plain JSON with no methods, so `isCompleted` evaluated false for **every** step — the
+ladder never showed a completed step and the modal's status badge was always wrong. Replaced by the
+`myCompletion` / `hasCompletedStep` / `isMyCurrentStep` helpers. Anything reading progress
+client-side must go through those.
+
+Adds C# → full rebuild. No migration, no doctype property, no Umbraco node.
 
 ### Training Groups System
 

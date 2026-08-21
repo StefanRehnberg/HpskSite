@@ -47,6 +47,20 @@ namespace HpskSite.Models.ViewModels.Training
         }
 
         /// <summary>
+        /// First level a shooter may tick off themselves.
+        /// Levels 1-3 (Nybörjartrappa Brons/Silver/Guld) mint the official Pistolskyttemärke via
+        /// MarkenLedgerService.SyncTrappaBadgesAsync when the level is finished, so those steps must
+        /// stay functionary-approved - nobody signs off their own märke. Levels 4 and up carry no
+        /// official consequence and are the shooter's own bookkeeping.
+        /// </summary>
+        public const int SelfServiceMinLevel = 4;
+
+        /// <summary>
+        /// True when the shooter may record this level's steps without a functionary.
+        /// </summary>
+        public static bool IsSelfServiceLevel(int levelId) => levelId >= SelfServiceMinLevel;
+
+        /// <summary>
         /// Initialize all training levels and steps
         /// </summary>
         private static void InitializeLevels()

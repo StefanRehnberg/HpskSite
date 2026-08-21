@@ -12,6 +12,14 @@ namespace HpskSite.Models.ViewModels.Training
         public string? Notes { get; set; }
 
         /// <summary>
+        /// True when the shooter ticked this step themselves instead of having it approved by a
+        /// functionary. Only possible from <see cref="TrainingDefinitions.SelfServiceMinLevel"/> and up.
+        /// Absent in older stored JSON, which deserialises to false - correct, since everything
+        /// recorded before self-service existed was functionary-approved.
+        /// </summary>
+        public bool SelfReported { get; set; }
+
+        /// <summary>
         /// Get unique identifier for this step
         /// </summary>
         public string StepId => $"{LevelId}-{StepNumber}";

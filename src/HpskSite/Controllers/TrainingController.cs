@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -274,7 +274,10 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Complete a training step (admin only)
+        /// Complete a training step.
+        /// Functionaries (site admin, trainer, skjutledare, club admin) may approve any step.
+        /// From <see cref="TrainingDefinitions.SelfServiceMinLevel"/> and up a shooter may also tick
+        /// their own next step - see <see cref="CanSelfReport"/> for why the beginner levels cannot.
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -282,33 +285,11 @@ namespace HpskSite.Controllers
         {
             try
             {
-                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                bool isTrainer = false;
-                bool isSkjutledare = false;
-                bool isClubAdmin = false;
+                var (isFunctionary, _, currentMemberData) = await ResolveStepAuthorityAsync(memberId);
+                var currentUser = await _memberManager.GetCurrentMemberAsync();
+                bool isSelf = currentMemberData != null && currentMemberData.Id == memberId;
 
-                if (!isSiteAdmin)
-                {
-                    var currentUser = await _memberManager.GetCurrentMemberAsync();
-                    var currentMemberData = currentUser != null ? _memberService.GetByEmail(currentUser.Email ?? "") : null;
-                    if (currentMemberData != null)
-                    {
-                        isTrainer = await _trainingGroupService.IsTrainerForMember(currentMemberData.Id, memberId);
-                    }
-
-                    if (!isTrainer)
-                        isSkjutledare = await _authorizationService.IsSkjutledareForMember(memberId);
-
-                    if (!isTrainer && !isSkjutledare)
-                    {
-                        var targetMember = _memberService.GetById(memberId);
-                        var targetClubId = int.TryParse(targetMember?.GetValue("primaryClubId")?.ToString(), out int cid) ? cid : 0;
-                        if (targetClubId > 0)
-                            isClubAdmin = await _authorizationService.IsClubAdminForClub(targetClubId);
-                    }
-                }
-
-                if (!isSiteAdmin && !isTrainer && !isSkjutledare && !isClubAdmin)
+                if (!isFunctionary && !isSelf)
                 {
                     return Json(new { success = false, message = "Access denied" });
                 }
@@ -334,12 +315,24 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Step already completed" });
                 }
 
-                // Get instructor name
-                var instructor = await _memberManager.GetCurrentMemberAsync();
-                var instructorName = instructor?.Name ?? "Admin";
+                // No functionary role: this is a shooter reporting their own progress. Allowed only on
+                // the self-service levels, and only for the step they are actually standing on.
+                bool isSelfService = false;
+                if (!isFunctionary)
+                {
+                    if (!CanSelfReport(progress, levelId, stepNumber, out var refusal))
+                    {
+                        return Json(new { success = false, message = refusal });
+                    }
+                    isSelfService = true;
+                }
+
+                // Get instructor name (null for self-reported steps - nobody signed them off)
+                var instructor = currentUser;
+                var instructorName = isSelfService ? null : (instructor?.Name ?? "Admin");
 
                 // Complete the step
-                progress.CompleteStep(levelId, stepNumber, instructorName, notes);
+                progress.CompleteStep(levelId, stepNumber, instructorName, notes, isSelfService);
 
                 // Save progress
                 progress.SaveToMember(member);
@@ -348,7 +341,9 @@ namespace HpskSite.Controllers
                 // Skyttetrappan → Pistolskyttemärket link: completing all steps of levels 1/2/3
                 // (Nybörjartrappa Brons/Silver/Guld) awards the matching base valör, stamped with
                 // the approving functionary. Idempotent; best-effort so it never breaks step approval.
-                if (levelId is 1 or 2 or 3)
+                // Belt and braces: self-service can never reach levels 1-3, but if that ever changes
+                // the badge must NOT be minted from a self-reported step.
+                if (!isSelfService && levelId is 1 or 2 or 3)
                 {
                     try
                     {
@@ -361,11 +356,12 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Send notification email (non-blocking)
+                // Send notification email (non-blocking). Skipped for self-reported steps - there is
+                // no point mailing the shooter about something they just ticked themselves.
                 try
                 {
                     var memberEmail = member.Email;
-                    if (!string.IsNullOrEmpty(memberEmail))
+                    if (!isSelfService && !string.IsNullOrEmpty(memberEmail))
                     {
                         var level = TrainingDefinitions.GetLevel(levelId);
                         _ = _emailService.SendTrainingStepApprovedAsync(
@@ -389,8 +385,132 @@ namespace HpskSite.Controllers
                     data = new {
                         newLevel = progress.CurrentLevel,
                         newStep = progress.CurrentStep,
-                        levelCompleted = progress.CurrentStep == 1 && progress.CurrentLevel > levelId
+                        levelCompleted = progress.CurrentStep == 1 && progress.CurrentLevel > levelId,
+                        selfReported = isSelfService
                     }
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// The four-tier "may act on this member's trappa" check, shared by CompleteStep and
+        /// UncompleteStep so approving and undoing cannot drift apart:
+        /// site admin, trainer of the member's active training group, skjutledare at their club,
+        /// club admin of their club.
+        /// </summary>
+        private async Task<(bool IsFunctionary, bool IsSiteAdmin, IMember? CurrentMember)> ResolveStepAuthorityAsync(int memberId)
+        {
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+
+            var currentUser = await _memberManager.GetCurrentMemberAsync();
+            var currentMemberData = currentUser != null ? _memberService.GetByEmail(currentUser.Email ?? "") : null;
+
+            if (isSiteAdmin) return (true, true, currentMemberData);
+
+            bool isTrainer = false;
+            if (currentMemberData != null)
+                isTrainer = await _trainingGroupService.IsTrainerForMember(currentMemberData.Id, memberId);
+
+            bool isSkjutledare = false;
+            if (!isTrainer)
+                isSkjutledare = await _authorizationService.IsSkjutledareForMember(memberId);
+
+            bool isClubAdmin = false;
+            if (!isTrainer && !isSkjutledare)
+            {
+                var targetMember = _memberService.GetById(memberId);
+                var targetClubId = int.TryParse(targetMember?.GetValue("primaryClubId")?.ToString(), out int cid) ? cid : 0;
+                if (targetClubId > 0)
+                    isClubAdmin = await _authorizationService.IsClubAdminForClub(targetClubId);
+            }
+
+            return (isTrainer || isSkjutledare || isClubAdmin, false, currentMemberData);
+        }
+
+        /// <summary>
+        /// Decide whether a shooter may record this step on their own, and if not, why.
+        /// Two rules, both deliberate:
+        ///  1. Only levels 4+ (Guldmarkesskytt and up). Levels 1-3 finish with an official
+        ///     Pistolskyttemarke being minted, and nobody signs off their own marke.
+        ///  2. Only the step they are standing on, so the ladder cannot be skipped to the top.
+        /// </summary>
+        private static bool CanSelfReport(MemberProgress progress, int levelId, int stepNumber, out string refusal)
+        {
+            if (!TrainingDefinitions.IsSelfServiceLevel(levelId))
+            {
+                refusal = "Stegen i nybörjartrappan (brons, silver och guld) godkänns av din tränare, "
+                        + "skjutledare eller klubbadmin, eftersom de ger ett officiellt märke.";
+                return false;
+            }
+
+            if (levelId != progress.CurrentLevel || stepNumber != progress.CurrentStep)
+            {
+                refusal = "Du kan bara markera det steg du står på just nu, "
+                        + $"{TrainingDefinitions.GetLevel(progress.CurrentLevel)?.Name} steg {progress.CurrentStep}.";
+                return false;
+            }
+
+            refusal = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Undo a completed step. Restricted to the self-service levels (4+) on purpose: undoing a
+        /// step in levels 1-3 would leave an already-minted marke behind with nothing backing it,
+        /// so those corrections stay a site-admin ResetProgress matter.
+        /// Whoever may APPROVE a step may also undo it (symmetry - otherwise a trainer's mis-tick on
+        /// level 4 could only be cleared by a site admin). A shooter may undo only their own
+        /// self-reported steps: a functionary's sign-off is not theirs to withdraw.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UncompleteStep(int memberId, int levelId, int stepNumber)
+        {
+            try
+            {
+                if (!TrainingDefinitions.IsSelfServiceLevel(levelId))
+                {
+                    return Json(new { success = false, message = "Steg i nybörjartrappan kan inte ångras här - kontakta en administratör." });
+                }
+
+                var (isFunctionary, _, currentMemberData) = await ResolveStepAuthorityAsync(memberId);
+                bool isSelf = currentMemberData != null && currentMemberData.Id == memberId;
+
+                if (!isFunctionary && !isSelf)
+                {
+                    return Json(new { success = false, message = "Access denied" });
+                }
+
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                var progress = MemberProgress.FromMember(member);
+                var completion = progress.GetCompletion(levelId, stepNumber);
+                if (completion == null)
+                {
+                    return Json(new { success = false, message = "Steget är inte markerat som klart." });
+                }
+
+                if (!isFunctionary && !completion.SelfReported)
+                {
+                    return Json(new { success = false, message = "Det här steget godkändes av en funktionär och kan bara ångras av dem." });
+                }
+
+                progress.UncompleteStep(levelId, stepNumber);
+                progress.SaveToMember(member);
+                _memberService.Save(member);
+
+                return Json(new {
+                    success = true,
+                    message = "Markeringen är borttagen.",
+                    data = new { newLevel = progress.CurrentLevel, newStep = progress.CurrentStep }
                 });
             }
             catch (Exception ex)
