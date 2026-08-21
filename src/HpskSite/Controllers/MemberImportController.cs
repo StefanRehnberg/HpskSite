@@ -153,7 +153,7 @@ namespace HpskSite.Controllers
         // ---------------------------------------------------------------
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Commit(int clubId, string mappingJson, string rowsJson)
+        public async Task<IActionResult> Commit(int clubId, string mappingJson, string rowsJson, bool force = false)
         {
             if (!await IsAuthorizedAsync(clubId))
             {
@@ -207,49 +207,53 @@ namespace HpskSite.Controllers
                 }
             }
 
+            // ---- Pre-flight: refuse a run that would duplicate the club's whole roster ----
+            // WHY: on 2026-08-21 an export whose email cells carried a trailing ';' matched NONE of
+            // the club's existing members and silently created 141 duplicates. The tell was visible
+            // before a single write — every row a "create", none an update — and nothing looked at it.
+            // A club's genuine FIRST import also creates everyone, so an empty roster is not
+            // suspicious; matching zero of a roster that already exists is. Confirmable, not fatal:
+            // the admin may legitimately be adding a wholly new group of people.
+            if (!force)
+            {
+                var (wouldMatch, wouldCreate) = PreflightMatchCounts(rows, mapping, byPnr, byEmail);
+                int clubMemberCount = CountClubMembers(allMembers, clubId);
+
+                if (wouldMatch == 0 && wouldCreate >= 10 && clubMemberCount >= 10)
+                {
+                    bool pnrMapped = mapping.Values.Any(a => string.Equals((a ?? "").Trim(), "personNumber", StringComparison.OrdinalIgnoreCase));
+
+                    _logger.LogWarning(
+                        "[MemberImport.Commit] Pre-flight blocked club {ClubId}: {Create} rows would ALL be created, " +
+                        "0 matched an existing member, club already has {Existing} members (personNumber mapped: {PnrMapped})",
+                        clubId, wouldCreate, clubMemberCount, pnrMapped);
+
+                    var reason = pnrMapped
+                        ? "Kontrollera att e-post och personnummer i filen är skrivna exakt som på pistol.nu."
+                        : "Filen har ingen personnummerkolumn mappad, så e-posten är enda nyckeln – ett extra tecken i "
+                          + "e-postcellen (till exempel ett avslutande semikolon) räcker för att matchningen ska missa.";
+
+                    return Json(new
+                    {
+                        success = false,
+                        requiresConfirmation = true,
+                        wouldCreate,
+                        clubMemberCount,
+                        message = $"Stopp: alla {wouldCreate} rader skulle skapas som NYA medlemmar och ingen av dem "
+                                + $"matchar någon av klubbens {clubMemberCount} befintliga medlemmar. Det brukar betyda "
+                                + $"att matchningsnyckeln inte stämmer – inte att alla är nya. {reason} "
+                                + "Är personerna verkligen nya kan du köra ändå."
+                    });
+                }
+            }
+
             int rowIndex = 0;
             foreach (var row in rows)
             {
                 rowIndex++;
                 try
                 {
-                    // Collapse mapped source columns → alias values. Multiple columns can
-                    // map to memberNotes; concatenate those.
-                    var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    var notes = new List<string>();
-
-                    foreach (var kvp in mapping)
-                    {
-                        var sourceHeader = kvp.Key;
-                        var alias = (kvp.Value ?? "").Trim();
-                        if (string.IsNullOrEmpty(alias))
-                        {
-                            continue;
-                        }
-                        if (!row.TryGetValue(sourceHeader, out var raw))
-                        {
-                            continue;
-                        }
-                        var value = (raw ?? "").Trim();
-                        if (string.IsNullOrEmpty(value))
-                        {
-                            continue;
-                        }
-
-                        if (alias == "memberNotes")
-                        {
-                            notes.Add($"{StripDedupSuffix(sourceHeader)}: {value}");
-                        }
-                        else if (!values.ContainsKey(alias))
-                        {
-                            values[alias] = value;
-                        }
-                    }
-
-                    if (notes.Count > 0)
-                    {
-                        values["memberNotes"] = string.Join(" | ", notes);
-                    }
+                    var values = CollapseRow(row, mapping);
 
                     values.TryGetValue("email", out var email);
                     values.TryGetValue("personNumber", out var personNumber);
@@ -257,7 +261,15 @@ namespace HpskSite.Controllers
                     values.TryGetValue("lastName", out var lastName);
                     values.TryGetValue("birthDate", out var birthDate);
 
-                    email = (email ?? "").Trim();
+                    // Clean the address BEFORE it is used as a dedup key — a stray trailing ';'
+                    // or wrapping quote from the export would otherwise match nothing and create
+                    // a duplicate account (see NormalizeEmail).
+                    var rawEmail = (email ?? "").Trim();
+                    email = NormalizeEmail(rawEmail);
+                    if (email.Length > 0)
+                    {
+                        values["email"] = email;
+                    }
                     var pnrKey = NormalizePnrKey(personNumber);
 
                     // Dedup: personNumber first, then email.
@@ -301,7 +313,12 @@ namespace HpskSite.Controllers
                         if (!IsValidEmail(email))
                         {
                             skipped++;
-                            errors.Add($"Rad {rowIndex}: ogiltig e-postadress \"{email}\" – hoppar över (e-post krävs som inloggning).");
+                            // Show the value as it stands in the FILE when cleaning changed it —
+                            // otherwise the admin can't find the row they need to correct.
+                            var shown = string.Equals(email, rawEmail, StringComparison.Ordinal)
+                                ? $"\"{rawEmail}\""
+                                : $"\"{rawEmail}\" (tolkad som \"{email}\")";
+                            errors.Add($"Rad {rowIndex}: ogiltig e-postadress {shown} – hoppar över (e-post krävs som inloggning). Står det flera adresser i samma cell måste de delas upp.");
                             continue;
                         }
 
@@ -321,6 +338,16 @@ namespace HpskSite.Controllers
                     ApplyValues(member, values, email, firstName, lastName, birthDate, pnrIncomplete, isNew);
 
                     _memberService.Save(member);
+
+                    // Register the new member in the dedup indexes. Without this, a person listed
+                    // TWICE in the same file is matched on neither pass — the index was built once
+                    // before the loop — and the second row tries to create a second account on the
+                    // same login. Same-file repeats now update the row we just created.
+                    if (isNew)
+                    {
+                        if (!string.IsNullOrEmpty(pnrKey)) byPnr.TryAdd(pnrKey, member);
+                        if (!string.IsNullOrWhiteSpace(member.Email)) byEmail.TryAdd(member.Email, member);
+                    }
 
                     // ---- Club-specific action columns (map to other tables/systems) ----
                     values.TryGetValue("skjutledare", out var skjutledareValue);
@@ -450,6 +477,102 @@ namespace HpskSite.Controllers
                 skipped,
                 pnrIncompleteCount,
                 errors
+            });
+        }
+
+        /// <summary>
+        /// Collapses one source row into alias → value using the confirmed mapping. Blank cells are
+        /// dropped (so a mapped-but-empty column never blanks stored data), the first mapped column
+        /// wins per alias, and several columns mapped to memberNotes are concatenated.
+        /// Shared by the pre-flight check and the write loop so both see identical values.
+        /// </summary>
+        private static Dictionary<string, string> CollapseRow(
+            Dictionary<string, string> row, Dictionary<string, string> mapping)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var notes = new List<string>();
+
+            foreach (var kvp in mapping)
+            {
+                var sourceHeader = kvp.Key;
+                var alias = (kvp.Value ?? "").Trim();
+                if (string.IsNullOrEmpty(alias))
+                {
+                    continue;
+                }
+                if (!row.TryGetValue(sourceHeader, out var raw))
+                {
+                    continue;
+                }
+                var value = (raw ?? "").Trim();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                if (alias == "memberNotes")
+                {
+                    notes.Add($"{StripDedupSuffix(sourceHeader)}: {value}");
+                }
+                else if (!values.ContainsKey(alias))
+                {
+                    values[alias] = value;
+                }
+            }
+
+            if (notes.Count > 0)
+            {
+                values["memberNotes"] = string.Join(" | ", notes);
+            }
+
+            return values;
+        }
+
+        /// <summary>
+        /// How many rows would MATCH an existing member, and how many would be created new.
+        /// Read-only — same keys and same order (personnummer, then email) as the write loop.
+        /// </summary>
+        private static (int WouldMatch, int WouldCreate) PreflightMatchCounts(
+            List<Dictionary<string, string>> rows,
+            Dictionary<string, string> mapping,
+            Dictionary<string, IMember> byPnr,
+            Dictionary<string, IMember> byEmail)
+        {
+            int match = 0, create = 0;
+
+            foreach (var row in rows)
+            {
+                var values = CollapseRow(row, mapping);
+                values.TryGetValue("email", out var rawEmail);
+                values.TryGetValue("personNumber", out var pnr);
+
+                var email = NormalizeEmail(rawEmail);
+                var pnrKey = NormalizePnrKey(pnr);
+
+                bool matched = (!string.IsNullOrEmpty(pnrKey) && byPnr.ContainsKey(pnrKey))
+                               || (!string.IsNullOrEmpty(email) && byEmail.ContainsKey(email));
+
+                if (matched) match++;
+                else if (IsValidEmail(email)) create++;   // rows without a usable login are skipped, not created
+            }
+
+            return (match, create);
+        }
+
+        /// <summary>
+        /// Members already affiliated with the club — its primary club or listed in memberClubIds.
+        /// Used only to tell a club's FIRST import (roster legitimately empty, everyone is new)
+        /// apart from a re-import that matched nothing because the dedup key was broken.
+        /// </summary>
+        private static int CountClubMembers(List<IMember> allMembers, int clubId)
+        {
+            var id = clubId.ToString();
+            return allMembers.Count(m =>
+            {
+                if (m.GetValue("primaryClubId")?.ToString() == id) return true;
+                var csv = m.GetValue("memberClubIds")?.ToString() ?? "";
+                return csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                          .Contains(id);
             });
         }
 
@@ -693,14 +816,60 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Pragmatic email check — non-empty and shaped like local@domain.tld with no spaces.
+        /// Characters that cannot occur in either half of an address here. The old check only
+        /// excluded '@' and whitespace, which let a trailing ';' through as "valid" — see
+        /// <see cref="NormalizeEmail"/>. Keep in sync with miEmailCharsOk() in MemberImportModal.cshtml.
+        /// </summary>
+        private const string EmailForbiddenChars = @";,:""<>()\[\]\\";
+
+        /// <summary>
+        /// Cleans an email cell before it is used as a dedup key or a login.
+        ///
+        /// WHY THIS EXISTS: the 2026-08-21 import file quoted the address WITH a trailing
+        /// semicolon inside the quotes — "ghaarnes@gmail.com;" — on 141 of 142 rows. The parser
+        /// trims whitespace only, so the value kept the ';'. Since the file had no personnummer
+        /// column, email was the ONLY dedup key, and `x@y.com;` matches no existing member: every
+        /// one of them was missed and 141 duplicate accounts were created, each with an
+        /// un-loginable address. Stripping the wrapper punctuation is what makes the key match.
+        ///
+        /// Deliberately conservative: only LEADING/TRAILING punctuation and wrapping quotes or
+        /// angle brackets are removed. A separator left in the MIDDLE ("a@b.se;c@d.se") is not
+        /// guessed at — it fails <see cref="IsValidEmail"/> and the row is reported and skipped,
+        /// which is safer than silently importing one of two addresses.
+        /// Keep in sync with miNormalizeEmail() in MemberImportModal.cshtml.
+        /// </summary>
+        private static string NormalizeEmail(string? email)
+        {
+            var value = (email ?? "").Trim();
+            if (value.Length == 0) return "";
+
+            // "a@b.se" / 'a@b.se' / <a@b.se> — wrappers some exports add around the cell.
+            if (value.Length >= 2 &&
+                ((value[0] == '"' && value[^1] == '"') ||
+                 (value[0] == '\'' && value[^1] == '\'') ||
+                 (value[0] == '<' && value[^1] == '>')))
+            {
+                value = value.Substring(1, value.Length - 2).Trim();
+            }
+
+            // Trailing/leading list separators and stray sentence punctuation.
+            value = value.Trim(';', ',', ':', '.', '"', '\'', '<', '>', ' ', '\t');
+
+            return value.Trim();
+        }
+
+        /// <summary>
+        /// Non-empty and shaped like local@domain.tld, with no whitespace and none of
+        /// <see cref="EmailForbiddenChars"/> in either half. Run on the value AFTER
+        /// <see cref="NormalizeEmail"/>.
         /// Keep in sync with miIsValidEmail() in MemberImportModal.cshtml (preview-time report).
         /// </summary>
         private static bool IsValidEmail(string? email)
         {
             if (string.IsNullOrWhiteSpace(email)) return false;
+            var part = @"[^@\s" + EmailForbiddenChars + "]+";
             return System.Text.RegularExpressions.Regex.IsMatch(
-                email.Trim(), @"^[^@\s]+@[^@\s]+\.[^@\s]+$");
+                email.Trim(), $"^{part}@{part}\\.{part}$");
         }
 
         /// <summary>A complete personnummer normalizes to 12 digits (ÅÅÅÅMMDD-XXXX).</summary>

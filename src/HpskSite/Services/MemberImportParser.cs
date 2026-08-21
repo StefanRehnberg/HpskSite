@@ -123,9 +123,7 @@ namespace HpskSite.Services
         {
             var result = new ParseResult();
 
-            // UTF-8, tolerate a BOM.
-            using var reader = new StreamReader(stream, new UTF8Encoding(true), detectEncodingFromByteOrderMarks: true);
-            var text = reader.ReadToEnd();
+            var text = ReadCsvText(stream);
             if (string.IsNullOrWhiteSpace(text))
             {
                 return result;
@@ -185,6 +183,56 @@ namespace HpskSite.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Decodes CSV bytes to text, picking the encoding rather than assuming UTF-8.
+        ///
+        /// WHY THIS EXISTS: Swedish club exports (Svenska Lag, Excel "CSV (semikolon­avgränsad)")
+        /// are routinely written as Windows-1252 with NO byte-order mark. Decoding those as UTF-8
+        /// turns every å/ä/ö into U+FFFD — silently, because invalid bytes are replaced rather
+        /// than thrown. The 2026-08-21 import destroyed 155 cells that way, including the header
+        /// "Förnamn", and mojibake in a header also breaks mapping suggestion.
+        ///
+        /// Order: honour a BOM if present; otherwise try STRICT UTF-8 and fall back to Latin-1
+        /// only when strict decoding fails. Latin-1 and Windows-1252 agree on every byte Swedish
+        /// text uses (å=0xE5, ä=0xE4, ö=0xF6); they differ only in 0x80–0x9F (smart quotes, €),
+        /// and Latin-1 is built into .NET so this needs no extra encoding provider.
+        /// </summary>
+        private static string ReadCsvText(Stream stream)
+        {
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            var bytes = buffer.ToArray();
+            if (bytes.Length == 0)
+            {
+                return "";
+            }
+
+            // A BOM is an explicit declaration — trust it and strip it.
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            {
+                return new UTF8Encoding(false).GetString(bytes, 3, bytes.Length - 3);
+            }
+            if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            {
+                return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            }
+            if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            {
+                return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+            }
+
+            // No BOM: strict UTF-8 throws on invalid bytes instead of inserting U+FFFD, which is
+            // what lets us detect a single-byte file and retry rather than corrupt it.
+            try
+            {
+                return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
+            }
+            catch (DecoderFallbackException)
+            {
+                return Encoding.Latin1.GetString(bytes);
+            }
         }
 
         private static char DetectDelimiter(string text)

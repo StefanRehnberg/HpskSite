@@ -49,6 +49,18 @@
                     </div>
                     <div id="mi_emailReport" class="alert small" style="display:none;"></div>
                     <div id="mi_targetHint" class="alert alert-info small" style="display:none;"></div>
+                    @* Blocking browser dialogs (alert/confirm) freeze the tab and read as a hang,
+                       so every warning that needs an answer is rendered here instead. *@
+                    <div id="mi_confirmPanel" class="alert alert-danger" style="display:none;">
+                        <h6 class="mb-2"><i class="bi bi-exclamation-octagon me-1"></i>Kontrollera innan du fortsätter</h6>
+                        <div id="mi_confirmText" class="mb-3 small"></div>
+                        <button type="button" class="btn btn-sm btn-danger" id="mi_confirmProceed">
+                            <i class="bi bi-check2 me-1"></i>Importera ändå
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="miHideConfirm()">
+                            Avbryt
+                        </button>
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-sm table-hover align-middle">
                             <thead>
@@ -126,6 +138,7 @@
         miEl('mi_step_result').style.display = 'none';
         miEl('mi_importBtn').style.display = 'none';
         miEl('mi_mappingBody').innerHTML = '';
+        miHideConfirm();
     };
 
     window.miPreview = function () {
@@ -250,11 +263,30 @@
         miUpdateEmailReport();
     };
 
-    // Keep in sync with IsValidEmail() in MemberImportController.cs.
+    // Keep in sync with NormalizeEmail() in MemberImportController.cs — strips wrapping
+    // quotes/angle brackets and leading/trailing list punctuation. A trailing ';' inside the
+    // quoted cell ("a@@b.se;") is what broke the 2026-08-21 import: it matched no existing
+    // member, so everyone was created again as a duplicate.
+    function miNormalizeEmail(s) {
+        var v = String(s == null ? '' : s).trim();
+        if (v.length >= 2) {
+            var f = v.charAt(0), l = v.charAt(v.length - 1);
+            if ((f === '"' && l === '"') || (f === "'" && l === "'") || (f === '<' && l === '>')) {
+                v = v.substring(1, v.length - 1).trim();
+            }
+        }
+        // Trim the same character set as String.Trim(';', ',', ':', '.', '"', '\'', '<', '>', ' ', '\t').
+        return v.replace(/^[;,:."'<>\s]+/, '').replace(/[;,:."'<>\s]+$/, '');
+    }
+
+    // Keep in sync with IsValidEmail() + EmailForbiddenChars in MemberImportController.cs.
+    // Run on the NORMALIZED value. A separator still left in the middle ("a@@b.se;c@@d.se")
+    // is intentionally invalid rather than guessed at.
     // NB: in this .cshtml the literal at-sign must be doubled (@@) so Razor does not
     // read it as a code transition; it renders to a single at-sign in the output JS.
     function miIsValidEmail(s) {
-        return /^[^@@\s]+@@[^@@\s]+\.[^@@\s]+$/.test(String(s).trim());
+        return /^[^@@\s;,:"<>()\[\]\\]+@@[^@@\s;,:"<>()\[\]\\]+\.[^@@\s;,:"<>()\[\]\\]+$/
+            .test(String(s).trim());
     }
 
     // First non-blank value across the email-mapped column(s) for a row.
@@ -289,17 +321,33 @@
         }
 
         var total = miState.rows.length;
-        var missing = 0, invalid = 0;
+        var missing = 0, invalid = 0, cleaned = 0, cleanedExample = '';
         for (var i = 0; i < miState.rows.length; i++) {
-            var val = miEmailForRow(miState.rows[i], emailHeaders);
+            var raw = miEmailForRow(miState.rows[i], emailHeaders);
+            var val = miNormalizeEmail(raw);
+            if (raw !== '' && val !== raw) {
+                cleaned++;
+                if (!cleanedExample) cleanedExample = raw;
+            }
             if (val === '') { missing++; }
             else if (!miIsValidEmail(val)) { invalid++; }
         }
 
+        // Surfaced on its own: a cell needing cleanup is the signature of the export bug that
+        // caused 141 duplicates. Cleaning makes the match work, but the admin should still see it.
+        var cleanedNote = '';
+        if (cleaned > 0) {
+            cleanedNote = '<div class="mt-2"><i class="bi bi-scissors me-1"></i>' +
+                '<strong>' + cleaned + '</strong> e-postcell' + (cleaned === 1 ? '' : 'er') +
+                ' har extra tecken runt adressen (t.ex. <code>' + miEscape(cleanedExample) + '</code>). ' +
+                'De städas automatiskt före matchningen.</div>';
+        }
+
         var bad = missing + invalid;
         if (bad === 0) {
-            el.className = 'alert alert-success small';
-            el.innerHTML = '<i class="bi bi-check-circle me-1"></i>Alla <strong>' + total + '</strong> rader har en giltig e-postadress.';
+            el.className = cleaned > 0 ? 'alert alert-info small' : 'alert alert-success small';
+            el.innerHTML = '<i class="bi bi-check-circle me-1"></i>Alla <strong>' + total +
+                '</strong> rader har en giltig e-postadress.' + cleanedNote;
             el.style.display = '';
             return;
         }
@@ -311,9 +359,40 @@
         el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>' +
             parts.join(' och ') + ' (av <strong>' + total + '</strong> rader). ' +
             'E-post är inloggningen — dessa rader kan <strong>inte skapas som nya medlemmar</strong> och hoppas över. ' +
-            'Rader som matchar en befintlig medlem via personnummer uppdateras ändå.';
+            'Rader som matchar en befintlig medlem via personnummer uppdateras ändå.' + cleanedNote;
         el.style.display = '';
     };
+
+    // In-modal confirmation. onProceed runs when the admin accepts.
+    function miShowConfirm(html, onProceed) {
+        var panel = miEl('mi_confirmPanel');
+        miEl('mi_confirmText').innerHTML = html;
+        var btn = miEl('mi_confirmProceed');
+        // Replace the node so a previous handler can never fire for a new question.
+        var fresh = btn.cloneNode(true);
+        btn.parentNode.replaceChild(fresh, btn);
+        fresh.addEventListener('click', function () {
+            miHideConfirm();
+            onProceed();
+        });
+        panel.style.display = '';
+        panel.scrollIntoView({ block: 'nearest' });
+    }
+
+    window.miHideConfirm = function () {
+        miEl('mi_confirmPanel').style.display = 'none';
+        miEl('mi_confirmProceed').style.display = '';
+    };
+
+    // Same panel, no way forward — for a failure the admin can't override.
+    function miShowConfirmError(message) {
+        var panel = miEl('mi_confirmPanel');
+        miEl('mi_confirmText').innerHTML =
+            '<strong>Importen kunde inte genomföras.</strong><br>' + miEscape(message);
+        miEl('mi_confirmProceed').style.display = 'none';
+        panel.style.display = '';
+        panel.scrollIntoView({ block: 'nearest' });
+    }
 
     function miCollectMapping() {
         var mapping = {};
@@ -325,17 +404,20 @@
         return mapping;
     }
 
-    window.miCommit = function () {
+    window.miCommit = function (force) {
         var mapping = miCollectMapping();
 
         // Sanity: require at least an email OR personnummer target so rows can be resolved.
         var aliases = Object.keys(mapping).map(function (k) { return mapping[k]; });
-        if (aliases.indexOf('email') === -1 && aliases.indexOf('personNumber') === -1) {
-            if (!confirm('Ingen kolumn är mappad till E-post eller Personnummer. Nya medlemmar kan då inte skapas. Fortsätt ändå?')) {
-                return;
-            }
+        if (!force && aliases.indexOf('email') === -1 && aliases.indexOf('personNumber') === -1) {
+            miShowConfirm(
+                'Ingen kolumn är mappad till <strong>E-post</strong> eller <strong>Personnummer</strong>. ' +
+                'Utan någon av dem kan raderna inte kopplas till en person, så inga nya medlemmar kan skapas.',
+                function () { miCommit(true); });
+            return;
         }
 
+        miHideConfirm();
         var btn = miEl('mi_importBtn');
         var orig = btn.innerHTML;
         btn.disabled = true;
@@ -345,6 +427,7 @@
         fd.append('clubId', miEl('mi_clubId').value);
         fd.append('mappingJson', JSON.stringify(mapping));
         fd.append('rowsJson', JSON.stringify(miState.rows));
+        fd.append('force', force ? 'true' : 'false');
 
         fetch('/umbraco/surface/MemberImport/Commit', {
             method: 'POST',
@@ -356,7 +439,12 @@
             btn.disabled = false;
             btn.innerHTML = orig;
             if (!data.success) {
-                alert('Fel vid import: ' + (data.message || 'Okänt fel'));
+                // Pre-flight stop: nothing was written. Let the admin decide, in the modal.
+                if (data.requiresConfirmation) {
+                    miShowConfirm(miEscape(data.message || ''), function () { miCommit(true); });
+                    return;
+                }
+                miShowConfirmError(data.message || 'Okänt fel');
                 return;
             }
             miRenderResult(data);
@@ -365,7 +453,7 @@
             btn.disabled = false;
             btn.innerHTML = orig;
             console.error('Commit error:', err);
-            alert('Fel vid import: ' + err.message);
+            miShowConfirmError(err.message);
         });
     };
 
