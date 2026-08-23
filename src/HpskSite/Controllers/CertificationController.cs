@@ -435,6 +435,50 @@ namespace HpskSite.Controllers
             return Json(new { success = true, data = rows });
         }
 
+        /// <summary>
+        /// Namn-/e-postsökning för väljarna i certifieringspanelerna. Går mot SQL i stället
+        /// för GetAll(0, int.MaxValue) — att läsa in hela medlemsregistret för att fylla en
+        /// rullgardin tog för lång tid när registret växte.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> SearchMembers(string query)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast administratörer." });
+
+            var q = (query ?? "").Trim();
+            if (q.Length < 2) return Json(new { success = true, members = new List<object>() });
+
+            // Escapa LIKE-jokrarna så att en sökning på "_" eller "%" inte matchar allt.
+            var like = "%" + q.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
+
+            List<int> ids;
+            using (var db = _databaseFactory.CreateDatabase())
+            {
+                ids = await db.FetchAsync<int>(@"
+                    SELECT TOP 25 n.id
+                    FROM cmsMember cm
+                    INNER JOIN umbracoNode n ON cm.nodeId = n.id
+                    WHERE n.trashed = 0
+                      AND (n.text LIKE @0 OR cm.Email LIKE @0)
+                    ORDER BY n.text", like);
+            }
+
+            var members = GetApprovedMembersByIds(ids)
+                .Select(m => new
+                {
+                    memberId = m.Id,
+                    name = MemberDisplayName(m),
+                    email = m.Email ?? "",
+                    club = int.TryParse(m.GetValue<string>("primaryClubId") ?? "", out int pcid)
+                        ? GetClubName(pcid) : ""
+                })
+                .OrderBy(x => x.name, StringComparer.CurrentCulture)
+                .ToList();
+
+            return Json(new { success = true, members });
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetGrantorsFor(string certType, int candidateMemberId)
         {
@@ -545,7 +589,8 @@ namespace HpskSite.Controllers
                 || await _certAuth.CanGrantAsync(current.Id, cert.CertificationType, cert.MemberId);
             if (!authorized) return Json(new { success = false, message = "Du har inte behörighet att redigera denna certifiering." });
 
-            var (ok, msg) = await _certService.UpdateMetaAsync(req.CertId, req.CertificateNumber, req.Notes, req.ExpiresAt);
+            var (ok, msg) = await _certService.UpdateMetaAsync(
+                req.CertId, req.CertificateNumber, req.Notes, req.ExpiresAt, req.CertifiedAt);
             return Json(new { success = ok, message = ok ? "Sparat." : msg });
         }
 
@@ -920,6 +965,8 @@ namespace HpskSite.Controllers
         public string? CertificateNumber { get; set; }
         public string? Notes { get; set; }
         public DateTime? ExpiresAt { get; set; }
+        /// <summary>Frivillig — utelämnad lämnar certifieringsdatumet orört.</summary>
+        public DateTime? CertifiedAt { get; set; }
     }
 
     public class CertificationRequestDto

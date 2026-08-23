@@ -257,12 +257,18 @@ namespace HpskSite.Services
 
         // ── Metadata edits (cert number etc.) ──────────────────────────
 
+        /// <summary><paramref name="certifiedAt"/> är frivillig — null lämnar det satta
+        /// datumet orört, så gamla anrop beter sig som förut.</summary>
         public async Task<(bool Success, string? Message)> UpdateMetaAsync(
-            int certId, string? certNumber, string? notes, DateTime? expiresAt)
+            int certId, string? certNumber, string? notes, DateTime? expiresAt, DateTime? certifiedAt = null)
         {
             using var db = _databaseFactory.CreateDatabase();
             var cert = await db.SingleOrDefaultByIdAsync<MemberCertification>(certId);
             if (cert == null) return (false, "Certifieringen hittades inte.");
+
+            if (certifiedAt.HasValue) cert.CertifiedAt = certifiedAt.Value;
+            if (expiresAt.HasValue && expiresAt.Value.Date < cert.CertifiedAt.Date)
+                return (false, "Förfallodatumet kan inte ligga före certifieringsdatumet.");
 
             cert.CertificateNumber = certNumber;
             cert.Notes = notes;

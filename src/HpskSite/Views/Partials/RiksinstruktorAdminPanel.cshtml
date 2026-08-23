@@ -38,7 +38,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Tilldela Riksinstruktör</h5>
+                <h5 class="modal-title" id="riksGrantTitle">Tilldela Riksinstruktör</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -51,10 +51,23 @@
                         <option value="Nord">Nord</option>
                     </select>
                 </div>
-                <div class="mb-3">
+
+                <!-- Nytilldelning: sök fram medlemmen. Vid redigering är medlemmen låst. -->
+                <div class="mb-3" id="riksMemberSearchWrap">
                     <label class="form-label">Medlem *</label>
-                    <select class="form-select" id="riksGrantMember"></select>
+                    <div class="position-relative">
+                        <input type="text" class="form-control" id="riksMemberSearch"
+                               placeholder="Sök medlem (namn eller e-post)…" autocomplete="off">
+                        <div id="riksMemberResults" class="list-group position-absolute w-100 shadow"
+                             style="z-index:1056; display:none; max-height:280px; overflow:auto;"></div>
+                    </div>
+                    <div class="form-text" id="riksMemberChosen"></div>
                 </div>
+                <div class="mb-3 d-none" id="riksMemberLockedWrap">
+                    <label class="form-label">Medlem</label>
+                    <input type="text" class="form-control" id="riksMemberLocked" disabled>
+                </div>
+
                 <div class="mb-3">
                     <label class="form-label">Certifierad datum *</label>
                     <input type="text" class="form-control" id="riksGrantCertifiedAt" placeholder="ÅÅÅÅ-MM-DD">
@@ -114,6 +127,8 @@
     }
 
     function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+    // För data-attribut i enkla citattecken: JSON-nyttolasten innehåller " som inte får bryta ut.
+    function escapeAttr(str) { return escapeHtml(str).replace(/'/g, '&#39;'); }
 
     function loadAll() {
         var loading = document.getElementById('riksLoading');
@@ -155,6 +170,12 @@
                              + '</div>'
                              + (p.cert
                                   ? '<div>'
+                                    + '<button type="button" class="btn btn-sm btn-outline-primary riks-edit-btn me-1"'
+                                    + ' data-cert=\'' + escapeAttr(JSON.stringify(p.cert)) + '\''
+                                    + ' data-member-id="' + p.memberId + '"'
+                                    + ' data-area="' + escapeHtml(a.code) + '"'
+                                    + ' data-name="' + escapeHtml(p.name) + '" title="Redigera">'
+                                    + '<i class="bi bi-pencil"></i></button>'
                                     + '<button type="button" class="btn btn-sm btn-outline-warning riks-unappoint-btn me-1"'
                                     + ' data-member-id="' + p.memberId + '" data-area="' + escapeHtml(a.code) + '" data-name="' + escapeHtml(p.name) + '" title="Ta bort utnämning">'
                                     + '<i class="bi bi-person-dash"></i></button>'
@@ -193,51 +214,148 @@
         });
     }
 
-    function loadMembers() {
-        var sel = document.getElementById('riksGrantMember');
-        sel.innerHTML = '<option value="">— Laddar medlemmar —</option>';
-        fetch('/umbraco/surface/MemberAdmin/GetMembers?pageSize=10000')
-            .then(function (r) { return r.json(); })
-            .then(function (resp) {
-                sel.innerHTML = '<option value="">— Välj medlem —</option>';
-                if (!resp.success) return;
-                // MemberAdmin/GetMembers returns data: { items: [...], page, ... }
-                var items = (resp.data && Array.isArray(resp.data.items)) ? resp.data.items
-                          : (Array.isArray(resp.data) ? resp.data : []);
-                items
-                    .map(function (m) { return { id: m.id, name: ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || m.email || ('Medlem #' + m.id) }; })
-                    .sort(function (a, b) { return a.name.localeCompare(b.name, 'sv'); })
-                    .forEach(function (m) {
-                        var opt = document.createElement('option');
-                        opt.value = m.id; opt.textContent = m.name;
-                        sel.appendChild(opt);
+    // ── Medlemssökning ──────────────────────────────────────────────────────
+    // Tidigare hämtades HELA medlemsregistret hit för att fylla en rullgardin,
+    // vilket tog för lång tid. Nu söker vi på namn/e-post medan man skriver.
+    var riksSearchTimer = null;
+    var riksSelectedMemberId = null;
+
+    function clearMemberSearch() {
+        riksSelectedMemberId = null;
+        document.getElementById('riksMemberSearch').value = '';
+        document.getElementById('riksMemberChosen').textContent = '';
+        var res = document.getElementById('riksMemberResults');
+        res.innerHTML = ''; res.style.display = 'none';
+    }
+
+    function initMemberSearch() {
+        var inp = document.getElementById('riksMemberSearch');
+        var res = document.getElementById('riksMemberResults');
+        if (inp.dataset.bound) return;
+        inp.dataset.bound = '1';
+
+        inp.addEventListener('input', function () {
+            clearTimeout(riksSearchTimer);
+            // Skriver man om efter ett val gäller inte valet längre.
+            riksSelectedMemberId = null;
+            document.getElementById('riksMemberChosen').textContent = '';
+
+            var q = inp.value.trim();
+            if (q.length < 2) { res.style.display = 'none'; res.innerHTML = ''; return; }
+
+            riksSearchTimer = setTimeout(function () {
+                fetch('/umbraco/surface/Certification/SearchMembers?query=' + encodeURIComponent(q))
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (!d.success) {
+                            res.innerHTML = '<div class="list-group-item small text-danger">'
+                                          + escapeHtml(d.message || 'Sökningen misslyckades') + '</div>';
+                            res.style.display = 'block';
+                            return;
+                        }
+                        if (!d.members.length) {
+                            res.innerHTML = '<div class="list-group-item small text-muted">Inga träffar</div>';
+                            res.style.display = 'block';
+                            return;
+                        }
+                        res.innerHTML = d.members.map(function (m) {
+                            var sub = [m.club, m.email].filter(function (x) { return x; }).join(' · ');
+                            return '<button type="button" class="list-group-item list-group-item-action riks-member-hit"'
+                                 + ' data-member-id="' + m.memberId + '" data-name="' + escapeHtml(m.name) + '">'
+                                 + escapeHtml(m.name)
+                                 + (sub ? ' <span class="text-muted small">' + escapeHtml(sub) + '</span>' : '')
+                                 + '</button>';
+                        }).join('');
+                        res.style.display = 'block';
+                    })
+                    .catch(function (e) {
+                        console.error('Riksinstruktörer: medlemssökning misslyckades', e);
+                        res.innerHTML = '<div class="list-group-item small text-danger">Nätverksfel</div>';
+                        res.style.display = 'block';
                     });
-            })
-            .catch(function (e) {
-                console.error('Riksinstruktörer: kunde inte hämta medlemmar', e);
-                sel.innerHTML = '<option value="">— Kunde inte hämta medlemmar —</option>';
-            });
+            }, 250);
+        });
+
+        res.addEventListener('click', function (ev) {
+            var hit = ev.target.closest('.riks-member-hit');
+            if (!hit) return;
+            riksSelectedMemberId = parseInt(hit.dataset.memberId, 10);
+            inp.value = hit.dataset.name;
+            document.getElementById('riksMemberChosen').textContent = 'Vald: ' + hit.dataset.name;
+            res.style.display = 'none'; res.innerHTML = '';
+        });
+
+        document.addEventListener('click', function (ev) {
+            if (!inp.contains(ev.target) && !res.contains(ev.target)) res.style.display = 'none';
+        });
     }
 
     document.getElementById('riksRefreshBtn').addEventListener('click', loadAll);
 
+    // Redigeringsläge: satt till { certId, memberId, area } när pennan öppnade modalen.
+    var riksEditing = null;
+
+    function setDate(fp, inputId, value) {
+        if (fp) { if (value) { fp.setDate(value, true); } else { fp.clear(); } }
+        else { document.getElementById(inputId).value = value || ''; }
+    }
+
     document.getElementById('riksAddBtn').addEventListener('click', function () {
+        riksEditing = null;
         initRiksFlatpickrs();
+        initMemberSearch();
+
+        document.getElementById('riksGrantTitle').textContent = 'Tilldela Riksinstruktör';
         document.getElementById('riksGrantArea').value = 'Syd';
-        if (fpRiksCertifiedAt) { fpRiksCertifiedAt.setDate(new Date(), true); }
-        else { document.getElementById('riksGrantCertifiedAt').value = new Date().toISOString().slice(0, 10); }
-        if (fpRiksExpiresAt) { fpRiksExpiresAt.clear(); }
-        else { document.getElementById('riksGrantExpiresAt').value = ''; }
+        document.getElementById('riksMemberSearchWrap').classList.remove('d-none');
+        document.getElementById('riksMemberLockedWrap').classList.add('d-none');
+        clearMemberSearch();
+
+        setDate(fpRiksCertifiedAt, 'riksGrantCertifiedAt', new Date().toISOString().slice(0, 10));
+        setDate(fpRiksExpiresAt, 'riksGrantExpiresAt', '');
         document.getElementById('riksGrantNumber').value = '';
         document.getElementById('riksGrantNotes').value = '';
         document.getElementById('riksGrantError').classList.add('d-none');
-        loadMembers();
+
         new bootstrap.Modal(document.getElementById('riksGrantModal')).show();
     });
 
+    function openEdit(btn) {
+        var cert;
+        try { cert = JSON.parse(btn.dataset.cert); }
+        catch (e) { alert('Kunde inte läsa certifieringen.'); return; }
+
+        riksEditing = { certId: cert.id, memberId: parseInt(btn.dataset.memberId, 10), area: btn.dataset.area };
+        initRiksFlatpickrs();
+        initMemberSearch();
+
+        document.getElementById('riksGrantTitle').textContent = 'Redigera Riksinstruktör';
+        document.getElementById('riksGrantArea').value = btn.dataset.area;
+        document.getElementById('riksMemberSearchWrap').classList.add('d-none');
+        document.getElementById('riksMemberLockedWrap').classList.remove('d-none');
+        document.getElementById('riksMemberLocked').value = btn.dataset.name;
+        clearMemberSearch();
+
+        setDate(fpRiksCertifiedAt, 'riksGrantCertifiedAt', cert.certifiedAt || '');
+        setDate(fpRiksExpiresAt, 'riksGrantExpiresAt', cert.expiresAt || '');
+        document.getElementById('riksGrantNumber').value = cert.certificateNumber || '';
+        document.getElementById('riksGrantNotes').value = cert.notes || '';
+        document.getElementById('riksGrantError').classList.add('d-none');
+
+        new bootstrap.Modal(document.getElementById('riksGrantModal')).show();
+    }
+
+    function postJson(url, payload) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify(payload)
+        }).then(function (r) { return r.json(); });
+    }
+
     document.getElementById('riksGrantSubmit').addEventListener('click', function () {
+        var btn = this;
         var area = document.getElementById('riksGrantArea').value;
-        var memberId = parseInt(document.getElementById('riksGrantMember').value, 10);
         var certifiedAt = document.getElementById('riksGrantCertifiedAt').value || null;
         var expiresAt = document.getElementById('riksGrantExpiresAt').value || null;
         var num = document.getElementById('riksGrantNumber').value.trim() || null;
@@ -245,42 +363,83 @@
         var err = document.getElementById('riksGrantError');
         err.classList.add('d-none');
 
-        if (!area || !memberId || !certifiedAt) {
-            err.textContent = 'Fyll i område, medlem och datum.';
+        var memberId = riksEditing ? riksEditing.memberId : riksSelectedMemberId;
+
+        function fail(msg) {
+            err.textContent = msg;
             err.classList.remove('d-none');
+            btn.disabled = false;
+        }
+
+        if (!area || !memberId || !certifiedAt) {
+            fail(riksEditing ? 'Fyll i område och datum.' : 'Välj område, sök fram en medlem och fyll i datum.');
             return;
         }
 
-        // Two-step: grant cert, then appoint to area.
-        fetch('/umbraco/surface/Certification/Grant', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
-            body: JSON.stringify({
-                memberId: memberId,
-                certificationType: 'Riksinstruktor',
+        btn.disabled = true;
+
+        function finish() {
+            bootstrap.Modal.getInstance(document.getElementById('riksGrantModal')).hide();
+            btn.disabled = false;
+            loadAll();
+        }
+
+        if (riksEditing) {
+            // Redigering: uppdatera certifieringen, och flytta utnämningen om området bytts.
+            var areaChanged = area !== riksEditing.area;
+            postJson('/umbraco/surface/Certification/UpdateMeta', {
+                certId: riksEditing.certId,
                 certifiedAt: certifiedAt,
                 expiresAt: expiresAt,
                 certificateNumber: num,
                 notes: notes
-            })
-        }).then(function (r) { return r.json(); }).then(function (resp) {
-            if (!resp.success) {
-                err.textContent = resp.message || 'Kunde inte spara';
-                err.classList.remove('d-none');
-                return;
-            }
-            return fetch('/umbraco/surface/Certification/Appoint', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
-                body: JSON.stringify({ memberId: memberId, certificationType: 'Riksinstruktor', scopeId: area })
-            }).then(function (r) { return r.json(); }).then(function () {
-                bootstrap.Modal.getInstance(document.getElementById('riksGrantModal')).hide();
-                loadAll();
+            }).then(function (resp) {
+                if (!resp.success) { fail(resp.message || 'Kunde inte spara'); return; }
+                if (!areaChanged) { finish(); return; }
+
+                return postJson('/umbraco/surface/Certification/Unappoint', {
+                    memberId: memberId, certificationType: 'Riksinstruktor', scopeId: riksEditing.area
+                }).then(function () {
+                    return postJson('/umbraco/surface/Certification/Appoint', {
+                        memberId: memberId, certificationType: 'Riksinstruktor', scopeId: area
+                    });
+                }).then(function (resp2) {
+                    if (resp2 && resp2.success === false) { fail(resp2.message || 'Kunde inte byta område'); return; }
+                    finish();
+                });
+            }).catch(function (e) {
+                console.error('Riksinstruktörer: kunde inte spara', e);
+                fail('Nätverksfel — inget sparades.');
             });
+            return;
+        }
+
+        // Nytilldelning, två steg: utfärda cert, utse sedan till område.
+        postJson('/umbraco/surface/Certification/Grant', {
+            memberId: memberId,
+            certificationType: 'Riksinstruktor',
+            certifiedAt: certifiedAt,
+            expiresAt: expiresAt,
+            certificateNumber: num,
+            notes: notes
+        }).then(function (resp) {
+            if (!resp.success) { fail(resp.message || 'Kunde inte spara'); return; }
+            return postJson('/umbraco/surface/Certification/Appoint', {
+                memberId: memberId, certificationType: 'Riksinstruktor', scopeId: area
+            }).then(function (resp2) {
+                if (resp2 && resp2.success === false) { fail(resp2.message || 'Certet skapades men utnämningen misslyckades'); return; }
+                finish();
+            });
+        }).catch(function (e) {
+            console.error('Riksinstruktörer: kunde inte spara', e);
+            fail('Nätverksfel — kontrollera listan innan du försöker igen.');
         });
     });
 
     document.body.addEventListener('click', function (ev) {
+        var edit = ev.target.closest('.riks-edit-btn');
+        if (edit) { ev.preventDefault(); openEdit(edit); return; }
+
         var revoke = ev.target.closest('.riks-revoke-btn');
         if (revoke) {
             ev.preventDefault();
