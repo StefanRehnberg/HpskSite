@@ -19,6 +19,7 @@ namespace HpskSite.Controllers
     /// </summary>
     public class CertificationController : SurfaceController
     {
+        private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
         private readonly AdminAuthorizationService _authService;
@@ -43,6 +44,7 @@ namespace HpskSite.Controllers
             ILogger<CertificationController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _databaseFactory = databaseFactory;
             _memberService = memberService;
             _memberManager = memberManager;
             _authService = authService;
@@ -96,13 +98,7 @@ namespace HpskSite.Controllers
             }).ToList();
 
             // Members appointed as Föreningsinstruktör for this club (might be from any club)
-            var appointmentGroup = $"Foreningsinstruktor_{clubId}";
-            var appointedIds = new HashSet<int>();
-            foreach (var m in allMembers)
-            {
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles != null && roles.Contains(appointmentGroup)) appointedIds.Add(m.Id);
-            }
+            var appointedIds = await GetMemberIdsInGroupAsync($"Foreningsinstruktor_{clubId}");
 
             var memberLookup = allMembers.ToDictionary(m => m.Id, m => m);
             var unionIds = clubMembers.Select(m => m.Id).Union(appointedIds).ToList();
@@ -168,13 +164,7 @@ namespace HpskSite.Controllers
             var memberLookup = allMembers.ToDictionary(m => m.Id, m => m);
 
             // Appointed Kretsinstruktörer for this region
-            var appointmentGroup = $"Kretsinstruktor_{regionCode}";
-            var appointedIds = new HashSet<int>();
-            foreach (var m in allMembers)
-            {
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles != null && roles.Contains(appointmentGroup)) appointedIds.Add(m.Id);
-            }
+            var appointedIds = await GetMemberIdsInGroupAsync($"Kretsinstruktor_{regionCode}");
 
             var clubsInRegion = _authService.GetClubsInRegions(new List<string> { regionCode });
             var clubIdSet = new HashSet<int>(clubsInRegion);
@@ -188,28 +178,35 @@ namespace HpskSite.Controllers
             var certs = await _certService.GetActiveForMembersAsync(allMemberIdsToConsider);
             var byMember = certs.GroupBy(c => c.MemberId).ToDictionary(g => g.Key, g => g.ToList());
 
-            // Föreningsinstruktör directory grouped by club
+            // Föreningsinstruktör directory grouped by club — en SQL-fråga för alla
+            // Foreningsinstruktor_*-grupper, inte en rollslagning per medlem i registret.
             var foreningsByClub = new Dictionary<int, List<object>>();
-            foreach (var m in allMembers)
-            {
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles == null) continue;
-                foreach (var r in roles.Where(x => x.StartsWith("Foreningsinstruktor_")))
+            const string foreningsPrefix = "Foreningsinstruktor_";
+            var foreningsMemberships = (await GetGroupMembershipsByPrefixAsync(foreningsPrefix))
+                .Select(r => new
                 {
-                    if (int.TryParse(r.Substring("Foreningsinstruktor_".Length), out int cid) && clubIdSet.Contains(cid))
-                    {
-                        var name = $"{m.GetValue<string>("firstName") ?? ""} {m.GetValue<string>("lastName") ?? ""}".Trim();
-                        if (string.IsNullOrEmpty(name)) name = m.Name ?? "Okänd";
-                        var cert = byMember.GetValueOrDefault(m.Id)?.FirstOrDefault(c => c.CertificationType == CertificationTypes.Foreningsinstruktor);
-                        if (!foreningsByClub.ContainsKey(cid)) foreningsByClub[cid] = new List<object>();
-                        foreningsByClub[cid].Add(new
-                        {
-                            memberId = m.Id,
-                            name,
-                            cert = cert == null ? null : ProjectCert(cert)
-                        });
-                    }
-                }
+                    r.MemberId,
+                    ClubId = int.TryParse(r.GroupName.Substring(foreningsPrefix.Length), out int cid) ? cid : 0
+                })
+                .Where(x => x.ClubId > 0 && clubIdSet.Contains(x.ClubId))
+                .ToList();
+
+            var foreningsCerts = await _certService.GetActiveForMembersAsync(
+                foreningsMemberships.Select(x => x.MemberId), CertificationTypes.Foreningsinstruktor);
+            var foreningsCertByMember = foreningsCerts.GroupBy(c => c.MemberId).ToDictionary(g => g.Key, g => g.First());
+
+            foreach (var entry in foreningsMemberships)
+            {
+                var m = memberLookup.GetValueOrDefault(entry.MemberId) ?? _memberService.GetById(entry.MemberId);
+                if (m == null || !m.IsApproved) continue;
+                var cert = foreningsCertByMember.GetValueOrDefault(entry.MemberId);
+                if (!foreningsByClub.ContainsKey(entry.ClubId)) foreningsByClub[entry.ClubId] = new List<object>();
+                foreningsByClub[entry.ClubId].Add(new
+                {
+                    memberId = m.Id,
+                    name = MemberDisplayName(m),
+                    cert = cert == null ? null : ProjectCert(cert)
+                });
             }
 
             object BuildPersonRow(int mId, string certType)
@@ -310,33 +307,29 @@ namespace HpskSite.Controllers
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current == null) return Json(new { success = false, message = "Login required." });
 
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
             var foreningsRole = $"Foreningsinstruktor_{clubId}";
+            var groups = await GetMemberIdsInGroupsAsync(new[] { foreningsRole, "Vapenkontrollant", "Banlaggare" });
+            var foreningsIds = groups.GetValueOrDefault(foreningsRole) ?? new HashSet<int>();
+            var vapenIds = groups.GetValueOrDefault("Vapenkontrollant") ?? new HashSet<int>();
+            var banIds = groups.GetValueOrDefault("Banlaggare") ?? new HashSet<int>();
 
-            string FullName(Umbraco.Cms.Core.Models.IMember m)
-            {
-                var n = $"{m.GetValue<string>("firstName") ?? ""} {m.GetValue<string>("lastName") ?? ""}".Trim();
-                return string.IsNullOrEmpty(n) ? (m.Name ?? "Okänd") : n;
-            }
+            var relevant = GetApprovedMembersByIds(foreningsIds.Concat(vapenIds).Concat(banIds));
 
             var foreningsList = new List<object>();
             var vapenList = new List<object>();
             var banList = new List<object>();
 
-            foreach (var m in allMembers)
+            foreach (var m in relevant)
             {
                 int.TryParse(m.GetValue<string>("primaryClubId") ?? "", out int primary);
                 bool inThisClub = primary == clubId;
 
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles == null) continue;
-
-                if (roles.Contains(foreningsRole))
-                    foreningsList.Add(new { memberId = m.Id, name = FullName(m) });
-                if (inThisClub && roles.Contains("Vapenkontrollant"))
-                    vapenList.Add(new { memberId = m.Id, name = FullName(m) });
-                if (inThisClub && roles.Contains("Banlaggare"))
-                    banList.Add(new { memberId = m.Id, name = FullName(m) });
+                if (foreningsIds.Contains(m.Id))
+                    foreningsList.Add(new { memberId = m.Id, name = MemberDisplayName(m) });
+                if (inThisClub && vapenIds.Contains(m.Id))
+                    vapenList.Add(new { memberId = m.Id, name = MemberDisplayName(m) });
+                if (inThisClub && banIds.Contains(m.Id))
+                    banList.Add(new { memberId = m.Id, name = MemberDisplayName(m) });
             }
 
             return Json(new
@@ -359,17 +352,10 @@ namespace HpskSite.Controllers
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current == null) return Json(new { success = false, message = "Login required." });
 
-            var role = $"Kretsinstruktor_{regionCode}";
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
-            var rows = new List<object>();
-            foreach (var m in allMembers)
-            {
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles == null || !roles.Contains(role)) continue;
-                var name = $"{m.GetValue<string>("firstName") ?? ""} {m.GetValue<string>("lastName") ?? ""}".Trim();
-                if (string.IsNullOrEmpty(name)) name = m.Name ?? "Okänd";
-                rows.Add(new { memberId = m.Id, name });
-            }
+            var appointedIds = await GetMemberIdsInGroupAsync($"Kretsinstruktor_{regionCode}");
+            var rows = GetApprovedMembersByIds(appointedIds)
+                .Select(m => (object)new { memberId = m.Id, name = MemberDisplayName(m) })
+                .ToList();
             return Json(new
             {
                 success = true,
@@ -398,21 +384,16 @@ namespace HpskSite.Controllers
                 || await _authService.IsCurrentUserAdminAsync()
                 || await _authService.IsRegionalAdminForRegion(regionCode);
 
-            var role = $"Kretsinstruktor_{regionCode}";
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
-            var rows = new List<object>();
-            foreach (var m in allMembers)
-            {
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles == null || !roles.Contains(role)) continue;
-                rows.Add(new
+            var appointedIds = await GetMemberIdsInGroupAsync($"Kretsinstruktor_{regionCode}");
+            var rows = GetApprovedMembersByIds(appointedIds)
+                .Select(m => (object)new
                 {
                     memberId = m.Id,
                     name = MemberDisplayName(m),
                     email = canSeeContact ? (m.Email ?? "") : null,
                     phone = canSeeContact ? (m.GetValue<string>("phoneNumber") ?? "") : null
-                });
-            }
+                })
+                .ToList();
 
             return Json(new
             {
@@ -431,33 +412,25 @@ namespace HpskSite.Controllers
             if (!await _authService.IsCurrentUserAdminAsync())
                 return Json(new { success = false, message = "Access denied" });
 
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
-            var memberLookup = allMembers.ToDictionary(m => m.Id, m => m);
-
-            var appointmentGroup = $"Riksinstruktor_{areaCode}";
-            var appointedIds = new HashSet<int>();
-            foreach (var m in allMembers)
-            {
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles != null && roles.Contains(appointmentGroup)) appointedIds.Add(m.Id);
-            }
+            var appointedIds = await GetMemberIdsInGroupAsync($"Riksinstruktor_{areaCode}");
 
             var certs = await _certService.GetActiveForMembersAsync(appointedIds, CertificationTypes.Riksinstruktor);
-            var byMember = certs.ToDictionary(c => c.MemberId, c => c);
+            // GroupBy, inte ToDictionary: två aktiva cert på samma medlem får inte krascha listan.
+            var byMember = certs.GroupBy(c => c.MemberId).ToDictionary(g => g.Key, g => g.First());
 
-            var rows = appointedIds.Select(id =>
-            {
-                var m = memberLookup.GetValueOrDefault(id);
-                var name = $"{m?.GetValue<string>("firstName") ?? ""} {m?.GetValue<string>("lastName") ?? ""}".Trim();
-                if (string.IsNullOrEmpty(name)) name = m?.Name ?? "Okänd";
-                var cert = byMember.GetValueOrDefault(id);
-                return new
+            var rows = GetApprovedMembersByIds(appointedIds)
+                .Select(m =>
                 {
-                    memberId = id,
-                    name,
-                    cert = cert == null ? null : ProjectCert(cert)
-                };
-            }).ToList();
+                    var cert = byMember.GetValueOrDefault(m.Id);
+                    return new
+                    {
+                        memberId = m.Id,
+                        name = MemberDisplayName(m),
+                        cert = cert == null ? null : ProjectCert(cert)
+                    };
+                })
+                .OrderBy(x => x.name, StringComparer.CurrentCulture)
+                .ToList();
 
             return Json(new { success = true, data = rows });
         }
@@ -743,6 +716,79 @@ namespace HpskSite.Controllers
             return ctx.Content.GetById(clubId)?.Name ?? "";
         }
 
+        /// <summary>
+        /// Medlems-id:n i en medlemsgrupp, med EN SQL-fråga. Ersätter mönstret
+        /// GetAll(0, int.MaxValue) + GetAllRoles per medlem, som ger ett anrop till
+        /// databasen per medlem i registret — det tog minuter i produktion.
+        /// Använd ALLTID den här när en grupp ska översättas till medlemmar.
+        /// </summary>
+        private async Task<HashSet<int>> GetMemberIdsInGroupAsync(string groupName)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ids = await db.FetchAsync<int>(@"
+                SELECT DISTINCT m2g.Member
+                FROM cmsMember2MemberGroup m2g
+                INNER JOIN umbracoNode grp ON m2g.MemberGroup = grp.id
+                WHERE grp.text = @0", groupName);
+            return new HashSet<int>(ids);
+        }
+
+        /// <summary>Samma sak för flera grupper på en gång — grupp → medlems-id:n.</summary>
+        private async Task<Dictionary<string, HashSet<int>>> GetMemberIdsInGroupsAsync(IEnumerable<string> groupNames)
+        {
+            var names = groupNames.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().ToList();
+            var result = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
+            if (names.Count == 0) return result;
+
+            var paramNames = string.Join(",", names.Select((_, i) => "@" + i));
+            using var db = _databaseFactory.CreateDatabase();
+            var rows = await db.FetchAsync<GroupMemberRow>($@"
+                SELECT grp.text AS GroupName, m2g.Member AS MemberId
+                FROM cmsMember2MemberGroup m2g
+                INNER JOIN umbracoNode grp ON m2g.MemberGroup = grp.id
+                WHERE grp.text IN ({paramNames})", names.Cast<object>().ToArray());
+
+            foreach (var r in rows)
+            {
+                if (!result.TryGetValue(r.GroupName, out var set))
+                {
+                    set = new HashSet<int>();
+                    result[r.GroupName] = set;
+                }
+                set.Add(r.MemberId);
+            }
+            return result;
+        }
+
+        /// <summary>(grupp, medlems-id) för alla grupper vars namn börjar med prefixet,
+        /// t.ex. "Foreningsinstruktor_" för hela kretsens instruktörskatalog.</summary>
+        private async Task<List<GroupMemberRow>> GetGroupMembershipsByPrefixAsync(string prefix)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<GroupMemberRow>(@"
+                SELECT grp.text AS GroupName, m2g.Member AS MemberId
+                FROM cmsMember2MemberGroup m2g
+                INNER JOIN umbracoNode grp ON m2g.MemberGroup = grp.id
+                WHERE grp.text LIKE @0", prefix.Replace("%", "[%]").Replace("_", "[_]") + "%");
+        }
+
+        /// <summary>Slår upp en handfull medlemmar via id. Bara för små mängder
+        /// (gruppmedlemmar) — aldrig för hela registret.</summary>
+        private List<Umbraco.Cms.Core.Models.IMember> GetApprovedMembersByIds(IEnumerable<int> ids)
+        {
+            return ids.Distinct()
+                .Select(id => _memberService.GetById(id))
+                .Where(m => m != null && m.IsApproved)
+                .Select(m => m!)
+                .ToList();
+        }
+
+        public class GroupMemberRow
+        {
+            public string GroupName { get; set; } = "";
+            public int MemberId { get; set; }
+        }
+
         private static string MemberDisplayName(Umbraco.Cms.Core.Models.IMember m)
         {
             var n = $"{m.GetValue<string>("firstName") ?? ""} {m.GetValue<string>("lastName") ?? ""}".Trim();
@@ -788,13 +834,13 @@ namespace HpskSite.Controllers
             var clubName = GetClubName(clubId);
             var certLabel = CertificationTypes.DisplayName(certType);
 
-            var admins = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.IsApproved && !string.IsNullOrEmpty(m.Email))
-                .Where(m =>
-                {
-                    var roles = _memberService.GetAllRoles(m.Id) ?? Enumerable.Empty<string>();
-                    return roles.Contains("Administrators") || (roleGroup != null && roles.Contains(roleGroup));
-                })
+            var groupNames = new List<string> { "Administrators" };
+            if (roleGroup != null) groupNames.Add(roleGroup);
+            var groups = await GetMemberIdsInGroupsAsync(groupNames);
+            var adminIds = groups.Values.SelectMany(v => v).Distinct();
+
+            var admins = GetApprovedMembersByIds(adminIds)
+                .Where(m => !string.IsNullOrEmpty(m.Email))
                 .ToList();
 
             foreach (var a in admins)

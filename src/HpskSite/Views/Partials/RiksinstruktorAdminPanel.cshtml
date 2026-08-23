@@ -116,7 +116,10 @@
     function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
 
     function loadAll() {
-        document.getElementById('riksLoading').style.display = '';
+        var loading = document.getElementById('riksLoading');
+        loading.innerHTML = '<div class="spinner-border spinner-border-sm text-primary" role="status"></div>'
+                          + '<span class="ms-2 small text-muted">Laddar...</span>';
+        loading.style.display = '';
         document.getElementById('riksContent').style.display = 'none';
 
         // Fetch all members + filter to those with Riksinstruktor_<area> roles client-side.
@@ -181,6 +184,12 @@
             });
             document.getElementById('riksLoading').style.display = 'none';
             document.getElementById('riksContent').style.display = '';
+        }).catch(function (e) {
+            // Utan den här slutade snurran aldrig snurra — ett fel blev tyst evig laddning.
+            console.error('Riksinstruktörer: kunde inte ladda', e);
+            loading.innerHTML = '<div class="alert alert-danger small mb-0">'
+                              + 'Kunde inte hämta listan. Försök igen med uppdateringsknappen.'
+                              + '</div>';
         });
     }
 
@@ -203,6 +212,10 @@
                         opt.value = m.id; opt.textContent = m.name;
                         sel.appendChild(opt);
                     });
+            })
+            .catch(function (e) {
+                console.error('Riksinstruktörer: kunde inte hämta medlemmar', e);
+                sel.innerHTML = '<option value="">— Kunde inte hämta medlemmar —</option>';
             });
     }
 
