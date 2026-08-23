@@ -1,0 +1,26 @@
+@*
+    Läget mellan tävling och publicerade listor: resultaten kontrolleras.
+
+    Renderas när det INTE ligger någon fil som börjar på "Resultat" i dokumentmappen. Tidigare
+    utelämnades resultatsektionen helt i det läget — det var rätt FÖRE tävlingen, när vi inte visste
+    om resultat skulle komma alls, men fel efteråt: en skytt som letar sitt resultat och inte hittar
+    någon rubrik alls drar samma slutsats som skytten som felanmälde live-resultaten, alltså att
+    pistol.nu tappat dem. Tomrum är också ett besked, och det här är det besked som blir kvar.
+
+    Löftet är avsiktligt utan datum. "Publiceras under kvällen" som slår fel är sämre än inget
+    klockslag, och kontrollen tar den tid den tar.
+
+    Delad av hubben och resultatsidan så beskedet bara finns på ett ställe.
+*@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+
+<div class="sm-card sm-waiting">
+    <div class="sm-waiting-icon" aria-hidden="true">⏳</div>
+    <div>
+        <h3>Resultatlistorna kontrolleras</h3>
+        <p class="mb-0">
+            Tävlingsledningen går igenom listorna innan de anslås. De publiceras här så snart
+            genomgången är klar.
+        </p>
+    </div>
+</div>

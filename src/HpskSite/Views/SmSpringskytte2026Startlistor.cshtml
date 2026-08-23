@@ -1,12 +1,16 @@
 @*
-    /sm-springskytte-2026/startlistor — startlistorna som PDF.
+    /sm-springskytte-2026/startlistor (= /resultat) — resultat- och startlistorna som PDF.
 
-    Tävlingsledningen kör inte pistol.nu:s startlistor eller resultathantering för det här SM:et
-    (beslut 2026-08-18). Vi vet INTE om resultat kommer att anslås, och skriver därför ingenting om
-    dem: resultatsektionen renderas bara om det faktiskt ligger en resultatfil i mappen. Ett tomt
-    löfte är samma fel som en felaktig uppgift.
+    Tävlingsledningen körde inte pistol.nu:s startlistor eller resultathantering för det här SM:et
+    (beslut 2026-08-18) — båda anslås som PDF.
 
-    Allt på sidan läses ur filnamnen av SmSpringskytte2026Controller.ResolveDocuments() — en ny lista
+    SIDAN ÄR EFTERHANDSSIDA, UTAN FÖRHANDSLÄGE. Tävlingen är genomförd och kommer inte att ligga i
+    framtiden igen, så texterna om att spara listan i telefonen innan man åker är borta — inte
+    gömda bakom en flagga. Det gör att `hasResults` bara betyder EN sak: finns listorna, eller
+    kontrolleras de fortfarande. Låt den fortsätta betyda bara det — den bar tidigare även
+    "tävlingen är över", och då gav en tömd resultatmapp tillbaka hela förhandssidan.
+
+    Allt läses ur filnamnen av SmSpringskytte2026Controller.ResolveDocuments() — en ny lista
     publiceras genom att lägga filen i mappen, aldrig genom att deploya kod.
 *@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
@@ -20,9 +24,12 @@
     var results = docs.Where(d => d.Category == "Resultat").ToList();
     var other = docs.Where(d => d.Category == "Övriga dokument").ToList();
 
-    var heading = results.Any() ? "Startlistor och resultat" : "Startlistor";
-    ViewBag.Title = heading + " — SM i Springskytte 2026";
-    ViewBag.MetaDescription = "Startlistor för SM i springskytte 2026 i Obbhult, vapengrupp C (lördag 22 augusti) och vapengrupp A (söndag 23 augusti).";
+    var hasResults = results.Any();
+
+    ViewBag.Title = "Resultat — SM i Springskytte 2026";
+    ViewBag.MetaDescription = hasResults
+        ? "Resultatlistor från SM i springskytte 2026 i Obbhult — individuellt och lagtävling i vapengrupp C (lördag 22 augusti) och vapengrupp A (söndag 23 augusti)."
+        : "Resultatlistorna från SM i springskytte 2026 i Obbhult kontrolleras och publiceras här så snart de är klara. Startlistorna finns som PDF.";
 }
 
 <link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
@@ -30,21 +37,61 @@
 <div class="container sm-page my-4">
 
     <header class="sm-hero">
-        <div class="sm-kicker">SM i Springskytte 2026</div>
-        <h1>@heading</h1>
-        <p class="sm-hero-sub">Ladda ner som PDF — spara den i telefonen innan du åker</p>
+        <div class="sm-kicker">SM i Springskytte 2026 · Obbhult 22–23 augusti</div>
+        <h1>Resultat</h1>
+        <p class="sm-hero-sub">
+            @if (hasResults)
+            {
+                <text>Ladda ner listorna som PDF — individuellt och lagtävling, vapengrupp C och A</text>
+            }
+            else
+            {
+                <text>Resultatlistorna kontrolleras och publiceras här så snart de är klara</text>
+            }
+        </p>
     </header>
 
     @await Html.PartialAsync("_SmSpringskytteNav")
+
+    @* Resultatsektionen renderas ALLTID, även utan filer — se _SmSpringskytteResultatVantar om
+       varför ett tomrum är ett sämre besked än ett väntemeddelande. *@
+    <section class="sm-section">
+        <h2>Resultat</h2>
+        @await Html.PartialAsync("_SmSpringskytteResultatNot")
+        @if (hasResults)
+        {
+            <p>
+                Tack för ett fint mästerskap. Här är resultatlistorna från båda dagarna — individuellt
+                och lagtävling, i den ordning de sköts.
+            </p>
+            <div class="sm-doc-list">
+                @foreach (var doc in results)
+                {
+                    @await Html.PartialAsync("_SmSpringskytteDokument", doc)
+                }
+            </div>
+            @if (results.Any(d => d.Status == "Preliminär"))
+            {
+                <p class="sm-note mt-3">
+                    <strong>Listorna är preliminära.</strong> Har du en fråga om ditt eget resultat —
+                    hör av dig till tävlingsledningen.
+                </p>
+            }
+        }
+        else
+        {
+            @await Html.PartialAsync("_SmSpringskytteResultatVantar")
+        }
+    </section>
 
     <section class="sm-section">
         <h2>Startlistor</h2>
         @if (startLists.Any())
         {
+            @* Efter tävlingen är startlistan ett arkiv, inte en instruktion — nummerlappar och
+               ändringar vid sekretariatet hörde till tävlingsdagen. *@
             <p>
-                Startlistorna är sorterade på vapengrupp. Ditt startnummer står i kolumnen längst till
-                vänster — <strong>nummerlappen hämtar du i vapenkontrollen</strong> och den ska bäras väl
-                synlig på ryggen.
+                Startlistorna ligger kvar som de såg ut på tävlingsdagarna, sorterade på vapengrupp.
             </p>
             <div class="sm-doc-list">
                 @foreach (var doc in startLists)
@@ -52,36 +99,14 @@
                     @await Html.PartialAsync("_SmSpringskytteDokument", doc)
                 }
             </div>
-            @if (startLists.Any(d => d.Status == "Preliminär"))
-            {
-                <p class="sm-note mt-3">
-                    <strong>Listorna är preliminära.</strong> Kontrollera din starttid igen när du kommer
-                    till tävlingsplatsen — ändringar anslås vid sekretariatet.
-                </p>
-            }
         }
         else
         {
             <div class="sm-card">
-                <p class="mb-0">Startlistorna publiceras här så snart de är klara.</p>
+                <p class="mb-0">Startlistorna ligger inte längre uppe här.</p>
             </div>
         }
     </section>
-
-    @* Renderas bara när det finns resultat. Vi vet inte om några kommer, och en tom sektion som
-       lovar dem är missvisande. Lägg en fil som börjar på "Resultat" i mappen och den dyker upp. *@
-    @if (results.Any())
-    {
-        <section class="sm-section">
-            <h2>Resultat</h2>
-            <div class="sm-doc-list">
-                @foreach (var doc in results)
-                {
-                    @await Html.PartialAsync("_SmSpringskytteDokument", doc)
-                }
-            </div>
-        </section>
-    }
 
     @if (other.Any())
     {
@@ -97,11 +122,10 @@
     }
 
     <section class="sm-section">
-        <h2>Ladda ner innan du åker</h2>
+        <h2>Dokument från tävlingen</h2>
         <div class="sm-card">
             <p>
-                Täckningen i grustaget kan vara svag. Öppna filerna hemma eller på vägen så du har dem
-                kvar offline.
+                Tävlings-PM och kartor ligger kvar för den som vill gå tillbaka till förutsättningarna.
             </p>
             <p class="sm-downloads mb-0">
                 <a class="btn btn-outline-primary btn-sm" href="~/files/sm-springskytte-2026/tavlings-pm.pdf" target="_blank" rel="noopener">📄 Tävlings-PM som PDF</a>

@@ -329,6 +329,66 @@ a.sm-card .sm-card-more {
     border-radius: 0 8px 8px 0;
 }
 
+/* Framtradande upplysning, gul och avsiktligt hog. Stefans beslut 2026-08-23, och
+   skalet ar viktigare an utseendet: skyttarna forvantade sig resultaten i pistol.nus
+   resultatvisning och en skytt felanmalde live-resultaten som trasiga. Rutan finns for
+   att ALLA ska se den, sa att ingen drar slutsatsen att pistol.nu inte klarar resultat.
+   Gor den darfor inte lugn och diskret "for att den inte ska lasa som en varning" --
+   att den syns ar hela poangen. Kraftigare an .sm-note (2px runtom + 6px kant + starkare
+   ton) eftersom .sm-note ar en rad i loptext, det har ar ett block som stoppar blicken. */
+.sm-notice {
+    display: flex;
+    gap: 0.9rem;
+    align-items: flex-start;
+    border: 2px solid var(--sm-yellow);
+    border-left-width: 6px;
+    background: rgba(224, 168, 0, 0.14);
+    border-radius: 12px;
+    padding: 1rem 1.15rem;
+    margin-bottom: 1.25rem;
+}
+
+.sm-notice-icon {
+    flex: 0 0 auto;
+    font-size: 1.5rem;
+    line-height: 1.2;
+}
+
+/* Slar .sm-section h3 (samma specificitet) genom att sta senare i filen -- dess
+   margin-top: 1.5rem skulle annars trycka rubriken ur rutan. */
+.sm-notice h3 {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.sm-notice p {
+    margin-bottom: 0;
+}
+
+/* Vantekortet: "resultatlistorna kontrolleras". Medvetet NEUTRALT och inte gult som
+   .sm-notice -- det ar ett lagesbesked, inte en varning, och tva gula block ovanpa
+   varandra gor att man slutar lasa bada. Samma flex-layout som .sm-notice sa ikon och
+   rubrik hamnar likadant nar de star intill varandra. */
+.sm-waiting {
+    display: flex;
+    gap: 0.9rem;
+    align-items: flex-start;
+}
+
+.sm-waiting-icon {
+    flex: 0 0 auto;
+    font-size: 1.5rem;
+    line-height: 1.2;
+}
+
+/* Slar .sm-section h3 (samma specificitet) genom att sta senare i filen. */
+.sm-waiting h3 {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
 /* ---------- Misc ---------- */
 .sm-list-tight {
     padding-left: 1.15rem;

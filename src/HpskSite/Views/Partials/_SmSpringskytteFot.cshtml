@@ -3,14 +3,19 @@
 
     Anmälan, avgifter, laganmälan och betalning bor på tävlingsnoden, och den som läst klart en sida
     ska inte behöva leta sig tillbaka till startsidan för att komma dit. Startlistor och resultat bor
-    däremot HÄR som PDF (beslut 2026-08-18) — tävlingsledningen kör inte pistol.nu:s startlistor eller
-    resultathantering för det här SM:et.
+    däremot HÄR som PDF (beslut 2026-08-18) — tävlingsledningen körde inte pistol.nu:s startlistor
+    eller resultathantering för det här SM:et.
+
+    Efter tävlingen är anmälan inte längre poängen med tävlingssidan, men fakturor och betalningar
+    ligger kvar där — därför står länken kvar, med en formulering som inte lovar en öppen anmälan.
     ViewData["CompetitionUrl"] är alltid satt (controllern faller tillbaka på prod-URL:en).
 *@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     var smfotUrl = ViewData["CompetitionUrl"] as string ?? "";
     var smfotActive = ViewData["ActivePage"] as string ?? "";
+    // Alltid /startlistor — se noten i _SmSpringskytteNav om varför adressen inte är /resultat.
+    var smfotDocsUrl = "/sm-springskytte-2026/startlistor";
 }
 
 @if (!string.IsNullOrEmpty(smfotUrl))
@@ -18,12 +23,12 @@
     <section class="sm-section sm-foot">
         <h2>Till tävlingssidan</h2>
         <p>
-            <strong>Anmälan, avgifter, laganmälan och betalning</strong> sköts på tävlingens egen sida.
+            <strong>Avgifter, laganmälan och betalning</strong> sköts på tävlingens egen sida.
             @if (smfotActive != "startlistor")
             {
                 <text>
-                    Startlistorna hittar du under
-                    <a href="/sm-springskytte-2026/startlistor">Startlistor &amp; resultat</a>.
+                    Resultat- och startlistorna hittar du under
+                    <a href="@smfotDocsUrl">Resultat &amp; startlistor</a>.
                 </text>
             }
         </p>

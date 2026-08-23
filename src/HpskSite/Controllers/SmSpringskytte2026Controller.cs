@@ -13,7 +13,8 @@ namespace HpskSite.Controllers
     ///   /sm-springskytte-2026/banor        → löpslingor + skjutområden (kartor)
     ///   /sm-springskytte-2026/service      → servering, parkering, boende
     ///   /sm-springskytte-2026/funktionarer → funktionärsinfo + länkar till schema/bemanning
-    ///   /sm-springskytte-2026/startlistor  → startlistorna som PDF (+ resultat om sådana dyker upp)
+    ///   /sm-springskytte-2026/resultat     → resultatlistorna som PDF (samma sida som /startlistor)
+    ///   /sm-springskytte-2026/startlistor  → startlistorna som PDF (+ resultat när sådana finns)
     ///
     /// Routed controller, no Umbraco node (same pattern as /mitt-schema, /styrelse, /siktbild) — the
     /// content is fixed for this one event, so a doctype + backoffice setup buys nothing and would be
@@ -23,10 +24,9 @@ namespace HpskSite.Controllers
     /// so it must not depend on a client fetch or a login completing.
     ///
     /// The competition NODE keeps anmälan, avgifter, laganmälan och betalning — this site only links to
-    /// it. Tävlingsledningen kör dock INTE startlistor eller resultat i pistol.nu för det här SM:et
-    /// (beslut 2026-08-18): startlistorna anslås som PDF på /startlistor. Om resultat kommer att anslås
-    /// vet vi inte, så INGEN sida får utfästa något om resultat — inte live-resultat, inte "publiceras
-    /// efter tävlingen" — och inte starttider i Mitt schema.
+    /// it. Tävlingsledningen körde INTE startlistor eller resultat i pistol.nu för det här SM:et
+    /// (beslut 2026-08-18) — båda anslås som PDF på /resultat (= /startlistor, samma sida). Resultaten
+    /// kom 2026-08-23, och sajten leder nu med dem: det här är en efterhandssida, inte en förhandssida.
     /// The node is resolved by URL segment rather than a hardcoded id so the same code works in dev and
     /// prod; override with config key "SmSpringskytte2026:CompetitionUrlSegment" if it is ever renamed.
     /// </summary>
@@ -114,9 +114,18 @@ namespace HpskSite.Controllers
         [HttpGet("funktionarer")]
         public IActionResult Funktionarer() => Page("SmSpringskytte2026Funktionarer", "funktionarer", "För funktionärer — SM i Springskytte 2026");
 
-        [HttpGet("startlistor")]
+        // Två URL:er, samma sida: /startlistor är adressen som stod i utskicken före tävlingen och som
+        // därför är delad och bokmärkt, /resultat är den man skriver in efteråt. Ingen redirect — en 302
+        // från en länk någon just fått i handen ser ut som att sidan flyttat.
+        //
+        // ⚠ VYERNA LÄNKAR ALLTID TILL /startlistor, aldrig till /resultat. Razor-vyerna kompileras vid
+        // körning och deployas därför utan bygge, medan den här routen är C#. En href till /resultat i en
+        // vy kan alltså nå produktion innan routen gör det — och då är menylänken en 404. /resultat är
+        // ett alias för inskrivna och delade adresser, inte något sidorna får peka på.
         // Vyn sätter ViewBag.Title själv utifrån vad som faktiskt ligger i mappen.
-        public IActionResult Startlistor() => Page("SmSpringskytte2026Startlistor", "startlistor", "Startlistor — SM i Springskytte 2026");
+        [HttpGet("startlistor")]
+        [HttpGet("resultat")]
+        public IActionResult Startlistor() => Page("SmSpringskytte2026Startlistor", "startlistor", "Resultat och startlistor — SM i Springskytte 2026");
 
         private IActionResult Page(string view, string active, string title)
         {
@@ -148,9 +157,9 @@ namespace HpskSite.Controllers
             var documents = ResolveDocuments();
             ViewData["Documents"] = documents;
 
-            // Navigeringen och sidrubriken nämner resultat först när det FINNS resultat att visa — vi
-            // vet inte om de kommer, och en flik som lovar dem är samma slags missvisande löfte som en
-            // tom resultatsektion. Ligger i ViewData eftersom navigeringspartialen är delad.
+            // Resultat leder — i navigeringen, i rubrikerna och på hubben — så snart det FINNS resultat
+            // att visa. Före tävlingen fanns inga, och en flik som lovade dem hade varit ett tomt löfte;
+            // nu är det omvända sant. Ligger i ViewData eftersom navigeringspartialen är delad.
             ViewData["HasResultDocuments"] = documents.Any(d => d.Category == CategoryResults);
 
             return View(view, rootNode);

@@ -7,13 +7,23 @@
 @{
     Layout = "Master.cshtml";
     ViewBag.Title = "SM i Springskytte 2026 — Obbhult, Varberg";
-    ViewBag.MetaDescription = "Allt du behöver veta om Svenska Mästerskapen i springskytte 22–23 augusti 2026 i Släryds grustag, Obbhult utanför Varberg. Tidsplan, banor, PM, service och funktionärsinfo.";
 
     // CompetitionId läses inte här — _SmSpringskytteFore hämtar det själv ur ViewData.
     var compUrl = ViewData["CompetitionUrl"] as string ?? "";
+
+    // Resultaten är hubbens huvudsak så snart de finns. Controllern lägger dokumenten i ViewData
+    // för ALLA sidor i sajten, så hubben kan lista resultatfilerna själv utan en egen läsning.
+    var docs = ViewData["Documents"] as IEnumerable<HpskSite.Controllers.SmDocument>
+               ?? Array.Empty<HpskSite.Controllers.SmDocument>();
+    var results = docs.Where(d => d.Category == "Resultat").ToList();
+    var hasResults = results.Any();
     var contactName = ViewData["ContactName"] as string ?? "";
     var contactEmail = ViewData["ContactEmail"] as string ?? "";
     var contactPhone = ViewData["ContactPhone"] as string ?? "";
+
+    ViewBag.MetaDescription = hasResults
+        ? "Resultat från Svenska Mästerskapen i springskytte 22–23 augusti 2026 i Släryds grustag, Obbhult utanför Varberg — individuellt och lagtävling i vapengrupp C och A."
+        : "Resultatlistorna från Svenska Mästerskapen i springskytte 22–23 augusti 2026 i Obbhult kontrolleras och publiceras så snart de är klara. Tidsplan, banor, PM och service.";
 }
 
 <link href="~/css/sm-springskytte-2026.css" rel="stylesheet" asp-append-version="true" />
@@ -25,14 +35,45 @@
         <h1>SM i Springskytte 2026</h1>
         <p class="sm-hero-sub">22–23 augusti · Släryds grustag, Obbhult utanför Varberg</p>
         <div class="sm-hero-facts">
+            <span>@(hasResults ? "🏆 Resultaten är publicerade" : "⏳ Resultatlistorna kontrolleras")</span>
             <span>📅 Lördag 22/8: vapengrupp C + stafett</span>
             <span>📅 Söndag 23/8: vapengrupp A</span>
-            <span>🔫 Vapenkontroll öppnar fredag 18.00</span>
             <span>🏅 Första SM i springskytte i vapengrupp A</span>
         </div>
     </header>
 
     @await Html.PartialAsync("_SmSpringskytteNav")
+
+    @* Resultaten ligger först på sidan — det är dem alla kommer hit för nu. Filerna listas direkt
+       här, så ingen behöver klicka sig vidare. Sektionen renderas ÄVEN utan filer: en tömd mapp
+       ska ge beskedet att listorna kontrolleras, inte ett tomrum där rubriken borde stått. *@
+    <section class="sm-section">
+        <h2>Resultat</h2>
+        @await Html.PartialAsync("_SmSpringskytteResultatNot")
+        @if (hasResults)
+        {
+            <p class="lead">
+                Tack för ett fint mästerskap. Här är resultatlistorna från båda dagarna — individuellt
+                och lagtävling, vapengrupp C och A.
+            </p>
+            <div class="sm-doc-list">
+                @foreach (var doc in results)
+                {
+                    @await Html.PartialAsync("_SmSpringskytteDokument", doc)
+                }
+            </div>
+            <p class="mt-3 mb-0">
+                <a class="btn btn-primary" href="/sm-springskytte-2026/startlistor">Resultat &amp; startlistor</a>
+            </p>
+        }
+        else
+        {
+            @await Html.PartialAsync("_SmSpringskytteResultatVantar")
+            <p class="mt-3 mb-0">
+                <a class="btn btn-outline-primary" href="/sm-springskytte-2026/startlistor">Startlistor</a>
+            </p>
+        }
+    </section>
 
     <section class="sm-section">
         <h2>Välkommen till Halland</h2>
@@ -42,21 +83,21 @@
             därtill är Svenska Pistolskytteförbundets första SM-springskytte i vapengrupp A.
         </p>
         <p>
-            Vi känner oss väl förberedda och trygga i att kunna bjuda på utmanande, rättvisa och därmed fina
-            tävlingsdagar. Putsen på diverse detaljer pågår såklart in i det sista. På den här sidan samlar vi
-            all information — tävlings-PM, banor, service och funktionärsinfo — och den uppdateras löpande fram
-            till tävlingsdagarna.
+            Tack till alla skyttar, lagledare och funktionärer som gjorde mästerskapet till vad det blev.
+            Sidan står kvar som den var: resultaten högst upp, och under dem tävlings-PM, banor, service
+            och funktionärsinfo precis som under tävlingsdagarna.
         </p>
-        <p class="mb-0"><strong>Väl mött i Halland!</strong></p>
+        <p class="mb-0"><strong>Tack för att ni kom till Halland!</strong></p>
     </section>
 
-    @await Html.PartialAsync("_SmSpringskytteFore")
+    @* "Gör det här innan du åker" (Mitt schema + notiser) är borttagen — tävlingen är genomförd.
+       Partialen _SmSpringskytteFore lever kvar för funktionärssidan, som lämnas orörd. *@
 
     <section class="sm-section">
         <h2>Tidsplan</h2>
         <p>
-            <a href="/sm-springskytte-2026/startlistor">Startlistorna finns här som PDF</a> — din exakta
-            starttid står där. Tiderna för prisutdelning och stafettstart är ungefärliga.
+            Så här såg dagarna ut. <a href="/sm-springskytte-2026/startlistor">Startlistorna ligger kvar</a>
+            tillsammans med resultaten.
         </p>
         <div class="row g-3">
             <div class="col-md-6">
@@ -126,28 +167,37 @@
     </section>
 
     <section class="sm-section">
-        <h2>Startlistor och anmälan</h2>
+        <h2>Resultat och tävlingssida</h2>
         <div class="row g-3">
             <div class="col-md-6">
                 <div class="sm-card">
-                    <h3>📄 Startlistor</h3>
+                    <h3>🏆 Resultat och startlistor</h3>
                     <p>
-                        Startlistorna för vapengrupp C och A finns här som PDF — ditt startnummer och din
-                        starttid.
+                        @if (hasResults)
+                        {
+                            <text>
+                                Resultatlistorna för vapengrupp C och A, individuellt och lagtävling — och
+                                startlistorna som de såg ut på tävlingsdagarna.
+                            </text>
+                        }
+                        else
+                        {
+                            <text>
+                                Resultatlistorna kontrolleras och publiceras så snart de är klara. Startlistorna
+                                ligger kvar som de såg ut på tävlingsdagarna.
+                            </text>
+                        }
                     </p>
-                    <a class="btn btn-primary" href="/sm-springskytte-2026/startlistor">Till startlistorna</a>
+                    <a class="btn btn-primary" href="/sm-springskytte-2026/startlistor">Till resultaten</a>
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="sm-card">
                     <h3>Tävlingssidan</h3>
                     <p>
-                        Anmälan, avgifter, laganmälan och betalning sköts på tävlingens egen sida.
+                        Avgifter, laganmälan och betalning sköts på tävlingens egen sida.
                     </p>
                     <a class="btn btn-outline-primary" href="@compUrl">Till tävlingssidan</a>
-                    <p class="sm-note mt-3 mb-0">
-                        <strong>Inbetalda startavgifter återbetalas inte efter 15 augusti.</strong>
-                    </p>
                 </div>
             </div>
         </div>
@@ -178,9 +228,6 @@
                     <a class="btn btn-outline-primary btn-sm"
                        href="https://www.google.com/maps/search/?api=1&query=57.131637,12.513277"
                        target="_blank" rel="noopener">Öppna i Google Maps</a>
-                    <p class="mt-3 mb-0 small text-muted">
-                        Täckningen i grustaget kan vara svag. Ladda gärna ner PM och kartor innan du åker.
-                    </p>
                 </div>
             </div>
         </div>
