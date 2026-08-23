@@ -270,8 +270,16 @@
 
         <!-- Members Tab -->
         <div class="tab-pane fade" id="membersTab">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="mb-0">Klubbmedlemmar</h5>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                <h5 class="mb-0">Klubbmedlemmar <span class="fw-normal small text-muted" id="clubMemberCount"></span></h5>
+                <div class="d-flex align-items-center justify-content-end flex-wrap gap-2 ms-auto">
+                <!-- Search filters the already-loaded list in the browser; no reload, so it
+                     stays instant even for a club with a couple of thousand members. -->
+                <div class="input-group input-group-sm club-member-search">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" id="clubMemberSearch" placeholder="Sök namn, e-post, telefon"
+                           aria-label="Sök bland klubbens medlemmar" oninput="renderClubMembers()">
+                </div>
                 <div class="dropdown">
                     <button class="btn btn-primary dropdown-toggle" type="button" id="memberActionsMenu" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="bi bi-sliders me-2"></i>Åtgärder
@@ -334,6 +342,7 @@
                             </button>
                         </li>
                     </ul>
+                </div>
                 </div>
             </div>
 
@@ -3785,6 +3794,11 @@ function deleteClubCompetition(competitionId, competitionName) {
 
 // ===== MEMBERS TAB FUNCTIONS =====
 
+// The full member list as loaded from the server. Search and sorting work on this
+// copy in the browser, so neither costs a round trip.
+let clubMembersData = [];
+let clubMemberSort = { key: 'name', dir: 1 };
+
 // Load Club Members
 function loadClubMembers() {
     const container = document.getElementById('clubMembersTableContainer');
@@ -3853,19 +3867,95 @@ function renderMemberAvatar(member) {
 }
 
 function displayClubMembers(members) {
-    const container = document.getElementById('clubMembersTableContainer');
+    clubMembersData = members || [];
+    renderClubMembers();
+}
 
-    if (!members || members.length === 0) {
+// Sortable columns. `sort` returns the value we order on: a string for the text
+// columns, a number for the two "senast aktiv" columns (which carry a unix
+// timestamp from the server, so "5 min sedan" sorts before "3 dagar sedan").
+const CLUB_MEMBER_COLUMNS = [
+    { key: 'name',   label: 'Namn',    sort: m => `${m.firstName || ''} ${m.lastName || ''}`.trim().toLowerCase() },
+    { key: 'email',  label: 'E-post',  sort: m => (m.email || '').toLowerCase() },
+    { key: 'phone',  label: 'Telefon', sort: m => (m.phoneNumber || '').toLowerCase() },
+    { key: 'web',    label: 'Webb',    thClass: 'text-nowrap', sort: m => m.lastActiveSortValue || 0 },
+    { key: 'app',    label: 'App',     thClass: 'text-nowrap', sort: m => m.lastMobileActiveSortValue || 0 },
+    { key: 'status', label: 'Status',  sort: m => (m.isApproved ? 1 : 0) }
+];
+
+function sortClubMembers(key) {
+    if (clubMemberSort.key === key) {
+        clubMemberSort.dir = -clubMemberSort.dir;
+    } else {
+        clubMemberSort = { key: key, dir: 1 };
+    }
+    renderClubMembers();
+}
+
+function matchesClubMemberSearch(member, needle) {
+    const haystack = [
+        member.firstName, member.lastName, member.email,
+        member.phoneNumber, member.shooterIdNumber
+    ].join(' ').toLowerCase();
+    // Every word has to match somewhere, so "anna sund" finds Anna Sundberg no
+    // matter which order the admin types the name in.
+    return needle.split(/\s+/).every(word => haystack.includes(word));
+}
+
+function renderClubMembers() {
+    const container = document.getElementById('clubMembersTableContainer');
+    if (!container) return;
+
+    const searchBox = document.getElementById('clubMemberSearch');
+    const needle = (searchBox ? searchBox.value : '').trim().toLowerCase();
+    const rows = needle
+        ? clubMembersData.filter(m => matchesClubMemberSearch(m, needle))
+        : clubMembersData.slice();
+
+    const countLabel = document.getElementById('clubMemberCount');
+    if (countLabel) {
+        countLabel.textContent = !clubMembersData.length ? ''
+            : needle ? `(${rows.length} av ${clubMembersData.length})`
+            : `(${clubMembersData.length})`;
+    }
+
+    if (!clubMembersData.length) {
         container.innerHTML = '<div class="alert alert-info">Inga medlemmar har lagts till ännu för denna klubb.</div>';
         return;
     }
 
-    let html = '<div class="table-responsive"><table class="table table-striped">';
-    html += '<thead><tr><th>Namn</th><th>E-post</th><th>Telefon</th>'
-         + '<th class="text-nowrap">Webb</th><th class="text-nowrap">App</th>'
-         + '<th>Status</th><th>Åtgärder</th></tr></thead><tbody>';
+    const column = CLUB_MEMBER_COLUMNS.find(c => c.key === clubMemberSort.key) || CLUB_MEMBER_COLUMNS[0];
+    rows.sort((a, b) => {
+        const va = column.sort(a), vb = column.sort(b);
+        if (typeof va === 'string') {
+            // Blank cells always land at the bottom, whichever way we sort.
+            if (!va !== !vb) return !va ? 1 : -1;
+            return va.localeCompare(vb, 'sv') * clubMemberSort.dir;
+        }
+        return (va - vb) * clubMemberSort.dir;
+    });
 
-    members.forEach(member => {
+    let html = '<div class="table-responsive"><table class="table table-striped">';
+    html += '<thead><tr>';
+    CLUB_MEMBER_COLUMNS.forEach(col => {
+        const active = col.key === clubMemberSort.key;
+        const icon = active
+            ? (clubMemberSort.dir === 1 ? 'bi-caret-up-fill' : 'bi-caret-down-fill')
+            : 'bi-arrow-down-up opacity-25';
+        const ariaSort = active ? (clubMemberSort.dir === 1 ? 'ascending' : 'descending') : 'none';
+        html += `<th class="club-member-sort ${col.thClass || ''}" aria-sort="${ariaSort}" role="button" tabindex="0"`
+             + ` title="Sortera efter ${col.label}" onclick="sortClubMembers('${col.key}')"`
+             + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sortClubMembers('${col.key}');}">`
+             + `${col.label} <i class="bi ${icon} small"></i></th>`;
+    });
+    html += '<th>Åtgärder</th></tr></thead><tbody>';
+
+    if (!rows.length) {
+        html += `<tr><td colspan="${CLUB_MEMBER_COLUMNS.length + 1}" class="text-center text-muted py-4">`
+             + 'Ingen medlem matchar sökningen.</td></tr>';
+    }
+
+    rows.forEach(member => {
         const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || 'Okänt namn';
         const statusBadge = member.isApproved
             ? '<span class="badge bg-success">Godkänd</span>'
@@ -5688,6 +5778,28 @@ document.addEventListener('DOMContentLoaded', loadDpaGate);
 
 [data-bs-theme="dark"] .club-admin-panel .ck.ck-editor__editable.ck-focused {
     border-color: var(--bs-primary);
+}
+
+/* Members table: clickable sort headers + the search box on the heading row */
+.club-admin-panel .club-member-sort {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.club-admin-panel .club-member-sort:hover {
+    color: var(--bs-primary);
+}
+
+.club-admin-panel .club-member-search {
+    width: 260px;
+}
+
+/* Doubled at-sign below on purpose: Razor reads a bare at-sign as C#, even inside style. */
+@@media (max-width: 575.98px) {
+    .club-admin-panel .club-member-search {
+        width: 100%;
+    }
 }
 </style>
 
