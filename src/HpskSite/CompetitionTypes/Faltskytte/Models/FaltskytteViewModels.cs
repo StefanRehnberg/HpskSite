@@ -272,8 +272,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int[] HitsPerFigure { get; set; } = Array.Empty<int>();
         /// <summary>Poångmål total score (null if station has no poångmål)</summary>
         public int? TiebreakerScore { get; set; }
-        /// <summary>Individual poångmål scores, e.g. [24, 20]</summary>
-        public int[]? PoangmalScores { get; set; }
+        /// <summary>
+        /// Individual poångmål scores, e.g. [24, 20]. A null element means no result has been
+        /// entered for that poängmål (shown as "—"); an entered 0 means the shooter shot and
+        /// scored nothing. Both count as 0 points — only the display differs.
+        /// </summary>
+        public int?[]? PoangmalScores { get; set; }
         /// <summary>Number of re-shoots at this station</summary>
         public int Reshoots { get; set; }
     }

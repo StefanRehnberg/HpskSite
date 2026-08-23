@@ -57,7 +57,7 @@
 <div id="fseKeypad" onclick="if(event.target===this)fseKeypadCancel()">
     <div class="kp-body">
         <div class="text-center small fw-bold text-muted mb-1">Po&auml;ngr&auml;kning</div>
-        <div class="kp-display" id="fseKpDisplay">0</div>
+        <div class="kp-display" id="fseKpDisplay">&mdash;</div>
         <div class="d-flex flex-wrap justify-content-center gap-2">
             <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(1)">1</button>
             <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(2)">2</button>
@@ -72,6 +72,8 @@
             <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(0)">0</button>
             <button class="btn btn-success kp-btn" onclick="fseKeypadOk()">OK</button>
         </div>
+        <button class="btn btn-outline-danger w-100 mt-2" onclick="fseKeypadClear()"><i class="bi bi-x-circle me-1"></i>Ta bort resultat</button>
+        <div class="small text-muted text-center mt-1">&mdash; = inget resultat inmatat. 0 = skytten missade helt.</div>
     </div>
 </div>
 
@@ -543,7 +545,8 @@
                 (wcCfg?.targetGroups || []).forEach(function(tg) {
                     (tg.figures || []).forEach(function(fig) { if (fig.isPoangmal) pmCount++; });
                 });
-                var pmScores = new Array(pmCount).fill(0);
+                // null = inget resultat inmatat, 0 = inmatad nolla (skytten missade helt)
+                var pmScores = new Array(pmCount).fill(null);
                 // Load individual pm scores if available
                 if (data.result.poangmalScores) {
                     try {
@@ -551,7 +554,7 @@
                             ? JSON.parse(data.result.poangmalScores)
                             : data.result.poangmalScores;
                         for (var pi = 0; pi < Math.min(saved.length, pmCount); pi++) {
-                            pmScores[pi] = parseInt(saved[pi]) || 0;
+                            pmScores[pi] = fsePmParse(saved[pi]);
                         }
                     } catch(e) {}
                 } else if (data.result.tiebreakerScore && pmCount === 1) {
@@ -562,7 +565,6 @@
                 shooterHits[member.memberId] = {
                     figHits: hitDist.map(function(v) { return parseInt(v) || 0; }),
                     pmScores: pmScores,
-                    pmTouched: pmScores.map(function(v) { return v > 0; }),
                     reshoots: data.result.reshoots || 0,
                     _dirty: false
                 };
@@ -583,7 +585,7 @@
                 if (fig.isPoangmal) totalPm++;
             });
         });
-        shooterHits[memberId] = { figHits: new Array(totalTargets).fill(null), pmScores: new Array(totalPm).fill(0), pmTouched: new Array(totalPm).fill(false), reshoots: 0, _dirty: false };
+        shooterHits[memberId] = { figHits: new Array(totalTargets).fill(null), pmScores: new Array(totalPm).fill(null), reshoots: 0, _dirty: false };
     }
 
     function fseRenderShooter() {
@@ -656,11 +658,12 @@
 
                 if (fig.isPoangmal) {
                     var pi = pmIdx;
-                    var pmVal = state.pmScores[pi] || 0;
+                    var pmVal = state.pmScores[pi];
+                    var pmSet = fsePmIsSet(pmVal);
                     html += '<div class="d-flex align-items-center gap-2 mt-2">' +
                         '<span class="badge bg-warning text-dark" style="font-size:0.85em">Po\u00e4ngr\u00e4kning</span>' +
-                        '<button class="btn btn-outline-primary fse-pm-tap" onclick="fseOpenKeypad(' + m.memberId + ',' + pi + ')">' +
-                        (pmVal > 0 ? pmVal : '&mdash;') + '</button></div>';
+                        '<button class="btn ' + (pmSet ? 'btn-primary' : 'btn-outline-primary') + ' fse-pm-tap" onclick="fseOpenKeypad(' + m.memberId + ',' + pi + ')">' +
+                        (pmSet ? pmVal : '&mdash;') + '</button></div>';
                     pmIdx++;
                 }
 
@@ -685,11 +688,22 @@
         fseRenderShooter();
     };
 
+    // Poängräkning: null = inget resultat inmatat (visas som "—"), 0 = inmatad nolla.
+    // Båda räknas som 0 poäng, men bara 0 betyder att skytten faktiskt skjutit.
+    function fsePmIsSet(v) { return v !== null && v !== undefined && v !== ''; }
+    function fsePmParse(v) { return fsePmIsSet(v) ? (parseInt(v) || 0) : null; }
+    function fsePmSum(pmScores) {
+        return pmScores.reduce(function(s, v) { return s + (fsePmIsSet(v) ? v : 0); }, 0);
+    }
+    function fsePmAnySet(pmScores) { return pmScores.some(fsePmIsSet); }
+    // Sparas med null i de tomma luckorna så att en inmatad nolla går att skilja från en
+    // tom lucka vid nästa inläsning. null när ingen poängräkning alls är inmatad.
+    function fsePmPayload(pmScores) { return fsePmAnySet(pmScores) ? pmScores : null; }
+
     window.fseSetPm = function(memberId, pmIdx, value) {
         var state = shooterHits[memberId];
         if (!state) return;
-        state.pmScores[pmIdx] = parseInt(value) || 0;
-        state.pmTouched[pmIdx] = true;
+        state.pmScores[pmIdx] = fsePmParse(value);
         state._dirty = true;
     };
 
@@ -699,25 +713,36 @@
         _kpMemberId = memberId;
         _kpPmIdx = pmIdx;
         var state = shooterHits[memberId];
-        var current = state ? (state.pmScores[pmIdx] || 0) : 0;
-        _kpValue = current > 0 ? String(current) : '';
-        document.getElementById('fseKpDisplay').textContent = _kpValue || '0';
+        var current = state ? state.pmScores[pmIdx] : null;
+        _kpValue = fsePmIsSet(current) ? String(current) : '';
+        fseKpRender();
         document.getElementById('fseKeypad').classList.add('show');
     };
+    function fseKpRender() {
+        // Tom display = inget resultat inmatat; OK tar då bort ett tidigare resultat
+        document.getElementById('fseKpDisplay').innerHTML = _kpValue === '' ? '&mdash;' : _kpValue;
+    }
     window.fseKeypadDigit = function(d) {
+        if (_kpValue === '0') _kpValue = ''; // ledande nolla ersätts av nästa siffra
         if (_kpValue.length >= 2) return; // max 2 digits
         _kpValue += String(d);
-        var num = parseInt(_kpValue) || 0;
-        if (num > 50) { _kpValue = '50'; num = 50; }
-        document.getElementById('fseKpDisplay').textContent = _kpValue || '0';
+        if ((parseInt(_kpValue) || 0) > 50) _kpValue = '50';
+        fseKpRender();
     };
     window.fseKeypadBackspace = function() {
         _kpValue = _kpValue.slice(0, -1);
-        document.getElementById('fseKpDisplay').textContent = _kpValue || '0';
+        fseKpRender();
+    };
+    window.fseKeypadClear = function() {
+        _kpValue = '';
+        fseKpRender();
+        fseSetPm(_kpMemberId, _kpPmIdx, null);
+        document.getElementById('fseKeypad').classList.remove('show');
+        fseRenderShooter();
     };
     window.fseKeypadOk = function() {
-        var val = parseInt(_kpValue) || 0;
-        if (val > 50) val = 50;
+        // Tom display tar bort resultatet (tillbaka till "—"), "0" sparar en inmatad nolla
+        var val = _kpValue === '' ? null : Math.min(parseInt(_kpValue) || 0, 50);
         fseSetPm(_kpMemberId, _kpPmIdx, val);
         document.getElementById('fseKeypad').classList.remove('show');
         fseRenderShooter();
@@ -842,8 +867,8 @@
                     patrolNumber: currentPatrol.patrolNumber,
                     shootingClass: m.shootingClass,
                     hitsPerFigure: state.figHits.map(function(v){return v||0;}),
-                    tiebreakerScore: state.pmScores.some(function(v){return v>0;}) ? state.pmScores.reduce(function(s,v){return s+v;},0) : null,
-                    poangmalScores: state.pmScores.some(function(v){return v>0;}) ? state.pmScores : null,
+                    tiebreakerScore: fsePmAnySet(state.pmScores) ? fsePmSum(state.pmScores) : null,
+                    poangmalScores: fsePmPayload(state.pmScores),
                     reshoots: state.reshoots
                 })
             });
@@ -864,10 +889,7 @@
         }
 
         // Validate: check for untouched poångmål
-        var untouchedPm = 0;
-        for (var pi = 0; pi < state.pmTouched.length; pi++) {
-            if (!state.pmTouched[pi]) untouchedPm++;
-        }
+        var untouchedPm = state.pmScores.filter(function(v) { return !fsePmIsSet(v); }).length;
         if (untouchedPm > 0) {
             if (!confirm('Po\u00e4ngr\u00e4kning saknas f\u00f6r ' + untouchedPm + ' figur(er). Spara \u00e4nd\u00e5?')) return;
         }
@@ -876,9 +898,7 @@
         var totalHits = hitsToSave.reduce(function(s,v){return s+v;}, 0);
         if (totalHits > 6) { alert('Max 6 tr\u00e4ff per station!'); return; }
 
-        var tiebreakerScore = null;
-        var hasAnyPm = state.pmScores.some(function(v){return v > 0;});
-        if (hasAnyPm) tiebreakerScore = state.pmScores.reduce(function(s,v){return s+v;}, 0);
+        var tiebreakerScore = fsePmAnySet(state.pmScores) ? fsePmSum(state.pmScores) : null;
 
         var btn = document.getElementById('fseSaveBtn');
         btn.disabled = true;
@@ -896,7 +916,7 @@
                     shootingClass: m.shootingClass,
                     hitsPerFigure: hitsToSave,
                     tiebreakerScore: tiebreakerScore,
-                    poangmalScores: state.pmScores.some(function(v){return v>0;}) ? state.pmScores : null,
+                    poangmalScores: fsePmPayload(state.pmScores),
                     reshoots: state.reshoots
                 })
             });
