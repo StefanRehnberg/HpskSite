@@ -400,16 +400,22 @@
         <td>{city}</td>
         <td>{contactDisplay}</td>
         <td class="dpa-col" data-dpa-club="{id}">{dpaBadge}</td>
-        <td>
-            <button class="btn btn-sm btn-warning me-1" onclick="editClub({id})" title="Redigera klubb">
-                <i class="bi bi-pencil"></i>
-            </button>
-            <button class="btn btn-sm btn-info me-1" onclick="showClubMembers({id}, '{name}')" title="Visa medlemmar">
-                <i class="bi bi-people"></i>
-            </button>
-            <button class="btn btn-sm btn-secondary" onclick="showClubAdmins({id}, '{name}', '{regionalFederation}')" title="Hantera administratörer">
-                <i class="bi bi-person-gear"></i>
-            </button>
+        <td class="text-end">
+            <div class="dropdown">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                        aria-expanded="false" title="Åtgärder för {name}">
+                    <i class="bi bi-sliders me-2"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><button class="dropdown-item" type="button" onclick="editClub({id})">
+                        <i class="bi bi-pencil me-2 text-primary"></i>Redigera klubben</button></li>
+                    <li><button class="dropdown-item" type="button" onclick="showClubMembers({id}, '{name}')">
+                        <i class="bi bi-people me-2 text-info"></i>Visa klubbens medlemmar</button></li>
+                    <li><button class="dropdown-item" type="button" onclick="showClubAdmins({id}, '{name}', '{regionalFederation}')">
+                        <i class="bi bi-person-gear me-2 text-secondary"></i>Hantera klubbadministratörer</button></li>
+                </ul>
+            </div>
         </td>
     </tr>
 </script>

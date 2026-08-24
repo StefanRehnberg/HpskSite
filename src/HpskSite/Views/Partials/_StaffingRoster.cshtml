@@ -846,12 +846,20 @@
         var adminBadge = p.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Kan hantera tävlingen i pistol.nu"></i>' : '';
         var extBadge = p.isExternal ? ' <span class="badge bg-light text-secondary border fw-normal" title="Extern hjälpare utan konto">extern</span>' : '';
 
-        var actions = '';
+        // Ring stays OUTSIDE the menu on purpose: on competition day, phoning a funktionär who
+        // has not turned up is the one action that must be a single tap, and it is a tel: link
+        // rather than a mutation. Everything else goes in the menu, spelled out.
+        var menuItems = '';
         if (!p.readOnly) {
-            actions += '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfAssignPerson(\'' + keyEsc + '\')" title="Ge ett uppdrag"><i class="bi bi-plus-lg"></i></button>';
-            if (p.memberId || p.email) actions += '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfNotifyPerson(\'' + keyEsc + '\')" title="Bjud in / notifiera"><i class="bi bi-envelope"></i></button>';
+            menuItems += '<li><button class="dropdown-item" type="button" onclick="stfAssignPerson(\'' + keyEsc + '\')"><i class="bi bi-plus-lg me-2 text-primary"></i>Ge ett uppdrag</button></li>';
+            if (p.memberId || p.email) menuItems += '<li><button class="dropdown-item" type="button" onclick="stfNotifyPerson(\'' + keyEsc + '\')"><i class="bi bi-envelope me-2 text-secondary"></i>Bjud in / notifiera</button></li>';
         }
-        if (p.phone) actions += '<a class="btn btn-sm btn-outline-success" href="tel:' + esc(p.phone) + '" title="Ring"><i class="bi bi-telephone"></i></a>';
+        menuItems += '<li><button class="dropdown-item" type="button" onclick="stfOpenPerson(\'' + keyEsc + '\')"><i class="bi bi-person-lines-fill me-2 text-secondary"></i>Öppna personkortet</button></li>';
+        var actions = '<div class="dropdown d-inline-block">'
+            + '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false" title="Åtgärder för ' + esc(p.displayName) + '">'
+            + '<i class="bi bi-sliders me-2"></i>Åtgärder</button>'
+            + '<ul class="dropdown-menu dropdown-menu-end">' + menuItems + '</ul></div>';
+        if (p.phone) actions += ' <a class="btn btn-sm btn-outline-success" href="tel:' + esc(p.phone) + '" title="Ring ' + esc(p.displayName) + '"><i class="bi bi-telephone"></i></a>';
 
         var main = '<tr class="' + (open ? 'table-active' : '') + '">'
             + '<td style="cursor:pointer" onclick="stfTogglePerson(\'' + keyEsc + '\')">'
@@ -1122,14 +1130,15 @@
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
         var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
         var pass = a.passLabel ? '<span class="badge bg-primary-subtle text-primary-emphasis border"><i class="bi bi-calendar2-week me-1"></i>' + esc(a.passLabel) + '</span>' : '';
-        var phone = a.phone ? '<a class="btn btn-sm btn-outline-success" href="tel:' + esc(a.phone) + '" title="Ring"><i class="bi bi-telephone"></i></a>' : '';
+        var phone = a.phone ? ' <a class="btn btn-sm btn-outline-success" href="tel:' + esc(a.phone) + '" title="Ring ' + esc(a.displayName) + '"><i class="bi bi-telephone"></i></a>' : '';
         var nameEsc = esc(a.displayName).replace(/'/g, "\\'");
-        var notifyBtn = (a.memberId || a.email)
-            ? '<button type="button" class="btn btn-sm btn-outline-primary" onclick="stfNotify(' + a.id + ',\'' + nameEsc + '\')" title="Bjud in / notifiera (e-post + push)"><i class="bi bi-envelope"></i></button>'
+        // Same rule as the person row: Ring stays a one-tap link, the rest is one menu.
+        var notifyItem = (a.memberId || a.email)
+            ? '<li><button class="dropdown-item" type="button" onclick="stfNotify(' + a.id + ',\'' + nameEsc + '\')"><i class="bi bi-envelope me-2 text-primary"></i>Bjud in / notifiera (e-post + push)</button></li>'
             : '';
         // External (non-member) helper: offer a copyable accept/decline link to send manually (SMS etc.).
-        var linkBtn = (!a.memberId && !a.readOnly)
-            ? '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfCopyInviteLink(' + a.id + ')" title="Kopiera svarslänk (för SMS m.m.)"><i class="bi bi-link-45deg"></i></button>'
+        var linkItem = (!a.memberId && !a.readOnly)
+            ? '<li><button class="dropdown-item" type="button" onclick="stfCopyInviteLink(' + a.id + ')"><i class="bi bi-link-45deg me-2 text-secondary"></i>Kopiera svarslänk (för SMS m.m.)</button></li>'
             : '';
         var note = a.note ? '<div class="text-muted small mt-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(a.note) + '</div>' : '';
         var avail = (a.availabilityLabels && a.availabilityLabels.length)
@@ -1141,9 +1150,16 @@
             : '';
         var actions = a.readOnly
             ? phone
-            : (phone + notifyBtn + linkBtn
-                + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
-                + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ',\'' + nameEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>');
+            : ('<div class="dropdown d-inline-block">'
+                + '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false" title="Åtgärder för ' + esc(a.displayName) + '">'
+                + '<i class="bi bi-sliders me-2"></i>Åtgärder</button>'
+                + '<ul class="dropdown-menu dropdown-menu-end">'
+                + notifyItem
+                + linkItem
+                + '<li><button class="dropdown-item" type="button" onclick="stfEdit(' + a.id + ')"><i class="bi bi-pencil me-2 text-primary"></i>Redigera uppdraget</button></li>'
+                + '<li><hr class="dropdown-divider"></li>'
+                + '<li><button class="dropdown-item text-danger" type="button" onclick="stfDelete(' + a.id + ',\'' + nameEsc + '\')"><i class="bi bi-trash me-2"></i>Ta bort uppdraget</button></li>'
+                + '</ul></div>' + phone);
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
             + '<div>' + star + '<span class="fw-semibold">' + esc(a.displayName) + '</span>' + fn + statusBadge + adminBadge + srcBadge + '</div>'
@@ -2034,12 +2050,18 @@
                     + '<span class="badge ' + (STATE_CLS[SV_STATUS[a.status] || ''] || 'bg-secondary') + '">'
                     + esc(SV_STATUS[a.status] || a.status) + '</span>'
                     + (a.readOnly ? '' :
+                        '<div class="dropdown d-inline-block">'
+                      + '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">'
+                      + '<i class="bi bi-sliders me-2"></i>Åtgärder</button>'
+                      + '<ul class="dropdown-menu dropdown-menu-end">'
                         // Splitting only means something on a row with real from–to times.
-                        (a.shiftLabel && a.shiftLabel.indexOf('–') > 0
-                            ? '<button type="button" class="btn btn-sm btn-outline-warning" onclick="stfSplitOpen(' + a.id + ')" title="Dela passet — någon annan tar resten"><i class="bi bi-scissors"></i></button>'
+                      + (a.shiftLabel && a.shiftLabel.indexOf('–') > 0
+                            ? '<li><button class="dropdown-item" type="button" onclick="stfSplitOpen(' + a.id + ')"><i class="bi bi-scissors me-2 text-warning"></i>Dela passet — någon annan tar resten</button></li>'
                             : '')
-                      + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="stfEdit(' + a.id + ')" title="Ändra"><i class="bi bi-pencil"></i></button>'
-                      + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="stfDelete(' + a.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>')
+                      + '<li><button class="dropdown-item" type="button" onclick="stfEdit(' + a.id + ')"><i class="bi bi-pencil me-2 text-primary"></i>Ändra passet</button></li>'
+                      + '<li><hr class="dropdown-divider"></li>'
+                      + '<li><button class="dropdown-item text-danger" type="button" onclick="stfDelete(' + a.id + ')"><i class="bi bi-trash me-2"></i>Ta bort passet</button></li>'
+                      + '</ul></div>')
                     + '</div>'
                     + '<div class="list-group-item py-2 bg-body-tertiary" id="stfSplit' + a.id + '" style="display:none">'
                     + '<div class="small fw-semibold mb-1">Dela passet ' + esc(a.shiftLabel || '') + '</div>'

@@ -462,15 +462,38 @@ function fkHubRenderConfigs(list) {
     return fkHubView === 'list' ? fkHubRenderTable(list) : fkHubRenderCards(list);
 }
 
+// ─── Row/card actions ──────────────────────────────────────
+// ONE menu for both views — four to six icon-only buttons per config was unreadable, and in
+// the list view they sat in the last column of a table inside .table-responsive, i.e. the one
+// that scrolls off first. The card keeps its wide Redigera/Visa button visible: that is the
+// primary action, it is already labelled, and hiding it would cost a click on every card.
+// data-bs-popper-config strategy:fixed is what lets the menu escape the scroll container.
+function fkHubActionsMenu(c) {
+    var open = c.canEdit
+        ? '<li><a class="dropdown-item" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-pencil me-2 text-primary"></i>Öppna för redigering</a></li>'
+        : '<li><a class="dropdown-item" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-eye me-2 text-secondary"></i>Öppna och visa</a></li>';
+    var assign = c.canEdit
+        ? '<li><button class="dropdown-item" type="button" onclick="fkAssignOpen(' + c.id + ')"><i class="bi bi-folder-symlink me-2 text-secondary"></i>Flytta till projekt</button></li>'
+        : '';
+    var del = c.canDelete
+        ? '<li><hr class="dropdown-divider"></li>'
+          + '<li><button class="dropdown-item text-danger" type="button" onclick="fkHubDelete(' + c.id + ')"><i class="bi bi-trash me-2"></i>Ta bort konfigurationen</button></li>'
+        : '';
+    return '<div class="dropdown">'
+        + '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false" title="Åtgärder för ' + escapeHtml(c.name) + '">'
+        + '<i class="bi bi-sliders me-2"></i>Åtgärder</button>'
+        + '<ul class="dropdown-menu dropdown-menu-end">'
+        + open
+        + '<li><button class="dropdown-item" type="button" onclick="fkHubDuplicate(' + c.id + ')"><i class="bi bi-copy me-2 text-info"></i>Duplicera konfigurationen</button></li>'
+        + assign
+        + del
+        + '</ul></div>';
+}
+
 // ─── Card view ────────────────────────────────────────────────────────
 function fkHubRenderCards(list) {
     return '<div class="row g-3">' + list.map(function(c) {
-        var deleteBtn = c.canDelete
-            ? '<button class="btn btn-outline-danger btn-sm" onclick="fkHubDelete(' + c.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>'
-            : '';
-        var assignBtn = c.canEdit
-            ? '<button class="btn btn-outline-secondary btn-sm" onclick="fkAssignOpen(' + c.id + ')" title="Flytta till projekt"><i class="bi bi-folder-symlink"></i></button>'
-            : '';
+        var actionsMenu = fkHubActionsMenu(c);
         return '<div class="col-md-6 col-lg-4">' +
             '<div class="card h-100">' +
                 '<div class="card-body">' +
@@ -489,8 +512,7 @@ function fkHubRenderCards(list) {
                         (c.canEdit
                             ? '<a class="btn btn-primary btn-sm flex-grow-1" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-pencil me-1"></i>Redigera</a>'
                             : '<a class="btn btn-outline-secondary btn-sm flex-grow-1" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-eye me-1"></i>Visa</a>') +
-                        '<button class="btn btn-outline-secondary btn-sm" onclick="fkHubDuplicate(' + c.id + ')" title="Duplicera"><i class="bi bi-copy"></i></button>' +
-                        assignBtn + deleteBtn +
+                        actionsMenu +
                     '</div>' +
                 '</div>' +
             '</div>' +
@@ -501,12 +523,7 @@ function fkHubRenderCards(list) {
 // ─── List/table view ──────────────────────────────────────────────────
 function fkHubRenderTable(list) {
     var rows = list.map(function(c) {
-        var actions = (c.canEdit
-                ? '<a class="btn btn-primary btn-sm" href="/faltkonfig/' + c.id + '/redigera" title="Redigera"><i class="bi bi-pencil"></i></a>'
-                : '<a class="btn btn-outline-secondary btn-sm" href="/faltkonfig/' + c.id + '/redigera" title="Visa"><i class="bi bi-eye"></i></a>') +
-            ' <button class="btn btn-outline-secondary btn-sm" onclick="fkHubDuplicate(' + c.id + ')" title="Duplicera"><i class="bi bi-copy"></i></button>' +
-            (c.canEdit ? ' <button class="btn btn-outline-secondary btn-sm" onclick="fkAssignOpen(' + c.id + ')" title="Flytta till projekt"><i class="bi bi-folder-symlink"></i></button>' : '') +
-            (c.canDelete ? ' <button class="btn btn-outline-danger btn-sm" onclick="fkHubDelete(' + c.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>' : '');
+        var actions = fkHubActionsMenu(c);
         return '<tr>' +
             '<td>' + pinStar(c.id) + '</td>' +
             '<td><a href="/faltkonfig/' + c.id + '/redigera" class="text-decoration-none fw-semibold">' + escapeHtml(c.name) + '</a>' +

@@ -482,8 +482,26 @@
         var links = (i.links && i.links.length) ? ('<div class="mt-1 ms-4">' + linkChips(i.links) + '</div>') : '';
         var blockLine = blockedByLine(i);
         var titleEsc = esc(i.title).replace(/'/g, "\\'");
-        var threadBtn = '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenThread(' + i.id + ',\'' + titleEsc + '\')" title="Kommentarer, logg &amp; beroenden"><i class="bi bi-chat-dots"></i>' + (i.commentCount ? ' ' + i.commentCount : '') + '</button>';
-        var notifyBtn = i.assignedMemberId ? '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbNotifyItem(' + i.id + ',\'' + titleEsc + '\')" title="Notifiera tilldelad medlem"><i class="bi bi-bell"></i></button>' : '';
+        // Five icon-only buttons per uppgift, on a list that runs to dozens of rows. One menu
+        // instead — and the comment COUNT moves up into the badge line, because that is
+        // information about the task, not an action, and it must stay readable at a glance.
+        var commentBadge = i.commentCount
+            ? '<span class="badge bg-light text-dark border" title="Kommentarer"><i class="bi bi-chat-dots me-1"></i>' + i.commentCount + '</span>'
+            : '';
+        var notifyItem = i.assignedMemberId
+            ? '<li><button class="dropdown-item" type="button" onclick="wbNotifyItem(' + i.id + ',\'' + titleEsc + '\')"><i class="bi bi-bell me-2 text-primary"></i>Notifiera tilldelad medlem</button></li>'
+            : '';
+        var actionsMenu = '<div class="dropdown">'
+            + '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false" title="Åtgärder för ' + esc(i.title) + '">'
+            + '<i class="bi bi-sliders me-2"></i>Åtgärder</button>'
+            + '<ul class="dropdown-menu dropdown-menu-end">'
+            + '<li><button class="dropdown-item" type="button" onclick="wbOpenThread(' + i.id + ',\'' + titleEsc + '\')"><i class="bi bi-chat-dots me-2 text-secondary"></i>Kommentarer, logg &amp; beroenden' + (i.commentCount ? ' (' + i.commentCount + ')' : '') + '</button></li>'
+            + notifyItem
+            + '<li><button class="dropdown-item" type="button" onclick="wbOpenLink(0,' + i.id + ')"><i class="bi bi-paperclip me-2 text-secondary"></i>Bifoga dokument eller länk</button></li>'
+            + '<li><button class="dropdown-item" type="button" onclick="wbOpenItem(' + i.workAreaId + ',' + i.id + ')"><i class="bi bi-pencil me-2 text-primary"></i>Redigera uppgiften</button></li>'
+            + '<li><hr class="dropdown-divider"></li>'
+            + '<li><button class="dropdown-item text-danger" type="button" onclick="wbDeleteItem(' + i.id + ',\'' + titleEsc + '\')"><i class="bi bi-trash me-2"></i>Ta bort uppgiften</button></li>'
+            + '</ul></div>';
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'
             + '<div class="form-check">'
@@ -491,17 +509,11 @@
             + '<label class="form-check-label ' + titleCls + '">' + esc(i.title) + '</label>'
             + '</div>'
             + (i.description ? '<div class="text-muted small ms-4">' + esc(i.description) + '</div>' : '')
-            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + blockedBadge + scope + costBadge(i.estimatedCost, i.actualCost) + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + blockedBadge + scope + costBadge(i.estimatedCost, i.actualCost) + commentBadge + '</div>'
             + blockLine
             + links
             + '</div>'
-            + '<div class="d-flex gap-1 flex-shrink-0">'
-            + notifyBtn
-            + threadBtn
-            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenLink(0,' + i.id + ')" title="Bifoga dokument/länk"><i class="bi bi-paperclip"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenItem(' + i.workAreaId + ',' + i.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteItem(' + i.id + ',\'' + titleEsc + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>'
-            + '</div>'
+            + '<div class="flex-shrink-0">' + actionsMenu + '</div>'
             + '</div>';
     }
 

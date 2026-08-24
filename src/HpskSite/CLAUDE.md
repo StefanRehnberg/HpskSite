@@ -2747,6 +2747,70 @@ keys (System.Text.Json camelCases output) and never passes strings through inlin
 (use id-only handlers). Spec: `Documentation/BOARD_WORK_PHASE1_TERMS.md`, `_PHASE2_MEETINGS.md`,
 `_PHASE3_GOVERNANCE.md`. KB: `KnowledgeBase/docs/styrelsearbete.md`. Marketed on /om-pistol-nu (Årshjul shot).
 
+## Radåtgärder: när en knapprad ska bli en meny (2026-08-24)
+
+**Gränsen: 3 eller fler kontroller synliga på en typisk rad → EN `Åtgärder`-meny.** Det är där
+alla konverteringar har landat, och den är nu genomförd överallt (11 radtyper på 8 ytor, se nedan).
+Tre skärpningar:
+- **Exakt 2 → meny bara om båda är ikoner utan text.** Två textknappar är läsbara; två ikoner i en
+  smal kolumn är en gissningslek.
+- **Varierar antalet med tillståndet → meny redan vid 2.** En layout som byter form kan operatören
+  aldrig lära sig. Det var fakturaradernas egentliga problem: tre olika betydelser bakom två
+  nästan identiska bock-ikoner (*en betalares ANMÄLAN* vs *arrangörens MOTTAGNA* vs *ångra*).
+- **Destruktivt sist, i rött, med utskriven text** — aldrig en naken soptunna intill andra ikoner.
+
+**Sidnivå (kortrubrik/verktygsrad): 4+ → en primär blå `Åtgärder`-meny med `dropdown-header`-grupper**
+(mönstret från Anmälningar och klubbens Medlemmar). Behåll den primära åtgärden synlig utanför menyn.
+1–3 *textade* knappar är bra som de är — resultatkortens Uppdatera/Publicera/Skriv ut är kortets
+arbetsflöde och ska inte gömmas.
+
+**Flikar: 8+ → grupperad vertikal räls + mobilväljare** (klubb 14, krets 10). 5–7 duger horisontellt
+men kontrollera radbrytning vid 1280 px. `/admin` har 9 på en rad och är den sista ytan över gränsen
+(ej gjord — rälsen bör då brytas ut till en delad partial i stället för en tredje kopia).
+
+**Undantagen är inte förhandlingsbara** — de här ska INTE bli menyer, oavsett antal:
+pagers (Första/Föregående/Nästa/Sista skytt), sifferknappsater (resultatinmatning, särskjutning),
+segmenterade väljare (Kortvy/Listvy/Kartvy), stepparna ± i tiduret, siktbildens styrkors,
+**flytta upp/ner** (en pil måste sitta kvar vid raden man flyttar), och `tel:`-länken **Ring** i
+bemanningen (att ringa en funktionär som inte kommit är enda åtgärden som måste vara ett tryck).
+Måttet är dessutom **synliga samtidigt**, inte antal i markup: `TrainingMatchScoreboard` ser ut att
+ha fem knappar men visar 1–2 beroende på roll.
+
+**Delade byggare — skriv inte en fjärde kopia:**
+`_CompetitionListRenderer` (tävlingsrader, 3 ytor) · **`_SeriesRowActions`** (serier, 3 ytor) ·
+**`_InvoiceRowActions`** (fakturor, 2 ytor — konfigobjekt med `qrFn`/`emailFn`/`cancelFn`/`creditFn`
+och `markItems`, eftersom ytorna har olika callback-namn).
+
+⚠️ **`data-bs-popper-config='{"strategy":"fixed"}'` på varje toggle.** Tabellerna ligger i
+`.table-responsive` vars overflow klipper en absolut positionerad meny; `data-bs-strategy` ignoreras
+tyst av Bootstrap. Syns bara på SISTA raden.
+
+⚠️ **Hover-gömda åtgärder måste överleva att pekaren lämnar raden.** `#grdTable .grd-roleacts` är
+`visibility:hidden` till hover, och den öppna menyn är ett BARN till den spanen — utan
+`:focus-within` / `:has(.show)` försvinner menyn på väg till menyvalet.
+
+**Fällor för den som testar detta:**
+- **Öppna den YTTRE fliken först** (`regionAdmin-tab` / `clubAdmin-tab`): en inre underpanel bär
+  `.active` medan hela adminpanelen är `display:none`, så klasspåståenden går igenom på en osynlig
+  sida och all geometri läser noll.
+- **Personlistan i Bemanning ligger i en offcanvas** (`stfOpenPeople()`), och `#stfPeopleBody` finns
+  i DOM ändå → en tom platshållarrad läses som "ingen person på tävlingen" på en tävling med 41.
+  Personnyckeln i `onclick` är dessutom **URL-kodad**; `stfOpenPerson` vill ha den avkodad.
+- **Bemanningsfliken pollar och byter ut sin `<tbody>`**, så en nod som hämtades före klicket kan
+  vara borttagen när menyn läses — läs den klickade noden först, och gör om försöket en gång.
+- **Styrelsemöten:** ett nyskapat möte kan ha TOM dagordning och ett justerat protokoll är låst —
+  båda renderar ingen Bifoga-kontroll. Välj ett möte med punkter som inte är justerat.
+- **Förberedelser och Bemanning finns sällan på samma tävling** i dev (5312 har uppgifterna, 6628
+  har folket). En tävling för båda halvorna hoppar tyst över den den saknar.
+- **En `if (await x.count())`-guard förvandlar en borttagen kontroll till ett grönt hopp.** Så tappade
+  `behorighet-verify` två påståenden och rapporterade ändå 9/9. Assertera att kontrollen finns.
+
+Verifierat 113/113 `hpsk-verify/action-menus-sweep-verify.mjs` (alla 8 ytor, inklusive att nedersta
+radens meny går att klicka på). Regression: row-action-menus 60/60, region-series-tab 38/38,
+complist-shared-renderer 23/23, staffing-grid 41/41, grid-fixes 19/19, personpanel 16/16*,
+behorighet 13/13*, epost 10/10, consolidated-invoice 42/42, organiser-consolidation 31/31,
+region-receivable 19/19. (*uppdaterade till menyn — samma dialog, ny väg in.)
+
 ## Common Patterns
 
 ### Model Usage

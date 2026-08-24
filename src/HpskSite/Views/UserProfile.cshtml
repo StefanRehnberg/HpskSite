@@ -4844,7 +4844,7 @@ function renderCompetitionsTable() {
                         <th>Klasser</th>
                         <th>Betalning</th>
                         <th>Status</th>
-                        <th>Åtgärder</th>
+                        <th class="text-end">Åtgärder</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -4858,26 +4858,33 @@ function renderCompetitionsTable() {
                             <td>${renderShootingClasses(comp.shootingClasses)}</td>
                             <td>${renderPaymentBadge(comp.paymentStatus, comp.paymentAmount)}</td>
                             <td>${renderStatusBadge(comp.competitionStatus)}</td>
-                            <td>
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="/competitions/${comp.competitionId}/" class="btn btn-outline-primary" title="Visa tävling">
-                                        <i class="bi bi-eye"></i>
-                                    </a>
-                                    ${(comp.paymentStatus === 'pending' || comp.paymentStatus === 'unpaid') && comp.isPayable ? `
-                                        <button class="btn btn-outline-success" onclick="payInvoice(${comp.competitionId}, ${comp.invoiceId})" title="Betala">
-                                            <i class="bi bi-credit-card"></i>
-                                        </button>
-                                    ` : ''}
-                                    ${comp.paymentStatus === 'paid' && comp.invoiceId ? `
-                                        <a href="/kvitto/${comp.invoiceId}" target="_blank" rel="noopener" class="btn btn-outline-secondary" title="Skriv ut kvitto">
-                                            <i class="bi bi-receipt"></i>
-                                        </a>
-                                    ` : ''}
-                                    ${comp.canUnregister ? `
-                                        <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')" title="Avanmäl">
-                                            <i class="bi bi-x-circle"></i>
-                                        </button>
-                                    ` : ''}
+                            <td class="text-end">
+                                @* Member-facing, so every action is spelled out. Betala / Skriv ut
+                                   kvitto / Avanmäl behind three similar icons was the worst place in
+                                   the app to guess wrong — two of them touch money. *@
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                                            data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                                            aria-expanded="false" title="Åtgärder för ${escapeHtml(comp.competitionName)}">
+                                        <i class="bi bi-sliders me-2"></i>Åtgärder
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="/competitions/${comp.competitionId}/">
+                                            <i class="bi bi-eye me-2 text-secondary"></i>Öppna tävlingssidan</a></li>
+                                        ${(comp.paymentStatus === 'pending' || comp.paymentStatus === 'unpaid') && comp.isPayable ? `
+                                            <li><button class="dropdown-item" type="button" onclick="payInvoice(${comp.competitionId}, ${comp.invoiceId})">
+                                                <i class="bi bi-credit-card me-2 text-success"></i>Betala anmälningsavgiften</button></li>
+                                        ` : ''}
+                                        ${comp.paymentStatus === 'paid' && comp.invoiceId ? `
+                                            <li><a class="dropdown-item" href="/kvitto/${comp.invoiceId}" target="_blank" rel="noopener">
+                                                <i class="bi bi-receipt me-2 text-secondary"></i>Skriv ut kvitto</a></li>
+                                        ` : ''}
+                                        ${comp.canUnregister ? `
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li><button class="dropdown-item text-danger" type="button" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')">
+                                                <i class="bi bi-x-circle me-2"></i>Avanmäl mig från tävlingen</button></li>
+                                        ` : ''}
+                                    </ul>
                                 </div>
                             </td>
                         </tr>

@@ -239,33 +239,7 @@
         <td><span class="badge bg-{statusClass}">{paymentStatus}</span></td>
         <td>{createdDate}</td>
         <td>{paymentDate}</td>
-        <td class="text-end">
-            <div class="btn-group btn-group-sm" role="group">
-                @* The printable invoice document — the krets/organiser needs it to send or file, and it
-                   is the same document the paying club sees from its own Fakturor list. *@
-                <a class="btn btn-outline-secondary" href="/faktura/{id}" target="_blank" rel="noopener"
-                   title="Visa faktura (för utskrift)">
-                    <i class="bi bi-file-earmark-text"></i>
-                </a>
-                <button class="btn btn-outline-primary" onclick="showSwishQRCode({id})" title="Visa betalningsuppgifter">
-                    <i class="bi bi-qr-code"></i>
-                </button>
-                <button class="btn btn-outline-info" onclick="resendInvoiceEmail({id})" title="Skicka QR-kod via e-post">
-                    <i class="bi bi-envelope"></i>
-                </button>
-                <button class="btn btn-outline-success {hideIfPaid}" onclick="markInvoiceAsPaid({id})" title="Markera som betald">
-                    <i class="bi bi-check-circle"></i>
-                </button>
-                @* Only on a samlingsfaktura: the organiser corrects it with a kreditfaktura rather than
-                   by altering the issued invoice. *@
-                <button class="btn btn-outline-dark {hideIfNotConsolidated}" onclick="openCreditNoteModal({id})"
-                        title="Skapa kreditfaktura">
-                    <i class="bi bi-receipt-cutoff"></i>
-                </button>
-                <button class="btn btn-outline-danger {hideIfCancelled}" onclick="cancelInvoice({id}, '{invoiceNumber}')" title="Makulera">
-                    <i class="bi bi-x-circle"></i>
-                </button>
-            </div>
+        <td class="text-end">{actionsMenu}
         </td>
     </tr>
 </script>
@@ -276,6 +250,8 @@
 @await Html.PartialAsync("SwishPaymentModal")
 
 <!-- Anti-forgery token for AJAX -->
+@await Html.PartialAsync("_InvoiceRowActions")
+
 @Html.AntiForgeryToken()
 
 <style>
@@ -576,8 +552,6 @@ function renderInvoices(invoices) {
     tbody.innerHTML = invoices.map(invoice => {
         const statusClass = getStatusClass(invoice.paymentStatus);
         const statusText = translateStatus(invoice.paymentStatus);
-        const hideIfPaid = invoice.paymentStatus === 'Paid' ? 'd-none' : '';
-        const hideIfCancelled = invoice.paymentStatus === 'Cancelled' ? 'd-none' : '';
         const createdDate = invoice.createdDate ? new Date(invoice.createdDate).toLocaleDateString('sv-SE') : '-';
         const paymentDate = invoice.paymentDate ? new Date(invoice.paymentDate).toLocaleDateString('sv-SE') : '-';
 
@@ -602,13 +576,11 @@ function renderInvoices(invoices) {
         // See the same badge in ClubAdminInvoicesList: the krets's list is where these are actually
         // seen, so name the junk here instead of leaving it to read as a real debt.
         if (invoice.isOrphanedTeamInvoice) {
-            kindBadge += ' <span class="badge bg-danger" title="Laget är borttaget – fakturan står kvar. Makulera den med krysset till höger.">Föräldralös – laget är borttaget</span>';
+            kindBadge += ' <span class="badge bg-danger" title="Laget är borttaget – fakturan står kvar. Makulera den via Åtgärder-menyn på raden.">Föräldralös – laget är borttaget</span>';
         }
-        const hideIfNotConsolidated = (isConsolidated && invoice.paymentStatus !== 'Cancelled') ? '' : 'd-none';
 
         return template
             .replace(/{kindBadge}/g, kindBadge)
-            .replace(/{hideIfNotConsolidated}/g, hideIfNotConsolidated)
             .replace(/{id}/g, invoice.id)
             .replace(/{invoiceNumber}/g, escapeHtml(invoice.invoiceNumber))
             .replace(/{competitionName}/g, escapeHtml(invoice.competitionName))
@@ -618,8 +590,20 @@ function renderInvoices(invoices) {
             .replace(/{statusClass}/g, statusClass)
             .replace(/{createdDate}/g, createdDate)
             .replace(/{paymentDate}/g, paymentDate)
-            .replace(/{hideIfPaid}/g, hideIfPaid)
-            .replace(/{hideIfCancelled}/g, hideIfCancelled);
+            // Row actions come from the shared builder — see _InvoiceRowActions.cshtml.
+            .replace(/{actionsMenu}/g, window.hpskInvoiceActionsMenu({
+                id: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                qrFn: 'showSwishQRCode',
+                emailFn: 'resendInvoiceEmail',
+                cancelFn: 'cancelInvoice',
+                creditFn: 'openCreditNoteModal',
+                creditable: isConsolidated && invoice.paymentStatus !== 'Cancelled',
+                cancelled: invoice.paymentStatus === 'Cancelled',
+                markItems: invoice.paymentStatus === 'Paid' ? [] : [
+                    { label: 'Markera som betald (mottagen)', icon: 'bi-check-circle', fn: 'markInvoiceAsPaid' }
+                ]
+            }));
     }).join('');
 }
 

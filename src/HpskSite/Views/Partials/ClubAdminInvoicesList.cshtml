@@ -234,6 +234,8 @@
 </div>
 
 <!-- HTML Template for Invoice Row -->
+@await Html.PartialAsync("_InvoiceRowActions")
+
 <script type="text/html" id="club-invoice-row-template">
     <tr data-invoice-id="{id}">
         <td class="club-invoice-select-cell d-none">
@@ -253,31 +255,7 @@
         <td><span class="badge bg-{statusClass}">{paymentStatus}</span>{sentBadge}</td>
         <td>{createdDate}</td>
         <td>{paymentDate}</td>
-        <td class="text-end">
-            <div class="btn-group btn-group-sm" role="group">
-                @* The invoice itself, printable — a treasurer needs the document (or a PDF of it) to
-                   get the payment through their own bookkeeping, same way a shooter prints a Kvitto. *@
-                <a class="btn btn-outline-secondary" href="/faktura/{id}" target="_blank" rel="noopener"
-                   title="Visa faktura (för utskrift)">
-                    <i class="bi bi-file-earmark-text"></i>
-                </a>
-                <button class="btn btn-outline-primary" onclick="showClubSwishQRCode({id})" title="Visa betalningsuppgifter">
-                    <i class="bi bi-qr-code"></i>
-                </button>
-                <button class="btn btn-outline-info" onclick="resendClubInvoiceEmail({id})" title="Skicka QR-kod via e-post">
-                    <i class="bi bi-envelope"></i>
-                </button>
-                {markAction}
-                @* Only on a samlingsfaktura, and only for the ORGANISER view: a club correcting an
-                   invoice it issued does it with a kreditfaktura, never by altering the invoice. *@
-                <button class="btn btn-outline-dark {hideIfNotCreditable}" onclick="openCreditNoteModal({id})"
-                        title="Skapa kreditfaktura">
-                    <i class="bi bi-receipt-cutoff"></i>
-                </button>
-                <button class="btn btn-outline-danger {hideIfCancelled}" onclick="cancelClubInvoice({id}, '{invoiceNumber}')" title="Makulera">
-                    <i class="bi bi-x-circle"></i>
-                </button>
-            </div>
+        <td class="text-end">{actionsMenu}
         </td>
     </tr>
 </script>
@@ -681,7 +659,6 @@ function renderClubInvoices(invoices) {
     tbody.innerHTML = invoices.map(invoice => {
         const statusClass = getClubStatusClass(invoice.paymentStatus);
         const statusText = translateClubStatus(invoice.paymentStatus);
-        const hideIfCancelled = invoice.paymentStatus === 'Cancelled' ? 'd-none' : '';
         const createdDate = invoice.createdDate ? new Date(invoice.createdDate).toLocaleDateString('sv-SE') : '-';
         const paymentDate = invoice.paymentDate ? new Date(invoice.paymentDate).toLocaleDateString('sv-SE') : '-';
 
@@ -709,7 +686,7 @@ function renderClubInvoices(invoices) {
         // list, which is where the money gets reconciled. Say so on the row, next to the makulera
         // button that resolves it.
         if (invoice.isOrphanedTeamInvoice) {
-            kindBadge += ' <span class="badge bg-danger" title="Laget är borttaget – fakturan står kvar. Makulera den med krysset till höger.">Föräldralös – laget är borttaget</span>';
+            kindBadge += ' <span class="badge bg-danger" title="Laget är borttaget – fakturan står kvar. Makulera den via Åtgärder-menyn på raden.">Föräldralös – laget är borttaget</span>';
         }
 
         // Crediting belongs to the ORGANISER, so offer it in the "att få betalt för" view only — in the
@@ -730,14 +707,17 @@ function renderClubInvoices(invoices) {
         }
 
         // Mark action: payer-view = sent-claim (+ undo); organizer-view = authoritative received.
-        let markAction = '';
+        // These three used to be two nearly identical check-circle icons with the difference only
+        // in the tooltip — a payer's CLAIM and the organiser's authoritative RECEIPT are not the
+        // same act, so in a menu they get full sentences.
+        const markItems = [];
         if (!isSettled) {
             if (isPayerView) {
-                markAction = alreadySent
-                    ? `<button class="btn btn-outline-secondary" onclick="clearClubInvoicePaymentSent(${invoice.id})" title="Ångra betalningsanmälan"><i class="bi bi-arrow-counterclockwise"></i></button>`
-                    : `<button class="btn btn-outline-success" onclick="markClubInvoicePaymentSent(${invoice.id})" title="Markera som betald av klubben"><i class="bi bi-check-circle"></i></button>`;
+                markItems.push(alreadySent
+                    ? { label: 'Ångra betalningsanmälan', icon: 'bi-arrow-counterclockwise', iconClass: 'text-secondary', fn: 'clearClubInvoicePaymentSent' }
+                    : { label: 'Markera som betald av klubben', icon: 'bi-check-circle', fn: 'markClubInvoicePaymentSent' });
             } else {
-                markAction = `<button class="btn btn-outline-success" onclick="markClubInvoiceAsPaid(${invoice.id})" title="Markera som betald (mottagen)"><i class="bi bi-check-circle"></i></button>`;
+                markItems.push({ label: 'Markera som betald (mottagen)', icon: 'bi-check-circle', fn: 'markClubInvoiceAsPaid' });
             }
         }
 
@@ -751,13 +731,22 @@ function renderClubInvoices(invoices) {
             .replace(/{rawStatus}/g, escapeClubHtml(invoice.paymentStatus || ''))
             .replace(/{settledBy}/g, String(invoice.settledByInvoiceId || 0))
             .replace(/{kindBadge}/g, kindBadge)
-            .replace(/{hideIfNotCreditable}/g, hideIfNotCreditable)
             .replace(/{statusClass}/g, statusClass)
             .replace(/{sentBadge}/g, sentBadge)
-            .replace(/{markAction}/g, markAction)
             .replace(/{createdDate}/g, createdDate)
             .replace(/{paymentDate}/g, paymentDate)
-            .replace(/{hideIfCancelled}/g, hideIfCancelled);
+            // Row actions come from the shared builder — see _InvoiceRowActions.cshtml.
+            .replace(/{actionsMenu}/g, window.hpskInvoiceActionsMenu({
+                id: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                qrFn: 'showClubSwishQRCode',
+                emailFn: 'resendClubInvoiceEmail',
+                cancelFn: 'cancelClubInvoice',
+                creditFn: 'openCreditNoteModal',
+                creditable: hideIfNotCreditable === '',
+                cancelled: invoice.paymentStatus === 'Cancelled',
+                markItems: markItems
+            }));
     }).join('');
 }
 

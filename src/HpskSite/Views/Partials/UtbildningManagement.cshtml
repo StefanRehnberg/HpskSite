@@ -466,9 +466,15 @@
                 h += '<li class="list-group-item d-flex justify-content-between align-items-center px-0 py-1">' +
                     '<span>' + esc(v.versionLabel) + (v.isActive ? '' : ' <span class="badge bg-secondary-subtle text-secondary-emphasis">inaktiv</span>') +
                     ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' + v.questionCount + ' frågor</span></span>' +
-                    '<span><a class="btn btn-sm btn-outline-secondary me-1" target="_blank" title="Skriv ut papperprov" href="/utbildning/prov-utskrift/' + encodeURIComponent(document.getElementById('utbCourseKey').value) + '?v=' + v.id + '"><i class="bi bi-printer"></i></a>' +
-                    '<button class="btn btn-sm btn-warning me-1" onclick="utbEditVersion(' + i + ')"><i class="bi bi-pencil"></i></button>' +
-                    '<button class="btn btn-sm btn-outline-danger" onclick="utbDeleteVersion(' + v.id + ')"><i class="bi bi-x"></i></button></span></li>';
+                    '<span class="dropdown">'+
+                    '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">' +
+                    '<i class="bi bi-sliders me-2"></i>Åtgärder</button>' +
+                    '<ul class="dropdown-menu dropdown-menu-end">' +
+                    '<li><a class="dropdown-item" target="_blank" href="/utbildning/prov-utskrift/' + encodeURIComponent(document.getElementById('utbCourseKey').value) + '?v=' + v.id + '"><i class="bi bi-printer me-2 text-secondary"></i>Skriv ut pappersprov</a></li>' +
+                    '<li><button class="dropdown-item" type="button" onclick="utbEditVersion(' + i + ')"><i class="bi bi-pencil me-2 text-primary"></i>Redigera versionen</button></li>' +
+                    '<li><hr class="dropdown-divider"></li>' +
+                    '<li><button class="dropdown-item text-danger" type="button" onclick="utbDeleteVersion(' + v.id + ')"><i class="bi bi-x-circle me-2"></i>Ta bort versionen</button></li>' +
+                    '</ul></span></li>';
             });
             h += '</ul>';
             el.innerHTML = h;

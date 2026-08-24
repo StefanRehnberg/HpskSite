@@ -502,14 +502,18 @@
             ${fields}
             <span id="ag_saved_${it.id}" class="sv-saved"><i class="bi bi-check-lg"></i> Sparat</span>
             <div class="mt-2">${linksHtml}</div>
-            <details class="sv-noprint mt-1"><summary class="sv-help" style="cursor:pointer;">+ Bifoga dokument, möte, valberedningens förslag eller länk</summary>
-                <div class="mt-2 d-flex gap-2 flex-wrap">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="attachDoc(${it.id})"><i class="bi bi-file-earmark me-1"></i>Dokument</button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="attachMeeting(${it.id})"><i class="bi bi-calendar-event me-1"></i>Tidigare möte</button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="attachValforslag(${it.id})"><i class="bi bi-person-check me-1"></i>Valberedningens förslag</button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="attachUrl(${it.id})"><i class="bi bi-link-45deg me-1"></i>Länk (URL)</button>
-                </div>
-            </details>
+            <div class="dropdown sv-noprint mt-1">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown"
+                        data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false">
+                    <i class="bi bi-paperclip me-2"></i>Bifoga…
+                </button>
+                <ul class="dropdown-menu">
+                    <li><button class="dropdown-item" type="button" onclick="attachDoc(${it.id})"><i class="bi bi-file-earmark me-2 text-secondary"></i>Dokument</button></li>
+                    <li><button class="dropdown-item" type="button" onclick="attachMeeting(${it.id})"><i class="bi bi-calendar-event me-2 text-secondary"></i>Tidigare möte</button></li>
+                    <li><button class="dropdown-item" type="button" onclick="attachValforslag(${it.id})"><i class="bi bi-person-check me-2 text-secondary"></i>Valberedningens förslag</button></li>
+                    <li><button class="dropdown-item" type="button" onclick="attachUrl(${it.id})"><i class="bi bi-link-45deg me-2 text-secondary"></i>Länk (URL)</button></li>
+                </ul>
+            </div>
         </div>`;
     }
 

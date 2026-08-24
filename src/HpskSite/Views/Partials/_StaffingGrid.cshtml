@@ -85,6 +85,11 @@
     .grd-scope { font-size: .75rem; color: var(--bs-secondary-color); }
     .grd-roleacts { visibility: hidden; }
     #grdTable tr:hover .grd-roleacts { visibility: visible; }
+    /* ⚠ The actions are a MENU now, and the open menu is a child of this span. Hover alone would
+       hide it the moment the pointer left the row — i.e. on the way to the menu item. Keep it
+       visible while the toggle holds focus (and, where :has() is supported, while the menu is open). */
+    .grd-roleacts:focus-within { visibility: visible; }
+    .grd-roleacts:has(.show) { visibility: visible; }
     /* Floating cell editor — anchored, not a modal: a modal per cell is exactly the friction we're removing. */
     #grdEditor { position: fixed; z-index: 1080; width: 330px; display: none; }
     #grdSuggest { max-height: 220px; overflow-y: auto; }
@@ -239,14 +244,20 @@
                 + (c.dayLabel ? '<div class="grd-daylabel">' + esc(c.dayLabel) + '</div>' : '')
                 + (c.timeLabel ? '<div class="text-muted fw-normal" style="font-size:.75rem">' + esc(c.timeLabel) + '</div>' : '')
                 + '</div>'
-                + (c.key ? '<span class="grd-roleacts text-nowrap">'
-                    + (c.dayId ? '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Ändra dagen" onclick="grdEditDay(' + c.dayId + ')"><i class="bi bi-pencil"></i></button>' : '')
-                    + (cols.length > 1 ? '<button type="button" class="btn btn-sm btn-link p-0 me-1" title="Kopiera dagens bemanning till en annan dag" onclick="grdCopyDay(\'' + arg(c.key) + '\')"><i class="bi bi-arrow-right-square"></i></button>' : '')
+                // One small labelled menu instead of three bare link-icons: the column is 215px
+                // wide and already carries the date, the day label and the time, so an icon strip
+                // competed with the information the header exists for.
+                + (c.key ? '<span class="grd-roleacts text-nowrap dropdown">'
+                    + '<button type="button" class="btn btn-sm btn-link p-0 text-decoration-none dropdown-toggle" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">Åtgärder</button>'
+                    + '<ul class="dropdown-menu dropdown-menu-end">'
+                    + (c.dayId ? '<li><button class="dropdown-item" type="button" onclick="grdEditDay(' + c.dayId + ')"><i class="bi bi-pencil me-2 text-primary"></i>Ändra dagen</button></li>' : '')
+                    + (cols.length > 1 ? '<li><button class="dropdown-item" type="button" onclick="grdCopyDay(\'' + arg(c.key) + '\')"><i class="bi bi-arrow-right-square me-2 text-info"></i>Kopiera dagens bemanning till en annan dag</button></li>' : '')
                     // Always offered. It used to require a StaffDay row AND an empty day, which is exactly
                     // the two cases that got stuck: a day someone had booked crew on, and a stray "ej i
                     // planen" column that has no row to delete and so could never be removed at all.
-                    + '<button type="button" class="btn btn-sm btn-link p-0 text-danger" title="Ta bort dagen" onclick="grdDeleteDay(' + (c.dayId || 0) + ',\'' + arg(c.key) + '\')"><i class="bi bi-x-lg"></i></button>'
-                    + '</span>' : '')
+                    + '<li><hr class="dropdown-divider"></li>'
+                    + '<li><button class="dropdown-item text-danger" type="button" onclick="grdDeleteDay(' + (c.dayId || 0) + ',\'' + arg(c.key) + '\')"><i class="bi bi-x-lg me-2"></i>Ta bort dagen</button></li>'
+                    + '</ul></span>' : '')
                 + '</div></th>';
         });
         document.getElementById('grdHead').innerHTML = head;

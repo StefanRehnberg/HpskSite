@@ -1,0 +1,104 @@
+@*
+    ONE Åtgärder menu for an invoice row, shared by both surfaces that list invoices:
+      * AdminInvoicesList.cshtml       (krets/sajt → Fakturor)
+      * ClubAdminInvoicesList.cshtml   (klubb → Fakturor, both directions)
+
+    Same reason _SeriesRowActions and _CompetitionListRenderer exist: two hand-rolled copies of
+    the same row is how a fix lands on one surface and silently skips the other.
+
+    Why these rows needed it most: five to six icon-only buttons in a 8–10 column table inside
+    .table-responsive, so the actions column is the one that scrolls off on a desk tablet — and
+    the set CHANGES SHAPE with the invoice's state and with which direction the club is looking
+    at (paying vs being paid). Three different meanings hid behind two nearly identical
+    check-circle icons: "Markera som betald av klubben" (a payer's claim), "Markera som betald
+    (mottagen)" (the organiser's authoritative receipt) and "Ångra betalningsanmälan". Those
+    have to be words.
+
+    Call it with a config object so the two surfaces can keep their own callback names:
+
+      window.hpskInvoiceActionsMenu({
+          id, invoiceNumber,                  // required
+          qrFn:      'showSwishQRCode',       // opens the payment-details dialog
+          emailFn:   'resendInvoiceEmail',    // mails the QR
+          cancelFn:  'cancelInvoice',         // makulera  (called as fn(id, 'invoiceNumber'))
+          creditFn:  'openCreditNoteModal',   // optional — omit to drop the item
+          creditable: bool,                   // show the kreditfaktura item
+          cancelled:  bool,                   // hide makulera on an already-cancelled invoice
+          markItems: [ {label, icon, iconClass, fn} ]   // 0..n state-dependent mark actions
+      })
+*@
+@if (ViewData["_hpskInvoiceRowActionsRendered"] == null)
+{
+    ViewData["_hpskInvoiceRowActionsRendered"] = true;
+    <script>
+    // Guarded: a page may include this alongside a partial that already pulled it in, and
+    // redefining mid-page would drop callbacks already bound.
+    if (!window.hpskInvoiceRowActionsLoaded) {
+        window.hpskInvoiceRowActionsLoaded = true;
+
+        window.hpskInvoiceEscape = function (text) {
+            if (text === null || text === undefined || text === '') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        };
+
+        // For a value going into an onclick="..." string literal: HTML-escape first, then protect
+        // the quote that would close it.
+        const arg = t => window.hpskInvoiceEscape(t).replace(/'/g, "\\'");
+
+        window.hpskInvoiceActionsMenu = function (cfg) {
+            const id = cfg.id;
+            const nr = window.hpskInvoiceEscape(cfg.invoiceNumber || '');
+            const nrArg = arg(cfg.invoiceNumber || '');
+
+            // Group 1 — look at it. The printable document first: it is what a treasurer needs to
+            // get the payment through their own bookkeeping.
+            let items = `<li><a class="dropdown-item" href="/faktura/${id}" target="_blank" rel="noopener">`
+                + `<i class="bi bi-file-earmark-text me-2 text-secondary"></i>Visa fakturan (för utskrift)</a></li>`;
+            if (cfg.qrFn) {
+                items += `<li><button class="dropdown-item" type="button" onclick="${cfg.qrFn}(${id})">`
+                    + `<i class="bi bi-qr-code me-2 text-primary"></i>Visa betalningsuppgifter</button></li>`;
+            }
+            if (cfg.emailFn) {
+                items += `<li><button class="dropdown-item" type="button" onclick="${cfg.emailFn}(${id})">`
+                    + `<i class="bi bi-envelope me-2 text-info"></i>Skicka betalningsuppgifter via e-post</button></li>`;
+            }
+
+            // Group 2 — change the money. Every one of these is spelled out; this is the group
+            // where identical-looking icons used to mean three different things.
+            let money = '';
+            (cfg.markItems || []).forEach(m => {
+                money += `<li><button class="dropdown-item" type="button" onclick="${m.fn}(${id})">`
+                    + `<i class="bi ${m.icon} me-2 ${m.iconClass || 'text-success'}"></i>${window.hpskInvoiceEscape(m.label)}</button></li>`;
+            });
+            if (cfg.creditable && cfg.creditFn) {
+                money += `<li><button class="dropdown-item" type="button" onclick="${cfg.creditFn}(${id})">`
+                    + `<i class="bi bi-receipt-cutoff me-2 text-dark"></i>Skapa kreditfaktura</button></li>`;
+            }
+            if (money) items += `<li><hr class="dropdown-divider"></li>` + money;
+
+            // Group 3 — makulera. An invoice is räkenskapsinformation: it is never deleted, so the
+            // wording says makulera and it sits last, alone, in red.
+            if (!cfg.cancelled && cfg.cancelFn) {
+                items += `<li><hr class="dropdown-divider"></li>`
+                    + `<li><button class="dropdown-item text-danger" type="button" onclick="${cfg.cancelFn}(${id}, '${nrArg}')">`
+                    + `<i class="bi bi-x-circle me-2"></i>Makulera fakturan</button></li>`;
+            }
+
+            // data-bs-popper-config strategy:fixed is REQUIRED: these tables live inside
+            // .table-responsive, whose overflow clips an absolutely-positioned menu — the bottom
+            // row's menu would open into a scroll container and be unreachable. (data-bs-strategy
+            // is silently ignored by Bootstrap; only the popper-config form works.)
+            return `<div class="dropdown">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                        aria-expanded="false" title="Åtgärder för faktura ${nr}">
+                    <i class="bi bi-sliders me-2"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">${items}</ul>
+            </div>`;
+        };
+    }
+    </script>
+}

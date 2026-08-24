@@ -3126,16 +3126,23 @@ function displayEvents(events) {
                 <td><span class="badge" style="background-color: ${color}">${event.type}</span></td>
                 <td>${date}</td>
                 <td>${event.venue || '-'}</td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.id})" title="Redigera">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="copyEvent(${event.id})" title="Kopiera (+1 vecka)">
-                        <i class="bi bi-copy"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.id}, '${event.name}')" title="Ta bort">
-                        <i class="bi bi-trash"></i>
-                    </button>
+                <td class="text-end">
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                                data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                                aria-expanded="false" title="Åtgärder för ${event.name}">
+                            <i class="bi bi-sliders me-2"></i>Åtgärder
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><button class="dropdown-item" type="button" onclick="editEvent(${event.id})">
+                                <i class="bi bi-pencil me-2 text-primary"></i>Redigera händelsen</button></li>
+                            <li><button class="dropdown-item" type="button" onclick="copyEvent(${event.id})">
+                                <i class="bi bi-copy me-2 text-info"></i>Kopiera till nästa vecka</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button class="dropdown-item text-danger" type="button" onclick="deleteEvent(${event.id}, '${event.name}')">
+                                <i class="bi bi-trash me-2"></i>Ta bort händelsen</button></li>
+                        </ul>
+                    </div>
                 </td>
             </tr>
         `;

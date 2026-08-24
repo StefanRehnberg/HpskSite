@@ -560,15 +560,21 @@
         <td class="{lastMobileActiveClass} text-nowrap small">{lastMobileActiveDisplay}</td>
         <td>{groupsBadges}</td>
         <td class="text-end text-nowrap">
-            <button class="btn btn-sm btn-outline-primary me-1" onclick="editUser({id})" title="Redigera">
-                <i class="bi bi-pencil"></i>
-            </button>
-            <button class="btn btn-sm btn-outline-warning me-1" onclick="showMemberAdminRolesModal({id})" title="Adminroller">
-                <i class="bi bi-person-gear"></i>
-            </button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="showSecurityModal({id})" title="Säkerhet">
-                <i class="bi bi-shield-lock"></i>
-            </button>
+            <div class="dropdown">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                        aria-expanded="false" title="Åtgärder för {name}">
+                    <i class="bi bi-sliders me-2"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><button class="dropdown-item" type="button" onclick="editUser({id})">
+                        <i class="bi bi-pencil me-2 text-primary"></i>Redigera medlemmen</button></li>
+                    <li><button class="dropdown-item" type="button" onclick="showMemberAdminRolesModal({id})">
+                        <i class="bi bi-person-gear me-2 text-warning"></i>Adminroller och behörigheter</button></li>
+                    <li><button class="dropdown-item" type="button" onclick="showSecurityModal({id})">
+                        <i class="bi bi-shield-lock me-2 text-secondary"></i>Säkerhet — lås upp, lösenord, inbjudan</button></li>
+                </ul>
+            </div>
         </td>
     </tr>
 </script>
