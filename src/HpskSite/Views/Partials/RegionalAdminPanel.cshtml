@@ -117,6 +117,7 @@
                 <optgroup label="Kalender &amp; tävlingar">
                     <option value="#regionEventsTab">Händelser</option>
                     <option value="#regionAdminCompetitionsTab">Tävlingar</option>
+                    <option value="#regionSeriesTab">Serier</option>
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#regionCertificationsTab">Certifieringar</option>
@@ -147,6 +148,10 @@
                 <button class="nav-link" id="regionAdminCompetitions-tab" data-bs-toggle="tab" data-bs-target="#regionAdminCompetitionsTab" type="button" role="tab" aria-controls="regionAdminCompetitionsTab" aria-selected="false"
                         data-region-code="@(ViewBag.regionCode as string ?? "")">
                     <i class="bi bi-trophy me-2"></i>Tävlingar
+                </button>
+                <button class="nav-link" id="regionSeries-tab" data-bs-toggle="tab" data-bs-target="#regionSeriesTab" type="button" role="tab" aria-controls="regionSeriesTab" aria-selected="false"
+                        data-region-code="@(ViewBag.regionCode as string ?? "")">
+                    <i class="bi bi-collection me-2"></i>Serier
                 </button>
 
                 <div class="admin-rail-group">Medlemmar</div>
@@ -294,6 +299,58 @@
                         <span class="visually-hidden">Laddar tävlingar...</span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Series Sub-Tab -->
+        <div class="tab-pane fade" id="regionSeriesTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Kretsserier</h5>
+                <button class="btn btn-primary" onclick="openCreateRegionSeriesModal()">
+                    <i class="bi bi-plus-circle me-2"></i>Ny Serie
+                </button>
+            </div>
+
+            <p class="text-muted small">
+                Serier som @regionName arrangerar, t.ex. en kretsserie där klubbarnas tävlingar
+                räknas samman. En serie som en enskild klubb arrangerar sköts på klubbens egen
+                adminsida.
+            </p>
+
+            <!-- Loading State -->
+            <div class="spinner-border text-primary d-none" id="regionSeriesLoadingSpinner" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+
+            <!-- Series Table -->
+            <div class="table-responsive" id="regionSeriesTableContainer">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Namn</th>
+                            <th>Period</th>
+                            <th>Status</th>
+                            <th class="text-center">Tävlingar</th>
+                            <th class="text-end">Åtgärder</th>
+                        </tr>
+                    </thead>
+                    <tbody id="regionSeriesTableBody">
+                        <tr class="text-muted">
+                            <td colspan="5" class="text-center py-4">Laddar serier...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State -->
+            <div class="alert alert-info d-none text-center" id="noRegionSeriesAlert">
+                <i class="bi bi-inbox me-2"></i>
+                Inga kretsserier hittades. <a href="#" onclick="openCreateRegionSeriesModal(); return false;">Skapa en nu</a>
+            </div>
+
+            <!-- Error Alert -->
+            <div class="alert alert-danger d-none" id="regionSeriesErrorAlert" role="alert">
+                <strong>Fel:</strong> <span id="regionSeriesErrorMessage"></span>
             </div>
         </div>
 
@@ -1490,3 +1547,329 @@
     border-color: var(--bs-primary);
 }
 </style>
+
+@* ===== Serier (kretsserier) =====
+   Mirrors the Serier tab on the club admin page (ClubAdminPanel.cshtml): the shared
+   Series* modals do the editing, this block only lists the series this krets owns and
+   locks the organizer fields to the krets so a kretsadmin cannot accidentally hand a
+   series to a club or to another krets. The openers the row buttons call from their onclick
+   attributes are put on window on purpose — the shared modals look them up by name. *@
+<script>
+(function () {
+    var regionSeriesCode = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(ViewBag.regionCode as string ?? ""));
+    var regionSeriesName = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(regionName));
+    var regionSeriesLoaded = false;
+
+    function regionSeriesToken() {
+        var tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
+        return tokenInput ? tokenInput.value : '';
+    }
+
+    function regionSeriesEscapeHtml(text) {
+        if (!text) return '';
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function regionSeriesFormatDateForInput(dateStr) {
+        if (!dateStr) return '';
+        var d = new Date(dateStr);
+        return d.toISOString().split('T')[0];
+    }
+
+    // Only this krets's own series. GetSeriesList also returns national series (no club, no
+    // krets) to everyone, so filtering on the krets code is what keeps the list honest.
+    function isThisRegionsSeries(s) {
+        var comp = (s.regionalFederation || '').toLowerCase();
+        return (!s.clubId || s.clubId === 0) && comp === regionSeriesCode.toLowerCase();
+    }
+
+    function loadRegionSeriesList() {
+        var spinner = document.getElementById('regionSeriesLoadingSpinner');
+        var tableContainer = document.getElementById('regionSeriesTableContainer');
+        var tbody = document.getElementById('regionSeriesTableBody');
+        var errorAlert = document.getElementById('regionSeriesErrorAlert');
+        var errorMessage = document.getElementById('regionSeriesErrorMessage');
+        var noSeriesAlert = document.getElementById('noRegionSeriesAlert');
+
+        spinner.classList.remove('d-none');
+        errorAlert.classList.add('d-none');
+        noSeriesAlert.classList.add('d-none');
+
+        var url = '/umbraco/surface/CompetitionAdmin/GetSeriesList';
+        if (regionSeriesCode) url += '?region=' + encodeURIComponent(regionSeriesCode);
+
+        fetch(url, {
+            method: 'GET',
+            headers: { 'RequestVerificationToken': regionSeriesToken() },
+            credentials: 'include'
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            spinner.classList.add('d-none');
+
+            if (!data.success) {
+                errorMessage.textContent = data.message || 'Kunde inte ladda serier';
+                errorAlert.classList.remove('d-none');
+                tbody.innerHTML = '<tr class="text-muted"><td colspan="5" class="text-center py-4">Fel vid laddning av serier</td></tr>';
+                return;
+            }
+
+            var regionSeries = (data.data || []).filter(isThisRegionsSeries);
+
+            if (regionSeries.length === 0) {
+                tableContainer.classList.add('d-none');
+                noSeriesAlert.classList.remove('d-none');
+                tbody.innerHTML = '';
+            } else {
+                tableContainer.classList.remove('d-none');
+                noSeriesAlert.classList.add('d-none');
+                renderRegionSeries(regionSeries);
+            }
+        })
+        .catch(function (error) {
+            spinner.classList.add('d-none');
+            errorMessage.textContent = error.message || 'Nätverksfel';
+            errorAlert.classList.remove('d-none');
+        });
+    }
+
+    function renderRegionSeries(seriesList) {
+        var tbody = document.getElementById('regionSeriesTableBody');
+        tbody.innerHTML = seriesList.map(function (series) {
+            var statusBadge = (series.isActive === true || series.isActive === 'true')
+                ? '<span class="badge bg-success">Aktiv</span>'
+                : '<span class="badge bg-secondary">Inaktiv</span>';
+            var strategyBadge = series.seriesCalculationStrategy
+                ? ' <span class="badge bg-info ms-1" title="Serieresultat konfigurerad"><i class="bi bi-bar-chart"></i></span>'
+                : '';
+            var start = series.startDate ? new Date(series.startDate).toLocaleDateString('sv-SE') : '-';
+            var end = series.endDate ? new Date(series.endDate).toLocaleDateString('sv-SE') : '-';
+            var dateRange = (start === '-' && end === '-') ? '-'
+                : (start !== '-' && end !== '-') ? (start + ' - ' + end)
+                : (start !== '-') ? ('Från ' + start) : ('Till ' + end);
+            var shortDesc = series.shortDescription ? regionSeriesEscapeHtml(series.shortDescription) : '<em>Ingen beskrivning</em>';
+            var nameEscaped = regionSeriesEscapeHtml(series.name).replace(/'/g, "\\'");
+            var count = series.competitionCount || 0;
+
+            return '<tr data-series-id="' + series.id + '">' +
+                '<td><strong>' + regionSeriesEscapeHtml(series.name) + strategyBadge + '</strong><br><small class="text-muted">' + shortDesc + '</small></td>' +
+                '<td><strong>' + dateRange + '</strong></td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td class="text-center"><span class="badge bg-info">' + count + '</span></td>' +
+                '<td class="text-end">' +
+                    '<button class="btn btn-sm btn-outline-primary" onclick="openSeriesEditModal(' + series.id + ')" title="Redigera"><i class="bi bi-pencil"></i></button> ' +
+                    '<button class="btn btn-sm btn-outline-info" onclick="openSeriesCopyModal(' + series.id + ')" title="Kopiera"><i class="bi bi-files"></i></button> ' +
+                    '<button class="btn btn-sm btn-outline-danger" onclick="openSeriesDeleteModal(' + series.id + ', \'' + nameEscaped + '\', ' + count + ')" title="Ta bort"><i class="bi bi-trash"></i></button>' +
+                '</td></tr>';
+        }).join('');
+    }
+
+    // Lock the organizer to this krets: no club, this krets, neither changeable. The select is
+    // disabled but still read on save (SeriesEditModal reads the value, not the disabled flag).
+    function lockSeriesOrganizerToRegion() {
+        var clubSelect = document.getElementById('seriesClubId');
+        var regionSelect = document.getElementById('seriesRegionalFederation');
+        if (clubSelect) {
+            clubSelect.value = '';
+            clubSelect.disabled = true;
+        }
+        if (regionSelect) {
+            // The region options load asynchronously; make sure ours exists before selecting it.
+            if (!Array.prototype.some.call(regionSelect.options, function (o) { return o.value === regionSeriesCode; })) {
+                var opt = document.createElement('option');
+                opt.value = regionSeriesCode;
+                opt.textContent = regionSeriesName;
+                regionSelect.appendChild(opt);
+            }
+            regionSelect.value = regionSeriesCode;
+            regionSelect.disabled = true;
+        }
+        var helpText = document.getElementById('seriesOrganizerHelpText');
+        if (helpText) {
+            helpText.textContent = 'Serien arrangeras av ' + regionSeriesName + ' och kan inte flyttas härifrån.';
+        }
+    }
+
+    window.openCreateRegionSeriesModal = function () {
+        document.getElementById('seriesId').value = '0';
+        document.getElementById('seriesName').value = '';
+        document.getElementById('seriesShortDescription').value = '';
+        document.getElementById('seriesDescription').value = '';
+        document.getElementById('seriesStartDate').value = '';
+        document.getElementById('seriesEndDate').value = '';
+        document.getElementById('showInMenu').checked = false;
+        document.getElementById('isActive').value = 'true';
+
+        if (typeof populateSeriesStrategy === 'function') {
+            populateSeriesStrategy('', '');
+        }
+
+        document.getElementById('seriesEditModalLabel').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Ny serie';
+
+        var modalElement = document.getElementById('seriesEditModal');
+        var modal = window.seriesEditModalInstance || new bootstrap.Modal(modalElement);
+        window.seriesEditModalInstance = modal;
+        modal.show();
+
+        lockSeriesOrganizerToRegion();
+    };
+
+    window.openSeriesEditModal = function (seriesId) {
+        var url = '/umbraco/surface/CompetitionAdmin/GetSeriesList';
+        if (regionSeriesCode) url += '?region=' + encodeURIComponent(regionSeriesCode);
+
+        fetch(url, {
+            method: 'GET',
+            headers: { 'RequestVerificationToken': regionSeriesToken() },
+            credentials: 'same-origin'
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.success || !data.data) return;
+            var series = data.data.find(function (s) { return s.id === seriesId; });
+            if (!series) return;
+
+            window.currentSeriesData = series;
+            document.getElementById('seriesId').value = series.id;
+            document.getElementById('seriesName').value = series.name || '';
+            document.getElementById('seriesShortDescription').value = series.shortDescription || '';
+
+            var descriptionContent = series.description || '';
+            if (descriptionContent && descriptionContent.charAt(0) === '{') {
+                try {
+                    var parsed = JSON.parse(descriptionContent);
+                    descriptionContent = parsed.markup || descriptionContent;
+                } catch (e) { }
+            }
+            document.getElementById('seriesDescription').value = descriptionContent;
+
+            if (series.startDate) {
+                var startInput = document.getElementById('seriesStartDate');
+                var startFormatted = regionSeriesFormatDateForInput(series.startDate);
+                startInput.value = startFormatted;
+                if (startInput._flatpickr) startInput._flatpickr.setDate(startFormatted);
+            }
+            if (series.endDate) {
+                var endInput = document.getElementById('seriesEndDate');
+                var endFormatted = regionSeriesFormatDateForInput(series.endDate);
+                endInput.value = endFormatted;
+                if (endInput._flatpickr) endInput._flatpickr.setDate(endFormatted);
+            }
+
+            document.getElementById('showInMenu').checked = series.showInMenu;
+            document.getElementById('isActive').value = series.isActive ? 'true' : 'false';
+
+            if (typeof populateSeriesStrategy === 'function') {
+                populateSeriesStrategy(series.seriesCalculationStrategy || '', series.seriesCalculationConfig || '');
+            }
+
+            document.getElementById('seriesEditModalLabel').innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera serie';
+
+            var modalElement = document.getElementById('seriesEditModal');
+            var modal = window.seriesEditModalInstance || new bootstrap.Modal(modalElement);
+            window.seriesEditModalInstance = modal;
+            modal.show();
+
+            lockSeriesOrganizerToRegion();
+        })
+        .catch(function (error) {
+            console.error('Error loading series:', error);
+        });
+    };
+
+    window.openSeriesCopyModal = function (seriesId) {
+        var token = regionSeriesToken();
+        var listUrl = '/umbraco/surface/CompetitionAdmin/GetSeriesList';
+        if (regionSeriesCode) listUrl += '?region=' + encodeURIComponent(regionSeriesCode);
+
+        fetch(listUrl, {
+            method: 'GET',
+            headers: { 'RequestVerificationToken': token },
+            credentials: 'same-origin'
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (seriesData) {
+            if (!seriesData.success || !seriesData.data) return;
+            var series = seriesData.data.find(function (s) { return s.id === seriesId; });
+            if (!series) return;
+
+            return fetch('/umbraco/surface/CompetitionAdmin/GetSeriesCompetitions?seriesId=' + seriesId, {
+                method: 'GET',
+                headers: { 'RequestVerificationToken': token },
+                credentials: 'same-origin'
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (competitionsData) {
+                if (!competitionsData.success) return;
+
+                window.currentSeriesDataForCopy = {
+                    seriesId: seriesId,
+                    seriesName: series.name,
+                    competitions: competitionsData.data || []
+                };
+
+                var modalElement = document.getElementById('seriesCopyModal');
+                if (!modalElement || typeof populateCopyModal !== 'function') return;
+
+                populateCopyModal(seriesId, window.currentSeriesDataForCopy.competitions);
+                var modal = window.seriesCopyModalInstance || new bootstrap.Modal(modalElement);
+                window.seriesCopyModalInstance = modal;
+                modal.show();
+            });
+        })
+        .catch(function (error) {
+            console.error('Error loading series for copy:', error);
+        });
+    };
+
+    window.openSeriesDeleteModal = function (seriesId, seriesName, competitionCount) {
+        window.deleteSeriesId = seriesId;
+        var modal = new bootstrap.Modal(document.getElementById('seriesDeleteConfirmModal'));
+        document.getElementById('deleteSeriesName').textContent = seriesName;
+
+        var errorAlert = document.getElementById('seriesDeleteErrorAlert');
+        errorAlert.classList.add('d-none');
+
+        if (competitionCount > 0) {
+            errorAlert.classList.remove('d-none');
+            document.getElementById('seriesDeleteErrorMessage').textContent =
+                'Denna serie innehåller ' + competitionCount + ' tävling(ar) och kan inte tas bort. Ta bort tävlingarna först.';
+            document.getElementById('deleteSeriesBtn').disabled = true;
+        } else {
+            document.getElementById('deleteSeriesBtn').disabled = false;
+        }
+
+        modal.show();
+    };
+
+    // The shared modals call these after a save/copy/delete.
+    window.loadSeriesList = loadRegionSeriesList;
+    window.reloadSeriesList = loadRegionSeriesList;
+    window.addSeriesToTable = function () { loadRegionSeriesList(); };
+    window.removeSeriesFromTable = function () { loadRegionSeriesList(); };
+
+    function ensureRegionSeriesLoaded() {
+        if (!regionSeriesLoaded) {
+            regionSeriesLoaded = true;
+            loadRegionSeriesList();
+        }
+    }
+
+    // Bound to click, not shown.bs.tab — same reason as the Tävlingar tab above: the Bootstrap
+    // transition event did not reliably reach a listener on this page in prod.
+    var seriesTabBtn = document.getElementById('regionSeries-tab');
+    if (seriesTabBtn) {
+        seriesTabBtn.addEventListener('click', ensureRegionSeriesLoaded);
+        if (seriesTabBtn.classList.contains('active')) {
+            ensureRegionSeriesLoaded();
+        }
+    }
+
+    var seriesEditModalEl = document.getElementById('seriesEditModal');
+    if (seriesEditModalEl) {
+        seriesEditModalEl.addEventListener('shown.bs.modal', lockSeriesOrganizerToRegion);
+    }
+})();
+</script>

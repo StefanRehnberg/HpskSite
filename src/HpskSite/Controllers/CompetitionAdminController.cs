@@ -2905,7 +2905,7 @@ namespace HpskSite.Controllers
                     return Ok(new
                     {
                         success = false,
-                        message = "Series saved but failed to publish: " + string.Join(", ", publishResult.EventMessages?.GetAll().Select(e => e.Message))
+                        message = "Series saved but failed to publish: " + DescribeSeriesPublishFailure(publishResult)
                     });
                 }
 
@@ -3005,7 +3005,7 @@ namespace HpskSite.Controllers
                     return Ok(new
                     {
                         success = false,
-                        message = "Series changes saved but failed to publish: " + string.Join(", ", publishResult.EventMessages?.GetAll().Select(e => e.Message))
+                        message = "Series changes saved but failed to publish: " + DescribeSeriesPublishFailure(publishResult)
                     });
                 }
 
@@ -3342,6 +3342,28 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Get authorization context for series operations (site admin, regional admin, or club admin)
         /// </summary>
+        /// <summary>
+        /// Why a series publish failed, in words. Umbraco hands back an EMPTY EventMessages list
+        /// when the content is merely invalid — a mandatory property left blank — which produced a
+        /// bare "failed to publish: " with nothing after the colon, and an unpublished ghost series
+        /// nobody could see. The publish status is the only thing that says anything in that case.
+        /// </summary>
+        private static string DescribeSeriesPublishFailure(Umbraco.Cms.Core.Services.PublishResult publishResult)
+        {
+            var messages = publishResult.EventMessages?.GetAll().Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).ToList()
+                           ?? new List<string>();
+            if (messages.Any())
+            {
+                return string.Join(", ", messages);
+            }
+
+            if (publishResult.Result == Umbraco.Cms.Core.Services.PublishResultType.FailedPublishContentInvalid)
+            {
+                return "obligatoriska fält saknas — kontrollera att startdatum är ifyllt.";
+            }
+
+            return publishResult.Result.ToString();
+        }
         private async Task<(bool isSiteAdmin, bool isRegionalAdmin, bool isClubAdmin, HashSet<int> managedClubIds)> GetSeriesAuthContext()
         {
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();

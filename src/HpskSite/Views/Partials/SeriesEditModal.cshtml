@@ -123,8 +123,12 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="seriesStartDate" class="form-label">Start Date</label>
-                                <input type="text" class="form-control" id="seriesStartDate" name="seriesStartDate" placeholder="Select start date">
+                                <label for="seriesStartDate" class="form-label">Start Date <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="seriesStartDate" name="seriesStartDate" placeholder="Select start date" required>
+                                @* Mandatory on the doctype, so a series without it SAVES but never PUBLISHES — and the publish
+                                   failure comes back with an empty message, leaving an unpublished ghost series behind. Requiring
+                                   it here stops that before it happens. *@
+                                <small class="form-text text-muted">Krävs — serien kan inte publiceras utan startdatum.</small>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -340,6 +344,17 @@ function onSeriesRegionChange() {
     }
 }
 
+// The organizer a series is being saved with. A club-owned series never carries a krets, so
+// the club select wins; otherwise the krets select's value is used even when the select is
+// DISABLED. Disabled means "locked" (the krets admin page locks it to its own krets), not
+// "empty" — reading the flag instead of the value silently dropped the krets on save.
+function getSeriesOrganizerRegionValue() {
+    const clubSelect = document.getElementById('seriesClubId');
+    const regionSelect = document.getElementById('seriesRegionalFederation');
+    if (clubSelect && clubSelect.value) return '';
+    return regionSelect ? (regionSelect.value || '') : '';
+}
+
 // Save series (create or update)
 function saveSeries() {
     const form = document.getElementById('seriesEditForm');
@@ -377,9 +392,7 @@ function saveSeries() {
         } else if (key === 'clubId') {
             fields[key] = value || '';
         } else if (key === 'regionalFederation') {
-            // Read from select, respecting disabled state
-            const regionSelect = document.getElementById('seriesRegionalFederation');
-            fields[key] = regionSelect.disabled ? '' : (regionSelect.value || '');
+            fields[key] = getSeriesOrganizerRegionValue();
         } else if (key === 'showInMenu') {
             fields[key] = value === 'on' || value === 'true';
         } else if (key === 'isActive') {
@@ -402,8 +415,7 @@ function saveSeries() {
         fields['clubId'] = document.getElementById('seriesClubId').value || '';
     }
     if (!('regionalFederation' in fields)) {
-        const regionSelect = document.getElementById('seriesRegionalFederation');
-        fields['regionalFederation'] = regionSelect.disabled ? '' : (regionSelect.value || '');
+        fields['regionalFederation'] = getSeriesOrganizerRegionValue();
     }
 
     const seriesId = parseInt(document.getElementById('seriesId').value) || 0;

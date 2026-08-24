@@ -134,6 +134,16 @@
     @Html.AntiForgeryToken()
     @await Html.PartialAsync("FeaturedItemsPicker")
 
+    @* Series modals for the Serier sub-tab in RegionalAdminPanel. They are included BEFORE
+       the competition modals on purpose: SeriesCopyModal/SeriesDeleteConfirmModal each declare
+       a showNotification() that falls back to alert(), while CompetitionEditModal declares a
+       toast version. Last declaration wins, so this order keeps the toast — same as the club
+       page, where ClubAdminPanel (which pulls in the series modals) is rendered before them. *@
+    @await Html.PartialAsync("SeriesEditModal")
+    @await Html.PartialAsync("SeriesStrategyModal")
+    @await Html.PartialAsync("SeriesCopyModal")
+    @await Html.PartialAsync("SeriesDeleteConfirmModal")
+
     @* Competition management modals for the Tävlingar sub-tab in RegionalAdminPanel *@
     @await Html.PartialAsync("CompetitionWizardModal")
     @await Html.PartialAsync("CompetitionAdvertModal")
