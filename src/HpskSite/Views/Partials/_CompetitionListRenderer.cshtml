@@ -20,6 +20,11 @@
       edit/copy/del  names of the page's existing callbacks, used to build the onclick
       manageUrl      false to drop the kugghjul link (default true)
 
+    The Åtgärder cell is ONE menu button (2026-08-24), the same shape the row menus at the
+    registreringsbord use — five look-alike icon buttons were unreadable and the last of them
+    got scrolled off on a tablet. Add a row action as a <li> in that menu, not as a button
+    beside it.
+
     Upload buttons appear only where the page actually has the upload modals, detected at
     render time — so a surface gets them by including the modals, not by editing this file.
 *@
@@ -111,15 +116,16 @@
             const typeLabel = window.hpskCompEscape(window.hpskCompetitionTypeLabel(comp.type));
             const call = (fn, args) => `${fn}(${args.join(', ')})`;
 
-            // Only offered where the page carries the modals — see the header note.
+            // Only offered where the page actually carries the modals — see the header note.
             let uploads = '';
             if (comp.isExternal) {
                 if (typeof window.openUploadInvitationModal === 'function') {
-                    uploads += `<button class="btn btn-sm btn-outline-success" onclick="${call('openUploadInvitationModal', [comp.id, `'${attr(comp.name)}'`])}" title="Ladda upp inbjudan"><i class="bi bi-file-earmark-arrow-up"></i></button> `;
+                    uploads += `<li><button class="dropdown-item" type="button" onclick="${call('openUploadInvitationModal', [comp.id, `'${attr(comp.name)}'`])}"><i class="bi bi-file-earmark-arrow-up me-2 text-success"></i>Ladda upp inbjudan</button></li>`;
                 }
                 if (typeof window.openUploadResultListModal === 'function') {
-                    uploads += `<button class="btn btn-sm btn-outline-warning" onclick="${call('openUploadResultListModal', [comp.id, `'${attr(comp.name)}'`])}" title="Ladda upp resultatlista"><i class="bi bi-file-earmark-bar-graph"></i></button> `;
+                    uploads += `<li><button class="dropdown-item" type="button" onclick="${call('openUploadResultListModal', [comp.id, `'${attr(comp.name)}'`])}"><i class="bi bi-file-earmark-bar-graph me-2 text-warning"></i>Ladda upp resultatlista</button></li>`;
                 }
+                if (uploads) uploads = '<li><hr class="dropdown-divider"></li>' + uploads;
             }
 
             const editFn = scope.edit || 'openAdminEditModal';
@@ -133,7 +139,7 @@
                 : [comp.id];
 
             const manage = scope.manageUrl === false ? '' :
-                `<a href="/competitionmanagement?competitionId=${comp.id}" class="btn btn-sm btn-outline-info" title="Hantera tävling"><i class="bi bi-gear"></i></a> `;
+                `<li><a class="dropdown-item" href="/competitionmanagement?competitionId=${comp.id}"><i class="bi bi-gear me-2 text-info"></i>Hantera tävlingen</a></li>`;
 
             return `<tr data-competition-id="${comp.id}">
                 <td><strong>${name}</strong>${window.hpskCompetitionExternalBadge(comp)}${window.hpskCompetitionScopeBadge(comp, scope)}</td>
@@ -142,10 +148,23 @@
                 <td>${window.hpskCompetitionStatusBadge(comp)}${window.hpskCompetitionRegistrationBadge(comp)}</td>
                 <td class="text-center"><span class="badge bg-info">${comp.registrationCount || 0}</span></td>
                 <td class="text-end">
-                    <a class="btn btn-sm btn-outline-secondary" href="/competitions/${comp.id}/" title="Visa" target="_blank"><i class="bi bi-eye"></i></a>
-                    <button class="btn btn-sm btn-outline-primary" onclick="${call(editFn, editArgs)}" title="Redigera"><i class="bi bi-pencil"></i></button>
-                    <button class="btn btn-sm btn-outline-info" onclick="${call(copyFn, copyArgs)}" title="Kopiera"><i class="bi bi-files"></i></button>
-                    ${manage}${uploads}<button class="btn btn-sm btn-outline-danger" onclick="${call(delFn, [comp.id, `'${attr(comp.name)}'`])}" title="Ta bort"><i class="bi bi-trash"></i></button>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                                data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                                aria-expanded="false" title="Åtgärder för ${name}">
+                            <i class="bi bi-sliders me-2"></i>Åtgärder
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            ${manage}
+                            <li><a class="dropdown-item" href="/competitions/${comp.id}/" target="_blank"><i class="bi bi-eye me-2 text-secondary"></i>Visa tävlingssidan</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button class="dropdown-item" type="button" onclick="${call(editFn, editArgs)}"><i class="bi bi-pencil me-2 text-primary"></i>Redigera tävlingen</button></li>
+                            <li><button class="dropdown-item" type="button" onclick="${call(copyFn, copyArgs)}"><i class="bi bi-files me-2 text-info"></i>Kopiera tävlingen</button></li>
+                            ${uploads}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button class="dropdown-item text-danger" type="button" onclick="${call(delFn, [comp.id, `'${attr(comp.name)}'`])}"><i class="bi bi-trash me-2"></i>Ta bort tävlingen</button></li>
+                        </ul>
+                    </div>
                 </td>
             </tr>`;
         };

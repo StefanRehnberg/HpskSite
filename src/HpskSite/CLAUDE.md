@@ -748,6 +748,22 @@ previously hand-rolled row markup, badges and status independently, which is how
 bug shipped on all three at once while the club page also kept a stale yellow badge (same trap as
 `startlist-dual-renderer`, with three renderers instead of two).
 
+**Each row's actions are ONE Åtgärder menu, not a strip of icon buttons (2026-08-24).** Five
+look-alike outline icons were unreadable and the last of them scrolled off on a tablet; the row
+menus at the registreringsbord already solved this. Add a row action as an `<li>` inside that menu.
+The series lists got the same treatment through **`Views/Partials/_SeriesRowActions.cshtml`**
+(`hpskSeriesActionsMenu(series)`), shared by AdminSeriesList / RegionalAdminPanel / ClubAdminPanel —
+all three define the same `openSeriesEditModal` / `openSeriesCopyModal` / `openSeriesDeleteModal`
+globally, each scoped to its own surface, which is what lets one builder serve all three.
+⚠ **`data-bs-popper-config='{"strategy":"fixed"}'` is required** — the tables sit inside
+`.table-responsive` (`overflow-x:auto`), which clips an absolutely-positioned menu, and
+`data-bs-strategy` is silently ignored by Bootstrap. It only shows on the LAST row.
+⚠ **A geometry test must open the OUTER Administration tab first** (`regionAdmin-tab` /
+`clubAdmin-tab`): an inner sub-pane carries `.active` while the whole admin pane is
+`display:none`, so class-level assertions pass on an invisible page and every rect reads zero.
+Verified 60/60 `hpsk-verify/row-action-menus-verify.mjs` (all six lists, incl. the bottom-row
+reachability hit-test).
+
 Surface differences are **parameters**, not copies: `{kind, groupBySeries, edit, copy, del, editArgs,
 copyArgs, manageUrl}`. Only `kind` changes visible output — a club's own page badges an open
 club-hosted comp "Öppen/inbjudan" instead of "Klubb", since "Klubb" says nothing new there. The

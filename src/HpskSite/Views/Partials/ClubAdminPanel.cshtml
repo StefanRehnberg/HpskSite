@@ -740,6 +740,7 @@
 </div>
 
 <!-- Series Modals (reused from admin page) -->
+@await Html.PartialAsync("_SeriesRowActions")
 @await Html.PartialAsync("SeriesEditModal")
 @await Html.PartialAsync("SeriesStrategyModal")
 @await Html.PartialAsync("SeriesCopyModal")
@@ -2830,18 +2831,13 @@ function renderClubSeries(seriesList) {
             : (start !== '-' && end !== '-') ? `${start} - ${end}`
             : (start !== '-') ? `Från ${start}` : `Till ${end}`;
         const shortDesc = series.shortDescription ? clubSeriesEscapeHtml(series.shortDescription) : '<em>Ingen beskrivning</em>';
-        const nameEscaped = clubSeriesEscapeHtml(series.name).replace(/'/g, "\\'");
 
         return `<tr data-series-id="${series.id}">
             <td><strong>${clubSeriesEscapeHtml(series.name)}${strategyBadge}</strong><br><small class="text-muted">${shortDesc}</small></td>
             <td><strong>${dateRange}</strong></td>
             <td>${statusBadge}</td>
             <td class="text-center"><span class="badge bg-info">${series.competitionCount || 0}</span></td>
-            <td class="text-end">
-                <button class="btn btn-sm btn-outline-primary" onclick="openSeriesEditModal(${series.id})" title="Redigera"><i class="bi bi-pencil"></i></button>
-                <button class="btn btn-sm btn-outline-info" onclick="openSeriesCopyModal(${series.id})" title="Kopiera"><i class="bi bi-files"></i></button>
-                <button class="btn btn-sm btn-outline-danger" onclick="openSeriesDeleteModal(${series.id}, '${nameEscaped}', ${series.competitionCount || 0})" title="Ta bort"><i class="bi bi-trash"></i></button>
-            </td>
+            <td class="text-end">${window.hpskSeriesActionsMenu(series)}</td>
         </tr>`;
     }).join('');
 }

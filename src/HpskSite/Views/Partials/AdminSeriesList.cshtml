@@ -8,6 +8,8 @@
     var currentMember = await MemberManager.GetCurrentMemberAsync();
 }
 
+@await Html.PartialAsync("_SeriesRowActions")
+
 <div class="admin-series-list">
     <!-- Header with Create Button -->
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -95,17 +97,7 @@
         <td class="text-center">
             <span class="badge bg-info">{competitionCount}</span>
         </td>
-        <td class="text-end">
-            <button class="btn btn-sm btn-outline-primary" onclick="openSeriesEditModal({id})" title="Redigera">
-                <i class="bi bi-pencil"></i>
-            </button>
-            <button class="btn btn-sm btn-outline-info" onclick="openSeriesCopyModal({id})" title="Kopiera">
-                <i class="bi bi-files"></i>
-            </button>
-            <button class="btn btn-sm btn-outline-danger" onclick="openSeriesDeleteModal({id}, '{nameEscaped}', {competitionCount})" title="Ta bort">
-                <i class="bi bi-trash"></i>
-            </button>
-        </td>
+        <td class="text-end">{actionsMenu}</td>
     </tr>
 </script>
 
@@ -339,7 +331,9 @@ function renderSeries() {
             .replace(/{statusClass}/g, statusInfo.badgeClass)
             .replace(/{statusText}/g, statusInfo.text)
             .replace(/{competitionCount}/g, series.competitionCount || 0)
-            .replace(/{nameEscaped}/g, escapeHtml(series.name).replace(/'/g, "\\'"));
+            .replace(/{nameEscaped}/g, escapeHtml(series.name).replace(/'/g, "\\'"))
+            // Shared with the krets and klubb series lists — see _SeriesRowActions.cshtml.
+            .replace(/{actionsMenu}/g, window.hpskSeriesActionsMenu(series));
     }).join('');
 }
 

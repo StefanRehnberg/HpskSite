@@ -1,0 +1,76 @@
+@*
+    ONE Åtgärder menu for a series row, shared by all three surfaces that list series:
+      * AdminSeriesList.cshtml      (site admin → Serier)
+      * RegionalAdminPanel.cshtml   (krets → Serier)
+      * ClubAdminPanel.cshtml       (klubb → Serier)
+
+    Same reason _CompetitionListRenderer exists: three hand-rolled copies of the same row is
+    how a fix lands on one surface and silently skips the other two. Include this partial and
+    call window.hpskSeriesActionsMenu(series) instead of writing a fourth copy.
+
+    All three pages define the same three openers globally (openSeriesEditModal,
+    openSeriesCopyModal, openSeriesDeleteModal) — each scoped to its own surface — so the
+    menu can call them by name and land in the right place on every page.
+*@
+@if (ViewData["_hpskSeriesRowActionsRendered"] == null)
+{
+    ViewData["_hpskSeriesRowActionsRendered"] = true;
+    <script>
+    // Guarded: a page may include this alongside a partial that already pulled it in, and
+    // redefining mid-page would drop callbacks already bound.
+    if (!window.hpskSeriesRowActionsLoaded) {
+        window.hpskSeriesRowActionsLoaded = true;
+
+        window.hpskSeriesEscape = function (text) {
+            if (text === null || text === undefined || text === '') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        };
+
+        // The contents of a row's Åtgärder cell: one menu button instead of a strip of icon
+        // buttons nobody could tell apart. Mirrors the row menus at the registreringsbord
+        // (CompetitionRegistrationManagement) — same button, same order, delete last, named
+        // in full and in red.
+        //
+        // data-bs-popper-config strategy:fixed is REQUIRED: these tables live inside
+        // .table-responsive, whose overflow clips an absolutely-positioned menu — the bottom
+        // row's menu would open into a scroll container and be unreachable. (data-bs-strategy
+        // is silently ignored by Bootstrap; only the popper-config form works.)
+        window.hpskSeriesActionsMenu = function (series) {
+            const id = series.id;
+            const name = window.hpskSeriesEscape(series.name);
+            // Into an onclick="..." string literal: HTML-escape first, then protect the quote
+            // that would close it.
+            const nameArg = window.hpskSeriesEscape(series.name).replace(/'/g, "\\'");
+            const count = series.competitionCount || 0;
+
+            return `<div class="dropdown">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
+                        aria-expanded="false" title="Åtgärder för ${name}">
+                    <i class="bi bi-sliders me-2"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="openSeriesEditModal(${id})">
+                            <i class="bi bi-pencil me-2 text-primary"></i>Redigera serien
+                        </button>
+                    </li>
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="openSeriesCopyModal(${id})">
+                            <i class="bi bi-files me-2 text-info"></i>Kopiera serien med dess tävlingar
+                        </button>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <button class="dropdown-item text-danger" type="button" onclick="openSeriesDeleteModal(${id}, '${nameArg}', ${count})">
+                            <i class="bi bi-trash me-2"></i>Ta bort serien
+                        </button>
+                    </li>
+                </ul>
+            </div>`;
+        };
+    }
+    </script>
+}
