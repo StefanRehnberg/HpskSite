@@ -6520,7 +6520,10 @@ function openSendRemindersModal() {
                 const ta = document.getElementById('sendRemindersMessage');
                 if (!ta.value) ta.value = reminderDefaultMessage;
 
-                reminderRecipients = (data.recipients || []).map(r => ({ ...r, selected: true }));
+                // Ineligible rows are shown but never pre-selected — the operator sees WHY someone
+                // can't be chased instead of wondering where they went.
+                reminderRecipients = (data.recipients || [])
+                    .map(r => ({ ...r, selected: r.eligible !== false }));
                 renderReminderRecipients();
             } else {
                 document.getElementById('sendRemindersRecipients').innerHTML =
@@ -6556,14 +6559,20 @@ function renderReminderRecipients() {
         }
         const amount = (r.amount != null) ? `${Math.round(Number(r.amount))} kr` : '';
         const sub = [r.club, r.email].filter(Boolean).map(escapeHistory).join(' · ');
-        html += `<li class="list-group-item py-1 px-2">
+        const blocked = r.eligible === false;
+        const reason = blocked && r.ineligibleReason
+            ? `<small class="d-block text-warning-emphasis"><i class="bi bi-info-circle me-1"></i>${escapeHistory(r.ineligibleReason)}</small>`
+            : '';
+        html += `<li class="list-group-item py-1 px-2${blocked ? ' bg-body-tertiary' : ''}">
             <div class="form-check mb-0 d-flex align-items-center">
                 <input class="form-check-input reminder-recipient-cb mt-0 me-2" type="checkbox"
                        id="reminderCb_${i}" data-idx="${i}" ${r.selected ? 'checked' : ''}
+                       ${blocked ? 'disabled' : ''}
                        onchange="onReminderCbChange(${i}, this.checked)">
-                <label class="form-check-label flex-grow-1" for="reminderCb_${i}">
+                <label class="form-check-label flex-grow-1${blocked ? ' text-muted' : ''}" for="reminderCb_${i}">
                     <span class="fw-semibold">${escapeHistory(r.memberName || '(namnlös)')}</span>${reminded}
                     <small class="text-muted d-block">${sub}</small>
+                    ${reason}
                 </label>
                 <span class="small text-muted ms-2 text-nowrap">${escapeHistory(amount)}</span>
             </div>
@@ -6580,8 +6589,13 @@ function onReminderCbChange(idx, checked) {
 }
 
 function reminderSelectAll(checked) {
-    reminderRecipients.forEach(r => r.selected = checked);
-    document.querySelectorAll('#sendRemindersRecipients .reminder-recipient-cb').forEach(cb => cb.checked = checked);
+    // "Välj alla" can never tick a row the server would refuse anyway.
+    reminderRecipients.forEach((r, i) => {
+        if (r.eligible === false) return;
+        r.selected = checked;
+        const cb = document.getElementById(`reminderCb_${i}`);
+        if (cb) cb.checked = checked;
+    });
     updateReminderSelection();
 }
 
@@ -6600,10 +6614,15 @@ function reminderUncheckAlreadyReminded() {
 
 // Sync the selected count + confirm button label/disabled state with the current ticks.
 function updateReminderSelection() {
-    const total = reminderRecipients.length;
-    const selected = reminderRecipients.filter(r => r.selected).length;
+    // The denominator is who CAN be chased; blocked rows are counted separately so the
+    // numbers on screen add up to what the send will actually do.
+    const total = reminderRecipients.filter(r => r.eligible !== false).length;
+    const blocked = reminderRecipients.length - total;
+    const selected = reminderRecipients.filter(r => r.selected && r.eligible !== false).length;
     document.getElementById('sendRemindersSelectedInfo').textContent =
-        total ? `${selected} av ${total} valda` : '';
+        reminderRecipients.length
+            ? `${selected} av ${total} valda` + (blocked ? ` · ${blocked} kan inte påminnas` : '')
+            : '';
     const btn = document.getElementById('sendRemindersConfirmBtn');
     btn.disabled = selected === 0;
     btn.innerHTML = `<i class="bi bi-send me-1"></i>Skicka påminnelser${selected ? ` (${selected})` : ''}`;

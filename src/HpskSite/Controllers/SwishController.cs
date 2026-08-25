@@ -542,27 +542,23 @@ namespace HpskSite.Controllers
         /// </summary>
         private (bool ok, decimal amount, string? refusal) ResolveTeamQrAmount(int invoiceId, decimal feeFallback)
         {
-            if (_paymentService.IsCoveredByOpenConsolidation(invoiceId, out var parent, out var parentPaid))
-                return (false, 0m, PaymentService.CoveredByConsolidationPaymentMessage(parent, parentPaid));
+            // The rule itself lives in ConsolidatedInvoiceService.ResolveQrAmount — this method used
+            // to carry its own copy, and the mailed reminders never got the same treatment. Only the
+            // team-specific WORDING stays here.
+            var resolved = _consolidatedService.ResolveQrAmount(invoiceId, feeFallback);
+            if (resolved.Ok)
+                return (true, resolved.Amount, null);
 
-            var balance = _consolidatedService.GetBalance(invoiceId);
-            var status = ConsolidatedInvoiceService.NormalizeStatus(balance.Status);
-
-            if (string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase))
-                return (false, 0m, "Lagavgiften har redan betalats.");
-            if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase))
-                return (false, 0m, "Fakturan är makulerad. Skapa en ny anmälan eller kontakta arrangören.");
-
-            if (balance.AmountDue > 0m)
-                return (true, balance.AmountDue, null);
-
-            _logger.LogWarning(
-                "Team invoice {InvoiceId} has status {Status} but no amount due; falling back to the competition fee {Fee}",
-                invoiceId, status, feeFallback);
-
-            return feeFallback > 0m
-                ? (true, feeFallback, null)
-                : (false, 0m, "Ingen lagavgift är konfigurerad.");
+            return resolved.Refusal switch
+            {
+                ConsolidatedInvoiceService.QrRefusal.AlreadyPaid =>
+                    (false, 0m, "Lagavgiften har redan betalats."),
+                ConsolidatedInvoiceService.QrRefusal.Cancelled =>
+                    (false, 0m, "Fakturan är makulerad. Skapa en ny anmälan eller kontakta arrangören."),
+                ConsolidatedInvoiceService.QrRefusal.NothingToCollect =>
+                    (false, 0m, "Ingen lagavgift är konfigurerad."),
+                _ => (false, 0m, resolved.Message)
+            };
         }
 
         /// <summary>

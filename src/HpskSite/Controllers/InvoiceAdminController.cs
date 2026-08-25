@@ -1332,7 +1332,15 @@ namespace HpskSite.Controllers
 
                 // Generate QR code
                 var invoiceNumber = invoice.GetValue<string>("invoiceNumber");
-                var totalAmount = invoice.GetValue<decimal>("totalAmount");
+
+                // This endpoint had NO status check at all, so an already-paid invoice could be
+                // resent with a live QR — an invitation to pay twice. The resolver answers both
+                // "may this be sent" and "for how much" (the issued total is not what is left to
+                // pay once a kreditfaktura exists).
+                var resolved = _consolidatedService.ResolveQrAmount(invoice.Id);
+                if (!resolved.Ok)
+                    return Json(new { success = false, message = resolved.Message });
+                var totalAmount = resolved.Amount;
                 var message = $"Betalning: {invoiceNumber}";
 
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
@@ -1625,6 +1633,8 @@ namespace HpskSite.Controllers
             var sentCount = 0;
             var skippedCount = 0;
             var errors = new List<string>();
+            // Never silently omit: the operator is told WHY someone was skipped, grouped by reason.
+            var skippedReasons = new List<ConsolidatedInvoiceService.QrRefusal>();
 
             foreach (var invoice in pendingInvoices)
             {
@@ -1652,7 +1662,19 @@ namespace HpskSite.Controllers
                     }
 
                     var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? "";
-                    var totalAmount = invoice.GetValue<decimal>("totalAmount");
+
+                    // How much to chase — and WHETHER to chase — comes from the one resolver, never
+                    // from totalAmount. The status filter above cannot see an invoice the club is
+                    // already paying through an open samlingsfaktura (it stays "Pending"), so without
+                    // this the shooter gets a Swish QR for money that is on its way from someone else.
+                    var resolved = _consolidatedService.ResolveQrAmount(invoice.Id);
+                    if (!resolved.Ok)
+                    {
+                        skippedCount++;
+                        skippedReasons.Add(resolved.Refusal);
+                        continue;
+                    }
+                    var totalAmount = resolved.Amount;
                     var qrMessage = $"Betalning: {invoiceNumber}";
                     var qrBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, totalAmount.ToString("F2"), qrMessage);
 
@@ -1693,6 +1715,7 @@ namespace HpskSite.Controllers
                 }
             }
 
+            var skipNote = DescribeSkippedReasons(skippedReasons);
             return Json(new
             {
                 success = true,
@@ -1701,7 +1724,31 @@ namespace HpskSite.Controllers
                 errorCount = errors.Count,
                 errors = errors.Take(10).ToList(),  // cap error list so the response stays reasonable
                 message = $"Påminnelser skickade: {sentCount}. Hoppade över: {skippedCount}."
+                    + (string.IsNullOrEmpty(skipNote) ? "" : $" ({skipNote})")
             });
+        }
+
+        /// <summary>
+        /// Plain-Swedish summary of why recipients were skipped, so the count is never a bare number
+        /// the operator has to guess at. Only reasons that actually occurred are named.
+        /// </summary>
+        private static string DescribeSkippedReasons(List<ConsolidatedInvoiceService.QrRefusal> reasons)
+        {
+            if (reasons.Count == 0) return "";
+            var parts = new List<string>();
+            foreach (var group in reasons.GroupBy(r => r).OrderByDescending(g => g.Count()))
+            {
+                var what = group.Key switch
+                {
+                    ConsolidatedInvoiceService.QrRefusal.CoveredByConsolidation => "täcks av en samlingsfaktura",
+                    ConsolidatedInvoiceService.QrRefusal.AlreadyPaid => "redan betalda",
+                    ConsolidatedInvoiceService.QrRefusal.Cancelled => "makulerade",
+                    ConsolidatedInvoiceService.QrRefusal.NothingToCollect => "inget kvar att betala",
+                    _ => "annat skäl"
+                };
+                parts.Add($"{group.Count()} {what}");
+            }
+            return string.Join(", ", parts);
         }
 
         /// <summary>
@@ -1755,7 +1802,11 @@ namespace HpskSite.Controllers
                     if (memberIdString == null || memberIdString.StartsWith("team-")) return false;
                     if (!int.TryParse(memberIdString, out int memberId)) return false;
                     var member = _memberService.GetById(memberId);
-                    return member != null && !string.IsNullOrEmpty(member.Email);
+                    if (member == null || string.IsNullOrEmpty(member.Email)) return false;
+                    // "You're about to email N shooters" has to mean N, so the same eligibility
+                    // rule as the send itself applies — a covered or settled invoice is not a
+                    // recipient however Pending it looks.
+                    return _consolidatedService.ResolveQrAmount(x.Id).Ok;
                 })
                 .Count();
 
@@ -1831,7 +1882,7 @@ namespace HpskSite.Controllers
                 // list because the audit read hiccupped; just show no "redan påmind" markers.
             }
 
-            var list = new List<(int invoiceId, string name, string email, string club, decimal amount, DateTime? last, int count)>();
+            var list = new List<(int invoiceId, string name, string email, string club, decimal amount, DateTime? last, int count, bool eligible, string reason)>();
             foreach (var invoice in pendingInvoices)
             {
                 var memberIdString = invoice.GetValue<string>("memberId");
@@ -1854,11 +1905,20 @@ namespace HpskSite.Controllers
                 int count = 0;
                 if (reminderByInvoice.TryGetValue(invoice.Id, out var r)) { last = r.last; count = r.count; }
 
-                list.Add((invoice.Id, member.Name ?? "", member.Email, club, invoice.GetValue<decimal>("totalAmount"), last, count));
+                // Show what cannot be chased, with the reason spelled out, rather than omitting it:
+                // a shooter missing from this list without explanation is exactly how the ghost
+                // invoices stayed invisible. The row is rendered ticked-off and disabled.
+                var resolved = _consolidatedService.ResolveQrAmount(invoice.Id);
+                var displayAmount = resolved.Ok ? resolved.Amount : invoice.GetValue<decimal>("totalAmount");
+
+                list.Add((invoice.Id, member.Name ?? "", member.Email, club, displayAmount, last, count,
+                    resolved.Ok, resolved.Ok ? "" : resolved.Message));
             }
 
             var recipients = list
-                .OrderBy(r => r.name, StringComparer.OrdinalIgnoreCase)
+                // Chaseable shooters first — the ineligible rows are context, not the work.
+                .OrderByDescending(r => r.eligible)
+                .ThenBy(r => r.name, StringComparer.OrdinalIgnoreCase)
                 .Select(r => new
                 {
                     invoiceId = r.invoiceId,
@@ -1867,7 +1927,9 @@ namespace HpskSite.Controllers
                     club = r.club,
                     amount = r.amount,
                     lastReminderSentDate = r.last,
-                    reminderCount = r.count
+                    reminderCount = r.count,
+                    eligible = r.eligible,
+                    ineligibleReason = r.reason
                 })
                 .ToList();
 
@@ -1943,7 +2005,11 @@ namespace HpskSite.Controllers
                     .FirstOrDefault();
                 if (firstPending != null)
                 {
-                    amount = firstPending.GetValue<decimal>("totalAmount");
+                    // Same resolver as the real send, so the preview cannot show an amount the
+                    // shooters would never be asked for. A refusal just leaves amount at 0 and
+                    // falls through to the competition fee below — this is a preview, not a demand.
+                    var previewResolved = _consolidatedService.ResolveQrAmount(firstPending.Id);
+                    amount = previewResolved.Ok ? previewResolved.Amount : 0m;
                     invoiceNumber = firstPending.GetValue<string>("invoiceNumber") ?? "TEST";
                 }
             }

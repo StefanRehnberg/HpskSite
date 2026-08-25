@@ -629,6 +629,88 @@ namespace HpskSite.Services
         private static bool IsSettled(string status) =>
             StatusIs(status, "Paid") || StatusIs(status, "Cancelled");
 
+        /// <summary>Why a QR/payment demand may not be issued for an invoice.</summary>
+        public enum QrRefusal
+        {
+            None = 0,
+            /// <summary>A samlingsfaktura that is still open already includes this amount.</summary>
+            CoveredByConsolidation,
+            AlreadyPaid,
+            Cancelled,
+            /// <summary>Nothing left to collect (fully credited), and no fee to fall back on.</summary>
+            NothingToCollect
+        }
+
+        public sealed class QrAmountResolution
+        {
+            public bool Ok { get; init; }
+            public decimal Amount { get; init; }
+            public QrRefusal Refusal { get; init; }
+            /// <summary>Ready-to-show Swedish wording for the refusal. Empty when <see cref="Ok"/>.</summary>
+            public string Message { get; init; } = "";
+            /// <summary>Invoice number of the covering samlingsfaktura, when that is the refusal.</summary>
+            public string ParentInvoiceNumber { get; init; } = "";
+        }
+
+        /// <summary>
+        /// THE single answer to "how much should this payment demand be for, and may it be issued at
+        /// all" — for every channel: the on-screen QR, the mailed QR, a reminder, a resent invoice.
+        ///
+        /// It exists because the two questions cannot be separated, and answering only the first is
+        /// how invoices get paid twice. Three things a status check plus `totalAmount` cannot know:
+        /// • An invoice covered by an OPEN samlingsfaktura keeps paymentStatus "Pending" — only
+        ///   <c>settledByInvoiceId</c> is set — so it looks unpaid while the club is already paying it.
+        ///   Chasing it asks the same money of two payers.
+        /// • A kreditfaktura reduces what is owed without ever editing the issued invoice, so the
+        ///   issued total is not what is left to pay. <see cref="GetBalance"/> derives that.
+        /// • A fully settled or makulerad invoice must be refused outright, not sent for 0 kr.
+        ///
+        /// <paramref name="feeFallback"/> is a deliberate escape hatch, not a default: a legacy invoice
+        /// with no readable amount still produces a payable demand rather than leaving the registration
+        /// desk stuck. It is logged, because it means bad invoice data.
+        ///
+        /// Callers that need different wording (team fees say "Lagavgiften") should switch on
+        /// <see cref="QrAmountResolution.Refusal"/> rather than re-deriving the rule.
+        /// </summary>
+        public QrAmountResolution ResolveQrAmount(int invoiceId, decimal feeFallback = 0m)
+        {
+            if (_paymentService.IsCoveredByOpenConsolidation(invoiceId, out var parent, out var parentPaid))
+            {
+                return new QrAmountResolution
+                {
+                    Refusal = QrRefusal.CoveredByConsolidation,
+                    ParentInvoiceNumber = parent,
+                    Message = PaymentService.CoveredByConsolidationPaymentMessage(parent, parentPaid)
+                };
+            }
+
+            var balance = GetBalance(invoiceId);
+            var status = NormalizeStatus(balance.Status);
+
+            if (string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase))
+                return new QrAmountResolution { Refusal = QrRefusal.AlreadyPaid, Message = "Fakturan är redan betald." };
+            if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                return new QrAmountResolution { Refusal = QrRefusal.Cancelled, Message = "Fakturan är makulerad." };
+
+            if (balance.AmountDue > 0m)
+                return new QrAmountResolution { Ok = true, Amount = balance.AmountDue };
+
+            _logger.LogWarning(
+                "Invoice {InvoiceId} has status {Status} but no amount due; falling back to the fee {Fee}",
+                invoiceId, status, feeFallback);
+
+            if (feeFallback > 0m)
+                return new QrAmountResolution { Ok = true, Amount = feeFallback };
+
+            return new QrAmountResolution
+            {
+                Refusal = QrRefusal.NothingToCollect,
+                Message = balance.Credited > 0m
+                    ? "Ingenting kvar att betala – fakturan är helt krediterad."
+                    : "Ingenting kvar att betala på den här fakturan."
+            };
+        }
+
         /// <summary>
         /// Total of the credit notes issued against an invoice. Credit notes live in the same hub, so
         /// this is a sibling scan rather than a query.
