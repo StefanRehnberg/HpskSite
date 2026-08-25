@@ -1783,6 +1783,46 @@ startlist-coverage 27/27, dnsdnf-ui 13/13, row-action-menus 60/60, action-menus-
 
 Adds C# → full rebuild. No SQL, no doctype property.
 
+### En skytts klass är EN sträng — `ShootingClasses.ToCanonicalName` (2026-08-25)
+
+**Klubbmästerskapet 2026-08-25 (tävling 3706) listade veteranerna TVÅ gånger** i resultatlistan: en
+rad med grundserierna 1–7 och en med finalserierna 8–10, och båda visade samma klass. C1/C2/C3 såg
+helt riktiga ut.
+
+**Orsaken är att klassen finns i två former** — `ShootingClass.Id` (`C_Vet_Y`, `C_Vet_A`, `A_opt_1`)
+och `ShootingClass.Name` (`C Vet Y`, `C Vet Ä`, `A Opt 1`). **De är IDENTISKA för C1/C2/C3/A1/B2/…
+och skiljer sig för varje klass med ändelse**, så en yta som lagrar Id:t ser korrekt ut i all
+testning och delar bara veteran-, dam-, junior- och optikklasserna. Resultatrader ska bära NAMNET —
+det är vad `GetShootersForResultsEntry` ger kvalinmatningen — men **finalinmatningen läste klassen
+rakt ur finalstartlistans JSON, som lagrar Id:t** (`loadFinalsStartList`). Resultatlistan grupperar
+på `(MemberId, ShootingClass)`, så de två formerna blev två skyttar som visade samma klass.
+
+**`ShootingClasses.ToCanonicalName` är nu den enda form en resultatrad får lagras i**, och
+`NormalizeKey` är dess nyckelvariant. Anropa den på varje klasssträng som går in i eller ut ur en
+resultatrad.
+- **Skrivvägen kanoniseras i `SaveResult`** — den enda strypningspunkten varje resultatrad passerar,
+  alltså det enda ställe som kan garantera att en skytts serier bär samma sträng oavsett vilken
+  inmatningsyta som skickade dem. Ett byte loggas.
+- **Läsvägen kanoniserar sina GRUPPERINGSNYCKLAR** (`CalculateFinalResults`, `CalculateLeaderboard`,
+  `PrecisionFamilySeriesScoreSource`, `PrecisionFinalsQualificationService` × 2), så redan skrivna
+  rader slås ihop utan SQL. Läsvägen får aldrig vara den som litar på kolumnen.
+- **`ParticipantStatusService.Key` viker ihop båda formerna.** Statustabellen lagrar Id:t medan
+  resultatraderna bär namnet, så en DNS/DNF träffade tyst ingenting för exakt de klasser där de
+  skiljer sig — den buggen låg och väntade och är dokumenterad som "Id-vs-Name-fällan" i DNS/DNF-avsnittet.
+- **Klienten:** `window.getShootingClassName` i `_ShootingClassesBootstrap.cshtml` (speglar C#-metoden)
+  och finalinmatningen går via den. **Startlistans JSON fortsätter lagra Id:t** — det är dess
+  konvention; konverteringen hör vid övergången till en resultatrad.
+
+`Migrations/normalize-result-shootingclass-to-display-name.sql` städar det lagrade datat (spar-,
+raderings- och klassbytesvägarna matchar på exakt sträng). Idempotent, precisionsfamiljen ENDAST —
+Springskytte och Fältskytte äger sina tabeller och sina konventioner. ⚠️ Den **rapporterar
+kollisioner och rör dem inte**: en rad i Id-form vars namnform redan finns för samma (tävling,
+medlem, serie) är samma serie inmatad två gånger och kräver ett mänskligt beslut — det unika indexet
+skulle avvisa UPDATE:n ändå.
+
+17 nya test i `ShootingClassesTests` (61/61), inklusive en svep över hela registret så en klass som
+läggs till senare inte tyst kan bryta ihopvikningen. Adds C# → full rebuild.
+
 ### Startliste-medveten radering (2026-08-25)
 
 Everywhere except Springskytte, deleting a registration was a bare confirm dialog: the registration
