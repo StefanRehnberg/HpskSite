@@ -3,6 +3,12 @@
  * Full CRUD for patrols and shooters, with publish mechanism.
  *@
 
+@* hpskEsc() — shooter and club names are member-supplied and are rendered into innerHTML
+   and into document.write print windows here. Included by the PARTIAL rather than by the
+   host page so the helper travels with the code that needs it and cannot be forgotten when
+   this partial is added to a new surface. Guarded, so a double include is harmless. *@
+@await Html.PartialAsync("_HtmlEscape")
+
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var rollingStartJson = ViewData["RollingStart"]?.ToString() ?? "";
@@ -390,8 +396,8 @@
                         var isDns = m.status === 'DNS';
                         html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row' + (isDns ? ' opacity-50' : '') + '" data-pm-id="' + m.patrolMemberId + '">' +
                             '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
-                            '<span class="flex-grow-1 small">' + m.name + ' <span class="text-muted">(' + m.club + ')</span>' +
-                            ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span>' +
+                            '<span class="flex-grow-1 small">' + hpskEsc(m.name) + ' <span class="text-muted">(' + hpskEsc(m.club) + ')</span>' +
+                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span>' +
                             (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span>' +
                             '<button class="btn ' + (isDns ? 'btn-warning' : 'btn-outline-warning') + ' btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',' + (!isDns) + ')" title="' + (isDns ? 'Ångra DNS' : 'Markera DNS – frigör platsen') + '">DNS</button>' +
                             '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltRemoveShooter(' + m.patrolMemberId + ')" title="Ta bort"><i class="bi bi-x"></i></button>' +
@@ -544,15 +550,9 @@
     // Backward-compat shim in case any legacy caller remains
     window.faltEditPatrolTime = function(patrolId, currentTime) { return window.faltEditPatrol(patrolId, currentTime, ''); };
 
-    // Tiny HTML escaper for user-supplied label text rendered inside string concatenation.
-    function escapeHtmlInline(s) {
-        return String(s == null ? '' : s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
+    // Kept as a name existing callers in this file use; the implementation lives in
+    // _HtmlEscape.cshtml so there is exactly one.
+    function escapeHtmlInline(s) { return hpskEsc(s); }
 
     window.faltPublish = async function(pub) {
         var msg = pub ? 'Publicera patrullistan? Den blir synlig för alla på tävlingssidan.' : 'Avpublicera patrullistan?';
@@ -595,23 +595,39 @@
                 return;
             }
             container.innerHTML = '';
-            data.shooters.forEach(function(s) {
+            // ⚠️ The button used to build a JS string literal inside the onclick out of the shooter's
+            // NAME and CLUB — member-supplied text — escaping single quotes only. A name containing
+            // a double quote terminated the attribute, and a trailing backslash escaped the closing
+            // quote of the literal: that is code execution in the organiser's browser, not a broken
+            // layout. Pass an INDEX into the fetched list instead, so no user text ever reaches the
+            // attribute. Same shape as hpskRemoveOrphanRow.
+            faltAddShooterCandidates = data.shooters;
+            data.shooters.forEach(function(s, si) {
                 var assigned = s.assignedToPatrol != null;
                 container.innerHTML += '<div class="d-flex align-items-center justify-content-between py-1 border-bottom' + (assigned ? ' bg-body-tertiary' : '') + '">' +
-                    '<span class="small">' + s.name + ' <span class="text-muted">(' + s.club + ')</span>' +
-                    ' <span class="badge bg-body-secondary text-body">' + s.shootingClass + '</span>' +
-                    (assigned ? ' <span class="badge bg-info text-dark">Patrull ' + s.assignedToPatrol + '</span>' : '') +
+                    '<span class="small">' + hpskEsc(s.name) + ' <span class="text-muted">(' + hpskEsc(s.club) + ')</span>' +
+                    ' <span class="badge bg-body-secondary text-body">' + hpskEsc(s.shootingClass) + '</span>' +
+                    (assigned ? ' <span class="badge bg-info text-dark">Patrull ' + hpskEsc(s.assignedToPatrol) + '</span>' : '') +
                     '</span>' +
-                    '<button class="btn btn-sm btn-outline-primary py-0" onclick="faltAddShooter(' + s.memberId + ',' +
-                    "'" + s.name.replace(/'/g, "\\'") + "'" + ',' +
-                    "'" + s.club.replace(/'/g, "\\'") + "'" + ',' +
-                    "'" + s.shootingClass.replace(/'/g, "\\'") + "'" +
-                    ')" title="' + (assigned ? 'Flytta till denna patrull' : 'Lägg till') + '">' +
+                    '<button class="btn btn-sm btn-outline-primary py-0" onclick="faltAddShooterByIndex(' + si + ')"' +
+                    ' title="' + (assigned ? 'Flytta till denna patrull' : 'Lägg till') + '">' +
                     '<i class="bi bi-' + (assigned ? 'arrow-right' : 'plus') + '"></i></button></div>';
             });
         }, 200);
     };
 
+    // The list the index-based button reads. Refilled on every search, so a stale index can only
+    // ever point inside the list currently on screen.
+    var faltAddShooterCandidates = [];
+
+    window.faltAddShooterByIndex = function(idx) {
+        var s = faltAddShooterCandidates[idx];
+        if (!s) return;
+        return window.faltAddShooter(s.memberId, s.name, s.club, s.shootingClass);
+    };
+
+    // Kept with the same signature: other callers (and the backward-compat shim below) pass the
+    // values directly, and nothing about them was unsafe — it was putting them in an ATTRIBUTE.
     window.faltAddShooter = async function(memberId, name, club, shootingClass) {
         if (!confirmIfResultsExist('L\u00e4gg till skytt')) return;
         var patrolId = parseInt(document.getElementById('faltAddShooterPatrolId').value);
@@ -769,11 +785,12 @@
             w.document.write('<h2>Vapengrupp ' + wg + ' \u2014 ' + grp.length + ' patruller, ' + total + ' skyttar</h2>');
             grp.forEach(function(p) {
                 var t = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}) : '';
-                var lblHtml = p.label ? ' &mdash; ' + p.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+                // Was a hand-rolled three-replace escape that missed both quote kinds.
+                var lblHtml = p.label ? ' &mdash; ' + hpskEsc(p.label) : '';
                 w.document.write('<div class="patrol">');
                 w.document.write('<div class="patrol-header">Patrull ' + p.patrolNumber + lblHtml + (t ? '<span class="patrol-time">' + t + '</span>' : '') + '</div>');
                 p.members.forEach(function(m) {
-                    w.document.write('<div class="member">' + m.name + ' <span class="member-class">(' + m.club + ') ' + m.shootingClass + '</span></div>');
+                    w.document.write('<div class="member">' + hpskEsc(m.name) + ' <span class="member-class">(' + hpskEsc(m.club) + ') ' + hpskEsc(m.shootingClass) + '</span></div>');
                 });
                 w.document.write('</div>');
             });

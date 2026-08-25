@@ -3,6 +3,12 @@
  * Tap-button hit entry, one shooter at a time, large touch targets.
  *@
 
+@* hpskEsc() — shooter and club names are member-supplied and are rendered into innerHTML
+   and into document.write print windows here. Included by the PARTIAL rather than by the
+   host page so the helper travels with the code that needs it and cannot be forgotten when
+   this partial is added to a new surface. Guarded, so a double include is harmless. *@
+@await Html.PartialAsync("_HtmlEscape")
+
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
 }
@@ -409,8 +415,8 @@
             presentMembers.add(m.memberId);
             rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom">' +
                 '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '" checked onchange="fseRcToggle(this)">' +
-                '<span class="flex-grow-1">' + m.name + ' <span class="text-muted small">(' + m.club + ')</span>' +
-                ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span></span>' +
+                '<span class="flex-grow-1">' + hpskEsc(m.name) + ' <span class="text-muted small">(' + hpskEsc(m.club) + ')</span>' +
+                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span></span>' +
                 (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
                 '</div>';
         });
@@ -500,8 +506,8 @@
             var isPresent = presentMembers.has(m.memberId);
             rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom">' +
                 '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isPresent ? ' checked' : '') + ' onchange="fseRcToggle(this)">' +
-                '<span class="flex-grow-1">' + m.name + ' <span class="text-muted small">(' + m.club + ')</span>' +
-                ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span></span>' +
+                '<span class="flex-grow-1">' + hpskEsc(m.name) + ' <span class="text-muted small">(' + hpskEsc(m.club) + ')</span>' +
+                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span></span>' +
                 (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
                 '</div>';
         });

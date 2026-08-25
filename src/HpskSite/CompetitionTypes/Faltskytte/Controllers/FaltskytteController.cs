@@ -76,29 +76,31 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return regions.Any();
         }
 
-        private async Task<bool> IsAuthorizedForCompetition(int competitionId)
-        {
-            if (await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                return true;
-            if (await _adminAuthorizationService.IsCompetitionManager(competitionId))
-                return true;
-
-            // Regional admins can manage any competition
-            var regions = await _adminAuthorizationService.GetManagedRegions();
-            if (regions.Any())
-                return true;
-
-            var competition = _contentService.GetById(competitionId);
-            var clubId = competition?.GetValue<int>("clubId") ?? 0;
-            if (clubId > 0)
-            {
-                if (await _adminAuthorizationService.IsClubAdminForClub(clubId))
-                    return true;
-                if (await _adminAuthorizationService.IsSkjutledareForClub(clubId))
-                    return true;
-            }
-            return false;
-        }
+        /// <summary>
+        /// May the current member operate THIS Fältskytte competition — patrols, station config,
+        /// results, shoot-offs? Gates 35 endpoints in this controller.
+        ///
+        /// ⚠️ FIXED 2026-08-25. It used to read:
+        ///     var regions = await GetManagedRegions();
+        ///     if (regions.Any()) return true;   // "Regional admins can manage any competition"
+        /// — i.e. a regional admin of ANY krets could manage EVERY Fältskytte competition in the
+        /// country, while every other surface asks about *this* competition's region. Confirmed a bug
+        /// with Stefan (2026-08-25): not everyone should reach every fältskytte competition.
+        ///
+        /// Delegates to <see cref="AdminAuthorizationService.HasCompetitionStaffAccessAsync"/>, which
+        /// already answers exactly this question and — the part that matters — handles BOTH host
+        /// shapes: a club-hosted competition (clubId set; IsClubAdminForClub folds in that club's
+        /// regional admins) and a region-hosted one (clubId unset, regionalFederation set — the SM
+        /// shape). Writing the host check out by hand is what has gone wrong here repeatedly, always
+        /// by handling only one of the two shapes.
+        ///
+        /// Grants the same set as before minus the hole: site admin, competition manager (incl.
+        /// Bemanning app access), club admin or Skjutledare of the organising club, or the regional
+        /// admin of the hosting krets. Skjutledare stay in deliberately — running the firing line is
+        /// their role, and they were already included here.
+        /// </summary>
+        private Task<bool> IsAuthorizedForCompetition(int competitionId) =>
+            _adminAuthorizationService.HasCompetitionStaffAccessAsync(competitionId);
 
         // ── Self-service auth helpers ───────────────────────────────
         // Used when faltskytteSelfServiceResults is on for a competition: a

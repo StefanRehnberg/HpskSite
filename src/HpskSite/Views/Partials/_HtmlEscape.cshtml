@@ -1,0 +1,29 @@
+@*
+ * The HTML escaper, once.
+ *
+ * Copies of this function already existed in FaltskytteStartListManagement,
+ * FaltskytteConfigurationEditor and FaltskytteConfigurationHub — and the sites that most needed it
+ * (shooter and club names rendered into innerHTML and into document.write print windows) had none.
+ * A helper that exists in the same file as the bug it prevents is not a safeguard.
+ *
+ * Include this partial and call hpskEsc(). Guarded, so a double include is harmless.
+*@
+<script>
+if (!window.hpskEsc) {
+    // Escapes for HTML TEXT and for a quoted HTML ATTRIBUTE value. Both quote kinds are escaped,
+    // so one function covers `<td>${x}</td>` and `title="${x}"`.
+    window.hpskEsc = function (s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    };
+
+    // ⚠️ NOT for building a JS string literal inside an onclick attribute. That needs both JS-string
+    // AND HTML-attribute escaping, in the right order, and getting it wrong is code execution rather
+    // than a broken layout. Pass an INDEX into an array the handler can read instead — see
+    // faltAddShooter and hpskRemoveOrphanRow for the shape.
+}
+</script>

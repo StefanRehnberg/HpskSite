@@ -3,6 +3,12 @@
  * Admin overview: station entry + result list generation.
  *@
 
+@* hpskEsc() — shooter and club names are member-supplied and are rendered into innerHTML
+   and into document.write print windows here. Included by the PARTIAL rather than by the
+   host page so the helper travels with the code that needs it and cannot be forgotten when
+   this partial is added to a new surface. Guarded, so a double include is harmless. *@
+@await Html.PartialAsync("_HtmlEscape")
+
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Tävling";
@@ -525,8 +531,8 @@ function renderFaltResultList(results, container) {
         group.shooters.forEach((shooter, idx) => {
             html += `<tr>
                 <td class="text-center">${idx + 1}</td>
-                <td>${shooter.name}</td>
-                <td>${shooter.club}</td>
+                <td>${hpskEsc(shooter.name)}</td>
+                <td>${hpskEsc(shooter.club)}</td>
                 <td class="text-center">${shooter.shootingClass}</td>`;
 
             // Station results
@@ -618,7 +624,8 @@ function faltPrintResultList(event) {
     w.document.write('<div class="meta">' + metaLine + '<' + '/div>');
 
     results.classGroups.forEach(function(group) {
-        w.document.write('<h2>' + group.className + ' (' + group.shooters.length + ' deltagare)</h2>');
+        // className can carry an admin-edited override (classNameOverrides), so it is user text too.
+        w.document.write('<h2>' + hpskEsc(group.className) + ' (' + group.shooters.length + ' deltagare)</h2>');
         w.document.write('<table><thead><tr><th>Pl</th><th>Namn</th><th>F\u00f6rening</th><th>Klass</th>');
         for (var i = 1; i <= results.stationCount; i++) {
             var cfg = stationConfigs.find(function(s){return s.station===i;});
@@ -631,9 +638,9 @@ function faltPrintResultList(event) {
 
         group.shooters.forEach(function(shooter, idx) {
             w.document.write('<tr><td>' + (idx+1) + '</td>');
-            w.document.write('<td>' + shooter.name + '</td>');
-            w.document.write('<td>' + shooter.club + '</td>');
-            w.document.write('<td>' + shooter.shootingClass + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.name) + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.club) + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.shootingClass) + '</td>');
             for (var i = 1; i <= results.stationCount; i++) {
                 var st = shooter.stations.find(function(s){return s.stationNumber===i;});
                 if (st) {
@@ -753,7 +760,8 @@ function faltPrintSubCompResultList(event) {
     w.document.write('<div class="meta">' + subMetaLine + '<' + '/div>');
 
     results.classGroups.forEach(function(group) {
-        w.document.write('<h2>' + group.className + ' (' + group.shooters.length + ' deltagare)</h2>');
+        // className can carry an admin-edited override (classNameOverrides), so it is user text too.
+        w.document.write('<h2>' + hpskEsc(group.className) + ' (' + group.shooters.length + ' deltagare)</h2>');
         w.document.write('<table><thead><tr><th>Pl</th><th>Namn</th><th>F\u00f6rening</th><th>Klass</th>');
         for (var i = 1; i <= results.stationCount; i++) {
             var cfg = stationConfigs.find(function(s){return s.station===i;});
@@ -766,9 +774,9 @@ function faltPrintSubCompResultList(event) {
 
         group.shooters.forEach(function(shooter, idx) {
             w.document.write('<tr><td>' + (idx+1) + '</td>');
-            w.document.write('<td>' + shooter.name + '</td>');
-            w.document.write('<td>' + shooter.club + '</td>');
-            w.document.write('<td>' + shooter.shootingClass + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.name) + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.club) + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.shootingClass) + '</td>');
             for (var i = 1; i <= results.stationCount; i++) {
                 var st = shooter.stations.find(function(s){return s.stationNumber===i;});
                 if (st) {
