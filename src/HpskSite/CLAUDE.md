@@ -1315,6 +1315,17 @@ persona test consolidates a team invoice with individual ones.
 should this QR be for", and both endpoints go through it** — the on-screen QR and the mailed QR can
 no longer disagree, and the mail's printed amount + audit row use the same number.
 - Refuses when `IsCoveredByOpenConsolidation`, when Paid, and when the invoice is makulerad.
+
+**Superseded 2026-08-25 — the rule moved to `ConsolidatedInvoiceService.ResolveQrAmount` and
+`ResolveTeamQrAmount` now delegates to it.** Keeping a private copy here is exactly why the three
+paths that MAIL a QR never got this fix: `SendPaymentReminders`, `ResendInvoiceEmail` and
+`SendTestReminder` all still read `totalAmount` raw and checked nothing. Only the team-specific
+WORDING stays in SwishController, switched on `QrAmountResolution.Refusal`. **Never re-derive the
+rule at a new QR site — call the resolver.** NB the reachable fault there was not the kreditfaktura
+(an individual registration invoice cannot be credited — `CreateCreditNoteAsync` requires a
+samlingsfaktura) but the samlingsfaktura: a covered child stays `Pending`, so the reminder mailed a
+Swish QR for money the club was already paying. `ResendInvoiceEmail` had **no status check at all**,
+so a Paid invoice could be re-mailed with a live QR.
 - Otherwise takes `ConsolidatedInvoiceService.GetBalance().AmountDue`. **Not `totalAmount` directly** —
   an issued invoice is never edited, so a kreditfaktura reduces what is owed without touching it, and
   `GetBalance` is where that is derived (read its doc comment before adding another QR site).
@@ -1594,6 +1605,66 @@ trail recorded it, and that a cross-club selection is refused **and writes nothi
 tested BEFORE anything is consolidated: afterwards the invoices are ineligible for their own reasons
 and a mixed selection would be refused by the wrong rule, passing while proving nothing.
 Adds C# → full rebuild. No SQL, no doctype property.
+
+### Startlistetäckning — är alla anmälda faktiskt placerade? (2026-08-25)
+
+A shooter could be registered, invoiced and **completely absent from the start list** with nothing
+anywhere saying so — the first to notice was the shooter, on the day. Springskytte got the answer
+2026-08-05 (a desk run found 43 A-starts with no start time behind a screen that looked finished);
+the same silence stood on the whole precision family and on Fältskytte.
+
+**`Services/StartListCoverage` is the seam** — same shape as `ISeriesScoreSource`, because where a
+start time LIVES differs per discipline: the precision family keeps skjutlag in a
+`precisionStartList` node's `configurationData`, Fältskytte keeps patrols in SQL. A new discipline
+is one class plus one line in `AdminServicesComposer`, never a branch in a controller.
+
+**⚠️ The two disciplines key placement DIFFERENTLY, and that is the whole design:**
+- Precision family: **(member, CLASS)**. Every registered class gets its own position in a skjutlag,
+  so A1 and A_opt_1 are two separate starts.
+- Fältskytte/MagnumFält: **(member, WEAPON GROUP)** — a patrol walks the course once, so C1 and C2
+  are the same start; the assign path already matches on `LEFT(pm.ShootingClass, 1)`. Keying per
+  class here would report a phantom missing start for the second class forever.
+`CoverageBuilder.Row.KeyClass` carries the key while `ShootingClass` stays the real class, because
+that is what the organiser must read on the row.
+
+**⚠️ `CoverageKeys.Canonical` exists for the Id-vs-Name trap.** Registrations and most writers
+store the class **ID** (`C1`, `A_opt_1`); `ChangeShooterClass` writes the display **NAME** (`C 1`,
+`A Opt 1`). A literal compare matches nothing for every class where they differ, and the whole list
+then reads as unplaced — which looks like a planning failure, not a bug. Verified against `C1_Dam`
+and `C_Vet_Y`.
+
+**The MIRROR fault is reported too (`onListWithoutRegistration`)** — rows on the list matching no
+registration. Found during verification: 3 of 12 rows on dev competition 2576 sit in a class the
+shooter is not entered in (Andy Haard registered in C3, on the list as `C_Vet_Y` **and** `A1`), i.e.
+the class change that causes result-row orphaning. **Reporting only the unplaced half makes the
+warning untrustworthy:** the organiser looks the shooter up, finds them ON the list, and writes the
+alarm off. Both halves have to be on screen for either to mean anything.
+
+**`hasAnyStartList` separates "no list created yet" from "the list forgot people".** Before the first
+generation everyone is unplaced, which is where every competition starts — a red alarm there trains
+the organiser to ignore the panel. That state renders amber and says so.
+
+**Endpoint is `RegistrationAdmin/GetStartListCoverage`** so it reuses `CanManageCompetitionDeskAsync`,
+which carries the club-vs-region host rule. An SM is region-hosted (`clubId` unset) and a
+hand-written `clubId` check locks the organising krets out of its own competition — got wrong four
+times before. Read-only and safe to poll.
+
+**Springskytte is deliberately untouched:** its own endpoint also covers **stafett teams**, a concept
+no other discipline has, and it works. The client picks the endpoint by discipline
+(`deskCoverageEndpoint`). Fold it in only if that endpoint is being touched anyway.
+
+**Surfaces:** `Views/Partials/_StartListCoveragePanel.cshtml` on the Startlistor tab (precision +
+Fältskytte), plus the desk banner on Anmälningar which now renders for **every** discipline (it was
+Springskytte-only). The panel exposes `window.hpskLoadStartListCoverage()`; `loadStartLists()` and
+`loadFaltPatrols()` call it, since every generate/edit path already comes back through those.
+⚠️ The loader is assigned with `window.x = x`, not left to hoisting — an `async function`
+declaration inside a block does **not** leak to global scope (same trap as the consolidation
+partials).
+
+Verified 27/27 `hpsk-verify/startlist-coverage-verify.mjs` (read-only). It asserts that the gap
+between list rows and `placed` is explained **entirely** by the orphans, so a silent key mismatch
+cannot slip through disguised as one. Regression: startpref 26/26, startpref-precision 10/10,
+startpass-total 11/11, verify-spring-all PASS. Adds C# → full rebuild. No SQL, no doctype property.
 
 ### Anmälningar row Åtgärder menu, shooter info, push column, reference lookup (2026-08-07)
 
