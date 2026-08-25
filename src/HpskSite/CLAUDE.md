@@ -2664,6 +2664,74 @@ X kl 15", "vem bemannar Y kl 15") are in `backlog.md` → *Funktionärer: närva
 that staffed it, so it must be settable per row (a person can be a member of several clubs, and an
 external helper has no member record at all) — today it is only derived from `primaryClubId`.
 
+## Dubblettsammanslagning av medlemmar (2026-08-25)
+
+Klubbadmin → Medlemmar → Åtgärder → **Hitta dubbletter**. Efter en import finns samma person ofta
+två gånger: en gång självregistrerad (annan e-postadress, så varken personnummer eller e-post
+matchade) och en gång från klubbens gamla register. Den självregistrerade posten äger INLOGGNINGEN
+och historiken; den importerade äger de bra fältvärdena (pistolskyttekort, adress, telefon). Ingen av
+dem går att kasta rakt av.
+
+**En sammanslagning är inte en radering, det är en FLYTT — och tabellkartan finns redan.**
+`MemberDataPurgeService.SubjectTables` (37 tabeller, med regeln att aktör-/audit-kolumner aldrig
+räknas) exponeras nu publikt och `MemberMergeService` går samma karta med UPDATE i stället för
+DELETE. **Skriv aldrig en andra tabellista** — en som glidit isär lämnar tyst en persons resultat
+kvar på ett konto som är på väg att raderas. En ny tabell läggs till på ETT ställe och båda får den.
+
+- **`FindCandidates(clubId)`** jämför klubbens roster mot sig själv OCH mot **klubblösa** medlemmar —
+  den självregistrerade som aldrig valde klubb syns inte i klubbens lista, vilket är precis där
+  dubbletten gömmer sig. Andra klubbars medlemmar returneras aldrig (både integritet och för att en
+  korsklubbs-merge skulle flytta en främmandes historik). `MembersAreInScope` upprepar kontrollen
+  server-side på både Compare och Merge, så handpostade id:n inte kommer förbi.
+- **Poäng:** personnummer 100 / pistolskyttekort 95 (IDENTITETSBEVIS — lika betyder samma person);
+  därefter krävs att NAMNET också stämmer: +födelsedatum 85, +telefon 80, +adress 70, enbart namn 40.
+  "Samma telefon" ensamt är ett hushåll, inte en dubblett. Uppslagen går via hinkar (namn/pnr/
+  kort/telefon), inte O(n²).
+- **⚠ Namnnormaliseringen får ALDRIG folda diakriter.** å/ä/ö → a/a/o gör Öberg och Oberg till samma
+  person, och det är olika människor. Bara gemener + kollapsade blanksteg.
+- **Överlevaren föreslås på INLOGGNING, inte på datamängd.** Den posten äger lösenordet medlemmen
+  kan, hens push-prenumerationer och hens resultat. Behåll skalet och kasta inloggningen så har du
+  låst ute medlemmen från sitt eget konto. Oavgjort → äldsta kontot. Operatören kan byta.
+- **Fältvalen:** tomt hos överlevaren = förkryssat (inget att förlora); båda har värden och de
+  skiljer sig = gulmarkerad rad och operatörens val. `MergeableFields` utesluter medvetet
+  session-/samtyckesskrot (tokens, tutorial-flaggor, last-active, träningsguidens position) — det
+  tillhör kontot som skapade det och skulle felrapportera överlevarens egen aktivitet.
+- **ClubMembership unionsslås, flyttas inte** — unikt index är (MemberId, ClubId), så en delad klubb
+  skulle krocka. Överlevarens rad suger upp den andras tomma kolumner och **tidigaste MemberSince**
+  (medlemmens verkliga historik med klubben); klubbar bara förloraren hade flyttas rakt av.
+- **⚠ Unika index är den verkliga faran vid flytten.** Båda kontona anmälda till samma tävling, samma
+  märke, samma enhet → en bulk-UPDATE kastar 2627 och rullar tillbaka HELA tabellen. Därför:
+  försök bulk, fall tillbaka på rad-för-rad, och räkna det som inte gick som **konflikt** i stället
+  för att avbryta. Krockande rader följer med den borttagna posten men **namnges i resultatet** och
+  innehållet ligger i ögonblicksbilden — inget försvinner osagt.
+- **Tävlingsanmälningar är Umbraco-NODER**, inte rader (`competitionRegistration.memberId`), och de
+  är sparade opublicerade → `Save()`, aldrig `Publish()`.
+- **Ordningen är inte godtycklig:** ögonblicksbilden tas FÖRE något flyttas (den är enda kopian av
+  förloraren) och förloraren raderas SIST, efter att allt loggats. En krasch på halva vägen lämnar
+  båda vid liv och loggraden borta — kör om — i stället för en raderad medlem vars rader aldrig kom fram.
+
+**`MemberMerge`-tabellen är både revisionsspår och dedupnyckel.** `MemberImportController.LoadMemberIndexes`
+har nu en TREDJE pass som indexerar `LoserEmail → SurvivorMemberId`. **Utan den skapar nästa import
+från samma gamla register dubbletten igen** — filen bär ju den utrangerade adressen. Det är också
+skälet att det är en tabell och inte en ny doctype-property: ingen backoffice-ändring att deploya.
+Passet ligger sist så en levande medlem alltid slår en utrangerad adress.
+
+**⚠ NPoco-fälla som kostade en runda:** `Fetch<T>(sql)` genererar `SELECT * FROM <T>` om SQL:en inte
+**börjar** med SELECT. Ett `IF OBJECT_ID(...) IS NOT NULL SELECT …` gav
+`Invalid object name 'RetiredEmailRow'` — den frågade alltså efter en tabell uppkallad efter POCO:n.
+Gör existenskontrollen till ett eget `ExecuteScalar`.
+
+**⚠ Modalen ligger i klubbens adminpanel, som är `display:none` tills Administration-fliken öppnas.**
+En modal inuti en dold panel får `.show` men blir aldrig synlig — samma fälla som geometritesterna
+går i. Ett test måste klicka `#clubAdmin-tab` först.
+
+Operatörssteg: kör `Migrations/create-member-merge-table.sql`. Ingen doctype-property, ingen
+Umbraco-nod. Adds C# → full rebuild. Verifierat 29/29 `hpsk-verify/member-merge-verify.mjs` (bygger
+sin egen fixtur, kör hela UI-flödet, kontrollerar att uppgifterna flyttade och att den utrangerade
+adressen pekar rätt, och städar bort sig själv i SQL — `MemberAdmin/DeleteMember` kräver sajtadmin
+och testkontot är klubbadmin). Regression: member-search-sort 25/25.
+KB: `KnowledgeBase/docs/dubbletter.md`.
+
 ## Board Work (Styrelsearbete) — dedicated /styrelse page
 
 Senior-friendly board workspace for clubs & regions, built on the existing `BoardRoles` table.

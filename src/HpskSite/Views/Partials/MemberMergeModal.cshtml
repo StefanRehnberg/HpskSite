@@ -1,0 +1,479 @@
+@*
+    Dubblettstädning för klubbadmin. Öppnas med openMemberMergeModal(clubId, clubName).
+    @Html.Partial denna i en klubbadminsida — den bär hela sitt eget UI och sin egen JS.
+
+    Tre steg som speglar controllern: hitta → jämför → slå ihop. Bara det sista skriver,
+    och det sista steget visar exakt vad det kommer att göra innan knappen finns att trycka på.
+
+    Målgruppen är klubbadmins med låg datorvana (se [[member-actions-menu]]): inga nakna ikoner,
+    ingen jargong, och den oåterkalleliga knappen sist och röd.
+*@
+
+<div class="modal fade" id="memberMergeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-people me-2"></i>Hitta och slå ihop dubbletter
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+
+            <div class="modal-body">
+                <input type="hidden" id="mm_clubId">
+
+                <div class="alert alert-info small">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Efter en import kan samma person finnas två gånger — en gång som hen registrerade sig
+                    själv, en gång från klubbens gamla medlemsregister. Här slår du ihop dem till en post
+                    och väljer vilka uppgifter som ska följa med.
+                </div>
+
+                <!-- Steg 1: kandidatlistan -->
+                <div id="mm_listStep">
+                    <div id="mm_listLoading" class="text-center py-4">
+                        <span class="spinner-border"></span>
+                        <div class="small text-muted mt-2">Söker efter dubbletter...</div>
+                    </div>
+                    <div id="mm_listResult" style="display:none;"></div>
+                </div>
+
+                <!-- Steg 2: jämförelsen -->
+                <div id="mm_compareStep" style="display:none;"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="mm_backBtn"
+                        style="display:none;" onclick="mmBackToList()">
+                    <i class="bi bi-arrow-left me-1"></i>Tillbaka till listan
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Stäng
+                </button>
+                <button type="button" class="btn btn-danger" id="mm_mergeBtn"
+                        style="display:none;" onclick="mmMerge()">
+                    <i class="bi bi-union me-1"></i>Slå ihop
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.memberMergeModalLoaded) return;
+    window.memberMergeModalLoaded = true;
+
+    var mmState = { clubId: 0, comparison: null, survivorId: 0, loserId: 0 };
+
+    function mmEl(id) { return document.getElementById(id); }
+
+    function mmEscape(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function mmToken() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
+    window.openMemberMergeModal = function (clubId, clubName) {
+        mmState.clubId = clubId;
+        mmEl('mm_clubId').value = clubId;
+        mmBackToList();
+        new bootstrap.Modal(mmEl('memberMergeModal')).show();
+        mmLoadList();
+    };
+
+    window.mmBackToList = function () {
+        mmEl('mm_listStep').style.display = '';
+        mmEl('mm_compareStep').style.display = 'none';
+        mmEl('mm_backBtn').style.display = 'none';
+        mmEl('mm_mergeBtn').style.display = 'none';
+    };
+
+    // ---- Steg 1: hitta ----
+    function mmLoadList() {
+        mmEl('mm_listLoading').style.display = '';
+        mmEl('mm_listResult').style.display = 'none';
+
+        fetch('/umbraco/surface/MemberMerge/FindDuplicates?clubId=' + encodeURIComponent(mmState.clubId))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                mmEl('mm_listLoading').style.display = 'none';
+                var el = mmEl('mm_listResult');
+                el.style.display = '';
+
+                if (!d.success) {
+                    el.innerHTML = '<div class="alert alert-danger">' + mmEscape(d.message || 'Okänt fel') + '</div>';
+                    return;
+                }
+                if (!d.count) {
+                    el.innerHTML =
+                        '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>' +
+                        '<strong>Inga dubbletter hittades.</strong> Ingen av klubbens medlemmar ser ut att ' +
+                        'finnas mer än en gång.</div>';
+                    return;
+                }
+                el.innerHTML = mmRenderList(d.candidates);
+            })
+            .catch(function (err) {
+                mmEl('mm_listLoading').style.display = 'none';
+                var el = mmEl('mm_listResult');
+                el.style.display = '';
+                el.innerHTML = '<div class="alert alert-danger">' + mmEscape(err.message) + '</div>';
+            });
+    }
+
+    function mmLevelBadge(level) {
+        if (level === 'saker')  return '<span class="badge bg-danger">Säkert samma person</span>';
+        if (level === 'trolig') return '<span class="badge bg-warning text-dark">Troligen samma</span>';
+        if (level === 'mojlig') return '<span class="badge bg-info text-dark">Kan vara samma</span>';
+        return '<span class="badge bg-secondary">Osäkert</span>';
+    }
+
+    function mmPersonCell(p) {
+        var lines = [];
+        lines.push('<div class="fw-semibold">' + mmEscape(p.name) + '</div>');
+        if (p.email) lines.push('<div class="small text-muted">' + mmEscape(p.email) + '</div>');
+
+        var facts = [];
+        facts.push(p.lastLogin ? 'inloggad ' + mmEscape(p.lastLogin) : 'har aldrig loggat in');
+        facts.push(p.filledFields + ' ifyllda uppgifter');
+        if (!p.inClub) facts.push('<span class="text-warning-emphasis">inte med i klubben</span>');
+        lines.push('<div class="small text-muted">' + facts.join(' · ') + '</div>');
+
+        return lines.join('');
+    }
+
+    function mmRenderList(candidates) {
+        var rows = '';
+        for (var i = 0; i < candidates.length; i++) {
+            var c = candidates[i];
+            rows +=
+                '<tr>' +
+                '<td>' + mmLevelBadge(c.level) +
+                    '<div class="small text-muted mt-1">' + mmEscape(c.reasons.join(', ')) + '</div></td>' +
+                '<td>' + mmPersonCell(c.a) + '</td>' +
+                '<td>' + mmPersonCell(c.b) + '</td>' +
+                '<td class="text-end">' +
+                    '<button type="button" class="btn btn-sm btn-outline-primary" ' +
+                    'onclick="mmCompare(' + c.a.id + ',' + c.b.id + ')">' +
+                    'Jämför &amp; slå ihop</button>' +
+                '</td>' +
+                '</tr>';
+        }
+
+        return '<div class="small text-muted mb-2">' + candidates.length +
+            ' möjliga dubblett' + (candidates.length === 1 ? '' : 'er') +
+            '. Mest säkra först — kontrollera alltid att det verkligen är samma person.</div>' +
+            '<div class="table-responsive"><table class="table table-sm align-middle">' +
+            '<thead class="table-light"><tr>' +
+            '<th style="width:22%;">Varför</th><th>Den ena</th><th>Den andra</th><th></th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+
+    // ---- Steg 2: jämför ----
+    window.mmCompare = function (aId, bId) {
+        var url = '/umbraco/surface/MemberMerge/Compare?clubId=' + encodeURIComponent(mmState.clubId) +
+                  '&memberAId=' + aId + '&memberBId=' + bId;
+
+        fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) { alert(d.message || 'Okänt fel'); return; }
+                mmState.comparison = d;
+                mmState.survivorId = d.survivor.id;
+                mmState.loserId = d.loser.id;
+                mmRenderCompare();
+                mmEl('mm_listStep').style.display = 'none';
+                mmEl('mm_compareStep').style.display = '';
+                mmEl('mm_backBtn').style.display = '';
+                mmEl('mm_mergeBtn').style.display = '';
+            })
+            .catch(function (err) { alert(err.message); });
+    };
+
+    // Vem som behålls kan bytas — då byter alla fältval sida med sig.
+    window.mmSwapSurvivor = function () {
+        var s = mmState.survivorId;
+        mmState.survivorId = mmState.loserId;
+        mmState.loserId = s;
+
+        var url = '/umbraco/surface/MemberMerge/Compare?clubId=' + encodeURIComponent(mmState.clubId) +
+                  '&memberAId=' + mmState.survivorId + '&memberBId=' + mmState.loserId;
+
+        fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) { alert(d.message || 'Okänt fel'); return; }
+                // Servern föreslår alltid samma överlevare; respektera operatörens val i stället.
+                d.survivor = d.survivor.id === mmState.survivorId ? d.survivor : d.loser;
+                mmState.comparison = d;
+                mmRenderCompare(true);
+            });
+    };
+
+    function mmRenderCompare(swapped) {
+        var d = mmState.comparison;
+
+        // Efter ett byte har servern jämfört åt andra hållet; vänd fälten så att
+        // "behålls" alltid är den kolumn operatören pekat ut.
+        var survivor = swapped ? d.loser : d.survivor;
+        var loser = swapped ? d.survivor : d.loser;
+        var fields = d.fields.map(function (f) {
+            if (!swapped) return f;
+            return {
+                alias: f.alias, label: f.label,
+                survivorValue: f.loserValue, loserValue: f.survivorValue,
+                conflict: f.conflict,
+                takeFromLoser: f.loserValue.length === 0 && f.survivorValue.length > 0
+            };
+        });
+        mmState.survivorId = survivor.id;
+        mmState.loserId = loser.id;
+
+        var head =
+            '<div class="row g-3 mb-3">' +
+            '<div class="col-md-6"><div class="card border-success h-100"><div class="card-body">' +
+                '<div class="badge bg-success mb-2">Behålls</div>' +
+                '<div class="fw-bold">' + mmEscape(survivor.name) + '</div>' +
+                '<div class="small text-muted">' + mmEscape(survivor.email) + '</div>' +
+                '<div class="small text-muted mt-2">' +
+                    'Skapad ' + mmEscape(survivor.created) + ' · ' +
+                    (survivor.lastLogin ? 'senast inloggad ' + mmEscape(survivor.lastLogin) : 'har aldrig loggat in') +
+                '</div>' +
+            '</div></div></div>' +
+            '<div class="col-md-6"><div class="card border-danger h-100"><div class="card-body">' +
+                '<div class="badge bg-danger mb-2">Tas bort</div>' +
+                '<div class="fw-bold">' + mmEscape(loser.name) + '</div>' +
+                '<div class="small text-muted">' + mmEscape(loser.email) + '</div>' +
+                '<div class="small text-muted mt-2">' +
+                    'Skapad ' + mmEscape(loser.created) + ' · ' +
+                    (loser.lastLogin ? 'senast inloggad ' + mmEscape(loser.lastLogin) : 'har aldrig loggat in') +
+                '</div>' +
+            '</div></div></div>' +
+            '</div>';
+
+        var reason =
+            '<div class="alert alert-light border small d-flex justify-content-between align-items-center">' +
+            '<div><i class="bi bi-lightbulb me-1"></i>Förslaget behåller <strong>' +
+                mmEscape(survivor.name) + '</strong> eftersom den posten ' +
+                mmEscape(d.suggestedReason) + '. Inloggningen och e-postadressen som behålls är den postens.</div>' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary ms-3 flex-shrink-0" ' +
+                'onclick="mmSwapSurvivor()"><i class="bi bi-arrow-left-right me-1"></i>Byt</button>' +
+            '</div>';
+
+        // Fältvalen. Tomt hos den som behålls = förkryssat; äkta konflikt = operatörens val.
+        var fillable = fields.filter(function (f) { return f.loserValue.length > 0; });
+        var rows = '';
+        for (var i = 0; i < fillable.length; i++) {
+            var f = fillable[i];
+            var same = f.survivorValue === f.loserValue;
+            if (same) continue;
+
+            rows +=
+                '<tr class="' + (f.conflict ? 'table-warning' : '') + '">' +
+                '<td>' + mmEscape(f.label) +
+                    (f.conflict ? ' <span class="badge bg-warning text-dark">skiljer sig</span>' : '') + '</td>' +
+                '<td class="small">' + (f.survivorValue
+                    ? mmEscape(f.survivorValue)
+                    : '<span class="text-muted fst-italic">tomt</span>') + '</td>' +
+                '<td class="small">' + mmEscape(f.loserValue) + '</td>' +
+                '<td class="text-center">' +
+                    '<input type="checkbox" class="form-check-input mm-take" value="' + mmEscape(f.alias) + '"' +
+                    (f.takeFromLoser || f.conflict === false ? ' checked' : '') + '>' +
+                '</td>' +
+                '</tr>';
+        }
+
+        var fieldsCard = rows
+            ? '<div class="card mb-3"><div class="card-body">' +
+                '<h6 class="card-title"><i class="bi bi-arrow-left-right me-1"></i>Uppgifter att flytta över</h6>' +
+                '<p class="small text-muted">Kryssade uppgifter kopieras till posten som behålls. ' +
+                'Tomma fält är förkryssade — där finns inget att förlora. Gulmarkerade rader har olika ' +
+                'värden på båda posterna och är ditt val.</p>' +
+                '<div class="d-flex gap-2 mb-2">' +
+                    '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="mmTakeAll(true)">Kryssa alla</button>' +
+                    '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="mmTakeAll(false)">Kryssa ur alla</button>' +
+                '</div>' +
+                '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
+                '<thead class="table-light"><tr>' +
+                '<th>Uppgift</th><th>Behålls</th><th>Tas bort</th><th class="text-center">Flytta över</th>' +
+                '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+              '</div></div>'
+            : '<div class="alert alert-secondary small">Posten som tas bort har inga uppgifter som ' +
+              'saknas hos den som behålls.</div>';
+
+        // Vad som flyttas med. Räknas fram av servern innan något skrivs.
+        var counts = d.counts || {};
+        var keys = Object.keys(counts);
+        var countsCard = keys.length
+            ? '<div class="card mb-3"><div class="card-body">' +
+                '<h6 class="card-title"><i class="bi bi-box-arrow-in-right me-1"></i>Historik som flyttas med</h6>' +
+                '<p class="small text-muted">Allt detta hör till <strong>' + mmEscape(loser.name) +
+                '</strong> och flyttas till posten som behålls. Ingenting kastas.</p>' +
+                '<ul class="small mb-0">' +
+                keys.map(function (k) {
+                    return '<li>' + mmEscape(mmTableLabel(k)) + ': <strong>' + counts[k] + '</strong></li>';
+                }).join('') +
+                '</ul></div></div>'
+            : '<div class="alert alert-secondary small">Posten som tas bort har ingen historik ' +
+              '(inga resultat, märken eller anmälningar) att flytta.</div>';
+
+        var warn =
+            '<div class="alert alert-danger small"><i class="bi bi-exclamation-triangle me-1"></i>' +
+            '<strong>Sammanslagningen går inte att ångra.</strong> Posten som tas bort raderas. ' +
+            'En kopia av den sparas i sammanslagningsloggen, och dess e-postadress kommer fortsätta ' +
+            'peka på den post du behåller — så nästa import skapar inte dubbletten igen.</div>';
+
+        mmEl('mm_compareStep').innerHTML = head + reason + fieldsCard + countsCard + warn;
+    }
+
+    window.mmTakeAll = function (checked) {
+        document.querySelectorAll('.mm-take').forEach(function (cb) { cb.checked = checked; });
+    };
+
+    // Tabellnamnen är engelska i databasen och säger inget till en klubbadmin.
+    // Okända tabeller faller tillbaka på sitt eget namn — hellre obegripligt än osynligt.
+    var MM_TABLE_LABELS = {
+        'ClubMembership': 'Klubbmedlemskap',
+        'MemberAccessKey': 'Nycklar och koder',
+        'MemberCertificateIssue': 'Föreningsintyg',
+        'MembershipFeeCharge': 'Medlemsavgifter',
+        'MemberCertifications': 'Certifieringar',
+        'CertificationRequests': 'Certifieringsansökningar',
+        'MemberBadge': 'Märken',
+        'MemberBadgeQualification': 'Guldfodringar',
+        'MarkenSeries': 'Inskickade serier',
+        'MarkenCompetitionResult': 'Egenrapporterade tävlingsresultat',
+        'MarkenStormastarEntry': 'Stormästarpoäng',
+        'StandardMedalAward': 'Standardmedaljer',
+        'StandardMedalGoldApplication': 'Guldmedaljansökningar',
+        'TrainingScores': 'Träningsresultat',
+        'TrainingGroupMembers': 'Träningsgrupper',
+        'TrainingMatchParticipants': 'Träningsmatcher',
+        'TrainingMatchJoinRequests': 'Förfrågningar om träningsmatch',
+        'ShooterStatistics': 'Skyttestatistik',
+        'PrecisionResultEntry': 'Resultat, precision',
+        'DuellResultEntry': 'Resultat, duell',
+        'MagnumPrecisionResultEntry': 'Resultat, magnumprecision',
+        'MilsnabbResultEntry': 'Resultat, milsnabb',
+        'NationellHelmatchResultEntry': 'Resultat, nationell helmatch',
+        'SpringskytteResultEntry': 'Resultat, springskytte',
+        'CompetitionShootOffEntry': 'Särskjutningar',
+        'CompetitionTeamMember': 'Lagmedlemskap',
+        'CompetitionRecords': 'Rekord',
+        'CompetitionChampions': 'Mästartitlar',
+        'BoardRoles': 'Styrelseuppdrag',
+        'RangeActivitySession': 'Banbesök',
+        'WebPushSubscription': 'Notisprenumerationer',
+        'RankingSnapshot': 'Rankingdata',
+        'CourseTestAccess': 'Kursbehörigheter',
+        'CourseTestResults': 'Kursresultat',
+        'CourseReviewers': 'Kursgranskaruppdrag'
+    };
+
+    function mmTableLabel(key) { return MM_TABLE_LABELS[key] || key; }
+
+    // ---- Steg 3: slå ihop ----
+    window.mmMerge = function () {
+        var take = [];
+        document.querySelectorAll('.mm-take:checked').forEach(function (cb) { take.push(cb.value); });
+
+        var d = mmState.comparison;
+        var loserName = mmState.loserId === d.loser.id ? d.loser.name : d.survivor.name;
+        if (!confirm('Slå ihop och ta bort "' + loserName + '"?\n\nDetta går inte att ångra.')) return;
+
+        var btn = mmEl('mm_mergeBtn');
+        var orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Slår ihop...';
+
+        var fd = new FormData();
+        fd.append('clubId', mmState.clubId);
+        fd.append('survivorMemberId', mmState.survivorId);
+        fd.append('loserMemberId', mmState.loserId);
+        fd.append('takeFieldsJson', JSON.stringify(take));
+
+        fetch('/umbraco/surface/MemberMerge/Merge', {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': mmToken() },
+            body: fd
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d2) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            if (!d2.success) { alert(d2.message || 'Okänt fel'); return; }
+            mmShowResult(d2);
+        })
+        .catch(function (err) {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+            alert(err.message);
+        });
+    };
+
+    function mmShowResult(d) {
+        var moved = Object.keys(d.rowsMoved || {});
+        var conflicts = Object.keys(d.conflicts || {});
+
+        var html =
+            '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>' +
+            '<strong>Klart.</strong> ' + mmEscape(d.loserName) + ' är borttagen och allt som hörde ' +
+            'till den posten sitter nu på den du behöll.</div>' +
+            '<ul class="small">' +
+            '<li>' + d.fieldsTaken + ' uppgifter flyttades över</li>' +
+            '<li>' + d.rowsMovedTotal + ' rader historik flyttades' +
+                (moved.length ? ' (' + moved.map(function (k) {
+                    return mmTableLabel(k) + ' ' + d.rowsMoved[k];
+                }).join(', ') + ')' : '') + '</li>' +
+            '<li>' + d.registrationsMoved + ' tävlingsanmälningar flyttades</li>' +
+            (d.clubMembershipsUnioned ? '<li>' + d.clubMembershipsUnioned +
+                ' klubbmedlemskap slogs ihop</li>' : '') +
+            (d.rolesTaken && d.rolesTaken.length ? '<li>Behörigheter som följde med: ' +
+                mmEscape(d.rolesTaken.join(', ')) + '</li>' : '') +
+            '</ul>';
+
+        // En krock är inte ett fel — men den får aldrig passera osagd.
+        if (conflicts.length) {
+            html +=
+                '<div class="alert alert-warning small"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                '<strong>Några rader kunde inte flyttas</strong> eftersom posten du behöll redan hade ' +
+                'en likadan (samma tävling, samma märke eller liknande). De följde med den borttagna ' +
+                'posten, men innehållet finns sparat i sammanslagningsloggen.<ul class="mb-0 mt-1">' +
+                conflicts.map(function (k) {
+                    var n = d.conflicts[k];
+                    return '<li>' + mmEscape(mmTableLabel(k)) + ': ' +
+                        (n < 0 ? 'okänt antal' : n) + '</li>';
+                }).join('') + '</ul></div>';
+        }
+
+        if (d.errors && d.errors.length) {
+            html += '<div class="alert alert-danger small"><strong>Följande gick inte att flytta:</strong>' +
+                '<ul class="mb-0 mt-1">' +
+                d.errors.map(function (e) { return '<li>' + mmEscape(e) + '</li>'; }).join('') +
+                '</ul></div>';
+        }
+
+        html += '<button type="button" class="btn btn-primary" onclick="mmAfterMerge()">' +
+                '<i class="bi bi-arrow-left me-1"></i>Tillbaka till listan</button>';
+
+        mmEl('mm_compareStep').innerHTML = html;
+        mmEl('mm_mergeBtn').style.display = 'none';
+        mmEl('mm_backBtn').style.display = 'none';
+    }
+
+    // Listan är byggd på medlemmar som inte längre finns — hämta om den, aldrig återanvänd.
+    window.mmAfterMerge = function () {
+        mmBackToList();
+        mmLoadList();
+        if (typeof loadClubMembers === 'function') {
+            try { loadClubMembers(); } catch (e) { /* medlemslistan finns inte på alla ytor */ }
+        }
+    };
+})();
+</script>

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly ClubMembershipService _clubMembershipService;
         private readonly MemberAccessKeyService _accessKeyService;
         private readonly MarkenLedgerService _markenLedger;
+        private readonly MemberMergeService _mergeService;
         private readonly ILogger<MemberImportController> _logger;
 
         private const string ClubMemberTypeAlias = "hpskClub";
@@ -71,6 +72,7 @@ namespace HpskSite.Controllers
             ClubMembershipService clubMembershipService,
             MemberAccessKeyService accessKeyService,
             MarkenLedgerService markenLedger,
+            MemberMergeService mergeService,
             ILogger<MemberImportController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -80,6 +82,7 @@ namespace HpskSite.Controllers
             _clubMembershipService = clubMembershipService;
             _accessKeyService = accessKeyService;
             _markenLedger = markenLedger;
+            _mergeService = mergeService;
             _logger = logger;
         }
 
@@ -188,7 +191,8 @@ namespace HpskSite.Controllers
             }
 
             var (allMembers, byPnr, byEmail) = LoadMemberIndexes();
-            var plan = BuildPlan(rows, mapping, byPnr, byEmail, BuildNameIndex(allMembers));
+            var plan = BuildPlan(rows, mapping, clubId, byPnr, byEmail, BuildNameIndex(allMembers));
+            ResolveClubNames(plan);
             int clubMemberCount = CountClubMembers(allMembers, clubId);
 
             bool pnrMapped = mapping.Values.Any(a =>
@@ -200,9 +204,11 @@ namespace HpskSite.Controllers
 
             _logger.LogInformation(
                 "[MemberImport.DryRun] Club {ClubId}: {Update} update, {Create} create, {Skip} skip " +
-                "(pnr {Pnr}, email {Email}, in-file {InFile}), {Clash} name clashes, suspicious={Suspicious}",
+                "(pnr {Pnr}, email {Email}, in-file {InFile}), {Outside} outside the club, " +
+                "{Clash} name clashes, suspicious={Suspicious}",
                 clubId, plan.WouldUpdate, plan.WouldCreate, plan.WouldSkip,
-                plan.MatchedByPnr, plan.MatchedByEmail, plan.MatchedInFile, plan.NameClashes, suspicious);
+                plan.MatchedByPnr, plan.MatchedByEmail, plan.MatchedInFile, plan.MatchedOutsideClub,
+                plan.NameClashes, suspicious);
 
             // Cap the per-row detail — the counts above are always complete.
             const int detailCap = 500;
@@ -217,6 +223,7 @@ namespace HpskSite.Controllers
                 matchedByPnr = plan.MatchedByPnr,
                 matchedByEmail = plan.MatchedByEmail,
                 matchedInFile = plan.MatchedInFile,
+                matchedOutsideClub = plan.MatchedOutsideClub,
                 cleanedEmails = plan.CleanedEmails,
                 nameClashes = plan.NameClashes,
                 clubMemberCount,
@@ -233,6 +240,8 @@ namespace HpskSite.Controllers
                     matchedOn = r.MatchedOn,
                     matchedName = r.MatchedName,
                     matchedMemberId = r.MatchedMemberId,
+                    matchedInClub = r.MatchedInClub,
+                    matchedClubName = r.MatchedClubName,
                     reason = r.Reason,
                     nameClashWith = r.NameClashWith
                 })
@@ -292,7 +301,7 @@ namespace HpskSite.Controllers
             {
                 // Same calculation the "Testkör" button shows the admin — one code path, so the
                 // stop can never contradict the dry run they just looked at.
-                var plan = BuildPlan(rows, mapping, byPnr, byEmail, BuildNameIndex(allMembers));
+                var plan = BuildPlan(rows, mapping, clubId, byPnr, byEmail, BuildNameIndex(allMembers));
                 int wouldMatch = plan.WouldUpdate;
                 int wouldCreate = plan.WouldCreate;
                 int clubMemberCount = CountClubMembers(allMembers, clubId);
@@ -649,6 +658,19 @@ namespace HpskSite.Controllers
                 }
             }
 
+            // Third pass: addresses that belonged to a member deleted by a merge, pointing at the
+            // member who survived it. Without this, the club's next import from the same old
+            // database recreates the duplicate that was just merged away — the file still carries
+            // the retired address. Last on purpose: a live member always outranks a retired one.
+            var byId = allMembers.ToDictionary(m => m.Id);
+            foreach (var (email, survivorId) in _mergeService.GetRetiredEmails())
+            {
+                var key = NormalizeEmail(email);
+                if (key.Length == 0) continue;
+                if (!byId.TryGetValue(survivorId, out var survivor)) continue; // survivor since deleted
+                byEmail.TryAdd(key, survivor);
+            }
+
             return (allMembers, byPnr, byEmail);
         }
 
@@ -666,6 +688,16 @@ namespace HpskSite.Controllers
             public string? MatchedOn { get; set; }
             public string? MatchedName { get; set; }
             public int? MatchedMemberId { get; set; }
+            /// <summary>
+            /// False when the matched member exists but is NOT affiliated with the importing club.
+            /// The write is still an update of that person, but from the club's point of view the
+            /// row ADDS someone to the roster — a distinction the count "uppdateras" hides.
+            /// </summary>
+            public bool MatchedInClub { get; set; }
+            /// <summary>The matched member's primary club, when it is some other club.</summary>
+            public int? MatchedClubId { get; set; }
+            /// <summary>Resolved name for <see cref="MatchedClubId"/>; filled in by the caller.</summary>
+            public string? MatchedClubName { get; set; }
             /// <summary>Why a skipped row was skipped.</summary>
             public string? Reason { get; set; }
             /// <summary>
@@ -685,6 +717,8 @@ namespace HpskSite.Controllers
             public int MatchedByPnr { get; set; }
             public int MatchedByEmail { get; set; }
             public int MatchedInFile { get; set; }
+            /// <summary>Matched an existing member who is not (yet) a member of the importing club.</summary>
+            public int MatchedOutsideClub { get; set; }
             public int CleanedEmails { get; set; }
             public int NameClashes { get; set; }
             public List<PlanRow> Rows { get; } = new();
@@ -700,6 +734,7 @@ namespace HpskSite.Controllers
         private static ImportPlan BuildPlan(
             List<Dictionary<string, string>> rows,
             Dictionary<string, string> mapping,
+            int clubId,
             Dictionary<string, IMember> byPnr,
             Dictionary<string, IMember> byEmail,
             Dictionary<string, IMember> byName)
@@ -743,6 +778,7 @@ namespace HpskSite.Controllers
                     entry.MatchedOn = "personnummer";
                     entry.MatchedName = byPnrHit.Name;
                     entry.MatchedMemberId = byPnrHit.Id;
+                    NoteAffiliation(entry, byPnrHit, clubId, plan);
                     plan.MatchedByPnr++;
                 }
                 else if (!string.IsNullOrEmpty(email) && byEmail.TryGetValue(email, out var byEmailHit))
@@ -751,18 +787,21 @@ namespace HpskSite.Controllers
                     entry.MatchedOn = "e-post";
                     entry.MatchedName = byEmailHit.Name;
                     entry.MatchedMemberId = byEmailHit.Id;
+                    NoteAffiliation(entry, byEmailHit, clubId, plan);
                     plan.MatchedByEmail++;
                 }
                 else if (!string.IsNullOrEmpty(pnrKey) && createdPnr.TryGetValue(pnrKey, out var pnrRow))
                 {
                     entry.Action = "update";
                     entry.MatchedOn = $"rad {pnrRow} i filen (samma personnummer)";
+                    entry.MatchedInClub = true;
                     plan.MatchedInFile++;
                 }
                 else if (!string.IsNullOrEmpty(email) && createdEmail.TryGetValue(email, out var emailRow))
                 {
                     entry.Action = "update";
                     entry.MatchedOn = $"rad {emailRow} i filen (samma e-post)";
+                    entry.MatchedInClub = true;
                     plan.MatchedInFile++;
                 }
                 else if (string.IsNullOrWhiteSpace(email))
@@ -834,6 +873,54 @@ namespace HpskSite.Controllers
                 return csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                           .Contains(id);
             });
+        }
+
+        /// <summary>True when the member is affiliated with the club — primary club or memberClubIds.</summary>
+        private static bool IsInClub(IMember member, int clubId)
+        {
+            var id = clubId.ToString();
+            if (member.GetValue("primaryClubId")?.ToString() == id) return true;
+            var csv = member.GetValue("memberClubIds")?.ToString() ?? "";
+            return csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                      .Contains(id);
+        }
+
+        /// <summary>
+        /// Records whether a matched member already belongs to the importing club. A match on a
+        /// member of some OTHER club is still a legitimate update of that person's shared account,
+        /// but it also adds them to this club's roster — so it is counted and shown separately
+        /// instead of disappearing into "uppdateras".
+        /// </summary>
+        private static void NoteAffiliation(PlanRow entry, IMember matched, int clubId, ImportPlan plan)
+        {
+            entry.MatchedInClub = IsInClub(matched, clubId);
+            if (entry.MatchedInClub) return;
+
+            plan.MatchedOutsideClub++;
+            if (int.TryParse(matched.GetValue("primaryClubId")?.ToString(), out var primary) && primary > 0)
+            {
+                entry.MatchedClubId = primary;
+            }
+        }
+
+        /// <summary>
+        /// Turns <see cref="PlanRow.MatchedClubId"/> into a club name so the admin recognises where
+        /// the matched person already belongs. Node lookups are cached per id — a file where every
+        /// row matches the same foreign club must not cost one tree read per row.
+        /// </summary>
+        private void ResolveClubNames(ImportPlan plan)
+        {
+            var names = new Dictionary<int, string?>();
+            foreach (var r in plan.Rows)
+            {
+                if (r.MatchedClubId is not int id) continue;
+                if (!names.TryGetValue(id, out var name))
+                {
+                    name = UmbracoContext.Content?.GetById(id)?.Name;
+                    names[id] = name;
+                }
+                r.MatchedClubName = name;
+            }
         }
 
         // ---------------------------------------------------------------

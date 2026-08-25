@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Member Import Modal (Svenska Lag → pistol.nu)
  * Two-step: upload+preview (column mapping) → import (commit).
  * Self-contained Bootstrap modal + vanilla JS. Uses the club id set via
@@ -441,7 +441,10 @@
         });
     };
 
-    function miActionBadge(action) {
+    function miActionBadge(action, row) {
+        if (action === 'update' && row && row.matchedInClub === false) {
+            return '<span class="badge bg-warning text-dark">Läggs till i klubben</span>';
+        }
         if (action === 'update') return '<span class="badge bg-success">Uppdateras</span>';
         if (action === 'create') return '<span class="badge bg-primary">Skapas ny</span>';
         return '<span class="badge bg-secondary">Hoppas över</span>';
@@ -470,6 +473,10 @@
         if (d.matchedByPnr > 0) keys.push('<strong>' + d.matchedByPnr + '</strong> via personnummer');
         if (d.matchedByEmail > 0) keys.push('<strong>' + d.matchedByEmail + '</strong> via e-post');
         if (d.matchedInFile > 0) keys.push('<strong>' + d.matchedInFile + '</strong> mot en tidigare rad i filen');
+        if (d.matchedOutsideClub > 0) {
+            keys.push('varav <strong>' + d.matchedOutsideClub +
+                '</strong> personer som inte är med i klubben i dag');
+        }
         head += '<div class="small text-muted">Klubben har <strong>' + d.clubMemberCount +
             '</strong> medlemmar sedan tidigare.' +
             (keys.length ? ' Matchat: ' + keys.join(', ') + '.' : '') +
@@ -487,6 +494,19 @@
                 'matchningsnyckeln inte stämmer — inte att alla är nya. Kontrollera att kolumnen med e-post ' +
                 '(och personnummer, om det finns) är rätt mappad och skriven exakt som på pistol.nu. ' +
                 'Importen stoppas och frågar innan den kör.</div>';
+        }
+        // A match on someone outside the club is still an update of that person's account, but it
+        // also puts them on this club's roster. Counted as "uppdateras", so say it out loud.
+        if (d.matchedOutsideClub > 0) {
+            warnings +=
+                '<div class="alert alert-warning"><i class="bi bi-person-plus me-1"></i><strong>' +
+                d.matchedOutsideClub + '</strong> rad' + (d.matchedOutsideClub === 1 ? '' : 'er') +
+                ' matchar en person som redan finns på pistol.nu men <strong>inte är medlem i den ' +
+                'här klubben</strong>. De räknas som "uppdateras" ovan, men för klubben ' +
+                'innebär de att ' + d.matchedOutsideClub + ' personer <strong>läggs till i ' +
+                'medlemslistan</strong>. Klubben har ' + d.clubMemberCount + ' medlemmar i dag. ' +
+                'Stämmer det att filen innehåller fler personer än klubbens nuvarande ' +
+                'medlemmar? Kontrollera de gulmarkerade raderna nedan.</div>';
         }
         if (d.cleanedEmails > 0) {
             warnings +=
@@ -506,9 +526,15 @@
         // Per-row detail, most actionable first: skipped, then name clashes, then the rest.
         var rows = (d.rows || []).slice();
         var rank = { 'skip': 0, 'create': 1, 'update': 2 };
+        function miRank(r) {
+            if (r.nameClashWith) return -1;
+            // A match outside the club needs a look before the plain updates do.
+            if (r.action === 'update' && r.matchedInClub === false) return 1.5;
+            return rank[r.action];
+        }
         rows.sort(function (a, b) {
-            var ra = a.nameClashWith ? -1 : rank[a.action];
-            var rb = b.nameClashWith ? -1 : rank[b.action];
+            var ra = miRank(a);
+            var rb = miRank(b);
             if (ra !== rb) return ra - rb;
             return a.rowNumber - b.rowNumber;
         });
@@ -525,6 +551,11 @@
             } else if (r.matchedName) {
                 note = 'Matchar <strong>' + miEscape(r.matchedName) + '</strong> (' +
                     miEscape(r.matchedOn) + ')';
+                if (r.matchedInClub === false) {
+                    note += '<br><span class="text-warning-emphasis">Finns redan som medlem' +
+                        (r.matchedClubName ? ' i <strong>' + miEscape(r.matchedClubName) + '</strong>' : '') +
+                        ', men inte i den här klubben — raden lägger till personen i klubbens medlemslista.</span>';
+                }
             } else if (r.matchedOn) {
                 note = 'Matchar ' + miEscape(r.matchedOn);
             }
@@ -532,7 +563,7 @@
             body +=
                 '<tr>' +
                 '<td class="text-muted small">' + r.rowNumber + '</td>' +
-                '<td>' + miActionBadge(r.action) + '</td>' +
+                '<td>' + miActionBadge(r.action, r) + '</td>' +
                 '<td>' + miEscape(r.name || '') + '</td>' +
                 '<td class="small">' + miEscape(r.email || '') + '</td>' +
                 '<td class="small text-muted">' + (r.rawEmail ? '<code>' + miEscape(r.rawEmail) + '</code>' : '') + '</td>' +

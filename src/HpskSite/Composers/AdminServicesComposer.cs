@@ -56,6 +56,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<MembershipFeeService>();
             // Hard-delete purge of a member's subject-owned rows across all custom DB tables.
             builder.Services.AddScoped<MemberDataPurgeService>();
+            builder.Services.AddScoped<MemberMergeService>();
 
             // Board work: meeting lifecycle (meetings + agenda + attendance/quorum + protokoll + actions).
             // Run create-board-meeting-tables.sql. See BOARD_WORK_PHASE2_MEETINGS.md.

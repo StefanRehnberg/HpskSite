@@ -1,4 +1,4 @@
-@{
+﻿@{
     var clubId = ViewBag.clubId as int? ?? 0;
     var clubName = ViewBag.clubName as string ?? "Club";
 }
@@ -313,6 +313,11 @@
                         <li>
                             <button class="dropdown-item" type="button" onclick="exportClubMembersCsv()">
                                 <i class="bi bi-download me-2 text-secondary"></i>Exportera lista
+                            </button>
+                        </li>
+                        <li>
+                            <button class="dropdown-item" type="button" onclick="openMemberMergeModal(@clubId, @(System.Text.Json.JsonSerializer.Serialize(clubName)))">
+                                <i class="bi bi-people me-2 text-warning"></i>Hitta dubbletter
                             </button>
                         </li>
                         <li><hr class="dropdown-divider"></li>
@@ -1160,6 +1165,7 @@
 @* Member-database expansion (see Documentation/MEMBER_DATABASE.md) *@
 @await Html.PartialAsync("ClubFeeManagement")
 @await Html.PartialAsync("MemberImportModal")
+@await Html.PartialAsync("MemberMergeModal")
 
 @* Member Security modal (lockout / password reset / invitation) — shared with Admin Page → Användare *@
 @await Html.PartialAsync("~/Views/Partials/_MemberSecurityModal.cshtml")

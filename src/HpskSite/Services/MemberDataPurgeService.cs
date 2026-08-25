@@ -1,4 +1,4 @@
-using Umbraco.Cms.Infrastructure.Scoping;
+﻿using Umbraco.Cms.Infrastructure.Scoping;
 
 namespace HpskSite.Services
 {
@@ -46,6 +46,14 @@ namespace HpskSite.Services
         //   Courses / CourseModules / CoursePrerequisites / CourseTestVersions — no member column
         //   (Training match SERIES scores are stored in the shared TrainingScores table — covered below.)
         // -------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Shared with <see cref="MemberMergeService"/>, which moves these same rows to another
+        /// member instead of deleting them. One map, two operations — if a new table is added
+        /// here, merge picks it up for free. Two copies would drift, and a drifted merge silently
+        /// leaves a person's results behind on a member that is about to be deleted.
+        /// </summary>
+        public static (string Table, string Column)[] SubjectTables => _tables;
+
         private static readonly (string Table, string Column)[] _tables = new[]
         {
             // ── Membership / keys / föreningsintyg / fees ──
