@@ -1606,6 +1606,57 @@ tested BEFORE anything is consolidated: afterwards the invoices are ineligible f
 and a mixed selection would be refused by the wrong rule, passing while proving nothing.
 Adds C# → full rebuild. No SQL, no doctype property.
 
+### Escaping i Fältskyttes vyer + kretsgränsen på fälttävlingar (2026-08-25)
+
+**Shooter and club names went straight into `innerHTML` and into three `document.write` print
+windows.** The member sets their own name and the organiser opens the print: stored XSS from low
+privilege to higher. A plain `<` also broke the printout outright.
+
+**⚠️ The dangerous one was an ONCLICK, not the visible rows.** The "lägg till skytt" button built a
+JS string literal out of the name *inside the attribute* and escaped **single quotes only**. A double
+quote in a name terminates the attribute; a trailing backslash escapes the literal's own closing
+quote. That is code execution in the organiser's browser, not a broken layout. It now passes an
+**INDEX** into the fetched list (`faltAddShooterByIndex`), so no user text reaches the attribute —
+same shape as `hpskRemoveOrphanRow`. **Never build a JS literal in an attribute from user text; pass
+an index.**
+
+**`Views/Partials/_HtmlEscape.cshtml` holds `hpskEsc()`, once.** Three copies of an escaper already
+existed (FaltskytteStartListManagement, FaltskytteConfigurationEditor, FaltskytteConfigurationHub)
+and the sites that needed one most had none — *a helper living in the same file as the bug it
+prevents is not a safeguard.* **Included by the PARTIALS themselves, not by the host pages**, so it
+travels with the code that needs it and cannot be forgotten when a partial is added to a new surface.
+Guarded against double include.
+
+**⚠️ Four of the sites a grep turns up must NOT be escaped:** one `textContent` assignment and three
+`confirm()` dialogs. Escaping there is actively wrong — it would show `&lt;` to the user. A source
+check must filter on **HTML context** (`document.write`, `innerHTML`, or a literal opening a tag),
+not on "no `confirm(` on this line": a dialog string can be built in a multi-line ternary and passed
+to `confirm` two lines later.
+
+**`FaltskytteController.IsAuthorizedForCompetition` let ANY regional admin manage EVERY Fältskytte
+competition in the country** — 35 endpoints (patrols, station config, results, shoot-offs) — because
+it read `GetManagedRegions()` and returned true on `regions.Any()`, while every other surface asks
+about *this* competition's region. Confirmed a bug with Stefan 2026-08-25. It now delegates to
+`AdminAuthorizationService.HasCompetitionStaffAccessAsync`, which handles **both host shapes**
+(club-hosted, where `IsClubAdminForClub` folds in that club's regional admins; and region-hosted,
+`clubId` unset — the SM shape). Writing the host check by hand is what has gone wrong here
+repeatedly. Skjutledare stay in deliberately. **`IsAuthorizedForCatalog` keeps `regions.Any()`** — the
+figure catalogue legitimately asks "do you administer any krets at all"; that is not a competition.
+
+Verified 22/22 `hpsk-verify/faltskytte-escaping-verify.mjs` (A/B: 11 of 22 fail on baseline) and
+12/12 `faltskytte-auth-region-verify.mjs` (A/B: 3 of 12).
+**⚠️ What those suites cannot reach, so nobody re-derives it:** a shooter's NAME cannot be set by
+the test account (`MemberAdmin/SaveMember` is site-admin only) and the renderers sit inside an IIFE,
+so hostile data cannot be injected from outside either — the name/club paths are verified at SOURCE
+level. The **patrol label** carries the end-to-end DOM proof through both the list and the print
+window, but it passes on baseline too (it already had a partial escape), so it is a non-regression,
+not proof of the name fix. And the cross-region refusal is unproven in dev: there is exactly ONE
+Fältskytte competition (5312, Halland) and the test account is regional admin for Halland, so the
+case cannot be produced. Proving it needs a site-admin account (to grant
+`RegionalAdmin_<other krets>`) or a Fältskytte competition in a second region.
+
+Adds C# → full rebuild.
+
 ### Föräldralösa startlisterader + rätt resultattabell (2026-08-25)
 
 **The coverage panel named the orphaned rows and offered no way to fix them** — the same criticism
