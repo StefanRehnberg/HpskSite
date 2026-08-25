@@ -51,6 +51,12 @@ namespace HpskSite.Composers
             // every named discipline must get to answer first.
             builder.Services.AddScoped<HpskSite.Services.StartListCoverage.IStartListCoverageSource, HpskSite.Services.StartListCoverage.PrecisionFamilyStartListCoverageSource>();
 
+            // Coverage makes an unplaced shooter visible; cleanup removes a DELETED one from the
+            // list instead of leaving them on it with orphaned result rows. Same precision-LAST rule.
+            builder.Services.AddScoped<HpskSite.Services.StartListCleanup.StartListCleanupService>();
+            builder.Services.AddScoped<HpskSite.Services.StartListCleanup.IStartListCleanupSource, HpskSite.Services.StartListCleanup.FaltskytteStartListCleanupSource>();
+            builder.Services.AddScoped<HpskSite.Services.StartListCleanup.IStartListCleanupSource, HpskSite.Services.StartListCleanup.PrecisionFamilyStartListCleanupSource>();
+
             // Register CompetitionTeamService as scoped
             builder.Services.AddScoped<CompetitionTeamService>();
 

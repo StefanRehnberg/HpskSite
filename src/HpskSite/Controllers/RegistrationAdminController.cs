@@ -38,6 +38,7 @@ namespace HpskSite.Controllers
         private readonly MemberClubService _memberClubService;
         private readonly RegistrationClubPropagationService _clubPropagationService;
         private readonly HpskSite.Services.StartListCoverage.StartListCoverageService _coverageService;
+        private readonly HpskSite.Services.StartListCleanup.StartListCleanupService _startListCleanupService;
         private readonly ILogger<RegistrationAdminController> _logger;
 
         public RegistrationAdminController(
@@ -62,6 +63,7 @@ namespace HpskSite.Controllers
             MemberClubService memberClubService,
             RegistrationClubPropagationService clubPropagationService,
             HpskSite.Services.StartListCoverage.StartListCoverageService coverageService,
+            HpskSite.Services.StartListCleanup.StartListCleanupService startListCleanupService,
             ILogger<RegistrationAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -81,6 +83,7 @@ namespace HpskSite.Controllers
             _teamService = teamService;
             _consolidatedService = consolidatedService;
             _coverageService = coverageService;
+            _startListCleanupService = startListCleanupService;
         }
 
         #region Registration Management
@@ -684,15 +687,49 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Captured BEFORE the delete — afterwards there is no registration to read it from.
+                var deletedMemberId = registration.GetValue<int>("memberId");
+
                 var result = _contentService.Delete(registration);
-                if (result.Success)
-                {
-                    return Json(new { success = true, message = "Anmälan borttagen." });
-                }
-                else
+                if (!result.Success)
                 {
                     return Json(new { success = false, message = "Kunde inte ta bort anmälan." });
                 }
+
+                // Take the shooter off the start list and drop their result rows. Without this the
+                // deleted shooter stays on the generated list with orphaned result rows behind them
+                // — half of the known class-change orphaning issue. Springskytte has done this since
+                // 2026-08-05 from the client; the precision family and Fältskytte now do it here,
+                // server-side, so it cannot be skipped by a client that never makes the second call.
+                //
+                // Deliberately AFTER the delete and best-effort: the registration is already gone, so
+                // failing the response would report a failed deletion that actually succeeded.
+                // Springskytte is not handled here (no source registered) — its own client call still
+                // owns that path.
+                var cleanup = competition != null && deletedMemberId > 0
+                    ? await _startListCleanupService.CleanupAsync(competition, deletedMemberId)
+                    : new HpskSite.Services.StartListCleanup.CleanupOutcome { Supported = false };
+
+                var messages = new List<string> { "Anmälan borttagen." };
+                if (cleanup.Regenerated)
+                    messages.Add("Startlistan byggdes om.");
+                else if (cleanup.SlotsFreed > 0)
+                    messages.Add($"Frigjorde {cleanup.SlotsFreed} plats{(cleanup.SlotsFreed == 1 ? "" : "er")} på startlistan"
+                               + (cleanup.PublishedListsUpdated > 0 ? " och uppdaterade den publicerade listan." : "."));
+                if (cleanup.ResultRowsDeleted > 0)
+                    messages.Add($"Tog bort {cleanup.ResultRowsDeleted} resultatrad{(cleanup.ResultRowsDeleted == 1 ? "" : "er")}.");
+
+                return Json(new
+                {
+                    success = true,
+                    message = string.Join(" ", messages),
+                    // Warnings are surfaced separately: they are things the operator must ACT on
+                    // (a stale cached list, a failed re-publish), not part of the success sentence.
+                    warnings = cleanup.Warnings,
+                    slotsFreed = cleanup.SlotsFreed,
+                    resultRowsDeleted = cleanup.ResultRowsDeleted,
+                    regenerated = cleanup.Regenerated
+                });
             }
             catch (Exception ex)
             {
@@ -1368,6 +1405,53 @@ namespace HpskSite.Controllers
                 return await _authService.IsRegionalAdminForRegion(regionCode);
 
             return false;
+        }
+
+        /// <summary>
+        /// Where a shooter currently stands on the start list, for the delete-confirmation warning.
+        ///
+        /// The point is that the confirm dialog can say what deleting will actually do. A bare "är du
+        /// säker?" hides the consequence that matters: a published start list is about to change, and
+        /// results already entered for this shooter are about to go.
+        ///
+        /// Read-only. Springskytte has its own equivalent (`Springskytte/GetStartListMembership`).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegistrationPlacement(int competitionId, int memberId)
+        {
+            try
+            {
+                if (competitionId <= 0 || memberId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                if (!await CanManageCompetitionDeskAsync(competition, competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var placements = await _startListCleanupService.DescribePlacementsAsync(competition, memberId);
+
+                return Json(new
+                {
+                    success = true,
+                    placements = placements.Select(pl => new
+                    {
+                        listName = pl.ListName,
+                        where = pl.Where,
+                        startTime = pl.StartTime,
+                        shootingClass = pl.ShootingClass,
+                        isPublished = pl.IsPublished
+                    }),
+                    anyPublished = placements.Any(pl => pl.IsPublished)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading start-list placement for competition {CompetitionId} member {MemberId}", competitionId, memberId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
         }
 
         /// <summary>

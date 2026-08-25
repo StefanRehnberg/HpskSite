@@ -4608,10 +4608,35 @@ function deleteMoneyNote(registrationId) {
     return lines.length ? '\n\n' + lines.join('\n') : '';
 }
 
+// The confirm text for a delete on every discipline EXCEPT Springskytte (which has its own).
+// A bare "är du säker?" hid the consequence that matters: a PUBLISHED start list is about to
+// change, and results already entered for this shooter are about to go with them.
+async function placementAwareDeleteMessage(registrationId) {
+    let msg = 'Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.';
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
+    const memberId = reg ? reg.memberId : null;
+    if (!memberId) return msg + deleteMoneyNote(registrationId);
+    try {
+        const compId = $('.competition-registration-management').data('competition-id');
+        const r = await fetch(`/umbraco/surface/RegistrationAdmin/GetRegistrationPlacement?competitionId=${compId}&memberId=${memberId}`,
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(x => x.json());
+        const pl = (r && r.success) ? (r.placements || []) : [];
+        if (pl.length) {
+            const lines = pl.map(x => `• ${x.listName}: ${x.where}`
+                + (x.startTime ? ` (start ${String(x.startTime).substring(0, 5)})` : '')
+                + (x.isPublished ? ' – PUBLICERAD' : ''));
+            msg = 'Skytten står på startlistan:\n' + lines.join('\n')
+                + '\n\nPlatsen frigörs'
+                + (r.anyPublished ? ' och den publicerade startlistan uppdateras' : '')
+                + ', och skyttens resultatrader tas bort. Ta bort anmälan?';
+        }
+    } catch (e) { /* a failed warning must never block a legitimate deletion */ }
+    return msg + deleteMoneyNote(registrationId);
+}
+
 async function confirmDeleteCompetitionRegistration(registrationId) {
     if (springDiscipline) { await springAwareDelete(registrationId, null); return; }
-    if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.'
-                + deleteMoneyNote(registrationId))) {
+    if (confirm(await placementAwareDeleteMessage(registrationId))) {
         deleteRegistrationById(registrationId);
     }
 }
@@ -4620,8 +4645,7 @@ async function deleteCompetitionRegistration() {
     const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value);
     const modalEl = document.getElementById('competitionEditRegistrationModal');
     if (springDiscipline) { await springAwareDelete(registrationId, modalEl); return; }
-    if (confirm('Är du säker på att du vill ta bort denna anmälan? Åtgärden kan inte ångras.'
-                + deleteMoneyNote(registrationId))) {
+    if (confirm(await placementAwareDeleteMessage(registrationId))) {
         bootstrap.Modal.getInstance(modalEl).hide();
         deleteRegistrationById(registrationId);
     }
@@ -4672,6 +4696,12 @@ function deleteRegistrationById(registrationId, memberId) {
                         body: JSON.stringify({ competitionId: parseInt(compId), memberId: memberId })
                     });
                 } catch (e) { /* registration already removed; cleanup is best-effort */ }
+            }
+            // Warnings are things the operator must act on (a stale cached list, a failed
+            // re-publish). Silently swallowing them would leave a published list wrong with
+            // nobody knowing — the exact failure mode this whole feature exists to end.
+            if (data.warnings && data.warnings.length) {
+                alert('Anmälan togs bort, men:\n\n• ' + data.warnings.join('\n• '));
             }
             loadCompetitionRegistrations();
         } else {
