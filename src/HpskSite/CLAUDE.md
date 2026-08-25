@@ -1606,6 +1606,54 @@ tested BEFORE anything is consolidated: afterwards the invoices are ineligible f
 and a mixed selection would be refused by the wrong rule, passing while proving nothing.
 Adds C# → full rebuild. No SQL, no doctype property.
 
+### Föräldralösa startlisterader + rätt resultattabell (2026-08-25)
+
+**The coverage panel named the orphaned rows and offered no way to fix them** — the same criticism
+we levelled at the old krets invoice page. Worse than the usual visible-but-not-actionable, because
+the row could not be cleared by hand either: `RemoveShooterFromStartList` refuses a shooter who has
+results, and those results are unreachable once the registration for that class is gone. The row was
+stuck.
+
+**`RegistrationAdmin/RemoveOrphanStartListRow` is SCOPED TO ONE CLASS.** A shooter can hold a
+perfectly good place in C1 while their A1 row is the orphan; clearing the shooter wholesale would
+delete a start they are entitled to. Fältskytte scales it to the WEAPON GROUP instead, because a
+patrol walks the course once.
+- **It re-derives the orphan status server-side before writing.** The client's list can be seconds
+  stale and this DELETES: if a registration exists for that class the row is a legitimate start and
+  must not be removed by a button meant for clearing leftovers.
+- **⚠️ The class-scoped delete must carry ShootingClass in the WHERE.** All three tables (result,
+  shoot-off, DNS/DNF status) are keyed on (competition, member, CLASS), so a scoped delete without it
+  would wipe a class the shooter IS entered in. The comparison strips whitespace, because the class is
+  stored as an ID ("C1") but written as a display NAME ("C 1") by `ChangeShooterClass`.
+- The panel also names the other option — add the class to the registration via Redigera anmälan —
+  so removal does not read as the only path.
+
+**⚠️ Two queries in `PrecisionStartListController` hardcoded `PrecisionResultEntry`** — the removal
+guard (:1175) and `HasResults` (:2166). On **Duell / Milsnabb / MagnumPrecision / NationellHelmatch**,
+whose rows live in their own tables, both answered "no results": the guard protected nothing, so a
+shooter with results could be removed from the start list and their results orphaned, silently. Both
+now go through `CompetitionResultTables`. **No other discipline is affected** — every discipline has
+its OWN `HasResults` and each view calls its own, so the shared endpoint is only ever asked about the
+precision family. A/B: the shared query answers 0 on baseline where the discipline's own answers 4
+(Fältskytte) and 13 (Springskytte).
+
+**⚠️ `DeleteResult` matches on ShootingClass but `ValidateDeleteRequest` does not require it.** A
+caller that omits it deletes nothing and used to be told *"Inget resultat hittades att ta bort"* — a
+statement about the DATA when the truth was a statement about the REQUEST. That misattribution cost a
+debugging round: a row that plainly existed reported itself absent, and the removal guard looked like
+it was contradicting the database. The message now names the missing field.
+
+**Noted, NOT fixed:** `AddShooterToStartList` refuses a member already on the list — it checks
+MEMBER, not (member, class) — even though the generators place a multi-class shooter in several
+classes. The manual editor therefore cannot do what the generator does. In the backlog.
+
+Verified 20/20 `hpsk-verify/orphan-row-cleanup-verify.mjs` and 6/6 `result-table-lookup-verify.mjs`.
+⚠️ The orphan suite **builds its own orphan and removes exactly that one** — its first version ate
+its fixture by cleaning dev of every orphan, and then failed on the next run with "ingen föräldralös
+rad i dev". Building the state you measure is the only repeatable shape here.
+
+Adds C# → full rebuild. No SQL, no doctype property.
+
 ### Startliste-medveten radering (2026-08-25)
 
 Everywhere except Springskytte, deleting a registration was a bare confirm dialog: the registration
