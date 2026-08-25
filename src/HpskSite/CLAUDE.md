@@ -1606,6 +1606,69 @@ tested BEFORE anything is consolidated: afterwards the invoices are ineligible f
 and a mixed selection would be refused by the wrong rule, passing while proving nothing.
 Adds C# → full rebuild. No SQL, no doctype property.
 
+### Startliste-medveten radering (2026-08-25)
+
+Everywhere except Springskytte, deleting a registration was a bare confirm dialog: the registration
+went, the shooter **stayed on the generated start list** with orphaned result rows behind them.
+A/B against the un-fixed build shows it plainly — the **public** start list still displayed the
+deleted shooter, and the orphan count went from 2 to 3: the delete *created* one.
+
+**On the old code the mess could not even be cleaned up through the UI.**
+`RemoveShooterFromStartList` refuses to remove a shooter who has results
+(`SELECT COUNT(*) FROM PrecisionResultEntry …`, hardcoded), and the results are unreachable once
+the registration is gone. The shooter was stuck on the list.
+
+**`Services/StartListCleanup` is the same seam as `StartListCoverage`** — coverage MAKES the mess
+visible, cleanup REMOVES it. One source per discipline, because the start unit differs (skjutlag in
+a content node vs patrol in SQL) and so does the result table.
+
+**It runs SERVER-SIDE inside `DeleteCompetitionRegistration`**, not as a second client call the way
+Springskytte does it. So it cannot be skipped by a client that never calls back, and there is no
+window where the registration is gone but the list still holds the shooter. Best-effort and AFTER
+the delete: the registration is already gone, so throwing would report a failed deletion that
+actually succeeded and invite a retry.
+
+**Four decisions that are easy to get wrong:**
+- **The vacated position is left as a GAP — no renumbering.** Position is a firing point;
+  renumbering moves every shooter after them to a different lane, mid-competition, for someone
+  else's withdrawal. Springskytte made the same call for start numbers. The suite asserts the other
+  rows are byte-identical.
+- **⚠️ Direktplacering is REGENERATED, not patched.** DP writes its own anonymous config shape and
+  its own bespoke HTML; deserializing that into a `StartListConfiguration` and re-rendering would
+  silently replace the whole list's markup. Same rule as `RegistrationClubPropagationService`.
+- **Only what was ALREADY published is re-published.** Publishing a draft list as a side effect of a
+  deletion would make an unfinished list public.
+- **⚠️ The result table is resolved with `TryFor`, not `For`.** `For()` answers
+  `PrecisionResultEntry` for anything unknown, which is right for a READ and dangerous for a DELETE
+  — a typo in the type would delete from another discipline's table.
+
+`CompetitionTypes/Common/CompetitionResultTables` now holds the type → result-table map, which
+existed in **three** copies, one carrying the comment *"keep the two in sync"* (the smell, not the
+safeguard). **The two existing call sites are deliberately NOT migrated:** their
+`_ => "PrecisionResultEntry"` fallback would change behaviour for Fältskytte on a hot read path no
+suite here covers. Migrate them only with a test that pins that path.
+
+**Confirm dialog and response:** the dialog now says WHERE the shooter stands ("Skjutlag 1, plats
+7"), whether the list is **PUBLICERAD**, and that the result rows go too
+(`RegistrationAdmin/GetRegistrationPlacement`, read-only). The response reports what happened
+instead of a bare "Anmälan borttagen", and `warnings` are surfaced separately because they are
+things the operator must act on (a stale cached blob, a failed re-publish).
+
+**Springskytte is untouched:** no source is registered, so the service no-ops there and its own
+client path still owns it. **Do not add a Springskytte source without removing the client call** —
+both would run and the second would report "0 freed", which reads like a failure.
+
+Verified 26/26 `hpsk-verify/startlist-aware-delete-verify.mjs`, which builds its own fixture:
+places a shooter, enters a result, deletes, then checks the shooter is gone from the configuration
+AND from the public page, that the result row followed, and that everyone else's slot is unchanged.
+**A/B: 12 of 26 fail on baseline.** ⚠️ Two fixture traps that cost a round: "unplaced" is per
+(member, CLASS), so a shooter can be missing a C3 slot while standing on the list in another class
+— `AddShooterToStartList` then refuses with "finns redan i startlistan"; and
+`ValidateResultRequest` requires `rangeOfficerId > 0` but answers only "Ogiltig begäran" without
+naming the field.
+
+Adds C# → full rebuild. No SQL, no doctype property, no Umbraco node.
+
 ### Startlistetäckning — är alla anmälda faktiskt placerade? (2026-08-25)
 
 A shooter could be registered, invoiced and **completely absent from the start list** with nothing
