@@ -1168,11 +1168,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     var shooter = team.Shooters.FirstOrDefault(s => s.MemberId == request.MemberId);
                     if (shooter != null)
                     {
-                        // CRITICAL: Check if shooter has results in database
+                        // CRITICAL: Check if shooter has results in database.
+                        // ⚠️ This asked PrecisionResultEntry unconditionally until 2026-08-25, so on
+                        // Duell / Milsnabb / MagnumPrecision / NationellHelmatch — whose rows live in
+                        // their own tables — the guard found nothing and protected nothing: the
+                        // shooter could be removed and their results left orphaned, silently. The
+                        // Precision fallback inside For() is right here; this is a read.
                         using (var db = _databaseFactory.CreateDatabase())
                         {
+                            var resultTable = HpskSite.CompetitionTypes.Common.CompetitionResultTables.For(
+                                competition?.GetValue<string>("competitionType"));
                             var hasResults = db.ExecuteScalar<int>(
-                                "SELECT COUNT(*) FROM PrecisionResultEntry WHERE CompetitionId = @0 AND MemberId = @1",
+                                $"SELECT COUNT(*) FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1",
                                 competitionId, request.MemberId) > 0;
 
                             if (hasResults)
@@ -2159,8 +2166,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public async Task<IActionResult> HasResults(int competitionId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            // Same fault as the removal guard above: hardcoding PrecisionResultEntry answered
+            // "no results" for every other discipline in the family, so anything gating on this
+            // silently stopped warning.
+            var resultTable = HpskSite.CompetitionTypes.Common.CompetitionResultTables.For(
+                _contentService.GetById(competitionId)?.GetValue<string>("competitionType"));
             var count = await db.ExecuteScalarAsync<int>(
-                "SELECT COUNT(*) FROM PrecisionResultEntry WHERE CompetitionId = @0", competitionId);
+                $"SELECT COUNT(*) FROM [{resultTable}] WHERE CompetitionId = @0", competitionId);
             return Json(new { success = true, hasResults = count > 0, resultCount = count });
         }
 

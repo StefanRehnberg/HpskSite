@@ -82,12 +82,24 @@ if (!window.hpskLoadStartListCoverage) {
                           + `<ul class="mb-0 small">${rows}</ul></div>`);
             });
             if (orphans.length) {
-                const rows = orphans.map(m =>
-                    `<li>${hpskCovEsc(m.name)} <span class="text-muted">— ${hpskCovEsc(m.club || '')} · står som ${hpskCovEsc(m.shootingClass || '')}</span></li>`
+                // Each row is ACTIONABLE. Naming the mess without offering a way to clear it is the
+                // same failure as the old krets invoice page — and here the operator could not fix it
+                // by hand either: the start-list editor refuses to remove a shooter who has results.
+                const rows = orphans.map((m, oi) =>
+                    `<li class="mb-1" id="hpskOrphan_${oi}">
+                        ${hpskCovEsc(m.name)}
+                        <span class="text-muted">— ${hpskCovEsc(m.club || '')} · står som ${hpskCovEsc(m.shootingClass || '')}</span>
+                        <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 ms-2"
+                                onclick="hpskRemoveOrphanRow(${oi})">
+                            <i class="bi bi-x-lg"></i> Ta bort från listan
+                        </button>
+                     </li>`
                 ).join('');
                 blocks.push(`<div class="mb-2"><strong>På listan men inte anmäld i den klassen — ${orphans.length} st</strong>`
-                          + `<div class="small text-muted">Oftast en klass som ändrades efter att listan genererades.</div>`
-                          + `<ul class="mb-0 small">${rows}</ul></div>`);
+                          + `<div class="small text-muted">Oftast en klass som ändrades efter att listan genererades. `
+                          + `Ska skytten <em>tävla</em> i klassen — lägg till den på anmälan i stället, via Åtgärder → Redigera anmälan.</div>`
+                          + `<ul class="mb-0 small list-unstyled">${rows}</ul></div>`);
+                window.__hpskOrphans = orphans;
             }
             detail = `
                 <details class="mt-2">
@@ -118,8 +130,57 @@ if (!window.hpskLoadStartListCoverage) {
         panel.classList.remove('d-none');
     };
 
+    // Clears one orphaned row. Named by INDEX rather than by interpolating the class into the
+    // onclick — a class id in an attribute is one apostrophe away from a broken handler.
+    const hpskRemoveOrphanRow = async function (idx) {
+        const panel = document.getElementById('hpskCoveragePanel');
+        const o = (window.__hpskOrphans || [])[idx];
+        if (!panel || !o) return;
+
+        const msg = `${o.name} står på startlistan som ${o.shootingClass} men har ingen anmälan i den klassen.\n\n`
+            + 'Raden tas bort från startlistan, och eventuella resultat som matats in för just den '
+            + 'klassen tas bort med den. Skyttens övriga klasser rörs inte.\n\nTa bort raden?';
+        if (!confirm(msg)) return;
+
+        const btn = document.querySelector(`#hpskOrphan_${idx} button`);
+        if (btn) { btn.disabled = true; btn.textContent = 'Tar bort…'; }
+        try {
+            const r = await fetch('/umbraco/surface/RegistrationAdmin/RemoveOrphanStartListRow', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+                },
+                body: JSON.stringify({
+                    competitionId: parseInt(panel.getAttribute('data-competition-id'), 10),
+                    memberId: o.memberId,
+                    shootingClass: o.shootingClass
+                })
+            }).then(x => x.json());
+
+            if (!r.success) {
+                alert(r.message || 'Kunde inte ta bort raden.');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-x-lg"></i> Ta bort från listan'; }
+                return;
+            }
+            if (r.warnings && r.warnings.length) alert('Raden togs bort, men:\n\n• ' + r.warnings.join('\n• '));
+
+            // Re-read rather than patching the DOM: the counts, the badges and the headline all
+            // change, and a hand-patched panel would disagree with the server.
+            await hpskLoadStartListCoverage();
+            // The start-list view on the same page is now stale.
+            if (window.loadStartLists) window.loadStartLists();
+            if (window.loadFaltPatrols) window.loadFaltPatrols();
+        } catch (err) {
+            console.error('Could not remove orphan row:', err);
+            alert('Ett fel uppstod.');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-x-lg"></i> Ta bort från listan'; }
+        }
+    };
+
     window.hpskLoadStartListCoverage = hpskLoadStartListCoverage;
     window.hpskRenderStartListCoverage = hpskRenderStartListCoverage;
+    window.hpskRemoveOrphanRow = hpskRemoveOrphanRow;
 
     document.addEventListener('DOMContentLoaded', () => hpskLoadStartListCoverage());
 }

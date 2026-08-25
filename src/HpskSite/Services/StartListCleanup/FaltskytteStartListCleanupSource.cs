@@ -64,8 +64,14 @@ namespace HpskSite.Services.StartListCleanup
             return found;
         }
 
-        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId)
+        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null)
         {
+            // A patrol is per WEAPON GROUP, so a scoped removal narrows to the group — clearing
+            // "C1" must not also pull the shooter out of their A patrol.
+            var onlyGroup = string.IsNullOrWhiteSpace(onlyShootingClass)
+                ? null
+                : StartListCoverage.CoverageKeys.WeaponGroupOf(onlyShootingClass);
+
             var warnings = new List<string>();
             var freed = 0;
             var deleted = 0;
@@ -75,21 +81,33 @@ namespace HpskSite.Services.StartListCleanup
                 using var db = _databaseFactory.CreateDatabase();
 
                 // Scoped through the patrol join so a member id can never reach another
-                // competition's patrols.
-                freed = await db.ExecuteAsync(
-                    @"DELETE pm FROM FaltskyttePatrolMember pm
-                      INNER JOIN FaltskyttePatrol p ON pm.PatrolId = p.Id
-                      WHERE p.CompetitionId = @0 AND pm.MemberId = @1", competition.Id, memberId);
+                // competition's patrols. LEFT(ShootingClass,1) is the same weapon-group test the
+                // assign path uses.
+                freed = onlyGroup == null
+                    ? await db.ExecuteAsync(
+                        @"DELETE pm FROM FaltskyttePatrolMember pm
+                          INNER JOIN FaltskyttePatrol p ON pm.PatrolId = p.Id
+                          WHERE p.CompetitionId = @0 AND pm.MemberId = @1", competition.Id, memberId)
+                    : await db.ExecuteAsync(
+                        @"DELETE pm FROM FaltskyttePatrolMember pm
+                          INNER JOIN FaltskyttePatrol p ON pm.PatrolId = p.Id
+                          WHERE p.CompetitionId = @0 AND pm.MemberId = @1
+                            AND LEFT(pm.ShootingClass, 1) = @2", competition.Id, memberId, onlyGroup);
 
                 // Empty patrols are deliberately LEFT in place. The patrol number is printed on
                 // station cards and referred to all day; deleting patrol 4 because its last shooter
                 // withdrew would renumber the field around the organiser.
+                var groupFilter = onlyGroup == null ? "" : " AND LEFT(ShootingClass, 1) = @2";
+                var args = onlyGroup == null
+                    ? new object[] { competition.Id, memberId }
+                    : new object[] { competition.Id, memberId, onlyGroup };
+
                 deleted += await db.ExecuteAsync(
-                    "DELETE FROM FaltskytteResultEntry WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
+                    $"DELETE FROM FaltskytteResultEntry WHERE CompetitionId=@0 AND MemberId=@1{groupFilter}", args);
                 try
                 {
                     deleted += await db.ExecuteAsync(
-                        "DELETE FROM FaltskytteShootOffEntry WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
+                        $"DELETE FROM FaltskytteShootOffEntry WHERE CompetitionId=@0 AND MemberId=@1{groupFilter}", args);
                 }
                 catch (Exception ex)
                 {

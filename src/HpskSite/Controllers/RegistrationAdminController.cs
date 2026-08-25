@@ -1408,6 +1408,83 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Remove ONE orphaned start-list row: a shooter standing in a class they hold no
+        /// registration for. Usually the registration's class was changed after the list was
+        /// generated, so the old row stayed behind.
+        ///
+        /// This exists because the coverage panel NAMED those rows and offered no way to fix them.
+        /// Visible-but-not-actionable is the same criticism we levelled at the old krets invoice
+        /// page — and worse here, because the row could not be cleared by hand either: the start-list
+        /// editor refuses to remove a shooter who has results, and those results are unreachable
+        /// once the registration for that class is gone.
+        ///
+        /// ⚠️ Scoped to ONE class on purpose. A shooter can legitimately hold a place in C1 while
+        /// their A1 row is the orphan; clearing the shooter wholesale would delete a start they are
+        /// entitled to.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> RemoveOrphanStartListRow([FromBody] OrphanStartListRowRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0
+                    || string.IsNullOrWhiteSpace(request.ShootingClass))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                if (!await CanManageCompetitionDeskAsync(competition, request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                // Re-derive the orphan status server-side. The client's list can be seconds stale,
+                // and this DELETES: if a registration exists for that class the row is a legitimate
+                // start and must not be removed by a button meant for cleaning up leftovers.
+                var coverage = await _coverageService.BuildAsync(competition);
+                var isOrphan = coverage.OnListWithoutRegistration.Any(o =>
+                    o.MemberId == request.MemberId
+                    && string.Equals(
+                        HpskSite.Services.StartListCoverage.CoverageKeys.Canonical(o.ShootingClass),
+                        HpskSite.Services.StartListCoverage.CoverageKeys.Canonical(request.ShootingClass),
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (!isOrphan)
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Raden hör till en giltig anmälan och togs inte bort. "
+                                + "Ladda om sidan — täckningen kan ha ändrats sedan listan visades."
+                    });
+
+                var outcome = await _startListCleanupService.CleanupAsync(
+                    competition, request.MemberId, request.ShootingClass);
+
+                if (outcome.SlotsFreed == 0 && outcome.ResultRowsDeleted == 0 && !outcome.Regenerated)
+                    return Json(new { success = false, message = "Ingenting kunde tas bort — kontrollera startlistan manuellt." });
+
+                var parts = new List<string>();
+                if (outcome.Regenerated) parts.Add("Startlistan byggdes om.");
+                else if (outcome.SlotsFreed > 0) parts.Add($"Tog bort {outcome.SlotsFreed} rad{(outcome.SlotsFreed == 1 ? "" : "er")} från startlistan.");
+                if (outcome.ResultRowsDeleted > 0) parts.Add($"Tog bort {outcome.ResultRowsDeleted} resultatrad{(outcome.ResultRowsDeleted == 1 ? "" : "er")}.");
+
+                return Json(new
+                {
+                    success = true,
+                    message = string.Join(" ", parts),
+                    warnings = outcome.Warnings,
+                    slotsFreed = outcome.SlotsFreed,
+                    resultRowsDeleted = outcome.ResultRowsDeleted
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing orphan start-list row for competition {CompetitionId} member {MemberId}", request?.CompetitionId, request?.MemberId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
         /// Where a shooter currently stands on the start list, for the delete-confirmation warning.
         ///
         /// The point is that the confirm dialog can say what deleting will actually do. A bare "är du
@@ -2916,6 +2993,14 @@ namespace HpskSite.Controllers
         public class DeleteRegistrationRequest
         {
             public int RegistrationId { get; set; }
+        }
+
+        public class OrphanStartListRowRequest
+        {
+            public int CompetitionId { get; set; }
+            public int MemberId { get; set; }
+            /// <summary>The class the ORPHANED ROW carries, not the shooter's registered class.</summary>
+            public string ShootingClass { get; set; } = "";
         }
 
         /// <summary>

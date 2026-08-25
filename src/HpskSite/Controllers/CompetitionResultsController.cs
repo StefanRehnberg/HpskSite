@@ -1155,10 +1155,19 @@ namespace HpskSite.Controllers
 
                 if (!deleted)
                 {
+                    // ⚠️ The delete matches on ShootingClass too, but ValidateDeleteRequest does not
+                    // require it — so a caller that omits it deletes nothing and used to be told
+                    // "there is no result", which is a statement about the DATA when the truth is a
+                    // statement about the REQUEST. That misattribution cost a debugging round: a row
+                    // that plainly existed reported itself absent, and the start-list removal guard
+                    // (which does not filter on class) looked like it was contradicting the database.
                     return Json(new ResultEntryResponse
                     {
                         Success = false,
-                        Message = "Inget resultat hittades att ta bort."
+                        Message = string.IsNullOrWhiteSpace(request.ShootingClass)
+                            ? "Ingen vapenklass angavs, så inget resultat kunde pekas ut. "
+                              + "En skytt kan ha resultat i flera klasser, så klassen måste följa med."
+                            : $"Inget resultat hittades att ta bort för klass {request.ShootingClass}, serie {request.SeriesNumber}."
                     });
                 }
 

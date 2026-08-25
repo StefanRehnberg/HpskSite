@@ -43,11 +43,11 @@ namespace HpskSite.Services.StartListCleanup
         /// already gone, so throwing here would report a failed deletion that actually succeeded and
         /// invite the operator to try again.
         /// </summary>
-        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId)
+        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null)
         {
             var source = SourceFor(competition);
             if (source == null) return new CleanupOutcome { Supported = false };
-            try { return await source.CleanupAsync(competition, memberId); }
+            try { return await source.CleanupAsync(competition, memberId, onlyShootingClass); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Start-list cleanup failed for member {MemberId} on competition {CompetitionId}", memberId, competition.Id);

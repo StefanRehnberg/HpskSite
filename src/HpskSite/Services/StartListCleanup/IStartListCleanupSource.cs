@@ -42,7 +42,11 @@ namespace HpskSite.Services.StartListCleanup
         /// <summary>
         /// Remove the member from every start unit and drop their result rows.
         /// Called AFTER the registration is gone, so it must be safe with no registration present.
+        ///
+        /// <paramref name="onlyShootingClass"/> narrows it to ONE class, which is what the orphan-row
+        /// action needs: a shooter can legitimately hold a place in C1 while their A1 row is the
+        /// orphan, and clearing both would delete a start the shooter is entitled to. Null = all.
         /// </summary>
-        Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId);
+        Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null);
     }
 }

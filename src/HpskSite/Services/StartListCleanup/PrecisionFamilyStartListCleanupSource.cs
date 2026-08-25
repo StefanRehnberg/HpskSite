@@ -83,8 +83,17 @@ namespace HpskSite.Services.StartListCleanup
             return Task.FromResult(found);
         }
 
-        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId)
+        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null)
         {
+            // Keyed per class here, matching how placement works in this family: each registered
+            // class holds its own position in a skjutlag.
+            var onlyKey = string.IsNullOrWhiteSpace(onlyShootingClass)
+                ? null
+                : StartListCoverage.CoverageKeys.Canonical(onlyShootingClass);
+            bool Matches(StartListShooter s) =>
+                s.MemberId == memberId
+                && (onlyKey == null || StartListCoverage.CoverageKeys.Canonical(s.WeaponClass) == onlyKey);
+
             var warnings = new List<string>();
             var slotsFreed = 0;
             var publishedUpdated = 0;
@@ -100,8 +109,12 @@ namespace HpskSite.Services.StartListCleanup
 
             if (dpConfig != null)
             {
-                // Count first — after the regeneration the shooter is gone and nothing can be counted.
-                slotsFreed = (await DescribePlacementsAsync(competition, memberId)).Count;
+                // A DP list is DERIVED from the registrations, so regenerating removes anything
+                // without one — which covers a scoped orphan removal too, and does it for every
+                // class at once. Count first, and only what was asked about: after the regeneration
+                // there is nothing left to count.
+                slotsFreed = (await DescribePlacementsAsync(competition, memberId))
+                    .Count(pl => onlyKey == null || StartListCoverage.CoverageKeys.Canonical(pl.ShootingClass) == onlyKey);
                 try
                 {
                     _dpService.Regenerate(competition.Id, competition, dpConfig);
@@ -125,7 +138,7 @@ namespace HpskSite.Services.StartListCleanup
                     {
                         if (team.Shooters == null) continue;
                         var before = team.Shooters.Count;
-                        team.Shooters = team.Shooters.Where(s => s.MemberId != memberId).ToList();
+                        team.Shooters = team.Shooters.Where(s => !Matches(s)).ToList();
                         removedHere += before - team.Shooters.Count;
                     }
                     if (removedHere == 0) continue;
@@ -170,7 +183,7 @@ namespace HpskSite.Services.StartListCleanup
                 }
             }
 
-            var deleted = await DeleteResultRowsAsync(competition, memberId, warnings);
+            var deleted = await DeleteResultRowsAsync(competition, memberId, onlyShootingClass, warnings);
 
             return new CleanupOutcome
             {
@@ -194,7 +207,7 @@ namespace HpskSite.Services.StartListCleanup
             }
         }
 
-        private async Task<int> DeleteResultRowsAsync(IContent competition, int memberId, List<string> warnings)
+        private async Task<int> DeleteResultRowsAsync(IContent competition, int memberId, string? onlyShootingClass, List<string> warnings)
         {
             // ⚠️ No silent fallback here. `For()` answers PrecisionResultEntry for anything unknown,
             // which is right for a READ and dangerous for a DELETE — a typo in the type would delete
@@ -215,15 +228,38 @@ namespace HpskSite.Services.StartListCleanup
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
-                deleted += await db.ExecuteAsync(
-                    $"DELETE FROM {table} WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
 
-                // Shoot-off entries and DNS/DNF status live in their own tables, keyed on the same
-                // identity. Leaving them makes a deleted shooter reappear in a tied medal group.
-                deleted += await db.ExecuteAsync(
-                    "DELETE FROM CompetitionShootOffEntry WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
-                deleted += await db.ExecuteAsync(
-                    "DELETE FROM CompetitionParticipantStatus WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
+                // ⚠️ ShootingClass must be part of the WHERE when a class is named: a shooter can
+                // hold results in several classes in the same competition, and the three tables
+                // below are all keyed on (competition, member, CLASS). Dropping the class from a
+                // scoped delete would wipe a class the shooter is legitimately entered in.
+                if (string.IsNullOrWhiteSpace(onlyShootingClass))
+                {
+                    deleted += await db.ExecuteAsync(
+                        $"DELETE FROM [{table}] WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
+                    // Shoot-off entries and DNS/DNF status live in their own tables, keyed on the same
+                    // identity. Leaving them makes a deleted shooter reappear in a tied medal group.
+                    deleted += await db.ExecuteAsync(
+                        "DELETE FROM CompetitionShootOffEntry WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
+                    deleted += await db.ExecuteAsync(
+                        "DELETE FROM CompetitionParticipantStatus WHERE CompetitionId=@0 AND MemberId=@1", competition.Id, memberId);
+                }
+                else
+                {
+                    // The class is stored as an ID here ("C1") but written as a display NAME by
+                    // ChangeShooterClass ("C 1"), so compare with the whitespace removed rather than
+                    // literally — otherwise a scoped delete silently removes nothing.
+                    const string classMatch = "REPLACE(ShootingClass, ' ', '') = REPLACE(@2, ' ', '')";
+                    deleted += await db.ExecuteAsync(
+                        $"DELETE FROM [{table}] WHERE CompetitionId=@0 AND MemberId=@1 AND {classMatch}",
+                        competition.Id, memberId, onlyShootingClass);
+                    deleted += await db.ExecuteAsync(
+                        $"DELETE FROM CompetitionShootOffEntry WHERE CompetitionId=@0 AND MemberId=@1 AND {classMatch}",
+                        competition.Id, memberId, onlyShootingClass);
+                    deleted += await db.ExecuteAsync(
+                        $"DELETE FROM CompetitionParticipantStatus WHERE CompetitionId=@0 AND MemberId=@1 AND {classMatch}",
+                        competition.Id, memberId, onlyShootingClass);
+                }
             }
             catch (Exception ex)
             {
