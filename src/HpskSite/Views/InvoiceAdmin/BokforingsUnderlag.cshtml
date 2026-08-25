@@ -103,7 +103,17 @@
     </div>
 }
 
-<div class="summary-card">
+@* The raw figures are also exposed as data attributes. A verification suite that has to scrape
+   "1 200 kr" out of nested divs is brittle, and a mis-scrape reads as a money bug — which is
+   exactly what happened here: consolidated-no-doublecount deliberately avoided the printed total
+   and asserted on invoice numbers appearing in the text instead, where a parent's reference is a
+   PREFIX of its own credit notes' references ("…-1" inside "…-19"). It reported a double-count
+   that did not exist. Invisible in print; nothing reads these but tests. *@
+<div class="summary-card"
+     data-bok-paid-total="@Model.Summary.PaidTotal.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+     data-bok-pending-total="@Model.Summary.PendingTotal.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+     data-bok-refunded-total="@Model.Summary.RefundedTotal.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+     data-bok-registrations="@Model.Summary.TotalRegistrations">
     <div class="cell">
         <div class="lbl">Anmälda</div>
         <div class="val">@Model.Summary.TotalRegistrations</div>
