@@ -1,0 +1,126 @@
+@*
+ * Placement coverage for every discipline EXCEPT Springskytte, which has its own panel because
+ * it also covers stafett teams (see SpringskytteStartListManagement).
+ *
+ * Answers the question the Startlistor tab never answered: is everyone who is registered actually
+ * placed somewhere? Without it a whole weapon class could have no list at all and the only symptom
+ * was shooters turning up with no start time.
+ *
+ * ViewData: CompetitionId (required).
+ * Exposes window.hpskLoadStartListCoverage() — call it after generating or editing a list.
+*@
+@{
+    var covCompetitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+}
+
+<div id="hpskCoveragePanel" class="mb-3 d-none" data-competition-id="@covCompetitionId"></div>
+
+<script>
+// Guarded: the panel is included from more than one host view and a double include must not
+// redefine the loader. Declared as an explicit window assignment rather than relying on function
+// hoisting — an async function declaration inside a block does NOT leak to global scope.
+if (!window.hpskLoadStartListCoverage) {
+    const hpskCovEsc = (s) => {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    };
+
+    const hpskLoadStartListCoverage = async function () {
+        const panel = document.getElementById('hpskCoveragePanel');
+        if (!panel) return;
+        const cid = panel.getAttribute('data-competition-id');
+        if (!cid) return;
+        try {
+            const res = await fetch(`/umbraco/surface/RegistrationAdmin/GetStartListCoverage?competitionId=${cid}`)
+                .then(r => r.json());
+            // supported === false means no reader for this discipline — say nothing rather than
+            // implying everything is placed.
+            if (!res.success || res.supported === false) { panel.classList.add('d-none'); return; }
+            hpskRenderStartListCoverage(res);
+        } catch (err) {
+            console.warn('Could not load start-list coverage:', err);
+            panel.classList.add('d-none');
+        }
+    };
+
+    const hpskRenderStartListCoverage = function (cov) {
+        const panel = document.getElementById('hpskCoveragePanel');
+        const ind = cov.individuals || { total: 0, placed: 0, byWeapon: [] };
+        const missing = Math.max(0, (ind.total || 0) - (ind.placed || 0));
+        const unit = cov.unitLabel || 'startlista';
+
+        // No registrations yet is not a state worth a panel.
+        if ((ind.total || 0) === 0) { panel.classList.add('d-none'); return; }
+
+        const allPlaced = missing === 0;
+        const orphanCount = (cov.onListWithoutRegistration || []).length;
+        // Before the first list exists everyone is unplaced, which is simply where a new
+        // competition starts — a red alarm there would train the organiser to ignore this panel.
+        const noListYet = cov.hasAnyStartList === false;
+        const tone = (allPlaced && orphanCount === 0) ? 'success'
+                   : allPlaced ? 'warning'                 // only orphans: worth fixing, not a blocker
+                   : noListYet ? 'warning'
+                   : 'danger';
+
+        const wcBadges = (ind.byWeapon || []).map(w => {
+            const ok = w.placed >= w.total;
+            return `<span class="badge bg-${ok ? 'success' : (noListYet ? 'secondary' : 'danger')} me-1">`
+                 + `Vapengrupp ${hpskCovEsc(w.weaponClass)}: ${w.placed}/${w.total}</span>`;
+        }).join('');
+
+        const orphans = cov.onListWithoutRegistration || [];
+
+        let detail = '';
+        if (!allPlaced || orphans.length) {
+            const blocks = [];
+            (ind.byWeapon || []).filter(w => (w.missing || []).length > 0).forEach(w => {
+                const rows = (w.missing || []).map(m =>
+                    `<li>${hpskCovEsc(m.name)} <span class="text-muted">— ${hpskCovEsc(m.club || '')} · ${hpskCovEsc(m.shootingClass || '')}</span></li>`
+                ).join('');
+                blocks.push(`<div class="mb-2"><strong>Vapengrupp ${hpskCovEsc(w.weaponClass)} — ${w.missing.length} utan starttid</strong>`
+                          + `<ul class="mb-0 small">${rows}</ul></div>`);
+            });
+            if (orphans.length) {
+                const rows = orphans.map(m =>
+                    `<li>${hpskCovEsc(m.name)} <span class="text-muted">— ${hpskCovEsc(m.club || '')} · står som ${hpskCovEsc(m.shootingClass || '')}</span></li>`
+                ).join('');
+                blocks.push(`<div class="mb-2"><strong>På listan men inte anmäld i den klassen — ${orphans.length} st</strong>`
+                          + `<div class="small text-muted">Oftast en klass som ändrades efter att listan genererades.</div>`
+                          + `<ul class="mb-0 small">${rows}</ul></div>`);
+            }
+            detail = `
+                <details class="mt-2">
+                    <summary class="small">Visa vilka det gäller</summary>
+                    <div class="mt-2">${blocks.join('')}</div>
+                </details>`;
+        }
+
+        // All placed but orphans present is still not a clean bill of health.
+        const headline = (allPlaced && orphanCount === 0)
+            ? '<i class="bi bi-check-circle me-1"></i>Alla anmälda har en starttid.'
+            : allPlaced
+            ? `<i class="bi bi-exclamation-triangle me-1"></i>Alla anmälda har en starttid, men `
+              + `<strong>${orphanCount} rad${orphanCount === 1 ? '' : 'er'} på listan saknar anmälan</strong> i den klassen.`
+            : (noListYet
+                ? `<i class="bi bi-info-circle me-1"></i><strong>${missing} anmäld${missing === 1 ? '' : 'a'} start${missing === 1 ? '' : 'er'}</strong>`
+                  + (unit === 'patrull' ? ' — inga patruller är skapade än.' : ' — ingen startlista är skapad än.')
+                // "någon skjutlag" is wrong gender — skjutlag is neuter. Rather than decline the
+                // unit word, say where they will be missing FROM, which is what the organiser cares
+                // about anyway.
+                : `<i class="bi bi-exclamation-triangle me-1"></i><strong>${missing} start${missing === 1 ? '' : 'er'} utan starttid</strong>`
+                  + (unit === 'patrull'
+                      ? ' — de är inte inlagda i någon patrull.'
+                      : ' — de kommer inte att synas på startlistan.'));
+
+        panel.className = `alert alert-${tone} mb-3`;
+        panel.innerHTML = `<div>${headline}</div><div class="mt-2">${wcBadges}</div>${detail}`;
+        panel.classList.remove('d-none');
+    };
+
+    window.hpskLoadStartListCoverage = hpskLoadStartListCoverage;
+    window.hpskRenderStartListCoverage = hpskRenderStartListCoverage;
+
+    document.addEventListener('DOMContentLoaded', () => hpskLoadStartListCoverage());
+}
+</script>

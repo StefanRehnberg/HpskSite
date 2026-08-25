@@ -281,18 +281,21 @@
         </button>
     </div>
 
-    @if (springskytteEnabled)
-    {
-        @* Placement warning at the DESK, not just on the Startlistor tab — this is where staff
-           stand all day, and a shooter with no starttid is only discovered at the firing line
-           otherwise. Links straight to the tab that can fix it. *@
-        <div id="deskCoverageBanner" class="alert alert-danger d-none align-items-center justify-content-between mb-3">
-            <div id="deskCoverageText"></div>
-            <button class="btn btn-sm btn-danger ms-3 flex-shrink-0" onclick="deskGoToStartLists()">
-                <i class="bi bi-list-ol me-1"></i>Till startlistor
-            </button>
-        </div>
-    }
+    @* Placement warning at the DESK, not just on the Startlistor tab — this is where staff
+       stand all day, and a shooter with no starttid is only discovered at the firing line
+       otherwise. Links straight to the tab that can fix it.
+
+       Rendered for EVERY discipline as of 2026-08-25. It was Springskytte-only, which is why the
+       same silence stood on Precision and Fältskytte: a shooter could be registered, invoiced and
+       absent from the start list with nothing anywhere saying so. Which endpoint answers is decided
+       in JS (see deskCoverageEndpoint) — Springskytte keeps its own, which also covers stafett. *@
+    <div id="deskCoverageBanner" class="alert alert-danger d-none align-items-center justify-content-between mb-3"
+         data-comp-type="@compType">
+        <div id="deskCoverageText"></div>
+        <button class="btn btn-sm btn-danger ms-3 flex-shrink-0" onclick="deskGoToStartLists()">
+            <i class="bi bi-list-ol me-1"></i>Till startlistor
+        </button>
+    </div>
 
     <!-- Search + Filters — six inputs in a single row at lg+ to minimize vertical
          space at the desk. Search matches name, club, and Swish reference (invoice
@@ -1661,25 +1664,39 @@ function updateTeamSortIndicators() {
 
 // Desk-side placement warning. Same coverage data the Startlistor tab shows, condensed to one
 // line: the desk needs to know that what it just registered has nowhere to start.
+// Springskytte answers from its own endpoint, which also covers stafett teams — a concept no
+// other discipline has. Everything else goes through the shared coverage service.
+function deskCoverageEndpoint(compType) {
+    return compType === 'Springskytte'
+        ? 'Springskytte/GetStartListCoverage'
+        : 'RegistrationAdmin/GetStartListCoverage';
+}
+
 async function refreshDeskCoverageBanner() {
     const banner = document.getElementById('deskCoverageBanner');
-    if (!banner) return; // non-Springskytte
+    if (!banner) return;
+    const hideBanner = () => { banner.classList.add('d-none'); banner.classList.remove('d-flex'); };
     try {
         const cid = $('.competition-registration-management').data('competition-id');
-        const cov = await fetch(`/umbraco/surface/Springskytte/GetStartListCoverage?competitionId=${cid}`)
+        const compType = banner.getAttribute('data-comp-type') || '';
+        const cov = await fetch(`/umbraco/surface/${deskCoverageEndpoint(compType)}?competitionId=${cid}`)
             .then(r => r.json());
-        if (!cov.success) { banner.classList.add('d-none'); return; }
+        if (!cov.success) { hideBanner(); return; }
+
+        // A discipline with no coverage reader must never render as "allt är placerat".
+        if (cov.supported === false) { hideBanner(); return; }
 
         const ind = cov.individuals || { total: 0, placed: 0, byWeapon: [] };
         const staf = cov.stafett || { total: 0, placed: 0, missing: [] };
         const indMissing = Math.max(0, (ind.total || 0) - (ind.placed || 0));
         const stafMissing = (staf.missing || []).length;
 
-        if (indMissing === 0 && stafMissing === 0) {
-            banner.classList.add('d-none');
-            banner.classList.remove('d-flex');
-            return;
-        }
+        if (indMissing === 0 && stafMissing === 0) { hideBanner(); return; }
+
+        // Before the first generation EVERYONE is unplaced, which is the normal state of a new
+        // competition — saying "de saknas på startlistan" there would cry wolf on every comp.
+        const noListYet = cov.hasAnyStartList === false;
+        const unit = cov.unitLabel || 'startlista';
 
         const parts = [];
         if (indMissing > 0) {
@@ -1692,9 +1709,14 @@ async function refreshDeskCoverageBanner() {
         }
         if (stafMissing > 0) parts.push(`<strong>${stafMissing} stafettlag utan startlista</strong>`);
 
+        banner.classList.toggle('alert-danger', !noListYet);
+        banner.classList.toggle('alert-warning', noListYet);
         document.getElementById('deskCoverageText').innerHTML =
-            '<i class="bi bi-exclamation-triangle me-1"></i>' + parts.join(' · ')
-            + ' — de saknas på startlistan.';
+            `<i class="bi bi-${noListYet ? 'info-circle' : 'exclamation-triangle'} me-1"></i>`
+            + parts.join(' · ')
+            + (noListYet
+                ? (unit === 'patrull' ? ' — inga patruller är skapade än.' : ' — ingen startlista är skapad än.')
+                : (unit === 'patrull' ? ' — de är inte inlagda i någon patrull.' : ' — de saknas på startlistan.'));
         banner.classList.remove('d-none');
         banner.classList.add('d-flex');
     } catch (err) {
@@ -1725,6 +1747,9 @@ function loadCompetitionTeams() {
             console.error('Error loading teams:', err);
             competitionTeams = [];
             renderCompetitionTeams();
+            // The placement warning must not depend on the teams request succeeding — a comp
+            // with no teams at all is the common case on the precision family.
+            refreshDeskCoverageBanner();
         });
 }
 

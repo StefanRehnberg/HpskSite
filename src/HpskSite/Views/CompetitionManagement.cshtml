@@ -628,10 +628,12 @@
                     var slViewData = new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } };
                     var rsJsonStr = competition?.Value<string>("rollingStart") ?? "";
                     slViewData["RollingStart"] = rsJsonStr;
+                    @await Html.PartialAsync("_StartListCoveragePanel", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
                     @await Html.PartialAsync("FaltskytteStartListManagement", slViewData)
                 }
                 else
                 {
+                    @await Html.PartialAsync("_StartListCoveragePanel", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
                     var isDp = false;
                     try { var dpJson = competition?.HasProperty("direktplaceringConfig") == true ? (competition.Value<string>("direktplaceringConfig") ?? "") : ""; isDp = dpJson.Contains("\"enabled\":true") || dpJson.Contains("\"Enabled\":true"); } catch { }
                     @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId }, { "IsDirektplacering", isDp } })

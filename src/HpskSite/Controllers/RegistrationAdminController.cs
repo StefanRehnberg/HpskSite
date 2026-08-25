@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly ConsolidatedInvoiceService _consolidatedService;
         private readonly MemberClubService _memberClubService;
         private readonly RegistrationClubPropagationService _clubPropagationService;
+        private readonly HpskSite.Services.StartListCoverage.StartListCoverageService _coverageService;
         private readonly ILogger<RegistrationAdminController> _logger;
 
         public RegistrationAdminController(
@@ -60,6 +61,7 @@ namespace HpskSite.Controllers
             ConsolidatedInvoiceService consolidatedService,
             MemberClubService memberClubService,
             RegistrationClubPropagationService clubPropagationService,
+            HpskSite.Services.StartListCoverage.StartListCoverageService coverageService,
             ILogger<RegistrationAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -78,6 +80,7 @@ namespace HpskSite.Controllers
             _startListRepository = startListRepository;
             _teamService = teamService;
             _consolidatedService = consolidatedService;
+            _coverageService = coverageService;
         }
 
         #region Registration Management
@@ -1365,6 +1368,81 @@ namespace HpskSite.Controllers
                 return await _authService.IsRegionalAdminForRegion(regionCode);
 
             return false;
+        }
+
+        /// <summary>
+        /// Start-list COVERAGE: which registered starts have nowhere to start from.
+        ///
+        /// This exists because nothing on the precision family or Fältskytte ever said so. A shooter
+        /// could be registered, invoiced and completely absent from the start list, and the first
+        /// person to notice was the shooter, on the day. Springskytte got this after the 2026-08-05
+        /// desk run found 43 A-starts without a start time behind a screen that looked finished;
+        /// the same silence was left everywhere else.
+        ///
+        /// Read-only and safe to poll. Discipline dispatch lives in StartListCoverageService — do not
+        /// branch on competitionType here.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStartListCoverage(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                // Goes through the shared desk check, which carries the club-vs-region host rule —
+                // an SM is region-hosted (clubId unset) and a hand-written clubId check locks the
+                // organising krets out of its own competition.
+                if (!await CanManageCompetitionDeskAsync(competition, competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet att se startlistans täckning." });
+
+                var coverage = await _coverageService.BuildAsync(competition);
+
+                return Json(new
+                {
+                    success = true,
+                    supported = coverage.Supported,
+                    unitLabel = coverage.UnitLabel,
+                    hasAnyStartList = coverage.HasAnyStartList,
+                    individuals = new
+                    {
+                        total = coverage.Total,
+                        placed = coverage.Placed,
+                        missing = coverage.Missing,
+                        byWeapon = coverage.ByWeapon.Select(g => new
+                        {
+                            weaponClass = g.WeaponClass,
+                            total = g.Total,
+                            placed = g.Placed,
+                            missing = g.Missing.Select(m => new
+                            {
+                                memberId = m.MemberId,
+                                name = m.Name,
+                                club = m.Club,
+                                shootingClass = m.ShootingClass
+                            })
+                        })
+                    },
+                    // The mirror fault. Reporting only unplaced starts made these invisible: the
+                    // organiser finds the shooter ON the list (under another class) and writes the
+                    // warning off as wrong.
+                    onListWithoutRegistration = coverage.OnListWithoutRegistration.Select(m => new
+                    {
+                        memberId = m.MemberId,
+                        name = m.Name,
+                        club = m.Club,
+                        shootingClass = m.ShootingClass
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building start-list coverage for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
         }
 
         /// <summary>

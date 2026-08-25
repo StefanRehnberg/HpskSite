@@ -1029,6 +1029,10 @@ function loadStartLists() {
         if (officialEl) officialEl.style.display = 'none';
         if (noListEl) noListEl.style.display = 'none';
 
+        // Placement coverage is stale the moment a list is generated or edited, and this function
+        // already runs on every one of those paths.
+        if (window.hpskLoadStartListCoverage) window.hpskLoadStartListCoverage();
+
         // Fetch THE ONE start list for this competition
         console.log('Fetching start list for competition:', competitionId);
         fetch(`/umbraco/surface/PrecisionStartList/GetOfficialStartList?competitionId=${competitionId}`)

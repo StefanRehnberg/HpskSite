@@ -283,6 +283,10 @@
         empty.style.display = 'none';
         container.style.display = 'none';
 
+        // Placement coverage is stale after any patrol change, and every one of those paths
+        // comes back through here.
+        if (window.hpskLoadStartListCoverage) window.hpskLoadStartListCoverage();
+
         try {
             var data = await apiGet('GetPatrols?competitionId=' + compId);
             loading.style.display = 'none';

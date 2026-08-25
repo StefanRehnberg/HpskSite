@@ -44,6 +44,13 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<ISeriesScoreSource, PrecisionFamilySeriesScoreSource>();
             builder.Services.AddScoped<ISeriesScoreSource, FaltskytteSeriesScoreSource>();
 
+            // "Is every registered start actually placed?" — same seam, one source per discipline.
+            builder.Services.AddScoped<HpskSite.Services.StartListCoverage.StartListCoverageService>();
+            builder.Services.AddScoped<HpskSite.Services.StartListCoverage.IStartListCoverageSource, HpskSite.Services.StartListCoverage.FaltskytteStartListCoverageSource>();
+            // Precision LAST: it claims the empty/unknown competitionType as a legacy fallback, so
+            // every named discipline must get to answer first.
+            builder.Services.AddScoped<HpskSite.Services.StartListCoverage.IStartListCoverageSource, HpskSite.Services.StartListCoverage.PrecisionFamilyStartListCoverageSource>();
+
             // Register CompetitionTeamService as scoped
             builder.Services.AddScoped<CompetitionTeamService>();
 
