@@ -4,6 +4,11 @@
 *@
 @using HpskSite.Models
 
+@* hpskEsc() — the shooter's name and club are member-supplied and are rendered into innerHTML here.
+   Included by this partial rather than by its host pages, so the helper travels with the code that
+   needs it and cannot be forgotten when the partial is added to a new surface. *@
+@await Html.PartialAsync("_HtmlEscape")
+
 <!-- Flatpickr Date/Time Picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -707,15 +712,8 @@
 <script>
 // Start List Management JavaScript
 
-// Tiny HTML escaper for user-supplied label text rendered inside template literals.
-function escapeHtmlInline(s) {
-    return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+// Was a fourth hand-rolled copy of the escaper; delegates to the shared one in _HtmlEscape.
+function escapeHtmlInline(s) { return hpskEsc(s); }
 
 // Global state to track if a published start list exists
 let hasPublishedStartList = false;
@@ -1528,11 +1526,11 @@ function createTeamCard(team, index, isOfficial) {
                     <div class="flex-grow-1 min-width-0">
                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-1">
                             <div class="shooter-info">
-                                <strong class="d-block d-sm-inline">${shooter.position}. ${shooter.name}</strong>
-                                <span class="text-muted d-none d-md-inline ms-2">${clubDisplay}</span>
+                                <strong class="d-block d-sm-inline">${shooter.position}. ${hpskEsc(shooter.name)}</strong>
+                                <span class="text-muted d-none d-md-inline ms-2">${hpskEsc(clubDisplay)}</span>
                             </div>
                             <div class="d-flex align-items-center gap-1">
-                                <span class="badge bg-info">${shooter.weaponClass}</span>
+                                <span class="badge bg-info">${hpskEsc(shooter.weaponClass)}</span>
                                 ${statusBadge}
                                 <div class="dropdown">
                                     <button class="btn btn-sm btn-link text-secondary p-1" data-bs-toggle="dropdown" aria-expanded="false">
@@ -1546,10 +1544,14 @@ function createTeamCard(team, index, isOfficial) {
                                             <i class="bi bi-arrow-down me-2"></i>Flytta ner
                                         </a></li>
                                         <li><hr class="dropdown-divider"></li>
-                                        <li><a class="dropdown-item" href="#" onclick="openEditWeaponClassModal(${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}', '${shooter.weaponClass}', ${team.teamNumber}); return false;">
+                                        <li><a class="dropdown-item" href="#" onclick="openEditWeaponClassModalFor(this); return false;"
+                                               data-member-id="${shooter.memberId}" data-shooter-name="${hpskEsc(shooter.name)}"
+                                               data-weapon-class="${hpskEsc(shooter.weaponClass)}" data-team="${team.teamNumber}">
                                             <i class="bi bi-pencil me-2"></i>Ändra vapenklass
                                         </a></li>
-                                        <li><a class="dropdown-item" href="#" onclick="openMoveShooterModal(${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}', ${team.teamNumber}); return false;">
+                                        <li><a class="dropdown-item" href="#" onclick="openMoveShooterModalFor(this); return false;"
+                                               data-member-id="${shooter.memberId}" data-shooter-name="${hpskEsc(shooter.name)}"
+                                               data-team="${team.teamNumber}">
                                             <i class="bi bi-arrows-move me-2"></i>Flytta till annat lag
                                         </a></li>
                                         <li><hr class="dropdown-divider"></li>
@@ -1563,14 +1565,16 @@ function createTeamCard(team, index, isOfficial) {
                                             <i class="bi bi-arrow-counterclockwise me-2"></i>Ta bort status
                                         </a></li>
                                         <li><hr class="dropdown-divider"></li>
-                                        <li><a class="dropdown-item text-danger" href="#" onclick="removeShooterFromTeam(${window.currentStartListId}, ${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}'); return false;">
+                                        <li><a class="dropdown-item text-danger" href="#" onclick="removeShooterFromTeamFor(this); return false;"
+                                               data-member-id="${shooter.memberId}" data-shooter-name="${hpskEsc(shooter.name)}"
+                                               data-weapon-class="${hpskEsc(shooter.weaponClass)}">
                                             <i class="bi bi-trash me-2"></i>Ta bort
                                         </a></li>
                                     </ul>
                                 </div>
                             </div>
                         </div>
-                        <small class="text-muted d-md-none">${clubDisplay}</small>
+                        <small class="text-muted d-md-none">${hpskEsc(clubDisplay)}</small>
                     </div>
                 </div>
             `;
@@ -1911,9 +1915,32 @@ function moveShooterPosition(memberId, direction) {
     });
 }
 
-function removeShooterFromTeam(startListId, memberId, shooterName) {
+// ⚠️ These three read the shooter off DATA ATTRIBUTES on the clicked element instead of taking the
+// name as an argument built into an onclick. The old form interpolated `shooter.name` into a JS
+// string literal inside the attribute and escaped ONLY single quotes — a double quote in a member's
+// name terminates the attribute and a trailing backslash escapes the literal's own closing quote,
+// i.e. code execution in the organiser's browser from a value the member sets themselves. Identical
+// to the Fältskytte "lägg till skytt" onclick fixed in 12e0578; this is its precision-family twin.
+// No user text reaches an attribute now — never build a JS literal in an attribute from user text.
+function openEditWeaponClassModalFor(el) {
+    openEditWeaponClassModal(parseInt(el.dataset.memberId, 10), el.dataset.shooterName,
+        el.dataset.weaponClass, parseInt(el.dataset.team, 10));
+}
+function openMoveShooterModalFor(el) {
+    openMoveShooterModal(parseInt(el.dataset.memberId, 10), el.dataset.shooterName,
+        parseInt(el.dataset.team, 10));
+}
+function removeShooterFromTeamFor(el) {
+    removeShooterFromTeam(window.currentStartListId, parseInt(el.dataset.memberId, 10),
+        el.dataset.shooterName, el.dataset.weaponClass);
+}
+
+function removeShooterFromTeam(startListId, memberId, shooterName, shootingClass) {
     if (!confirmIfResultsExist('Ta bort skytt fr\u00e5n lag')) return;
-    if (!confirm(`Är du säker på att du vill ta bort ${shooterName} från startlistan?\n\nOBS: Detta går inte att ångra.`)) {
+    // Name the CLASS in the dialog. A place on the list is per (skytt, klass), so on a multi-class
+    // shooter "ta bort NN från startlistan" does not say which of their starts is about to go.
+    const what = shootingClass ? `${shooterName} (${shootingClass})` : shooterName;
+    if (!confirm(`Är du säker på att du vill ta bort ${what} från startlistan?\n\nOBS: Detta går inte att ångra.`)) {
         return;
     }
 
@@ -1935,7 +1962,10 @@ function removeShooterFromTeam(startListId, memberId, shooterName) {
         },
         body: JSON.stringify({
             startListId: startListId,
-            memberId: memberId
+            memberId: memberId,
+            // Required for a multi-class shooter: the server removes per (member, class) and
+            // refuses outright rather than guessing when several placements exist.
+            shootingClass: shootingClass || ''
         })
     })
     .then(response => response.json())

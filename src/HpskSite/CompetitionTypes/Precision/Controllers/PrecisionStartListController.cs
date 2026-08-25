@@ -3,6 +3,7 @@ using HpskSite.Models.ViewModels.Competition;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.ViewModels;
 using HpskSite.CompetitionTypes.Precision.Services;
+using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Common.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
@@ -18,6 +19,7 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Services;
+using HpskSite.Services.StartListCoverage;
 using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Precision.Controllers
@@ -36,6 +38,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private readonly StartListGenerator _generator;
         private readonly StartListHtmlRenderer _renderer;
         private readonly ClubService _clubService;
+        private readonly MemberClubService _memberClubService;
         private readonly PrecisionFinalsQualificationService _finalsQualificationService;
         private readonly PrecisionQualifyingResultsService _qualifyingResultsService;
         private readonly PrecisionFinalsStartListBuilder _finalsBuilder;
@@ -58,6 +61,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             StartListGenerator generator,
             StartListHtmlRenderer renderer,
             ClubService clubService,
+            MemberClubService memberClubService,
             PrecisionFinalsQualificationService finalsQualificationService,
             PrecisionQualifyingResultsService qualifyingResultsService,
             PrecisionFinalsStartListBuilder finalsBuilder)
@@ -75,6 +79,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             _generator = generator;
             _renderer = renderer;
             _clubService = clubService;
+            _memberClubService = memberClubService;
             _finalsQualificationService = finalsQualificationService;
             _qualifyingResultsService = qualifyingResultsService;
             _finalsBuilder = finalsBuilder;
@@ -1039,14 +1044,44 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
                 }
 
-                // Check if shooter already exists
-                var existingShooter = configuration.Teams
+                // ⚠️ A place on this list is per (MEMBER, CLASS), not per member. The generators
+                // already put a multi-class shooter in A2, B2 and C2 on the same competition, so a
+                // member-only duplicate check made the manual editor unable to do what the generator
+                // does: a shooter who enters a second class late could not be placed at all, and the
+                // whole list had to be regenerated (reshuffling everyone else's skjutlag and times)
+                // to add one row. Same key as StartListCoverage and StartListCleanup use.
+                //
+                // Canonical() is required, not tidiness: registrations and most writers store the
+                // class ID ("C1"), while ChangeShooterClass writes the display NAME ("C 1"). A
+                // literal compare misses the duplicate for every class where the two differ, which
+                // would let the same start be added twice.
+                var placements = configuration.Teams
                     .SelectMany(t => t.Shooters ?? new List<StartListShooter>())
-                    .FirstOrDefault(s => s.MemberId == request.MemberId);
+                    .Where(s => s.MemberId == request.MemberId)
+                    .ToList();
 
-                if (existingShooter != null)
+                if (string.IsNullOrWhiteSpace(request.WeaponClass))
                 {
-                    return Json(new { success = false, message = "Skyttan finns redan i startlistan." });
+                    // Without a class we cannot tell a legitimate second start from a duplicate, so
+                    // keep the old member-level refusal — but NAME the missing field. Answering
+                    // "skyttan finns redan" to a request that simply omitted the class is a statement
+                    // about the DATA when the truth is a statement about the REQUEST, and that
+                    // misattribution has already cost a debugging round on DeleteResult.
+                    if (placements.Count > 0)
+                    {
+                        return Json(new { success = false, message = "Vapenklass saknas i begäran. Skyttan står redan i startlistan i en annan klass, så klassen måste anges för att avgöra om detta är en ny start." });
+                    }
+                }
+                else
+                {
+                    var requestedKey = CoverageKeys.Canonical(request.WeaponClass);
+                    var sameClass = placements
+                        .FirstOrDefault(s => CoverageKeys.Canonical(s.WeaponClass) == requestedKey);
+
+                    if (sameClass != null)
+                    {
+                        return Json(new { success = false, message = $"Skyttan finns redan i startlistan i klass {sameClass.WeaponClass}." });
+                    }
                 }
 
                 // Get member info
@@ -1056,8 +1091,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Medlemmen kunde inte hittas." });
                 }
 
-                // Get club name
-                var primaryClubId = member.GetValue<int>("primaryClubId");
+                // Get club name.
+                // ⚠️ `primaryClubId` is a STRING property. GetValue<int> does not convert it and
+                // silently returns 0, so every shooter added through this endpoint was stamped
+                // "Okänd klubb" on the start list — visible on the public list and, because the
+                // result list reads the start list first, on the results too. Same trap that made
+                // every walk-in registration store clubId=0. Go through MemberClubService.
+                var primaryClubId = _memberClubService.GetPrimaryClubId(member);
                 var clubName = _clubService.GetClubNameById(primaryClubId) ?? "Okänd klubb";
 
                 // Find team
@@ -1159,13 +1199,45 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
                 }
 
+                // ⚠️ Removal is per (MEMBER, CLASS) — the same key as the placement itself, and the
+                // mirror of the duplicate check in AddShooterToStartList. This used to take the FIRST
+                // row matching the member across all skjutlag and remove that, so on a multi-class
+                // shooter it silently removed *an arbitrary* start: asked to clear a leftover C1 row
+                // it could just as easily delete a perfectly good A2 place, and reported success.
+                // Caught by the verify suite's own cleanup step, which lost the placement it had not
+                // touched.
+                var requestedClassKey = string.IsNullOrWhiteSpace(request.ShootingClass)
+                    ? null
+                    : CoverageKeys.Canonical(request.ShootingClass);
+
+                var memberPlacements = configuration.Teams
+                    .SelectMany(t => t.Shooters ?? new List<StartListShooter>())
+                    .Where(s => s.MemberId == request.MemberId)
+                    .ToList();
+
+                // No class given and several placements: refuse and NAME the missing field rather
+                // than picking one. Guessing here destroys a start the operator did not ask about,
+                // and "Skyttan har tagits bort" would report it as a success.
+                if (requestedClassKey == null && memberPlacements.Count > 1)
+                {
+                    return Json(new
+                    {
+                        success = false,
+                        message = $"Vapenklass saknas i begäran. Skyttan har {memberPlacements.Count} " +
+                                  $"placeringar på listan ({string.Join(", ", memberPlacements.Select(s => s.WeaponClass))}), " +
+                                  "så klassen måste anges för att rätt start tas bort."
+                    });
+                }
+
                 // Find and remove shooter
                 bool shooterFound = false;
                 foreach (var team in configuration.Teams)
                 {
                     if (team.Shooters == null) continue;
 
-                    var shooter = team.Shooters.FirstOrDefault(s => s.MemberId == request.MemberId);
+                    var shooter = team.Shooters.FirstOrDefault(s =>
+                        s.MemberId == request.MemberId
+                        && (requestedClassKey == null || CoverageKeys.Canonical(s.WeaponClass) == requestedClassKey));
                     if (shooter != null)
                     {
                         // CRITICAL: Check if shooter has results in database.
@@ -1176,18 +1248,38 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         // Precision fallback inside For() is right here; this is a read.
                         using (var db = _databaseFactory.CreateDatabase())
                         {
-                            var resultTable = HpskSite.CompetitionTypes.Common.CompetitionResultTables.For(
+                            var resultTable = CompetitionResultTables.For(
                                 competition?.GetValue<string>("competitionType"));
-                            var hasResults = db.ExecuteScalar<int>(
-                                $"SELECT COUNT(*) FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1",
-                                competitionId, request.MemberId) > 0;
 
-                            if (hasResults)
+                            // ⚠️ Scope the guard to the SAME class as the removal. Result rows are
+                            // keyed (competition, member, class, series), so a member-wide count let
+                            // results in A2 block the removal of a leftover C1 row the shooter is not
+                            // even registered for — the orphan that then could not be cleared through
+                            // the UI at all.
+                            //
+                            // The class filter is applied in C# through CoverageKeys.Canonical rather
+                            // than in SQL: the class is stored as an ID ("C1") but written as a display
+                            // NAME ("C 1") by ChangeShooterClass, and a hand-rolled
+                            // UPPER(REPLACE(...)) would be a second normalisation free to drift from
+                            // the one every other surface uses. The row set here is one shooter's
+                            // series, so there is nothing to gain by filtering in the query.
+                            var resultClasses = await db.FetchAsync<string>(
+                                $"SELECT ShootingClass FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1",
+                                competitionId, request.MemberId);
+
+                            var resultRows = requestedClassKey == null
+                                ? resultClasses.Count
+                                : resultClasses.Count(c => CoverageKeys.Canonical(c) == requestedClassKey);
+
+                            if (resultRows > 0)
                             {
+                                var which = requestedClassKey == null
+                                    ? "denna skytt"
+                                    : $"skytten i klass {shooter.WeaponClass}";
                                 return Json(new
                                 {
                                     success = false,
-                                    message = "Kan inte ta bort skyttan eftersom resultat redan har registrerats för denna skytt."
+                                    message = $"Kan inte ta bort skyttan eftersom resultat redan har registrerats för {which}."
                                 });
                             }
                         }
@@ -1901,18 +1993,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
-        /// Get the result table name for a competition type. Canonical copy lives in
-        /// CompetitionResultsController.GetResultTableName — keep the two in sync.
+        /// Get the result table name for a competition type. The map lives in
+        /// <see cref="CompetitionResultTables"/>; this was the copy carrying "keep the two in sync".
         /// </summary>
-        private static string GetResultTableName(string typeId) => typeId switch
-        {
-            "Milsnabb" => "MilsnabbResultEntry",
-            "Duell" => "DuellResultEntry",
-            "NationellHelmatch" => "NationellHelmatchResultEntry",
-            "MagnumPrecision" => "MagnumPrecisionResultEntry",
-            "Springskytte" => "SpringskytteResultEntry",
-            _ => "PrecisionResultEntry"
-        };
+        private static string GetResultTableName(string typeId) =>
+            CompetitionResultTables.ForSharedResultEndpoint(typeId);
 
         /// <summary>
         /// Update the weapon class in the member's competition registration
@@ -3411,6 +3496,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
     {
         public int StartListId { get; set; }
         public int MemberId { get; set; }
+
+        /// <summary>
+        /// Which of the member's placements to remove. Optional for older callers, but supply it:
+        /// a place on the list is per (member, class), so without it a multi-class shooter's
+        /// removal is ambiguous.
+        /// </summary>
+        public string ShootingClass { get; set; } = "";
     }
 
     public class CreateNewTeamRequest

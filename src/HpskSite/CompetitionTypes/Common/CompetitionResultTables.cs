@@ -39,5 +39,42 @@ namespace HpskSite.CompetitionTypes.Common
             if (key.Length == 0) return false;
             return ByType.TryGetValue(key, out tableName!);
         }
+
+        /// <summary>
+        /// Disciplines that own their own result controller, table AND row shape, and whose rows the
+        /// SHARED precision-family result endpoints must therefore never address.
+        /// </summary>
+        private static readonly HashSet<string> OwnResultController =
+            new(StringComparer.OrdinalIgnoreCase) { "Faltskytte", "MagnumFalt" };
+
+        /// <summary>
+        /// The map for the SHARED result endpoints — <c>CompetitionResults</c>' save / delete /
+        /// class-change / series-read, and the class change in <c>PrecisionStartList</c>. Identical to
+        /// <see cref="For"/> for every discipline those endpoints legitimately serve, including the
+        /// empty/unknown → Precision fallback that legacy nodes depend on.
+        ///
+        /// ⚠️ It THROWS for Fältskytte/MagnumFält, and that is the whole point of it existing.
+        /// Those endpoints used to carry their own copy of this map whose `_ => "PrecisionResultEntry"`
+        /// fallback answered *Precision* for a fält competition — so a fält id reaching them read an
+        /// empty table, MERGEd a precision-shaped row into it, or DELETEd from it: wrong, and silent.
+        /// Simply pointing them at <see cref="For"/> instead would be worse, not better: the DELETE
+        /// and the class-change UPDATE would start addressing REAL Fältskytte rows with a
+        /// class-scoped WHERE, i.e. quietly destroying another discipline's results. A fält
+        /// competition arriving here is a caller error either way, so say so instead of guessing —
+        /// every call site is inside a try/catch that already reports a failure to the operator.
+        /// Fältskytte's own controller is unaffected; it never routes through here.
+        /// </summary>
+        public static string ForSharedResultEndpoint(string? typeId)
+        {
+            var key = (typeId ?? "").Trim();
+            if (OwnResultController.Contains(key))
+            {
+                throw new InvalidOperationException(
+                    $"Tävlingstypen '{key}' har egna resultatytor och egen resultattabell " +
+                    $"({For(key)}). De delade resultatvägarna för precisionsfamiljen får inte " +
+                    "läsa eller skriva dess rader — anropet gick till fel endpoint.");
+            }
+            return For(key);
+        }
     }
 }

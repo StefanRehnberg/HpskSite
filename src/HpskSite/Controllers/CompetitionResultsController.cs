@@ -12,6 +12,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Common.Utilities;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.Services;
@@ -1821,17 +1822,13 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Get the result table name for a competition type.
+        /// Get the result table name for a competition type. The map itself lives in
+        /// <see cref="CompetitionResultTables"/> — this used to be one of three hand-kept copies,
+        /// and the one below it in PrecisionStartListController carried the comment "keep the two in
+        /// sync", which was the smell rather than the safeguard.
         /// </summary>
-        private static string GetResultTableName(string typeId) => typeId switch
-        {
-            "Milsnabb" => "MilsnabbResultEntry",
-            "Duell" => "DuellResultEntry",
-            "NationellHelmatch" => "NationellHelmatchResultEntry",
-            "MagnumPrecision" => "MagnumPrecisionResultEntry",
-            "Springskytte" => "SpringskytteResultEntry",
-            _ => "PrecisionResultEntry"
-        };
+        private static string GetResultTableName(string typeId) =>
+            CompetitionResultTables.ForSharedResultEndpoint(typeId);
 
         private async Task<List<PrecisionResultEntry>> GetCompetitionResultsInternal(int competitionId)
         {

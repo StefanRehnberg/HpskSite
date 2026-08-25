@@ -1644,16 +1644,29 @@ repeatedly. Skjutledare stay in deliberately. **`IsAuthorizedForCatalog` keeps `
 figure catalogue legitimately asks "do you administer any krets at all"; that is not a competition.
 
 Verified 22/22 `hpsk-verify/faltskytte-escaping-verify.mjs` (A/B: 11 of 22 fail on baseline) and
-12/12 `faltskytte-auth-region-verify.mjs` (A/B: 3 of 12).
-**⚠️ What those suites cannot reach, so nobody re-derives it:** a shooter's NAME cannot be set by
-the test account (`MemberAdmin/SaveMember` is site-admin only) and the renderers sit inside an IIFE,
-so hostile data cannot be injected from outside either — the name/club paths are verified at SOURCE
-level. The **patrol label** carries the end-to-end DOM proof through both the list and the print
-window, but it passes on baseline too (it already had a partial escape), so it is a non-regression,
-not proof of the name fix. And the cross-region refusal is unproven in dev: there is exactly ONE
-Fältskytte competition (5312, Halland) and the test account is regional admin for Halland, so the
-case cannot be produced. Proving it needs a site-admin account (to grant
-`RegionalAdmin_<other krets>`) or a Fältskytte competition in a second region.
+**25/25 `faltskytte-auth-region-verify.mjs`** (A/B: 7 of 25).
+
+**Both gaps this section used to declare are now CLOSED (2026-08-25, later the same day), after
+Stefan created a dev site-admin account.** What is proven, and what still isn't:
+- **The cross-region refusal is proven.** `faltskytte-auth-region-verify` section 4 grants
+  `RegionalAdmin_<other krets>` to a plain member as site admin, confirms the role actually sits on
+  them, and asserts all four gated endpoints plus `/competitionmanagement` refuse — then revokes and
+  asserts the revocation. **A/B: on baseline an Ankeland admin really did read Halland's patrols,
+  station config, shoot-off status and station QR.** It also carries a control probe, because a green
+  refusal can equally mean the account is simply logged out.
+- **The shooter's NAME is proven in the DOM — but only on the precision editor**, by
+  `name-escaping-dom-verify.mjs`. See the *En plats på startlistan är per (skytt, klass)* section.
+- **⚠️ Still NOT reachable on the Fältskytte surfaces, and this is a property of the data flow, not
+  of the test:** `Faltskytte/SearchAvailableShooters` returns the REGISTRATION's snapshot name
+  (`r.MemberName`) and `FaltskyttePatrolMember.MemberName` is likewise a snapshot, so renaming a
+  member changes nothing on the patrol lists, the print window or the add-shooter list. Getting
+  hostile text there means re-registering or regenerating patrols. What IS asserted is the structural
+  fix — every row's onclick is `faltAddShooterByIndex(n)`, so no user text reaches the attribute at
+  all — plus the patrol label's end-to-end proof through list and print.
+- **⚠️ The dev site-admin login is `admin.claude@pistol.nu` / `123456`.** Its `cmsMember.LoginName`
+  was `adminclaude` and its password was not the shared dev one, so it could not be logged in with at
+  all; both were corrected directly in the dev DB on 2026-08-25 (the original hash is kept in that
+  session's scratchpad). Dev only — the account does not exist in prod.
 
 Adds C# → full rebuild.
 
@@ -1694,14 +1707,79 @@ statement about the DATA when the truth was a statement about the REQUEST. That 
 debugging round: a row that plainly existed reported itself absent, and the removal guard looked like
 it was contradicting the database. The message now names the missing field.
 
-**Noted, NOT fixed:** `AddShooterToStartList` refuses a member already on the list — it checks
-MEMBER, not (member, class) — even though the generators place a multi-class shooter in several
-classes. The manual editor therefore cannot do what the generator does. In the backlog.
+**Fixed 2026-08-25 (same day, own section below):** `AddShooterToStartList` checked MEMBER, not
+(member, class). See *En plats på startlistan är per (skytt, klass)*.
 
 Verified 20/20 `hpsk-verify/orphan-row-cleanup-verify.mjs` and 6/6 `result-table-lookup-verify.mjs`.
 ⚠️ The orphan suite **builds its own orphan and removes exactly that one** — its first version ate
 its fixture by cleaning dev of every orphan, and then failed on the next run with "ingen föräldralös
 rad i dev". Building the state you measure is the only repeatable shape here.
+
+Adds C# → full rebuild. No SQL, no doctype property.
+
+### En plats på startlistan är per (skytt, klass) — inte per skytt (2026-08-25)
+
+**`AddShooterToStartList` vägrade en medlem som redan stod på listan**, för att dubblettkontrollen
+frågade om MEDLEMMEN och inte om (medlem, klass) — trots att generatorerna rutinmässigt placerar
+samma skytt i A2, B2 och C2 på samma tävling. **Redigeraren kunde alltså inte göra vad generatorn
+gör:** en skytt som efteranmälde sig i en andra klass gick inte att placera alls, och enda vägen att
+lägga till den ENA raden var att generera om hela listan — vilket flyttar allas skjutlag och tider.
+
+**Och borttagningen hade samma fel, spegelvänt.** `RemoveShooterFromStartList` tog den FÖRSTA raden
+som matchade medlemmen, tvärs över alla skjutlag, och svarade *"Skyttan har tagits bort."* Ombedd att
+städa en kvarglömd C1-rad kunde den lika gärna radera en fullt giltig A2-plats. **Det var inte
+teoretiskt** — den nya svitens egen städning gjorde precis det på dev och rapporterade lyckat
+resultat; `repair-2576-startlist.mjs` finns kvar från den återställningen.
+
+- **Nyckeln är `CoverageKeys.Canonical`, inte en literal jämförelse.** Klassen lagras som ID ("C1")
+  men skrivs som visningsNAMN ("C 1") av `ChangeShooterClass`, så en rak strängjämförelse missar
+  dubbletten för varje klass där de skiljer sig — och skulle alltså släppa igenom samma start två
+  gånger. Samma nyckel som `StartListCoverage` och `StartListCleanup` använder.
+- **Utan klass i begäran: neka och NAMNGE fältet.** Att svara "skyttan finns redan" på en begäran som
+  bara utelämnade klassen är ett påstående om DATAT när sanningen är ett påstående om BEGÄRAN — exakt
+  den felattributionen som redan kostat en felsökningsrunda på `DeleteResult`. Borttagningen nekar på
+  samma sätt när medlemmen har flera placeringar, och räknar upp dem. **Den gissar aldrig**, eftersom
+  en gissning här förstör en start operatören inte frågade om.
+- **⚠️ Resultatgrinden i borttagningen måste ha SAMMA klasstuktur.** Resultatrader är nycklade
+  (tävling, medlem, klass, serie), så en medlemsbred räkning lät resultat i A2 blockera borttagningen
+  av en kvarglömd C1-rad som skytten inte ens är anmäld i — den föräldralösa raden som då inte gick
+  att städa via UI:t alls. Filtret ligger i C# via `Canonical`, inte i SQL: ett handrullat
+  `UPPER(REPLACE(...))` är en andra normalisering som är fri att glida från den alla andra ytor använder.
+- **Klienten skickar klassen och SKRIVER UT den i dialogen.** "Ta bort NN från startlistan" säger
+  inte vilken av skyttens starter som försvinner.
+
+**⚠️ Samma XSS-form som Fältskyttes onclick (`12e0578`) satt i syskonvyn — och den var exploaterad,
+inte teoretisk.** `CompetitionStartListManagement.cshtml` byggde tre onclick-attribut som
+`'${shooter.name.replace(/'/g, "\\'")}'` (bara enkelfnuttar) och skrev dessutom namnet rakt i
+innerHTML. A/B mot den ofixade vyn: `window.__pwned` **kördes** och ett `<img src=x>` skapades i
+arrangörens redigerare. Raderna läser nu skytten från **data-attribut** via
+`removeShooterFromTeamFor` / `openMoveShooterModalFor` / `openEditWeaponClassModalFor`, så ingen
+användartext når ett attribut. Partialen inkluderar `_HtmlEscape` själv, och dess fjärde handrullade
+escaper (`escapeHtmlInline`) delegerar nu till `hpskEsc`.
+
+**⚠️ `AddShooterToStartList` stämplade varje tillagd skytt "Okänd klubb".** Den läste
+`GetValue<int>("primaryClubId")`, och egenskapen är en STRÄNG — konverteringen sker inte, värdet blir
+tyst 0. Syns på den publika startlistan och, eftersom resultatlistan läser startlistan först, i
+resultaten. Går nu via `MemberClubService.GetPrimaryClubId`. Samma fälla som gav varje
+walk-in-anmälan `clubId=0`.
+
+**Kartan gren → resultattabell har inga kopior kvar.** `CompetitionResultTables` fick
+`ForSharedResultEndpoint`, och de två sista handhållna switcharna (`CompetitionResultsController`
+och `PrecisionStartListController`, den senare med kommentaren "keep the two in sync") delegerar dit.
+Den **löser precisionsfamiljen exakt som förut**, inklusive tom/okänd typ → Precision som äldre noder
+förlitar sig på, och **kastar för Fältskytte/MagnumFält**. ⚠️ Att i stället bara peka dem på `For()`
+hade varit sämre, inte bättre: DELETE:n och klassbytets UPDATE hade då börjat adressera VERKLIGA
+`FaltskytteResultEntry`-rader med ett klass-scopat WHERE. En fälttävling som når hit är ett
+anroparfel åt båda hållen — säg det i stället för att gissa; varje anropsplats ligger redan i en
+try/catch som rapporterar fel till operatören.
+
+Verifierat 24/24 `hpsk-verify/multiclass-add-shooter-verify.mjs` (**A/B: 9 av 19 faller på baseline**)
+och 29/29 `name-escaping-dom-verify.mjs` (**A/B: 7 av 29**, inklusive att koden faktiskt kördes).
+⚠️ **Läs namnsvitens huvud innan den ändras** — den bevisar precisionsredigeraren i DOM:en men
+Fältskyttes "lägg till skytt" bara STRUKTURELLT: `SearchAvailableShooters` returnerar ANMÄLANS
+snapshot-namn, inte medlemsregistret, så ett namnbyte når aldrig den ytan. Regression: escaping 22/22,
+auth-region 25/25, orphan-row 20/20, result-table-lookup 6/6, startlist-aware-delete 26/26,
+startlist-coverage 27/27, dnsdnf-ui 13/13, row-action-menus 60/60, action-menus-sweep 113/113.
 
 Adds C# → full rebuild. No SQL, no doctype property.
 
