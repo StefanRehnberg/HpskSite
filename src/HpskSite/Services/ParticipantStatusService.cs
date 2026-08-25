@@ -62,8 +62,14 @@ namespace HpskSite.Services
             return lookup;
         }
 
+        /// <summary>
+        /// Folds the class onto its canonical name before keying, so a row written with the Id
+        /// ("C_Vet_Y") and a probe carrying the display Name ("C Vet Y") still meet. Without the
+        /// fold the two forms are different keys and a DNS/DNF silently fails to apply to exactly
+        /// the classes where Id and Name differ — the veteran, dam, junior and optic classes.
+        /// </summary>
         public static string Key(int memberId, string? shootingClass) =>
-            $"{memberId}|{(shootingClass ?? "").Trim().ToLowerInvariant()}";
+            $"{memberId}|{ShootingClasses.NormalizeKey(shootingClass)}";
 
         // ── Writes ────────────────────────────────────────────────────
 

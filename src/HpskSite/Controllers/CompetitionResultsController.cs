@@ -149,8 +149,24 @@ namespace HpskSite.Controllers
                 }
 
                 // Use shooter info from the request (sent by the UI)
-                _logger.LogInformation("Using shooter info from request: MemberId={MemberId}, Class={Class} for Team={Team}, Position={Position}", 
+                _logger.LogInformation("Using shooter info from request: MemberId={MemberId}, Class={Class} for Team={Team}, Position={Position}",
                     request.ShooterMemberId, request.ShooterClass, request.TeamNumber, request.Position);
+
+                // ⚠️ Canonicalise the class BEFORE it reaches the MERGE. This is the single choke
+                // point every result row passes through, so it is the only place that can
+                // guarantee one shooter's series all carry the same class string no matter which
+                // entry surface sent them. Callers legitimately hold the class in either form —
+                // start list JSON stores the Id ("C_Vet_Y"), GetShootersForResultsEntry hands out
+                // the Name ("C Vet Y") — and a mismatch is invisible until the result list groups
+                // by (MemberId, ShootingClass) and splits the shooter in two.
+                var canonicalClass = ShootingClasses.ToCanonicalName(request.ShooterClass);
+                if (!string.Equals(canonicalClass, request.ShooterClass, StringComparison.Ordinal))
+                {
+                    _logger.LogInformation(
+                        "Canonicalised incoming shooting class '{Raw}' to '{Canonical}' for MemberId={MemberId}, series {SeriesNumber}",
+                        request.ShooterClass, canonicalClass, request.ShooterMemberId, request.SeriesNumber);
+                    request.ShooterClass = canonicalClass;
+                }
 
                 // Calculate totals from string shots
                 var total = 0;
@@ -2449,9 +2465,11 @@ namespace HpskSite.Controllers
                 return new { Shooters = new List<object>() };
             }
 
-            // Group results by (MemberId, ShootingClass) to separate multi-class shooters
+            // Group results by (MemberId, ShootingClass) to separate multi-class shooters.
+            // Canonicalised for the same reason as the result list — the raw column can hold both
+            // the Id and the Name form of one class, and grouping on it splits the shooter.
             var shooterTotals = results
-                .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                .GroupBy(r => new { r.MemberId, ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass) })
                 .Select(g => {
                     var totalScore = 0;
                     var totalXCount = 0;
@@ -3540,15 +3558,21 @@ namespace HpskSite.Controllers
             _logger.LogInformation("Shooter lookup cache built with {Count} entries", shooterLookup.Count);
 
             // DNS / DNF. Loaded once for the whole competition and probed per shooter below.
-            // NOTE: the status table stores the class *Id* ("C1", "A_opt_1"), while ShooterResult
-            // below carries the display *Name* ("C 1", "A Opt 1"). The lookup must therefore happen
-            // while the raw id is still in scope — probing on the display name silently matches
-            // nothing for every class where Id and Name differ.
+            // The status table stores the class *Id* ("C1", "A_opt_1") while the rows here carry the
+            // display *Name* — ParticipantStatusService.Key folds both onto the same key, so the
+            // probe below may use either form.
             var participantStatuses = await _participantStatusService.GetForCompetitionAsync(competitionId);
             var statusLookup = ParticipantStatusService.BuildLookup(participantStatuses);
 
+            // ⚠️ Group on the CANONICAL class, not the raw column. A shooter whose series were
+            // entered from two different surfaces can have some rows stored as the Id ("C_Vet_Y")
+            // and some as the Name ("C Vet Y") — the same class, two different strings. Grouping on
+            // the raw value split such a shooter into two entries that both rendered "C Vet Y",
+            // one holding the grundserier and one the finalserier (klubbmästerskapet 2026-08-25).
+            // Writes are canonicalised in SaveResult, so this only has to cover rows already in the
+            // table; it stays because the read side must never be the thing that trusts the column.
             var shooterResults = results
-                .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                .GroupBy(r => new { r.MemberId, ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass) })
                 .Select(g =>
                 {
                     var memberId = g.Key.MemberId;
@@ -3568,7 +3592,7 @@ namespace HpskSite.Controllers
                         MemberId = memberId,
                         Name = name,
                         Club = club,
-                        ShootingClass = ShootingClasses.GetById(shootingClass)?.Name ?? shootingClass,
+                        ShootingClass = shootingClass, // already the display Name — see the group key
                         Results = memberResults,
                         ParticipationStatus = participantStatus?.Status,
                         ParticipationStatusLabel = participantStatus == null

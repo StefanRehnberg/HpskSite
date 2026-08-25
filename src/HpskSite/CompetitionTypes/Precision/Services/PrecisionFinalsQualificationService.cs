@@ -44,9 +44,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 MaxShootersPerTeam = maxShootersPerTeam
             };
 
-            // Group results by shooter and calculate qualification scores
+            // Group results by shooter and calculate qualification scores.
+            // Canonical class in the key — the raw column mixes Id and Name forms of the same
+            // class, and a split shooter qualifies on half a grundomgång.
             var shooterScores = qualificationResults
-                .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                .GroupBy(r => new { r.MemberId, ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass) })
                 .Select(g => new
                 {
                     g.Key.MemberId,
@@ -166,7 +168,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             }
 
             var shooterScores = qualificationResults
-                .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                .GroupBy(r => new { r.MemberId, ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass) })
                 .Select(g => new
                 {
                     g.Key.MemberId,

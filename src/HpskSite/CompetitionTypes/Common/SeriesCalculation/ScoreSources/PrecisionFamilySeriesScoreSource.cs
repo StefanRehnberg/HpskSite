@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Persistence;
+using HpskSite.Models;
 using HpskSite.CompetitionTypes.Common.SeriesCalculation.Models;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.Services;
@@ -85,13 +86,17 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
                     continue;
                 }
 
+                // Canonical class in the group key: the raw column can hold either the Id
+                // ("C_Vet_Y") or the display Name ("C Vet Y") for the same class depending on which
+                // entry surface wrote the row, and grouping on it raw splits one shooter's series
+                // into two part-scores. See ShootingClasses.ToCanonicalName.
                 set.ByCompetition[compId] = rows
-                    .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                    .GroupBy(r => new { r.MemberId, ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass) })
                     .Select(g =>
                     {
                         var (name, club, clubId) = shooterLookup.TryGetValue(g.Key.MemberId, out var info)
                             ? info
-                            : ("Okänd skytt", "Okänd klubb", 0);
+                            : ("Okï¿½nd skytt", "Okï¿½nd klubb", 0);
 
                         return new ShooterCompetitionScore
                         {
@@ -121,22 +126,22 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
                     var member = _memberService.GetById(memberId);
                     if (member != null)
                     {
-                        var name = member.Name ?? "Okänd";
+                        var name = member.Name ?? "Okï¿½nd";
                         var clubId = member.GetValue<int>("primaryClubId");
                         var clubName = clubId > 0
-                            ? (_clubService.GetClubNameById(clubId) ?? "Okänd klubb")
-                            : "Okänd klubb";
+                            ? (_clubService.GetClubNameById(clubId) ?? "Okï¿½nd klubb")
+                            : "Okï¿½nd klubb";
                         lookup[memberId] = (name, clubName, clubId);
                     }
                     else
                     {
-                        lookup[memberId] = ("Okänd skytt", "Okänd klubb", 0);
+                        lookup[memberId] = ("Okï¿½nd skytt", "Okï¿½nd klubb", 0);
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to look up member {MemberId}", memberId);
-                    lookup[memberId] = ("Okänd skytt", "Okänd klubb", 0);
+                    lookup[memberId] = ("Okï¿½nd skytt", "Okï¿½nd klubb", 0);
                 }
             }
 

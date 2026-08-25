@@ -20,4 +20,22 @@
         }
         return '';
     };
+    // Canonical DISPLAY NAME of a class ("C_Vet_Y" -> "C Vet Y"). Mirrors
+    // ShootingClasses.ToCanonicalName on the server. Use this on any class string taken
+    // straight out of start list JSON before showing it or posting it with a result:
+    // start lists store the Id, result rows store the Name, and mixing the two splits a
+    // shooter's series into two result entries that both display the same class.
+    // Unknown input is returned trimmed and unchanged.
+    window.getShootingClassName = function (shootingClassIdOrName) {
+        if (!shootingClassIdOrName) return '';
+        var key = String(shootingClassIdOrName).trim();
+        if (!key) return '';
+        var lower = key.toLowerCase();
+        var list = window.HpskShootingClasses || [];
+        for (var i = 0; i < list.length; i++) {
+            var sc = list[i];
+            if (sc.id.toLowerCase() === lower || sc.name.toLowerCase() === lower) return sc.name;
+        }
+        return key;
+    };
 </script>

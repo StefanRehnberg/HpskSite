@@ -3534,7 +3534,13 @@ function loadFinalsStartList() {
                             name: s.Name || s.name || '',
                             club: s.Club || s.club || '',
                             weaponClass: s.WeaponClass || s.weaponClass || '',
-                            shootingClass: s.WeaponClass || s.weaponClass || '',
+                            // ⚠️ The start list stores the class Id ("C_Vet_Y"); a result row
+                            // stores the display Name ("C Vet Y"), which is what the qualifying
+                            // path gets from GetShootersForResultsEntry. Posting the Id here gave
+                            // the finalserier a different ShootingClass than the grundserier for
+                            // every class where Id and Name differ, and the result list — grouped
+                            // on (MemberId, ShootingClass) — listed the shooter twice.
+                            shootingClass: window.getShootingClassName(s.WeaponClass || s.weaponClass || ''),
                             position: s.Position != null ? s.Position : s.position,
                             teamNumber: teamNum,
                             startTime: teamStart

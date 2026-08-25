@@ -125,5 +125,65 @@ namespace HpskSite.Tests
             Assert.NotEqual(WeaponClass.A, ShootingClasses.GetWeaponClass("A_p_1"));
             Assert.NotEqual(WeaponClass.A, ShootingClasses.GetWeaponClass("A_g_1"));
         }
+
+        // ── Canonical storage form ─────────────────────────────────────
+        // Regression cover for the klubbmästerskap 2026-08-25 split: result rows written from the
+        // finals entry screen carried the Id ("C_Vet_Y") while the qualifying screen wrote the
+        // Name ("C Vet Y"), so grouping by (MemberId, ShootingClass) listed one shooter twice.
+
+        [Theory]
+        [InlineData("C_Vet_Y", "C Vet Y")]
+        [InlineData("C_Vet_A", "C Vet Ä")]
+        [InlineData("C_Jun", "C Jun")]
+        [InlineData("C2_Dam", "C2 Dam")]
+        [InlineData("A_opt_1", "A Opt 1")]
+        [InlineData("A_m_1", "AM1")]
+        [InlineData("L_Vet_A", "L Vet Ä")]
+        public void ToCanonicalName_ConvertsIdToDisplayName(string id, string expected)
+        {
+            Assert.Equal(expected, ShootingClasses.ToCanonicalName(id));
+        }
+
+        [Theory]
+        [InlineData("C Vet Y")]
+        [InlineData("C Vet Ä")]
+        [InlineData("A Opt 1")]
+        [InlineData("C1")]
+        [InlineData("AM1")]
+        public void ToCanonicalName_IsIdempotent(string name)
+        {
+            Assert.Equal(name, ShootingClasses.ToCanonicalName(name));
+            Assert.Equal(name, ShootingClasses.ToCanonicalName(ShootingClasses.ToCanonicalName(name)));
+        }
+
+        [Theory]
+        [InlineData("C_Vet_Y", "C Vet Y")]
+        [InlineData("c_vet_y", "C VET Y")]
+        [InlineData("A_opt_1", " A Opt 1 ")]
+        public void NormalizeKey_FoldsIdAndNameOntoOneKey(string a, string b)
+        {
+            // The whole point: two spellings of one class must never become two group keys.
+            Assert.Equal(ShootingClasses.NormalizeKey(a), ShootingClasses.NormalizeKey(b));
+        }
+
+        [Fact]
+        public void ToCanonicalName_LeavesUnknownInputAlone()
+        {
+            // An unrecognised class still has to group with itself, so it is trimmed, not dropped.
+            Assert.Equal("Hemmasnickrad klass", ShootingClasses.ToCanonicalName("  Hemmasnickrad klass  "));
+            Assert.Equal("", ShootingClasses.ToCanonicalName(null));
+            Assert.Equal("", ShootingClasses.ToCanonicalName("   "));
+        }
+
+        [Fact]
+        public void EveryClass_CanonicalisesFromBothIdAndName()
+        {
+            // Sweeps the registry so a class added later cannot quietly break the fold.
+            foreach (var sc in ShootingClasses.All)
+            {
+                Assert.Equal(sc.Name, ShootingClasses.ToCanonicalName(sc.Id));
+                Assert.Equal(sc.Name, ShootingClasses.ToCanonicalName(sc.Name));
+            }
+        }
     }
 }

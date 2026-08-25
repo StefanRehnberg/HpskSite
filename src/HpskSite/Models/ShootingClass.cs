@@ -115,6 +115,37 @@ namespace HpskSite.Models
             var weapon = GetWeaponClass(shootingClassIdOrName);
             return weapon?.ToString() ?? string.Empty;
         }
+
+        /// <summary>
+        /// The canonical form a shooting class is STORED in on a result row: the display
+        /// <see cref="ShootingClass.Name"/> ("C Vet Y"), never the Id ("C_Vet_Y").
+        ///
+        /// ⚠️ Id and Name are the same string for C1/C2/C3 and differ for every class with a
+        /// suffix — C_Vet_Y/"C Vet Y", C_Vet_A/"C Vet Ä", A_opt_1/"A Opt 1". A surface that
+        /// stores the Id therefore looks correct in testing and only splits the veteran, dam,
+        /// junior and optic classes. That is the 2026-08-25 klubbmästerskap bug: the finals
+        /// entry screen took the class straight from the finals start list JSON (Id form) while
+        /// the qualifying screen took it from GetShootersForResultsEntry (Name form), so
+        /// grouping by (MemberId, ShootingClass) put a veteran's grundserier and finalserier in
+        /// two rows that both DISPLAYED "C Vet Y".
+        ///
+        /// Call this on every class string crossing into or out of a result row. Unknown input
+        /// is returned trimmed and unchanged — never dropped, so a class we do not recognise
+        /// still groups with itself.
+        /// </summary>
+        public static string ToCanonicalName(string? shootingClassIdOrName)
+        {
+            if (string.IsNullOrWhiteSpace(shootingClassIdOrName)) return string.Empty;
+            var key = shootingClassIdOrName.Trim();
+            return (GetById(key) ?? GetByName(key))?.Name ?? key;
+        }
+
+        /// <summary>
+        /// Case-insensitive grouping/lookup key that folds Id and Name onto the same value.
+        /// Use wherever a class string is a dictionary key or a GroupBy key.
+        /// </summary>
+        public static string NormalizeKey(string? shootingClassIdOrName) =>
+            ToCanonicalName(shootingClassIdOrName).ToLowerInvariant();
     }
 
     public enum WeaponClass
