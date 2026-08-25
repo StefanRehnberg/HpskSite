@@ -1484,9 +1484,14 @@
 								}
 								else
 								{
+									@* No competitionResult node yet. Live results do NOT need one — the board
+									   computes them straight from the result table (GetResultsList's node-free
+									   branch, gated on showLiveResults). The link appears as soon as the first
+									   series is entered; the JS below polls for that, so the organiser never
+									   has to reload. *@
 									<div id="liveResultsCheck">
 										<p class="text-muted small mb-0" id="noResultsText">
-											<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
+											<i class="bi bi-hourglass-split me-1"></i> Live-resultat visas så snart det första resultatet är inmatat.
 										</p>
 									</div>
 								}
@@ -2076,31 +2081,45 @@ document.addEventListener('DOMContentLoaded', function() {
 
     @if (showLiveResults && !hasResultPage)
     {
-        @* Only AJAX call needed: showLiveResults enabled but no result page — lightweight DB check *@
+        @* showLiveResults is on but no competitionResult node exists. A result list is NOT a
+           prerequisite for the live board — the only question is whether any result has been entered
+           yet, which this asks the database directly. It re-asks every 30 s so the link appears
+           during the competition without a reload, and stops as soon as it has appeared. *@
         <text>
-    @if (isSpringskytte)
-    {
-        @:fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}`)
+    var liveProbeUrl = @Html.Raw(
+        isSpringskytte ? "'/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=' + competitionId"
+        : isFaltskytte ? "'/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + competitionId"
+        : "'/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=' + competitionId");
+
+    @* ⚠️ Read BOTH casings. These endpoints build anonymous objects with PascalCase members but MVC
+       serialises them camelCase, and the old check read `data.Success && data.Count` — permanently
+       false, which is why the live link only ever appeared once a result list had been created.
+       Springskytte/Fältskytte also differ on whether classGroups sits at the root or under results. *@
+    function liveProbeHasResults(d) {
+        if (!d) return false;
+        if (!(d.success || d.Success)) return false;
+        var n = (d.count !== undefined) ? d.count : d.Count;
+        if (typeof n === 'number') return n > 0;
+        var r = d.results || d.Results || d;
+        var g = r.classGroups || r.ClassGroups;
+        return !!(g && g.length);
     }
-    else if (isFaltskytte)
-    {
-        @:fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}`)
+
+    var liveProbeTimer = null;
+    function liveProbe() {
+        var container = document.getElementById('liveResultsCheck');
+        if (!container) { if (liveProbeTimer) { clearInterval(liveProbeTimer); liveProbeTimer = null; } return; }
+        fetch(liveProbeUrl)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!liveProbeHasResults(d)) return;
+                if (liveProbeTimer) { clearInterval(liveProbeTimer); liveProbeTimer = null; }
+                container.innerHTML = '<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>';
+            })
+            .catch(function (e) { console.error('Error checking results:', e); });
     }
-    else
-    {
-        @:fetch(`/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=${competitionId}`)
-    }
-        .then(response => response.json())
-        .then(data => {
-            var hasResults = @Html.Raw(isSpringskytte || isFaltskytte ? "data.success && data.results && data.results.classGroups && data.results.classGroups.length > 0" : "data.Success && data.Count > 0");
-            if (hasResults) {
-                var container = document.getElementById('liveResultsCheck');
-                if (container) {
-                    container.innerHTML = '<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>';
-                }
-            }
-        })
-        .catch(error => console.error('Error checking results:', error));
+    liveProbe();
+    liveProbeTimer = setInterval(liveProbe, 30000);
         </text>
     }
 

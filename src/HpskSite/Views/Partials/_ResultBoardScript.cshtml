@@ -107,6 +107,22 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         return allGroups.filter(function(g){return show[isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||'')]});
     }
 
+    // "Nothing entered yet" — shown INSTEAD of the initial spinner, and only while the board has never
+    // had data. Once something has rendered, a later failed poll leaves the last good standings on
+    // screen: on a wall TV a momentary blip must not wipe the board.
+    function rbWait(){
+        if(allGroups.length)return;
+        var wr=document.getElementById('rbTableWrap');
+        if(!wr)return;
+        wr.className='rb-table-wrap';
+        wr.innerHTML='<div style="text-align:center;padding:3rem 1rem;opacity:.75">'
+            +'<div class="spinner-border text-light" role="status"></div>'
+            +'<p style="margin:1.5rem 0 0;font-size:1.6rem">Väntar på det första resultatet…</p>'
+            +'<p style="margin:.5rem 0 0;font-size:1rem;opacity:.7">Tavlan fyller på sig själv så snart resultat matas in.</p>'
+            +'</div>';
+        updateStatus();
+    }
+
     function fetchResults(){
         var url=isSpringskytte
             ?'/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId='+compId
@@ -116,7 +132,12 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         fetch(url)
         .then(function(r){return r.json()})
         .then(function(d){
-            if(!d.success)return;
+            // A competition with live results on but nothing entered yet is the NORMAL state before the
+            // first series — the endpoints answer success:false ("Inga resultat finns i databasen ännu")
+            // and this used to `return`, leaving the board on its initial spinner forever with nothing
+            // said. A board is cast to a wall TV before the shooting starts, so it has to be able to
+            // wait out loud and fill itself in. Never overwrite a good render on a later blip.
+            if(!d.success){rbWait();return}
             if(isSpringskytte){
                 allGroups=d.classGroups||[];
                 // Springskytte publishes PER WEAPON CLASS (officialWeaponClasses; resultsOfficial is only
@@ -133,7 +154,10 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                 isOfficial=rr.isOfficial||rr.IsOfficial||false;
                 isMedals=rr.isAwardingStandardMedals||rr.IsAwardingStandardMedals||false;
             } else {
-                if(!d.exists)return;
+                // No result list node is required — GetResultsList computes straight from the result
+                // table when showLiveResults is on. `exists:false` only ever arrives with success:false,
+                // which is handled above; treat it as "waiting" rather than dying silently.
+                if(!d.exists){rbWait();return}
                 isOfficial=d.isOfficial||d.IsOfficial||false;
                 isMedals=d.isAwardingStandardMedals||d.IsAwardingStandardMedals||false;
                 allGroups=(d.results||d.Results).classGroups||(d.results||d.Results).ClassGroups||[];

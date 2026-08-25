@@ -1823,6 +1823,56 @@ skulle avvisa UPDATE:n ändå.
 17 nya test i `ShootingClassesTests` (61/61), inklusive en svep över hela registret så en klass som
 läggs till senare inte tyst kan bryta ihopvikningen. Adds C# → full rebuild.
 
+### Live-resultat kräver ingen resultatlista (2026-08-25)
+
+**Rapporterat:** "jag var tvungen att skapa en resultatlista för att Live resultat skulle visas."
+Regeln ska vara: är `showLiveResults` på, visas live-resultat **från att det första resultatet är
+inmatat**, oavsett om någon `competitionResult`-nod finns.
+
+**Servern klarade redan detta** — `GetResultsList` har en nod-fri gren
+(`resultPage == null && showLiveResults`) som räknar rakt ur resultattabellen via
+`CalculateFinalResults`. Två helt andra saker stod i vägen:
+
+1. **Länken erbjöds aldrig.** Tävlingssidans två första grenar kräver `hasResultPage`; den nod-fria
+   vägen gick via en JS-probe som läste **`data.Success && data.Count > 0`** — PascalCase — medan MVC
+   serialiserar de anonyma objekten **camelCase** (verifierat på tråden: `{"success":true,"count":0}`).
+   Alltså permanent falsk. **Springskytte var dubbelt trasig:** proben läste
+   `data.results.classGroups`, och `GetSpringskytteResults` har ingen `results`-nyckel alls —
+   `classGroups` ligger i roten. **Fältskytte var den enda gren där proben fungerade**, vilket är
+   varför felet kunde ligga kvar. `liveProbeHasResults` läser nu båda skalen och båda placeringarna.
+2. **Proben frågade bara en gång, vid sidladdning.** Öppnar arrangören sidan innan första serien är
+   inmatad dyker länken aldrig upp utan omladdning — vilket är precis tvärtemot "från första
+   resultatet". Den frågar nu om var 30 s och slutar när länken visats.
+
+Platshållartexten sa dessutom **"Resultat har inte publicerats än"**, vilket beskriver en
+resultatlista och inte live-läget. Den lyder nu *"Live-resultat visas så snart det första resultatet
+är inmatat"* — ett löfte koden numera håller.
+
+**Och tavlan satt kvar på sin spinner.** Före första resultatet svarar alla tre endpoints
+`success:false`, och `fetchResults` gjorde `return` — så `renderAll()` kördes aldrig och
+`#rbTableWrap` behöll skelettets spinner, utan text, utan badge, utan tidsstämpel. En tavla castas
+till en vägg-TV **innan** skjutningen börjar, så den måste kunna vänta högt och fylla på sig själv.
+`rbWait()` renderar "Väntar på det första resultatet…".
+⚠️ **`rbWait` skriver bara när `allGroups` är tom.** En senare misslyckad poll får aldrig ersätta
+ställningen som står på skärmen — på en vägg-TV ska ett nätverksglapp inte tömma tavlan.
+⚠️ **`!d.exists`-grinden i precisionsgrenen var en tystnadsfälla** och pekar nu också på `rbWait`.
+
+**Kvarstår medvetet:** den nod-fria grenen har ingen `mergeConfig` eller `classNameOverrides` — de
+bor på noden. Live-tavlan visar alltså råa klasser tills en resultatlista finns, vilket är rätt: en
+sammanslagning är arrangörens beslut, inte något som ska gissas fram.
+
+Verifierat 31/31 `hpsk-verify/liveresults-no-resultlist-verify.mjs` (**A/B: 9 av 31 faller på
+baseline**, bl.a. att en tävling med 12 inmatade resultat ändå visade "Resultat har inte publicerats
+än" och ingen länk) plus 13/13 i den utbrutna probe-läsaren. ⚠️ **Fällor för den som ändrar sviten:**
+mocken måste matcha grenens endpoint — 5326 ser ut som ett bra val och är Springskytte, så en
+`GetResultsList`-mock applicerades aldrig (använd 5103, Precision); `liveProbeHasResults` är korrekt
+scopad i `DOMContentLoaded` och syns **inte** för `page.evaluate` — assertera observerbart beteende;
+och läs platshållartexten ur **server-HTML**, för på en tävling som redan har resultat har proben
+hunnit byta ut den innan `page.content()` läses, så påståendet faller just när fixen fungerar.
+
+**Endast vyer → ingen ombyggnad krävs**, filerna kan laddas upp direkt. Ingen SQL, ingen
+doctype-property.
+
 ### Startliste-medveten radering (2026-08-25)
 
 Everywhere except Springskytte, deleting a registration was a bare confirm dialog: the registration
