@@ -1879,6 +1879,54 @@ läste fel nyckel, fick 0, och lämnade fixturen kvar medan raderingen svarade "
 "Mer filter"-panelen. Den som smalnat av med den synliga "Bara nära dig"-knappen hittar alltså inte
 den synliga vägen tillbaka — knappen själv är vägen, men "Rensa filter" borde ligga på primärraden.
 
+### shootingClassIds lagrades som CSV av tävlingsguiden (2026-08-26)
+
+Konventionen högre upp i den här filen är entydig: `shootingClassIds` MÅSTE lagras som en
+**JSON-array** (`["C1","C2"]`), aldrig CSV. Ändå fick varje tävling skapad via **tävlingsguiden**
+`C1,C2,C3`. Upptäckt genom att titta i databasen på en Standardpistoltävling.
+
+**⚠️ Orsaken är en typ som aldrig kan matcha.** `fields` deserialiseras till
+`Dictionary<string, object>`, så System.Text.Json ger **`JsonElement`** — aldrig `string`.
+Konverteringen testade:
+```csharp
+if (value is string stringValue) { /* CSV → JSON */ }
+else if (value is JsonElement el && el.ValueKind == JsonValueKind.Array) { /* array → JSON */ }
+```
+Guiden skickar klasserna som en CSV-**sträng** (`wizard_shootingClassIds.value = selected.join(',')`),
+alltså ett `JsonElement` med `ValueKind == String` — som matchar **ingen** av grenarna. Det råa
+elementet lagrades, och dess `ToString()` är CSV:n. `value is string` var död kod från början.
+
+**Tyst i åratal, eftersom varje LÄSARE bär en CSV-fallback.** Ingenting gick fel; det syntes bara i
+databasen. Konventionen finns ändå av ett skäl (ett klassnamn kan innehålla komma) och det finns en
+migreringsendpoint just för att städa CSV-rader.
+
+`Models/ShootingClassIdsValue.cs` är nu THE one place den konverteringen bor — den låg i **fyra**
+kopior, tre i `CompetitionAdminController` (skapa/kopiera/annons, alla med luckan) och en i
+`PrecisionCompetitionEditService`. **Redigeringsvägen var korrekt hela tiden**, för den gör
+`value.ToString()` innan den konverterar; den delegerar ändå nu, så de inte kan glida isär.
+`FromText` skickar igenom en redan JSON-kodad array oförändrad — kontrollen är "börjar med `[`" och
+inte en parse, just för att ett dubbelkodat värde inte ska uppstå av att någon sparar en gång till.
+
+**⚠️ Migreringsendpointen `FixShootingClassIdsFormat` hade ALDRIG fungerat.** Den letade hubben med
+`_contentService.GetRootContent().FirstOrDefault(c => c.ContentType.Alias == "competitionsHub")` —
+men `GetRootContent()` returnerar noder på ROTNIVÅ, alltså bara `Home`, och `competitionsHub` är ett
+BARN till Home. Den svarade därför `"Competitions hub not found"` varje gång den anropades, sedan den
+skrevs. Nu använder den samma uppslag som `CreateCompetition` och samma normaliserare som skrivvägen.
+Körd i dev: **18 rättade, 64 redan korrekta, 0 fel** av 96 tävlingar.
+
+**⚠️ Läs INTE lagringsformen via `CompetitionEdit/GetCompetitionData`** — den normaliserar medvetet
+till CSV (`GetShootingClassIdsString`), eftersom redigeringsformulärets dolda fält vill ha CSV. En
+kontroll måste gå till databasen, och **värdet ligger i `varcharValue`, inte `textValue`**; en fråga
+på bara `textValue` ger NULL och det ser ut som att ingenting sparades.
+
+Verifierat 12/12 `hpsk-verify/shootingclassids-json-verify.mjs` (CSV-sträng, JSON-array-sträng och
+riktig JSON-array round-trippar alla till exakt C1, C2, C3 utan dubbelkodning) plus SQL-kontroll av
+lagringsformen: alla tre lagrar `["C1","C2","C3"]`.
+
+**KÖR I PROD efter deploy:** `GET /umbraco/surface/CompetitionAdmin/FixShootingClassIdsFormat`
+(sajtadmin). Den är idempotent och rapporterar antal. Tävlingar i papperskorgen migreras inte —
+migreringen går genom tävlingsnavets underträd, vilket är rätt.
+
 ### "Redan anmäld i…"-brickan följde inte den valda skytten (2026-08-26)
 
 **Rapporterat på en Standardpistoltävling: efter att en skytt anmälts stod den gula brickan kvar och
@@ -1913,12 +1961,21 @@ exakt de tre som beskriver felet. Läser bara — anmäler ingen, ändrar ingent
 
 **Endast en JS-fil → ingen ombyggnad krävs.**
 
-**Fynd på vägen, INTE åtgärdat:** tävlingens SNYGGA URL gav **500** medan trädets URL gav 200
-(`/competitions/2026/halland/falkenbergs-pistolklubb/standarden/` mot
-`/competitions/2026/standarden/`). Tävlingen har `clubId = 2607` (Falkenbergs Pistolklubb) och tom
-`regionalFederation`. Ett 500 där, inte ett 404, är värt en egen titt — jfr avsnittet om
-självomdirigering och `CompetitionUrlProvider`, som returnerar null när klubben inte kan resolvas
-till en publicerad `club` under en `regionalPage`. Noterat, inte utrett.
+**⚠️ Rättelse av ett "fynd" som inte var ett fel.** Under felsökningen ovan svarade tävlingens
+snygga URL (`/competitions/2026/halland/falkenbergs-pistolklubb/standarden/`) **500** medan trädets
+URL gav 200, och det rapporterades som en misstänkt bugg i URL-provideren. **Det var transient.**
+Omkontrollerat 6 gånger i rad direkt efteråt: **200 varje gång.** Enda 500:an inträffade i samma
+fönster där appen låg i innehållslåskonflikt precis efter en omstart (se
+[[umbraco-content-lock-teardown]]).
+
+Lärdomen är värd mer än fyndet: **ett enstaka 500 från en nyss omstartad dev-app är inte ett fynd.**
+Mät om innan det rapporteras, särskilt när appen samtidigt visat sig ha låsproblem — annars går tid
+åt att leta efter en bugg som inte finns.
+
+*Separat, verkligt och orelaterat:* dev-loggen bär ~220 felrader från Examine,
+`FileNotFoundException` på `umbraco/Data/TEMP/ExamineIndexes/MembersIndex/_1bu.si` — ett korrupt
+medlemsindex i dev. Åtgärdas genom att bygga om indexet i backoffice; rör inte prod och har inget
+med det här arbetet att göra.
 
 ### Roller som redigeraren aldrig visade fick inte tas bort av den (2026-08-26)
 

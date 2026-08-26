@@ -1207,22 +1207,13 @@ namespace HpskSite.Controllers
                         }
                         else if (field.Key == "shootingClassIds" && value != null)
                         {
-                            // Convert to JSON array string for storage
-                            if (value is string stringValue && !string.IsNullOrEmpty(stringValue))
-                            {
-                                // Split comma-separated values and serialize to JSON array
-                                var classIds = stringValue.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
-                                value = System.Text.Json.JsonSerializer.Serialize(classIds);
-                            }
-                            else if (value is System.Text.Json.JsonElement jsonElement)
-                            {
-                                // Handle JSON array from frontend
-                                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-                                {
-                                    var classIds = jsonElement.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
-                                    value = System.Text.Json.JsonSerializer.Serialize(classIds);
-                                }
-                            }
+                            // ⚠️ Kartan bor i HpskSite.Models.ShootingClassIdsValue. Den här grenen
+                            // testade tidigare `value is string`, men fields deserialiseras till
+                            // Dictionary<string, object> så värdet är ALLTID ett JsonElement — och
+                            // guiden skickar en CSV-STRÄNG, alltså ValueKind == String, som varken
+                            // sträng- eller Array-grenen fångade. Det råa elementet lagrades och
+                            // varje guide-skapad tävling fick CSV i stället för JSON.
+                            value = HpskSite.Models.ShootingClassIdsValue.Normalize(value);
                         }
 
                         if (value != null)
@@ -1539,20 +1530,13 @@ namespace HpskSite.Controllers
                         }
                         else if (field.Key == "shootingClassIds" && value != null)
                         {
-                            // Convert to JSON array string for storage
-                            if (value is string stringValue && !string.IsNullOrEmpty(stringValue))
-                            {
-                                var classIds = stringValue.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
-                                value = System.Text.Json.JsonSerializer.Serialize(classIds);
-                            }
-                            else if (value is System.Text.Json.JsonElement jsonElement)
-                            {
-                                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-                                {
-                                    var classIds = jsonElement.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
-                                    value = System.Text.Json.JsonSerializer.Serialize(classIds);
-                                }
-                            }
+                            // ⚠️ Kartan bor i HpskSite.Models.ShootingClassIdsValue. Den här grenen
+                            // testade tidigare `value is string`, men fields deserialiseras till
+                            // Dictionary<string, object> så värdet är ALLTID ett JsonElement — och
+                            // guiden skickar en CSV-STRÄNG, alltså ValueKind == String, som varken
+                            // sträng- eller Array-grenen fångade. Det råa elementet lagrades och
+                            // varje guide-skapad tävling fick CSV i stället för JSON.
+                            value = HpskSite.Models.ShootingClassIdsValue.Normalize(value);
                         }
 
                         if (value != null)
@@ -1848,19 +1832,13 @@ namespace HpskSite.Controllers
                         // Convert shooting class IDs to JSON array
                         else if (field.Key == "shootingClassIds" && value != null)
                         {
-                            if (value is string stringValue && !string.IsNullOrEmpty(stringValue))
-                            {
-                                var classIds = stringValue.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
-                                value = System.Text.Json.JsonSerializer.Serialize(classIds);
-                            }
-                            else if (value is System.Text.Json.JsonElement jsonElement)
-                            {
-                                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-                                {
-                                    var classIds = jsonElement.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
-                                    value = System.Text.Json.JsonSerializer.Serialize(classIds);
-                                }
-                            }
+                            // ⚠️ Kartan bor i HpskSite.Models.ShootingClassIdsValue. Den här grenen
+                            // testade tidigare `value is string`, men fields deserialiseras till
+                            // Dictionary<string, object> så värdet är ALLTID ett JsonElement — och
+                            // guiden skickar en CSV-STRÄNG, alltså ValueKind == String, som varken
+                            // sträng- eller Array-grenen fångade. Det råa elementet lagrades och
+                            // varje guide-skapad tävling fick CSV i stället för JSON.
+                            value = HpskSite.Models.ShootingClassIdsValue.Normalize(value);
                         }
 
                         if (value != null)
@@ -2314,8 +2292,17 @@ namespace HpskSite.Controllers
                 int errorCount = 0;
                 var errors = new List<string>();
 
-                // Get all competitions
-                var competitionsHub = _contentService.GetRootContent().FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
+                // ⚠️ GetRootContent() returnerar noder på ROTNIVÅ (barn till -1), alltså bara Home.
+                // competitionsHub är ett BARN till Home (path -1,<home>,<hub>), så det gamla
+                // uppslaget hittade den aldrig och den här endpointen har svarat
+                // "Competitions hub not found" sedan den skrevs — den har alltså aldrig migrerat
+                // något. Samma uppslag som CreateCompetition använder, av samma skäl.
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                var competitionsHub = rootContent == null
+                    ? null
+                    : GetFlatDescendants(rootContent).FirstOrDefault(c =>
+                        c.ContentType.Alias == "competitionsHub"
+                        || c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase));
                 if (competitionsHub == null)
                 {
                     return Ok(new { success = false, message = "Competitions hub not found" });
@@ -2343,13 +2330,13 @@ namespace HpskSite.Controllers
                             continue; // Already correct format
                         }
 
-                        // Convert CSV to JSON array
-                        var classIds = shootingClassIds.Split(',')
-                            .Select(s => s.Trim())
-                            .Where(s => !string.IsNullOrEmpty(s))
-                            .ToArray();
-
-                        var jsonArray = System.Text.Json.JsonSerializer.Serialize(classIds);
+                        // Samma normaliserare som skrivvägen, så migreringen och skapandet inte
+                        // kan producera olika former.
+                        var jsonArray = HpskSite.Models.ShootingClassIdsValue.FromText(shootingClassIds);
+                        if (string.IsNullOrEmpty(jsonArray))
+                        {
+                            continue; // inget att skriva
+                        }
 
                         // Update the competition
                         competition.SetValue("shootingClassIds", jsonArray);

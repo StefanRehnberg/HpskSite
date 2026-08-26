@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -411,22 +411,14 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             return null; // Invalid date
         }
 
+        /// <summary>
+        /// Den här vägen var KORREKT hela tiden — den gör <c>value.ToString()</c> innan den
+        /// konverterar, så CSV:n nådde fram. Den delegerar ändå, så att skapa- och redigera-vägen
+        /// inte kan glida isär om formen ändras. Se <see cref="HpskSite.Models.ShootingClassIdsValue"/>.
+        /// </summary>
         private object ConvertShootingClassIds(string value)
         {
-            if (string.IsNullOrEmpty(value))
-                return null;
-
-            // If it's already a JSON array, return as-is
-            if (value.TrimStart().StartsWith("["))
-                return value;
-
-            // Split CSV and convert to JSON array string
-            var classIds = value.Split(',')
-                .Select(s => s.Trim())
-                .Where(s => !string.IsNullOrEmpty(s))
-                .ToArray();
-
-            return System.Text.Json.JsonSerializer.Serialize(classIds);
+            return HpskSite.Models.ShootingClassIdsValue.FromText(value);
         }
 
         private object ConvertCompetitionManagers(object value)
