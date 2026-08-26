@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Competition Creation Wizard Modal
  * 6-step wizard for creating competitions
  * Mobile-optimized with context-aware behavior
@@ -57,6 +57,8 @@
                                 <option value="Faltskytte">Fältskytte</option>
                                 <option value="MagnumPrecision">Magnum Precision</option>
                                 <option value="MagnumFalt">Magnum Fältskytte</option>
+                                <option value="Standardpistol">Standardpistol</option>
+                                <option value="Sportpistol">Sportpistol</option>
                             </select>
                         </div>
 
@@ -1090,6 +1092,9 @@ function applySeriesDefaults() {
     const standardSection = document.getElementById('wizard_standardSeriesSection');
     const springSection = document.getElementById('wizard_springskytteSeriesSection');
     const isLocked = (typeId === 'Milsnabb' || typeId === 'NationellHelmatch');
+    // Standardpistol/Sportpistol: 12 serier som FÖRVAL, inte låst. Se kommentaren i
+    // PrecisionFamily.Facts — serieantalet är gängse format, inte en regel jag kunnat verifiera.
+    const suggests12 = (typeId === 'Standardpistol' || typeId === 'Sportpistol');
     const isSpringskytte = (typeId === 'Springskytte');
     const isFaltskytte = (typeId === 'Faltskytte' || typeId === 'MagnumFalt');
     const faltSection = document.getElementById('wizard_faltskytteSection');
@@ -1129,6 +1134,16 @@ function applySeriesDefaults() {
         finalsGroup.style.opacity = '0.5';
         finalsGroup.querySelectorAll('button').forEach(b => b.disabled = true);
         milsnabbNote.classList.remove('d-none');
+    } else if (suggests12) {
+        // Förvalt men redigerbart: fälten låses INTE och finalgruppen lämnas öppen.
+        seriesInput.value = 12;
+        finalsInput.value = 0;
+        seriesInput.readOnly = false;
+        finalsInput.readOnly = false;
+        seriesButtons.classList.remove('d-none');
+        finalsGroup.style.opacity = '';
+        finalsGroup.querySelectorAll('button').forEach(b => b.disabled = false);
+        milsnabbNote.classList.add('d-none');
     } else {
         seriesInput.readOnly = false;
         finalsInput.readOnly = false;

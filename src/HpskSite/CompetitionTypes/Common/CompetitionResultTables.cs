@@ -1,4 +1,4 @@
-namespace HpskSite.CompetitionTypes.Common
+﻿namespace HpskSite.CompetitionTypes.Common
 {
     /// <summary>
     /// Competition type → its result table. THE one place this mapping lives.
@@ -20,6 +20,8 @@ namespace HpskSite.CompetitionTypes.Common
             ["Springskytte"] = "SpringskytteResultEntry",
             ["Faltskytte"] = "FaltskytteResultEntry",
             ["MagnumFalt"] = "FaltskytteResultEntry",
+            ["Standardpistol"] = "StandardpistolResultEntry",
+            ["Sportpistol"] = "SportpistolResultEntry",
         };
 
         /// <summary>

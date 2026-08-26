@@ -1,4 +1,4 @@
-@using Umbraco.Cms.Web.Website.Controllers
+﻿@using Umbraco.Cms.Web.Website.Controllers
 @using Umbraco.Cms.Web.Website.Models
 @using Umbraco.Cms.Core.Security
 @using Umbraco.Cms.Web.Common.PublishedModels
@@ -166,6 +166,8 @@
                                         <option value="Duell">Duell</option>
                                         <option value="NationellHelmatch">Nationell Helmatch</option>
                                         <option value="MagnumPrecision">Magnum Precision</option>
+                                        <option value="Standardpistol">Standardpistol</option>
+                                        <option value="Sportpistol">Sportpistol</option>
                                         <option value="Faltskytte">Fältskytte</option>
                                     </select>
                                     <select id="yearFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
@@ -2682,6 +2684,8 @@ function renderDashboard(data, selectedYears = null) {
                             <option value="Duell" ${data.competitionType === 'Duell' ? 'selected' : ''}>Duell</option>
                             <option value="NationellHelmatch" ${data.competitionType === 'NationellHelmatch' ? 'selected' : ''}>Nationell Helmatch</option>
                             <option value="MagnumPrecision" ${data.competitionType === 'MagnumPrecision' ? 'selected' : ''}>Magnum Precision</option>
+                            <option value="Standardpistol">Standardpistol</option>
+                            <option value="Sportpistol">Sportpistol</option>
                             <option value="Faltskytte" ${data.competitionType === 'Faltskytte' ? 'selected' : ''}>Fältskytte</option>
                         </select>
                         <select id="dashboardYearFilter" class="form-select form-select-sm" style="width: auto;" onchange="onDashboardYearChange(this)">
@@ -4508,6 +4512,8 @@ function renderFaltskytteDashboard(data) {
                         <option value="Duell">Duell</option>
                         <option value="NationellHelmatch">Nationell Helmatch</option>
                         <option value="MagnumPrecision">Magnum Precision</option>
+                        <option value="Standardpistol">Standardpistol</option>
+                        <option value="Sportpistol">Sportpistol</option>
                         <option value="Faltskytte" selected>Fältskytte</option>
                     </select>
                     <select class="form-select form-select-sm" style="width:auto;" onchange="onFaltYearChange(this)">

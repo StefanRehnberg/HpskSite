@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -170,6 +170,8 @@ namespace HpskSite.Controllers
             string duellShooterClass = null,
             string nationellHelmatchShooterClass = null,
             string magnumPrecisionShooterClass = null,
+            string standardpistolShooterClass = null,
+            string sportpistolShooterClass = null,
             // Member-database expansion — self-service editable fields (see Documentation/MEMBER_DATABASE.md)
             string birthDate = null, string landlinePhone = null, string gender = null, string coAddress = null,
             string guardian1Name = null, string guardian1Mobile = null, string guardian1Email = null,
@@ -222,6 +224,14 @@ namespace HpskSite.Controllers
                 if (!string.IsNullOrEmpty(nationellHelmatchShooterClass) && member.HasProperty("nationellHelmatchShooterClass"))
                 {
                     member.SetValue("nationellHelmatchShooterClass", nationellHelmatchShooterClass);
+                }
+                if (!string.IsNullOrEmpty(standardpistolShooterClass) && member.HasProperty("standardpistolShooterClass"))
+                {
+                    member.SetValue("standardpistolShooterClass", standardpistolShooterClass);
+                }
+                if (!string.IsNullOrEmpty(sportpistolShooterClass) && member.HasProperty("sportpistolShooterClass"))
+                {
+                    member.SetValue("sportpistolShooterClass", sportpistolShooterClass);
                 }
                 if (!string.IsNullOrEmpty(magnumPrecisionShooterClass) && member.HasProperty("magnumPrecisionShooterClass"))
                 {
@@ -2419,7 +2429,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get shooter class from member profile based on discipline
-                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", "MagnumPrecision" => "magnumPrecisionShooterClass", _ => "precisionShooterClass" };
+                var shooterClassProperty = HpskSite.CompetitionTypes.Common.PrecisionFamily.ShooterClassProperty(discipline);
                 string shooterClass = "";
                 if (member.HasProperty(shooterClassProperty))
                 {
@@ -2507,7 +2517,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get shooter class from member profile based on discipline
-                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", "MagnumPrecision" => "magnumPrecisionShooterClass", _ => "precisionShooterClass" };
+                var shooterClassProperty = HpskSite.CompetitionTypes.Common.PrecisionFamily.ShooterClassProperty(discipline);
                 string shooterClass = "";
                 if (member.HasProperty(shooterClassProperty))
                 {
@@ -2958,7 +2968,7 @@ namespace HpskSite.Controllers
                 var medalStats = GetMemberMedalStats(memberId, selectedYear, competitionType);
 
                 // Calculate handicap profiles (discipline-aware)
-                var shooterClassProperty = competitionType switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", "MagnumPrecision" => "magnumPrecisionShooterClass", _ => "precisionShooterClass" };
+                var shooterClassProperty = HpskSite.CompetitionTypes.Common.PrecisionFamily.ShooterClassProperty(competitionType);
                 string shooterClass = "";
                 if (targetMember.HasProperty(shooterClassProperty))
                 {

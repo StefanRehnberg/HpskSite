@@ -67,6 +67,8 @@ namespace HpskSite.Services
             ("magnumPrecisionShooterClass", "Skytteklass magnum"),
             ("milsnabbShooterClass",        "Skytteklass milsnabb"),
             ("nationellHelmatchShooterClass", "Skytteklass nationell helmatch"),
+            ("standardpistolShooterClass",  "Skytteklass standardpistol"),
+            ("sportpistolShooterClass",     "Skytteklass sportpistol"),
             ("profilePictureUrl",      "Profilbild"),
             ("trainingNotes",          "Träningsanteckningar"),
         };

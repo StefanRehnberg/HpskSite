@@ -1,4 +1,4 @@
-@*
+﻿@*
     RecordEntryModal — admin-only modal for creating a new record.
     Included from RecordsHallOfFame.cshtml only when RecordsCanEdit=true. Reads the
     same scope from ViewData. Exposes window['recordEntryOpen_' + instance]() which
@@ -29,6 +29,8 @@
                         <select class="form-select" id="reDiscipline-@reInstance">
                             <option value="Precision">Precisionsskjutning</option>
                             <option value="MagnumPrecision">Magnumprecision</option>
+                            <option value="Standardpistol">Standardpistol</option>
+                            <option value="Sportpistol">Sportpistol</option>
                             <option value="Milsnabb">Militär snabbmatch</option>
                         </select>
                     </div>

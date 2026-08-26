@@ -26,6 +26,8 @@
             new CompetitionType("Faltskytte", "Fältskytte", "Fältskytte"),
             new CompetitionType("MagnumPrecision", "Magnum Precision", "Magnum Precision 50 m"),
             new CompetitionType("MagnumFalt", "Magnum Fältskytte", "Magnum Fältskytte"),
+            new CompetitionType("Standardpistol", "Standardpistol", "Standardpistol 25 m — serier på 150 s, 20 s och 10 s"),
+            new CompetitionType("Sportpistol", "Sportpistol", "Sportpistol 25 m — precisionshalva och duellhalva"),
         };
 
         public static CompetitionType? GetById(string id)

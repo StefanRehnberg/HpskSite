@@ -1,4 +1,4 @@
-@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @using Newtonsoft.Json
 @using Umbraco.Cms.Core.Models.PublishedContent
 @using Umbraco.Extensions
@@ -375,7 +375,20 @@
                 const competitionTypeId = data.competitionTypeId || 'Precision';
                 const isMilsnabb = competitionTypeId === 'Milsnabb';
                 const isNationellHelmatch = competitionTypeId === 'NationellHelmatch';
-                const isGrouped12 = isMilsnabb || isNationellHelmatch;
+
+                // Hur grenens 12 serier delas i delsummor: [förstaSerieIndex, sistaExklusive, rubrik].
+                // Var hårdkodat till 3 grupper om 4 på TRE ställen (kolumnräkningen, rubrikerna och
+                // cellerna), vilket gjorde Sportpistols 2 grupper om 6 omöjlig att uttrycka.
+                // null = ingen gruppering, alltså vanlig serie-per-kolumn-tabell.
+                const seriesGroups =
+                    isMilsnabb ? [[0, 4, '10s'], [4, 8, '8s'], [8, 12, '6s']]
+                    : isNationellHelmatch ? [[0, 4, 'Prec'], [4, 8, 'Duell'], [8, 12, 'Fält']]
+                    // Standardpistol: 150 s / 20 s / 10 s — samma 3x4-form som Milsnabb.
+                    : competitionTypeId === 'Standardpistol' ? [[0, 4, '150s'], [4, 8, '20s'], [8, 12, '10s']]
+                    // Sportpistol: precisionshalva + duellhalva, alltså 2 grupper om 6.
+                    : competitionTypeId === 'Sportpistol' ? [[0, 6, 'Prec'], [6, 12, 'Duell']]
+                    : null;
+                const isGrouped12 = seriesGroups !== null;
 
                 // Build HTML for results
                 let html = '';
@@ -401,7 +414,7 @@
 
                         if (isGrouped12) {
                             seriesColCount = 12;
-                            totalColCount = 3; // 3 group subtotals (10s/8s/6s or Prec/Duell/Fält)
+                            totalColCount = seriesGroups.length; // en delsumma per grupp
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
                             seriesCountForRow = maxSeriesCount;
                             if (hasFinalsRound && seriesCountForRow >= totalSeriesCount) {
@@ -480,14 +493,11 @@
 
                         // Add series columns based on competition type
                         if (isGrouped12) {
-                            // 12 series in 3 groups of 4 with subtotals
-                            const groupHeaders = isNationellHelmatch
-                                ? ['Prec', 'Duell', 'Fält']
-                                : ['10s', '8s', '6s'];
-                            for (let g = 0; g < 3; g++) {
-                                for (let i = g*4+1; i <= g*4+4; i++) html += `<th class="milsnabb-series" style="width:${seriesPct}%">${i}</th>`;
-                                html += `<th class="subtotal-col" style="width:${totalPct}%">${groupHeaders[g]}</th>`;
-                            }
+                            // 12 serier i grupper med delsumma efter varje grupp.
+                            seriesGroups.forEach(([start, end, label]) => {
+                                for (let i = start + 1; i <= end; i++) html += `<th class="milsnabb-series" style="width:${seriesPct}%">${i}</th>`;
+                                html += `<th class="subtotal-col" style="width:${totalPct}%">${label}</th>`;
+                            });
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
                             const seriesCount = maxSeriesCount;
 
@@ -569,9 +579,8 @@
 
                             // Add series scores based on competition type
                             if (isGrouped12) {
-                                // 12 series in 3 groups of 4 with subtotals
-                                const groups = [[0,4],[4,8],[8,12]];
-                                groups.forEach(([start, end]) => {
+                                // Samma grupper som rubrikerna — en källa, så de inte kan glida isär.
+                                seriesGroups.forEach(([start, end]) => {
                                     let groupTotal = 0;
                                     for (let i = start; i < end; i++) {
                                         const s = i < seriesScores.length ? seriesScores[i].score : 0;

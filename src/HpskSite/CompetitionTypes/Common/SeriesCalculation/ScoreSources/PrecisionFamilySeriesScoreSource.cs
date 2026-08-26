@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Persistence;
 using HpskSite.Models;
@@ -28,6 +28,8 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
             ["Duell"] = "DuellResultEntry",
             ["NationellHelmatch"] = "NationellHelmatchResultEntry",
             ["MagnumPrecision"] = "MagnumPrecisionResultEntry",
+            ["Standardpistol"] = "StandardpistolResultEntry",
+            ["Sportpistol"] = "SportpistolResultEntry",
         };
 
         public PrecisionFamilySeriesScoreSource(

@@ -1,4 +1,4 @@
-using HpskSite.CompetitionTypes.Precision.Services;
+﻿using HpskSite.CompetitionTypes.Precision.Services;
 using HpskSite.Models;
 using HpskSite.Models.Ranking;
 using HpskSite.Services.Notifications;
@@ -61,14 +61,13 @@ namespace HpskSite.Services.Ranking
             _logger = logger;
         }
 
-        public static string ShooterClassProperty(string discipline) => discipline switch
-        {
-            "Milsnabb" => "milsnabbShooterClass",
-            "Duell" => "duellShooterClass",
-            "NationellHelmatch" => "nationellHelmatchShooterClass",
-            "MagnumPrecision" => "magnumPrecisionShooterClass",
-            _ => "precisionShooterClass"
-        };
+        /// <summary>
+        /// Behålls som publik ingång — flera anropare går hit — men kartan bor i
+        /// <see cref="HpskSite.CompetitionTypes.Common.PrecisionFamily"/>. Den här metoden VAR en
+        /// egen kopia av samma switch, alltså ett andra ställe att glömma vid en ny gren.
+        /// </summary>
+        public static string ShooterClassProperty(string discipline) =>
+            HpskSite.CompetitionTypes.Common.PrecisionFamily.ShooterClassProperty(discipline);
 
         /// <summary>A | B | C | R | M | L. A-family (A/A Opt/AM/AP/AG) folds to "A".</summary>
         public static string NormalizeWeaponGroup(string? weaponClass)

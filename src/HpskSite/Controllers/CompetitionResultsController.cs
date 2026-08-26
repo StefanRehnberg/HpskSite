@@ -586,35 +586,8 @@ namespace HpskSite.Controllers
                 using (var db = _umbracoDatabaseFactory.CreateDatabase())
                 {
                     var compTypeId = GetCompetitionTypeId(competitionId);
-                    if (compTypeId == "Milsnabb")
-                    {
-                        var milsnabbResults = await db.FetchAsync<MilsnabbResultEntry>(
-                            "WHERE CompetitionId = @0", competitionId);
-                        existingResults = milsnabbResults.Cast<PrecisionResultEntry>().ToList();
-                    }
-                    else if (compTypeId == "Duell")
-                    {
-                        var duellResults = await db.FetchAsync<DuellResultEntry>(
-                            "WHERE CompetitionId = @0", competitionId);
-                        existingResults = duellResults.Cast<PrecisionResultEntry>().ToList();
-                    }
-                    else if (compTypeId == "NationellHelmatch")
-                    {
-                        var nhResults = await db.FetchAsync<NationellHelmatchResultEntry>(
-                            "WHERE CompetitionId = @0", competitionId);
-                        existingResults = nhResults.Cast<PrecisionResultEntry>().ToList();
-                    }
-                    else if (compTypeId == "MagnumPrecision")
-                    {
-                        var mpResults = await db.FetchAsync<MagnumPrecisionResultEntry>(
-                            "WHERE CompetitionId = @0", competitionId);
-                        existingResults = mpResults.Cast<PrecisionResultEntry>().ToList();
-                    }
-                    else
-                    {
-                        existingResults = await db.FetchAsync<PrecisionResultEntry>(
-                            "WHERE CompetitionId = @0", competitionId);
-                    }
+                    existingResults = await FetchFamilyResultsAsync(
+                        db, compTypeId, "WHERE CompetitionId = @0", competitionId);
                 }
 
                 var entererNameMap = BuildEntererNameMap(existingResults.Select(e => e.EnteredBy));
@@ -1846,46 +1819,45 @@ namespace HpskSite.Controllers
         private static string GetResultTableName(string typeId) =>
             CompetitionResultTables.ForSharedResultEndpoint(typeId);
 
+        /// <summary>
+        /// Läser precisionsfamiljens resultatrader ur RÄTT tabell, som rätt KÖRTIDSTYP.
+        ///
+        /// ⚠️ Körtidstypen är inte kosmetik: NPoco väljer tabell vid insert/update/delete utifrån
+        /// den, så en rad som lästes som `PrecisionResultEntry` skulle skrivas TILLBAKA till
+        /// PrecisionResultEntry oavsett vilken gren den kom från. Därför en typad gren per gren och
+        /// inte en `SELECT * FROM [tabellnamn]` — den senare hade varit kortare och tyst fel.
+        ///
+        /// Kedjan låg i två kopior (här och i inmatningsvyns uppslag). En ny gren är nu en gren här.
+        /// </summary>
+        private static async Task<List<PrecisionResultEntry>> FetchFamilyResultsAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, string compTypeId, string where, int competitionId)
+        {
+            switch ((compTypeId ?? "").Trim())
+            {
+                case "Milsnabb":
+                    return (await db.FetchAsync<MilsnabbResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
+                case "Duell":
+                    return (await db.FetchAsync<DuellResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
+                case "NationellHelmatch":
+                    return (await db.FetchAsync<NationellHelmatchResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
+                case "MagnumPrecision":
+                    return (await db.FetchAsync<MagnumPrecisionResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
+                case "Standardpistol":
+                    return (await db.FetchAsync<HpskSite.CompetitionTypes.Standardpistol.Models.StandardpistolResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
+                case "Sportpistol":
+                    return (await db.FetchAsync<HpskSite.CompetitionTypes.Sportpistol.Models.SportpistolResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
+                default:
+                    // Tom/okänd typ = Precision. Äldre noder bär ingen competitionType.
+                    return await db.FetchAsync<PrecisionResultEntry>(where, competitionId);
+            }
+        }
+
         private async Task<List<PrecisionResultEntry>> GetCompetitionResultsInternal(int competitionId)
         {
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             var compTypeId = GetCompetitionTypeId(competitionId);
-
-            if (compTypeId == "Milsnabb")
-            {
-                var milsnabbResults = await db.FetchAsync<MilsnabbResultEntry>(
-                    "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                    competitionId);
-                return milsnabbResults.Cast<PrecisionResultEntry>().ToList();
-            }
-
-            if (compTypeId == "Duell")
-            {
-                var duellResults = await db.FetchAsync<DuellResultEntry>(
-                    "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                    competitionId);
-                return duellResults.Cast<PrecisionResultEntry>().ToList();
-            }
-
-            if (compTypeId == "NationellHelmatch")
-            {
-                var nhResults = await db.FetchAsync<NationellHelmatchResultEntry>(
-                    "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                    competitionId);
-                return nhResults.Cast<PrecisionResultEntry>().ToList();
-            }
-
-            if (compTypeId == "MagnumPrecision")
-            {
-                var mpResults = await db.FetchAsync<MagnumPrecisionResultEntry>(
-                    "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                    competitionId);
-                return mpResults.Cast<PrecisionResultEntry>().ToList();
-            }
-
-            return await db.FetchAsync<PrecisionResultEntry>(
-                "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                competitionId);
+            return await FetchFamilyResultsAsync(db, compTypeId,
+                "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber", competitionId);
         }
 
         /// <summary>
@@ -3637,6 +3609,12 @@ namespace HpskSite.Controllers
             var isDuell = competitionTypeId.Equals("Duell", StringComparison.OrdinalIgnoreCase);
             var isNationellHelmatch = competitionTypeId.Equals("NationellHelmatch", StringComparison.OrdinalIgnoreCase);
             var isMagnumPrecision = competitionTypeId.Equals("MagnumPrecision", StringComparison.OrdinalIgnoreCase);
+            // Standardpistol och Sportpistol: placeringsmedaljer enbart. SHB publicerar ingen
+            // fastpoängstabell för dem som jag kunnat läsa, och att hitta på trösklar är värre än
+            // att inte ha några — grundregeln (1/9 silver, 1/3 brons) gäller alltid.
+            var isPlacementOnlyNewDiscipline =
+                competitionTypeId.Equals("Standardpistol", StringComparison.OrdinalIgnoreCase)
+                || competitionTypeId.Equals("Sportpistol", StringComparison.OrdinalIgnoreCase);
 
             // Select tiebreaker based on competition type
             // Duell uses the same tiebreaker as Precision (series count back)
@@ -3855,6 +3833,24 @@ namespace HpskSite.Controllers
                         ShouldSplitGroupC = shouldSplitGroupC
                     };
                     nhMedalService.CalculateStandardMedals(medalShooters, config);
+                }
+                else if (isPlacementOnlyNewDiscipline)
+                {
+                    // Delad, parametriserad tjänst — se PlacementOnlyStandardMedalService för varför
+                    // Duells och NationellHelmatchs egna kopior lämnades orörda.
+                    // 12 serier = full match; A-familjen poolas INTE, eftersom AM/AP/AG inte ens
+                    // erbjuds för dessa grenar (se CLAUDE.md: AM/AP/AG-omfattningen).
+                    var placementService = new HpskSite.CompetitionTypes.Common.PlacementOnlyStandardMedalService
+                    {
+                        MinimumSeriesCount = 12,
+                        PoolAFamily = false
+                    };
+                    var config = new StandardMedalConfig
+                    {
+                        SeriesCount = qualificationSeriesCount,
+                        ShouldSplitGroupC = shouldSplitGroupC
+                    };
+                    placementService.CalculateStandardMedals(medalShooters, config);
                 }
                 else if (isMagnumPrecision)
                 {
