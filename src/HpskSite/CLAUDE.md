@@ -1,4 +1,4 @@
-# Claude Development Notes - pistol.nu
+﻿# Claude Development Notes - pistol.nu
 
 ## Project Overview
 Umbraco v16.2 project for pistol.nu (formerly HPSK) featuring member management, club administration, training system (Skyttetrappan), and competition management.
@@ -1782,6 +1782,64 @@ auth-region 25/25, orphan-row 20/20, result-table-lookup 6/6, startlist-aware-de
 startlist-coverage 27/27, dnsdnf-ui 13/13, row-action-menus 60/60, action-menus-sweep 113/113.
 
 Adds C# → full rebuild. No SQL, no doctype property.
+
+### Tävlingar-sidan: hitta en viss lokal tävling (2026-08-26)
+
+Klagomål: "rörigt att hitta en viss lokal tävling". **Volymen var inte huvudorsaken** — mätt i dev
+renderades 94 kort men bara **11 syntes**, eftersom statusfiltret redan gömmer avslutade. Tre
+strukturella fel gjorde det däremot, och alla tre är åtgärdade:
+
+1. **Sökfältet låg inne i den kollapsade "Mer filter"-panelen** (`offsetParent === null`). Den
+   snabbaste vägen till EN viss tävling — skriv namnet — fanns inte på skärmen. Det ligger nu först
+   och alltid synligt, med en rensa-knapp. ⚠️ Den gamla inputen är **borttagen**, inte flyttad: två
+   element med samma `id` gör det andra dött för `getElementById`.
+2. **⚠️ En tävling som ingår i en serie fanns inte på sidan över huvud taget.** `allCompetitions`
+   uteslöt allt vars förälder är en `competitionSeries`, så omgången fick inget kort och därmed
+   ingen `data-search-text` — **sökning på dess namn gav noll träffar**. Och det är just där lokala
+   klubbtävlingar bor (en omgång i Hallandsserien). Varje omgång är nu ett vanligt tävlingskort med
+   en **"Del av <serien>"**-länk, och **seriens namn ligger i kortets söktext** så en sökning på
+   serien hittar dess omgångar. Seriekorten är borta från sidan — de konkurrerade om samma kortyta
+   utan att göra omgångarna hittbara. Serien nås via brickan; `/competitions/{serie}/` är oförändrad.
+3. **`isClubOnly`-tävlingar var uteslutna för ALLA**, även för den egna klubbens medlemmar. De visas
+   nu för medlemmar i klubben, badgade **"Endast klubb"** så det går att förstå varför andra inte ser
+   dem. Medlemskapet resolvas via `MemberClubService.GetAllClubIds` — **`primaryClubId` är en STRÄNG**,
+   så `GetValue<int>` ger tyst 0.
+
+**"Nära dig" är en SORTERING, inte ett standardfilter.** Kort med `data-near-me="1"` (tävling hos en
+klubb jag tillhör, eller i en krets någon av mina klubbar sitter i) sorteras först, med två rubriker
+som säger var gränsen går. **Ingenting göms** — ett standardfilter som tyst gömmer tävlingar är vad
+som genererar "min tävling är borta", och användarbasen är delvis datorovan. Den som vill smalna av
+trycker **"Bara nära dig"** (opt-in, och Rensa filter lyfter det).
+- ⚠️ **Rubrikerna måste räknas PER CONTAINER.** `filterCompetitions()` plockar upp
+  `.competition-card` **globalt**, alltså både kortvyns kort och listvyns rader — samma tävling två
+  gånger. Första utsågan visade "14 st" när sju kort syntes, vilket läser som att sidan räknar fel
+  på tävlingarna. `renderSectionHeadings` grupperar på `parentNode`.
+- ⚠️ **Rubrikerna återskapas EFTER sorteringen.** `sortCards` flyttar korten genom att appenda dem
+  på nytt, så en rubrik som redan låg i flödet hamnar på fel plats.
+- **Ingen krets eller klubb → ingen sektion och ingen knapp.** Utloggad, eller medlem utan klubb, får
+  exakt den gamla platta listan i stället för en tom "Nära dig"-rubrik.
+- Kretsnamnet i rubriken går via `Federations.GetDescription` (koden lagras som enum-NAMN "Halland",
+  människor känner igen "Hallands Pistolskyttekrets"), med koden som reserv.
+
+**Kartan:** det server-genererade `seriesChildCompetitionsForMapJson`-tillägget är **borttaget**. Det
+fanns just för att serieomgångar inte var kort; nu är de det, så tillägget hade räknat varje omgång
+**två gånger** — och det lydde inte filtret.
+
+**Rättelse av en tidigare felläsning:** region-filtret släpper INTE region-lösa tävlingar. Rad
+`cardRegion === ''` i `filterCompetitions` visar dem när någon krets är valt. 36 % av korten i dev har
+tom region (en series region härleds ur barnens `clubId`/`regionalFederation`), men hålet finns inte.
+
+Verifierat 28/28 `hpsk-verify/competitions-hub-findability-verify.mjs` (**A/B: 12 faller på baseline**)
+och 9/9 `competitions-hub-clubonly-verify.mjs`. Den senare **bygger sin egen fixtur** — dev har noll
+`isClubOnly`-tävlingar, så grenen kan inte mätas på befintlig data — och raderar den igen.
+⚠️ `CreateCompetition` returnerar id:t under **`data.id`**, inte `competitionId`; en första version
+läste fel nyckel, fick 0, och lämnade fixturen kvar medan raderingen svarade "Competition not found".
+
+**Endast vyer → ingen ombyggnad krävs.** Ingen SQL, ingen doctype-property, ingen Umbraco-nod.
+
+**Kvarstående UX-observation, inte åtgärdad:** `#clearFilters` ligger själv inne i den kollapsade
+"Mer filter"-panelen. Den som smalnat av med den synliga "Bara nära dig"-knappen hittar alltså inte
+den synliga vägen tillbaka — knappen själv är vägen, men "Rensa filter" borde ligga på primärraden.
 
 ### Roller som redigeraren aldrig visade fick inte tas bort av den (2026-08-26)
 

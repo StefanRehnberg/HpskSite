@@ -1,10 +1,14 @@
-@using Umbraco.Cms.Web.Common.PublishedModels;
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
 @using HpskSite.Models;
 @using Umbraco.Extensions;
 @using HpskSite.Extensions
 @using Umbraco.Cms.Core.Security;
+@using Umbraco.Cms.Core.Models;
+@using Umbraco.Cms.Core.Services;
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject IMemberManager _memberManager
+@inject IMemberService _memberService
+@inject HpskSite.Services.MemberClubService _memberClubService
 @{
     Layout = "Master.cshtml";
 
@@ -16,39 +20,91 @@
     // Single content tree traversal for all lookups (avoids ~107 separate tree scans)
     var allContent = Model.Root().DescendantsOrSelf().ToList();
 
-    // Get all competitions, competition series, and competition types from cached tree
-    // Only include standalone competitions (not part of any series) and exclude club-only competitions
-    var allCompetitions = allContent
-        .Where(x => x.ContentType.Alias == "competition" &&
-                   x.Parent()?.ContentType.Alias != "competitionSeries" &&
-                   !x.Value<bool>("isClubOnly"))
-        .ToList();
     var allCompetitionSeries = allContent.Where(x => x.ContentType.Alias == "competitionSeries").ToList();
 
-    // Competitions that belong to a series are rendered as part of their series card (not as
-    // individual cards), so the map — which reads competition cards from the DOM — never sees them.
-    // Collect the range-linked ones here so the map view can show them too.
-    var seriesChildCompetitionsForMap = allContent
-        .Where(x => x.ContentType.Alias == "competition"
-                   && x.Parent()?.ContentType.Alias == "competitionSeries"
-                   && !x.Value<bool>("isClubOnly")
-                   && (x.HasProperty("rangeId") ? x.Value<int>("rangeId") : 0) > 0)
-        .Select(x => new
+    // Which competitions belong to a series, and what to call it. A series round is now a NORMAL
+    // competition card carrying a "Del av <serien>" badge — see the note on allCompetitions below.
+    var seriesInfoByCompetitionId = new Dictionary<int, (string Name, string Url)>();
+    foreach (var s in allCompetitionSeries)
+    {
+        var sName = s.Value<string>("seriesName") ?? s.Name;
+        var sUrl = s.Url();
+        foreach (var child in s.Children().Where(x => x.ContentType.Alias == "competition"))
         {
-            name = x.Name,
-            url = x.Url(),
-            rangeId = x.Value<int>("rangeId"),
-            date = x.Value<DateTime>("competitionDate").ToString("yyyy-MM-dd")
-        })
+            seriesInfoByCompetitionId[child.Id] = (sName, sUrl);
+        }
+    }
+
+    // Build club-to-region lookup for determining effective region.
+    // Resolved BEFORE the competition list, because both "is this competition mine" and the
+    // Nära dig grouping need it.
+    var allClubs = allContent.Where(x => x.ContentType.Alias == "club").ToList();
+    var clubRegionLookup = allClubs.ToDictionary(
+        c => c.Id,
+        c => c.Value<string>("regionalFederation") ?? ""
+    );
+
+    // The viewer's own clubs and kretsar. MemberClubService is the ONE place a member's clubs are
+    // resolved (primaryClubId is a STRING property — reading it as int silently yields 0).
+    var currentMember = await _memberManager.GetCurrentMemberAsync();
+    var myClubIds = new HashSet<int>();
+    var myRegions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    IMember? myMemberRecord = null;
+    if (currentMember != null)
+    {
+        myMemberRecord = _memberService.GetByEmail(currentMember.Email);
+        foreach (var cid in _memberClubService.GetAllClubIds(myMemberRecord))
+        {
+            myClubIds.Add(cid);
+            if (clubRegionLookup.TryGetValue(cid, out var r) && !string.IsNullOrWhiteSpace(r)) myRegions.Add(r);
+        }
+    }
+
+    // Every competition worth showing this viewer, in ONE list.
+    //
+    // Two exclusions were removed here, because each one made a competition impossible to FIND
+    // rather than merely lower down the page:
+    //  • Rounds in a series used to be excluded entirely (parent alias != competitionSeries). They
+    //    had no card and therefore no data-search-text, so searching for one by name returned
+    //    nothing — and a local club competition is very often a series round. That was the reported
+    //    "rörigt att hitta en viss lokal tävling".
+    //  • isClubOnly competitions were excluded for everyone, including the club's own members, so
+    //    your own club's internal competition was invisible on the page that lists competitions.
+    //    They are now shown to members of that club only, badged "Endast klubb".
+    var allCompetitions = allContent
+        .Where(x => x.ContentType.Alias == "competition")
+        .Where(x => !x.Value<bool>("isClubOnly") || myClubIds.Contains(x.Value<int>("clubId")))
         .ToList();
-    var seriesChildCompetitionsForMapJson = System.Text.Json.JsonSerializer.Serialize(seriesChildCompetitionsForMap);
+
+    // "Nära dig" = hosted by a club I belong to, or in a krets one of my clubs sits in. Region is
+    // derived the same way the card does it: club first, then the competition's own field.
+    Func<IPublishedContent, bool> isNearMe = comp =>
+    {
+        if (myClubIds.Count == 0 && myRegions.Count == 0) return false;
+        var ccid = comp.Value<int>("clubId");
+        if (ccid > 0 && myClubIds.Contains(ccid)) return true;
+        var region = ccid > 0 && clubRegionLookup.TryGetValue(ccid, out var cr)
+            ? cr
+            : comp.Value<string>("regionalFederation") ?? "";
+        return !string.IsNullOrWhiteSpace(region) && myRegions.Contains(region);
+    };
+    var nearMeCompetitionIds = new HashSet<int>(allCompetitions.Where(c => isNearMe(c)).Select(c => c.Id));
+
+    // Läsbara kretsnamn till rubriken. Kretsen lagras som enum-NAMN ("Halland"), medan människor
+    // känner igen beskrivningen ("Hallands Pistolskyttekrets"). Koden får vara reserv om en klubb
+    // bär ett värde som inte finns i enumet — att visa råkoden är bättre än att visa ingenting.
+    var myRegionNames = string.Join(" · ", myRegions.OrderBy(r => r, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false)).Select(r =>
+        Enum.TryParse<HpskSite.Models.Federations.RegionalFederations>(r, true, out var rf)
+            ? HpskSite.Models.Federations.GetDescription(rf)
+            : r));
+
     var competitionTypes = allContent.Where(x => x.ContentType.Alias == "competitionType").ToList();
     // Use centralized shooting classes model (includes R, L, M classes)
     var shootingClasses = HpskSite.Models.ShootingClasses.All;
     var competitionSeasons = allContent.Where(x => x.ContentType.Alias == "competitionSeason").ToList();
 
-    // Batch registration check — load all user registrations into a HashSet for O(1) lookups
-    var currentMember = await _memberManager.GetCurrentMemberAsync();
+    // Batch registration check — load all user registrations into a HashSet for O(1) lookups.
+    // currentMember is resolved further up, because the competition list itself depends on it.
     var userRegisteredCompetitionIds = new HashSet<int>();
     if (currentMember != null)
     {
@@ -59,13 +115,6 @@
             .Select(x => x.Value<int>("competitionId"))
             .ToHashSet();
     }
-
-    // Build club-to-region lookup for determining effective region
-    var allClubs = allContent.Where(x => x.ContentType.Alias == "club").ToList();
-    var clubRegionLookup = allClubs.ToDictionary(
-        c => c.Id,
-        c => c.Value<string>("regionalFederation") ?? ""
-    );
 
     // Get unique venues for filtering
     var allVenues = allCompetitions.Select(c => c.Value<string>("venue")).Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderBy(v => v).ToList();
@@ -144,6 +193,25 @@
     <!-- Filter Section -->
     <div class="row mb-4">
         <div class="col-12">
+            @* Sökfältet ligger FÖRST och alltid synligt. Det låg tidigare inne i den kollapsade
+               "Mer filter"-panelen — alltså var den snabbaste vägen till EN viss tävling, att skriva
+               dess namn, inte på skärmen. Det var en av huvudorsakerna till klagomålen om att det är
+               svårt att hitta en lokal tävling. Inputen är densamma (#searchCompetitions), så all
+               befintlig filter-JS följer med. *@
+            <div class="row mb-3">
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="searchCompetitions"
+                               placeholder="Sök på tävling, plats, serie eller beskrivning…"
+                               autocomplete="off">
+                        <button class="btn btn-outline-secondary d-none" type="button" id="clearSearchBtn" title="Rensa sökningen">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Primary Filter Pills (Always Visible) -->
             <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
                 <!-- Region Filter Dropdown -->
@@ -180,6 +248,16 @@
                     Avslutade (<span id="completed-count">@completedCompetitions.Count</span>)
                 </button>
 
+                @if (myClubIds.Count > 0 || myRegions.Count > 0)
+                {
+                    @* Opt-IN, inte standard. Standardvyn sorterar det lokala först och gömmer
+                       ingenting; den som vill smalna av trycker här och ser att den gjort det. *@
+                    <button class="btn btn-outline-secondary" id="onlyNearMeBtn" type="button"
+                            title="Visa bara tävlingar i dina kretsar och klubbar">
+                        <i class="bi bi-geo-fill me-1"></i>Bara nära dig
+                    </button>
+                }
+
                 <!-- Expander Button -->
                 <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#advancedFilters" aria-expanded="false" aria-controls="advancedFilters">
                     <i class="bi bi-funnel"></i> Mer filter
@@ -208,14 +286,6 @@
                 <div class="card" style="background-color: var(--bs-tertiary-bg);">
                     <div class="card-body">
                         <div class="row g-3">
-                            <!-- Search Box -->
-                            <div class="col-md-2">
-                                <label for="searchCompetitions" class="form-label">
-                                    <i class="bi bi-search"></i> Sök tävlingar
-                                </label>
-                                <input type="text" class="form-control" id="searchCompetitions" placeholder="Sök på namn, plats eller beskrivning...">
-                            </div>
-
                             <!-- Competition Type Filter -->
                             <div class="col-md-2">
                                 <label for="filterCompetitionType" class="form-label">
@@ -302,129 +372,11 @@
     <!-- All Competitions Grid -->
     <div class="mt-4" id="competitionsGrid">
         <div class="row">
-            @* Competition Series Cards *@
-            @foreach (var series in allCompetitionSeries)
-            {
-                var seriesName = series.Value<string>("seriesName") ?? series.Name;
-                var seriesDescription = series.Value<string>("seriesDescription") ?? "";
-                var seriesShortDescription = series.Value<string>("seriesShortDescription") ?? seriesDescription;
-                var seriesStartDate = series.Value<DateTime>("seriesStartDate");
-                var seriesEndDate = series.Value<DateTime>("seriesEndDate");
-                var seriesLogo = series.Value<IPublishedContent>("seriesLogo");
-                var isSeriesActive = series.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
+            @* Seriekorten är borta från den här sidan: en serie konkurrerade om samma kortyta
+               som tävlingarna, och dess omgångar gick inte att hitta alls — de renderades aldrig
+               som kort och saknade därför data-search-text. Varje omgång är nu ett vanligt
+               tävlingskort med en "Del av <serien>"-bricka som länkar till serien. *@
 
-                // Get competitions in this series
-                var seriesCompetitions = series.Children().Where(x => x.ContentType.Alias == "competition")
-                                                      .OrderBy(x => x.Value<DateTime>("competitionDate"))
-                                                      .ToList();
-                var seriesCompletedCount = seriesCompetitions.Where(c => c.Value<DateTime>("competitionDate").Date < now.Date).Count();
-                var totalCompetitions = seriesCompetitions.Count();
-                var progressPercentage = totalCompetitions > 0 ? (seriesCompletedCount * 100 / totalCompetitions) : 0;
-
-                // Derive series regions from its child competitions (CSV of distinct non-empty regions)
-                var seriesRegions = string.Join(",", seriesCompetitions.Select(c =>
-                {
-                    var ccid = c.Value<int>("clubId");
-                    if (ccid > 0 && clubRegionLookup.TryGetValue(ccid, out var cr)) return cr;
-                    return c.Value<string>("regionalFederation") ?? "";
-                }).Where(r => !string.IsNullOrEmpty(r)).Distinct());
-
-                // Calculate series status based on series dates (not competition dates)
-                var seriesStatus = "inactive";
-                var seriesStatusText = "<i class=\"bi bi-pause-circle me-1\"></i> Inaktiv";
-                var seriesStatusClass = "secondary";
-                var seriesButtonText = "Visa serie";
-                var seriesButtonClass = "btn-secondary";
-
-                if (isSeriesActive)
-                {
-                    // Use series' own start/end dates instead of child competition dates
-                    if (seriesEndDate != DateTime.MinValue && seriesStartDate != DateTime.MinValue)
-                    {
-                        if (seriesEndDate.Date < now.Date)
-                        {
-                            seriesStatus = "completed";
-                            seriesStatusText = "<i class=\"bi bi-check-circle me-1\"></i> Avslutad";
-                            seriesStatusClass = "secondary";
-                            seriesButtonText = "Visa resultat";
-                            seriesButtonClass = "btn-secondary";
-                        }
-                        else if (seriesStartDate.Date <= now.Date && seriesEndDate.Date >= now.Date)
-                        {
-                            seriesStatus = "active";
-                            seriesStatusText = "<i class=\"bi bi-play-circle me-1\"></i> Pågående serie";
-                            seriesStatusClass = "primary";
-                            seriesButtonText = "Visa serie";
-                            seriesButtonClass = "btn-primary";
-                        }
-                        else if (seriesStartDate.Date > now.Date)
-                        {
-                            seriesStatus = "upcoming";
-                            seriesStatusText = "<i class=\"bi bi-calendar me-1\"></i> Kommande serie";
-                            seriesStatusClass = "warning";
-                            seriesButtonText = "Visa serie";
-                            seriesButtonClass = "btn-warning";
-                        }
-                    }
-                    else
-                    {
-                        // Series is active but has no dates set - treat as upcoming
-                        seriesStatus = "upcoming";
-                        seriesStatusText = "<i class=\"bi bi-calendar me-1\"></i> Kommande serie";
-                        seriesStatusClass = "warning";
-                        seriesButtonText = "Visa serie";
-                        seriesButtonClass = "btn-warning";
-                    }
-                }
-
-                <div class="col-md-6 col-lg-4 mb-4 competition-card series-card"
-                     data-status="@seriesStatus"
-                     data-name="@seriesName.ToLower()"
-                     data-description="@seriesShortDescription?.ToLower()"
-                     data-series="@series.Id"
-                     data-region="@seriesRegions"
-                     data-date="@(seriesStartDate != DateTime.MinValue ? seriesStartDate.ToString("yyyy-MM-dd") : "")"
-                     data-search-text="@((seriesName + " " + seriesShortDescription + " serie").ToLower())">
-                    <div class="card h-100 border-@seriesStatusClass series-highlight">
-                        <div class="card-header bg-@seriesStatusClass text-white">
-                            <div class="d-flex align-items-center">
-                                @if (seriesLogo != null)
-                                {
-                                    <img src="@seriesLogo.Url()" alt="@seriesName Logo" class="me-2" style="max-height: 32px; max-width: 40px;">
-                                }
-                                <div class="flex-grow-1">
-                                    <h5 class="card-title mb-0"><i class="bi bi-trophy"></i> @seriesName</h5>
-                                    <small>@Html.Raw(seriesStatusText)</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <p class="card-text">@Html.Raw(System.Net.WebUtility.HtmlDecode(seriesShortDescription))</p>
-                            <ul class="list-unstyled small">
-                                @if (seriesStartDate != DateTime.MinValue && seriesEndDate != DateTime.MinValue)
-                                {
-                                    <li><i class="bi bi-calendar-range"></i> @seriesStartDate.ToString("yyyy-MM-dd") - @seriesEndDate.ToString("yyyy-MM-dd")</li>
-                                }
-                                <li><i class="bi bi-trophy"></i> @totalCompetitions tävlingar i serien</li>
-                                <li><i class="bi bi-graph-up"></i> @progressPercentage% genomfört</li>
-                                @if (totalCompetitions > 0)
-                                {
-                                    <li><i class="bi bi-calendar-check"></i> @seriesCompletedCount/@totalCompetitions avslutade</li>
-                                }
-                            </ul>
-                            @if (totalCompetitions > 0)
-                            {
-                                <div class="progress mb-2" style="height: 6px;">
-                                    <div class="progress-bar bg-success" role="progressbar" style="width: @progressPercentage%"></div>
-                                </div>
-                            }
-                        </div>
-                        <div class="card-footer">
-                            <a href="@series.Url()" class="btn @seriesButtonClass btn-sm">@seriesButtonText</a>
-                        </div>
-                    </div>
-                </div>
-            }
 
             @* Individual Competition Cards *@
             @foreach (var competition in allCompetitions)
@@ -570,6 +522,9 @@
                 {
                     seriesId = parent.Id.ToString();
                 }
+                seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
+                var isClubOnlyComp = competition.Value<bool>("isClubOnly");
+                var isNearMeComp = nearMeCompetitionIds.Contains(competition.Id);
 
                 // Calculate status
                 var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
@@ -629,7 +584,8 @@
                      data-range-id="@(competition.HasProperty("rangeId") ? competition.Value<int>("rangeId") : 0)"
                      data-comp-name="@competition.Name"
                      data-comp-url="@competition.CompetitionUrl()"
-                     data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName).ToLower())">
+                     data-near-me="@(isNearMeComp ? "1" : "0")"
+                     data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName + " " + (partOfSeries.Name ?? "")).ToLower())">
                     <div class="card h-100 border-@statusClass">
                         <div class="card-header bg-@statusClass text-white">
                             <div class="d-flex justify-content-between align-items-start">
@@ -647,6 +603,24 @@
                                         {
                                             <span class="badge bg-light text-dark me-1" title="Inbjudan tillgänglig">
                                                 <i class="bi bi-file-earmark-pdf me-1"></i>Inbjudan
+                                            </span>
+                                        }
+                                        @if (partOfSeries.Name != null)
+                                        {
+                                            @* Länken till serien är hela poängen: omgången är hittbar här, och
+                                               sammanställningen är ett klick bort. stopPropagation behövs inte — kortet
+                                               är inte klickbart i sin helhet. *@
+                                            <a href="@partOfSeries.Url" class="badge bg-light text-dark text-decoration-none me-1"
+                                               title="Visa hela serien @partOfSeries.Name">
+                                                <i class="bi bi-trophy me-1"></i>Del av @partOfSeries.Name
+                                            </a>
+                                        }
+                                        @if (isClubOnlyComp)
+                                        {
+                                            @* Renderas bara för medlemmar i klubben (se allCompetitions), så brickan
+                                               förklarar varför ingen annan ser den. *@
+                                            <span class="badge bg-light text-dark me-1" title="Endast för klubbens medlemmar">
+                                                <i class="bi bi-lock me-1"></i>Endast klubb
                                             </span>
                                         }
                                     </div>
@@ -754,123 +728,10 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @* Competition Series Rows *@
-                    @foreach (var series in allCompetitionSeries)
-                    {
-                        var seriesName = series.Value<string>("seriesName") ?? series.Name;
-                        var seriesDescription = series.Value<string>("seriesDescription") ?? "";
-                        var seriesShortDescription = series.Value<string>("seriesShortDescription") ?? seriesDescription;
-                        var seriesStartDate = series.Value<DateTime>("seriesStartDate");
-                        var seriesEndDate = series.Value<DateTime>("seriesEndDate");
-                        var isSeriesActive = series.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
+                    @* Seriekorten är borta från den här sidan: en serie konkurrerade om
+                       samma kortyta som tävlingarna, och dess omgångar gick inte att hitta alls.
+                       Varje omgång är nu en vanlig rad med en "Del av <serien>"-länk. *@
 
-                        // Get competitions in this series for stats
-                        var seriesCompetitions = series.Children().Where(x => x.ContentType.Alias == "competition")
-                                                              .OrderBy(x => x.Value<DateTime>("competitionDate"))
-                                                              .ToList();
-                        var seriesCompletedCountList = seriesCompetitions.Where(c => c.Value<DateTime>("competitionDate").Date < now.Date).Count();
-                        var totalCompetitionsList = seriesCompetitions.Count();
-
-                        // Derive series regions from its child competitions (CSV of distinct non-empty regions)
-                        var seriesRegions = string.Join(",", seriesCompetitions.Select(c =>
-                        {
-                            var ccid = c.Value<int>("clubId");
-                            if (ccid > 0 && clubRegionLookup.TryGetValue(ccid, out var cr)) return cr;
-                            return c.Value<string>("regionalFederation") ?? "";
-                        }).Where(r => !string.IsNullOrEmpty(r)).Distinct());
-
-                        // Calculate series status based on series dates (not competition dates)
-                        var seriesStatus = "inactive";
-                        var seriesStatusText = "<i class=\"bi bi-pause-circle me-1\"></i> Inaktiv";
-                        var seriesStatusClass = "secondary";
-
-                        if (isSeriesActive)
-                        {
-                            // Use series' own start/end dates instead of child competition dates
-                            if (seriesEndDate != DateTime.MinValue && seriesStartDate != DateTime.MinValue)
-                            {
-                                if (seriesEndDate.Date < now.Date)
-                                {
-                                    seriesStatus = "completed";
-                                    seriesStatusText = "<i class=\"bi bi-check-circle me-1\"></i> Avslutad";
-                                    seriesStatusClass = "secondary";
-                                }
-                                else if (seriesStartDate.Date <= now.Date && seriesEndDate.Date >= now.Date)
-                                {
-                                    seriesStatus = "active";
-                                    seriesStatusText = "<i class=\"bi bi-play-circle me-1\"></i> Pågående serie";
-                                    seriesStatusClass = "primary";
-                                }
-                                else if (seriesStartDate.Date > now.Date)
-                                {
-                                    seriesStatus = "upcoming";
-                                    seriesStatusText = "<i class=\"bi bi-calendar me-1\"></i> Kommande serie";
-                                    seriesStatusClass = "warning";
-                                }
-                            }
-                        }
-
-                        <tr class="competition-card series-row"
-                            data-status="@seriesStatus"
-                            data-name="@seriesName.ToLower()"
-                            data-description="@seriesShortDescription?.ToLower()"
-                            data-series="@series.Id"
-                            data-region="@seriesRegions"
-                            data-date="@(seriesStartDate != DateTime.MinValue ? seriesStartDate.ToString("yyyy-MM-dd") : "")"
-                            data-search-text="@((seriesName + " " + seriesShortDescription + " serie").ToLower())">
-
-                            <td>
-                                <div class="fw-bold"><i class="bi bi-trophy"></i> @seriesName</div>
-                                @if (!string.IsNullOrEmpty(seriesShortDescription))
-                                {
-                                    <div class="small text-muted series-description">@Html.Raw(System.Net.WebUtility.HtmlDecode(seriesShortDescription))</div>
-                                }
-                            </td>
-
-                            <td>
-                                <span class="badge bg-@seriesStatusClass">
-                                    @Html.Raw(seriesStatusText)
-                                </span>
-                            </td>
-
-                            <td>
-                                @if (seriesStartDate != DateTime.MinValue && seriesEndDate != DateTime.MinValue)
-                                {
-                                    <div class="fw-bold">@seriesStartDate.ToString("yyyy-MM-dd")</div>
-                                    <small class="text-muted">till @seriesEndDate.ToString("MM-dd")</small>
-                                }
-                                else
-                                {
-                                    <small class="text-muted">-</small>
-                                }
-                            </td>
-
-                            <td>
-                                <span class="text-muted">Flera platser</span>
-                            </td>
-
-                            <td>
-                                <span class="text-primary fw-bold">Serie</span>
-                            </td>
-
-                            <td>
-                                @if (totalCompetitionsList > 0)
-                                {
-                                    <span class="badge bg-light text-dark">@totalCompetitionsList tävlingar</span>
-                                }
-                                else
-                                {
-                                    <small class="text-muted">Inga tävlingar</small>
-                                }
-                            </td>
-
-                            <td>
-                                <a href="@series.Url()" class="btn btn-@seriesStatusClass btn-sm">
-                                    <i class="bi bi-eye"></i>
-                                </a>
-                            </td>
-                        </tr>
-                    }
 
                     @* Individual Competition Rows *@
                     @foreach (var competition in allCompetitions)
@@ -1000,6 +861,9 @@
                         {
                             seriesId = parent.Id.ToString();
                         }
+                        seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
+                        var isClubOnlyComp = competition.Value<bool>("isClubOnly");
+                        var isNearMeComp = nearMeCompetitionIds.Contains(competition.Id);
 
                         // Calculate status (same logic as card view)
                         var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
@@ -1056,10 +920,27 @@
                             data-season="@seasonId"
                             data-series="@seriesId"
                             data-date="@compDate.ToString("yyyy-MM-dd")"
-                            data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName).ToLower())">
+                            data-near-me="@(isNearMeComp ? "1" : "0")"
+                            data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName + " " + (partOfSeries.Name ?? "")).ToLower())">
 
                             <td>
                                 <div class="fw-bold">@competition.Name</div>
+                                @* Samma två brickor som kortvyn, i smått. De måste finnas på båda ställena:
+                                   listvyn är en egen renderare, och en bricka bara i kortvyn betyder att
+                                   halva användarna inte ser att tävlingen ingår i en serie. *@
+                                @if (partOfSeries.Name != null)
+                                {
+                                    <a href="@partOfSeries.Url" class="badge bg-light text-dark text-decoration-none"
+                                       title="Visa hela serien @partOfSeries.Name">
+                                        <i class="bi bi-trophy me-1"></i>Del av @partOfSeries.Name
+                                    </a>
+                                }
+                                @if (isClubOnlyComp)
+                                {
+                                    <span class="badge bg-light text-dark" title="Endast för klubbens medlemmar">
+                                        <i class="bi bi-lock me-1"></i>Endast klubb
+                                    </span>
+                                }
                             </td>
 
                             <td>
@@ -1332,6 +1213,12 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedRegions = new Set(); // Empty = all regions
     let allRegions = []; // Will be populated from API
 
+    // Har den här besökaren en „närhet” alls? Utloggad, eller medlem utan klubb, har ingen — och då
+    // ska sidan se ut precis som förut i stället för att visa en tom „Nära dig”-rubrik.
+    const hasLocality = @((myClubIds.Count > 0 || myRegions.Count > 0) ? "true" : "false");
+    const localityLabel = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(myRegionNames));
+    let onlyNearMe = false;
+
     // Load regions for filter
     function loadRegions() {
         fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
@@ -1454,6 +1341,9 @@ document.addEventListener('DOMContentLoaded', function() {
             let matchesWeaponClass = !selectedWeaponClass ||
                 cardWeaponClass.split(',').some(wc => wc.trim() === selectedWeaponClass);
 
+            // "Bara nära dig" — en uttrycklig avsmalning, aldrig förvald.
+            let matchesNearMe = !onlyNearMe || card.dataset.nearMe === '1';
+
             // Region filter - if selectedRegions is empty, show all; otherwise check if any of the card's regions is selected
             // Also show competitions with no region (national competitions) when any region is selected.
             // Series cards can carry a CSV of regions (one per child competition), so split before matching.
@@ -1470,7 +1360,7 @@ document.addEventListener('DOMContentLoaded', function() {
             let matchesVenue = !selectedVenue || cardVenue === selectedVenue;
 
             // Show/hide card
-            if (matchesStatus && matchesSearch && matchesType && matchesWeaponClass && matchesRegion && matchesSeason && matchesVenue) {
+            if (matchesStatus && matchesSearch && matchesType && matchesWeaponClass && matchesRegion && matchesSeason && matchesVenue && matchesNearMe) {
                 card.classList.remove('filtered-out');
                 visibleCards.push(card);
             } else {
@@ -1493,6 +1383,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Sort function
     function sortCards(cards, sortBy) {
         cards.sort((a, b) => {
+            // Närhet är PRIMÄR sorteringsnyckel när besökaren har en krets eller klubb. Det är
+            // "Nära dig först"-beteendet, och det är medvetet en SORTERING och inte ett filter:
+            // ett standardfilter som tyst gömmer tävlingar är vad som genererar "min tävling är
+            // borta". Den som vill smalna av gör det själv via "Visa bara nära dig".
+            if (hasLocality) {
+                const an = a.dataset.nearMe === '1' ? 0 : 1;
+                const bn = b.dataset.nearMe === '1' ? 0 : 1;
+                if (an !== bn) return an - bn;
+            }
             switch (sortBy) {
                 case 'date-asc':
                     return new Date(a.dataset.date) - new Date(b.dataset.date);
@@ -1511,6 +1410,73 @@ document.addEventListener('DOMContentLoaded', function() {
         cards.forEach(card => {
             card.parentNode.appendChild(card);
         });
+
+        // Rubrikerna återskapas EFTER sorteringen, inte före. Sorteringen flyttar korten genom att
+        // appenda dem på nytt, så en rubrik som redan låg i flödet hade hamnat på fel ställe.
+        renderSectionHeadings(cards);
+    }
+
+    // Två rubriker i SAMMA container som korten: "Nära dig" före det första lokala kortet och
+    // "Övriga tävlingar i landet" före det första icke-lokala. Ingenting göms — rubrikerna säger
+    // bara var gränsen går, och bär antalet så den andra gruppen är läsbar utan att skrollas fram.
+    function renderSectionHeadings(visibleCards) {
+        document.querySelectorAll('.comp-section-heading').forEach(el => el.remove());
+        if (!hasLocality || !visibleCards || visibleCards.length === 0) return;
+
+        // ⚠️ filterCompetitions() plockar upp `.competition-card` GLOBALT, alltså både kortvyns
+        // kort och listvyns rader — samma tävling två gånger. Rubrikerna måste därför grupperas
+        // per container, annars visar de dubbla antalet ("14 st" när sju kort syns) och det ser ut
+        // som om sidan räknar fel på tävlingarna.
+        const byContainer = new Map();
+        visibleCards.forEach(c => {
+            if (!byContainer.has(c.parentNode)) byContainer.set(c.parentNode, []);
+            byContainer.get(c.parentNode).push(c);
+        });
+        byContainer.forEach(cards => renderHeadingsIn(cards));
+    }
+
+    function renderHeadingsIn(visibleCards) {
+        const near = visibleCards.filter(c => c.dataset.nearMe === '1');
+        const other = visibleCards.filter(c => c.dataset.nearMe !== '1');
+        // Med bara en grupp på skärmen säger en rubrik ingenting — då är den bara brus.
+        if (near.length === 0 || other.length === 0) return;
+
+        const isList = visibleCards[0].tagName === 'TR';
+        const make = (text, sub) => {
+            if (isList) {
+                const tr = document.createElement('tr');
+                tr.className = 'comp-section-heading';
+                const td = document.createElement('td');
+                td.colSpan = 8;
+                td.className = 'bg-body-tertiary fw-bold small py-2';
+                td.textContent = sub ? (text + ' \u2014 ' + sub) : text;
+                tr.appendChild(td);
+                return tr;
+            }
+            const div = document.createElement('div');
+            div.className = 'col-12 comp-section-heading';
+            const inner = document.createElement('div');
+            inner.className = 'd-flex align-items-baseline gap-2 border-bottom pb-1 mb-3';
+            const strong = document.createElement('span');
+            strong.className = 'fw-bold text-uppercase small';
+            strong.textContent = text;
+            inner.appendChild(strong);
+            if (sub) {
+                const small = document.createElement('span');
+                small.className = 'text-muted small';
+                small.textContent = sub;
+                inner.appendChild(small);
+            }
+            div.appendChild(inner);
+            return div;
+        };
+
+        const nearSub = localityLabel ? (localityLabel + ' \u00b7 ' + near.length + ' st') : (near.length + ' st');
+        const nearHeading = make('N\u00e4ra dig', nearSub);
+        near[0].parentNode.insertBefore(nearHeading, near[0]);
+
+        const otherHeading = make('\u00d6vriga t\u00e4vlingar i landet', other.length + ' st');
+        other[0].parentNode.insertBefore(otherHeading, other[0]);
     }
 
     // Update status pill counts
@@ -1553,6 +1519,34 @@ document.addEventListener('DOMContentLoaded', function() {
             filterCompetitions();
         });
     });
+
+    // "Bara nära dig"-knappen
+    const onlyNearMeBtn = document.getElementById('onlyNearMeBtn');
+    if (onlyNearMeBtn) {
+        onlyNearMeBtn.addEventListener('click', function () {
+            onlyNearMe = !onlyNearMe;
+            this.classList.toggle('active', onlyNearMe);
+            this.setAttribute('aria-pressed', onlyNearMe ? 'true' : 'false');
+            filterCompetitions();
+        });
+    }
+
+    // Rensa-knappen i sökfältet. Ett tomt sökfält ser identiskt ut med ett man glömt rensa, och
+    // det är den vanligaste orsaken till "det finns inga tävlingar" när det finns gott om dem.
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+    function syncClearSearchBtn() {
+        if (clearSearchBtn) clearSearchBtn.classList.toggle('d-none', !searchInput.value);
+    }
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', function () {
+            searchInput.value = '';
+            syncClearSearchBtn();
+            filterCompetitions();
+            searchInput.focus();
+        });
+    }
+    searchInput.addEventListener('input', syncClearSearchBtn);
+    syncClearSearchBtn();
 
     // View toggle functions
     function switchToCardView() {
@@ -1616,14 +1610,9 @@ document.addEventListener('DOMContentLoaded', function() {
             (byRange[rid] = byRange[rid] || []).push({ name: c.dataset.compName || '', url: c.dataset.compUrl || '#', date: c.dataset.date || '' });
         });
 
-        // Competitions that are part of a series aren't rendered as cards — add them from the
-        // server-supplied list so they appear on the map too.
-        const seriesComps = @Html.Raw(seriesChildCompetitionsForMapJson);
-        seriesComps.forEach(sc => {
-            const rid = parseInt(sc.rangeId || '0');
-            if (!rid) return;
-            (byRange[rid] = byRange[rid] || []).push({ name: sc.name || '', url: sc.url || '#', date: sc.date || '' });
-        });
+        // Serieomgångar renderas nu som vanliga kort, så de plockas upp av selektorn ovan.
+        // Det server-genererade tillägget som fanns här är borttaget — kvar hade det räknat varje
+        // serieomgång TVÅ gånger, och tillägget lydde inte filtret.
 
         const rangeIds = Object.keys(byRange);
         compCluster.clearLayers();
@@ -1700,6 +1689,15 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('regionSelectAll').checked = true;
         document.querySelectorAll('.region-checkbox').forEach(cb => cb.checked = true);
         updateRegionFilterLabel();
+
+        // "Bara nära dig" är ett filter som gömmer tävlingar, så Rensa filter måste lyfta det —
+        // annars är det kvar efter att användaren tryckt på knappen som säger att allt är rensat.
+        onlyNearMe = false;
+        if (onlyNearMeBtn) {
+            onlyNearMeBtn.classList.remove('active');
+            onlyNearMeBtn.setAttribute('aria-pressed', 'false');
+        }
+        syncClearSearchBtn();
 
         filterCompetitions();
     });
