@@ -1,4 +1,4 @@
-@using Umbraco.Cms.Web.Common.PublishedModels;
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
 @using Umbraco.Cms.Core.Security
 @using Umbraco.Cms.Core.Services
 @using Newtonsoft.Json
@@ -125,6 +125,12 @@
         .current-user { background-color: #cce5ff !important; } /* Light blue for current user */
         .same-club { background-color: #f0f8ff !important; } /* Very light blue for same club */
 
+        /* Write-in space on the PRINTED list. A start time slips on the day and a range officer
+           then pens the new one onto the sheet in their hand — with no room for it they write
+           over the printed time, which is the one thing on the row that must stay readable.
+           Screen-invisible: it is paper affordance, nothing to do with the web view. */
+        .writein { display: none; }
+
         @@media print {
             .no-print { display: none !important; }
             .print-only { display: block !important; }
@@ -132,6 +138,19 @@
             .start-list-table { font-size: 9px; }
             .start-list-table th, .start-list-table td { padding: 2px 4px; }
             .team-header { font-size: 12px; }
+
+            /* 42mm — the printed time plus a rule long enough to write another one on. */
+            .start-list-table th.col-starttid,
+            .start-list-table td.col-starttid { width: 42mm; }
+
+            .writein {
+                display: inline-block;
+                border-bottom: 1px dotted #666;
+                min-width: 18mm;
+                margin-left: 4mm;
+            }
+            /* On a shared-time skjutlag the time lives in the header, so the rule goes there. */
+            .team-header .writein { min-width: 30mm; }
         }
     </style>
 </head>
@@ -185,7 +204,7 @@
                             <thead>
                                 <tr>
                                     <th>#</th>
-                                    <th>Starttid</th>
+                                    <th class="col-starttid">Starttid</th>
                                     <th>Namn</th>
                                     <th>Förening</th>
                                     <th>Vapen</th>
@@ -230,7 +249,7 @@
 
                                     <tr class="@rowClass">
                                         <td class="text-center">@s.StartOrder</td>
-                                        <td style="font-family:monospace;font-weight:bold">@sTime</td>
+                                        <td class="col-starttid" style="font-family:monospace;font-weight:bold">@sTime<span class="writein"></span></td>
                                         <td>@sName</td>
                                         <td>@HpskSite.Helpers.ClubNameHelper.Shorten(sClub)</td>
                                         <td class="text-center">@s.WeaponClass</td>
@@ -258,7 +277,7 @@
                             var teamDateLabel = HpskSite.CompetitionTypes.Precision.Controllers.StartListHtmlRenderer.FormatTeamDate(teamDateRaw);
                             <div class="team-section">
                                 <div class="team-header">
-                                    Skjutlag: @team.TeamNumber@(string.IsNullOrWhiteSpace(teamLabel) ? "" : $" — {teamLabel}") - Tid (ca): @teamDateLabel@team.StartTime-@team.EndTime (@team.ShooterCount st)
+                                    Skjutlag: @team.TeamNumber@(string.IsNullOrWhiteSpace(teamLabel) ? "" : $" — {teamLabel}") - Tid (ca): @teamDateLabel@team.StartTime-@team.EndTime (@team.ShooterCount st)@* A whole skjutlag shares one time, so the write-in rule belongs to the header rather than to every row. *@<span class="writein"></span>
 </div>
                                 <table class="start-list-table">
                                     <thead>

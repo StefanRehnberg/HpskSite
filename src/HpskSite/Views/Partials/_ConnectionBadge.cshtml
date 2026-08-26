@@ -1,0 +1,44 @@
+@*
+    Connectivity indicator for data-entry screens.
+
+    On a range with patchy cellular, a failed save shows up as one "Ett fel uppstod" per attempt and
+    nothing tells the operator that the PROBLEM is the network rather than the data. This badge makes
+    the state standing rather than per-attempt: green while saves land, red — with the words —
+    the moment one does not.
+
+    Wiring: call `hpskSetConnection(ok)` after every server round trip on the screen. Every badge on
+    the page updates, so a screen that renders one in a header and one near a save button stays
+    consistent.
+
+        try { const r = await fetch(...); hpskSetConnection(r.ok); }
+        catch (e) { hpskSetConnection(false); }
+
+    ⚠️ Report the FETCH outcome, not `navigator.onLine`. A phone associated with a range AP that has
+    no upstream reports onLine = true, which is exactly the situation this badge exists to expose.
+
+    It starts neutral (grey) and NEVER guesses: until a real request has been made, "we don't know"
+    is the honest state — a green badge before the first save is a promise nothing has kept.
+*@
+<span class="badge bg-secondary hpsk-conn-badge" title="Nätverksstatus"><i class="bi bi-wifi"></i></span>
+@if (ViewData["hpskConnBadgeScriptRendered"] == null)
+{
+    ViewData["hpskConnBadgeScriptRendered"] = true;
+    <script>
+    // Guarded so several badges on one page define the function once.
+    if (!window.hpskSetConnection) {
+        window.hpskSetConnection = function (ok) {
+            document.querySelectorAll('.hpsk-conn-badge').forEach(function (el) {
+                if (ok) {
+                    el.className = 'badge bg-success hpsk-conn-badge';
+                    el.innerHTML = '<i class="bi bi-wifi"></i>';
+                    el.title = 'Uppkopplad';
+                } else {
+                    el.className = 'badge bg-danger hpsk-conn-badge';
+                    el.innerHTML = '<i class="bi bi-wifi-off"></i> Ingen kontakt';
+                    el.title = 'Ingen kontakt med servern — åtgärder sparas inte';
+                }
+            });
+        };
+    }
+    </script>
+}

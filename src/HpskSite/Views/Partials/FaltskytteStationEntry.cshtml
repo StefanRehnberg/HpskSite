@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Fältskytte Station Entry — Mobile-Optimized
  * Tap-button hit entry, one shooter at a time, large touch targets.
  *@
@@ -191,7 +191,11 @@
                 <i class="bi bi-arrow-left me-1"></i>Upprop
             </button>
             <span class="fw-bold fs-5" id="fseStationLabel"></span>
-            <span class="badge bg-info fs-6" id="fsePatrolLabel"></span>
+            <span class="d-flex align-items-center gap-2">
+                @* Green while saves land, red the moment one does not — see _ConnectionBadge. *@
+                @await Html.PartialAsync("_ConnectionBadge")
+                <span class="badge bg-info fs-6" id="fsePatrolLabel"></span>
+            </span>
         </div>
 
         <!-- Navigation bar -->
@@ -878,9 +882,15 @@
                     reshoots: state.reshoots
                 })
             });
+            hpskSetConnection(true);
             state._dirty = false;
             m.hasResult = true;
-        } catch(e) { console.error('Reshoot save failed:', e); }
+        } catch(e) {
+            // This save reported NOTHING to the operator before — the row went on showing the new
+            // reshoot count while the server never heard about it. The badge is the whole signal here.
+            hpskSetConnection(false);
+            console.error('Reshoot save failed:', e);
+        }
     };
 
     window.fseSave = async function() {
@@ -927,6 +937,10 @@
                 })
             });
             var data = await resp.json();
+            // The badge tracks whether the SERVER was reached, so a business-rule rejection
+            // (data.success === false) still counts as connected — conflating the two would send
+            // the operator hunting for a network fault when the data was the problem.
+            hpskSetConnection(true);
             if (data.success) {
                 state._dirty = false;
                 m.hasResult = true;
@@ -955,6 +969,7 @@
                 btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>SPARA RESULTAT';
             }
         } catch(err) {
+            hpskSetConnection(false);
             alert('N\u00e4tverksfel.');
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>SPARA RESULTAT';

@@ -185,6 +185,10 @@ else
             <option value="grid3">3 rutor</option>
             <option value="grid4">4 rutor</option>
         </select>
+        @* A wall TV or kiosk screen is the one nobody walks over to nudge, so this matters more
+           here than anywhere — but still opt-in: a real TV never sleeps and does not need it,
+           while a laptop driving a projector does. *@
+        @await Html.PartialAsync("_ScreenWakeButton", new ViewDataDictionary(ViewData) { { "cssClass", "btn btn-outline-light btn-sm" } })
         <span class="rb-ts" id="rbCycleNow"></span>
         <span class="rb-ts" id="rbLastUpdated"></span>
     </div>

@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Competition Results Management Partial View
  * Handles results entry and management for a specific competition
 *@
@@ -180,6 +180,13 @@
                     </h5>
                     <div class="d-flex align-items-center gap-2">
                         <span id="evtMountPrecisionStation"></span>
+                        @* Whether saves are landing at all. On the range this is the difference between
+                           "the score was wrong" and "the network is down" — see _ConnectionBadge. *@
+                        @await Html.PartialAsync("_ConnectionBadge")
+                        @* Only on the /station pad. A phone or tablet at the firing point locks mid-series
+                           otherwise; the admin page in a desktop browser has no such problem, and an
+                           always-on lock there would just hold a laptop awake for no reason. *@
+                        @await Html.PartialAsync("_ScreenWakeButton")
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resultEntrySettingsModal" title="Inställningar">
                             <i class="bi bi-gear"></i>
                         </button>
@@ -3022,6 +3029,10 @@ async function saveResultWithRetry(url, data, token, maxRetries = 1) {
             const result = await response.json();
             console.log('Server response data (attempt ' + attempt + '):', result);
 
+            // Reached the server. A rejected save (result.success === false) is still a connected
+            // save — the badge answers "is the network up", not "was the data accepted".
+            hpskSetConnection(true);
+
             if (result.success) {
                 showSaveMessage('Resultat sparade!', 'success');
                 updateOverallTotals();
@@ -3044,6 +3055,9 @@ async function saveResultWithRetry(url, data, token, maxRetries = 1) {
                 await new Promise(r => setTimeout(r, 500));
                 continue;
             }
+            // Only after the retries are spent — flagging the first transient miss would make the
+            // badge blink red on a save that then succeeded, which is how an indicator stops being read.
+            hpskSetConnection(false);
             console.error('Error saving results:', error);
             showSaveMessage('Ett fel uppstod vid sparande av resultat.', 'error');
         }

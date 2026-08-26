@@ -2160,8 +2160,18 @@ namespace HpskSite.Controllers
 
                 var teams = await _teamService.GetTeamsForCompetitionAsync(competitionId);
 
-                // Pre-load team invoices (memberId "team-{id}", newest non-cancelled per team).
+                // Pre-load team invoices (memberId "team-{id}"). Two different things are read
+                // from them, and conflating the two is what made the heading above the lists
+                // disagree with the Lag list under it:
+                //   • the ACTIONABLE invoice — newest non-cancelled — which the row's status,
+                //     amount and buttons refer to, and
+                //   • the sum of what has actually been PAID against the team, across every
+                //     non-cancelled invoice, which is what the team still owes is measured from.
+                // A team with a duplicate invoice (one Paid, one stale Pending — SM Springskytte
+                // 2026-08-20) has one of each, so reading only the newest gets the debt wrong in
+                // whichever direction the ids happened to fall.
                 var teamInvoices = new Dictionary<string, IContent>();
+                var teamPaidBilled = new Dictionary<string, decimal>();
                 var invoicesHub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
                     .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
                 if (invoicesHub != null)
@@ -2171,11 +2181,21 @@ namespace HpskSite.Controllers
                         .OrderByDescending(c => c.Id))
                     {
                         var mid = inv.GetValue<string>("memberId") ?? "";
-                        if (mid.StartsWith("team-")
-                            && !teamInvoices.ContainsKey(mid)
-                            && CleanPaymentStatus(inv.GetValue<string>("paymentStatus") ?? "") != "Cancelled")
-                        {
+                        if (!mid.StartsWith("team-")) continue;
+
+                        var invStatus = CleanPaymentStatus(inv.GetValue<string>("paymentStatus") ?? "");
+                        if (invStatus == "Cancelled") continue;
+
+                        if (!teamInvoices.ContainsKey(mid))
                             teamInvoices[mid] = inv;
+
+                        // BILLED total of the paid invoices, not actualPaidAmount — a cash-rounding
+                        // variance is not a debt. Same rule as the individual side
+                        // (paidBilledMap in CompetitionController).
+                        if (invStatus == "Paid")
+                        {
+                            teamPaidBilled[mid] = teamPaidBilled.GetValueOrDefault(mid)
+                                + inv.GetValue<decimal>("totalAmount");
                         }
                     }
                 }
@@ -2185,11 +2205,23 @@ namespace HpskSite.Controllers
 
                 var result = teams.Select(t =>
                 {
-                    teamInvoices.TryGetValue($"team-{t.Team.Id}", out var inv);
+                    var invoiceKey = $"team-{t.Team.Id}";
+                    teamInvoices.TryGetValue(invoiceKey, out var inv);
                     var fee = t.Team.IsRelay ? stafettFee : teamFee;
                     string status = inv != null
                         ? CleanPaymentStatus(inv.GetValue<string>("paymentStatus") ?? "Unknown")
                         : (fee > 0 ? "No Invoice" : "No Fee");
+
+                    // What the LAG still owes, defined exactly as for an individual registration:
+                    // its fee minus what has been paid against it — never the sum of its Pending
+                    // invoice rows. The fee is the debt base; only when the competition carries no
+                    // fee for this kind of team do we fall back to what the team was actually
+                    // billed, so a legacy team whose fee was later cleared stays collectable
+                    // instead of silently reading 0 kr owed.
+                    var invoiceAmount = inv?.GetValue<decimal>("totalAmount") ?? 0m;
+                    var feeBase = fee > 0 ? fee : invoiceAmount;
+                    var paidBilled = teamPaidBilled.GetValueOrDefault(invoiceKey);
+                    var outstanding = Math.Max(0m, feeBase - paidBilled);
 
                     return new
                     {
@@ -2206,7 +2238,12 @@ namespace HpskSite.Controllers
                         paymentStatus = status,
                         invoiceId = inv?.Id ?? 0,
                         invoiceNumber = inv?.GetValue<string>("invoiceNumber") ?? "",
-                        amount = inv?.GetValue<decimal>("totalAmount") ?? fee
+                        amount = inv != null ? invoiceAmount : fee,
+                        // The two figures the summary cards above the lists are built from. Named
+                        // like the individual rows' fields and meaning the same thing, so the
+                        // client can total both kinds with one rule.
+                        paidAmount = paidBilled,
+                        outstandingAmount = outstanding
                     };
                 }).ToList();
 

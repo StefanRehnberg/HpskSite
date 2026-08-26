@@ -1783,6 +1783,85 @@ startlist-coverage 27/27, dnsdnf-ui 13/13, row-action-menus 60/60, action-menus-
 
 Adds C# → full rebuild. No SQL, no doctype property.
 
+### Roller som redigeraren aldrig visade fick inte tas bort av den (2026-08-26)
+
+**En sajtadmin som öppnade medlemsmodalen på en klubbadmin och tryckte Spara tog TYST bort hens
+`ClubAdmin_*`-roll.** Tre rimliga beslut som tillsammans blev en bugg: `MemberAdmin/GetMember`
+filtrerade bort `ClubAdmin_*` ur `groups`, `GetMemberGroups` filtrerade bort dem ur kryssrutelistan
+("to reduce response size and UI clutter") — men `SaveMember` diffade de POSTADE grupperna mot
+`GetAllRoles`, alltså mot **alla** roller medlemmen har. Klienten kunde bevisligen inte posta
+tillbaka det den aldrig fick. A/B: 2 klubbadmins på klubb 2604 blev 1 vid ett enda Spara, utan
+felmeddelande och utan att något på skärmen antydde att grupper ändrades.
+
+**`GetGroupEditorGroupNamesAsync` är nu den ENDA plats som bestämmer vad gruppredigeraren erbjuder,
+och `SaveMember` får bara ta bort roller ur den mängden.** Att i stället bevara prefixet `ClubAdmin_`
+explicit hade lagat exakt det här fallet och lämnat FORMEN kvar — felet är inte prefixet, utan att en
+diff tar bort det som aldrig erbjöds. Filtrera bort något i den metoden och det är skyddat i
+sparandet gratis; invarianten är strukturell i stället för en prefixlista att hålla i takt.
+`GetMember` läser samma mängd, så förkryssningen och skyddet kan inte glida isär.
+- **`rolesToAdd` lämnades ORÖRT, medvetet.** Där finns ingen tyst förlust, och att börja tysta bort
+  en icke-erbjuden tilldelning skulle införa precis den sortens tysta bortfall som fixen handlar om.
+- **De andra scope-rollerna hade INTE buggen:** `RegionalAdmin_*`, `Skjutledare_*`,
+  `Foreningsinstruktor_*`, `Kretsinstruktor_*`, `Riksinstruktor_*` ligger i
+  `_memberGroupService.GetAllAsync()`, alltså i kryssrutelistan, och rundgår korrekt. Bevisat på
+  vägen: `Riksinstruktor_Syd` överlevde samma sparning som åt `ClubAdmin_2604`. De är ändå skyddade
+  nu, eftersom skyddet följer "erbjöds den?" och inte en lista över prefix.
+
+**Väntande på Anmälningar räknades per FAKTURARAD på lagsidan.** Individsidan fick definitionen
+"vad ANMÄLAN är skyldig (avgift − betalt)" i `f4d425d`; lagsidan buckettade fortfarande på
+fakturastatus, alltså den form som gjorde att rubriken sa 1000 kr medan Lag-listan under visade 600.
+`GetCompetitionTeams` returnerar nu `paidAmount` + `outstandingAmount` med samma definition, och
+klienten totaliserar båda slagen med en regel. ⚠️ Endpointen läste bara den NYASTE icke-makulerade
+fakturan, vilket ger fel skuld åt vilket håll id:na råkar falla när ett lag har en betald och en
+kvarglömd väntande. Basen är AVGIFTEN, med det fakturerade beloppet som reserv bara när tävlingen
+inte bär någon avgift för lagtypen — annars läser ett gammalt lag vars avgift nollats "0 kr skuld".
+
+**Delade partialer i stället för en fjärde handskriven kopia:** `_ScreenWakeButton.cshtml`
+("Håll skärmen vaken") och `_ConnectionBadge.cshtml` (`hpskSetConnection(ok)`). Tre skärmar bar redan
+var sin kopia av wake-lock-dansen med egna variabelprefix; de ligger kvar, men partialen är den att
+konvergera mot. Två regler som är hela poängen med att de finns:
+- **Låset MÅSTE återtas på `visibilitychange`** — OS:et släpper det varje gång fliken göms, så utan
+  det ser knappen påslagen ut och gör ingenting efter första flikbytet.
+- **Rapportera FETCH-utfallet, aldrig `navigator.onLine`** — en telefon ansluten till banans AP utan
+  uppström rapporterar `onLine === true`, vilket är exakt det läge badgen finns för. En avvisad
+  sparning (`success:false`) räknas som UPPKOPPLAD; att blanda ihop de två skickar operatören på
+  nätverksjakt när det var datat som var fel.
+- Partialen visar tillstånd med `.active` + `aria-pressed`, inte genom att byta in en bestämd
+  Bootstrap-variant: anroparen väljer variant (den mörka `/live`-tavlan skickar `btn-outline-light`),
+  och två varianter på samma knapp låter stilmallens ordning avgöra utseendet.
+- ⚠️ **Precisionens `/station`-padda är `CompetitionResultsManagement` med `IsStationPage`**, inte
+  `DistributedResultEntry.cshtml` (som är en självrapporteringsmodal). Knappen sitter bara i
+  `isStationPage`-grenen. **`SkjutledareView` gör noll serveranrop** — en uppkopplingsbadge där
+  skulle rapportera om ingenting.
+- **Fynd på vägen:** Fältskyttes omskjutnings-autospar rapporterade ingenting alls vid fel
+  (`catch { console.error }`) — raden visade det nya antalet medan servern aldrig hörde om det.
+
+**⚠️ Omnumrering av patruller flyttade inte resultatradernas patrullnummer.**
+`FaltskytteResultEntry` bär en KOPIA av `PatrolNumber` och ingenting höll de två i takt, så en
+omnumrering lämnade varje redan inmatat resultat pekande på det nummer patrullen HADE.
+`FaltskytteStatsController` joinar resultatrader mot patruller på just `PatrolNumber` (`:51-57`), så
+flödesstatistiken krediterade varje patrulls sträcktider till en annan patrulls vapengrupp. **Tyst**,
+eftersom resultaten i sig förblir riktiga och bara ATTRIBUTIONEN ruttnar. `RenumberAllPatrolsAsync`
+returnerar nu mappningen och migrerar raderna i samma operation, tvåfasat av samma skäl som
+patrullerna: ett gammalt och ett nytt nummer kan kollidera mitt i vandringen (patrull 3 blir 2 medan
+den verkliga 2 inte flyttat än). **Ett läge går inte att lösa** — delade två patruller nummer är
+deras resultatrader oskiljbara, för raderna registrerade bara numret; det larmas om i förväg i
+stället för att låta migreringen framstå som förlustfri i alla lägen.
+Ny läsande `Faltskytte/PreviewRenumberPatrols` namnger vad som ändras (gammalt → nytt, vapengrupp,
+etikett, antal resultat), listar dubblettnummer, och använder **samma `ORDER BY`** som själva
+omnumreringen — annars kan de två vara oense om vilken patrull som blir vilket nummer. Spåret är en
+`LogInformation` med hela mappningen; en ny kolumn skulle behöva en migrering för att säga samma sak.
+
+Övrigt i samma omgång: Fältskyttes Startlistor-flik läser om på `shown.bs.tab` (den renderade en gång
+vid sidladdning och var inaktuell i samma sekund anmälningsbordet registrerade någon), skriv-in-rader
+i print-CSS på startlista och patrullista, och den föräldralösa `StationInfoCard.cshtml` raderad.
+
+Verifierat 48/48 `hpsk-verify/carryover-batch-verify.mjs`, **A/B: 21 faller på baseline**.
+⚠️ **Punkt 1 i den sviten är den enda vars A/B FÖRSTÖR dev** — där tar sparandet verkligen bort
+rollen. Två A/B-körningar tömde klubb 2604 på båda sina klubbadmins innan självreparationen fanns,
+och enda spåret var `Current roles:`-raderna i apploggen. Ta inte bort självreparationen.
+Adds C# → full rebuild. Ingen SQL, ingen doctype-property, ingen Umbraco-nod.
+
 ### En skytts klass är EN sträng — `ShootingClasses.ToCanonicalName` (2026-08-25)
 
 **Klubbmästerskapet 2026-08-25 (tävling 3706) listade veteranerna TVÅ gånger** i resultatlistan: en
@@ -2643,7 +2722,7 @@ Two SQL migrations: `add-approval-to-faltskytte-configuration.sql` (status + app
 **Per-station name + reorder** (`_FaltskytteConfiguratorScript.cshtml`):
 - `name` added to `createDefaultStation`; editable in advanced-mode card body + simple-mode header; `faltCfgEscapeHtml` helper added.
 - **Reorder is per weapon class** with array order = display/sequence and the station NUMBER as stable identity (looked up everywhere by `.station`, and a single-station save serializes the whole blob — so no renumber, nothing downstream breaks). `ensureStations` rewritten to PRESERVE array order (keep in-order ≤count, append missing). `faltCfgMoveStation` (advanced, per-class; linked classes sync via faltCfgMarkDirty) + `faltCfgSimpleMoveStation`/`faltCfgSimpleSetName` (simple, uniform across classes). Scope: editor + printout only — NOT patrol generation / result-entry order (those sort by number).
-- **Station name in headers:** added `Name` to `FaltskytteStationConfig` (server model) + `StationName` to `FaltskytteStationView`; `GetStationEntryData` returns it (first non-empty across classes). Shown after "Station X" in: editor cards, printed station card (`faltCfgPrintStation`), result-entry roll-call + entry headers (`fseStationLabel()`), public `StationInfoCard`, and `FaltskytteStationInfoStatic` (QR Förutsättningar). Intentionally NOT on Tidur / live results.
+- **Station name in headers:** added `Name` to `FaltskytteStationConfig` (server model) + `StationName` to `FaltskytteStationView`; `GetStationEntryData` returns it (first non-empty across classes). Shown after "Station X" in: editor cards, printed station card (`faltCfgPrintStation`), result-entry roll-call + entry headers (`fseStationLabel()`), and the public `FaltskytteStationInfoStatic` (QR Förutsättningar; the old `StationInfoCard` partial that also showed it was orphaned and deleted 2026-08-26). Intentionally NOT on Tidur / live results.
 
 Verified end-to-end via Playwright (32/32, 2026-06-15) — see KB `faltskytte-konfigurationer.md` for the user-facing guide.
 
@@ -2727,7 +2806,7 @@ No state machine — every command button is tappable any time so the chief can 
 - **Normal:** per-figure greedy 6-shot allocation with min-floor + slowest-first. Each figure gets `station.minShotsPerFigure × targets` as floor, then sort by perShot desc and fill remaining slots up to `targetsPerFigure × maxShotsPerFigure` per figure.
 - Tillägg (both modes): +2 s when `weaponStartPosition === '45 grader'`; +2 s × (n_målgrupper − 1) for omriktning; ×1.30 multiplier when Mörkerfältskjutning toggle is on.
 
-**`MinShotsPerFigure` / `MaxShotsPerFigure` are STATION-WIDE** (mirroring SHB phrasing "min/max träff per figur i en station"). Both fields render as Min träff/fig + Max träff/fig inputs in the configurator's station card. Min defaults to 0 (no requirement), shown in BOTH Normal and Poäng modes. Max defaults to 6 (Poäng's "no cap"), shown in Normal only (Poäng users don't need to set it). Non-default values surface in `StationInfoCard` Förutsättningar as *"Min/Max träff/figur"*. An earlier commit (`7ee3df9`) added these as **per-figure** controls in error — corrected in `28c63c5`.
+**`MinShotsPerFigure` / `MaxShotsPerFigure` are STATION-WIDE** (mirroring SHB phrasing "min/max träff per figur i en station"). Both fields render as Min träff/fig + Max träff/fig inputs in the configurator's station card. Min defaults to 0 (no requirement), shown in BOTH Normal and Poäng modes. Max defaults to 6 (Poäng's "no cap"), shown in Normal only (Poäng users don't need to set it). Non-default values surface in the QR Förutsättningar page (`FaltskytteStationInfoStatic`) as *"Min/Max träff/figur"*. An earlier commit (`7ee3df9`) added these as **per-figure** controls in error — corrected in `28c63c5`.
 
 **Svårighetsgrad badge:** `round(100 × SHB-min-tid / station.shootingTimeSec)`. 100 % = exactly at SHB minimum; <100 % = generous; >100 % = below SHB minimum (impossible per regelverk but mathematically valid). Plain badge — no threshold colors per Banläggare feedback. Sourced from the same Excel formula HPSK Banläggare have used historically ("Pokalen 2 tidutrakning.xls", VBA dump).
 
@@ -2808,7 +2887,7 @@ No state machine — every command button is tappable any time so the chief can 
 - **QR-1 — Förutsättningar (on the station card):** opens a **read-only** view of that station's conditions + a **static per-figure visibility timeline** (green show/hide bands, no clock). **No login.** Served at **`/station?t=<token>`** where the token is an opaque `IDataProtector` payload (`"<compId>:<station>"`, protector purpose `"Faltskytte.StationInfoQr.v1"`) — non-enumerable + non-forgeable, so a shooter can't change a station number to preview others. Rendered **server-side** by the new partial `Views/Partials/FaltskytteStationInfoStatic.cshtml` (typed `FaltskytteStationConfig`; C# port of the Tidur's `tmrFigBands`; bands use inline styles + `InvariantCulture` percentages — avoids the "top-level `<style>` in a partial 500s" trap).
 - **QR-2 — Result entry (separate cut-out, placed by the Målgrupper):** opens `/station?c&s`. **Login required.** Shows an **adaptive landing**: a *Stationschef* button if the user has staff access + one button per patrol they're in (labelled `Vapengrupp · Patrull N · HH:mm`) when `faltskytteSelfServiceResults` is on. 0 → "ingen behörighet"; 1 → straight there (`?role=chief` or `?p=<patrolId>`); 2+ → chooser. **Fixes the dual-role case** (functionary who is also a shooter). **No sticky memory — select every scan** (the old `hpsk_faltselfservice_*` localStorage auto-resolve was removed; entering under the wrong class is the failure mode to avoid).
 
-**Secrecy lock-down:** the old `/station` `else` branch rendered the full layout (`StationInfoCard`) to **anyone** with `?c&s`, and `GetStationConfig` was an **unauthenticated** endpoint returning the **whole** competition. Both fixed: the leaky `else` is gone (logged-out → login CTA, logged-in non-participant → "ingen behörighet", never the layout), and **`GetStationConfig` is now gated by `CanReadStationAsync`** (staff or self-service participant). QR-1 renders server-side so it needs no endpoint. `StationInfoCard.cshtml` is now **orphaned** (delete in a follow-up). Residual: a registered participant could still read other stations via the API — acceptable ("hard, not impossible"); tightening it to per-allowed-station is a follow-up.
+**Secrecy lock-down:** the old `/station` `else` branch rendered the full layout (`StationInfoCard`) to **anyone** with `?c&s`, and `GetStationConfig` was an **unauthenticated** endpoint returning the **whole** competition. Both fixed: the leaky `else` is gone (logged-out → login CTA, logged-in non-participant → "ingen behörighet", never the layout), and **`GetStationConfig` is now gated by `CanReadStationAsync`** (staff or self-service participant). QR-1 renders server-side so it needs no endpoint. `StationInfoCard.cshtml` was left **orphaned** by this and was **deleted 2026-08-26** — it still carried the double-`?` returnUrl that `cb8a91d` fixed in `StationPage.cshtml` (prod IIS 404s it, Kestrel does not, so dev could never catch it), and deleting it is what stops that pattern being copied back out. Residual: a registered participant could still read other stations via the API — acceptable ("hard, not impossible"); tightening it to per-allowed-station is a follow-up.
 
 **Key code:**
 - `CompetitionTypes/Faltskytte/Controllers/FaltskytteController.cs` — injected `IDataProtectionProvider`; `GetStationConfig` now `async` + `CanReadStationAsync` gate; new `GetStationInfoQr(competitionId, stationNumber)` (staff-gated: mints token, builds absolute `/station?t=…` URL via `Request.Scheme/Host`, returns the QR PNG in one call so the print stays synchronous); extracted `QrPng` helper shared with `GenerateQrCode`.

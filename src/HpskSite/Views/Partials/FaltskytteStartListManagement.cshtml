@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Fältskytte Patrol Management
  * Full CRUD for patrols and shooters, with publish mechanism.
  *@
@@ -239,12 +239,37 @@
     var faltPatrolSize = 6; // Default; updated when generating
     var _faltHasResults = false;
 
-    if (compId) {
-        // Check if results exist (for modification warning)
-        apiGet('HasResults?competitionId=' + compId).then(function(d) {
+    // Check if results exist (for modification warning). Re-read on every tab activation,
+    // not just at page load: results appear DURING the day, and this flag is what decides
+    // whether destructive patrol edits warn at all.
+    function faltRefreshHasResults() {
+        return apiGet('HasResults?competitionId=' + compId).then(function(d) {
             _faltHasResults = d.hasResults || false;
         }).catch(function() {});
+    }
+
+    if (compId) {
+        faltRefreshHasResults();
         loadFaltPatrols();
+
+        // Reload when the Startlistor tab is opened. Without this the patrol list rendered
+        // once at page load and went stale the moment the desk registered anyone — the
+        // organiser then made patrol decisions from a list that was minutes or hours old.
+        // Precision (CompetitionStartListManagement.cshtml) and Springskytte
+        // (SpringskytteStartListManagement.cshtml) already do this; Fältskytte was the
+        // last one that did not.
+        //
+        // Same selectors as the precision partial, for the same reason: the admin page uses
+        // #comp-startlists and the standalone page #startlists. Listened for on document so
+        // it survives the tab button being re-rendered.
+        document.addEventListener('shown.bs.tab', function (ev) {
+            var target = ev.target && ev.target.getAttribute
+                ? (ev.target.getAttribute('data-bs-target') || '')
+                : '';
+            if (target !== '#comp-startlists' && target !== '#startlists') return;
+            faltRefreshHasResults();
+            loadFaltPatrols();
+        });
     }
 
     function confirmIfResultsExist(action) {
@@ -748,10 +773,67 @@
     };
 
     window.faltRenumberPatrols = async function() {
-        if (!confirm('Numrera om alla patruller löpande 1..N? Patrullernas ordning behålls — det är bara numreringen som städas.')) return;
+        // Ask the server what would change and name it. A patrol NUMBER is what is printed on the
+        // patrol list, the station cards and the copies the shooters carry, so a generic
+        // "numrera om alla patruller?" asks the operator to approve something they cannot see.
+        var pre;
+        try {
+            pre = await apiGet('PreviewRenumberPatrols?competitionId=' + compId);
+        } catch (e) {
+            alert('Kunde inte läsa vad omnumreringen skulle innebära. Försök igen.');
+            return;
+        }
+        if (!pre || !pre.success) {
+            alert('Fel: ' + ((pre && pre.message) || 'Kunde inte förhandsgranska omnumreringen'));
+            return;
+        }
+
+        var changes = pre.changes || [];
+        if (changes.length === 0) {
+            // Nothing to do is worth SAYING. Silently reloading looks like the button is broken.
+            alert('Patrullerna är redan numrerade 1–' + pre.total + ' i följd. Inget att göra.');
+            return;
+        }
+
+        // Name them, but cap the list — a 40-patrol dialog is as unreadable as no dialog.
+        var shown = changes.slice(0, 12).map(function(c) {
+            var extra = [];
+            if (c.weaponGroup) extra.push('vapengrupp ' + c.weaponGroup);
+            if (c.label) extra.push(c.label);
+            if (c.resultCount > 0) extra.push(c.resultCount + ' resultat');
+            return '  Patrull ' + c.oldNumber + ' → ' + c.newNumber
+                 + (extra.length ? ' (' + extra.join(', ') + ')' : '');
+        });
+        if (changes.length > shown.length) {
+            shown.push('  … och ' + (changes.length - shown.length) + ' till');
+        }
+
+        var msg = changes.length + ' av ' + pre.total + ' patruller får ett nytt nummer:\n\n'
+                + shown.join('\n') + '\n\n'
+                + 'Ordningen behålls — det är numreringen som städas. Men numret står på '
+                + 'utskrivna patrullistor och stationskort, så redan utdelade papper stämmer inte '
+                + 'efteråt.';
+
+        if (pre.duplicateNumbers && pre.duplicateNumbers.length) {
+            // The one case the result-row migration cannot resolve — say it before, not after.
+            msg += '\n\nOBS: nummer ' + pre.duplicateNumbers.join(', ') + ' används av flera '
+                 + 'patruller. Redan inmatade resultat på ett sådant nummer kan inte skiljas åt '
+                 + 'och hamnar på en av dem.';
+        }
+        if (pre.hasResults) {
+            msg += '\n\nResultat är redan inmatade. De följer med till de nya numren.';
+        }
+
+        msg += '\n\nNumrera om?';
+
+        if (!confirm(msg)) return;
+
         var data = await apiPost('RenumberPatrols', { competitionId: parseInt(compId) });
-        if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        if (data.success) {
+            loadFaltPatrols();
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
     };
     window.faltPrintPatrolList = function() {
         if (allPatrols.length === 0) return;
@@ -772,6 +854,10 @@
         w.document.write('.patrol{margin:8px 0;padding:8px 12px;border:1px solid #ccc;border-radius:6px;page-break-inside:avoid}');
         w.document.write('.patrol-header{font-weight:bold;margin-bottom:4px}');
         w.document.write('.patrol-time{color:#666;font-weight:normal;margin-left:8px}');
+        // Write-in rule after the start time. A patrol's send-off slips on the day and the starter
+        // pens the new time onto the sheet in their hand; with no room they write over the printed
+        // one. A patrol shares one time, so it belongs in the header rather than on every member.
+        w.document.write('.patrol-writein{display:inline-block;border-bottom:1px dotted #666;min-width:26mm;margin-left:6mm}');
         w.document.write('.member{margin:2px 0 2px 16px;font-size:0.9em}');
         w.document.write('.member-class{color:#666;font-size:0.85em}');
         w.document.write('.summary{font-size:0.85em;color:#666;margin-top:4px}');
@@ -788,7 +874,9 @@
                 // Was a hand-rolled three-replace escape that missed both quote kinds.
                 var lblHtml = p.label ? ' &mdash; ' + hpskEsc(p.label) : '';
                 w.document.write('<div class="patrol">');
-                w.document.write('<div class="patrol-header">Patrull ' + p.patrolNumber + lblHtml + (t ? '<span class="patrol-time">' + t + '</span>' : '') + '</div>');
+                w.document.write('<div class="patrol-header">Patrull ' + p.patrolNumber + lblHtml
+                    + (t ? '<span class="patrol-time">' + t + '</span>' : '')
+                    + '<span class="patrol-writein"></span></div>');
                 p.members.forEach(function(m) {
                     w.document.write('<div class="member">' + hpskEsc(m.name) + ' <span class="member-class">(' + hpskEsc(m.club) + ') ' + hpskEsc(m.shootingClass) + '</span></div>');
                 });

@@ -1,0 +1,93 @@
+@*
+    "Håll skärmen vaken" — opt-in Screen Wake Lock toggle.
+
+    A screen that sleeps mid-pass is a real problem on the day: the station pad locks while a
+    shooter is halfway through a series, and a patrol list or live board on a monitor goes black
+    with nobody near it to wake it. The lock is deliberately OPT-IN — holding a phone awake
+    unasked drains a battery that has to last the whole competition (see the
+    station-device-battery-cellular-constraint note).
+
+    Why a partial: this exact toggle had already been hand-copied onto three screens
+    (SpringskytteStarter, SpringskytteResultsManagement, FaltskytteStartledare), each with its own
+    variable prefix. Three more screens needed it, and six copies of a browser-API dance with a
+    visibilitychange re-acquire is how one of them ends up subtly wrong. Those three still carry
+    their own copies — this is the one to converge on.
+
+    Usage:
+        @await Html.PartialAsync("_ScreenWakeButton")
+        @await Html.PartialAsync("_ScreenWakeButton", new ViewDataDictionary(ViewData) {
+            { "cssClass", "btn btn-outline-light btn-sm" } })
+
+    Self-contained and instance-safe: the id is unique per render and the script is an IIFE, so
+    two of these on one page cannot fight over the same lock.
+
+    ⚠️ The OS releases the lock whenever the tab is hidden, so it MUST be re-acquired on
+    visibilitychange — without that the toggle looks on and does nothing after the first
+    tab switch. That is the bug this partial exists to stop being re-introduced.
+*@
+@{
+    var wakeId = "wake_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+    var wakeCss = ViewData["cssClass"] as string ?? "btn btn-outline-secondary btn-sm";
+}
+<button type="button" id="@wakeId" class="@wakeCss" aria-pressed="false" title="Hindra skärmen från att slockna">
+    <i class="bi bi-display me-1"></i>Håll skärmen vaken
+</button>
+<script>
+(function () {
+    var btn = document.getElementById('@wakeId');
+    if (!btn) return;
+
+    var lock = null;
+    // Intent, kept separately from the lock itself: the lock object disappears on its own every
+    // time the tab is hidden, so it cannot answer "does the operator still want this on".
+    var wanted = false;
+
+    function render() {
+        btn.innerHTML = wanted
+            ? '<i class="bi bi-display-fill me-1"></i>Skärm vaken'
+            : '<i class="bi bi-display me-1"></i>Håll skärmen vaken';
+        // Show state with .active + aria-pressed rather than by swapping in a specific Bootstrap
+        // variant. The caller picks the variant (the dark live board passes btn-outline-light), and
+        // forcing btn-secondary/btn-outline-secondary here would stack two variants on the same
+        // button and let whichever rule came last in the stylesheet decide how it looks.
+        btn.classList.toggle('active', wanted);
+        btn.setAttribute('aria-pressed', wanted ? 'true' : 'false');
+    }
+
+    async function acquire() {
+        if (!('wakeLock' in navigator)) return false;
+        try {
+            lock = await navigator.wakeLock.request('screen');
+            lock.addEventListener('release', function () { lock = null; });
+            return true;
+        } catch (e) {
+            // Best-effort by design: a denied or unsupported lock must never break the screen
+            // it is sitting on. The button stays honest about what happened.
+            return false;
+        }
+    }
+
+    btn.addEventListener('click', async function () {
+        if (wanted) {
+            wanted = false;
+            if (lock) { try { await lock.release(); } catch (e) { } lock = null; }
+            render();
+            return;
+        }
+        if (!('wakeLock' in navigator)) {
+            // Say so rather than leaving a toggle that looks on and does nothing.
+            btn.innerHTML = '<i class="bi bi-x me-1"></i>Stöds ej';
+            return;
+        }
+        wanted = true;
+        await acquire();
+        render();
+    });
+
+    document.addEventListener('visibilitychange', async function () {
+        if (wanted && !lock && document.visibilityState === 'visible') await acquire();
+    });
+
+    render();
+})();
+</script>

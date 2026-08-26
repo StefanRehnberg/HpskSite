@@ -2807,15 +2807,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// fixing duplicates: bump everyone above the target range first, then walk
         /// in order assigning 1..N.
         /// </summary>
-        private static async Task RenumberAllPatrolsAsync(
+        private static async Task<List<(int PatrolId, int OldNumber, int NewNumber)>> RenumberAllPatrolsAsync(
             Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId)
         {
+            var changes = new List<(int PatrolId, int OldNumber, int NewNumber)>();
+
             var allPatrols = await db.FetchAsync<FaltskyttePatrol>(
                 "WHERE CompetitionId = @0 ORDER BY PatrolNumber, Id", competitionId);
-            if (allPatrols.Count == 0) return;
+            if (allPatrols.Count == 0) return changes;
 
-            // Snapshot the original ordering before we mutate the in-memory list.
-            var ordered = allPatrols.Select(p => p.Id).ToList();
+            // Snapshot the original ordering AND the original numbers before we mutate anything.
+            // The numbers are what the result rows carry, so they are needed to migrate those too.
+            var ordered = allPatrols.Select(p => (p.Id, p.PatrolNumber)).ToList();
 
             // Phase 1: lift every row out of the 1..N target range. bump > count
             // guarantees the post-bump range and the target range don't overlap.
@@ -2827,10 +2830,53 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             // Phase 2: walk the original order and reassign sequential numbers.
             for (int i = 0; i < ordered.Count; i++)
             {
+                var newNumber = i + 1;
                 await db.ExecuteAsync(
                     "UPDATE FaltskyttePatrol SET PatrolNumber = @0 WHERE Id = @1",
-                    i + 1, ordered[i]);
+                    newNumber, ordered[i].Id);
+                if (ordered[i].PatrolNumber != newNumber)
+                    changes.Add((ordered[i].Id, ordered[i].PatrolNumber, newNumber));
             }
+
+            // ⚠️ FaltskytteResultEntry carries a COPY of the patrol number, and nothing was keeping
+            // the two in step. Renumbering left every already-entered result pointing at the number
+            // its patrol used to have — silently, because the results themselves stay correct and
+            // only the ATTRIBUTION rots. FaltskytteStatsController joins result rows to patrols on
+            // PatrolNumber, so the flow statistics then credit each patrol's legs to another
+            // patrol's weapon group. Migrate them inside the same operation or not at all.
+            //
+            // Two-phase for the same reason as above: an old number and a new number can collide
+            // mid-walk (patrol 3 becoming 2 while the real 2 has not moved yet), which would merge
+            // two patrols' rows under one number with no way back.
+            if (changes.Count > 0)
+            {
+                await db.ExecuteAsync(
+                    "UPDATE FaltskytteResultEntry SET PatrolNumber = PatrolNumber + @0 WHERE CompetitionId = @1",
+                    bump, competitionId);
+
+                foreach (var (_, oldNumber, newNumber) in changes)
+                {
+                    await db.ExecuteAsync(
+                        "UPDATE FaltskytteResultEntry SET PatrolNumber = @0 WHERE CompetitionId = @1 AND PatrolNumber = @2",
+                        newNumber, competitionId, oldNumber + bump);
+                }
+
+                // Anything still carrying the bump belonged to a patrol whose number did NOT change,
+                // so it comes back down untouched. Doing this as one statement rather than per number
+                // keeps a result row for a deleted patrol from being stranded 1000 numbers up.
+                // >= not >, so a row that was sitting on 0 (bad legacy data) also comes back.
+                await db.ExecuteAsync(
+                    "UPDATE FaltskytteResultEntry SET PatrolNumber = PatrolNumber - @0 WHERE CompetitionId = @1 AND PatrolNumber >= @0",
+                    bump, competitionId);
+
+                // ⚠️ One case this CANNOT resolve, and it is the very case the renumber exists for:
+                // if two patrols shared a number, their result rows are indistinguishable — the rows
+                // only ever recorded the number — so both fold into whichever of the two is walked
+                // first. There is no information left to split them with. Say so rather than imply
+                // the migration is lossless in every state.
+            }
+
+            return changes;
         }
 
         /// <summary>
@@ -2846,10 +2892,95 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
-            await RenumberAllPatrolsAsync(db, request.CompetitionId);
+            var changes = await RenumberAllPatrolsAsync(db, request.CompetitionId);
             var count = await db.ExecuteScalarAsync<int>(
                 "SELECT COUNT(*) FROM FaltskyttePatrol WHERE CompetitionId = @0", request.CompetitionId);
-            return Json(new { success = true, count });
+
+            // The trail. A patrol number is printed on the patrol list, the station cards and the
+            // shooters' own copies, so "which patrol was 7 this morning" is a real question after the
+            // fact — and it had no answer anywhere. Logged rather than stored: it is a rare
+            // administrative act, and a new column would need a migration to say the same thing.
+            if (changes.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Renumbered {ChangedCount} of {TotalCount} Fältskytte patrols for competition {CompId}: {Mapping}",
+                    changes.Count, count, request.CompetitionId,
+                    string.Join(", ", changes.Select(c => $"{c.OldNumber}→{c.NewNumber}")));
+            }
+
+            return Json(new
+            {
+                success = true,
+                count,
+                changed = changes.Count,
+                changes = changes.Select(c => new { oldNumber = c.OldNumber, newNumber = c.NewNumber })
+            });
+        }
+
+        /// <summary>
+        /// What a renumber WOULD do, without doing it. Exists so the confirm dialog can name the
+        /// patrols that change instead of asking about "alla patruller" — the numbers are already
+        /// printed and handed out, so overwriting them blind is the thing to prevent.
+        /// Writes nothing; safe to call on every dialog open.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> PreviewRenumberPatrols(int competitionId)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+            // Same ORDER BY as RenumberAllPatrolsAsync, so the preview and the act cannot disagree
+            // about which patrol becomes which number.
+            var patrols = await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber, Id", competitionId);
+
+            var resultCounts = await db.FetchAsync<PatrolResultCount>(
+                "SELECT PatrolNumber, COUNT(*) AS ResultCount FROM FaltskytteResultEntry "
+                + "WHERE CompetitionId = @0 GROUP BY PatrolNumber", competitionId);
+            var resultsByNumber = resultCounts.ToDictionary(r => r.PatrolNumber, r => r.ResultCount);
+
+            var rows = new List<object>();
+            for (int i = 0; i < patrols.Count; i++)
+            {
+                var newNumber = i + 1;
+                if (patrols[i].PatrolNumber == newNumber) continue;
+                rows.Add(new
+                {
+                    oldNumber = patrols[i].PatrolNumber,
+                    newNumber,
+                    weaponGroup = patrols[i].WeaponGroup ?? "",
+                    label = patrols[i].Label ?? "",
+                    // Results follow the renumber (see RenumberAllPatrolsAsync), but the operator
+                    // should still be told the competition is under way before numbers move.
+                    resultCount = resultsByNumber.TryGetValue(patrols[i].PatrolNumber, out var rc) ? rc : 0
+                });
+            }
+
+            // Duplicate numbers are the state the renumber exists to repair, AND the one state where
+            // the result rows cannot be told apart afterwards. Surface it as its own warning.
+            var duplicateNumbers = patrols
+                .GroupBy(x => x.PatrolNumber)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .OrderBy(n => n)
+                .ToList();
+
+            return Json(new
+            {
+                success = true,
+                total = patrols.Count,
+                changes = rows,
+                duplicateNumbers,
+                hasResults = resultsByNumber.Values.Any(v => v > 0)
+            });
+        }
+
+        private class PatrolResultCount
+        {
+            public int PatrolNumber { get; set; }
+            public int ResultCount { get; set; }
         }
 
         public class CompetitionIdRequest

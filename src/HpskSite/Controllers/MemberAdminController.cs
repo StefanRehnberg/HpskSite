@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Models;
@@ -708,6 +708,9 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
+                var editorGroups = new HashSet<string>(
+                    await GetGroupEditorGroupNamesAsync(), StringComparer.OrdinalIgnoreCase);
+
                 // Parse additional club IDs
                 var additionalClubIds = new List<int>();
                 var memberClubIdsStr = member.GetValue("memberClubIds")?.ToString() ?? "";
@@ -760,9 +763,11 @@ namespace HpskSite.Controllers
                     guardian2Email = GetVal(member, "guardian2Email"),
                     emergencyContactName = GetVal(member, "emergencyContactName"),
                     emergencyContactPhone = GetVal(member, "emergencyContactPhone"),
-                    // Filter out ClubAdmin_* groups (managed separately via club admin assignment)
+                    // Which checkboxes start out ticked — so only the roles the editor offers at
+                    // all (GetGroupEditorGroupNamesAsync), which leaves out ClubAdmin_* because
+                    // those are managed via the club-admin surface.
                     groups = _memberService.GetAllRoles(member.Id)
-                        .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
+                        .Where(g => editorGroups.Contains(g))
                         .ToArray()
                 };
 
@@ -945,8 +950,24 @@ namespace HpskSite.Controllers
                     {
                         var currentRoles = _memberService.GetAllRoles(member.Id).ToList();
                         var newGroups = groups ?? new string[0];
-                        var rolesToRemove = currentRoles.Except(newGroups).ToList();
+
+                        // Only roles the editor actually offered may be removed by this diff. The
+                        // client cannot post back a role it was never shown (see
+                        // GetGroupEditorGroupNamesAsync), so an unfiltered Except() reads "not
+                        // posted" as "unchecked" and silently deletes it.
+                        var offered = new HashSet<string>(
+                            await GetGroupEditorGroupNamesAsync(), StringComparer.OrdinalIgnoreCase);
+                        var rolesToRemove = currentRoles
+                            .Except(newGroups)
+                            .Where(role => offered.Contains(role))
+                            .ToList();
                         var rolesToAdd = newGroups.Except(currentRoles).ToList();
+
+                        var keptRoles = currentRoles.Except(newGroups).Except(rolesToRemove).ToList();
+                        if (keptRoles.Count > 0)
+                        {
+                            Console.WriteLine($"Kept roles not offered by the group editor: {string.Join(", ", keptRoles)}");
+                        }
 
                         Console.WriteLine($"Current roles: {string.Join(", ", currentRoles)}");
                         Console.WriteLine($"New roles: {string.Join(", ", newGroups)}");
@@ -1353,6 +1374,28 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// The member groups the generic group editor in the member modal offers as checkboxes.
+        /// ClubAdmin_* is left out to reduce response size and UI clutter — those roles are owned
+        /// by the club-admin surface (<c>ClubAdminController.AssignClubAdmin</c>), not by a generic
+        /// checkbox.
+        ///
+        /// This is the ONE place that decides what the editor offers, because
+        /// <see cref="SaveMember"/> removes roles by diffing against this same list. A role the
+        /// editor never offered cannot be posted back, so diffing against every role the member
+        /// has would silently strip it — that is exactly how saving the modal on a club admin used
+        /// to delete their ClubAdmin_* role without a word. Filter something out here and it is
+        /// protected there for free.
+        /// </summary>
+        private async Task<List<string>> GetGroupEditorGroupNamesAsync()
+        {
+            return (await _memberGroupService.GetAllAsync())
+                .Select(g => g.Name)
+                .Where(name => !string.IsNullOrEmpty(name))
+                .Where(name => !name!.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
+                .ToList()!;
+        }
+
+        /// <summary>
         /// Gets all available member groups
         /// </summary>
         [HttpGet]
@@ -1370,11 +1413,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                // Filter out ClubAdmin_* groups to reduce response size and UI clutter
-                var groups = (await _memberGroupService.GetAllAsync())
-                    .Select(g => g.Name)
-                    .Where(name => !name.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
+                var groups = (await GetGroupEditorGroupNamesAsync()).ToArray();
                 return Json(new { success = true, data = groups });
             }
             catch (Exception ex)

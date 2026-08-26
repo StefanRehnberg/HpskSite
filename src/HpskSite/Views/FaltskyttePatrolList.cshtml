@@ -1,4 +1,4 @@
-@using HpskSite.CompetitionTypes.Faltskytte.Models
+﻿@using HpskSite.CompetitionTypes.Faltskytte.Models
 @model FaltskyttePatrolListModel
 @{
     // Patrullista — PUBLIC READ-ONLY WALL screen (/patrullista/{id}). Big-screen/clubhouse display:
@@ -43,9 +43,17 @@
     <div class="container-fluid py-3">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2 border-bottom pb-2">
             <h2 class="mb-0"><i class="bi bi-people-fill me-2"></i>Patrullista</h2>
-            <div class="text-end">
-                <div class="fw-bold">@Model.CompetitionName</div>
-                <div class="text-muted small">Uppdaterad <span id="plUpdated"></span></div>
+            <div class="d-flex align-items-center gap-3">
+                @* This page is meant to be left up on a monitor by the start area, so the screen
+                   going black is the normal failure mode rather than an edge case. Opt-in, because
+                   the same URL is also opened on a phone. *@
+                <div class="d-print-none">
+                    @await Html.PartialAsync("_ScreenWakeButton")
+                </div>
+                <div class="text-end">
+                    <div class="fw-bold">@Model.CompetitionName</div>
+                    <div class="text-muted small">Uppdaterad <span id="plUpdated"></span></div>
+                </div>
             </div>
         </div>
 

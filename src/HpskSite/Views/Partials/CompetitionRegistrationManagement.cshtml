@@ -3256,16 +3256,22 @@ function updatePaymentSummary() {
     });
 
     // Fold teams/stafett (Lag) into the money totals so the sums above the lists
-    // reflect the whole competition, not just individuals. Teams carry a single
-    // invoice (amount + status), not the multi-invoice aggregates individuals have.
+    // reflect the whole competition, not just individuals — and by the SAME definition:
+    // "Väntande" is what the LAG still owes (fee − paid), never the amount on its Pending
+    // invoice row. Bucketing teams by invoice status was the half of this screen that still
+    // did it the old way, so a team with a stale duplicate invoice, or one whose fee an open
+    // samlingsfaktura is already paying, inflated the heading while the Lag list underneath
+    // showed the truth. See outstandingAmount in RegistrationAdminController.GetCompetitionTeams.
     let relayCount = 0;
     teams.forEach(t => {
         if (t.isRelay) relayCount++;
         const status = t.paymentStatus || 'No Invoice';
-        const amount = Number(t.amount) || 0;
-        if (status === 'Paid') { paidCount++; paidAmount += amount; }
-        else if (status === 'Pending') { pendingCount++; pendingAmount += amount; }
-        else if (status === 'No Invoice') noInvoiceCount++;
+        paidAmount += Number(t.paidAmount) || 0;
+        const owed = Number(t.outstandingAmount) || 0;
+        pendingAmount += owed;
+        if (owed > 0) pendingCount++;
+        if (status === 'Paid') paidCount++;
+        if (status === 'No Invoice') noInvoiceCount++;
     });
 
     document.getElementById('summaryRegCount').textContent = regs.length;
