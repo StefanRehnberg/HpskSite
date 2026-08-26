@@ -554,6 +554,14 @@ namespace HpskSite.Services
         /// <summary>
         /// Competition registrations are Umbraco content nodes carrying a memberId property, not
         /// rows — and they are saved unpublished, so they are re-saved, never published.
+        ///
+        /// LEFT(..., 20) är inte kosmetik. TRY_CONVERT(INT, x) returnerar INTE NULL när x är längre
+        /// än 4000 tecken — den kastar 8152 "String or binary data would be truncated", och TRY_
+        /// sväljer bara misslyckade konverteringar, aldrig trunkeringsfel. Optimeraren får dessutom
+        /// utvärdera villkoret FÖRE filtret på pt.Alias, så ETT enda överstort textValue var som
+        /// helst i umbracoPropertyData (en RTE-text, en block list) slog ut hela sammanslagningen
+        /// — i prod, aldrig i dev där ingen rad var så lång. Att korta strängen först gör
+        /// konverteringen omöjlig att spränga. Vanligaste vägen är ändå intValue, som jämförs direkt.
         /// </summary>
         private void MoveRegistrations(int survivorId, int loserId, MergeResult result)
         {
@@ -569,7 +577,9 @@ namespace HpskSite.Services
                       JOIN umbracoPropertyData pd   ON pd.versionId = cv.id
                       JOIN cmsPropertyType pt       ON pt.id = pd.propertyTypeId AND pt.Alias = 'memberId'
                       WHERE n.trashed = 0
-                        AND TRY_CONVERT(INT, COALESCE(CAST(pd.intValue AS nvarchar(50)), pd.varcharValue, pd.textValue)) = @0",
+                        AND (pd.intValue = @0
+                             OR (pd.intValue IS NULL
+                                 AND TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20)) = @0))",
                     loserId);
             }
 
