@@ -76,28 +76,80 @@
         .Where(x => !x.Value<bool>("isClubOnly") || myClubIds.Contains(x.Value<int>("clubId")))
         .ToList();
 
-    // "Nära dig" = hosted by a club I belong to, or in a krets one of my clubs sits in. Region is
-    // derived the same way the card does it: club first, then the competition's own field.
-    Func<IPublishedContent, bool> isNearMe = comp =>
+    // Grannkretsarna, ur det handskrivna gränsschemat i Models/RegionAdjacency.cs. Egna kretsar
+    // filtreras bort där, så en granne som samtidigt är min egen krets aldrig kan hamna i två
+    // sektioner.
+    // ⚠️ En serieomgång utan egen värd ÄRVER sina syskons kretsar.
+    // Kretsen härleds ur tävlingens `clubId` eller `regionalFederation`, och på en del omgångar är
+    // ingen av dem satt — förut syntes det bara som ett tomt regionfilter (som tolererar tomt), men
+    // nu AVGÖR kretsen vilken sektion tävlingen hamnar i. Utan arvet landar en Halland-medlems egna
+    // Hallandsserie-omgång under "Övriga tävlingar i landet", vilket är precis det klagomålet
+    // handlade om. En serie som spänner över flera kretsar ger flera kandidater, och då räcker det
+    // att EN av dem är min — hellre det än att omgången försvinner ned i botten.
+    var inheritedRegionsByCompetitionId = new Dictionary<int, List<string>>();
+    foreach (var srs in allCompetitionSeries)
     {
-        if (myClubIds.Count == 0 && myRegions.Count == 0) return false;
+        var kids = srs.Children().Where(x => x.ContentType.Alias == "competition").ToList();
+        Func<IPublishedContent, string> ownRegionOf = k =>
+        {
+            var kcid = k.Value<int>("clubId");
+            return kcid > 0 && clubRegionLookup.TryGetValue(kcid, out var kr)
+                ? kr
+                : k.Value<string>("regionalFederation") ?? "";
+        };
+        var seriesRegionSet = kids
+            .Select(ownRegionOf)
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (seriesRegionSet.Count == 0) continue;
+        foreach (var k in kids)
+        {
+            if (string.IsNullOrWhiteSpace(ownRegionOf(k)))
+                inheritedRegionsByCompetitionId[k.Id] = seriesRegionSet;
+        }
+    }
+
+    var neighbourRegions = HpskSite.Models.RegionAdjacency.NeighboursOfAny(myRegions);
+
+    // Tre nivåer, och ordningen ÄR sidans struktur:
+    //   0 = Din krets      — min egen krets, eller en klubb jag är medlem i
+    //   1 = Nära dig       — en krets som GRÄNSAR till någon av mina
+    //   2 = Övriga         — allt annat, inklusive tävlingar utan krets
+    // Kretsen härleds precis som kortet gör det: klubbens krets först, sedan tävlingens eget fält.
+    // ⚠️ Klubbmedlemskap slår kretsen. En medlem i en klubb i en annan krets ska hitta sin egen
+    // klubbs tävling under "Din krets", inte två sektioner ned.
+    Func<IPublishedContent, int> localityTier = comp =>
+    {
+        if (myClubIds.Count == 0 && myRegions.Count == 0) return 2;
         var ccid = comp.Value<int>("clubId");
-        if (ccid > 0 && myClubIds.Contains(ccid)) return true;
+        if (ccid > 0 && myClubIds.Contains(ccid)) return 0;
         var region = ccid > 0 && clubRegionLookup.TryGetValue(ccid, out var cr)
             ? cr
             : comp.Value<string>("regionalFederation") ?? "";
-        return !string.IsNullOrWhiteSpace(region) && myRegions.Contains(region);
+        // Egen krets först, sedan de ärvda (bara relevant för en region-lös serieomgång).
+        var candidates = !string.IsNullOrWhiteSpace(region)
+            ? new List<string> { region }
+            : (inheritedRegionsByCompetitionId.TryGetValue(comp.Id, out var inh) ? inh : new List<string>());
+        if (candidates.Count == 0) return 2;
+        if (candidates.Any(r => myRegions.Contains(r))) return 0;
+        if (candidates.Any(r => neighbourRegions.Contains(r))) return 1;
+        return 2;
     };
-    var nearMeCompetitionIds = new HashSet<int>(allCompetitions.Where(c => isNearMe(c)).Select(c => c.Id));
+    var localityTierByCompetitionId = allCompetitions.ToDictionary(c => c.Id, c => localityTier(c));
 
-    // Läsbara kretsnamn till rubriken. Kretsen lagras som enum-NAMN ("Halland"), medan människor
+    // Läsbara kretsnamn till rubrikerna. Kretsen lagras som enum-NAMN ("Halland"), medan människor
     // känner igen beskrivningen ("Hallands Pistolskyttekrets"). Koden får vara reserv om en klubb
     // bär ett värde som inte finns i enumet — att visa råkoden är bättre än att visa ingenting.
-    var myRegionNames = string.Join(" · ", myRegions.OrderBy(r => r, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false)).Select(r =>
-        Enum.TryParse<HpskSite.Models.Federations.RegionalFederations>(r, true, out var rf)
-            ? HpskSite.Models.Federations.GetDescription(rf)
-            : r));
-
+    Func<IEnumerable<string>, string> regionNames = codes => string.Join(" · ",
+        codes.OrderBy(r => r, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false))
+             .Select(r => Enum.TryParse<HpskSite.Models.Federations.RegionalFederations>(r, true, out var rf)
+                 ? HpskSite.Models.Federations.GetDescription(rf)
+                 : r));
+    var allRegionNamesByCode = Enum.GetValues(typeof(HpskSite.Models.Federations.RegionalFederations))
+        .Cast<HpskSite.Models.Federations.RegionalFederations>()
+        .ToDictionary(f => f.ToString(), f => HpskSite.Models.Federations.GetDescription(f));
+    var myRegionNames = regionNames(myRegions);
     var competitionTypes = allContent.Where(x => x.ContentType.Alias == "competitionType").ToList();
     // Use centralized shooting classes model (includes R, L, M classes)
     var shootingClasses = HpskSite.Models.ShootingClasses.All;
@@ -524,7 +576,11 @@
                 }
                 seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
                 var isClubOnlyComp = competition.Value<bool>("isClubOnly");
-                var isNearMeComp = nearMeCompetitionIds.Contains(competition.Id);
+                var compTier = localityTierByCompetitionId.TryGetValue(competition.Id, out var ct) ? ct : 2;
+                // Kretsen rubriken ska namnge: den egna, annars den ärvda (serieomgång utan värd).
+                var effectiveRegion = !string.IsNullOrWhiteSpace(competitionRegion)
+                    ? competitionRegion
+                    : string.Join(",", inheritedRegionsByCompetitionId.TryGetValue(competition.Id, out var effInh) ? effInh : new List<string>());
 
                 // Calculate status
                 var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
@@ -584,7 +640,8 @@
                      data-range-id="@(competition.HasProperty("rangeId") ? competition.Value<int>("rangeId") : 0)"
                      data-comp-name="@competition.Name"
                      data-comp-url="@competition.CompetitionUrl()"
-                     data-near-me="@(isNearMeComp ? "1" : "0")"
+                     data-tier="@compTier"
+                     data-effective-region="@effectiveRegion"
                      data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName + " " + (partOfSeries.Name ?? "")).ToLower())">
                     <div class="card h-100 border-@statusClass">
                         <div class="card-header bg-@statusClass text-white">
@@ -863,7 +920,10 @@
                         }
                         seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
                         var isClubOnlyComp = competition.Value<bool>("isClubOnly");
-                        var isNearMeComp = nearMeCompetitionIds.Contains(competition.Id);
+                        var compTier = localityTierByCompetitionId.TryGetValue(competition.Id, out var ct2) ? ct2 : 2;
+                        var effectiveRegion = !string.IsNullOrWhiteSpace(competitionRegion)
+                            ? competitionRegion
+                            : string.Join(",", inheritedRegionsByCompetitionId.TryGetValue(competition.Id, out var effInh2) ? effInh2 : new List<string>());
 
                         // Calculate status (same logic as card view)
                         var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
@@ -920,7 +980,8 @@
                             data-season="@seasonId"
                             data-series="@seriesId"
                             data-date="@compDate.ToString("yyyy-MM-dd")"
-                            data-near-me="@(isNearMeComp ? "1" : "0")"
+                            data-tier="@compTier"
+                            data-effective-region="@effectiveRegion"
                             data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName + " " + (partOfSeries.Name ?? "")).ToLower())">
 
                             <td>
@@ -1217,6 +1278,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // ska sidan se ut precis som förut i stället för att visa en tom „Nära dig”-rubrik.
     const hasLocality = @((myClubIds.Count > 0 || myRegions.Count > 0) ? "true" : "false");
     const localityLabel = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(myRegionNames));
+    // Kod → läsbart kretsnamn. "Nära dig"-rubriken namnger de kretsar som FAKTISKT ligger i
+    // sektionen, inte alla grannkretsar som skulle kunna ligga där. En första version listade
+    // grannlistan och sa "Älvsborg · Göteborg · Jönköping + 3 fler" över en sektion som innehöll
+    // en enda tävling från Kronoberg — alltså tre kretsnamn som inte fanns på skärmen.
+    const regionNameByCode = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(allRegionNamesByCode));
+    // "Din krets" i singular ser fel ut för den som har klubbar i två kretsar.
+    const ownRegionHeading = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+        myRegions.Count > 1 ? "Dina kretsar" : "Din krets"));
     let onlyNearMe = false;
 
     // Load regions for filter
@@ -1341,8 +1410,11 @@ document.addEventListener('DOMContentLoaded', function() {
             let matchesWeaponClass = !selectedWeaponClass ||
                 cardWeaponClass.split(',').some(wc => wc.trim() === selectedWeaponClass);
 
-            // "Bara nära dig" — en uttrycklig avsmalning, aldrig förvald.
-            let matchesNearMe = !onlyNearMe || card.dataset.nearMe === '1';
+            // "Bara nära dig" — en uttrycklig avsmalning, aldrig förvald. Behåller BÅDE din egen
+            // krets och grannkretsarna (nivå 0 och 1); "nära dig" utan den egna kretsen vore en
+            // konstig fråga att ställa.
+            const cardTier = parseInt(card.dataset.tier || '2', 10);
+            let matchesNearMe = !onlyNearMe || cardTier <= 1;
 
             // Region filter - if selectedRegions is empty, show all; otherwise check if any of the card's regions is selected
             // Also show competitions with no region (national competitions) when any region is selected.
@@ -1388,8 +1460,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // ett standardfilter som tyst gömmer tävlingar är vad som genererar "min tävling är
             // borta". Den som vill smalna av gör det själv via "Visa bara nära dig".
             if (hasLocality) {
-                const an = a.dataset.nearMe === '1' ? 0 : 1;
-                const bn = b.dataset.nearMe === '1' ? 0 : 1;
+                const an = parseInt(a.dataset.tier || '2', 10);
+                const bn = parseInt(b.dataset.tier || '2', 10);
                 if (an !== bn) return an - bn;
             }
             switch (sortBy) {
@@ -1436,10 +1508,34 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderHeadingsIn(visibleCards) {
-        const near = visibleCards.filter(c => c.dataset.nearMe === '1');
-        const other = visibleCards.filter(c => c.dataset.nearMe !== '1');
+        const tierOf = c => parseInt(c.dataset.tier || '2', 10);
+
+        // Kretsarna som faktiskt är representerade bland gruppens kort. Kortet bär den EFFEKTIVA
+        // kretsen (egen, annars den ärvda från seriens syskon), och kan bära flera som CSV.
+        const regionsIn = (cards) => {
+            const codes = new Set();
+            cards.forEach(c => (c.dataset.effectiveRegion || '')
+                .split(',').map(x => x.trim()).filter(Boolean).forEach(x => codes.add(x)));
+            const names = [...codes].map(c => regionNameByCode[c] || c).sort((x, y) => x.localeCompare(y, 'sv'));
+            // Fler än tre kretsnamn slutar fungera som rubrik och börjar radbryta.
+            if (names.length === 0) return '';
+            if (names.length <= 3) return names.join(' \u00b7 ');
+            return names.slice(0, 3).join(' \u00b7 ') + ' + ' + (names.length - 3) + ' fler';
+        };
+
+        const t0 = visibleCards.filter(c => tierOf(c) === 0);
+        const t1 = visibleCards.filter(c => tierOf(c) === 1);
+        const t2 = visibleCards.filter(c => tierOf(c) === 2);
+        const groups = [
+            // "Din krets" namnger MIN krets — det är vad sektionen är, inte vad den innehåller.
+            { title: ownRegionHeading, sub: localityLabel, cards: t0 },
+            // "Nära dig" namnger de grannkretsar som verkligen har en tävling här.
+            { title: 'N\u00e4ra dig', sub: regionsIn(t1), cards: t1 },
+            { title: '\u00d6vriga t\u00e4vlingar i landet', sub: '', cards: t2 }
+        ].filter(g => g.cards.length > 0);
+
         // Med bara en grupp på skärmen säger en rubrik ingenting — då är den bara brus.
-        if (near.length === 0 || other.length === 0) return;
+        if (groups.length < 2) return;
 
         const isList = visibleCards[0].tagName === 'TR';
         const make = (text, sub) => {
@@ -1471,12 +1567,11 @@ document.addEventListener('DOMContentLoaded', function() {
             return div;
         };
 
-        const nearSub = localityLabel ? (localityLabel + ' \u00b7 ' + near.length + ' st') : (near.length + ' st');
-        const nearHeading = make('N\u00e4ra dig', nearSub);
-        near[0].parentNode.insertBefore(nearHeading, near[0]);
-
-        const otherHeading = make('\u00d6vriga t\u00e4vlingar i landet', other.length + ' st');
-        other[0].parentNode.insertBefore(otherHeading, other[0]);
+        groups.forEach(g => {
+            const sub = g.sub ? (g.sub + ' \u00b7 ' + g.cards.length + ' st') : (g.cards.length + ' st');
+            const heading = make(g.title, sub);
+            g.cards[0].parentNode.insertBefore(heading, g.cards[0]);
+        });
     }
 
     // Update status pill counts

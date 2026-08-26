@@ -1805,6 +1805,43 @@ strukturella fel gjorde det däremot, och alla tre är åtgärdade:
    dem. Medlemskapet resolvas via `MemberClubService.GetAllClubIds` — **`primaryClubId` är en STRÄNG**,
    så `GetValue<int>` ger tyst 0.
 
+**TRE sektioner, i den ordningen (utökat 2026-08-26 efter Stefans önskemål):**
+`data-tier` på varje kort — **0 = Din krets** (min egen krets, eller en klubb jag är medlem i),
+**1 = Nära dig** (en krets som GRÄNSAR till någon av mina), **2 = Övriga tävlingar i landet**.
+Nivån är primär sorteringsnyckel, och rubrikerna renderas ur grupperna.
+- **Klubbmedlemskap slår kretsen.** En medlem i en klubb i en annan krets ska hitta sin egen klubbs
+  tävling under "Din krets", inte två sektioner ned.
+- Rubriken blir **"Dina kretsar"** i plural när medlemmen har klubbar i flera kretsar.
+- **"Din krets" namnger MIN krets; "Nära dig" namnger de kretsar som FAKTISKT ligger i sektionen.**
+  ⚠️ En första version satte grannLISTAN som undertext, så rubriken sa "Älvsborg · Göteborg ·
+  Jönköping + 3 fler" över en sektion som innehöll en enda tävling från Kronoberg — tre kretsnamn som
+  inte fanns på skärmen. Undertexten härleds nu ur korten (`data-effective-region`), kapad vid tre
+  namn eftersom en rubrik som radbryts slutar vara en rubrik.
+- **"Bara nära dig" behåller nivå 0 OCH 1** — "nära dig" utan den egna kretsen vore en konstig fråga.
+
+**`Models/RegionAdjacency.cs` är gränsschemat**, och det är **handskriven geografi** — inget register
+levererar det. Kretsarna följer i stort de gamla länen (Skåne delat i Malmöhus/Kristianstad, Kalmar i
+Norra/Södra, Västra Götaland i Göteborg-Bohuslän/Älvsborg/Skaraborg/Västgöta-Dal).
+- **Kanterna deklareras EN gång som par och speglas i konstruktorn.** Att skriva båda riktningarna
+  för hand är dubbelt så mycket data och gör en ensidig gräns möjlig — vilket ger det märkliga
+  utfallet att A är nära B men inte B nära A.
+- **Gotland får havsgränser** (Kalmar N/S, Östergötland, Stockholm, efter färjelägena). Alternativet
+  är att ön aldrig har någon granne, vilket gör hela sektionen meningslös just där.
+- **Ankeland har medvetet inga grannar** — påhittad krets för demo/testdata (jfr demoklubben
+  Ankeborg), och ska inte dra in riktiga kretsars tävlingar.
+- `NeighboursOfAny` **utesluter de egna kretsarna**, så samma tävling aldrig kan hamna i två sektioner.
+- Uppslag är skiftlägesokänsligt, eftersom `NormalizeRegionCode` gemenar koden på en del kodvägar.
+- **14 test i `RegionAdjacencyTests`** kontrollerar FORMEN — varje kod finns i enumet, varje gräns är
+  ömsesidig, ingen dubblett, ingen självgräns, ingen oavsiktlig ö. **Geografin kan de inte
+  kontrollera**; ett par som ser fel ut ska rättas i `Borders` och listan är ordnad söder → norr just
+  för att gå att läsa mot en karta.
+
+**⚠️ En region-lös serieomgång ÄRVER sina syskons kretsar.** Kretsen härleds ur `clubId` eller
+`regionalFederation`, och på en del omgångar är ingen satt. Förut syntes det bara som ett tomt
+regionfilter (som tolererar tomt) — men nu AVGÖR kretsen vilken sektion tävlingen hamnar i, och utan
+arvet landade en Halland-medlems egna Hallandsserie-omgångar under "Övriga tävlingar i landet",
+vilket är precis klagomålet. Mätt: två omgångar flyttade från Övriga till Din krets.
+
 **"Nära dig" är en SORTERING, inte ett standardfilter.** Kort med `data-near-me="1"` (tävling hos en
 klubb jag tillhör, eller i en krets någon av mina klubbar sitter i) sorteras först, med två rubriker
 som säger var gränsen går. **Ingenting göms** — ett standardfilter som tyst gömmer tävlingar är vad
@@ -1829,13 +1866,14 @@ fanns just för att serieomgångar inte var kort; nu är de det, så tillägget 
 `cardRegion === ''` i `filterCompetitions` visar dem när någon krets är valt. 36 % av korten i dev har
 tom region (en series region härleds ur barnens `clubId`/`regionalFederation`), men hålet finns inte.
 
-Verifierat 28/28 `hpsk-verify/competitions-hub-findability-verify.mjs` (**A/B: 12 faller på baseline**)
-och 9/9 `competitions-hub-clubonly-verify.mjs`. Den senare **bygger sin egen fixtur** — dev har noll
+Verifierat 34/34 `hpsk-verify/competitions-hub-findability-verify.mjs` (**A/B: 12 faller mot den
+tvåsektionsversion som föregick den, och 12 mot originalet**), 9/9
+`competitions-hub-clubonly-verify.mjs` och 14/14 `RegionAdjacencyTests`. Den senare **bygger sin egen fixtur** — dev har noll
 `isClubOnly`-tävlingar, så grenen kan inte mätas på befintlig data — och raderar den igen.
 ⚠️ `CreateCompetition` returnerar id:t under **`data.id`**, inte `competitionId`; en första version
 läste fel nyckel, fick 0, och lämnade fixturen kvar medan raderingen svarade "Competition not found".
 
-**Endast vyer → ingen ombyggnad krävs.** Ingen SQL, ingen doctype-property, ingen Umbraco-nod.
+**Gränsschemat är C# → full ombyggnad krävs.** Ingen SQL, ingen doctype-property, ingen Umbraco-nod.
 
 **Kvarstående UX-observation, inte åtgärdad:** `#clearFilters` ligger själv inne i den kollapsade
 "Mer filter"-panelen. Den som smalnat av med den synliga "Bara nära dig"-knappen hittar alltså inte
