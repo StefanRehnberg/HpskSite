@@ -1879,6 +1879,47 @@ läste fel nyckel, fick 0, och lämnade fixturen kvar medan raderingen svarade "
 "Mer filter"-panelen. Den som smalnat av med den synliga "Bara nära dig"-knappen hittar alltså inte
 den synliga vägen tillbaka — knappen själv är vägen, men "Rensa filter" borde ligga på primärraden.
 
+### "Redan anmäld i…"-brickan följde inte den valda skytten (2026-08-26)
+
+**Rapporterat på en Standardpistoltävling: efter att en skytt anmälts stod den gula brickan kvar och
+det såg ut som att ingen mer gick att anmäla.**
+
+⚠️ **Det var INTE grenspecifikt och inte nytt med de nya tävlingstyperna.**
+`wwwroot/js/competition-registration.js` delas av hela precisionsfamiljen och har **noll**
+grenberoende — `grep -cE "Standardpistol|Sportpistol|Milsnabb|MagnumPrecision|competitionType"` ger
+**0**. Senaste ändringen i filen före fixen var `43e361c` (2026-08-16, "Tävlar för"-arbetet).
+Att den nya grenen var där det upptäcktes betyder bara att det var där någon råkade byta skytte
+mitt i ett anmälningspass.
+
+**Två av tre vägar släppte inte förra skyttens tillstånd.** `queryExistingRegistrations()` anropades
+bara när en NY skytt valdes:
+- **Byte av KLUBB** (`handleClubSelection`) nollade `selectedTargetMemberId` men lämnade
+  `existingRegistrations`, `weaponClassConflicts`, brickorna OCH **de förkryssade klasserna** kvar.
+  Det är den allvarliga halvan: nästa skytt ärvde föregåendes klassval och kunde anmälas i den.
+- **Tomma "Välj medlem…"** (tidiga returgrenen i `handleMemberSelection`) lämnade brickan kvar över
+  ett tomt formulär.
+- Byte av MEDLEM fungerade redan, vilket är precis därför felet var lätt att missa.
+
+`clearExistingRegistrationState()` är nu den enda platsen som släpper tillståndet, och anropas från
+båda vägarna. Den utnyttjar att `addExistingRegistrationBadges()` börjar med att ta bort alla
+brickor — med tom `existingRegistrations` lägger den inte tillbaka några.
+
+**⚠️ Regressionen som måste finnas med:** att brickan **kommer tillbaka** när den anmälda skytten
+väljs igen. Utan det påståendet är "inga brickor" grönt även om funktionen tagits bort helt — och
+brickan är det som hindrar en dubbelanmälan.
+
+Verifierat 10/10 `hpsk-verify/registration-badge-reset-verify.mjs`; **A/B: 3 faller på ofixad kod**,
+exakt de tre som beskriver felet. Läser bara — anmäler ingen, ändrar ingenting.
+
+**Endast en JS-fil → ingen ombyggnad krävs.**
+
+**Fynd på vägen, INTE åtgärdat:** tävlingens SNYGGA URL gav **500** medan trädets URL gav 200
+(`/competitions/2026/halland/falkenbergs-pistolklubb/standarden/` mot
+`/competitions/2026/standarden/`). Tävlingen har `clubId = 2607` (Falkenbergs Pistolklubb) och tom
+`regionalFederation`. Ett 500 där, inte ett 404, är värt en egen titt — jfr avsnittet om
+självomdirigering och `CompetitionUrlProvider`, som returnerar null när klubben inte kan resolvas
+till en publicerad `club` under en `regionalPage`. Noterat, inte utrett.
+
 ### Roller som redigeraren aldrig visade fick inte tas bort av den (2026-08-26)
 
 **En sajtadmin som öppnade medlemsmodalen på en klubbadmin och tryckte Spara tog TYST bort hens

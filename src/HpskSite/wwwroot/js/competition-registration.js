@@ -1,4 +1,4 @@
-// Competition Registration System JavaScript
+﻿// Competition Registration System JavaScript
 // Version: 2026-02-02-v2 (with modal null checks)
 console.log('competition-registration.js loaded - version 2026-02-02-v2');
 
@@ -1617,6 +1617,9 @@ function handleClubSelection() {
 
     // Clear selected member ID and update button state
     selectedTargetMemberId = null;
+    // Byte av klubb betyder byte av person: förra skyttens anmälningar, brickor och
+    // klassmarkeringar får inte följa med.
+    clearExistingRegistrationState();
     updateRegistrationButton();
 
     // Update quick-create button text with selected club name
@@ -1652,6 +1655,9 @@ async function handleMemberSelection() {
         hideSelectedMemberInfo();
         document.getElementById('onBehalfOfMemberId').value = '';
         selectedTargetMemberId = null;
+        // Ingen skytt vald = inget att visa brickor för. Utan detta stod förra skyttens
+        // "Redan anmäld i…" kvar över ett tomt formulär.
+        clearExistingRegistrationState();
         loadRepresentingClubs(null);
         updateRegistrationButton(); // Update button state when no member selected
         return;
@@ -1767,6 +1773,26 @@ function showRegistrationTargetError(message) {
 // ============================================================================
 // DUPLICATE REGISTRATION PREVENTION SYSTEM
 // ============================================================================
+
+// Släpp allt som hör till FÖRRA skytten: de laddade anmälningarna, vapenklasskonflikterna, de
+// gula "Redan anmäld i…"-brickorna och de förkryssade klasserna.
+//
+// ⚠️ Måste anropas varje gång målskytten upphör att vara den som tillståndet lästes för — inte
+// bara när en NY skytt väljs. Två vägar saknade det och lämnade förra skyttens tillstånd kvar:
+//   • byte av KLUBB (handleClubSelection) — värst av de två, eftersom den lämnade både brickan
+//     OCH den förkryssade klassen, så nästa skytt ärvde Andys C_Vet_Y och kunde anmälas i den
+//   • val av den tomma "Välj medlem…" (handleMemberSelection)
+// Symptomet var att den gula brickan stod kvar och det såg ut som att ingen mer gick att anmäla.
+// Reproducerat på Standardpistol, men filen har NOLL grenberoende — det gällde hela
+// precisionsfamiljen och var inte nytt med de nya tävlingstyperna.
+function clearExistingRegistrationState() {
+    existingRegistrations = [];
+    weaponClassConflicts = {};
+    // addExistingRegistrationBadges() börjar med att ta bort alla brickor, och med tom
+    // existingRegistrations lägger den inte tillbaka några.
+    addExistingRegistrationBadges();
+    clearAllClassSelections();
+}
 
 // Query existing registrations for the current member in this competition
 async function queryExistingRegistrations() {
