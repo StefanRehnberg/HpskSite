@@ -19,10 +19,13 @@
 <form id="registrationForm">
     @Html.AntiForgeryToken()
 
-    <!-- Anti-spam honeypot — invisible to humans -->
+    @* Anti-spam honeypot — osynlig för människor. Fältnamnet får INTE likna något
+       en lösenordshanterare eller webbläsarens autofyll känner igen ("website",
+       "url", "company" …) — då fylls fällan i åt en riktig användare, och servern
+       svarar då att allt gick bra utan att skapa något konto. Ingen <label> heller,
+       av samma skäl. *@
     <div style="position:absolute;left:-9999px;opacity:0;height:0;overflow:hidden;" aria-hidden="true">
-        <label for="website">Website</label>
-        <input type="text" id="website" name="website" tabindex="-1" autocomplete="off" />
+        <input type="text" id="hp_check_2" name="hp_check_2" tabindex="-1" autocomplete="off" />
     </div>
 
     <div class="mb-3">
@@ -215,6 +218,14 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
+        // Registreringen tar flera sekunder (klubb- och kretsadmins notifieras innan
+        // svaret skickas). Utan pending-state ser användaren ingenting hända och
+        // hinner klicka igen, vilket ger "e-postadressen finns redan".
+        const submitBtn = document.getElementById('registerSubmitBtn');
+        const submitBtnHtml = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Registrerar…';
+
         try {
             const response = await fetch('/umbraco/surface/Member/RegisterMember', {
                 method: 'POST',
@@ -234,17 +245,25 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Registration error:', error);
             showError('Ett fel uppstod vid registrering. Försök igen.');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = submitBtnHtml;
         }
     }
 
     function showError(message) {
         const resultDiv = document.getElementById('registrationResult');
         resultDiv.innerHTML = `<div class="alert alert-danger">${message}</div>`;
+        // #registrationResult ligger överst i formuläret medan Registrera-knappen
+        // ligger längst ned — utan scroll hamnar svaret utanför skärmen och
+        // användaren tror att ingenting hände.
+        resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function showSuccess(message) {
         const resultDiv = document.getElementById('registrationResult');
         resultDiv.innerHTML = `<div class="alert alert-success">${message}</div>`;
+        resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function showRegistrationSuccess(firstName) {
@@ -339,6 +358,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             </div>
         `;
+
+        // Formuläret var precis dolt, så sidan har krympt — scrolla upp till
+        // bekräftelsen så den inte hamnar ovanför synfältet.
+        resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 });
 

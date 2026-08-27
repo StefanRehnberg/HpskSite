@@ -503,14 +503,26 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RegisterMember(string firstName, string lastName, string email,
-            string password, string confirmPassword, int? primaryClubId = null, string? website = null)
+            string password, string confirmPassword, int? primaryClubId = null,
+            [FromForm(Name = "hp_check_2")] string? honeypot = null)
         {
             try
             {
-                // Honeypot check — bots fill hidden fields
-                if (!string.IsNullOrEmpty(website))
+                // Honeypot check — bots fill hidden fields.
+                // Svara ALDRIG success här: fältet kan även fyllas av en riktig
+                // användares autofyll/lösenordshanterare, och då blev registreringen
+                // ett svart hål — bekräftelse på skärmen, inget konto i databasen.
+                if (!string.IsNullOrEmpty(honeypot))
                 {
-                    return Json(new { success = true, message = "Registrering lyckades!" });
+                    System.Diagnostics.Debug.WriteLine(
+                        $"RegisterMember: honeypot filled (email={email}) — registration refused");
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Registreringen kunde inte genomföras. Om du använder en " +
+                                  "lösenordshanterare eller webbläsarens autofyll, stäng av den " +
+                                  "för den här sidan och försök igen."
+                    });
                 }
 
                 // Validate required fields
