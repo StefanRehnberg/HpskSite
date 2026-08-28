@@ -2738,6 +2738,55 @@ Club admins migrate a hand-written ledger of past series in bulk on the club **M
 - **Elit timing gate + editable Guldmärke year (2026-06-04):** now enforced — SHB 5.4.2 "Prov för elitmärke får avläggas första gången året efter det guldmärket erövrats." `AnalyzeSeriesProofAsync` for Elit requires a held Pistolskyttemärket Guld (no Guld → no Elit, also fixes prereq-not-enforced-on-award) and only counts series with `Year >= guldBadge.AchievedYear + 1`. Because that depends on an accurate Guld year, the **Guldmärke year is now captured at award and editable afterward**: `AwardBadge` already accepted `Year` (JS now sends it, prompting at Guld award, default current year); the Detaljer Guld row gained an **År** input next to the Nr input; `SetBadgeUniqueNumber` (+ `UniqueNumberRequest.Year`) now also sets `AchievedYear`. The Elit family summary shows a note ("Elitprov får avläggas först {guldYear+1} …") when the member holds Guld but the viewed year isn't past it. Luftpistol's brons prereq stays advisory (only Elit's gate is hard, since the timing rule needs the Guld year).
 - **Remove an auto-awarded family badge (2026-06-04):** awarded badges are persisted `MemberBadge` rows; the engine is add-only, so deleting the source series does NOT retract a badge (it just stops re-deriving). New `POST Marken/DeleteFamilyBadges {memberId, family}` (auth `CanSignOffForMemberAsync`) deletes all of a member's `MemberBadge` + `MemberBadgeQualification` rows for a family; wired to a **"Ta bort" trash button** on each row in the Detaljer "Andra märken" section (`deleteMarkenFamily` JS, functionary-only). Caveat surfaced in the confirm dialog: derived families re-materialize on next read if the underlying evidence still qualifies — remove the series/results first for a lasting removal. (Prior to this there was no UI for the long-existing `DeleteBadge` endpoint — removal required editing the `MemberBadge` table directly.)
 
+### Resultatlistan kan läsas per klass ELLER per vapengrupp (2026-08-28)
+
+Från samma klubbadminrapport: *"vid mästerskap är det ju en enda lång lista att redovisa … att kunna
+växla mellan total resultatlista och en sorterad efter klass vore roligt för deltagare"*. Klargjort
+med rapportören att det gäller **klass 1–3, inte vapengrupperna** — och därmed är det väldefinierat,
+eftersom klasserna inom en vapengrupp skjuter samma program.
+
+**Det är en VY, inte en sammanslagning.** Placeringar och medaljer räknas oförändrat per klass;
+varje rad i det utplattade läget skriver ut sin klass OCH sin officiella placering i klassen
+(`C2 · 1`), så listan aldrig kan läsas som ett resultat. En riktig sammanslagning ändrar vem som
+vann — det är `ClassMergingService` och en annan funktion.
+
+**Implementerad som en omgruppering av `classGroups` FÖRE renderaren** (`crFlattenByWeaponGroup` i
+`Views/CompetitionResult.cshtml`), inte som en andra tabellbyggare. Hela kolumnbredds- och
+cellogiken är oberörd och kan därför inte glida från klassvyn. Ren vy-ändring → ingen ombyggnad.
+
+- **⚠️ Vapengruppen resolvas via `window.getWeaponClassCode`, aldrig `charAt(0)`.** `A_opt_2` skulle
+  annars foldas in i A, och optiksikte är inte samma tävling som öppet sikte. Partialen
+  `_ShootingClassesBootstrap.cshtml` var **inte** inkluderad i resultatvyn och är det nu; den
+  resolvar både klass-ID och visningsNAMN, vilket krävs här eftersom resultatrader bär namnet.
+- **⚠️ Koden läser SKYTTARNA, inte gruppens rubrik.** En grupp kan vara sammanslagen (`C2+Dam`) eller
+  omdöpt av en admin (`C2 Allmänt`) — rubriken resolvar då till ingenting.
+- **Lika total OCH lika X delar placering.** Den officiella särskiljningen är en serie-countback som
+  servern gör per klass; att räkna fram en egen tvärs över klasser vore en andra rangordningsregel
+  fri att säga emot den riktiga, så den utplattade listan avstår från att skilja skyttar den inte
+  kan skilja ärligt.
+- **⚠️ Pennan för att döpa om klassgruppen är BORTTAGEN i utplattat läge.** "Vapengrupp C" är en
+  etikett den här sidan hittat på, och en override sparad på den nyckeln hade skrivit en rad i
+  `classNameOverrides` som aldrig mer matchar någon verklig klassgrupp. Radera-knappen bär däremot
+  fortfarande skyttens RIKTIGA klass (den kommer från skytten, inte från gruppen).
+- **Växlingen erbjuds bara när minst en vapengrupp har mer än en klassgrupp.** En kontroll som inte
+  gör något är sämre än ingen kontroll. Verkligt fall i dev: Rynketians sammanslagningar lämnar exakt
+  en grupp per vapengrupp, och där finns ingen växling.
+- **Särskjutningsnoterna följer med** till den utplattade gruppen — de förklarar hur en MEDALJ
+  avgjordes och är sanna oavsett gruppering.
+- Valet minns per tävling i `localStorage` (`hpsk_cr_flat_<compId>`), och `crShooterTotals` är nu
+  enda platsen skotten parsas (raden räknade själv om samma sak).
+- **Springskytte och Fältskytte har egna renderare i samma fil och är medvetet orörda.**
+
+**⚠️ Fälla för den som testar detta: en start är per (skytt, KLASS).** 19 skyttar på tävling 2586 är
+anmälda i två klasser och har därför två rader i den utplattade vyn — vilket är rätt. En uppslagning
+på bara namnet hittar den andra starten och rapporterar en korrekt rad som fel; det kostade en
+felsökningsrunda. Matcha på (namn, klass).
+
+Verifierat 38/38 `hpsk-verify/resultlist-flatten-verify.mjs` (**A/B: baseline avbryter efter 1/3** —
+utan växlingen kan inget nedanför köras). Läser bara; rör inget utom besökarens egen
+localStorage-preferens, som städas. Fixtur 2586 (7 grupper: 3 i A, 4 i C) + Rynketian som negativt
+fall. Regression: marken-witness-date 79/79.
+
 ### Märken: bevittning på plats, skjutdatum och kontext i valideringskön (2026-08-28)
 
 Från en klubbadmins rapport: *"jag får ingen info eller förhandsvisning om vad det är … jag kan inte

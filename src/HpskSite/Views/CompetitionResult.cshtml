@@ -211,6 +211,11 @@
 </head>
 <body>
     @Html.AntiForgeryToken()
+    @* window.getWeaponClassCode — needed by the "alla klasser i vapengruppen"-view below. Use it
+       rather than charAt(0): A_opt_1 would otherwise be folded into plain A, and optical sights are
+       not the same competition as open sights. It also resolves both the class ID and the display
+       NAME, which matters here because result rows carry the Name. *@
+    @await Html.PartialAsync("~/Views/Partials/_ShootingClassesBootstrap.cshtml")
     <div class="container-fluid">
         <!-- Header -->
         <div class="d-flex justify-content-between align-items-center mb-4 no-print">
@@ -340,6 +345,144 @@
     const canDeleteResults = @(canDeleteResults.ToString().ToLower());
         
         // Fetch and display results
+        // ── "Alla klasser i vapengruppen" ────────────────────────────────────────────────────────
+        // A shooter wants to see where they landed among everyone who shot the same course with the
+        // same weapon group — klass 1/2/3 (plus Dam/Vet/Jun) all shoot the same programme, so a
+        // combined reading is fair. This is a VIEW, not a merge: placements and medals stay per
+        // class, and the official per-class placement is printed on every row so the flat list can
+        // never be mistaken for a result.
+        //
+        // Implemented as a regrouping of `classGroups` BEFORE the renderer, so the whole table
+        // builder below is untouched and cannot drift from the per-class view.
+        const CR_FLAT_KEY = `hpsk_cr_flat_${competitionId}${subQs ? '_sub' : ''}`;
+        let crFlatMode = (() => { try { return localStorage.getItem(CR_FLAT_KEY) === '1'; } catch { return false; } })();
+
+        function crSetFlatMode(on) {
+            crFlatMode = !!on;
+            try { localStorage.setItem(CR_FLAT_KEY, crFlatMode ? '1' : '0'); } catch { }
+            loadResults();
+        }
+
+        // Series scores + totals for one shooter. ONE implementation: the flat view needs the total
+        // to sort on before rendering, and the row below needs the per-series cells — two parses of
+        // the same shots JSON would be free to disagree.
+        function crShooterTotals(shooter) {
+            const seriesScores = [];
+            let total = 0, xCount = 0;
+            (shooter.results || []).forEach(result => {
+                let score = 0, x = 0;
+                JSON.parse(result.shots).forEach(shot => {
+                    score += (shot === 'X' ? 10 : parseInt(shot));
+                    if (shot === 'X') x++;
+                });
+                seriesScores.push({ score, xCount: x });
+                total += score;
+                xCount += x;
+            });
+            return { seriesScores, total, xCount };
+        }
+
+        // "A_Opt" -> "A Opt", "A_M" -> "AM" … mirrors the prefixes ClassMergingService uses for
+        // combined class names, so the two surfaces name the same weapon group the same way.
+        function crWeaponGroupLabel(code) {
+            switch (code) {
+                case 'A_Opt': return 'A Opt';
+                case 'A_M': return 'AM';
+                case 'A_P': return 'AP';
+                case 'A_G': return 'AG';
+                default: return code;
+            }
+        }
+
+        // How many weapon groups actually hold more than one class group. 0 = flattening would change
+        // nothing, so the toggle is not offered — a control that does nothing is worse than no control.
+        function crFlattenableGroups(classGroups) {
+            const counts = {};
+            (classGroups || []).forEach(g => {
+                const code = crGroupWeaponCode(g);
+                counts[code] = (counts[code] || 0) + 1;
+            });
+            return Object.values(counts).filter(n => n > 1).length;
+        }
+
+        // The weapon group of a class group, taken from its SHOOTERS rather than the group's own
+        // (possibly merged, possibly admin-renamed) name — "C2 Allmänt" resolves to nothing.
+        function crGroupWeaponCode(group) {
+            const first = (group.shooters || [])[0];
+            const src = (first && first.shootingClass) || group.className || '';
+            return (window.getWeaponClassCode ? window.getWeaponClassCode(src) : '') || String(src).charAt(0).toUpperCase() || '?';
+        }
+
+        function crFlattenByWeaponGroup(classGroups) {
+            const byCode = new Map();
+            (classGroups || []).forEach(group => {
+                const code = crGroupWeaponCode(group);
+                if (!byCode.has(code)) byCode.set(code, []);
+                // Capture the OFFICIAL per-class placement (the server's order within this group)
+                // before anything is re-sorted — it is the only placement that means anything.
+                (group.shooters || []).forEach((shooter, idx) => {
+                    const t = crShooterTotals(shooter);
+                    byCode.get(code).push(Object.assign({}, shooter, {
+                        __officialClassName: shooter.shootingClass || group.className || '',
+                        __officialPlace: idx + 1,
+                        __sortTotal: t.total,
+                        __sortX: t.xCount
+                    }));
+                });
+            });
+
+            // Särskjutning footnotes explain how a MEDAL was decided, and stay true regardless of how
+            // the table is grouped — carry them over rather than silently dropping them here.
+            const notesByCode = new Map();
+            (classGroups || []).forEach(group => {
+                if (!Array.isArray(group.shootOffNotes) || !group.shootOffNotes.length) return;
+                const code = crGroupWeaponCode(group);
+                if (!notesByCode.has(code)) notesByCode.set(code, []);
+                notesByCode.get(code).push(...group.shootOffNotes);
+            });
+
+            const out = [];
+            for (const [code, shooters] of byCode) {
+                shooters.sort((a, b) => (b.__sortTotal - a.__sortTotal) || (b.__sortX - a.__sortX));
+                // Equal total AND equal X share a position. The official tie-break is a series
+                // countback the server computes per class; inventing a cross-class countback here
+                // would be a second ranking rule free to disagree with the real one, so the flat
+                // list declines to separate shooters it cannot honestly separate.
+                let pos = 0, prevTotal = null, prevX = null;
+                shooters.forEach((s, i) => {
+                    if (s.__sortTotal !== prevTotal || s.__sortX !== prevX) { pos = i + 1; prevTotal = s.__sortTotal; prevX = s.__sortX; }
+                    s.__flatPos = pos;
+                    s.__flatClassLabel = `${s.__officialClassName} · ${s.__officialPlace}`;
+                });
+                out.push({
+                    className: `Vapengrupp ${crWeaponGroupLabel(code)}`,
+                    shooters,
+                    shootOffNotes: notesByCode.get(code) || [],
+                    __isFlat: true
+                });
+            }
+            out.sort((a, b) => a.className.localeCompare(b.className, 'sv'));
+            return out;
+        }
+
+        function crViewToggleHtml(flattenable) {
+            if (!flattenable) return '';
+            return `
+                <div class="d-flex align-items-center gap-2 flex-wrap mb-3 no-print">
+                    <span class="small text-muted">Visa:</span>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Visningsläge">
+                        <button type="button" class="btn ${crFlatMode ? 'btn-outline-primary' : 'btn-primary'}"
+                                onclick="crSetFlatMode(false)">Per klass</button>
+                        <button type="button" class="btn ${crFlatMode ? 'btn-primary' : 'btn-outline-primary'}"
+                                onclick="crSetFlatMode(true)">Alla klasser i vapengruppen</button>
+                    </div>
+                    ${crFlatMode
+                        ? `<span class="small text-muted"><i class="bi bi-info-circle me-1"></i>Sammanslagen läsning.
+                             Placeringar och medaljer räknas fortfarande per klass — varje rad visar sin klass och sin placering i den.</span>`
+                        : ''}
+                </div>`;
+        }
+
         async function loadResults() {
             const container = document.getElementById('resultsContent');
 
@@ -393,8 +536,16 @@
                 // Build HTML for results
                 let html = '';
 
-                if (results.classGroups && results.classGroups.length > 0) {
-                    results.classGroups.forEach(classGroup => {
+                // The view toggle is offered only when at least one weapon group holds more than one
+                // class — otherwise the two views are identical.
+                const crFlattenable = crFlattenableGroups(results.classGroups);
+                html += crViewToggleHtml(crFlattenable);
+                const crGroupsToRender = (crFlatMode && crFlattenable)
+                    ? crFlattenByWeaponGroup(results.classGroups)
+                    : results.classGroups;
+
+                if (crGroupsToRender && crGroupsToRender.length > 0) {
+                    crGroupsToRender.forEach(classGroup => {
                         // Allocate column widths so the table fits the viewport while leaving as
                         // much room as possible for Namn and Förening. Single-series columns
                         // (1..N, F1..FN, milsnabb 1..12) hold at most 2 chars ("50"), so they
@@ -469,10 +620,14 @@
                         // as the override key so renaming + reverting are roundtrip-safe.
                         const autoName = classGroup.className || '';
                         const displayName = classGroup.displayClassName || autoName;
-                        const renameAttr = canDeleteResults
+                        // ⚠️ No renaming in the flattened view: "Vapengrupp C" is a label this page
+                        // invented, and saving an override keyed on it would write a row into
+                        // classNameOverrides that matches no real class group ever again.
+                        const canRename = canDeleteResults && !classGroup.__isFlat;
+                        const renameAttr = canRename
                             ? ` data-rename="1" data-original="${autoName.replace(/"/g, '&quot;')}" data-current="${displayName.replace(/"/g, '&quot;')}"`
                             : '';
-                        const renameBtn = canDeleteResults
+                        const renameBtn = canRename
                             ? ` <button type="button" class="btn btn-link btn-sm p-0 ms-2 rename-class-btn no-print" title="Byt namn på klassgruppen" aria-label="Byt namn">
                                   <i class="bi bi-pencil-square"></i>
                                </button>`
@@ -541,25 +696,12 @@
 
                         // Add shooters
                         classGroup.shooters.forEach((shooter, index) => {
-                            const position = index + 1;
-                            let totalScore = 0;
-                            let totalXCount = 0;
+                            // In the flattened view the position is a shared reading rank (see
+                            // crFlattenByWeaponGroup); per class it is the server's official order.
+                            const position = shooter.__flatPos || (index + 1);
                             let qualificationScore = 0;
 
-                            // Calculate series scores
-                            const seriesScores = [];
-                            shooter.results.forEach(result => {
-                                const shots = JSON.parse(result.shots);
-                                let score = 0;
-                                let xCount = 0;
-                                shots.forEach(shot => {
-                                    score += (shot === 'X' ? 10 : parseInt(shot));
-                                    if (shot === 'X') xCount++;
-                                });
-                                seriesScores.push({score, xCount});
-                                totalScore += score;
-                                totalXCount += xCount;
-                            });
+                            const { seriesScores, total: totalScore, xCount: totalXCount } = crShooterTotals(shooter);
 
                             // Row styling
                             let rowClass = '';
@@ -574,7 +716,7 @@
                                     <td class="text-center">${position}</td>
                                     <td class="results-cell-truncate" title="${shooter.name}">${shooter.name}</td>
                                     <td class="results-cell-truncate" title="${shooter.club}">${shooter.club}</td>
-                                    <td class="text-center">${shooter.shootingClass || classGroup.className}</td>
+                                    <td class="text-center">${shooter.__flatClassLabel || shooter.shootingClass || classGroup.className}</td>
                             `;
 
                             // Add series scores based on competition type
