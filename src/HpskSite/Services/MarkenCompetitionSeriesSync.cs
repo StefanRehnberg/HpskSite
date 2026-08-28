@@ -45,6 +45,13 @@ namespace HpskSite.Services
             _logger = logger;
         }
 
+        /// <summary>
+        /// Elitmärkets brons requirement per series (SHB 5.4). Read from the family definition so the
+        /// materialisation bar cannot drift from the rule it exists to serve.
+        /// </summary>
+        private static int ElitBronsPerSeries =>
+            MarkenFamilies.Get(MarkenFamilies.Elit)?.SeriesThreshold?[0] ?? 45;
+
         /// <summary>What one reconciliation did. Returned so callers can log or assert on it.</summary>
         public record SyncResult(int Inserted, int Updated, int Deleted)
         {
@@ -153,10 +160,18 @@ namespace HpskSite.Services
 
                 int total = SumShots(r.Shots);
                 int threshold = Marken.PrecisionThreshold(group, year, birthYears.GetValueOrDefault(r.MemberId));
-                // Only QUALIFYING series are materialised. A precision competition holds 7-10 series per
-                // shooter and materialising all of them would bury the ledger in rows that count toward
-                // nothing — the Guldfodring and the liga are both about series that reach the gold krav.
-                if (total < threshold) continue;
+
+                // ── What is worth materialising ──
+                // Not every series: a precision competition holds 7-10 per shooter, and rows that can
+                // never count toward anything would just bury the ledger. But the bar is the LOWEST
+                // threshold any consumer cares about, not the Guldfodring's alone:
+                //   · Guldfodring — the age-adjusted guldkrav (A 43 / B 45 / C 46, less age concessions)
+                //   · Elitmärket  — 45 p/serie for brons (SHB 5.4), and Stefan confirmed 2026-08-28 that
+                //     a series shot in competition may serve as an elitprov ("skjutningarna får göras
+                //     under både tränings- och tävlingsskjutning").
+                // For weapon group C the guldkrav is 46 while Elit brons asks 45, so keying only on the
+                // guldkrav would silently withhold every C-shooter's 45s from their Elit.
+                if (total < Math.Min(threshold, ElitBronsPerSeries)) continue;
 
                 desired[r.Id] = new MarkenSeries
                 {
@@ -177,7 +192,11 @@ namespace HpskSite.Services
                     Shots = r.Shots ?? "[]",
                     Total = total,
                     Threshold = threshold,
-                    Qualifies = true,
+                    // ⚠️ Qualifies means "reaches the GULDKRAV", which is what the Guldfodring filters on.
+                    // It is NOT the same question as "is worth materialising" (see the bar above): a
+                    // 45 in weapon group C is Elit-brons evidence but under the 46 guldkrav, so it is
+                    // stored with Qualifies = false and stays out of the Guldfodring while counting for Elit.
+                    Qualifies = total >= threshold,
                     Status = Marken.StatusVerified,
                     ValidatedDate = r.EnteredAt,
                     Notes = ci.Name,
@@ -209,13 +228,14 @@ namespace HpskSite.Services
 
                 // A corrected result must move the series with it.
                 if (have.Total == want.Total && have.Threshold == want.Threshold
+                    && have.Qualifies == want.Qualifies
                     && have.WeaponGroup == want.WeaponGroup && have.SeriesDate.Date == want.SeriesDate.Date
                     && have.ClubId == want.ClubId && have.Shots == want.Shots
                     && have.Status == want.Status) continue;
 
                 have.Total = want.Total;
                 have.Threshold = want.Threshold;
-                have.Qualifies = true;
+                have.Qualifies = want.Qualifies;
                 have.WeaponGroup = want.WeaponGroup;
                 have.SeriesDate = want.SeriesDate;
                 have.ClubId = want.ClubId;

@@ -2001,16 +2001,17 @@ namespace HpskSite.Controllers
                         var d = Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target);
                         return d == Marken.DisciplinePrecision || d == Marken.DisciplineSnabbpistol;
                     })
-                    // ⚠️ HUMAN-ENTERED SERIES ONLY, deliberately.
-                    // Materialising competition series (2026-08-28) put ~180 new precision rows into the
-                    // dev ledger alone, and Elit brons asks 45 p/serie where the C guldkrav is 46 — so
-                    // simply letting them through here would start handing out Elitmärken as a SIDE
-                    // EFFECT of a change that was about the Guldfodring and the club liga. Whether a
-                    // competition series may serve as an elitprov is a rules question (SHB 5.4) nobody
-                    // has decided, and badge awards are forward-only, so a wrong "yes" cannot be undone.
-                    // Keeping the old behaviour exactly is the reversible choice; lift this filter only
-                    // once the question has an answer.
-                    .Where(s => !s.IsFromCompetition)
+                    // Competition series ARE valid elitprov (confirmed with Stefan 2026-08-28, from SHB
+                    // 5.4: "skjutningarna får göras under både tränings- och tävlingsskjutning som
+                    // anordnats enligt förbundets bestämmelser"), so materialised series count here too.
+                    // The gates that keep this honest are elsewhere and unchanged: a held Guldmärke, only
+                    // years after it, 5 precision AND 5 snabb in the SAME calendar year, one valör per
+                    // year, in order.
+                    // ⚠️ The PRECISION half is what competitions feed today. The snabb half still comes
+                    // only from human submissions — a Duell competition's series are not materialised,
+                    // because whether they are shot on the snabbpistoltavla at 25 m with 3 s/shot is a
+                    // question about the discipline, not about this code. Until that is answered, a
+                    // shooter cannot complete Elit from competition results alone.
                     .ToList();
 
                 // SHB 5.4.2: "Prov för elitmärke får avläggas första gången året efter det guldmärket

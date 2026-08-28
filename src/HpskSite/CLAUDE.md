@@ -2767,8 +2767,12 @@ från), `SourceCompetitionId`, `CountsTowardGuldfodring`.
   standard. Utan `-b` exitar sqlcmd dessutom 0 på T-SQL-fel. Tillsammans gjorde det att en äldre
   verifieringssvits städ-DELETE **gjorde ingenting medan den rapporterade lyckat**. Appen påverkas inte
   (SqlClient sätter ON), men varje skript måste sätta det själv.
-- **Endast KVALIFICERANDE serier materialiseras.** En precisionstävling har 7–10 serier per skytt; att
-  lägga in alla hade begravt registret i rader som räknas mot ingenting. 182 rader i dev.
+- **⚠️ Tröskeln är `min(guldkrav, Elit brons 45)`, inte guldkravet.** Inte varje serie — en
+  precisionstävling har 7–10 per skytt och rader som aldrig kan räknas mot något hade begravt registret
+  — men baren är den LÄGSTA någon konsument bryr sig om. För vapengrupp C är guldkravet 46 medan Elit
+  brons är 45, så att bara läsa guldkravet hade tyst undanhållit varje C-skytts 45:or från deras Elit.
+  **`Qualifies` betyder exakt "når guldkravet"** och är därför `false` på en sådan rad: Elit-bevis, men
+  utanför guldfodringen. ~186 rader i dev.
 - **`ClubId` bär skyttens EGEN klubb** på en materialiserad rad (ingen klubb *validerade* den —
   tävlingsinmatningen är valideringen). Det är vad som gör ligan **medlemsbaserad**, vilket var
   Stefans beslut: den listar klubbens medlemmars serier var de än skjutits. ⚠️ En skytt utan
@@ -2793,20 +2797,39 @@ från), `SourceCompetitionId`, `CountsTowardGuldfodring`.
    Båda gated på `CanSignOffForMemberAsync` (styrelse / skjutledare-om-tillåtet / sajtadmin) — en
    klubbadmin får SE men inte signera, samma delning som valideringskön redan har.
 
-**⚠️ Elit lämnades AVSIKTLIGT oförändrat.** `AnalyzeSeriesProofAsync` filtrerar bort materialiserade
+**Elit räknar tävlingsserier** (bekräftat med Stefan 2026-08-28 ur SHB 5.4: *"skjutningarna får göras
+under både tränings- och tävlingsskjutning som anordnats enligt förbundets bestämmelser"*). Hela
+regeluppsättningen, för referens: guldmärket krävs först och provet får göras tidigast kalenderåret
+EFTER att det erövrades; **5 precisionsserier + 5 snabbserier under SAMMA kalenderår**; per serie brons
+45 / silver 48 / guld 49 för BÅDA momenten; ett märke per år, i turordning. Allt det var redan
+implementerat och är oförändrat — det enda som ändrades är att filtret nedan togs bort.
+
+- **⚠️ Bara PRECISIONSHALVAN får sitt bränsle från tävlingar.** Snabbhalvan kommer fortfarande enbart
+  från handinskick: en Duelltävlings serier materialiseras INTE, eftersom huruvida de skjuts mot
+  snabbpistoltavla på 25 m med 3 s/skott är en fråga om grenen, inte om koden. **ÖPPEN FRÅGA till
+  Stefan.** Tills den är svarad kan ingen fullborda Elit på tävlingsresultat ensamt — vilket också är
+  varför materialiseringen av ~186 precisionsserier inte myntade ett enda Elitmärke.
+
+**Tre guldserier FÅR komma från en enda tävling** (Stefan 2026-08-28). Dev visar en skytt med sju
+kvalificerande 48-serier från samma tävlingsdag, alla räknande. Beteendet är oförändrat sedan före
+materialiseringen — det syns bara nu.
+
+**Varför frågan var värd att ställa innan filtret lyftes** (behållet, för nästa gång något liknande
+dyker upp): `AnalyzeSeriesProofAsync` filtrerade bort materialiserade
 serier (`!s.IsFromCompetition`). Elit brons kräver 45 p/serie där C-guldkravet är 46, så att bara
 släppa igenom dem hade börjat dela ut Elitmärken som SIDOEFFEKT av en ändring om guldfodringen och
-ligan. Om en tävlingsserie får vara elitprov är en regelfråga (SHB 5.4) ingen avgjort, och
-märkestilldelning är enkelriktad — ett felaktigt "ja" går inte att ångra. **Frågan är öppen.**
+ligan — och märkestilldelning är enkelriktad, så ett felaktigt "ja" hade inte gått att ångra. Det var
+en regelfråga, inte en kodfråga, och den hörde därför hos Stefan.
 
 **Operatörssteg:** kör `Migrations/add-source-and-counts-to-markenseries.sql` (idempotent, egen batch
-per objekt, sätter `QUOTED_IDENTIFIER ON` själv). Adds C# → full ombyggnad.
+per objekt, sätter `QUOTED_IDENTIFIER ON` själv). **Körd i prod 2026-08-28.** Adds C# → full ombyggnad.
 
-Verifierat 44/44 `hpsk-verify/marken-compseries-sync-verify.mjs` (**A/B: 11 av 44 faller**, inklusive
-alla fyra propageringspåståenden och hela dubblett-halvan). Sviten redigerar verkliga resultatrader —
-poäng ner under kravet, ändrad poäng, raderad rad — och återställer varje mutation ur en FULL snapshot
-med återställningen asserterad. Regression: marken-witness-date 79/79, resultlist-flatten 38/38,
-märkes- och kvalifikationstabellerna oförändrade före/efter (6/6).
+Verifierat 50/50 `hpsk-verify/marken-compseries-sync-verify.mjs` (**A/B: 11 av 44 faller** på den
+version som mättes före Elit-tillägget, inklusive alla fyra propageringspåståenden och hela
+dubblett-halvan). Sviten redigerar verkliga resultatrader — poäng ner under kravet, 45 p som Elit-bevis,
+44 p under båda trösklarna, ändrad poäng, raderad rad — och återställer varje mutation ur en FULL
+snapshot med återställningen asserterad. Regression: marken-witness-date 79/79, resultlist-flatten
+38/38, märkes- och kvalifikationstabellerna oförändrade före/efter (6/6).
 
 ### Resultatlistan kan läsas per klass ELLER per vapengrupp (2026-08-28)
 
