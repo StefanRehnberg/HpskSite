@@ -618,8 +618,12 @@ window.currentClubId = clubId;
     @await Html.PartialAsync("CompetitionWizardModal")
     @await Html.PartialAsync("CompetitionEditModal")
     @await Html.PartialAsync("SpringskytteEditModal")
+    @await Html.PartialAsync("CompetitionAdvertEditModal")
     @await Html.PartialAsync("CompetitionDeleteConfirmModal")
     @await Html.PartialAsync("FeaturedItemsPicker")
+
+    @* Åtgärder → Redigera tävlingen — delad med krets- och sajtlistorna *@
+    @await Html.PartialAsync("_CompetitionEditDispatch")
 }
 
 <!-- JavaScript for club page functionality -->
@@ -784,89 +788,6 @@ function escapeHtml(text) {
     return text.replace(/[&<>"']/g, m => map[m]);
 }
 
-// Open edit modal for club admin (same as admin page)
-window.openAdminEditModal = function(competitionId) {
-    console.log('Opening edit modal for competition ID:', competitionId);
-
-    // Update modal title for edit mode
-    const modalLabel = document.getElementById('competitionEditModalLabel');
-    modalLabel.innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera Tävling';
-
-    // Fetch competition data
-    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
-    console.log('CSRF token found:', !!token);
-
-    const url = `/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`;
-    console.log('Fetching from URL:', url);
-
-    fetch(url, {
-        method: 'GET',
-        headers: {
-            'RequestVerificationToken': token
-        },
-        credentials: 'same-origin'
-    })
-    .then(response => {
-        console.log('Response status:', response.status);
-        console.log('Response ok:', response.ok);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        console.log('Received data:', data);
-        if (data.success) {
-            // Store the competition data to populate after modal is shown
-            window.currentCompetitionData = data.data;
-
-            // Show modal first, then populate data after Flatpickr is initialized
-            const modalElement = document.getElementById('competitionEditModal');
-            console.log('Modal element found:', !!modalElement);
-            // Reuse existing modal instance or create new one
-            const modal = window.competitionEditModalInstance || new bootstrap.Modal(modalElement);
-            window.competitionEditModalInstance = modal;
-            console.log('Showing modal...');
-            modal.show();
-            console.log('Modal shown');
-
-            // Defensively trigger series load if the modal's show.bs.modal handler didn't
-            setTimeout(() => {
-                const seriesSelect = document.getElementById('competitionSeriesId');
-                const alreadyLoaded = seriesSelect && (seriesSelect.options.length > 1 || seriesSelect.dataset.seriesLoaded === 'true');
-                if (!alreadyLoaded && typeof window.loadSeries === 'function') {
-                    window.loadSeries();
-                }
-            }, 250);
-
-            // Populate data after modal is shown and Flatpickr is initialized
-            setTimeout(() => {
-                console.log('Checking if populateEditModal is defined:', typeof window.populateEditModal);
-                if (typeof window.populateEditModal === 'function') {
-                    populateEditModal(window.currentCompetitionData);
-                    loadEditModalShootingClasses();
-                } else {
-                    console.error('populateEditModal function is not defined. Retrying in 500ms...');
-                    setTimeout(() => {
-                        if (typeof window.populateEditModal === 'function') {
-                            populateEditModal(window.currentCompetitionData);
-                            loadEditModalShootingClasses();
-                        } else {
-                            console.error('populateEditModal still not defined after retry');
-                        }
-                    }, 500);
-                }
-            }, 200); // Increased delay to ensure Flatpickr is ready
-        } else {
-            console.error('API returned success=false:', data);
-            alert('Failed to load competition data: ' + (data.message || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error loading competition:', error);
-        alert('Error loading competition data: ' + error.message);
-    });
-};
 </script>
 
 <style>

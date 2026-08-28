@@ -152,6 +152,11 @@
     @await Html.PartialAsync("CompetitionAdvertEditModal")
     @await Html.PartialAsync("UploadCompetitionFileModal")
     @await Html.PartialAsync("CompetitionDeleteConfirmModal")
+
+    @* Åtgärder → Redigera tävlingen — delad med klubb- och sajtlistorna. Utan den fick
+       varje rad "Redigeringsfunktion kunde inte hittas", eftersom dispatchen bara fanns
+       inbakad i AdminCompetitionsList. *@
+    @await Html.PartialAsync("_CompetitionEditDispatch")
 }
 
 <div class="tab-content" id="regionPageTabContent">

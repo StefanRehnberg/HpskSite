@@ -1,0 +1,217 @@
+@*
+    ONE edit dispatch for the competition lists, shared by every surface that shows an
+    Åtgärder → "Redigera tävlingen":
+      * AdminCompetitionsList.cshtml   (site admin)
+      * RegionalPage.cshtml            (krets → Administration → Tävlingar)
+      * Club.cshtml                    (klubb → Administration → Tävlingar)
+
+    window.openAdminEditModal used to live inline in AdminCompetitionsList, so only the site
+    admin page had it. The krets list called it and got "Redigeringsfunktion kunde inte
+    hittas. Kontakta administratören." on every row, and the club page carried a cut-down
+    COPY that ignored competitionType — it opened the ordinary tävlingsmodal for a
+    Springskytte competition and for an external advert. Same trap as the row renderer
+    (_CompetitionListRenderer.cshtml): three surfaces, one behaviour, three copies.
+
+    The dispatch only picks the modal; the modal markup still belongs to the page. A surface
+    that includes this partial must therefore also include the modals it can reach:
+      CompetitionEditModal       (#competitionEditModal)        internal competitions
+      SpringskytteEditModal      (#springEditModal)             Springskytte
+      CompetitionAdvertEditModal (#competitionAdvertEditModal)  external adverts
+    Each opener names the missing modal instead of failing silently.
+*@
+<script>
+// Route to the right edit modal. isExternal/competitionType come from the row's onclick.
+window.openAdminEditModal = function(competitionId, isExternal, competitionType) {
+    console.log('Opening edit modal for competition ID:', competitionId, 'isExternal:', isExternal, 'type:', competitionType);
+
+    if (isExternal === true) {
+        window.openAdvertEditModal(competitionId);
+        return;
+    }
+
+    // Springskytte has its own edit modal
+    if (competitionType === 'Springskytte') {
+        window.openSpringskytteEditModal(competitionId);
+        return;
+    }
+
+    window.openInternalEditModal(competitionId);
+};
+
+// Open internal competition edit modal
+window.openInternalEditModal = function(competitionId) {
+    console.log('Opening INTERNAL edit modal for competition ID:', competitionId);
+
+    const modalElement = document.getElementById('competitionEditModal');
+    if (!modalElement) {
+        console.error('competitionEditModal element not found!');
+        alert('Redigeringsrutan saknas på den här sidan. Kontakta administratören.');
+        return;
+    }
+
+    // Update modal title for edit mode
+    const modalLabel = document.getElementById('competitionEditModalLabel');
+    if (modalLabel) {
+        modalLabel.innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera Tävling';
+    }
+
+    // Fetch competition data
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    const url = `/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`;
+
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            // Store the competition data to populate after modal is shown
+            window.currentCompetitionData = data.data;
+
+            // Show modal first, then populate data after Flatpickr is initialized
+            const modal = window.competitionEditModalInstance || new bootstrap.Modal(modalElement);
+            window.competitionEditModalInstance = modal;
+            modal.show();
+
+            // Defensively trigger series load if the modal's show.bs.modal handler didn't
+            setTimeout(() => {
+                const seriesSelect = document.getElementById('competitionSeriesId');
+                const alreadyLoaded = seriesSelect && (seriesSelect.options.length > 1 || seriesSelect.dataset.seriesLoaded === 'true');
+                if (!alreadyLoaded && typeof window.loadSeries === 'function') {
+                    window.loadSeries();
+                }
+            }, 250);
+
+            // Populate data after modal is shown and Flatpickr is initialized
+            setTimeout(() => {
+                if (typeof window.populateEditModal === 'function') {
+                    window.populateEditModal(window.currentCompetitionData);
+                    loadEditModalShootingClasses();
+                } else {
+                    console.error('populateEditModal function is not defined. Retrying in 500ms...');
+                    setTimeout(() => {
+                        if (typeof window.populateEditModal === 'function') {
+                            window.populateEditModal(window.currentCompetitionData);
+                            loadEditModalShootingClasses();
+                        } else {
+                            console.error('populateEditModal still not defined after retry');
+                        }
+                    }, 500);
+                }
+            }, 200);
+        } else {
+            console.error('API returned success=false:', data);
+            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading competition:', error);
+        alert('Fel vid laddning av tävlingsdata: ' + error.message);
+    });
+};
+
+// Open Springskytte competition edit modal
+window.openSpringskytteEditModal = function(competitionId) {
+    console.log('Opening SPRINGSKYTTE edit modal for competition ID:', competitionId);
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`, {
+        method: 'GET',
+        headers: { 'RequestVerificationToken': token },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            const modalElement = document.getElementById('springEditModal');
+            if (!modalElement) {
+                console.error('springEditModal element not found!');
+                alert('Springskytte-redigeringsmodal inte tillgänglig.');
+                return;
+            }
+
+            const modal = window.springEditModalInstance || new bootstrap.Modal(modalElement);
+            window.springEditModalInstance = modal;
+            modal.show();
+
+            setTimeout(() => {
+                if (typeof window.populateSpringEditModal === 'function') {
+                    window.populateSpringEditModal(data.data);
+                } else {
+                    console.error('populateSpringEditModal function is not defined');
+                }
+            }, 200);
+        } else {
+            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading springskytte competition:', error);
+        alert('Fel vid laddning av tävlingsdata: ' + error.message);
+    });
+};
+
+// Open external competition (advertisement) edit modal
+window.openAdvertEditModal = function(competitionId) {
+    console.log('Opening EXTERNAL edit modal for competition ID:', competitionId);
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    // Fetch competition data using the admin controller's GetCompetition endpoint
+    fetch(`/umbraco/surface/CompetitionAdmin/GetCompetition?id=${competitionId}`, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            const modalElement = document.getElementById('competitionAdvertEditModal');
+            if (!modalElement) {
+                console.error('competitionAdvertEditModal element not found!');
+                alert('Redigeringsrutan för externa tävlingar saknas på den här sidan. Kontakta administratören.');
+                return;
+            }
+
+            // Populate data BEFORE showing modal so selected IDs are stored
+            if (typeof window.populateAdvertEditModal === 'function') {
+                window.populateAdvertEditModal(data.competition);
+            } else {
+                console.error('populateAdvertEditModal function is not defined');
+            }
+
+            // Now show modal - the shown.bs.modal event will use the stored selected IDs
+            const modal = window.competitionAdvertEditModalInstance || new bootstrap.Modal(modalElement);
+            window.competitionAdvertEditModalInstance = modal;
+            modal.show();
+        } else {
+            console.error('API returned success=false:', data);
+            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading external competition:', error);
+        alert('Fel vid laddning av tävlingsdata: ' + error.message);
+    });
+};
+</script>

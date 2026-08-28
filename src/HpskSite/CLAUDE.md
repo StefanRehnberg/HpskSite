@@ -737,6 +737,20 @@ competition that saves but fails to publish never reaches the id list and would 
 - GET GetCompetitionsList - Returns all competitions (site admins) or filtered by managed clubs (club admins)
 - POST CreateCompetition, CopyCompetition, DeleteCompetition - Require appropriate authorization
 
+**"Redigera tävlingen" dispatchas också på ETT ställe** (2026-08-28) — `window.openAdminEditModal`
+låg inbakad i `AdminCompetitionsList.cshtml`, så bara sajtadmin hade den. Kretslistan anropade den
+och fick **"Redigeringsfunktion kunde inte hittas. Kontakta administratören."** på varje rad, och
+klubbsidan bar en nedbantad KOPIA i `Club.cshtml` som struntade i `competitionType` — en
+Springskyttetävling öppnades tyst i den vanliga tävlingsmodalen. Dispatchen (`openAdminEditModal`
++ `openInternalEditModal` / `openSpringskytteEditModal` / `openAdvertEditModal`) bor nu i
+**`Views/Partials/_CompetitionEditDispatch.cshtml`**, inkluderad av AdminCompetitionsList,
+RegionalPage och Club. Partialen väljer bara modal — **markupen tillhör fortfarande sidan**, så en
+yta som inkluderar den måste också ha `CompetitionEditModal` (`#competitionEditModal`),
+`SpringskytteEditModal` (`#springEditModal`) och `CompetitionAdvertEditModal`
+(`#competitionAdvertEditModal`); klubbsidan saknade den sista och har fått den. Verifierat 31/31
+`hpsk-verify/competition-edit-dispatch-verify.mjs` (klickar en rad per modaltyp på alla tre ytorna),
+plus 23/23 complist-shared-renderer, 25/25 comptype-filter och 60/60 row-action-menus oförändrade.
+
 **THE COMPETITION LIST IS SHOWN ON THREE SURFACES BUT RENDERED ONCE** (consolidated 2026-08-18) —
 `AdminCompetitionsList.cshtml` (site), the Tävlingar sub-tab in `RegionalAdminPanel.cshtml` (krets)
 and the Tävlingar tab in `ClubAdminPanel.cshtml` (klubb). All three call the same
