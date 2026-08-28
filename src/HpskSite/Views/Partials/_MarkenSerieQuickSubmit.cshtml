@@ -342,6 +342,13 @@ function mqsRenderQr(res) {
     c.innerHTML = `
         <div class="text-center">
             <div class="alert ${res.qualifies === false ? 'alert-warning' : 'alert-success'}">${mqsEsc(res.message)}</div>
+            ${res.duplicateWarning
+                ? `<div class="alert alert-warning small text-start py-2"><i class="bi bi-exclamation-triangle me-1"></i>${mqsEsc(res.duplicateWarning)}</div>`
+                : ''}
+            ${res.requiresOnSiteWitness
+                ? `<div class="alert alert-warning small text-start py-2 mb-2"><i class="bi bi-qr-code-scan me-1"></i>
+                     Klubben kräver bevittning på plats — serien kan bara godkännas genom att koden skannas här vid banan.</div>`
+                : ''}
             <p class="mb-2">Visa koden för en styrelsemedlem eller skjutledare så kan de validera direkt:</p>
             <img src="${qr}" alt="QR" class="img-fluid border rounded" style="max-width:240px;">
             <div class="text-muted small mt-2"><span class="spinner-border spinner-border-sm"></span> Väntar på validering…</div>

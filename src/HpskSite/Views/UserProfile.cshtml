@@ -3756,8 +3756,15 @@ function markenEvidenceDesc(s) {
         return `${escapeHtmlMarken(s.familyName)} – ${escapeHtmlMarken(s.competitionName)}: <strong>${s.total}</strong> <span class="text-muted">(${escapeHtmlMarken(s.weaponGroup)})</span>${lvl}`;
     }
     switch (s.discipline) {
-        case 'Precision':
-            return `Precisionsserie <strong>${s.total} p</strong> <span class="text-muted">(${escapeHtmlMarken(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under guldkrav</span>'}`;
+        case 'Precision': {
+            // A series shot at a hosted competition is in the same ledger, marked with the competition —
+            // so the shooter can see it already counts and does not need submitting.
+            const from = s.fromCompetition
+                ? ` <span class="badge bg-light text-dark border">${escapeHtmlMarken(s.competitionName || 'tävling')}</span>`
+                : '';
+            const notCounted = s.counts === false ? ' <span class="badge bg-secondary">räknas inte</span>' : '';
+            return `Precisionsserie <strong>${s.total} p</strong> <span class="text-muted">(${escapeHtmlMarken(s.weaponGroup)})</span>${from}${notCounted}${s.qualifies ? '' : ' <span class="text-warning small">under guldkrav</span>'}`;
+        }
         case 'Air':
             return `Luftpistolserie <strong>${s.total} p</strong> <span class="text-muted">(nivå ${escapeHtmlMarken(s.claimedLevel)})</span>`;
         case 'Snabbpistol':
@@ -3889,6 +3896,9 @@ function markenRenderQr(container, res, modalId, kind) {
     container.innerHTML = `
         <div class="text-center" id="qrPending_${res.id}">
             <div class="alert ${res.qualifies === false ? 'alert-warning' : 'alert-success'}">${escapeHtmlMarken(res.message)}</div>
+            ${res.duplicateWarning
+                ? `<div class="alert alert-warning small text-start py-2"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtmlMarken(res.duplicateWarning)}</div>`
+                : ''}
             <p class="mb-2">Visa koden för en styrelsemedlem eller skjutledare så kan de validera direkt:</p>
             <img src="${qr}" alt="QR" class="img-fluid border rounded" style="max-width:240px;">
             ${res.requiresOnSiteWitness

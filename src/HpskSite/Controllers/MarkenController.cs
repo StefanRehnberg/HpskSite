@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly MarkenLedgerService _ledger;
         private readonly MarkenCandidateService _candidates;
+        private readonly MarkenCompetitionSeriesSync _compSeriesSync;
         private readonly MarkenCompetitionService _compService;
         private readonly MarkenStormastarService _stormastarService;
         private readonly StandardMedalLedgerService _standardMedals;
@@ -63,6 +64,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             MarkenLedgerService ledger,
             MarkenCandidateService candidates,
+            MarkenCompetitionSeriesSync compSeriesSync,
             MarkenCompetitionService compService,
             MarkenStormastarService stormastarService,
             StandardMedalLedgerService standardMedals,
@@ -78,6 +80,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _ledger = ledger;
             _candidates = candidates;
+            _compSeriesSync = compSeriesSync;
             _compService = compService;
             _stormastarService = stormastarService;
             _standardMedals = standardMedals;
@@ -272,6 +275,52 @@ namespace HpskSite.Controllers
                 series.Qualifies = total >= threshold;
             }
 
+            // ── Probable duplicate ──
+            // Checked BEFORE inserting, and reported as a WARNING rather than a refusal. The commonest
+            // duplicate is a series shot in a klubbtävling that the shooter also submits by hand; the
+            // competition copy is materialised by MarkenCompetitionSeriesSync, so it is already here to
+            // be found. Not a hard block, because two genuinely different series can share the signature
+            // (47 twice in the same weapon group on the same day is ordinary in a 10-series competition)
+            // — the shooter is told, and a functionary decides.
+            string? duplicateWarning = null;
+            if (series.SeriesType == Marken.SeriesTypePrecision)
+            {
+                try
+                {
+                    await _compSeriesSync.SyncMemberYearAsync(member.Id, series.Year);
+                    var dupes = await _ledger.FindProbableDuplicatesAsync(
+                        member.Id, series.WeaponGroup, series.SeriesDate, series.Total);
+
+                    // Same day, same weapon group, same total AND the identical shot sequence: that is
+                    // the same physical series, not a coincidence. Those are recorded but NOT counted,
+                    // so the double count cannot arise in the first place — and a functionary can turn
+                    // the counting on if it really was a second series.
+                    var exact = dupes.FirstOrDefault(d => SameShots(d.Shots, series.Shots));
+                    if (exact != null)
+                    {
+                        series.CountsTowardGuldfodring = false;
+                        duplicateWarning = exact.SourceResultId.HasValue
+                            ? $"Den här serien finns redan från {exact.Notes ?? "en tävling"} — samma dag, samma skott. "
+                              + "Den är sparad men räknas inte en andra gång mot guldfodringen. Sköt du verkligen två "
+                              + "likadana serier kan en funktionär räkna med den."
+                            : "Du har redan skickat in en serie med samma skott samma dag. Den är sparad men räknas inte "
+                              + "en andra gång. Var det en annan serie kan en funktionär räkna med den.";
+                    }
+                    else if (dupes.Count > 0)
+                    {
+                        // Same score, different shots. A shooter who fires 48 twice in weapon group C on
+                        // one day is ordinary in a 10-series competition, so this only points it out.
+                        var d = dupes[0];
+                        duplicateWarning = d.SourceResultId.HasValue
+                            ? $"Obs: en serie med samma poäng ({d.Total}) i vapengrupp {d.WeaponGroup} finns redan samma dag "
+                              + $"från {d.Notes ?? "en tävling"}. Skickar du in samma serie två gånger — säg till en "
+                              + "funktionär, så räknas den bara en gång."
+                            : $"Obs: du har redan en serie med samma poäng ({d.Total}) i vapengrupp {d.WeaponGroup} samma dag.";
+                    }
+                }
+                catch { /* a warning is never worth failing the submit over */ }
+            }
+
             var id = await _ledger.InsertSeriesAsync(series);
             var token = ProtectVerifyToken("series:" + id);
 
@@ -288,6 +337,7 @@ namespace HpskSite.Controllers
                 // fallback or whether the QR code is the only way this series can ever be approved.
                 requiresOnSiteWitness = RequireOnSiteWitness(series.ClubId),
                 seriesDate = series.SeriesDate,
+                duplicateWarning,
                 message = series.SeriesType == Marken.SeriesTypePrecision && !series.Qualifies
                     ? "Sparad. Obs: serien når inte guldkravet — den räknas inte mot guldfodringen men kan ändå valideras."
                     : "Sparad och skickad för validering."
@@ -431,6 +481,80 @@ namespace HpskSite.Controllers
             if (s.Status != Marken.StatusRejected) return Json(new { success = false, message = "Bara avvisade serier kan tas bort." });
             var (ok, msg) = await _ledger.DeleteSeriesAsync(s.Id);
             return Json(new { success = ok, message = ok ? "Borttagen." : msg });
+        }
+
+        public class SeriesCountsRequest { public int Id { get; set; } public bool Counts { get; set; } }
+
+        /// <summary>
+        /// Include or exclude one guldserie from the Guldfodring, without deleting it.
+        /// <para>
+        /// This is how a duplicate is resolved — the shooter really did shoot the series, so the record
+        /// stays and only the counting changes. It is also the ONLY thing that works for a
+        /// competition-sourced series: deleting one is futile because the next reconciliation
+        /// materialises it again from the result row.
+        /// </para>
+        /// POST /umbraco/surface/Marken/SetSeriesCountsToward  { id, counts }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetSeriesCountsToward([FromBody] SeriesCountsRequest request)
+        {
+            var s = await _ledger.GetSeriesAsync(request?.Id ?? 0);
+            if (s == null) return Json(new { success = false, message = "Serien hittades inte." });
+            if (!await CanSignOffForMemberAsync(s.MemberId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var (ok, msg) = await _ledger.SetSeriesCountsTowardAsync(s.Id, request!.Counts);
+            if (!ok) return Json(new { success = false, message = msg });
+
+            // The Guldfodring may complete or un-complete as a direct result.
+            int actingId = await GetCurrentMemberIdAsync();
+            await RecomputeYearlyQualificationAsync(s.MemberId, s.Year, actingId);
+            await RecomputeSeriesProofFamiliesAsync(s.MemberId);
+
+            return Json(new
+            {
+                success = true,
+                message = request.Counts
+                    ? "Serien räknas mot guldfodringen igen."
+                    : "Serien räknas inte längre mot guldfodringen. Den ligger kvar i historiken."
+            });
+        }
+
+        /// <summary>
+        /// Delete a guldserie a functionary judges to have been entered by mistake.
+        /// <para>
+        /// ⚠️ Refuses a competition-sourced series and says why: it is derived from a result row, so the
+        /// next reconciliation would recreate it. Excluding it (<see cref="SetSeriesCountsToward"/>) is
+        /// the operation that lasts — and if the RESULT is what is wrong, the result is what to correct.
+        /// </para>
+        /// POST /umbraco/surface/Marken/DeleteSeriesAsFunctionary  { id }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteSeriesAsFunctionary([FromBody] IdRequest request)
+        {
+            var s = await _ledger.GetSeriesAsync(request?.Id ?? 0);
+            if (s == null) return Json(new { success = false, message = "Serien hittades inte." });
+            if (!await CanSignOffForMemberAsync(s.MemberId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            if (s.SourceResultId.HasValue)
+                return Json(new
+                {
+                    success = false,
+                    message = "Serien kommer från ett inmatat tävlingsresultat och skapas om automatiskt. "
+                            + "Välj \"Räkna inte\" i stället, eller rätta resultatet i tävlingen."
+                });
+
+            int memberId = s.MemberId, year = s.Year;
+            var (ok, msg) = await _ledger.DeleteSeriesAsync(s.Id);
+            if (!ok) return Json(new { success = false, message = msg });
+
+            int actingId = await GetCurrentMemberIdAsync();
+            await RecomputeYearlyQualificationAsync(memberId, year, actingId);
+            await RecomputeSeriesProofFamiliesAsync(memberId);
+            return Json(new { success = true, message = "Serien borttagen." });
         }
 
         /// <summary>
@@ -1049,6 +1173,11 @@ namespace HpskSite.Controllers
             if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
             if (await GetCurrentMemberAsync() == null) return Json(new { success = false, message = "Inte inloggad." });
 
+            // The liga is member-based (Stefan's call): it lists the club's members' guldserier wherever
+            // they were shot. Competition series only exist here once materialised, so reconcile first —
+            // otherwise the liga is exactly as blind to them as before.
+            await EnsureCompetitionSeriesSyncedAsync(year is > 0 ? year.Value : DateTime.Now.Year);
+
             List<MarkenSeries> all;
             try { all = await _ledger.GetVerifiedSeriesForClubAsync(clubId); }
             catch { all = new(); }
@@ -1170,6 +1299,10 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             int y = year ?? DateTime.Now.Year;
+
+            // Materialise competition series before reading, so a member whose only guldserier were shot
+            // in competitions shows up here at all.
+            await EnsureCompetitionSeriesSyncedAsync(y);
 
             // Members to show = badge/Guldfodring holders in this club PLUS anyone with verified
             // series recorded at this club this year (so backlog/self-submitted series are visible
@@ -1710,6 +1843,12 @@ namespace HpskSite.Controllers
             var cand = await _candidates.AnalyzePistolskytteAsync(memberId, year);
             var thisYearQ = quals.FirstOrDefault(q => q.Year == year);
 
+            // Precision series of the year, including any a functionary excluded from the count.
+            var yearPrecisionSeries = (await _ledger.GetSeriesForMemberAsync(memberId, year))
+                .Where(s => s.SeriesType == Marken.SeriesTypePrecision)
+                .OrderByDescending(s => s.Total).ThenBy(s => s.SeriesDate)
+                .ToList();
+
             return new
             {
                 success = true,
@@ -1755,12 +1894,29 @@ namespace HpskSite.Controllers
                     requiredSeries = cand.RequiredSeries,
                     bestSeries = cand.QualifyingSeries.Take(5).Select(s => new
                     {
+                        id = s.Id,
                         date = s.Date,
                         weaponGroup = s.WeaponGroup,
                         score = s.Score,
                         threshold = s.Threshold,
                         source = s.Source,
                         label = s.Label
+                    }),
+                    // EVERY precision series of the year, counted or not — the counted ones are gone from
+                    // cand.QualifyingSeries by definition, so without this an excluded series would be
+                    // invisible and impossible to put back.
+                    allPrecisionSeries = yearPrecisionSeries.Select(s => new
+                    {
+                        id = s.Id,
+                        date = s.SeriesDate,
+                        weaponGroup = s.WeaponGroup,
+                        score = s.Total,
+                        threshold = s.Threshold,
+                        qualifies = s.Qualifies,
+                        status = s.Status,
+                        counts = s.CountsTowardGuldfodring,
+                        fromCompetition = s.IsFromCompetition,
+                        competitionName = s.IsFromCompetition ? s.Notes : null
                     }),
                     part2Met = cand.Part2Met,
                     part2Source = cand.Part2Source,
@@ -1845,6 +2001,16 @@ namespace HpskSite.Controllers
                         var d = Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target);
                         return d == Marken.DisciplinePrecision || d == Marken.DisciplineSnabbpistol;
                     })
+                    // ⚠️ HUMAN-ENTERED SERIES ONLY, deliberately.
+                    // Materialising competition series (2026-08-28) put ~180 new precision rows into the
+                    // dev ledger alone, and Elit brons asks 45 p/serie where the C guldkrav is 46 — so
+                    // simply letting them through here would start handing out Elitmärken as a SIDE
+                    // EFFECT of a change that was about the Guldfodring and the club liga. Whether a
+                    // competition series may serve as an elitprov is a rules question (SHB 5.4) nobody
+                    // has decided, and badge awards are forward-only, so a wrong "yes" cannot be undone.
+                    // Keeping the old behaviour exactly is the reversible choice; lift this filter only
+                    // once the question has an answer.
+                    .Where(s => !s.IsFromCompetition)
                     .ToList();
 
                 // SHB 5.4.2: "Prov för elitmärke får avläggas första gången året efter det guldmärket
@@ -2349,6 +2515,11 @@ namespace HpskSite.Controllers
         /// </summary>
         private async Task RecomputeYearlyQualificationAsync(int memberId, int year, int? validatorId)
         {
+            // Materialise the member's competition series FIRST. The analyser reads the ledger only, so
+            // without this a series shot at a hosted competition would not count at all — and a result
+            // corrected days after the competition has to move the guldserie with it.
+            await _compSeriesSync.SyncMemberYearAsync(memberId, year);
+
             // Phase 1: Pistolskyttemärket. Future families add their own analyzer here.
             var cand = await _candidates.AnalyzePistolskytteAsync(memberId, year);
             var existing = await _ledger.GetQualificationForYearAsync(memberId, Family, year);
@@ -2454,6 +2625,29 @@ namespace HpskSite.Controllers
             return false;
         }
 
+        /// <summary>
+        /// True when two stored shot arrays are the same sequence. Compared as SEQUENCES, not as sets or
+        /// sums: the total is already part of the duplicate signature, so what this adds is the order —
+        /// which is what separates the same series entered twice from two series that happen to score
+        /// the same. An "X" and a "10" are kept distinct, so a shooter who typed 10 where the result
+        /// sheet says X gets the softer warning rather than a silent exclusion.
+        /// </summary>
+        private static bool SameShots(string? a, string? b)
+        {
+            if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+            try
+            {
+                var xa = System.Text.Json.JsonSerializer.Deserialize<List<string>>(a);
+                var xb = System.Text.Json.JsonSerializer.Deserialize<List<string>>(b);
+                if (xa == null || xb == null || xa.Count == 0 || xa.Count != xb.Count) return false;
+                for (int i = 0; i < xa.Count; i++)
+                    if (!string.Equals((xa[i] ?? "").Trim(), (xb[i] ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
+                        return false;
+                return true;
+            }
+            catch { return false; }
+        }
+
         private static bool IsValidShot(string? s)
         {
             if (string.IsNullOrWhiteSpace(s)) return false;
@@ -2505,6 +2699,9 @@ namespace HpskSite.Controllers
                 hasPhoto = !string.IsNullOrEmpty(s.PhotoFileRef),
                 validatedDate = s.ValidatedDate,
                 notes = s.Notes,
+                counts = s.CountsTowardGuldfodring,
+                fromCompetition = s.IsFromCompetition,
+                competitionName = s.IsFromCompetition ? s.Notes : null,
                 // Per ITEM, not per queue: the Min sida queue spans several clubs, and only some of
                 // them may demand on-site witnessing.
                 requiresOnSiteWitness = RequireOnSiteWitness(s.ClubId),
@@ -2542,6 +2739,21 @@ namespace HpskSite.Controllers
 
         /// <summary>Mints a QR verify token that expires (see <see cref="VerifyTokenLifetime"/>).</summary>
         private string ProtectVerifyToken(string payload) => _verifyProtector.Protect(payload, VerifyTokenLifetime);
+
+        /// <summary>
+        /// Makes sure the year's hosted-competition guldserier are materialised into the ledger before a
+        /// CLUB-WIDE surface reads it, cached so the cost is paid once per year per 10 minutes rather
+        /// than on every tab load. A member's own page reconciles unconditionally (and cheaply, one
+        /// member) in <c>RecomputeYearlyQualificationAsync</c>, so a shooter never sees stale data about
+        /// themselves because of this cache.
+        /// </summary>
+        private async Task EnsureCompetitionSeriesSyncedAsync(int year)
+        {
+            var key = $"marken_compsync_year_{year}";
+            if (AppCaches.RuntimeCache.Get(key) != null) return;
+            await _compSeriesSync.SyncYearFromResultsAsync(year);
+            AppCaches.RuntimeCache.Insert(key, () => (object)DateTime.Now, TimeSpan.FromMinutes(10));
+        }
 
         /// <summary>
         /// Reads the per-club <c>markenRequireOnSiteWitness</c> toggle (default false). When on, a

@@ -2738,6 +2738,76 @@ Club admins migrate a hand-written ledger of past series in bulk on the club **M
 - **Elit timing gate + editable Guldmärke year (2026-06-04):** now enforced — SHB 5.4.2 "Prov för elitmärke får avläggas första gången året efter det guldmärket erövrats." `AnalyzeSeriesProofAsync` for Elit requires a held Pistolskyttemärket Guld (no Guld → no Elit, also fixes prereq-not-enforced-on-award) and only counts series with `Year >= guldBadge.AchievedYear + 1`. Because that depends on an accurate Guld year, the **Guldmärke year is now captured at award and editable afterward**: `AwardBadge` already accepted `Year` (JS now sends it, prompting at Guld award, default current year); the Detaljer Guld row gained an **År** input next to the Nr input; `SetBadgeUniqueNumber` (+ `UniqueNumberRequest.Year`) now also sets `AchievedYear`. The Elit family summary shows a note ("Elitprov får avläggas först {guldYear+1} …") when the member holds Guld but the viewed year isn't past it. Luftpistol's brons prereq stays advisory (only Elit's gate is hard, since the timing rule needs the Guld year).
 - **Remove an auto-awarded family badge (2026-06-04):** awarded badges are persisted `MemberBadge` rows; the engine is add-only, so deleting the source series does NOT retract a badge (it just stops re-deriving). New `POST Marken/DeleteFamilyBadges {memberId, family}` (auth `CanSignOffForMemberAsync`) deletes all of a member's `MemberBadge` + `MemberBadgeQualification` rows for a family; wired to a **"Ta bort" trash button** on each row in the Detaljer "Andra märken" section (`deleteMarkenFamily` JS, functionary-only). Caveat surfaced in the confirm dialog: derived families re-materialize on next read if the underlying evidence still qualifies — remove the series/results first for a lasting removal. (Prior to this there was no UI for the long-existing `DeleteBadge` endpoint — removal required editing the `MemberBadge` table directly.)
 
+### En guldserie finns på ETT ställe — tävlingsserier materialiseras (2026-08-28)
+
+Rapporterat av en klubbadmin, som två klagomål som visade sig vara samma fel sett från två sidor:
+guldserieligan på klubbsidan saknade tävlingsserier, och guldfodringen räknade en serie **två gånger**
+om den både skjutits i en klubbtävling och skickats in för hand.
+
+**Orsaken var två parallella källor.** `MarkenCandidateService` läste kvalificerande precisionsserier
+**live ur `PrecisionResultEntry`** *utöver* `MarkenSeries`, utan någon dedup. Ligan läser bara
+`MarkenSeries` och kunde därför aldrig se dem. Ingen av ytorna hade fel för sig själv; formen var fel.
+
+**`Services/MarkenCompetitionSeriesSync` materialiserar dem nu in i samma register**, och analysatorn
+läser registret ENSAMT. Nya kolumner: `SourceResultId` (vilken `PrecisionResultEntry`-rad serien kom
+från), `SourceCompetitionId`, `CountsTowardGuldfodring`.
+
+- **⚠️ RECONCILE, aldrig append.** Varje synk räknar om vad resultaten säger och får registret att
+  stämma: lägger till, uppdaterar, och **raderar rader vars källa är borta eller inte längre
+  kvalificerar**. Det är det som gör att sena rättelser följer med — resultat rättas dagar efter en
+  tävling, och en enkelriktad "insert on save"-hook hade lämnat guldserier stående på poäng som inte
+  finns. Den är därmed också idempotent och kan köras på läsning.
+- **⚠️ `CountsTowardGuldfodring` skrivs ALDRIG över av en synk.** En funktionär som uteslutit en serie
+  som dubblett får inte få sitt beslut ogjort av nästa omräkning.
+- **Unikt FILTRERAT index på `SourceResultId`** gör den andra kopian av en resultatrad omöjlig i
+  schemat, inte bara osannolik i koden. Filtrerat, eftersom de många handinlagda raderna är NULL och
+  ett vanligt unikt index bara tillåter EN NULL.
+- **⚠️ Det filtrerade indexet ändrade kraven på varje sqlcmd-skript som rör tabellen.** SQL Server
+  vägrar all DML mot en tabell med filtrerat index när `QUOTED_IDENTIFIER` är OFF — vilket är sqlcmds
+  standard. Utan `-b` exitar sqlcmd dessutom 0 på T-SQL-fel. Tillsammans gjorde det att en äldre
+  verifieringssvits städ-DELETE **gjorde ingenting medan den rapporterade lyckat**. Appen påverkas inte
+  (SqlClient sätter ON), men varje skript måste sätta det själv.
+- **Endast KVALIFICERANDE serier materialiseras.** En precisionstävling har 7–10 serier per skytt; att
+  lägga in alla hade begravt registret i rader som räknas mot ingenting. 182 rader i dev.
+- **`ClubId` bär skyttens EGEN klubb** på en materialiserad rad (ingen klubb *validerade* den —
+  tävlingsinmatningen är valideringen). Det är vad som gör ligan **medlemsbaserad**, vilket var
+  Stefans beslut: den listar klubbens medlemmars serier var de än skjutits. ⚠️ En skytt utan
+  `primaryClubId` får `ClubId = 0` och syns då i ingen liga — korrekt, och asserterat, eftersom
+  sträng-egenskapsfällan (`GetValue<int>("primaryClubId")` → tyst 0) annars skulle tömma ligan tyst.
+- **`SeriesDate` är TÄVLINGENS datum, inte `EnteredAt`** — en funktionär kan mata in raden dagar senare.
+- **Medlemslistan hämtas ur RESULTATTABELLEN**, medvetet inte ur en klubbroster eller
+  `GetAllActiveMemberIdsAsync`: en skytt vars enda guldserier kommer från tävlingar har inget märke,
+  ingen kvalifikation och ingen inskickad serie, så varje roster byggd av märkesdata missar exakt det
+  fall detta finns för. Klubbytorna cachar synken 10 min (`marken_compsync_year_<år>`); medlemmens egen
+  sida synkar villkorslöst och billigt.
+
+**Dubbletten hanteras i tre steg, och INGET av dem gissar:**
+1. **Vid inskicket:** samma skytt, vapengrupp, dag OCH **identisk skottsekvens** → serien sparas men
+   med `CountsTowardGuldfodring = false`, så dubbelräkningen aldrig uppstår. Samma poäng men *andra*
+   skott ger bara en varning — en skytt som skjuter 48 två gånger i C på en dag är vardag i en
+   10-serierstävling, och en automatisk ihopslagning hade UNDERräknat.
+2. **I kön och i Detaljer:** varje serie visas med sin källa, så dubbletten syns intill sin tvilling.
+3. **Åtgärden:** `SetSeriesCountsToward` (räkna/räkna inte, reversibelt, funkar för båda slagen) och
+   `DeleteSeriesAsFunctionary` (bara handinlagda — **att radera en tävlingsserie nekas med förklaring**,
+   eftersom nästa synk skapar om den; är resultatet fel är det resultatet som ska rättas).
+   Båda gated på `CanSignOffForMemberAsync` (styrelse / skjutledare-om-tillåtet / sajtadmin) — en
+   klubbadmin får SE men inte signera, samma delning som valideringskön redan har.
+
+**⚠️ Elit lämnades AVSIKTLIGT oförändrat.** `AnalyzeSeriesProofAsync` filtrerar bort materialiserade
+serier (`!s.IsFromCompetition`). Elit brons kräver 45 p/serie där C-guldkravet är 46, så att bara
+släppa igenom dem hade börjat dela ut Elitmärken som SIDOEFFEKT av en ändring om guldfodringen och
+ligan. Om en tävlingsserie får vara elitprov är en regelfråga (SHB 5.4) ingen avgjort, och
+märkestilldelning är enkelriktad — ett felaktigt "ja" går inte att ångra. **Frågan är öppen.**
+
+**Operatörssteg:** kör `Migrations/add-source-and-counts-to-markenseries.sql` (idempotent, egen batch
+per objekt, sätter `QUOTED_IDENTIFIER ON` själv). Adds C# → full ombyggnad.
+
+Verifierat 44/44 `hpsk-verify/marken-compseries-sync-verify.mjs` (**A/B: 11 av 44 faller**, inklusive
+alla fyra propageringspåståenden och hela dubblett-halvan). Sviten redigerar verkliga resultatrader —
+poäng ner under kravet, ändrad poäng, raderad rad — och återställer varje mutation ur en FULL snapshot
+med återställningen asserterad. Regression: marken-witness-date 79/79, resultlist-flatten 38/38,
+märkes- och kvalifikationstabellerna oförändrade före/efter (6/6).
+
 ### Resultatlistan kan läsas per klass ELLER per vapengrupp (2026-08-28)
 
 Från samma klubbadminrapport: *"vid mästerskap är det ju en enda lång lista att redovisa … att kunna

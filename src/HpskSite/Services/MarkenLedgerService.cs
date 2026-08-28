@@ -321,6 +321,40 @@ namespace HpskSite.Services
             return (true, null);
         }
 
+        /// <summary>
+        /// Include/exclude one series from the Guldfodring count. Targeted UPDATE rather than a
+        /// read-modify-write of the whole row: a reconciliation may be updating the score columns of the
+        /// same row concurrently, and the two must not overwrite each other.
+        /// </summary>
+        public async Task<(bool Success, string? Message)> SetSeriesCountsTowardAsync(int id, bool counts)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var rows = await db.ExecuteAsync(
+                "UPDATE MarkenSeries SET CountsTowardGuldfodring = @0, UpdatedAt = @1 WHERE Id = @2",
+                counts, DateTime.Now, id);
+            return rows > 0 ? (true, null) : (false, "Serien hittades inte.");
+        }
+
+        /// <summary>
+        /// Series that look like the SAME PHYSICAL SERIES as the candidate: same shooter, weapon group,
+        /// day and total. Used to WARN at submit time.
+        /// <para>
+        /// ⚠️ A warning, never an automatic merge. Two different series can legitimately share this
+        /// signature — 47 twice in weapon group C on the same day is ordinary in a 10-series
+        /// competition — so collapsing them silently would UNDER-count the shooter.
+        /// </para>
+        /// </summary>
+        public async Task<List<MarkenSeries>> FindProbableDuplicatesAsync(int memberId, string weaponGroup, DateTime seriesDate, int total)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<MarkenSeries>(
+                @"WHERE MemberId = @0 AND WeaponGroup = @1 AND Total = @2
+                   AND CAST(SeriesDate AS date) = CAST(@3 AS date)
+                   AND SeriesType = @4 AND Status <> @5
+                   ORDER BY Id",
+                memberId, weaponGroup, total, seriesDate, Marken.SeriesTypePrecision, Marken.StatusRejected);
+        }
+
         public async Task<(bool Success, string? Message)> DeleteSeriesAsync(int id)
         {
             using var db = _databaseFactory.CreateDatabase();

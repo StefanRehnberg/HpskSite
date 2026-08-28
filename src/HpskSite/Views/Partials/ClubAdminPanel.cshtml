@@ -2237,6 +2237,7 @@ function renderMemberMarkenDetail(data) {
 
     // ── Årtalsmärke ──
     const artBlock = renderMarkenArtalsmarke(art, canSign, memberId, name);
+    // (guldserieledger renderas av renderMarkenSeriesLedger, definierad längre ned)
 
     // ── Guldfodring (this year) ──
     const p = gf.persisted;
@@ -2245,10 +2246,9 @@ function renderMemberMarkenDetail(data) {
     const part2 = gf.part2Met || (p && p.part2Met);
     // The date answers "when was this shot?" — a club admin validating a Guldfodring needs it to
     // tell this year's series apart and to spot a serie entered under the wrong date.
-    const seriesRows = (gf.bestSeries || []).map(s => {
-        const sd = s.date ? new Date(s.date).toLocaleDateString('sv-SE') : '';
-        return `<li>${sd ? '<span class="text-nowrap">' + escapeMedalHtml(sd) + '</span> · ' : ''}${escapeMedalHtml(s.weaponGroup)}: <strong>${s.score}</strong> (krav ${s.threshold})${s.source ? ' <span class="text-muted">' + escapeMedalHtml(s.source === 'Tävling' ? (s.label || 'tävling') : 'guldserie') + '</span>' : ''}</li>`;
-    }).join('');
+    // Every precision series of the year, counted or not — the whole point is that a duplicate is
+    // visible next to the series it duplicates, and that an excluded series can be put back.
+    const seriesRows = renderMarkenSeriesLedger(gf.allPrecisionSeries || gf.bestSeries || [], canSign, memberId, name);
 
     // Read-only status — the year completes automatically when both parts are validated.
     const bothDone = gf.candidateBothMet || (p && p.fulfilled);
@@ -2280,7 +2280,10 @@ function renderMemberMarkenDetail(data) {
             ${partLine('Snabbskyttedel (3 godkända snabbserier)', part2, gf.part2ViaFalt ? escapeMedalHtml(gf.part2Detail || 'fältmedalj') : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} serier`)}
             <div class="mt-2">${gfStatus}</div>
         </div></div>
-        <p class="text-muted small">Precisionsdelen byggs av validerade guldserier och resultat från hemmatävlingar. Serier valideras i kön högst upp på fliken (eller via QR).</p>
+        <p class="text-muted small">Precisionsdelen byggs av validerade guldserier. Serier som skjutits på en
+        tävling här på pistol.nu läggs in automatiskt och behöver inte skickas in — märks med tävlingens namn
+        ovan. Har samma serie hamnat här två gånger: välj <em>Räkna inte</em> på den ena, så ligger den kvar i
+        historiken men räknas bara en gång. Övriga serier valideras i kön högst upp på fliken (eller via QR).</p>
 
         ${renderMarkenFamiliesBlock(data.families, data.stormastar, canSign, memberId, name)}
 
@@ -2288,6 +2291,76 @@ function renderMemberMarkenDetail(data) {
         <div id="memberMastarBlock" class="mb-2"><div class="text-muted small">Laddar…</div></div>`;
 
     loadMemberMastar(memberId);
+}
+
+// One line per guldserie of the year, whichever way it got here. A series shot at a hosted
+// competition is materialised into the same ledger as a hand-submitted one, so this list is where a
+// duplicate becomes visible — and where it is resolved.
+//
+// Two different controls on purpose:
+//   · "Räkna inte" / "Räkna med" works for BOTH kinds and is reversible. It is the only thing that
+//     lasts on a competition series: deleting one is futile, the next reconciliation recreates it.
+//   · "Ta bort" only appears on a hand-entered series, which is the only kind that can be a genuine
+//     mis-entry rather than a consequence of a result.
+function renderMarkenSeriesLedger(list, canSign, memberId, name) {
+    if (!list || !list.length) return '';
+    return list.map(s => {
+        const sd = s.date ? new Date(s.date).toLocaleDateString('sv-SE') : '';
+        const dateHtml = sd ? `<span class="text-nowrap">${escapeMedalHtml(sd)}</span> · ` : '';
+        const src = s.fromCompetition
+            ? `<span class="badge bg-light text-dark border ms-1" title="Kommer från ett inmatat tävlingsresultat">${escapeMedalHtml(s.competitionName || 'tävling')}</span>`
+            : (s.source === 'Tävling'
+                ? `<span class="text-muted ms-1">${escapeMedalHtml(s.label || 'tävling')}</span>`
+                : '<span class="text-muted ms-1">guldserie</span>');
+        // `counts` is undefined on the legacy bestSeries shape; only an explicit false means excluded.
+        const excluded = s.counts === false;
+        const pending = s.status && s.status !== 'Verified';
+        const flags = (excluded ? ' <span class="badge bg-secondary">räknas inte</span>' : '')
+            + (pending ? ' <span class="badge bg-warning text-dark">väntar på validering</span>' : '')
+            + (s.qualifies === false ? ' <span class="badge bg-light text-dark border">under kravet</span>' : '');
+        let actions = '';
+        if (canSign && s.id) {
+            actions += ` <a href="#" class="text-decoration-none ms-2" title="${excluded ? 'Räkna med serien igen' : 'Räkna inte den här serien mot guldfodringen'}"
+                            onclick="setMarkenSeriesCounts(${s.id}, ${excluded ? 'true' : 'false'}, ${memberId}, '${escapeMedalAttr(name)}');return false;">${excluded ? 'Räkna med' : 'Räkna inte'}</a>`;
+            if (!s.fromCompetition) {
+                actions += ` <a href="#" class="text-danger text-decoration-none ms-2" title="Ta bort en serie som lagts in av misstag"
+                                onclick="deleteMarkenSeries(${s.id}, ${memberId}, '${escapeMedalAttr(name)}');return false;">Ta bort</a>`;
+            }
+        }
+        return `<li class="${excluded ? 'text-decoration-line-through text-muted' : ''}">${dateHtml}${escapeMedalHtml(s.weaponGroup)}: `
+             + `<strong>${s.score}</strong> (krav ${s.threshold})${src}${flags}${actions}</li>`;
+    }).join('');
+}
+
+function setMarkenSeriesCounts(seriesId, counts, memberId, name) {
+    fetch('/umbraco/surface/Marken/SetSeriesCountsToward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ id: seriesId, counts })
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (!d.success) { alert(d.message || 'Kunde inte uppdatera.'); return; }
+        openMemberMarkenDetail(memberId, name); // the Guldfodring may have completed or un-completed
+        loadClubMarken();
+    })
+    .catch(() => alert('Något gick fel.'));
+}
+
+function deleteMarkenSeries(seriesId, memberId, name) {
+    if (!confirm('Ta bort den här guldserien helt?\n\nAnvänd "Räkna inte" i stället om serien verkligen sköts men inte ska räknas.')) return;
+    fetch('/umbraco/surface/Marken/DeleteSeriesAsFunctionary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ id: seriesId })
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (!d.success) { alert(d.message || 'Kunde inte ta bort.'); return; }
+        openMemberMarkenDetail(memberId, name);
+        loadClubMarken();
+    })
+    .catch(() => alert('Något gick fel.'));
 }
 
 // Other badge families (Elit, Fält, Precision, Milsnabb, Nat.helmatch, Luftpistol) + Stormästar,

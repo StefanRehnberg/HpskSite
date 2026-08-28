@@ -161,5 +161,49 @@ namespace HpskSite.Models
         public int EnteredByMemberId { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
+
+        /// <summary>
+        /// The <c>PrecisionResultEntry.Id</c> this series was materialised from, or null when a human
+        /// entered it (the shooter's own submission, or a klubbliggare import).
+        /// <para>
+        /// A qualifying precision series shot at a hosted pistol.nu competition IS a guldserie, and
+        /// used to be read live out of the result table instead of being a row here — which is why the
+        /// club Guldserie-ligan could not see it and the Guldfodring counted it twice when the shooter
+        /// had also submitted it by hand. A UNIQUE FILTERED INDEX on this column makes the second copy
+        /// of one result row impossible in the schema, not merely unlikely in the code.
+        /// </para>
+        /// </summary>
+        public int? SourceResultId { get; set; }
+
+        /// <summary>The competition the series was shot at. Null for human-entered series.</summary>
+        public int? SourceCompetitionId { get; set; }
+
+        /// <summary>
+        /// Whether this series counts toward the Guldfodring. Default true.
+        /// <para>
+        /// Set to false to resolve a duplicate, or to drop a series entered by mistake: the series was
+        /// really shot, so the record stays and only the counting changes. Deleting a
+        /// competition-sourced row would be futile — the next reconciliation recreates it from the
+        /// result row — so exclusion, not deletion, is the operation that works for both kinds.
+        /// </para>
+        /// </summary>
+        public bool CountsTowardGuldfodring { get; set; } = true;
+
+        /// <summary>True when a competition result produced this series rather than a person.</summary>
+        [Ignore]
+        public bool IsFromCompetition => SourceResultId.HasValue;
+
+        /// <summary>
+        /// Identity of the PHYSICAL series a row describes: same shooter, weapon group, day and score.
+        /// Used to WARN about a probable duplicate at submit time.
+        /// <para>
+        /// ⚠️ Deliberately NOT used to collapse rows automatically. Two different series can share this
+        /// signature — a shooter who fires 47 twice in weapon group C on the same day is ordinary in a
+        /// 10-series competition — so automatic merging would silently UNDER-count. A human decides;
+        /// the code only points.
+        /// </para>
+        /// </summary>
+        [Ignore]
+        public string DuplicateSignature => $"{MemberId}|{WeaponGroup}|{SeriesDate:yyyy-MM-dd}|{Total}";
     }
 }
