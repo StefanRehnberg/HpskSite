@@ -105,7 +105,10 @@
             fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
-                body: JSON.stringify({ kind, id })
+                // Pass the scanned token along: on a club that requires on-site witnessing it is the
+                // PROOF that this approval came from scanning the shooter's live code, and the server
+                // refuses a bare approve there.
+                body: JSON.stringify({ kind, id, token: TOKEN })
             })
             .then(r => r.json())
             .then(res => {

@@ -29,6 +29,13 @@
                         <label class="form-label small mb-1" for="mqsClub">Klubb som validerar</label>
                         <select class="form-select form-select-sm" id="mqsClub"></select>
                     </div>
+                    @* Shot-date. Defaults to today because this flow runs at the range moments after
+                       the series was fired — but it is editable, because the functionary validating it
+                       in the queue has no other way to know when it was shot. *@
+                    <div class="mb-2">
+                        <label class="form-label small mb-1" for="mqsDate">Datum då serien sköts</label>
+                        <input type="text" class="form-control form-control-sm" id="mqsDate" placeholder="ÅÅÅÅ-MM-DD">
+                    </div>
                     <div id="mqsBirthWrap" class="mb-2" style="display:none;">
                         <label class="form-label small mb-1" for="mqsPersonNumber">Ditt personnummer <span class="text-muted">(frivilligt)</span></label>
                         <input type="text" class="form-control form-control-sm" id="mqsPersonNumber" placeholder="ÅÅÅÅMMDD-XXXX">
@@ -59,6 +66,49 @@ function mqsEsc(s) {
 function mqsAntiForgery() {
     const t = document.querySelector('input[name="__RequestVerificationToken"]');
     return t ? t.value : '';
+}
+
+// ── Shot-date input, shared by every Märken series submit surface ───────────────────────────────
+// Lives here because this partial is the one included on both UserProfile.cshtml and
+// TrainingMatch.cshtml; the Guldserie/Snabbserie modals on Min sida call the same two functions so
+// the date rules cannot drift between the three ways of submitting the same series.
+//
+// The bounds mirror the server (`MarkenController.ResolveSeriesDate`): not in the future, at most 60
+// days back. Older series belong in the functionary-gated klubbliggare import.
+const MARKEN_MAX_BACKDATING_DAYS = 60;
+
+function markenDateInit(id) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.markenDateReady === '1') return;
+    el.dataset.markenDateReady = '1';
+    const today = new Date();
+    const min = new Date(today.getTime() - MARKEN_MAX_BACKDATING_DAYS * 86400000);
+    // Degrades to a plain text field when flatpickr isn't on the page — the server parses the string
+    // either way, so a missing picker costs the calendar, never the feature.
+    if (window.flatpickr) {
+        flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', defaultDate: 'today', maxDate: 'today', minDate: min });
+    } else {
+        el.value = markenDateToIso(today);
+    }
+}
+
+// Re-defaults an already-initialised input to today, for a modal being reopened.
+function markenDateReset(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    markenDateInit(id);
+    const today = markenDateToIso(new Date());
+    if (el._flatpickr) el._flatpickr.setDate(today, false); else el.value = today;
+}
+
+function markenDateValue(id) {
+    const el = document.getElementById(id);
+    return el ? (el.value || '').trim() : '';
+}
+
+function markenDateToIso(d) {
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 // Weapon group ("A"/"B"/"C"/"R") from a class id ("C2", "A_Opt", "R"); null for M/L/unknown.
@@ -101,6 +151,7 @@ function mqsOpen(o) {
     const btn = document.getElementById('mqsSubmitBtn');
     btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka in för validering';
 
+    markenDateReset('mqsDate');
     mqsLoadClubs();
     mqsLoadBirthStatus(o.seriesType);
     bootstrap.Modal.getOrCreateInstance(document.getElementById('mqsModal')).show();
@@ -256,7 +307,7 @@ function mqsSubmit() {
             btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka in för validering';
             return;
         }
-        const body = { seriesType: o.seriesType, clubId, weaponGroup: o.weaponGroup };
+        const body = { seriesType: o.seriesType, clubId, weaponGroup: o.weaponGroup, seriesDate: markenDateValue('mqsDate') };
         if (o.seriesType === 'Speed') {
             body.target = o.target;
             if (o.target === 'Snabbpistol_25m') body.total = o.total;

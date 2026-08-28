@@ -641,6 +641,19 @@
                         <label class="form-check-label small" for="markenSkjutledareToggle">Tillåt skjutledare</label>
                     </div>
                 </div>
+                @* Witnessing requirement. Deliberately a per-club choice rather than a site-wide rule:
+                   at a range without coverage a hard requirement means no guldserie can be recorded
+                   at all, so the club decides which risk it would rather carry. *@
+                <div class="card-body py-2 border-top d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <span class="fw-semibold"><i class="bi bi-qr-code-scan me-1"></i>Måste serier bevittnas på plats?</span>
+                        <div class="form-text mb-0" id="markenWitnessHelp">Av: en serie kan skickas in hemifrån och godkännas i kön i efterhand. På: serien godkänns bara genom att en funktionär skannar skyttens QR-kod vid banan.</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="markenWitnessToggle" onchange="saveMarkenSettings()">
+                        <label class="form-check-label small" for="markenWitnessToggle">Kräv bevittning</label>
+                    </div>
+                </div>
             </div>
 
             @* Validation queue — submitted series awaiting a functionary's Godkänn/Avvisa. *@
@@ -2010,6 +2023,11 @@ document.getElementById('marken-tab').addEventListener('shown.bs.tab', function 
     loadClubMarken();
 });
 
+// False until a read confirms the club doctype actually carries `markenRequireOnSiteWitness`.
+// Everything that touches that switch keys off this, so a missing property disables it in one place
+// instead of being re-derived from the help text.
+let markenWitnessAvailable = false;
+
 // Sign-off authority toggle — only club admins get a successful read, so the card stays hidden for
 // plain functionaries (skjutledare). Keeps the intro hint in sync with the actual setting.
 function loadMarkenSettings() {
@@ -2020,11 +2038,21 @@ function loadMarkenSettings() {
             if (!d.success) { if (card) card.style.display = 'none'; return; }
             const toggle = document.getElementById('markenSkjutledareToggle');
             if (toggle) toggle.checked = !!d.skjutledareSignoff;
+            const witness = document.getElementById('markenWitnessToggle');
+            if (witness) witness.checked = !!d.requireOnSiteWitness;
             if (card) card.style.display = 'block';
             markenSyncHint(!!d.skjutledareSignoff);
             if (!d.propertyExists) {
                 const ft = card ? card.querySelector('.form-text') : null;
                 if (ft) ft.innerHTML = '<span class="text-warning">Egenskapen saknas på klubbtypen i Umbraco — kontakta en administratör innan inställningen kan sparas.</span>';
+            }
+            // Say so up front rather than letting the switch appear to work and silently revert:
+            // SetValue on a missing property is a no-op, so the server refuses that save.
+            markenWitnessAvailable = !!d.witnessPropertyExists;
+            if (!markenWitnessAvailable) {
+                if (witness) witness.disabled = true;
+                const wh = document.getElementById('markenWitnessHelp');
+                if (wh) wh.innerHTML = '<span class="text-warning">Egenskapen \'markenRequireOnSiteWitness\' saknas på klubbtypen i Umbraco — kontakta en administratör innan inställningen kan användas.</span>';
             }
         })
         .catch(() => {});
@@ -2035,23 +2063,42 @@ function markenSyncHint(enabled) {
     if (hint) hint.textContent = enabled ? '(eller skjutledare — aktiverat för klubben)' : '';
 }
 
+// Both switches post through here — one endpoint, one save. Each remembers the value it had so a
+// refusal can put the switch that failed back where it was.
 function saveMarkenSettings() {
     const toggle = document.getElementById('markenSkjutledareToggle');
+    const witness = document.getElementById('markenWitnessToggle');
     const enabled = toggle.checked;
     toggle.disabled = true;
+    if (witness && markenWitnessAvailable) witness.disabled = true;
+    const body = { clubId: clubId, skjutledareSignoff: enabled };
+    // Omit the field entirely when the doctype property is missing — the server reads a missing field
+    // as "leave it alone", so sending it would make the server refuse the skjutledare half too.
+    if (witness && markenWitnessAvailable) body.requireOnSiteWitness = witness.checked;
     fetch('/umbraco/surface/Marken/SetMarkenClubSettings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
-        body: JSON.stringify({ clubId: clubId, skjutledareSignoff: enabled })
+        body: JSON.stringify(body)
     })
     .then(r => r.json())
     .then(d => {
         toggle.disabled = false;
-        if (!d.success) { alert(d.message || 'Kunde inte spara.'); toggle.checked = !enabled; return; }
+        if (witness) witness.disabled = !markenWitnessAvailable;
+        if (!d.success) {
+            alert(d.message || 'Kunde inte spara.');
+            // Re-read rather than guess which half failed — the server saves them together.
+            loadMarkenSettings();
+            return;
+        }
         markenSyncHint(enabled);
-        loadClubMarkenQueue(); // re-evaluate who can validate after the change
+        loadClubMarkenQueue(); // re-evaluate who can validate, and re-render the bevittning hints
     })
-    .catch(() => { toggle.disabled = false; alert('Något gick fel.'); toggle.checked = !enabled; });
+    .catch(() => {
+        toggle.disabled = false;
+        if (witness) witness.disabled = !markenWitnessAvailable;
+        alert('Något gick fel.');
+        loadMarkenSettings();
+    });
 }
 
 function exportClubMarken() {
@@ -2593,12 +2640,19 @@ function markenEvidenceDescAdmin(s) {
     }
 }
 
+// The person clicking Godkänn is signing off on something they may not have watched, so the row
+// carries the DATE, the shooter's own note and the club's witnessing rule — a name plus five digits
+// leaves them nothing to judge it by.
 function renderClubQueueItem(s, canValidate) {
     const shots = (s.kind !== 'comp' && s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeMedalHtml).join(' · ')}</div>` : '';
     const photoUrl = s.kind === 'comp' ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}`
         : s.kind === 'stormastar' ? `/umbraco/surface/Marken/GetStormastarPhoto?id=${s.id}`
         : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
     const photo = s.hasPhoto ? ` <a href="${photoUrl}" target="_blank" rel="noopener" title="Foto"><i class="bi bi-camera"></i></a>` : '';
+    // On-site witnessing: say it BEFORE the click, rather than letting the server refuse afterwards.
+    const onSite = (s.kind !== 'comp' && s.kind !== 'stormastar' && s.requiresOnSiteWitness)
+        ? `<div class="small text-warning-emphasis mt-1"><i class="bi bi-qr-code-scan me-1"></i>Klubben kräver bevittning på plats — godkänn genom att skanna skyttens QR-kod.</div>`
+        : '';
     const buttons = canValidate
         ? `<div class="text-nowrap mt-1">
              <button class="btn btn-sm btn-success" onclick="clubQueueAct('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
@@ -2606,8 +2660,22 @@ function renderClubQueueItem(s, canValidate) {
            </div>`
         : '<div class="small text-muted mt-1">Endast styrelse/skjutledare kan validera.</div>';
     return `<div class="border-bottom py-2">
-        <div><strong>${escapeMedalHtml(s.memberName)}</strong></div>
-        <div>${markenEvidenceDescAdmin(s)}${photo}</div>${shots}${buttons}</div>`;
+        <div><strong>${escapeMedalHtml(s.memberName)}</strong>${markenQueueDate(s)}</div>
+        <div>${markenEvidenceDescAdmin(s)}${photo}</div>${shots}${markenQueueNote(s)}${onSite}${buttons}</div>`;
+}
+
+// ⚠️ A competition result carries `competitionDate`, a series carries `seriesDate` — reading only one
+// of them leaves half the queue undated.
+function markenQueueDate(s) {
+    const raw = s.kind === 'comp' ? s.competitionDate : s.seriesDate;
+    if (!raw) return ' <span class="text-muted small">datum saknas</span>';
+    return ` <span class="text-muted small"><i class="bi bi-calendar3 me-1"></i>${escapeMedalHtml(new Date(raw).toLocaleDateString('sv-SE'))}</span>`;
+}
+
+function markenQueueNote(s) {
+    return s.notes
+        ? `<div class="small text-muted fst-italic"><i class="bi bi-chat-left-text me-1"></i>${escapeMedalHtml(s.notes)}</div>`
+        : '';
 }
 
 function clubQueueAct(kind, id, approve) {

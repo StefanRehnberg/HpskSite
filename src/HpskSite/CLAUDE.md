@@ -2670,6 +2670,7 @@ Navigate to **Members → Member Groups**:
 - **finalsStartList**: add `perClassConfigData` Textarea property (optional, label "Per-klass-konfiguration (JSON)"). Stores the admin's per-championship-class skjutlag-assignment + cut overrides so they survive regeneration. Added 2026-05-21.
 - **finalsStartList**: add `startListContent` Textarea property (optional, label "Cachad HTML"). Mirrors the property on `precisionStartList`. Added 2026-05-21.
 - **competition**: add `resultListFile` Media Picker property (optional, label "Resultatlista"). Mirrors `invitationFile` — stores a PDF/Word result list uploaded for external competitions. Without it, the "Ladda upp resultatlista" button silently no-ops and the public "Resultatlista" card never renders. Added 2026-05-28.
+- **club**: add `markenRequireOnSiteWitness` True/False property (optional, default false, label "Kräv bevittning på plats för serier"). When ON, a `MarkenSeries` can only be APPROVED by scanning the shooter's live QR code — `SetSeriesStatus` refuses a bare approve from the validation queue. Rejecting is always allowed. Missing property = safe default (off) + `SetMarkenClubSettings` refuses that half of the save with a message naming the property, rather than no-op'ing (`SetValue` on a missing property is silently ignored, so the switch would appear to work and revert on next load). Added 2026-08-28.
 - **club**: add `markenSignoffSkjutledare` True/False property (optional, default false, label "Tillåt skjutledare att signera märken"). Powers per-club sign-off authority for Märken (Pistolskyttemärket). OFF (default) → only board members (Styrelse, via `BoardRoles`) + site admins sign off Guldfodringar/märken; ON → Skjutledare of the club may too. Missing property = silent no-op (safe default = board only). Added 2026-05-31. Also run `Migrations/create-marken-tables.sql` in SSMS.
 - **competition**: add `rangeId` Integer property (optional, default 0, label "Skjutbana (id)"). Links a competition to a shooting range in the Skjutbanedatabas → the public competition page shows venue + map + Vägbeskrivning (members-only block) and the management page gets a range-picker. Missing property = graceful no-op (picker shows "lägg till egenskapen", public block hidden). Added 2026-06-03. Also run `Migrations/create-range-tables.sql` in SSMS + create the `shootingRangeHub` node (alias `skjutbanor`). See `Documentation/SHOOTING_RANGE_DATABASE.md`.
 - **club**: add `orgNumber` Textstring property (optional, label "Organisationsnummer"). Swedish org. number for the club. Surfaced in the club create/edit modal (`ClubManagement.cshtml`) and printed on competition payment receipts (organizer block) so the receipt is valid for friskvårdsbidrag claims. (`address`/`city`/`postalCode` already existed on `club`.) Missing property = silent no-op + blank receipt row. Added 2026-06-11.
@@ -2736,6 +2737,71 @@ Club admins migrate a hand-written ledger of past series in bulk on the club **M
 - **Strict valör progression (SHB 5.4.2 et al., 2026-06-04):** the award engine used to grant the **highest** qualified valör in one go (a documented Phase-2 simplification). SHB requires **one valör per year, sequential** — "Endast ett märke kan under året erövras … och märke av högre grad endast av den som förut innehar märke av närmast lägre grad" (appears in 5 chapter sections: Elit + the discipline/Luftpistol families). Now enforced via `Marken.ApplyValorProgression(perYear→(year,qualifiedOrdinal))` → `(held, heldYear, guldYears)`, walking years chronologically, stepping one grade per qualifying year. Wired into BOTH `MarkenCompetitionService.AnalyzeAsync` (added `EarnedYear`) and `MarkenController.AnalyzeSeriesProofAsync` (tuple gained `EarnedYear`); recompute methods stamp the badge with `EarnedYear`. So a member who shoots all-Guld series in one year earns **Brons** that year (Guld takes ≥3 qualifying years). **Forward-only by design:** `EnsureBadgeAsync` is insert-the-missing-level-only (never downgrades), so existing leniently-awarded Guld badges in prod are preserved — strict progression only governs new/future awards. **Testing caveat:** a member already auto-awarded Guld under the old rule keeps Guld (and recompute just adds a Brons row dated their series year) — verify the strict behavior with a FRESH member, not a previously-awarded one.
 - **Elit timing gate + editable Guldmärke year (2026-06-04):** now enforced — SHB 5.4.2 "Prov för elitmärke får avläggas första gången året efter det guldmärket erövrats." `AnalyzeSeriesProofAsync` for Elit requires a held Pistolskyttemärket Guld (no Guld → no Elit, also fixes prereq-not-enforced-on-award) and only counts series with `Year >= guldBadge.AchievedYear + 1`. Because that depends on an accurate Guld year, the **Guldmärke year is now captured at award and editable afterward**: `AwardBadge` already accepted `Year` (JS now sends it, prompting at Guld award, default current year); the Detaljer Guld row gained an **År** input next to the Nr input; `SetBadgeUniqueNumber` (+ `UniqueNumberRequest.Year`) now also sets `AchievedYear`. The Elit family summary shows a note ("Elitprov får avläggas först {guldYear+1} …") when the member holds Guld but the viewed year isn't past it. Luftpistol's brons prereq stays advisory (only Elit's gate is hard, since the timing rule needs the Guld year).
 - **Remove an auto-awarded family badge (2026-06-04):** awarded badges are persisted `MemberBadge` rows; the engine is add-only, so deleting the source series does NOT retract a badge (it just stops re-deriving). New `POST Marken/DeleteFamilyBadges {memberId, family}` (auth `CanSignOffForMemberAsync`) deletes all of a member's `MemberBadge` + `MemberBadgeQualification` rows for a family; wired to a **"Ta bort" trash button** on each row in the Detaljer "Andra märken" section (`deleteMarkenFamily` JS, functionary-only). Caveat surfaced in the confirm dialog: derived families re-materialize on next read if the underlying evidence still qualifies — remove the series/results first for a lasting removal. (Prior to this there was no UI for the long-existing `DeleteBadge` endpoint — removal required editing the `MemberBadge` table directly.)
+
+### Märken: bevittning på plats, skjutdatum och kontext i valideringskön (2026-08-28)
+
+Från en klubbadmins rapport: *"jag får ingen info eller förhandsvisning om vad det är … jag kan inte
+se vilka datum som avses"*, plus frågan om en serie ens kan skickas in obevittnad. Den kunde det.
+
+**`SubmitSeries` var ingen grind.** Den lade serien `Pending` i kön och returnerade QR-token som ett
+*erbjudande* — kön var den asynkrona vägen, så en guldserie kunde skickas in från soffan. Nu finns
+klubbinställningen **`markenRequireOnSiteWitness`** (per klubb, av som standard, samma mönster som
+`markenSignoffSkjutledare`).
+- Grinden sitter på **godkännandet**, inte på inskicket: vid inskickstillfället har ingen ännu
+  validerat, så "kräv bevittning" kan bara betyda *approve kräver ett bevis på att någon stod där*.
+  `SetSeriesStatus` kräver då en **levande verify-token myntad för exakt den serien**
+  (`IsLiveVerifyToken(token, "series:{id}")`), vilket bara skyttens egen skärm kan producera.
+  `MarkenVerify.cshtml` skickar med `TOKEN`; köns Godkänn skickar ingen och nekas med en förklaring.
+- **Avvisa är alltid tillåtet** — en klubb som kräver bevittning måste ändå kunna rensa kön från
+  serier ingen bevittnat, annars låser kön sig.
+- **Medvetet per klubb, inte global spärr.** Vid en bana utan täckning betyder ett hårt krav att
+  ingen guldserie kan registreras alls; klubben väljer vilken risk den vill bära.
+- **Gäller serier, inte `comp`/`stormastar`** — ett egenrapporterat mästerskapsresultat är en
+  resultatlista på papper, inte något en funktionär står och tittar på.
+
+**⚠️ Tokens har giltighetstid nu (`ToTimeLimitedDataProtector`, 30 min) — och det öppnade ett hål som
+MÅSTE täppas i samma ändring.** `CreateProtector` ensam gav en evig token; när den blir bärande
+grind är evigheten fel. Men en utgången token på en klubb som kräver bevittning skulle **stranda
+serien permanent**: godkännbar av ingen, raderbar bara efter att först ha avvisats. Därför
+**`GetMyVerifyLink(id)`** — myntar en FÄRSK kod för skyttens egen *pending* serie (QR-ikon i "Mina
+inskickade serier" → `#mySerieQrModal`, återanvänder `markenRenderQr` så skärmen pollar och stänger
+sig själv när någon godkänner). Inför aldrig en utgångstid på något som är enda vägen framåt utan att
+samtidigt bygga vägen tillbaka.
+
+**Skjutdatum går att ange** (`SubmitSeriesRequest.SeriesDate`, "yyyy-MM-dd"). Förut `DateTime.Now`
+hårdkodat, så en serie skjuten igår registrerades som skjuten idag. `ResolveSeriesDate` bär reglerna:
+tomt = idag, inte i framtiden, högst **60 dagar** bakåt (äldre hör till den funktionärsgrindade
+klubbliggarimporten). **`Year` följer skjutdatumet, inte inskicksdagen** — en serie skjuten 28
+december och inskickad 3 januari tillhör det gamla årets guldfodring. Klientsidan delar EN
+implementation (`markenDateInit`/`markenDateReset`/`markenDateValue` i `_MarkenSerieQuickSubmit.cshtml`,
+gränserna speglar servern) över alla tre inskicksytorna — Guldserie-modalen, Snabbserie-modalen och
+snabbinskicket vid banan. Den degraderar till ett vanligt textfält när flatpickr inte finns på sidan
+(`TrainingMatch.cshtml` laddar den inte).
+
+**Kön visar nu det som gör ett beslut möjligt:** datum, skyttens notering, och en förklaring när
+klubben kräver bevittning. Förut fick den som klickade Godkänn namn + fem siffror.
+- ⚠️ **`seriesDate` skickades redan** från servern och ritades bara aldrig ut — leta efter det
+  innan du lägger till ett fält.
+- ⚠️ **Ett tävlingsresultat bär `competitionDate`, en serie bär `seriesDate`** — läser man bara den
+  ena blir halva kön odaterad. Båda köerna (`renderClubQueueItem` i ClubAdminPanel,
+  `renderQueueItem` i UserProfile) har fixen; det är samma dual-renderer-fälla som startlistorna.
+- `requiresOnSiteWitness` ligger **per rad i `SerieDto`**, inte per kö: Min sida-kön spänner över
+  flera klubbar och bara vissa av dem kan kräva bevittning. `RequireOnSiteWitness` memoiserar per
+  request, annars blir det en innehållsuppslagning per rad.
+
+**Rättelse av något jag trodde saknades:** *självvalidering var redan blockerad.* `SelfValidateMsg`
+kontrolleras i `SetSeriesStatus`, `SetCompResultStatus`, `SetStormastarStatus` och
+`GetSerieForVerify`. Kontrollen sitter i anroparen, inte i `CanValidateSeriesAsync` — läs den innan
+du drar slutsatsen att grinden fattas. (Klubbliggarimporten självvaliderar avsiktligt och rör inte
+`SetSeriesStatus`.)
+
+**Fortfarande OBYGGT och beslutat:** materialisering av tävlingsserier i `MarkenSeries` (löser både
+dubbelräkningen i guldfodringen och att guldserieligan inte ser tävlingsserier — se
+`marken-club-admin-report-2026-08-28` i minnet), dubblettvarning vid inskick, och växlingen
+samlad/klassvis resultatlista. Foto i snabbinskicket väntar på Android-appen.
+
+**Operatörssteg:** lägg till `club.markenRequireOnSiteWitness` (True/False). Adds C# → full rebuild.
+Ingen SQL.
 
 ### Märken: "Spara som Guldserie/Snabbserie" from Resultat-entry + Training match (2026-06-10)
 A shooter can turn a single just-shot **5-shot series** into a Märken submission from two more places besides the "Jag har skjutit en Guldserie" button on Min sida: the manual **Resultat-entry** modal (`TrainingScoreEntry.cshtml`) and a **Training match** (`TrainingMatchScoreEntry.cshtml`). Per-series, shot-by-shot only — NOT offered in serie-total / total-only entry (no per-shot data).

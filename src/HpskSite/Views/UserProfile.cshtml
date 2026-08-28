@@ -1317,6 +1317,21 @@ function deletePracticeRow(id) {
     </div>
 </div>
 
+@* ── Fresh QR for an already-submitted, still-pending series ──
+   Verify links expire, and on a club that requires on-site witnessing the QR is the only route to an
+   approval — so the shooter must be able to produce a new code without re-entering the series. *@
+<div class="modal fade" id="mySerieQrModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-qr-code text-warning"></i> Validera serien</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body"><div id="mySerieQrBody"></div></div>
+        </div>
+    </div>
+</div>
+
 @* ── Guldserie entry modal (5-shot keypad) ── *@
 <div class="modal fade" id="guldserieModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
@@ -1340,6 +1355,12 @@ function deletePracticeRow(id) {
                         <div class="col-6" id="gsClubWrap" style="display:none;">
                             <label class="form-label small mb-1">Klubb (för validering)</label>
                             <select id="gsClub" class="form-select"></select>
+                        </div>
+                        @* Shot-date. Defaults to today; the functionary validating it in the queue has
+                           no other way to know when the series was actually fired. *@
+                        <div class="col-6">
+                            <label class="form-label small mb-1" for="gsDate">Datum då serien sköts</label>
+                            <input type="text" class="form-control" id="gsDate">
                         </div>
                     </div>
                     <div class="text-center small text-muted mb-2" id="gsThresholdNote"></div>
@@ -1434,6 +1455,11 @@ function deletePracticeRow(id) {
                     <div id="ssClubWrap" class="mb-3" style="display:none;">
                         <label class="form-label small mb-1">Klubb (för validering)</label>
                         <select id="ssClub" class="form-select"></select>
+                    </div>
+                    @* Shot-date — see the Guldserie modal; the queue has no other way to know when. *@
+                    <div class="mb-3">
+                        <label class="form-label small mb-1" for="ssDate">Datum då serien sköts</label>
+                        <input type="text" class="form-control" id="ssDate" placeholder="ÅÅÅÅ-MM-DD">
                     </div>
                     <div class="mb-3">
                         <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto (valfritt)</label>
@@ -3691,9 +3717,14 @@ function loadMySeries(year) {
                 const del = s.status === 'Rejected'
                     ? ` <button class="btn btn-sm btn-link text-danger p-0 ms-1" title="Ta bort avvisad" onclick="deleteMyEvidence('${s.kind || 'series'}', ${s.id})"><i class="bi bi-trash"></i></button>`
                     : '';
+                // Verify tokens expire, so a pending series needs a way to present a FRESH code —
+                // otherwise a club that requires on-site witnessing can never approve it.
+                const qrBtn = (s.status === 'Pending' && (s.kind || 'series') === 'series')
+                    ? ` <button class="btn btn-sm btn-link p-0 ms-1" title="Visa QR-kod för validering" onclick="showMySerieQr(${s.id})"><i class="bi bi-qr-code"></i></button>`
+                    : '';
                 return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
                     <span>${markenEvidenceDesc(s)} <span class="text-muted small">${date}</span></span>
-                    <span class="text-nowrap">${badge}${del}</span></div>`;
+                    <span class="text-nowrap">${badge}${qrBtn}${del}</span></div>`;
             }).join('');
             updateMarkenEmptyState();
         })
@@ -3769,9 +3800,22 @@ function renderQueueItem(s) {
         : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
     const photo = s.hasPhoto ? ` <a href="${photoUrl}" target="_blank" rel="noopener"><i class="bi bi-camera"></i></a>` : '';
     const shots = (s.kind !== 'comp' && s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeHtmlMarken).join(' · ')}</div>` : '';
+    // ⚠️ A competition result carries `competitionDate`, a series carries `seriesDate` — reading only
+    // one of them leaves half the queue undated. Same shape as the club-admin queue.
+    const dateRawQ = s.kind === 'comp' ? s.competitionDate : s.seriesDate;
+    const dateQ = dateRawQ
+        ? ` <span class="text-muted small"><i class="bi bi-calendar3 me-1"></i>${escapeHtmlMarken(new Date(dateRawQ).toLocaleDateString('sv-SE'))}</span>`
+        : ' <span class="text-muted small">datum saknas</span>';
+    const noteQ = s.notes
+        ? `<div class="small text-muted fst-italic"><i class="bi bi-chat-left-text me-1"></i>${escapeHtmlMarken(s.notes)}</div>`
+        : '';
+    // Say the witnessing rule before the click instead of letting the server refuse afterwards.
+    const onSiteQ = (s.kind !== 'comp' && s.kind !== 'stormastar' && s.requiresOnSiteWitness)
+        ? `<div class="small text-warning-emphasis"><i class="bi bi-qr-code-scan me-1"></i>Klubben kräver bevittning på plats — skanna skyttens QR-kod.</div>`
+        : '';
     return `<div class="border-bottom py-2">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-            <div><strong>${escapeHtmlMarken(s.memberName)}</strong> <span class="text-muted small">${escapeHtmlMarken(s.clubName || '')}</span><br>${markenEvidenceDesc(s)}${photo}${shots}</div>
+            <div><strong>${escapeHtmlMarken(s.memberName)}</strong> <span class="text-muted small">${escapeHtmlMarken(s.clubName || '')}</span>${dateQ}<br>${markenEvidenceDesc(s)}${photo}${shots}${noteQ}${onSiteQ}</div>
             <div class="text-nowrap">
                 <button class="btn btn-sm btn-success" onclick="queueAct('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
                 <button class="btn btn-sm btn-outline-danger" onclick="queueAct('${s.kind}', ${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
@@ -3821,6 +3865,25 @@ function markenUploadPhoto(inputId) {
 let markenQrPoll = null;
 function markenStopStatusPoll() { if (markenQrPoll) { clearInterval(markenQrPoll); markenQrPoll = null; } }
 
+// Mints and shows a FRESH verify code for one of my own pending series. Reuses markenRenderQr, so the
+// screen also polls and closes itself the moment a functionary approves it.
+function showMySerieQr(id) {
+    const body = document.getElementById('mySerieQrBody');
+    if (!body) return;
+    body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mySerieQrModal')).show();
+    fetch(`/umbraco/surface/Marken/GetMyVerifyLink?id=${id}`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) {
+                body.innerHTML = `<div class="alert alert-warning mb-0">${escapeHtmlMarken(d.message || 'Kunde inte skapa en ny kod.')}</div>`;
+                return;
+            }
+            markenRenderQr(body, d, 'mySerieQrModal', 'series');
+        })
+        .catch(() => { body.innerHTML = '<div class="alert alert-danger mb-0">Något gick fel.</div>'; });
+}
+
 function markenRenderQr(container, res, modalId, kind) {
     const qr = `/umbraco/surface/Faltskytte/GenerateQrCode?url=${encodeURIComponent(res.verifyUrl)}`;
     container.innerHTML = `
@@ -3828,6 +3891,12 @@ function markenRenderQr(container, res, modalId, kind) {
             <div class="alert ${res.qualifies === false ? 'alert-warning' : 'alert-success'}">${escapeHtmlMarken(res.message)}</div>
             <p class="mb-2">Visa koden för en styrelsemedlem eller skjutledare så kan de validera direkt:</p>
             <img src="${qr}" alt="QR" class="img-fluid border rounded" style="max-width:240px;">
+            ${res.requiresOnSiteWitness
+                ? `<div class="alert alert-warning small py-2 mt-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+                     Din klubb kräver att serien bevittnas på plats — den kan <strong>bara</strong> godkännas
+                     genom att koden skannas här vid banan. Koden är giltig en kort stund; har den gått ut
+                     visar du en ny från listan över dina inskickade serier.</div>`
+                : ''}
             <div class="text-muted small mt-2"><span class="spinner-border spinner-border-sm"></span> Väntar på validering…</div>
             <div class="d-grid mt-3"><button class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button></div>
         </div>`;
@@ -3875,6 +3944,7 @@ function openGuldserieModal() {
     document.getElementById('gsPhoto').value = '';
     gsRenderShots();
     gsUpdateThreshold();
+    markenDateReset('gsDate'); // shared with the quick-submit partial — same bounds as the server
     markenPopulateClubPicker('gsClubWrap', 'gsClub');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('guldserieModal')).show();
 }
@@ -3907,7 +3977,7 @@ function gsSave() {
         return fetch('/umbraco/surface/Marken/SubmitSeries', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
-            body: JSON.stringify({ seriesType: 'Precision', clubId, weaponGroup: document.getElementById('gsWeapon').value, shots: gsShots, claimedLevel: 'Guld', photoRef })
+            body: JSON.stringify({ seriesType: 'Precision', clubId, weaponGroup: document.getElementById('gsWeapon').value, shots: gsShots, claimedLevel: 'Guld', photoRef, seriesDate: markenDateValue('gsDate') })
         });
     }).then(r => r.json()).then(res => {
         if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> SKICKA'; return; }
@@ -3923,6 +3993,7 @@ function openSnabbserieModal() {
     document.getElementById('ssResult').style.display = 'none';
     document.getElementById('ssPhoto').value = '';
     ssUpdateReq();
+    markenDateReset('ssDate');
     markenPopulateClubPicker('ssClubWrap', 'ssClub');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('snabbserieModal')).show();
 }
@@ -3943,7 +4014,7 @@ function ssSave() {
     if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
     const target = document.getElementById('ssTarget').value;
     const isSnabbpistol = target === 'Snabbpistol_25m';
-    const body = { seriesType: 'Speed', clubId, weaponGroup: document.getElementById('ssWeapon').value, target };
+    const body = { seriesType: 'Speed', clubId, weaponGroup: document.getElementById('ssWeapon').value, target, seriesDate: markenDateValue('ssDate') };
     if (isSnabbpistol) {
         const score = parseInt(document.getElementById('ssScore').value) || 0;
         if (score <= 0 || score > 50) { alert('Ange seriens poäng (0–50).'); return; }

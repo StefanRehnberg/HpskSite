@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.DataProtection;
+﻿using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -37,7 +37,16 @@ namespace HpskSite.Controllers
         private readonly MarkenStormastarService _stormastarService;
         private readonly StandardMedalLedgerService _standardMedals;
         private readonly StandardMedalProofStorage _proofStorage;
-        private readonly IDataProtector _verifyProtector;
+        private readonly ITimeLimitedDataProtector _verifyProtector;
+
+        /// <summary>
+        /// How long a QR verify link stays valid. The shooter shows the code to a functionary who is
+        /// standing next to them, so minutes is the real-world window — and once the club turns on
+        /// <c>markenRequireOnSiteWitness</c> this token IS the proof of on-site witnessing, so an
+        /// unbounded one (what <c>CreateProtector</c> alone gives) would let a code be redeemed from
+        /// the sofa a year later. Expiry is not a lockout: the club validation queue still works.
+        /// </summary>
+        private static readonly TimeSpan VerifyTokenLifetime = TimeSpan.FromMinutes(30);
 
         public MarkenController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -73,7 +82,7 @@ namespace HpskSite.Controllers
             _stormastarService = stormastarService;
             _standardMedals = standardMedals;
             _proofStorage = proofStorage;
-            _verifyProtector = dataProtectionProvider.CreateProtector("Marken.SeriesVerify.v1");
+            _verifyProtector = dataProtectionProvider.CreateProtector("Marken.SeriesVerify.v1").ToTimeLimitedDataProtector();
         }
 
         private const string Family = Marken.FamilyPistolskytte;
@@ -140,6 +149,44 @@ namespace HpskSite.Controllers
             public int? Total { get; set; }               // snabbpistol speed series (scored 0–50)
             public string? PhotoRef { get; set; }
             public string? Notes { get; set; }
+
+            /// <summary>
+            /// The day the series was actually SHOT ("yyyy-MM-dd"). Empty = today. Until 2026-08-28
+            /// this was always the submission day, so a series entered the morning after read as
+            /// having been shot that morning — and the functionary validating it in the queue had no
+            /// date on screen at all to judge it by.
+            /// </summary>
+            public string? SeriesDate { get; set; }
+        }
+
+        /// <summary>
+        /// How far back a shooter may date their own series. Bounded because the date decides which
+        /// year's Guldfodring the series counts toward, and because older series belong in the
+        /// functionary-gated klubbliggare import (<see cref="AddBacklogSeries"/>) where someone with
+        /// sign-off authority vouches for them. Wide enough to cover "shot in December, submitted in
+        /// January", which is a real case and must not be pushed into the backlog flow.
+        /// </summary>
+        private const int MaxSeriesBackdatingDays = 60;
+
+        /// <summary>
+        /// Resolves the shot-date for a self-submitted series. Returns null + a message when the date
+        /// is unusable, rather than silently falling back to today: a series stamped with the wrong
+        /// year lands in the wrong Guldfodring, and nothing downstream would ever question it.
+        /// </summary>
+        private static (DateTime? Date, string? Error) ResolveSeriesDate(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return (DateTime.Now, null);
+            if (!DateTime.TryParse(raw, out var parsed)) return (null, "Ogiltigt datum.");
+
+            var day = parsed.Date;
+            if (day > DateTime.Now.Date) return (null, "Datumet ligger i framtiden.");
+            if (day < DateTime.Now.Date.AddDays(-MaxSeriesBackdatingDays))
+                return (null, $"Datumet är mer än {MaxSeriesBackdatingDays} dagar tillbaka. "
+                            + "Äldre serier registreras av en funktionär under Historiska serier från klubbliggare.");
+
+            // Keep the time-of-day when the shooter dated the series today, so several series shot the
+            // same day still sort in the order they were entered.
+            return (day == DateTime.Now.Date ? DateTime.Now : day, null);
         }
 
         /// <summary>
@@ -162,7 +209,12 @@ namespace HpskSite.Controllers
             var group = Marken.WeaponGroup(request.WeaponGroup);
             if (group == null) return Json(new { success = false, message = "Ogiltig vapengrupp." });
 
-            int year = DateTime.Now.Year;
+            var (seriesDate, dateError) = ResolveSeriesDate(request.SeriesDate);
+            if (seriesDate == null) return Json(new { success = false, message = dateError });
+
+            // The YEAR follows the shot-date, not the submission date — a series shot on 28 December
+            // and submitted on 3 January belongs to the old year's Guldfodring.
+            int year = seriesDate.Value.Year;
             int birthYear = _candidates.GetBirthYear(member.Id, year);
 
             var series = new MarkenSeries
@@ -171,7 +223,7 @@ namespace HpskSite.Controllers
                 ClubId = request.ClubId,
                 BadgeFamily = Family,
                 Year = year,
-                SeriesDate = DateTime.Now,
+                SeriesDate = seriesDate.Value,
                 WeaponGroup = group,
                 Status = Marken.SeriesStatusPending,
                 PhotoFileRef = string.IsNullOrWhiteSpace(request.PhotoRef) ? null : request.PhotoRef,
@@ -221,7 +273,7 @@ namespace HpskSite.Controllers
             }
 
             var id = await _ledger.InsertSeriesAsync(series);
-            var token = _verifyProtector.Protect("series:" + id);
+            var token = ProtectVerifyToken("series:" + id);
 
             return Json(new
             {
@@ -232,6 +284,10 @@ namespace HpskSite.Controllers
                 threshold = series.Threshold,
                 verifyToken = token,
                 verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                // The shooter must know BEFORE they walk away from the range whether the queue is a
+                // fallback or whether the QR code is the only way this series can ever be approved.
+                requiresOnSiteWitness = RequireOnSiteWitness(series.ClubId),
+                seriesDate = series.SeriesDate,
                 message = series.SeriesType == Marken.SeriesTypePrecision && !series.Qualifies
                     ? "Sparad. Obs: serien når inte guldkravet — den räknas inte mot guldfodringen men kan ändå valideras."
                     : "Sparad och skickad för validering."
@@ -378,6 +434,43 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Mints a FRESH QR verify link for one of the current member's own <b>pending</b> series.
+        /// <para>
+        /// Required, not a convenience: verify tokens expire (<see cref="VerifyTokenLifetime"/>), and on
+        /// a club that requires on-site witnessing the QR code is the ONLY way a series can be
+        /// approved. Without a way to show a new code, an expired token would strand the series in the
+        /// queue permanently — approvable by nobody, and deletable only by rejecting it first.
+        /// </para>
+        /// GET /umbraco/surface/Marken/GetMyVerifyLink?id=123
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyVerifyLink(int id)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false, message = "Inte inloggad." });
+
+            var s = await _ledger.GetSeriesAsync(id);
+            if (s == null) return Json(new { success = false, message = "Serien hittades inte." });
+            if (s.MemberId != member.Id) return Json(new { success = false, message = "Åtkomst nekad." });
+            if (s.Status != Marken.SeriesStatusPending)
+                return Json(new { success = false, message = "Serien är redan avgjord." });
+
+            var token = ProtectVerifyToken("series:" + s.Id);
+            return Json(new
+            {
+                success = true,
+                id = s.Id,
+                verifyToken = token,
+                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                requiresOnSiteWitness = RequireOnSiteWitness(s.ClubId),
+                qualifies = s.Qualifies,
+                total = s.Total,
+                threshold = s.Threshold,
+                message = "Visa koden för en styrelsemedlem eller skjutledare."
+            });
+        }
+
+        /// <summary>
         /// Lightweight status of one of the current member's own series — polled by the QR modal so
         /// the shooter's screen updates the moment a functionary validates it on another device.
         /// GET /umbraco/surface/Marken/GetMySerieStatus?id=123
@@ -453,7 +546,7 @@ namespace HpskSite.Controllers
                 EnteredByMemberId = member.Id
             };
             var id = await _compService.InsertSelfReportedAsync(r);
-            var token = _verifyProtector.Protect("comp:" + id);
+            var token = ProtectVerifyToken("comp:" + id);
 
             return Json(new
             {
@@ -585,7 +678,7 @@ namespace HpskSite.Controllers
                 EnteredByMemberId = member.Id
             };
             var id = await _ledger.InsertSeriesAsync(series);
-            var token = _verifyProtector.Protect("series:" + id);
+            var token = ProtectVerifyToken("series:" + id);
 
             return Json(new
             {
@@ -687,7 +780,17 @@ namespace HpskSite.Controllers
             return ("series", int.TryParse(raw, out var j) ? j : 0); // legacy plain-id = series
         }
 
-        public class EvidenceActionRequest { public string Kind { get; set; } = "series"; public int Id { get; set; } }
+        public class EvidenceActionRequest
+        {
+            public string Kind { get; set; } = "series";
+            public int Id { get; set; }
+
+            /// <summary>
+            /// The QR verify token, present when the validator came in through the scan page. Only
+            /// consulted by clubs that require on-site witnessing (<see cref="RequireOnSiteWitness"/>).
+            /// </summary>
+            public string? Token { get; set; }
+        }
 
         /// <summary>Unified validate — dispatches to series or competition-result by kind.</summary>
         [HttpPost]
@@ -697,7 +800,7 @@ namespace HpskSite.Controllers
             {
                 "comp" => await SetCompResultStatus(request.Id, Marken.StatusVerified),
                 "stormastar" => await SetStormastarStatus(request.Id, Marken.StatusVerified),
-                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusVerified)
+                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusVerified, request?.Token)
             };
 
         [HttpPost]
@@ -730,7 +833,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RejectSeries([FromBody] IdRequest request) => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusRejected);
 
-        private async Task<IActionResult> SetSeriesStatus(int id, string status)
+        private async Task<IActionResult> SetSeriesStatus(int id, string status, string? verifyToken = null)
         {
             var series = await _ledger.GetSeriesAsync(id);
             if (series == null) return Json(new { success = false, message = "Serien hittades inte." });
@@ -738,6 +841,25 @@ namespace HpskSite.Controllers
             if (series.MemberId == validatorId) return Json(new { success = false, message = SelfValidateMsg });
             if (!await CanValidateSeriesAsync(series))
                 return Json(new { success = false, message = "Åtkomst nekad." });
+
+            // ── On-site witnessing (opt-in per club) ──
+            // Approving then requires a LIVE verify token minted for THIS series, which only the
+            // shooter's own screen can produce — that is what makes "bevittnad på plats" a fact
+            // rather than a claim. Rejecting is always allowed: a club that demands witnessing must
+            // still be able to clear its queue of series nobody witnessed, or the queue jams.
+            // Series only — a self-reported championship result is a paper result list, not
+            // something a functionary stands and watches.
+            if (status == Marken.StatusVerified
+                && RequireOnSiteWitness(series.ClubId)
+                && !IsLiveVerifyToken(verifyToken, "series:" + series.Id))
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = "Klubben kräver att serier bevittnas på plats. Godkänn genom att skanna "
+                            + "skyttens QR-kod vid banan. Har koden gått ut visar skytten en ny."
+                });
+            }
 
             var (ok, msg) = await _ledger.SetSeriesStatusAsync(id, status, validatorId);
 
@@ -966,15 +1088,29 @@ namespace HpskSite.Controllers
             if (!await _auth.IsClubAdminForClub(clubId)) return Json(new { success = false, message = "Åtkomst nekad." });
             var club = _contentService.GetById(clubId);
             bool hasProp = club != null && club.HasProperty("markenSignoffSkjutledare");
+            bool hasWitnessProp = club != null && club.HasProperty("markenRequireOnSiteWitness");
             return Json(new
             {
                 success = true,
                 skjutledareSignoff = hasProp && club!.GetValue<bool>("markenSignoffSkjutledare"),
-                propertyExists = hasProp
+                propertyExists = hasProp,
+                requireOnSiteWitness = hasWitnessProp && club!.GetValue<bool>("markenRequireOnSiteWitness"),
+                witnessPropertyExists = hasWitnessProp
             });
         }
 
-        public class MarkenClubSettingsRequest { public int ClubId { get; set; } public bool SkjutledareSignoff { get; set; } }
+        public class MarkenClubSettingsRequest
+        {
+            public int ClubId { get; set; }
+            public bool SkjutledareSignoff { get; set; }
+
+            /// <summary>
+            /// Nullable so a client that only knows about the older switch cannot silently turn the
+            /// witnessing requirement off by omitting it — a missing field means "leave it alone",
+            /// not "false".
+            /// </summary>
+            public bool? RequireOnSiteWitness { get; set; }
+        }
 
         /// <summary>Set whether the club's Skjutledare may validate märken. Club admins only.</summary>
         [HttpPost]
@@ -991,15 +1127,33 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Egenskapen 'markenSignoffSkjutledare' saknas på klubbtypen — be en administratör lägga till den i Umbraco." });
 
             club.SetValue("markenSignoffSkjutledare", request!.SkjutledareSignoff);
+
+            // Refuse rather than no-op when the property is missing. `SetValue` on an absent property
+            // is silently ignored, so the switch would report success, flip back on the next load,
+            // and the club would believe it had a requirement it does not have.
+            if (request.RequireOnSiteWitness.HasValue)
+            {
+                if (!club.HasProperty("markenRequireOnSiteWitness"))
+                    return Json(new { success = false, message = "Egenskapen 'markenRequireOnSiteWitness' saknas på klubbtypen — be en administratör lägga till den i Umbraco." });
+                club.SetValue("markenRequireOnSiteWitness", request.RequireOnSiteWitness.Value);
+            }
+
             _contentService.Save(club);
             _contentService.Publish(club, new[] { "*" }, -1);
-            return Json(new
+            _onSiteWitnessCache.Remove(clubId);
+
+            var messages = new List<string>
             {
-                success = true,
-                message = request.SkjutledareSignoff
+                request.SkjutledareSignoff
                     ? "Skjutledare kan nu validera märken för klubben."
                     : "Endast styrelsemedlemmar kan validera märken för klubben."
-            });
+            };
+            if (request.RequireOnSiteWitness == true)
+                messages.Add("Serier måste nu bevittnas på plats — de godkänns genom att skanna skyttens QR-kod.");
+            else if (request.RequireOnSiteWitness == false)
+                messages.Add("Serier kan godkännas i valideringskön i efterhand.");
+
+            return Json(new { success = true, message = string.Join(" ", messages) });
         }
 
         // ── Club secretary: reads ─────────────────────────────────────
@@ -2071,7 +2225,7 @@ namespace HpskSite.Controllers
                 EnteredByMemberId = member.Id
             };
             var id = await _stormastarService.InsertAsync(e);
-            var token = _verifyProtector.Protect("stormastar:" + id);
+            var token = ProtectVerifyToken("stormastar:" + id);
             return Json(new
             {
                 success = true,
@@ -2349,7 +2503,16 @@ namespace HpskSite.Controllers
                 speedRequirement = s.SeriesType == Marken.SeriesTypeSpeed ? Marken.SpeedRequirementText(s.ClaimedLevel) : null,
                 status = s.Status,
                 hasPhoto = !string.IsNullOrEmpty(s.PhotoFileRef),
-                validatedDate = s.ValidatedDate
+                validatedDate = s.ValidatedDate,
+                notes = s.Notes,
+                // Per ITEM, not per queue: the Min sida queue spans several clubs, and only some of
+                // them may demand on-site witnessing.
+                requiresOnSiteWitness = RequireOnSiteWitness(s.ClubId),
+                // The validator IS the witness on a series approved through the QR flow, so this is
+                // what "vem har bevittnat serien" resolves to once it has been approved.
+                validatedByName = s.ValidatedByMemberId is int vid && vid > 0
+                    ? _memberService.GetById(vid)?.Name
+                    : null
             };
         }
 
@@ -2374,6 +2537,48 @@ namespace HpskSite.Controllers
                 if (!club.HasProperty("markenSignoffSkjutledare")) return false;
                 return club.GetValue<bool>("markenSignoffSkjutledare");
             }
+            catch { return false; }
+        }
+
+        /// <summary>Mints a QR verify token that expires (see <see cref="VerifyTokenLifetime"/>).</summary>
+        private string ProtectVerifyToken(string payload) => _verifyProtector.Protect(payload, VerifyTokenLifetime);
+
+        /// <summary>
+        /// Reads the per-club <c>markenRequireOnSiteWitness</c> toggle (default false). When on, a
+        /// series may only be approved by scanning the shooter's live QR code — the club has decided
+        /// that a functionary must have witnessed the shooting, as SHB kap 5 assumes. Default is off
+        /// because a hard requirement is unusable where there is no coverage at the range.
+        /// </summary>
+        private bool RequireOnSiteWitness(int clubId)
+        {
+            if (clubId <= 0) return false;
+            // Memoized: SerieDto asks per item, so an unmemoized read would be one content lookup per
+            // row in the validation queue.
+            if (_onSiteWitnessCache.TryGetValue(clubId, out var cached)) return cached;
+            bool required;
+            try
+            {
+                var club = _contentService.GetById(clubId);
+                required = club != null
+                    && club.HasProperty("markenRequireOnSiteWitness")
+                    && club.GetValue<bool>("markenRequireOnSiteWitness");
+            }
+            catch { required = false; }
+            _onSiteWitnessCache[clubId] = required;
+            return required;
+        }
+
+        private readonly Dictionary<int, bool> _onSiteWitnessCache = new();
+
+        /// <summary>
+        /// True when <paramref name="token"/> is a live (unexpired) verify token minted for exactly
+        /// <paramref name="expectedPayload"/> — i.e. the validator really scanned THIS evidence's QR
+        /// code rather than pasting some other one they had lying around.
+        /// </summary>
+        private bool IsLiveVerifyToken(string? token, string expectedPayload)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return false;
+            try { return _verifyProtector.Unprotect(token) == expectedPayload; }
             catch { return false; }
         }
 
