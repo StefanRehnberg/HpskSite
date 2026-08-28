@@ -60,10 +60,6 @@
         @await Html.PartialAsync("_SmSpringskytteResultatNot")
         @if (hasResults)
         {
-            <p>
-                Tack för ett fint mästerskap. Här är resultatlistorna från båda dagarna — individuellt
-                och lagtävling, i den ordning de sköts.
-            </p>
             <div class="sm-doc-list">
                 @foreach (var doc in results)
                 {
