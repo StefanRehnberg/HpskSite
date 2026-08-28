@@ -175,6 +175,19 @@ namespace HpskSite.Models
         /// </summary>
         public int? SourceResultId { get; set; }
 
+        /// <summary>
+        /// WHICH result table <see cref="SourceResultId"/> points into — <c>PrecisionResultEntry</c> or
+        /// <c>DuellResultEntry</c>.
+        /// <para>
+        /// ⚠️ Load-bearing, not decoration: the two tables have independent identity columns, so
+        /// <c>PrecisionResultEntry.Id = 2377</c> and <c>DuellResultEntry.Id = 2377</c> are different
+        /// rows carrying the same integer. The unique index is on (SourceTable, SourceResultId) for
+        /// exactly that reason; keying on the id alone would reject a legitimate Duell series and make
+        /// the reconciliation's answer depend on which table it read first.
+        /// </para>
+        /// </summary>
+        public string? SourceTable { get; set; }
+
         /// <summary>The competition the series was shot at. Null for human-entered series.</summary>
         public int? SourceCompetitionId { get; set; }
 

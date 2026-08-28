@@ -88,10 +88,21 @@ namespace HpskSite.Services
             var allSeries = await _ledger.GetSeriesForMemberAsync(memberId, year);
             result.PendingPrecisionCount = allSeries.Count(s =>
                 s.SeriesType == Marken.SeriesTypePrecision && s.Status == Marken.SeriesStatusPending);
+            // Scoped the same way as Part2SeriesCount below — "väntar på validering" on this card is
+            // about the part it can complete, and a pending snabbpistol series completes nothing here.
             result.PendingSpeedCount = allSeries.Count(s =>
-                s.SeriesType == Marken.SeriesTypeSpeed && s.Status == Marken.SeriesStatusPending);
+                Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplineTillampning
+                && s.Status == Marken.SeriesStatusPending);
+            // ⚠️ TILLÄMPNINGSSERIER ONLY, not every Speed series.
+            // SHB 5.1.1.1 pt 2 defines the speed part as 3 tillämpningsserier against B 100 (50 m) or
+            // 1/6 C 30 (25 m). A snabbpistol series (snabbpistoltavla, 25 m, 3 s/shot) is Elit's speed
+            // evidence, NOT this — the codebase said so in Marken.SeriesDiscipline's own comment while
+            // this count read `SeriesType == Speed` and quietly accepted both.
+            // Pre-existing, and it would have gone from a corner case to systematic the moment Duell
+            // competition series began materialising as snabbpistol series (2026-08-28).
             result.Part2SeriesCount = allSeries.Count(s =>
-                s.SeriesType == Marken.SeriesTypeSpeed && s.Status == Marken.StatusVerified
+                Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplineTillampning
+                && s.Status == Marken.StatusVerified
                 && string.Equals(s.ClaimedLevel, Marken.LevelGuld, StringComparison.OrdinalIgnoreCase));
 
             // ── Part 2 (SHB 5.1.1.1 pt 2): a held Standardmedalj i fält satisfies the whole part;

@@ -2804,11 +2804,25 @@ EFTER att det erövrades; **5 precisionsserier + 5 snabbserier under SAMMA kalen
 45 / silver 48 / guld 49 för BÅDA momenten; ett märke per år, i turordning. Allt det var redan
 implementerat och är oförändrat — det enda som ändrades är att filtret nedan togs bort.
 
-- **⚠️ Bara PRECISIONSHALVAN får sitt bränsle från tävlingar.** Snabbhalvan kommer fortfarande enbart
-  från handinskick: en Duelltävlings serier materialiseras INTE, eftersom huruvida de skjuts mot
-  snabbpistoltavla på 25 m med 3 s/skott är en fråga om grenen, inte om koden. **ÖPPEN FRÅGA till
-  Stefan.** Tills den är svarad kan ingen fullborda Elit på tävlingsresultat ensamt — vilket också är
-  varför materialiseringen av ~186 precisionsserier inte myntade ett enda Elitmärke.
+- **BÅDA halvorna får sitt bränsle från tävlingar.** Stefan bekräftade 2026-08-28 att en Duelltävlings
+  serier skjuts mot snabbpistoltavla på 25 m med 3 s/skott, alltså giltigt snabbskyttebevis, så
+  `DuellResultEntry` materialiseras som snabbserier (`SeriesType=Speed`, `Target=Snabbpistol_25m`,
+  valör ur 49/48/45 — samma stege som `SubmitSeries`). Tröskeln där är Elit brons ensamt; en Duellserie
+  har ingen annan konsument.
+- **⚠️⚠️ DE TVÅ RESULTATTABELLERNA HAR OBEROENDE IDENTITETSKOLUMNER.** `PrecisionResultEntry.Id = 2377`
+  och `DuellResultEntry.Id = 2377` är OLIKA rader med samma heltal — i dev kolliderar id 7 på riktigt.
+  Därför bär varje materialiserad rad **`SourceTable`** och det unika indexet är på
+  **(SourceTable, SourceResultId)** (`add-sourcetable-to-markenseries.sql`, en följdmigrering eftersom
+  den första redan var körd i prod). Nyckling på id:t ensamt hade avvisat en giltig Duellserie och gjort
+  synkens svar beroende av vilken tabell som lästes först. **Varje SQL-fråga och varje join mot
+  `MarkenSeries` måste scopa på `SourceTable`** — sviten gick själv i den fällan tre gånger: en
+  målradsjoin som pekade på fel resultatrad, en skottjämförelse och ett dubblettindexprov.
+- **⚠️ Fixad samtidigt, för materialiseringen hade förstärkt den:** guldfodringens **del 2** räknade
+  `SeriesType == Speed` brett och svalde därmed snabbpistolserier. SHB 5.1.1.1 pt 2 definierar del 2 som
+  3 **tillämpnings**serier mot B 100 eller 1/6 C 30 — snabbpistoltavlan är Elits bevis, inte detta.
+  Kodbasen sa redan så i `Marken.SeriesDiscipline`s egen kommentar medan räkningen accepterade båda.
+  Mätt på medlem 1078 i dev: 4 tillämpningsserier och 10 snabbpistolserier → gamla koden svarade 14.
+  `PendingSpeedCount` är scopad likadant.
 
 **Tre guldserier FÅR komma från en enda tävling** (Stefan 2026-08-28). Dev visar en skytt med sju
 kvalificerande 48-serier från samma tävlingsdag, alla räknande. Beteendet är oförändrat sedan före
@@ -2821,15 +2835,36 @@ släppa igenom dem hade börjat dela ut Elitmärken som SIDOEFFEKT av en ändrin
 ligan — och märkestilldelning är enkelriktad, så ett felaktigt "ja" hade inte gått att ångra. Det var
 en regelfråga, inte en kodfråga, och den hörde därför hos Stefan.
 
-**Operatörssteg:** kör `Migrations/add-source-and-counts-to-markenseries.sql` (idempotent, egen batch
-per objekt, sätter `QUOTED_IDENTIFIER ON` själv). **Körd i prod 2026-08-28.** Adds C# → full ombyggnad.
+**⚠️ TRÖSKELVÄRDENA ÄR RÄTT SOM DE ÄR — ändra dem inte utan att läsa `Documentation/shb_kap5.txt`.**
+En sammanfattning som cirkulerade 2026-08-28 angav guldkravet till A 34 / B 40 / C 46; källtexten (kap 5,
+tabellen under punkt 1) säger **Brons 32/33/34, Silver 38/39/40, Guld 43/45/46** för A/B/C. De avvikande
+siffrorna är **C-kolumnen läst nedåt** — ett lätt misstag i den PDF-utvunna layouten, och alla C-värden i
+sammanfattningen var riktiga. Att följa dem hade sänkt A-guldkravet från 43 till 34 och retroaktivt
+kvalificerat mängder av serier; märkestilldelning är enkelriktad. Koden matchar källan.
+- **Åldersavdragen:** 55+ → −1 p/serie (implementerat, matchar källan). 65+ → källan har TVÅ
+  bestämmelser: −2 p/serie (5.1.1, under tabellen) och *"Skytt som ett föregående år fyllt 65 år
+  erhåller inteckning efter att ha uppfyllt fordringarna för pistolskyttemärket i silver"* (5.1.2.2,
+  som handlar just om årtalsmärken). Guldfodringen ÄR årtalsmärkesinteckningen, så koden följer 5.1.2.2
+  (silvertabellen) — den mer specifika bestämmelsen, och den mer generösa. Medvetet val, dokumenterat här
+  eftersom −2 vore en rimlig läsning av 5.1.1 ensam.
 
-Verifierat 50/50 `hpsk-verify/marken-compseries-sync-verify.mjs` (**A/B: 11 av 44 faller** på den
-version som mättes före Elit-tillägget, inklusive alla fyra propageringspåståenden och hela
-dubblett-halvan). Sviten redigerar verkliga resultatrader — poäng ner under kravet, 45 p som Elit-bevis,
-44 p under båda trösklarna, ändrad poäng, raderad rad — och återställer varje mutation ur en FULL
-snapshot med återställningen asserterad. Regression: marken-witness-date 79/79, resultlist-flatten
-38/38, märkes- och kvalifikationstabellerna oförändrade före/efter (6/6).
+**Operatörssteg:** kör `Migrations/add-source-and-counts-to-markenseries.sql` **(körd i prod
+2026-08-28)** och därefter `Migrations/add-sourcetable-to-markenseries.sql` — den senare backfillar
+befintliga rader till `PrecisionResultEntry` och byter det unika indexet mot det sammansatta. Båda
+idempotenta, egen batch per objekt, sätter `QUOTED_IDENTIFIER ON` själva. Adds C# → full ombyggnad.
+
+Verifierat 59/59 `hpsk-verify/marken-compseries-sync-verify.mjs`, två körningar i rad (**A/B: 11 av 44
+faller** på den version som mättes före Elit- och Duelltilläggen, inklusive alla fyra
+propageringspåståenden och hela dubblett-halvan). Sviten redigerar verkliga resultatrader — poäng ner
+under kravet, 45 p som Elit-bevis, 44 p under båda trösklarna, ändrad poäng, raderad rad — och
+återställer varje mutation ur en FULL snapshot, **inklusive en synk efteråt**: att återställa resultatet
+räcker inte, serien beskriver den muterade poängen tills något rekonciliererar, och nästa körning hade
+då mätt förra körningens rester. ⚠️ Den **konvergerar registret innan den mäter det** av samma skäl.
+⚠️ Och den anropar `GetMemberMarkenDetail` som **sajtadmin** — målraden plockas ur verklig dev-data och
+kan tillhöra vilken krets som helst, så en klubb-/kretsadmin nekas, ingen synk körs, och
+propageringspåståendena faller medan koden är hel.
+Regression: marken-witness-date 79/79, resultlist-flatten 38/38, märkes- och kvalifikationstabellerna
+oförändrade före/efter (6/6). Dev: 186 materialiserade precisionsserier + 12 Duellserier.
 
 ### Resultatlistan kan läsas per klass ELLER per vapengrupp (2026-08-28)
 

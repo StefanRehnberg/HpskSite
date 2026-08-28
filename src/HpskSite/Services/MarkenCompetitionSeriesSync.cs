@@ -52,6 +52,19 @@ namespace HpskSite.Services
         private static int ElitBronsPerSeries =>
             MarkenFamilies.Get(MarkenFamilies.Elit)?.SeriesThreshold?[0] ?? 45;
 
+        /// <summary>
+        /// The two result tables a guldserie/snabbserie can be materialised FROM.
+        /// <para>
+        /// <b>PrecisionResultEntry</b> → precision series, feeding the Guldfodring's precision part and
+        /// Elit's precision half. <b>DuellResultEntry</b> → snabbpistol series (snabbpistoltavla, 25 m,
+        /// 3 s/shot — confirmed with Stefan 2026-08-28), feeding Elit's SPEED half only. A Duell series
+        /// is NOT a tillämpningsserie and therefore does nothing for the Guldfodring's part 2, which SHB
+        /// 5.1.1.1 pt 2 defines against the B100 and C30 targets.
+        /// </para>
+        /// </summary>
+        private const string TablePrecision = "PrecisionResultEntry";
+        private const string TableDuell = "DuellResultEntry";
+
         /// <summary>What one reconciliation did. Returned so callers can log or assert on it.</summary>
         public record SyncResult(int Inserted, int Updated, int Deleted)
         {
@@ -86,7 +99,10 @@ namespace HpskSite.Services
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
-                ids = await db.FetchAsync<int>("SELECT DISTINCT MemberId FROM PrecisionResultEntry WHERE MemberId > 0");
+                ids = await db.FetchAsync<int>(
+                    @"SELECT DISTINCT MemberId FROM PrecisionResultEntry WHERE MemberId > 0
+                      UNION
+                      SELECT DISTINCT MemberId FROM DuellResultEntry WHERE MemberId > 0");
             }
             catch (Exception ex)
             {
@@ -150,7 +166,9 @@ namespace HpskSite.Services
             });
             var clubIds = ids.ToDictionary(id => id, GetPrimaryClubId);
 
-            var desired = new Dictionary<int, MarkenSeries>();   // keyed by SourceResultId
+            // ⚠️ Keyed on (SourceTable, SourceResultId), never on the id alone — the two result tables
+            // have independent identity columns, so the same integer names a different row in each.
+            var desired = new Dictionary<(string Table, int Id), MarkenSeries>();
             foreach (var r in rows)
             {
                 if (!comps.TryGetValue(r.CompetitionId, out var ci) || ci.Year != year) continue;
@@ -159,21 +177,30 @@ namespace HpskSite.Services
                 if (group == null) continue;
 
                 int total = SumShots(r.Shots);
-                int threshold = Marken.PrecisionThreshold(group, year, birthYears.GetValueOrDefault(r.MemberId));
+                bool isDuell = r.SourceTable == TableDuell;
 
                 // ── What is worth materialising ──
                 // Not every series: a precision competition holds 7-10 per shooter, and rows that can
-                // never count toward anything would just bury the ledger. But the bar is the LOWEST
-                // threshold any consumer cares about, not the Guldfodring's alone:
+                // never count toward anything would just bury the ledger. The bar is the LOWEST
+                // threshold any consumer of that series type cares about.
+                //
+                // PRECISION serves two badges with different bars:
                 //   · Guldfodring — the age-adjusted guldkrav (A 43 / B 45 / C 46, less age concessions)
-                //   · Elitmärket  — 45 p/serie for brons (SHB 5.4), and Stefan confirmed 2026-08-28 that
-                //     a series shot in competition may serve as an elitprov ("skjutningarna får göras
-                //     under både tränings- och tävlingsskjutning").
+                //   · Elitmärket  — 45 p/serie for brons (SHB 5.4); Stefan confirmed 2026-08-28 that a
+                //     series shot in competition may serve as an elitprov.
                 // For weapon group C the guldkrav is 46 while Elit brons asks 45, so keying only on the
                 // guldkrav would silently withhold every C-shooter's 45s from their Elit.
-                if (total < Math.Min(threshold, ElitBronsPerSeries)) continue;
+                //
+                // A DUELL series (snabbpistoltavla, 25 m, 3 s/shot) serves ONLY Elit's speed half, so its
+                // single bar is Elit brons. It is not a tillämpningsserie and does nothing for the
+                // Guldfodring's part 2, which SHB 5.1.1.1 pt 2 defines against the B100 / C30 targets.
+                int threshold = isDuell
+                    ? ElitBronsPerSeries
+                    : Marken.PrecisionThreshold(group, year, birthYears.GetValueOrDefault(r.MemberId));
+                int bar = isDuell ? ElitBronsPerSeries : Math.Min(threshold, ElitBronsPerSeries);
+                if (total < bar) continue;
 
-                desired[r.Id] = new MarkenSeries
+                desired[(r.SourceTable, r.Id)] = new MarkenSeries
                 {
                     MemberId = r.MemberId,
                     // No club VALIDATED this series — the range officer's entry at the competition is the
@@ -182,25 +209,30 @@ namespace HpskSite.Services
                     // members' series wherever they were shot, not the series shot at its competitions.
                     ClubId = clubIds.GetValueOrDefault(r.MemberId),
                     BadgeFamily = Marken.FamilyPistolskytte,
-                    SeriesType = Marken.SeriesTypePrecision,
+                    SeriesType = isDuell ? Marken.SeriesTypeSpeed : Marken.SeriesTypePrecision,
+                    Target = isDuell ? Marken.SpeedTargetSnabbpistol : null,
                     Year = year,
                     // The COMPETITION's date, not EnteredAt: a range officer may type the row days later,
                     // and the series was shot on the day of the competition.
                     SeriesDate = ci.Date ?? r.EnteredAt,
                     WeaponGroup = group,
-                    ClaimedLevel = Marken.LevelGuld,
+                    // Precision guldserier claim Guld by definition. A snabbpistol series claims the valör
+                    // its score actually reaches — the same 49/48/45 ladder SubmitSeries applies.
+                    ClaimedLevel = isDuell ? SnabbpistolLevel(total) : Marken.LevelGuld,
                     Shots = r.Shots ?? "[]",
                     Total = total,
                     Threshold = threshold,
-                    // ⚠️ Qualifies means "reaches the GULDKRAV", which is what the Guldfodring filters on.
-                    // It is NOT the same question as "is worth materialising" (see the bar above): a
-                    // 45 in weapon group C is Elit-brons evidence but under the 46 guldkrav, so it is
-                    // stored with Qualifies = false and stays out of the Guldfodring while counting for Elit.
+                    // ⚠️ Qualifies means "reaches the threshold this series is judged against", which for
+                    // precision is the GULDKRAV — what the Guldfodring filters on. It is NOT the same
+                    // question as "is worth materialising" (see the bar above): a 45 in weapon group C is
+                    // Elit-brons evidence but under the 46 guldkrav, so it is stored Qualifies = false and
+                    // stays out of the Guldfodring while still counting for Elit.
                     Qualifies = total >= threshold,
                     Status = Marken.StatusVerified,
                     ValidatedDate = r.EnteredAt,
                     Notes = ci.Name,
                     SourceResultId = r.Id,
+                    SourceTable = r.SourceTable,
                     SourceCompetitionId = r.CompetitionId,
                     CountsTowardGuldfodring = true
                 };
@@ -209,9 +241,9 @@ namespace HpskSite.Services
             int inserted = 0, updated = 0, deleted = 0;
             using var db = _databaseFactory.CreateDatabase();
 
-            foreach (var (sourceId, want) in desired)
+            foreach (var (key, want) in desired)
             {
-                var have = existing.FirstOrDefault(e => e.SourceResultId == sourceId);
+                var have = existing.FirstOrDefault(e => e.SourceResultId == key.Id && e.SourceTable == key.Table);
                 if (have == null)
                 {
                     want.CreatedAt = DateTime.Now;
@@ -221,7 +253,7 @@ namespace HpskSite.Services
                     {
                         // The unique index is the backstop: a concurrent sync inserting the same source
                         // row loses here, which is exactly right — one result, one series.
-                        _logger.LogDebug(ex, "Marken series for result {ResultId} already materialised", sourceId);
+                        _logger.LogDebug(ex, "Marken series for {Table} row {ResultId} already materialised", key.Table, key.Id);
                     }
                     continue;
                 }
@@ -231,7 +263,9 @@ namespace HpskSite.Services
                     && have.Qualifies == want.Qualifies
                     && have.WeaponGroup == want.WeaponGroup && have.SeriesDate.Date == want.SeriesDate.Date
                     && have.ClubId == want.ClubId && have.Shots == want.Shots
-                    && have.Status == want.Status) continue;
+                    && have.Status == want.Status && have.SourceTable == want.SourceTable
+                    && have.SeriesType == want.SeriesType && have.Target == want.Target
+                    && have.ClaimedLevel == want.ClaimedLevel) continue;
 
                 have.Total = want.Total;
                 have.Threshold = want.Threshold;
@@ -243,6 +277,12 @@ namespace HpskSite.Services
                 have.Status = want.Status;
                 have.Notes = want.Notes;
                 have.SourceCompetitionId = want.SourceCompetitionId;
+                have.SourceTable = want.SourceTable;   // backfilled rows may still carry null
+                // A result row cannot change which discipline it is, but keeping these in sync means a
+                // row written by an older build converges instead of staying half-formed.
+                have.SeriesType = want.SeriesType;
+                have.Target = want.Target;
+                have.ClaimedLevel = want.ClaimedLevel;
                 // ⚠️ CountsTowardGuldfodring is NOT overwritten. An admin who excluded this series as a
                 // duplicate must not have that decision undone by a re-sync.
                 have.UpdatedAt = DateTime.Now;
@@ -254,7 +294,8 @@ namespace HpskSite.Services
             // corrected below the krav, the class was changed to a weapon group with a higher krav, or a
             // personnummer arrived and moved the threshold. Leaving it would keep a guldserie standing on
             // a score that does not exist.
-            foreach (var stale in existing.Where(e => e.SourceResultId.HasValue && !desired.ContainsKey(e.SourceResultId.Value)))
+            foreach (var stale in existing.Where(e => e.SourceResultId.HasValue
+                                                     && !desired.ContainsKey((e.SourceTable ?? TablePrecision, e.SourceResultId.Value))))
             {
                 await db.ExecuteAsync("DELETE FROM MarkenSeries WHERE Id = @0", stale.Id);
                 deleted++;
@@ -267,17 +308,43 @@ namespace HpskSite.Services
             return result;
         }
 
+        /// <summary>
+        /// The valör a snabbpistol series reaches — the same 49/48/45 ladder <c>SubmitSeries</c> applies
+        /// to a hand-entered one, so a Duell competition series and a submitted one are graded alike.
+        /// </summary>
+        private static string SnabbpistolLevel(int total) =>
+            total >= 49 ? Marken.LevelGuld : total >= 48 ? Marken.LevelSilver : Marken.LevelBrons;
+
         // ── Reads ────────────────────────────────────────────────────────────────────────────────
-        // One row per SERIES (5 shots). Chunked because IN (@0) runs out at ~2100 parameters and does
-        // so silently.
+        // One row per SERIES (5 shots), from BOTH result tables. Chunked because IN (@0) runs out at
+        // ~2100 parameters and does so silently.
+        //
+        // ⚠️ DuellResultEntry has the same shape as PrecisionResultEntry (it derives from it) and its own
+        // identity column, so each row is tagged with the table it came from — see MarkenSeries.SourceTable.
         private async Task<List<ResultRow>> ReadResultRowsAsync(List<int> ids)
         {
             var all = new List<ResultRow>();
             using var db = _databaseFactory.CreateDatabase();
-            foreach (var chunk in Chunk(ids, 1000))
-                all.AddRange(await db.FetchAsync<ResultRow>(
-                    "SELECT Id, CompetitionId, MemberId, ShootingClass, Shots, EnteredAt " +
-                    "FROM PrecisionResultEntry WHERE MemberId IN (@0)", chunk));
+            foreach (var table in new[] { TablePrecision, TableDuell })
+            {
+                foreach (var chunk in Chunk(ids, 1000))
+                {
+                    List<ResultRow> rows;
+                    try
+                    {
+                        rows = await db.FetchAsync<ResultRow>(
+                            $"SELECT Id, CompetitionId, MemberId, ShootingClass, Shots, EnteredAt FROM [{table}] WHERE MemberId IN (@0)",
+                            chunk);
+                    }
+                    catch (Exception ex)
+                    {
+                        // One discipline's table missing must not cost the other its sync.
+                        _logger.LogWarning(ex, "Marken competition-series sync could not read {Table}", table);
+                        continue;
+                    }
+                    foreach (var r in rows) { r.SourceTable = table; all.Add(r); }
+                }
+            }
             return all;
         }
 
@@ -332,6 +399,12 @@ namespace HpskSite.Services
             public string ShootingClass { get; set; } = "";
             public string Shots { get; set; } = "";
             public DateTime EnteredAt { get; set; }
+
+            /// <summary>
+            /// Set by the reader, not by the query — which table this row came out of. Not mapped: the
+            /// SELECT lists its columns explicitly, so NPoco never tries to fill this.
+            /// </summary>
+            public string SourceTable { get; set; } = "";
         }
     }
 }
