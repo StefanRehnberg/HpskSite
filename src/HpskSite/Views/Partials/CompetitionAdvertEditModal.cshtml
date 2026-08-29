@@ -10,7 +10,7 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <div class="modal fade" id="competitionAdvertEditModal" tabindex="-1" aria-labelledby="competitionAdvertEditModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-info text-white">
                 <h5 class="modal-title" id="competitionAdvertEditModalLabel">
@@ -717,4 +717,27 @@ function showAdvertEditNotification(message, type) {
         }
     }, 5000);
 }
+</script>
+@* Sektionsnavigering — se _ModalSectionNav och den vanliga tavlingsmodalen. *@
+@await Html.PartialAsync("_ModalSectionNav")
+<script>
+(function () {
+    var el = document.getElementById('competitionAdvertEditModal');
+    if (!el) return;
+    window.hpskAdvertSyncSections = function () {
+        if (typeof window.hpskModalSectionNav === 'function') {
+            try { window.hpskModalSectionNav('#competitionAdvertEditModal'); } catch (e) { console.warn('sektionsnav:', e); }
+        }
+    };
+    el.addEventListener('shown.bs.modal', window.hpskAdvertSyncSections);
+    if (typeof window.populateAdvertEditModal === 'function' && !window.__hpskAdvSecnavWrapped) {
+        window.__hpskAdvSecnavWrapped = true;
+        var inner = window.populateAdvertEditModal;
+        window.populateAdvertEditModal = function () {
+            var r = inner.apply(this, arguments);
+            setTimeout(window.hpskAdvertSyncSections, 0);
+            return r;
+        };
+    }
+})();
 </script>

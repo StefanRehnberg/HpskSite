@@ -17,7 +17,7 @@
 </style>
 
 <div class="modal fade" id="springEditModal" tabindex="-1" aria-labelledby="springEditModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="springEditModalLabel">
@@ -670,12 +670,42 @@ window.populateSpringEditModal = function(comp) {
 
 // --- Club/Region loading ---
 
+// Sätter BÅDA värdlistorna från sina dataset-värden, om alternativen finns.
+//
+// ⚠ Finns för att ta bort en ordningsberoende, inte för att gissa en timing. Värdet
+// kommer från springEditPopulate (som skriver dataset.currentValue) medan alternativen
+// kommer från två asynkrona hämtningar — och vilken som är först varierar mellan
+// körningar. Reproducerat som flakighet åt BÅDA håll: ibland tom vid första öppningen,
+// ibland vid andra. Att anropa den här bade efter populate OCH efter varje laddning
+// tacker alla ordningar, sa ingen av dem behover vara "ratt".
+//
+// Varfor det spelar roll: springEditSave laser select-VARDET, sa en tom select sparar
+// regionalFederation="" och tar bort tavlingens krets (och darmed dess snygga URL).
+function springEditApplyHostValues() {
+    const clubSelect = document.getElementById('springEdit_clubId');
+    const regionSelect = document.getElementById('springEdit_regionalFederation');
+    if (clubSelect) {
+        const v = clubSelect.dataset.currentValue;
+        if (v && v !== '0' && [].some.call(clubSelect.options, o => o.value === v)) clubSelect.value = v;
+    }
+    if (regionSelect) {
+        const v = regionSelect.dataset.currentValue;
+        if (v && [].some.call(regionSelect.options, o => o.value === v)) regionSelect.value = v;
+    }
+}
+window.springEditApplyHostValues = springEditApplyHostValues;
+
 function springEditLoadClubs() {
     const clubSelect = document.getElementById('springEdit_clubId');
     if (clubSelect.options.length > 1) {
         // Already loaded, just set value
-        const val = clubSelect.dataset.currentValue;
-        if (val && val !== '0') clubSelect.value = val;
+        springEditApplyHostValues();
+        // ⚠ MÅSTE ändå ladda/återställa kretsen. Kretsen hämtas annars bara som en
+        // sidoeffekt av klubbhämtningens .then, så den här kortslutningen hoppade över
+        // den helt vid ANDRA öppningen i samma sidladdning — selecten stod kvar tom och
+        // springEditSave postade regionalFederation="", vilket tog bort tävlingens krets
+        // och därmed dess snygga URL. Reproducerat: öppning 1 gav "Halland", öppning 2 gav "".
+        springEditLoadRegions();
         return;
     }
     fetch('/umbraco/surface/CompetitionAdmin/GetClubsForCompetitionAdmin')
@@ -690,8 +720,7 @@ function springEditLoadClubs() {
                     opt.textContent = club.name;
                     clubSelect.appendChild(opt);
                 });
-                const val = clubSelect.dataset.currentValue;
-                if (val && val !== '0') clubSelect.value = val;
+                springEditApplyHostValues();
 
                 // Load regions too
                 springEditLoadRegions();
@@ -740,7 +769,19 @@ function springEditLockHostSelects() {
 
 function springEditLoadRegions() {
     const regionSelect = document.getElementById('springEdit_regionalFederation');
-    if (regionSelect.options.length > 1) return;
+    // ⚠ Kortslutningen fick INTE returnera utan att sätta värdet. Är kretslistan redan
+    // laddad (modalen öppnad en andra gång i samma sidladdning) hoppade den gamla koden
+    // ur här och lämnade selecten tom — och springEditSave läser select-VÄRDET:
+    //     fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '')
+    // En kretsvärd tävling sparades alltså med regionalFederation="" och tappade sin
+    // krets, vilket i sin tur tar bort dess snygga URL (CompetitionUrlProvider kräver
+    // klubb, krets eller mästerskapstyp). Uppmätt som flakighet: samma tävling gav
+    // "Halland" i en körning och "" i nästa. Den vanliga tävlingsmodalen har haft rätt
+    // hantering hela tiden — se ensureRegionsLoaded, som är mönstret här.
+    if (regionSelect.options.length > 1) {
+        springEditApplyHostValues();
+        return;
+    }
     fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
         .then(r => r.json())
         .then(data => {
@@ -753,8 +794,7 @@ function springEditLoadRegions() {
                     opt.textContent = region.name;
                     regionSelect.appendChild(opt);
                 });
-                const val = regionSelect.dataset.currentValue;
-                if (val) regionSelect.value = val;
+                springEditApplyHostValues();
             } else {
                 springEditLockHostSelects();
             }
@@ -972,4 +1012,40 @@ function springEditSave() {
         }
     });
 }
+</script>
+@* Sektionsnavigering — samma behandling som den vanliga tavlingsmodalen fick
+   2026-08-29. Partialen inkluderas av modalen sjalv sa den foljer med till varje
+   yta som renderar den. Guardad mot dubbelinkludering. *@
+@await Html.PartialAsync("_ModalSectionNav")
+<script>
+(function () {
+    var el = document.getElementById('springEditModal');
+    if (!el) return;
+    window.hpskSpringSyncSections = function () {
+        if (typeof window.hpskModalSectionNav === 'function') {
+            try { window.hpskModalSectionNav('#springEditModal'); } catch (e) { console.warn('sektionsnav:', e); }
+        }
+    };
+    el.addEventListener('shown.bs.modal', window.hpskSpringSyncSections);
+    // Springskytte doljer falt (allowDualCClass, allowSelfReporting, finalserier)
+    // nar modalen fylls. Rita om efter det, av samma skal som i tavlingsmodalen:
+    // en dold sektion far annars en knapp som hoppar till ingenting.
+    // ⚠ Funktionen heter populateSpringEditModal, inte springEditPopulate. En forsta
+    // version wrappade fel namn och blev tyst dod kod — wrappern kordes aldrig, och
+    // racet sag ut att vara kvar trots att fixen fanns. typeof-guarden dolde det.
+    if (typeof window.populateSpringEditModal === 'function' && !window.__hpskSpringSecnavWrapped) {
+        window.__hpskSpringSecnavWrapped = true;
+        var inner = window.populateSpringEditModal;
+        window.populateSpringEditModal = function () {
+            var r = inner.apply(this, arguments);
+            // Ordningen mellan populate och de tva asynkrona vardlistorna varierar.
+            // Applicera vardena har OCKSA, sa ingen ordning behover vara den ratta.
+            if (typeof window.springEditApplyHostValues === 'function') {
+                window.springEditApplyHostValues();
+            }
+            setTimeout(window.hpskSpringSyncSections, 0);
+            return r;
+        };
+    }
+})();
 </script>
