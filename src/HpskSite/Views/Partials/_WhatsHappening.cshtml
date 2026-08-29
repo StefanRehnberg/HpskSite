@@ -129,7 +129,10 @@
                             else if (daysAhead == 1) { <span class="badge text-bg-warning me-1">Imorgon</span> }
                             <span class="badge @BadgeClass(item.Source)">@item.SourceLabel · @(full ? item.TypeLabel : item.MaskedTypeLabel)</span>
                             <div class="fw-semibold text-truncate">@label</div>
-                            @if (full)
+                            @* Klubb och plats visas bara för inloggade. En öppen tävling behåller sin
+                               titel för utloggade (den är redan publik på tävlingsnavet), men får ingen
+                               undertext — annars skulle den ensam bland raderna peka ut en klubb/ort. *@
+                            @if (isLoggedIn)
                             {
                                 <div class="text-muted small">
                                     @if (!string.IsNullOrEmpty(item.ClubName)) { <span class="text-body-secondary fw-medium">@item.ClubName</span> }
@@ -137,7 +140,7 @@
                                     @if (item.Source == FeedSource.TrainingMatch && item.ParticipantCount > 0) { <text> · @item.ParticipantCount deltagare</text> }
                                 </div>
                             }
-                            else if (item.Source == FeedSource.Competition)
+                            else if (!full && item.Source == FeedSource.Competition)
                             {
                                 <div class="text-muted small">Klubbintern tävling</div>
                             }
