@@ -81,32 +81,83 @@ namespace HpskSite.Controllers
         /// using a fresh DI scope. Use this for any background work that touches
         /// scoped services (IContentService, DirektplaceringStartListService, etc.)
         /// to avoid leaking write locks via disposed-scope-captured services.
+        ///
+        /// ⚠️ The fresh DI scope is NOT enough on its own, and a missing
+        /// <see cref="ExecutionContext.SuppressFlow"/> took production down for three hours on
+        /// 2026-08-29. Umbraco's AMBIENT scope is an <c>AsyncLocal</c>, so it rides the execution
+        /// context into the background thread regardless of which DI scope the work resolves its
+        /// services from. <c>ContentService.Publish</c> then ran on this thread against the
+        /// request's scope while the request thread was disposing it — "The Scope … being disposed
+        /// is not the Ambient Scope", plus "There is already an open DataReader associated with
+        /// this Connection". The request's scope never completed, so the ContentTree write lock
+        /// (umbracoLock id -333) stayed held by an abandoned transaction: every subsequent
+        /// ContentService read waited 60 s and failed with "Failed to acquire read lock for id:
+        /// -333", until the app pool was recycled.
+        ///
+        /// Suppressing the flow is safe here because the delegates resolve everything from
+        /// <c>sp</c> and build their own UmbracoContext where they need one (see the eager-invoice
+        /// call sites). Do not add work here that reads HttpContext or an inherited UmbracoContext.
         /// </summary>
         private void EnqueueBackground(TimeSpan delay, Action<IServiceProvider> work, string description)
         {
             var scopeFactory = _scopeFactory;
             var fallbackLogger = _logger;
-            _ = Task.Run(async () =>
+
+            // The suppression must wrap the point where the task is CREATED — that is when the
+            // execution context is captured. Restored on dispose, so the request thread is unaffected.
+            using (ExecutionContext.SuppressFlow())
             {
-                try
+                _ = Task.Run(async () =>
                 {
-                    if (delay > TimeSpan.Zero) await Task.Delay(delay);
-                    using var scope = scopeFactory.CreateScope();
                     try
                     {
-                        work(scope.ServiceProvider);
+                        if (delay > TimeSpan.Zero) await Task.Delay(delay);
+                        using var scope = scopeFactory.CreateScope();
+                        try
+                        {
+                            WarnIfAmbientScopeFlowed(scope.ServiceProvider, fallbackLogger, description);
+                            work(scope.ServiceProvider);
+                        }
+                        catch (Exception ex)
+                        {
+                            var logger = scope.ServiceProvider.GetService<ILogger<CompetitionController>>() ?? fallbackLogger;
+                            logger.LogWarning(ex, "Background work failed: {Description}", description);
+                        }
                     }
                     catch (Exception ex)
                     {
-                        var logger = scope.ServiceProvider.GetService<ILogger<CompetitionController>>() ?? fallbackLogger;
-                        logger.LogWarning(ex, "Background work failed: {Description}", description);
+                        fallbackLogger.LogWarning(ex, "Background scope creation failed: {Description}", description);
                     }
-                }
-                catch (Exception ex)
+                });
+            }
+        }
+
+        /// <summary>
+        /// Self-proving guard for the suppression above. If a sixth fire-and-forget site is ever added
+        /// without <see cref="ExecutionContext.SuppressFlow"/>, this says so in the log the moment the
+        /// work starts — instead of the failure surfacing hours later as a site-wide -333 lock timeout,
+        /// which is how it was found the first time. Read-only and best-effort: a diagnostic must never
+        /// be the reason the background work fails.
+        /// </summary>
+        private static void WarnIfAmbientScopeFlowed(IServiceProvider sp, ILogger fallbackLogger, string description)
+        {
+            try
+            {
+                var accessor = sp.GetService<Umbraco.Cms.Infrastructure.Scoping.IScopeAccessor>();
+                if (accessor?.AmbientScope != null)
                 {
-                    fallbackLogger.LogWarning(ex, "Background scope creation failed: {Description}", description);
+                    var logger = sp.GetService<ILogger<CompetitionController>>() ?? fallbackLogger;
+                    logger.LogWarning(
+                        "Background work {Description} started with an AMBIENT UMBRACO SCOPE still attached. " +
+                        "The request's scope has flowed into this thread and content locks can be orphaned " +
+                        "(see the -333 incident 2026-08-29). Wrap the Task.Run in ExecutionContext.SuppressFlow().",
+                        description);
                 }
-            });
+            }
+            catch
+            {
+                // Diagnostics only.
+            }
         }
 
         // Helper method to detect AJAX requests

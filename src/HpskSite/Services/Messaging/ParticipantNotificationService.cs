@@ -87,20 +87,32 @@ namespace HpskSite.Services.Messaging
             }
 
             // 3: background push (fire-and-forget). WebPushService is off-request safe (own DB scope).
+            //
+            // ⚠️ "Own DB scope" is only true once the execution context is suppressed. WebPushService
+            // calls _scopeProvider.CreateScope() per recipient, and Umbraco's ambient scope is an
+            // AsyncLocal — without SuppressFlow those become CHILD scopes of the request's scope,
+            // sharing its connection while the request thread disposes it. That is the same fault
+            // that orphaned the ContentTree write lock (-333) and froze the site for three hours on
+            // 2026-08-29 (see CompetitionController.EnqueueBackground). It bites hardest here:
+            // CompetitionResultsController calls Notify immediately after _contentService.Publish,
+            // i.e. while the request still holds content locks.
             if (members.Count > 0)
             {
                 var title = string.IsNullOrWhiteSpace(compName) ? "pistol.nu" : compName;
                 var url = string.IsNullOrWhiteSpace(compUrl) ? "/" : compUrl;
                 var tag = "comp-" + competitionId;
                 var recipients = members;
-                _ = Task.Run(async () =>
+                using (ExecutionContext.SuppressFlow())
                 {
-                    foreach (var mid in recipients)
+                    _ = Task.Run(async () =>
                     {
-                        try { await _webPush.SendToMemberAsync(mid, title, text, url, tag); }
-                        catch (Exception ex) { _logger.LogWarning(ex, "Participant push failed for member {Member}", mid); }
-                    }
-                });
+                        foreach (var mid in recipients)
+                        {
+                            try { await _webPush.SendToMemberAsync(mid, title, text, url, tag); }
+                            catch (Exception ex) { _logger.LogWarning(ex, "Participant push failed for member {Member}", mid); }
+                        }
+                    });
+                }
             }
 
             return members.Count;
