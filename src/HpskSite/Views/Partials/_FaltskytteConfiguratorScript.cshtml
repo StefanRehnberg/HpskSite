@@ -167,7 +167,12 @@ function faltCfgSyncLinked(wc) {
 }
 
 const SHOOTER_POSITIONS = ["Stående", "Knästående", "Sittande", "Liggande", "Valfri"];
-const WEAPON_POSITIONS = ["45 grader", "Riktning tillåten"];
+// "Hands-up" added 2026-08-29 for Magnumfält (Bert Johansson's requirements,
+// 2026-07-23). It carries NO time supplement: SHB Del E gives vapengrupp M only
+// the omriktning supplement, and inventing a figure for a new utgångsläge would
+// put a number into competition planning that no source backs. If SPSF specifies
+// one, add it beside SHB_TILLAGG_WEAPON_45 and branch it the same way.
+const WEAPON_POSITIONS = ["45 grader", "Riktning tillåten", "Hands-up"];
 const SUPPORT_HAND = ["Ej stödhand", "Stödhand tillåten"];
 const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande", "Rörligt"];
 
@@ -176,38 +181,67 @@ const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande", "Rörligt"
 // (SHB 2026 pp. 120-122) all pass through origin; max distance corresponds
 // to the diagram's max time/shot (AR=2,0 s, B=1,75 s, C=1,5 s).
 // Values verified against SHB pp. 100-109 (Fältskyttefigurer).
+// The M column is Magnumfältskjutning, SHB 2026 Del E, E.7 (pp. 143-151) —
+// transcribed in Documentation/SHB_MAGNUMFALT_MAL_OCH_AVSTAND.md, because the
+// source PDF is a scan with no text layer and cannot be grepped.
+// ⚠ Magnum reaches MUCH further: group 1 is 180 m against A/R's 70.
+// ⚠ Two figures deviate inside their own group and cannot be expressed in a
+//   per-group table — grupp 7 "1/1 miniatyr" is 70 m (group says 80) and
+//   grupp 9 "Ovalen nr 3" is 50 m (group says 60). They get the group value,
+//   i.e. slightly too generous for those two figures. Noted in the doc.
+// ⚠ Grupp 14 is 17 m per the target table but Diagram 4 ends near 13 m. The
+//   table column is literally headed "Max skjutavstånd", so 17 is used.
+// SHB has no grupp 0 for Magnum. It needs none: sizeGroup 0 means "not set"
+// and is skipped by both the bounds walk and the time calc, so the row is
+// unreachable for every weapon group.
 const SHB_MAX_DISTANCES = {
     0:  { AR: 80, B: 90, C: 100 },
-    1:  { AR: 70, B: 80, C: 90 },
-    2:  { AR: 60, B: 65, C: 75 },
-    3:  { AR: 50, B: 55, C: 65 },
-    4:  { AR: 45, B: 50, C: 55 },
-    5:  { AR: 40, B: 45, C: 50 },
-    6:  { AR: 35, B: 40, C: 45 },
-    7:  { AR: 30, B: 35, C: 40 },
-    8:  { AR: 27, B: 32, C: 36 },
-    9:  { AR: 24, B: 27, C: 30 },
-    10: { AR: 20, B: 22, C: 25 },
-    11: { AR: 16, B: 18, C: 20 },
-    12: { AR: 14, B: 16, C: 18 },
-    13: { AR: 12, B: 14, C: 16 },
-    14: { AR: 7,  B: 8,  C: 9  }
+    1:  { AR: 70, B: 80, C: 90,  M: 180 },
+    2:  { AR: 60, B: 65, C: 75,  M: 150 },
+    3:  { AR: 50, B: 55, C: 65,  M: 130 },
+    4:  { AR: 45, B: 50, C: 55,  M: 110 },
+    5:  { AR: 40, B: 45, C: 50,  M: 100 },
+    6:  { AR: 35, B: 40, C: 45,  M: 90 },
+    7:  { AR: 30, B: 35, C: 40,  M: 80 },
+    8:  { AR: 27, B: 32, C: 36,  M: 68 },
+    9:  { AR: 24, B: 27, C: 30,  M: 60 },
+    10: { AR: 20, B: 22, C: 25,  M: 50 },
+    11: { AR: 16, B: 18, C: 20,  M: 40 },
+    12: { AR: 14, B: 16, C: 18,  M: 36 },
+    13: { AR: 12, B: 14, C: 16,  M: 32 },
+    14: { AR: 7,  B: 8,  C: 9,   M: 17 }
     // SizeGroup 15 is reserved (no SHB row); treated as "unset" → no bound.
 };
-const SHB_MAX_TIME_PER_SHOT = { AR: 2.0, B: 1.75, C: 1.5 };
+// M: Diagram 4's lines end at 20 s/shot on the group's max distance, the same
+// shape as Diagrams 1-3. The text's "cirka 10 sek/skott" is the typical value
+// that falls out of it (a group-8 figure at 34 m of its 68 m max = 10 s).
+const SHB_MAX_TIME_PER_SHOT = { AR: 2.0, B: 1.75, C: 1.5, M: 20 };
 const SHB_TILLAGG_WEAPON_45 = 2;     // Vapenläge 45 grader → +2 sek
 const SHB_TILLAGG_OMRIKTNING = 2;    // per omriktning mellan målgrupper (n-1)
 const SHB_MORKER_MULTIPLIER = 1.30;  // Mörkerfältskjutning → +30 % på total
 const SLIDER_MIN_DISTANCE = 5;       // m — practical floor regardless of figurgrupp
 const FALT_STATION_SHOTS = 6;        // SHB-konvention: alltid 6 skott per fältskyttestation
+const SHB_MAGNUM_MAX_DISTANCE = 180; // E.7.1.1: "Skjutavstånd över 180 meter är inte tillåtet"
 
-// Maps any weapon-class code (A, A_Opt, A_M, A_P, A_G, B, C, R) to the SHB
-// diagram bucket (AR / B / C). All A-family + R share Diagram 1.
+// Maps any weapon-class code (A, A_Opt, A_M, A_P, A_G, B, C, R, M) to the SHB
+// diagram bucket (AR / B / C / M). All A-family + R share Diagram 1.
+//
+// ⚠ M was missing and fell through to 'AR', so every Magnumfält station was
+// dimensioned with A/R distances — a grupp-1 figure was capped at 70 m where
+// SHB allows 180. A magnum competition's classes are M1-M9 (ShootingClass.cs,
+// all WeaponClass.M), so this hit every one of them.
 function faltShbBucket(wc) {
     if (!wc) return 'AR';
     if (wc === 'B') return 'B';
     if (wc === 'C') return 'C';
+    if (wc === 'M' || /^M\d/.test(wc)) return 'M';
     return 'AR';
+}
+
+// True when the station is being dimensioned for vapengrupp M. Magnum differs
+// from A/R/B/C in more than the distance table, so several rules branch on it.
+function faltIsMagnum(wc) {
+    return faltShbBucket(wc) === 'M';
 }
 
 // Max shooting distance (m) for a figure given its sizeGroup + the weapon
@@ -465,7 +499,11 @@ function faltSuggestShootingTime(station, wc, morker) {
     }
     var sumSec = grund;
 
-    if (station.weaponStartPosition === '45 grader') {
+    // ⚠ The 45° supplement is NOT applied for vapengrupp M. D.10.6.2.1 lists it
+    // for A/R (and the B/C diagrams), but E.7.1.2 gives Magnum only the
+    // omriktning supplement — Magnum is shot from valfri skjutställning. Adding
+    // it there would be inventing a rule the source does not carry.
+    if (station.weaponStartPosition === '45 grader' && !faltIsMagnum(wc)) {
         sumSec += SHB_TILLAGG_WEAPON_45;
         lines.push({ label: 'Vapenläge 45 grader', sec: SHB_TILLAGG_WEAPON_45 });
     }
@@ -1152,7 +1190,7 @@ function faltCfgSetDistance(wc, stationNum, tgIdx, value, opts) {
     if (slider && slider.value !== String(v)) slider.value = v;
     if (num && num.value !== String(v)) num.value = v;
     var hint = document.getElementById('faltCfgSpacingHint_' + wc + '_' + stationNum + '_' + tgIdx);
-    if (hint) hint.textContent = faltSpacingHintText(v);
+    if (hint) hint.textContent = faltSpacingHintText(v, wc);
 
     // Föreslaget skjuttid display: for advanced mode, one per (wc, station);
     // for simple mode, one per class per station row in the params table.
@@ -1161,11 +1199,19 @@ function faltCfgSetDistance(wc, stationNum, tgIdx, value, opts) {
     if (!opts || !opts.skipDirty) faltCfgMarkDirty(wc, stationNum);
 }
 
-function faltSpacingHintText(distanceM) {
-    var spacing = Math.round((distanceM - 5) / 2);
-    if (spacing < 5) return 'Rek. avstånd mellan figurer: minst 5 cm (regelminimum).';
-    if (spacing > 40) return 'Rek. avstånd mellan figurer: högst 40 cm (regelmaximum).';
-    return 'Rek. avstånd mellan figurer i målgruppen: ' + spacing + ' cm.';
+// Magnum has its OWN spacing formula (SHB Diagram 6, Del E):
+//     mellan fig (cm) = (0,5 × skjutavstånd (m) − 5) / 2,  min 5, max 40
+// versus ordinary fält's (avstånd − 5) / 2. Same min/max, half the slope —
+// which matters precisely because Magnum's distances run to 180 m, where the
+// ordinary formula would demand far more than the 40 cm cap allows.
+function faltSpacingHintText(distanceM, wc) {
+    var magnum = faltIsMagnum(wc);
+    var raw = magnum ? (0.5 * distanceM - 5) / 2 : (distanceM - 5) / 2;
+    var spacing = Math.round(raw);
+    var suffix = magnum ? ' (Magnum, SHB diagram 6)' : '';
+    if (spacing < 5) return 'Rek. avstånd mellan figurer: minst 5 cm (regelminimum)' + suffix + '.';
+    if (spacing > 40) return 'Rek. avstånd mellan figurer: högst 40 cm (regelmaximum)' + suffix + '.';
+    return 'Rek. avstånd mellan figurer i målgruppen: ' + spacing + ' cm' + suffix + '.';
 }
 
 // Re-render Föreslaget-skjuttid + Svårighet badges for one station across every class.
@@ -1357,7 +1403,7 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
                     ' onchange="faltCfgSetDistance(\'' + distWc + '\',' + stationNum + ',' + tgIdx + ',this.value)">' +
                 '<span class="text-muted small">m<\/span>' +
             '<\/div>' +
-            '<div class="form-text small" id="faltCfgSpacingHint_' + idBase + '">' + faltSpacingHintText(currentDist) + '<\/div>' +
+            '<div class="form-text small" id="faltCfgSpacingHint_' + idBase + '">' + faltSpacingHintText(currentDist, distWc) + '<\/div>' +
             faltCfgBoundsNote(bounds);
     }
 
