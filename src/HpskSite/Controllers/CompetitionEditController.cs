@@ -26,6 +26,10 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly IPublishedContentQuery _publishedContentQuery;
         private readonly HpskSite.Services.AdminAuthorizationService _authorizationService;
+        // Anmalningar sparas OPUBLICERADE, sa de maste raknas i SQL — den publicerade
+        // cachen ser dem inte. Basklassen tar emot fabriken men exponerar den inte.
+        private readonly IUmbracoDatabaseFactory _databaseFactory;
+        private readonly Microsoft.Extensions.Logging.ILogger<CompetitionEditController> _logger;
 
         public CompetitionEditController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -36,12 +40,15 @@ namespace HpskSite.Controllers
             IPublishedUrlProvider publishedUrlProvider,
             IContentService contentService,
             IPublishedContentQuery publishedContentQuery,
-            HpskSite.Services.AdminAuthorizationService authorizationService)
+            HpskSite.Services.AdminAuthorizationService authorizationService,
+            Microsoft.Extensions.Logging.ILogger<CompetitionEditController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
             _publishedContentQuery = publishedContentQuery;
             _authorizationService = authorizationService;
+            _databaseFactory = databaseFactory;
+            _logger = logger;
         }
 
         /// <summary>
@@ -585,7 +592,233 @@ namespace HpskSite.Controllers
 
             return value;
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Byt disciplin pa en befintlig tavling
+        //
+        // Varfor: competitionType satts i tavlingsguiden och gick INTE att andra
+        // efterat — den lastes bara av redigeringsmodalen for att visa/dolja
+        // avsnitt. Valde arrangoren fel gren var radera-och-skapa-om enda vagen,
+        // vilket ar precis klagomalet posten handlar om.
+        //
+        // ⚠ NAR det ar sakert ar sjalva regeln. Varje disciplin har sin EGEN
+        // resultattabell (se CompetitionResultTables) och sina egna klasser, sa ett
+        // byte efter att folk anmalt sig eller efter att resultat matats in skulle
+        // foraldralosa bada. Darfor: bara nar tavlingen ar orord.
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Far den har tavlingens disciplin bytas, och i sa fall varfor/varfor inte?
+        /// Read-only. Klienten anvander svaret for att aktivera eller forklara.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetCompetitionTypeChangeability(int competitionId)
+        {
+            try
+            {
+                if (!await CanEditCompetitionAsync(competitionId))
+                    return Json(new { success = false, message = "Behorighet saknas." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tavlingen hittades inte." });
+
+                var state = InspectTypeChange(competitionId, competition);
+                return Json(new
+                {
+                    success = true,
+                    currentType = state.CurrentType,
+                    canChange = state.CanChange,
+                    reason = state.Reason,
+                    registrationCount = state.RegistrationCount,
+                    resultCount = state.ResultCount,
+                    options = HpskSite.Models.CompetitionTypes.All
+                        .Select(t => new { id = t.Id, name = t.Name })
+                        .ToList()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetCompetitionTypeChangeability failed for {Id}", competitionId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Byter disciplin. Kontrollerar sakerheten SERVERSIDAN igen — klientens
+        /// bild kan vara sekunder gammal, och en anmalan som kom emellan far inte
+        /// bli foraldralos av ett knapptryck.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ChangeCompetitionType([FromBody] ChangeCompetitionTypeRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begaran." });
+
+                if (!await CanEditCompetitionAsync(request.CompetitionId))
+                    return Json(new { success = false, message = "Behorighet saknas." });
+
+                var newType = (request.NewType ?? "").Trim();
+                var known = HpskSite.Models.CompetitionTypes.All.FirstOrDefault(t =>
+                    string.Equals(t.Id, newType, StringComparison.OrdinalIgnoreCase));
+                if (known == null)
+                    return Json(new { success = false, message = $"Okand gren: \"{newType}\"." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null || competition.ContentType.Alias != "competition")
+                    return Json(new { success = false, message = "Tavlingen hittades inte." });
+
+                var state = InspectTypeChange(request.CompetitionId, competition);
+                if (!state.CanChange)
+                    return Json(new { success = false, message = state.Reason });
+
+                if (string.Equals(state.CurrentType, known.Id, StringComparison.OrdinalIgnoreCase))
+                    return Json(new { success = true, message = "Grenen var redan " + known.Name + ".", changed = false });
+
+                competition.SetValue("competitionType", known.Id);
+
+                // ⚠ Klasserna tillhor grenen. Springskytte anvander vapen- och
+                // aldersklasser, precisionsfamiljen sina egna — att lamna kvar den
+                // gamla uppsattningen ger en tavling vars klasser inte finns i dess
+                // gren. Nollstall dem, sa arrangoren far valja om i samma modal.
+                competition.SetValue("shootingClassIds", "");
+
+                var result = _contentService.Save(competition);
+                if (!result.Success)
+                    return Json(new { success = false, message = "Kunde inte spara grenbytet." });
+
+                // Bara redan publicerade tavlingar publiceras om. Att publicera ett
+                // utkast som sidoeffekt av ett grenbyte vore fel.
+                if (competition.Published)
+                {
+                    _contentService.Publish(competition, Array.Empty<string>());
+                }
+
+                _logger.LogInformation(
+                    "Competition {Id} type changed {From} -> {To} (registrations {Regs}, results {Res})",
+                    request.CompetitionId, state.CurrentType, known.Id, state.RegistrationCount, state.ResultCount);
+
+                return Json(new
+                {
+                    success = true,
+                    changed = true,
+                    newType = known.Id,
+                    newTypeName = known.Name,
+                    message = $"Grenen andrad till {known.Name}. Valj klasser for den nya grenen och spara."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ChangeCompetitionType failed");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        private sealed class TypeChangeState
+        {
+            public string CurrentType { get; set; } = "";
+            public bool CanChange { get; set; }
+            public string Reason { get; set; } = "";
+            public int RegistrationCount { get; set; }
+            public int ResultCount { get; set; }
+        }
+
+        /// <summary>
+        /// Sakerhetsregeln pa ETT stalle, last av bade lasningen och skrivningen.
+        /// </summary>
+        private TypeChangeState InspectTypeChange(int competitionId, Umbraco.Cms.Core.Models.IContent competition)
+        {
+            var state = new TypeChangeState
+            {
+                CurrentType = competition.GetValue<string>("competitionType") ?? ""
+            };
+
+            using var db = _databaseFactory.CreateDatabase();
+
+            // ⚠ Anmalningar ar Umbraco-NODER som sparas OPUBLICERADE, sa den
+            // publicerade cachen ser dem inte — de maste raknas i SQL. Samma sak som
+            // gjorde att kolumnen "Anmalningar" visade 0 pa varje rad fore 2026-08-18.
+            // De ligger under en registrationsHub som i sin tur ligger under tavlingen.
+            state.RegistrationCount = db.ExecuteScalar<int>(@"
+                SELECT COUNT(*)
+                FROM umbracoNode reg
+                JOIN umbracoContent c ON c.nodeId = reg.id
+                JOIN umbracoNode hub ON hub.id = reg.parentId
+                WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
+                  AND (reg.parentId = @0 OR hub.parentId = @0)", competitionId);
+
+            // ⚠ Rakna i ALLA disciplintabeller, inte bara den nuvarande grenens. En
+            // tavling som redan bytt gren en gang, eller som skapades som fel gren och
+            // fick nagra rader, har kvar dem i en annan tabell — och de skulle bli
+            // osynliga foraldralosa rader efter ytterligare ett byte.
+            var tables = new[]
+            {
+                "PrecisionResultEntry", "MilsnabbResultEntry", "DuellResultEntry",
+                "NationellHelmatchResultEntry", "MagnumPrecisionResultEntry",
+                "SpringskytteResultEntry", "FaltskytteResultEntry",
+                "StandardpistolResultEntry", "SportpistolResultEntry"
+            };
+            var total = 0;
+            foreach (var t in tables)
+            {
+                try
+                {
+                    // Tabellen kan saknas i en miljo som inte kort alla migreringar.
+                    // Da finns inga rader dar heller — hoppa over, avbryt inte.
+                    var exists = db.ExecuteScalar<int>(
+                        "SELECT COUNT(*) FROM sys.tables WHERE name = @0", t);
+                    if (exists == 0) continue;
+                    total += db.ExecuteScalar<int>(
+                        $"SELECT COUNT(*) FROM [{t}] WHERE CompetitionId = @0", competitionId);
+                }
+                catch (Exception ex)
+                {
+                    // En tabell vi inte kan lasa far inte tolkas som "inga resultat" —
+                    // det ar precis det svaret som skulle tillata ett farligt byte.
+                    _logger.LogWarning(ex, "Could not count results in {Table} for competition {Id}", t, competitionId);
+                    state.CanChange = false;
+                    state.Reason = "Kunde inte kontrollera om tavlingen har resultat. Grenbytet stoppas.";
+                    return state;
+                }
+            }
+            state.ResultCount = total;
+
+            if (state.RegistrationCount > 0 && state.ResultCount > 0)
+            {
+                state.Reason = $"Tavlingen har {state.RegistrationCount} anmalningar och {state.ResultCount} inmatade resultat. "
+                             + "Grenen kan bara bytas sa lange tavlingen ar orord — varje gren har egen resultattabell och egna klasser.";
+            }
+            else if (state.RegistrationCount > 0)
+            {
+                state.Reason = $"Tavlingen har {state.RegistrationCount} anmalningar. Ta bort dem forst, "
+                             + "eller skapa en ny tavling — klasserna tillhor grenen och foljer inte med.";
+            }
+            else if (state.ResultCount > 0)
+            {
+                state.Reason = $"Tavlingen har {state.ResultCount} inmatade resultat. Grenen kan inte bytas, "
+                             + "eftersom varje gren lagrar sina resultat i en egen tabell.";
+            }
+            else
+            {
+                state.CanChange = true;
+                state.Reason = "Tavlingen ar orord — grenen kan bytas.";
+            }
+
+            return state;
+        }
+
     }
+
+    /// <summary>Begaran om att byta disciplin pa en befintlig tavling.</summary>
+    public class ChangeCompetitionTypeRequest
+    {
+        public int CompetitionId { get; set; }
+        public string NewType { get; set; } = "";
+    }
+
 
     /// <summary>
     /// Request model for competition data editing.

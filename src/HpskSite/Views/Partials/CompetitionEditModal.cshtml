@@ -148,6 +148,26 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    @* Gren. Sattes i tavlingsguiden och gick INTE att andra efterat — valde
+                       arrangoren fel var radera-och-skapa-om enda vagen, vilket ar precis
+                       klagomalet. Bytet ar tillatet bara sa lange tavlingen ar OROR: varje gren
+                       har egen resultattabell och egna klasser. Servern avgor, och kontrollerar
+                       om vid sparningen — klientens bild kan vara sekunder gammal.
+                       ⚠ INTE ett name-falt: det far inte folja med i FormData till
+                       SaveCompetition, som droppar competitionType i alias-kartan anda. Bytet
+                       gar via sin egen endpoint. *@
+                    <div class="mb-3">
+                        <label for="edit_competitionTypeSelect" class="form-label">Gren</label>
+                        <div class="d-flex gap-2 align-items-start">
+                            <select class="form-select" id="edit_competitionTypeSelect" style="max-width:320px" disabled>
+                                <option value="">Laddar…</option>
+                            </select>
+                            <button type="button" class="btn btn-outline-primary" id="edit_competitionTypeBtn"
+                                    onclick="hpskChangeCompetitionType()" disabled>Byt gren</button>
+                        </div>
+                        <div class="form-text" id="edit_competitionTypeHelp">&nbsp;</div>
+                    </div>
+
                     <div class="mb-3">
                         <label for="competitionScope" class="form-label">Omfattning</label>
                         <select class="form-select" id="competitionScope" name="competitionScope">
@@ -2117,5 +2137,125 @@ function collectEditDpConfig() {
         setTimeout(window.hpskEditModalSyncSections, 0);
         return r;
     };
+})();
+</script>
+<script>
+// ─── Byt gren pa en befintlig tavling ────────────────────────────────────────
+//
+// competitionType sattes i tavlingsguiden och gick inte att andra efterat; modalen
+// laste den bara for att visa/dolja avsnitt. Valde arrangoren fel gren var
+// radera-och-skapa-om enda vagen ut.
+//
+// ⚠ SERVERN AGER REGELN. Klienten fragar bara vad som galler och visar svaret.
+// ChangeCompetitionType kontrollerar om, eftersom en anmalan kan ha kommit in mellan
+// att modalen oppnades och att knappen trycktes.
+(function () {
+    if (window.hpskLoadCompetitionTypeState) return;
+
+    window.hpskLoadCompetitionTypeState = function (competitionId) {
+        var sel = document.getElementById('edit_competitionTypeSelect');
+        var btn = document.getElementById('edit_competitionTypeBtn');
+        var help = document.getElementById('edit_competitionTypeHelp');
+        if (!sel || !btn || !help) return;
+        if (!competitionId) { sel.innerHTML = '<option value="">—</option>'; return; }
+
+        fetch('/umbraco/surface/CompetitionEdit/GetCompetitionTypeChangeability?competitionId=' + competitionId, {
+            credentials: 'same-origin'
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) {
+                sel.innerHTML = '<option value="">' + (d.message || 'Kunde inte lasa grenen') + '</option>';
+                sel.disabled = true; btn.disabled = true; help.textContent = '';
+                return;
+            }
+            sel.innerHTML = '';
+            (d.options || []).forEach(function (o) {
+                var opt = document.createElement('option');
+                opt.value = o.id;
+                opt.textContent = o.name;
+                if (o.id === d.currentType) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            sel.dataset.currentType = d.currentType || '';
+            sel.disabled = !d.canChange;
+            btn.disabled = !d.canChange;
+            help.textContent = d.reason || '';
+            help.className = 'form-text ' + (d.canChange ? 'text-success' : 'text-warning-emphasis');
+        })
+        .catch(function (e) {
+            sel.innerHTML = '<option value="">Kunde inte lasa grenen</option>';
+            sel.disabled = true; btn.disabled = true;
+            help.textContent = 'Fel vid kontroll: ' + e;
+        });
+    };
+
+    window.hpskChangeCompetitionType = function () {
+        var sel = document.getElementById('edit_competitionTypeSelect');
+        var btn = document.getElementById('edit_competitionTypeBtn');
+        var help = document.getElementById('edit_competitionTypeHelp');
+        var id = parseInt(document.getElementById('competitionId').value, 10) || 0;
+        if (!id || !sel) return;
+        var newType = sel.value;
+        if (!newType || newType === sel.dataset.currentType) {
+            help.textContent = 'Valj en annan gren an den nuvarande.';
+            return;
+        }
+        var label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : newType;
+        // Klasserna nollstalls av servern — sag det INNAN, inte efterat.
+        if (!confirm('Byt gren till "' + label + '"?\n\nTavlingens klasser nollstalls, eftersom klasserna '
+                   + 'tillhor grenen. Du far valja klasser for den nya grenen och spara.')) return;
+
+        btn.disabled = true;
+        var prev = btn.textContent;
+        btn.textContent = 'Byter…';
+        fetch('/umbraco/surface/CompetitionEdit/ChangeCompetitionType', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ competitionId: id, newType: newType })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            btn.textContent = prev;
+            if (!d.success) {
+                help.className = 'form-text text-danger';
+                help.textContent = d.message || 'Grenbytet gick inte.';
+                btn.disabled = false;
+                return;
+            }
+            help.className = 'form-text text-success';
+            help.textContent = d.message || 'Grenen andrad.';
+            sel.dataset.currentType = d.newType || newType;
+            // Ladda om modalen sa avsnitten (Faltskytte/Egenbokning) och klasslistan
+            // speglar den nya grenen. Att lamna kvar den gamla vyn vore vilseledande.
+            if (typeof window.openAdminEditModal === 'function') {
+                setTimeout(function () { window.openAdminEditModal(id, false, d.newType); }, 700);
+            }
+        })
+        .catch(function (e) {
+            btn.textContent = prev; btn.disabled = false;
+            help.className = 'form-text text-danger';
+            help.textContent = 'Fel: ' + e;
+        });
+    };
+
+    // Hamta tillstandet nar modalen fyllts — da finns competitionId i det dolda faltet.
+    if (typeof window.populateEditModal === 'function' && !window.__hpskTypeChangeWrapped) {
+        window.__hpskTypeChangeWrapped = true;
+        var inner = window.populateEditModal;
+        window.populateEditModal = function (competition) {
+            var r = inner.apply(this, arguments);
+            try {
+                var id = (competition && competition.id) ||
+                         parseInt(document.getElementById('competitionId').value, 10) || 0;
+                window.hpskLoadCompetitionTypeState(id);
+            } catch (e) { console.warn('grenbyte:', e); }
+            return r;
+        };
+    }
 })();
 </script>
