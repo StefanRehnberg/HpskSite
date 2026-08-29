@@ -125,7 +125,11 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 </script>
 
 <div class="modal fade" id="competitionEditModal" tabindex="-1" aria-labelledby="competitionEditModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    @* modal-dialog-scrollable: utan den växte dialogen till 3,3-5,5 skärmar och Spara
+       hamnade ~3 500 px ned (uppmätt 2026-08-29 på 1280x720, 1536x864 och 1920x1080,
+       för Precision, Faltskytte och Standardpistol). Nu scrollar KROPPEN och sidfoten
+       med Spara star still. Sektionsnavigeringen ovanfor kroppen kraver ocksa detta. *@
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="competitionEditModalLabel">
@@ -685,6 +689,30 @@ let compDescriptionEditor = null; // CKEditor instance for competition descripti
 
 const editModal = document.getElementById('competitionEditModal');
 
+// Sektionsnavigering. Körs på shown (inte show) och sedan en gång till, för att
+// disciplinvillkoren i populateEditModal döljer sektioner via setTimeout EFTER att
+// modalen visats — ritas raden före det får en dold sektion en knapp som hoppar
+// till ingenting. Funktionen är idempotent, så den extra körningen är gratis.
+window.hpskEditModalSyncSections = function () {
+    if (typeof window.hpskModalSectionNav === 'function') {
+        try { window.hpskModalSectionNav('#competitionEditModal'); } catch (e) { console.warn('sektionsnav:', e); }
+    }
+};
+editModal.addEventListener('shown.bs.modal', window.hpskEditModalSyncSections);
+
+// ⚠ Datumväljarna körs med `static: true`, alltså ligger kalendern i flödet och
+// klipps av modalkroppens `overflow-y: auto` (som modal-dialog-scrollable ger oss).
+// Uppmätt: kalendern nådde y=713 medan kroppen slutade vid y=620 — nedersta
+// veckoraden gick inte att klicka. Rulla in hela kalendern när den öppnas.
+// `block: 'nearest'` scrollar bara om den faktiskt inte får plats.
+function hpskRevealPicker(_sel, _dstr, instance) {
+    var cal = instance && instance.calendarContainer;
+    if (!cal) return;
+    setTimeout(function () {
+        try { cal.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) { }
+    }, 30);
+}
+
 editModal.addEventListener('show.bs.modal', function() {
     setTimeout(function() {
         try {
@@ -694,13 +722,15 @@ editModal.addEventListener('show.bs.modal', function() {
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
                 locale: 'sv',
-                static: true
+                static: true,
+                onOpen: hpskRevealPicker
             });
 
             flatpickr('#competitionEndDate', {
                 dateFormat: 'Y-m-d',
                 locale: 'sv',
-                static: true
+                static: true,
+                onOpen: hpskRevealPicker
             });
 
             flatpickr('#registrationOpenDate', {
@@ -708,7 +738,8 @@ editModal.addEventListener('show.bs.modal', function() {
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
                 locale: 'sv',
-                static: true
+                static: true,
+                onOpen: hpskRevealPicker
             });
 
             flatpickr('#registrationCloseDate', {
@@ -716,7 +747,8 @@ editModal.addEventListener('show.bs.modal', function() {
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
                 locale: 'sv',
-                static: true
+                static: true,
+                onOpen: hpskRevealPicker
             });
         } catch (e) {
             console.error('Error initializing date pickers:', e);
@@ -2059,3 +2091,31 @@ function collectEditDpConfig() {
    input's inline handlers call validateSwishNumberField — so this file has to bring it itself.
    The partial guards against being defined twice where both modals are present. *@
 @await Html.PartialAsync("_SwishNumberValidation")
+@* Sektionsnavigering. Inkluderas av modalen sjalv, inte av vardsidorna, sa den
+   foljer med till varje yta som renderar modalen. Samma regel som _HtmlEscape. *@
+@await Html.PartialAsync("_ModalSectionNav")
+<script>
+// Rita om sektionsraden EFTER populateEditModal, inte pa en gissad timeout.
+//
+// ⚠ Det ar disciplinvillkoren INNE i populateEditModal som doljer
+// #editFaltskytteSection och #editDirektplaceringSection. Ritas raden fore dem far
+// en precisionstavling en knapp till "Faltskytte-installningar" som hoppar till en
+// tom rubrik. En forsta version anvande setTimeout(900) och gjorde precis det —
+// samma tidsglapp som redan finns i modalens ovriga oppningsvagar. Hooka pa den
+// auktoritativa punkten i stallet.
+//
+// Wrappern laggs SIST i filen, sa den ligger utanpa bada de befintliga
+// populateEditModal-definitionerna (den andra dekorerar den forsta).
+(function () {
+    if (typeof window.populateEditModal !== 'function') return;
+    if (window.__hpskSecnavWrapped) return;
+    window.__hpskSecnavWrapped = true;
+    var inner = window.populateEditModal;
+    window.populateEditModal = function (competition) {
+        var r = inner.apply(this, arguments);
+        // Noll fordrojning: bara efter att synkron show/hide i inner har kort.
+        setTimeout(window.hpskEditModalSyncSections, 0);
+        return r;
+    };
+})();
+</script>
