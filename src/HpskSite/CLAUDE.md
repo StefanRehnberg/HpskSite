@@ -2738,6 +2738,51 @@ Club admins migrate a hand-written ledger of past series in bulk on the club **M
 - **Elit timing gate + editable Guldmärke year (2026-06-04):** now enforced — SHB 5.4.2 "Prov för elitmärke får avläggas första gången året efter det guldmärket erövrats." `AnalyzeSeriesProofAsync` for Elit requires a held Pistolskyttemärket Guld (no Guld → no Elit, also fixes prereq-not-enforced-on-award) and only counts series with `Year >= guldBadge.AchievedYear + 1`. Because that depends on an accurate Guld year, the **Guldmärke year is now captured at award and editable afterward**: `AwardBadge` already accepted `Year` (JS now sends it, prompting at Guld award, default current year); the Detaljer Guld row gained an **År** input next to the Nr input; `SetBadgeUniqueNumber` (+ `UniqueNumberRequest.Year`) now also sets `AchievedYear`. The Elit family summary shows a note ("Elitprov får avläggas först {guldYear+1} …") when the member holds Guld but the viewed year isn't past it. Luftpistol's brons prereq stays advisory (only Elit's gate is hard, since the timing rule needs the Guld year).
 - **Remove an auto-awarded family badge (2026-06-04):** awarded badges are persisted `MemberBadge` rows; the engine is add-only, so deleting the source series does NOT retract a badge (it just stops re-deriving). New `POST Marken/DeleteFamilyBadges {memberId, family}` (auth `CanSignOffForMemberAsync`) deletes all of a member's `MemberBadge` + `MemberBadgeQualification` rows for a family; wired to a **"Ta bort" trash button** on each row in the Detaljer "Andra märken" section (`deleteMarkenFamily` JS, functionary-only). Caveat surfaced in the confirm dialog: derived families re-materialize on next read if the underlying evidence still qualifies — remove the series/results first for a lasting removal. (Prior to this there was no UI for the long-existing `DeleteBadge` endpoint — removal required editing the `MemberBadge` table directly.)
 
+### "Utvalda tävlingar"-väljaren gick inte att skilja tävlingar åt i (2026-08-29)
+
+Rapporterat med skärmbild: fem rader som alla läste *"Kretsmästerska…"* och ingen ledtråd om vilken som
+var vilken — *"här finns massa kretstävlingar som jag inte vet vilka de är"*.
+
+**⚠️ Det var inte den publika tävlingslistan.** Skärmbilden visade `FeaturedItemsPicker.cshtml`, modalen
+där klubben/kretsen väljer vilka tävlingar som lyfts fram på sin egen sida. En första analys utgick från
+`CompetitionsHub` och hade byggt fel sak — **öppna skärmbilden innan du kartlägger en rapport om "en
+lista"**.
+
+Fyra fel, och tre av dem var att befintlig data inte visades:
+- **Arrangör och serie fanns redan i payloaden** (`clubName`, `regionCode`, `seriesName` från
+  `Club/GetAvailableCompetitions`) och renderades inte. Raden var namn + datum + bricka.
+- **Namnet var det som klipptes.** Allt låg på EN flexrad med `text-truncate` på namnet, så på en telefon
+  offrades namnet först. Att bara lägga till arrangören där hade gett trunkeringen mer att äta. Raden är
+  nu tvårads: namn på egen rad, arrangör · serie · datum som liten metarad under.
+- **Filtren fanns men scrollade bort.** Dialogen är `modal-dialog-scrollable`, alltså scrollar BODY —
+  och filterraden följde med listan uppåt. De var alltså aldrig borta, bara utanför skärmen exakt när de
+  behövdes. Nu `position: sticky` (med `bg-body`, inte hårdkodat vitt, så randen följer temat).
+- **Kretsen kom ut som enum-kod** (`Jonkoping`). `GetAvailableCompetitions` skickar nu även `regionName`
+  från `regionalPage`-noden; `regionCode` ligger kvar orörd eftersom regionfiltret jämför mot den.
+
+Dessutom, efter påpekande: **regionfiltret är förvalt till sidans egen krets** (fjärde argumentet till
+`openFeaturedPicker`) — listan är nationell och på väg mot tusentals rader. Förvalet sätts EFTER att
+dropdownen fyllts, och bara om kretsen finns bland alternativen; annars hade admin mötts av en tom lista
+med ett filter hen inte valt. Raden *"Visar X av Y poster"* finns just för att ett förvalt filter aldrig
+ska kunna gömma något tyst.
+
+**Och rubriken sa fel sak.** "Redigera Utvalda Tävlingar" läser som att man ska ändra på tävlingarna;
+modalen väljer bara vad som visas. Nu *"Välj vad som visas på sidan"*, med pennikonen utbytt mot en
+stjärna på båda ytorna (klubbsidan och kretssidan).
+
+⚠️ Sökrutan lovar numera klubb och serie, så sökningen matchar mot namn + serie + klubb + krets. En
+platshållare som lovar mer än koden gör är sin egen bugg.
+
+Verifierat 18/18 `hpsk-verify/featured-picker-verify.mjs` (**A/B: 7 av 12 faller innan baseline kraschar
+på den saknade filterraden**). ⚠️ Sviten måste öppna modalen via `window.openFeaturedPicker(...)` — att
+kalla bootstraps `show()` för hand ger ett tomt skal, eftersom hämtningen ligger i den funktionen; första
+körningen mätte "0 poster" och skyllde på renderingen. Klubbsidan loggar `ckeditor-duplicated-modules`
+vid varje besök (befintligt brus, orelaterat) och filtreras bort ur JS-felkontrollen.
+
+⚠️ **Bygg-fälla på vägen:** `Copy-Item` bevarar källfilens tidsstämpel, så en återställd `.cs` såg äldre
+ut än föregående byggutdata och MSBuild hoppade över den — appen körde vidare på baseline-binären medan
+källan såg rätt ut. Rör filen (`LastWriteTime = Get-Date`) före ombyggnad efter en A/B.
+
 ### Träningsloggen växte tomma serier · tangent för TIO · klubbsidan ur avatarmenyn (2026-08-29)
 
 Tre punkter ur klubbadminens andra mail. Endast vyer → **ingen ombyggnad krävs**, ingen SQL.

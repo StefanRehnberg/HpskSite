@@ -3,28 +3,55 @@
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
+                @* "Redigera" var fel verb: modalen ÄNDRAR ingen tävling, den väljer vilka som lyfts fram
+                   på klubbens eller kretsens sida. En klubbadmin som tror att hen är på väg att redigera
+                   en tävling vågar rimligen inte klicka. Listan innehåller både tävlingar och serier. *@
                 <h5 class="modal-title" id="featuredItemsPickerLabel">
-                    <i class="bi bi-star-fill me-2 text-warning"></i>Redigera Utvalda Tävlingar
+                    <i class="bi bi-star-fill me-2 text-warning"></i>Välj vad som visas på sidan
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <!-- Filters -->
-                <div class="row g-2 mb-3">
-                    <div class="col">
-                        <input type="text" class="form-control" id="featuredPickerSearch" placeholder="Sök tävlingar..." oninput="filterFeaturedItems()">
+                @* ⚠️ STICKY. The dialog is modal-dialog-scrollable, so the BODY scrolls — and the filter
+                   row scrolled away with the list, which is why a club admin reported on 2026-08-29 that
+                   he could not tell the competitions apart: by the time he was looking at them, the tools
+                   for narrowing them down were off screen. The filters were never missing.
+
+                   The selects get their own full-width row below md: three controls on one line squeeze a
+                   phone to the point where none of them is usable. *@
+                <div class="featured-picker-filters bg-body pt-1 pb-2 mb-2">
+                    <div class="row g-2">
+                        <div class="col-12 col-md">
+                            <input type="text" class="form-control" id="featuredPickerSearch" placeholder="Sök tävling, klubb eller serie..." oninput="filterFeaturedItems()">
+                        </div>
+                        <div class="col-6 col-md-auto">
+                            <select class="form-select" id="featuredPickerRegion" onchange="filterFeaturedItems()" style="min-width: 130px;">
+                                <option value="">Alla regioner</option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-auto">
+                            <select class="form-select" id="featuredPickerClub" onchange="filterFeaturedItems()" style="min-width: 130px;">
+                                <option value="">Alla klubbar</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="col-auto">
-                        <select class="form-select" id="featuredPickerRegion" onchange="filterFeaturedItems()" style="min-width: 130px;">
-                            <option value="">Alla regioner</option>
-                        </select>
-                    </div>
-                    <div class="col-auto">
-                        <select class="form-select" id="featuredPickerClub" onchange="filterFeaturedItems()" style="min-width: 130px;">
-                            <option value="">Alla klubbar</option>
-                        </select>
+                    <div class="small text-muted mt-1">
+                        <span>Bocka i de tävlingar och serier som ska lyftas fram överst på sidan.</span>
+                        <span id="featuredPickerCounts" class="ms-1"></span>
                     </div>
                 </div>
+                <style>
+                    /* Scoped to this modal. bg-body (not a hardcoded white) so the sticky strip follows
+                       the viewer's theme instead of turning into a white bar in dark mode. */
+                    #featuredItemsPickerModal .featured-picker-filters {
+                        position: sticky;
+                        top: 0;
+                        z-index: 3;
+                    }
+                    /* Without min-width:0 a flex child refuses to shrink below its content, so a long
+                       competition name pushes the badge off the row instead of wrapping. */
+                    #featuredItemsPickerModal .min-width-0 { min-width: 0; }
+                </style>
 
                 <!-- Loading spinner -->
                 <div id="featuredPickerLoading" class="text-center py-4">
@@ -72,11 +99,18 @@
     let _currentContentType = '';
     let _currentFeaturedIds = [];
     let _modalInstance = null;
+    let _defaultRegionCode = '';
 
-    window.openFeaturedPicker = function (contentId, contentType, featuredIds) {
+    // defaultRegionCode: the krets the page belongs to. The list is national and will grow into the
+    // thousands, so opening it unfiltered means scrolling past every competition in Sweden to find one of
+    // your own. Pre-selecting the page's own region is the answer to "här finns massa kretstävlingar som
+    // jag inte vet vilka de är" — with the counts line saying how much is being hidden, and the dropdown
+    // one click from "Alla regioner".
+    window.openFeaturedPicker = function (contentId, contentType, featuredIds, defaultRegionCode) {
         _currentContentId = contentId;
         _currentContentType = contentType;
         _currentFeaturedIds = featuredIds || [];
+        _defaultRegionCode = defaultRegionCode || '';
 
         // Show loading, hide items
         document.getElementById('featuredPickerLoading').style.display = '';
@@ -97,6 +131,14 @@
                 if (data.success) {
                     _allItems = data.items || [];
                     populateFilterDropdowns();
+                    // Applied AFTER the dropdown is built — setting a value on an empty select is a no-op.
+                    // Only when the page's region actually appears among the options; otherwise the admin
+                    // would open an empty list with a filter they never chose.
+                    if (_defaultRegionCode) {
+                        var sel = document.getElementById('featuredPickerRegion');
+                        var exists = [...sel.options].some(function (o) { return o.value === _defaultRegionCode; });
+                        if (exists) sel.value = _defaultRegionCode;
+                    }
                     renderFeaturedItems();
                 } else {
                     document.getElementById('featuredPickerLoading').innerHTML =
@@ -142,9 +184,11 @@
         var competitions = [];
 
         _allItems.forEach(function (item) {
-            var nameMatch = item.name && item.name.toLowerCase().indexOf(search) !== -1;
-            var seriesMatch = item.seriesName && item.seriesName.toLowerCase().indexOf(search) !== -1;
-            if (search && !nameMatch && !seriesMatch) return;
+            // The placeholder promises club and series too — so the search has to honour that. Matching
+            // only the name is what made two identically named kretstävlingar unfindable.
+            var hay = [item.name, item.seriesName, item.clubName, item.regionName]
+                .filter(Boolean).join(' ').toLowerCase();
+            if (search && hay.indexOf(search) === -1) return;
             if (filterRegion && (item.regionCode || '') !== filterRegion) return;
             if (filterClub && String(item.clubId || '') !== filterClub) return;
 
@@ -162,9 +206,13 @@
             seriesSection.style.display = '';
             seriesContainer.innerHTML = series.map(function (item) {
                 var checked = _currentFeaturedIds.indexOf(item.id) !== -1 ? 'checked' : '';
-                return '<label class="list-group-item list-group-item-action d-flex align-items-center py-2" style="cursor: pointer;">'
-                    + '<input type="checkbox" class="form-check-input me-3 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
-                    + '<span class="flex-grow-1 text-truncate"><strong>' + escapeHtmlPicker(item.name) + '</strong></span>'
+                var host = item.clubName || item.regionName || item.regionCode || '';
+                return '<label class="list-group-item list-group-item-action d-flex align-items-start py-2" style="cursor: pointer;">'
+                    + '<input type="checkbox" class="form-check-input me-3 mt-1 flex-shrink-0 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
+                    + '<span class="flex-grow-1 min-width-0">'
+                    +   '<span class="d-block"><strong>' + escapeHtmlPicker(item.name) + '</strong></span>'
+                    +   (host ? '<small class="text-muted d-block"><i class="bi bi-building me-1"></i>' + escapeHtmlPicker(host) + '</small>' : '')
+                    + '</span>'
                     + '<span class="badge ms-2 flex-shrink-0" style="background-color: #6f42c1;">Serie</span>'
                     + '</label>';
             }).join('');
@@ -177,13 +225,30 @@
         var compSection = document.getElementById('featuredPickerCompetitions');
         if (competitions.length > 0) {
             compSection.style.display = '';
+            // ⚠️ TWO LINES, and the NAME is never truncated.
+            // Reported 2026-08-29: "här finns massa kretstävlingar som jag inte vet vilka de är". The row
+            // was name + date + badge on ONE flex line with text-truncate on the name, so on a phone the
+            // name was the first thing sacrificed — five rows all reading "Kretsmästerska…". The arranger
+            // and the series were in the payload the whole time and simply weren't rendered; adding them
+            // to the same single line would only have given the truncation more to eat.
             compContainer.innerHTML = competitions.map(function (item) {
                 var checked = _currentFeaturedIds.indexOf(item.id) !== -1 ? 'checked' : '';
                 var dateStr = item.date ? new Date(item.date).toLocaleDateString('sv-SE') : '';
-                return '<label class="list-group-item list-group-item-action d-flex align-items-center py-2" style="cursor: pointer;">'
-                    + '<input type="checkbox" class="form-check-input me-3 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
-                    + '<span class="flex-grow-1 text-truncate">' + escapeHtmlPicker(item.name) + '</span>'
-                    + (dateStr ? '<small class="text-muted ms-2 flex-shrink-0"><i class="bi bi-calendar3 me-1"></i>' + dateStr + '</small>' : '')
+                // Arranger: the club when a club hosts it, otherwise the krets (an SM has no club).
+                var host = item.clubName || item.regionName || item.regionCode || '';
+                var meta = [];
+                if (host) meta.push('<i class="bi bi-building me-1"></i>' + escapeHtmlPicker(host));
+                // The series is what separates "Seriefält 8" from "Seriefält 9" — and often what makes
+                // two identically named kretstävlingar tellable apart.
+                if (item.seriesName) meta.push('<i class="bi bi-collection me-1"></i>' + escapeHtmlPicker(item.seriesName));
+                if (dateStr) meta.push('<i class="bi bi-calendar3 me-1"></i>' + dateStr);
+
+                return '<label class="list-group-item list-group-item-action d-flex align-items-start py-2" style="cursor: pointer;">'
+                    + '<input type="checkbox" class="form-check-input me-3 mt-1 flex-shrink-0 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
+                    + '<span class="flex-grow-1 min-width-0">'
+                    +   '<span class="d-block">' + escapeHtmlPicker(item.name) + '</span>'
+                    +   (meta.length ? '<small class="text-muted d-block">' + meta.join(' <span class="mx-1">·</span> ') + '</small>' : '')
+                    + '</span>'
                     + '<span class="badge bg-primary ms-2 flex-shrink-0">Tävling</span>'
                     + '</label>';
             }).join('');
@@ -194,6 +259,18 @@
         // No results
         var noResults = document.getElementById('featuredPickerNoResults');
         noResults.style.display = (series.length === 0 && competitions.length === 0) ? '' : 'none';
+
+        // Say how much is being hidden. With thousands of competitions the difference between "these are
+        // all of them" and "these are 12 of 1400" is the whole difference between trusting the list and
+        // scrolling forever.
+        var counts = document.getElementById('featuredPickerCounts');
+        if (counts) {
+            var shown = series.length + competitions.length;
+            var total = _allItems.length;
+            counts.textContent = (shown === total)
+                ? ('Visar alla ' + total + ' poster')
+                : ('Visar ' + shown + ' av ' + total + ' poster');
+        }
 
         // Hide loading, show items
         document.getElementById('featuredPickerLoading').style.display = 'none';

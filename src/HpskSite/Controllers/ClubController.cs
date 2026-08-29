@@ -1273,6 +1273,10 @@ namespace HpskSite.Controllers
                 // Build club name/region lookup from club nodes
                 var clubNameLookup = new Dictionary<int, string>();
                 var clubRegionLookup = new Dictionary<int, string>();
+                // regionCode → the krets's human name. The code is an enum name ("Jonkoping"), which is
+                // what the picker showed on screen — Swedish letters and all context missing. The
+                // regionalPage node carries the readable one, and this walk already visits every node.
+                var regionNameLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var root in UmbracoContext.Content.GetAtRoot())
                 {
                     foreach (var node in root.Descendants())
@@ -1284,6 +1288,12 @@ namespace HpskSite.Controllers
                             var cRegion = node.Value<string>("regionalFederation") ?? "";
                             if (!string.IsNullOrEmpty(cRegion))
                                 clubRegionLookup[node.Id] = cRegion;
+                        }
+                        else if (node.ContentType.Alias == "regionalPage")
+                        {
+                            var rCode = node.Value<string>("regionCode") ?? "";
+                            if (!string.IsNullOrEmpty(rCode))
+                                regionNameLookup[rCode] = node.Value<string>("regionName") ?? node.Name;
                         }
                     }
                 }
@@ -1324,7 +1334,11 @@ namespace HpskSite.Controllers
                             seriesName = parentSeriesName,
                             clubId = compClubId > 0 ? compClubId : (int?)null,
                             clubName = compClubName,
-                            regionCode = compRegion ?? ""
+                            regionCode = compRegion ?? "",
+                            // Readable krets name for display; regionCode stays as-is because the picker's
+                            // region filter compares against it.
+                            regionName = !string.IsNullOrEmpty(compRegion) && regionNameLookup.TryGetValue(compRegion, out var rn)
+                                ? rn : (compRegion ?? "")
                         });
                     }
                 }
