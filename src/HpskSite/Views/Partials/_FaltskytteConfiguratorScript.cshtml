@@ -220,20 +220,42 @@ function faltFigureMaxDistance(sizeGroup, wc) {
     return row[faltShbBucket(wc)] || null;
 }
 
+// Stödhand easing, per SHB D.10.6.1 (verbatim):
+//   "Med stödhand kan en figur från en ett nummer högre grupp användas.
+//    Alternativt kan skjutavståndet ökas med ett steg."
+// The two are equivalent, so ONE size-group step down in the max-distance
+// lookup expresses both: a longer permitted distance AND a lower per-shot time.
+// Clamped at group 1 (largest figure), which is the top of the SHB table.
+//
+// ⚠ This helper is the ONLY place the easing is decided. It is read by BOTH
+// faltTargetGroupBounds (the slider ceiling) and faltSuggestShootingTime (the
+// SHB time). They used to answer differently for the same station — the time
+// applied the easing, the slider did not — so the shoot-time calc believed the
+// station was one group easier while the slider refused to let the distance go
+// there. Do not re-derive it at a third site.
+function faltStodhandEased(station) {
+    return !!station && station.supportHand === 'Stödhand tillåten';
+}
+
+function faltLookupSizeGroup(sizeGroup, station) {
+    return faltStodhandEased(station) ? Math.max(1, sizeGroup - 1) : sizeGroup;
+}
+
 // Distance bounds for a målgrupp = {min: 5, max: tightest figure max}.
 // Returns null when no figure has a usable sizeGroup yet.
-function faltTargetGroupBounds(tg, wc) {
+// `station` is optional — pass it so stödhand raises the ceiling.
+function faltTargetGroupBounds(tg, wc, station) {
     var figs = (tg && tg.figures) || [];
     var maxes = [];
     for (var i = 0; i < figs.length; i++) {
         // Skip figures with no picked target or sizeGroup 0 (treated as "not set").
         var sg = figs[i].sizeGroup;
         if (sg == null || sg === 0) continue;
-        var m = faltFigureMaxDistance(sg, wc);
+        var m = faltFigureMaxDistance(faltLookupSizeGroup(sg, station), wc);
         if (m != null) maxes.push(m);
     }
     if (maxes.length === 0) return null;
-    return { min: SLIDER_MIN_DISTANCE, max: Math.min.apply(null, maxes) };
+    return { min: SLIDER_MIN_DISTANCE, max: Math.min.apply(null, maxes), eased: faltStodhandEased(station) };
 }
 
 // Computes SHB-suggested skjuttid for a station for one weapon class.
@@ -271,11 +293,9 @@ function faltSuggestShootingTime(station, wc, morker) {
     var lines = [];
     var anyApplicable = false;
 
-    // Stödhand: per SHB D.10.6.1, stödhand makes the station effectively one
-    // SizeGroup easier (or one distance step shorter) — both equivalent. We
-    // implement by shifting the figure's SizeGroup down by 1 for max-distance
-    // lookup, which lowers per-shot-time. Clamped at SizeGroup 1 (largest).
-    var stodhandEasing = station.supportHand === 'Stödhand tillåten';
+    // Stödhand: see faltStodhandEased / faltLookupSizeGroup — the shared helpers
+    // the distance slider reads too, so the time and the ceiling agree.
+    var stodhandEasing = faltStodhandEased(station);
 
     // Per-figure entries collected during the målgrupp walk — used by the
     // Normal-mode greedy allocator and the Poäng min+easiest-extras allocator.
@@ -287,14 +307,14 @@ function faltSuggestShootingTime(station, wc, morker) {
     // Informational per-målgrupp lines + per-figure data collection.
     station.targetGroups.forEach(function(tg, gi) {
         var letter = String.fromCharCode(65 + gi); // A, B, C, ...
-        var bounds = faltTargetGroupBounds(tg, wc);
+        var bounds = faltTargetGroupBounds(tg, wc, station);
         var effectiveDistance = tg.distance != null ? tg.distance : (bounds ? bounds.max : null);
         var groupPerShot = 0;
         var groupLimitingFig = '';
         (tg.figures || []).forEach(function(f, fi) {
             if (!f.sizeGroup) return;
             // Stödhand: look up max distance for one easier size group.
-            var lookupGroup = stodhandEasing ? Math.max(1, f.sizeGroup - 1) : f.sizeGroup;
+            var lookupGroup = faltLookupSizeGroup(f.sizeGroup, station);
             var maxD = faltFigureMaxDistance(lookupGroup, wc);
             if (!maxD) return;
             anyApplicable = true;
@@ -494,6 +514,37 @@ function faltCfgUpdateStation(wc, stationNum, field, value) {
     if (field === 'weaponStartPosition' || field === 'shootingTimeSec' || field === 'maxShotsPerFigure' || field === 'minShotsPerFigure' || field === 'supportHand') {
         faltCfgRefreshSuggestion(stationNum);
     }
+    // Stödhand moves the distance CEILING (SHB D.10.6.1), so the sliders have to
+    // be rebuilt — faltCfgRefreshSuggestion only repaints the badges. Turning it
+    // OFF lowers the ceiling, which can leave a stored distance above what is now
+    // legal; clamp it here rather than in the renderer, so the saved blob and the
+    // screen agree (a render-time clamp shows a legal number over an illegal
+    // stored one, and the shoot-time calc reads the stored one).
+    if (field === 'supportHand') {
+        faltCfgClampDistancesToBounds(stationNum);
+        renderActiveTab();
+    }
+}
+
+// Pull every målgrupp distance on a station back inside its current bounds.
+// Returns the number of groups actually changed, so callers can tell the
+// operator instead of silently rewriting their numbers.
+function faltCfgClampDistancesToBounds(stationNum) {
+    var changed = 0;
+    Object.keys(faltCfgData).forEach(function(wc) {
+        if (FALT_CFG_META_KEYS.has(wc)) return;
+        var station = faltCfgData[wc] && faltCfgData[wc].stations
+            ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+        if (!station || !station.targetGroups) return;
+        station.targetGroups.forEach(function(tg) {
+            if (tg.distance == null) return;
+            var b = faltTargetGroupBounds(tg, wc, station);
+            if (!b) return;
+            if (tg.distance > b.max) { tg.distance = b.max; changed++; faltCfgMarkDirty(wc, stationNum); }
+            else if (tg.distance < b.min) { tg.distance = b.min; changed++; faltCfgMarkDirty(wc, stationNum); }
+        });
+    });
+    return changed;
 }
 
 function faltCfgUpdateGroup(wc, stationNum, tgIdx, field, value) {
@@ -1212,7 +1263,14 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
             : null)
         : null;
     var distSourceTg = distTg ? distTg[tgIdx] : tg;
-    var bounds = faltTargetGroupBounds(tg, distWc);
+    // Stödhand is a STATION setting, so the ceiling has to be resolved against
+    // the station this målgrupp belongs to — renderTargetGroup only gets the
+    // group. Read it from the distance class, which is the class the slider
+    // writes to (they differ in simple mode).
+    var distStation = faltCfgData[distWc] && faltCfgData[distWc].stations
+        ? faltCfgData[distWc].stations.find(function(s) { return s.station === stationNum; })
+        : null;
+    var bounds = faltTargetGroupBounds(tg, distWc, distStation);
     var currentDist = distSourceTg && distSourceTg.distance != null ? distSourceTg.distance : (bounds ? bounds.max : SLIDER_MIN_DISTANCE);
     if (bounds && currentDist > bounds.max) currentDist = bounds.max;
     if (currentDist < SLIDER_MIN_DISTANCE) currentDist = SLIDER_MIN_DISTANCE;
@@ -1239,7 +1297,12 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
                     ' onchange="faltCfgSetDistance(\'' + distWc + '\',' + stationNum + ',' + tgIdx + ',this.value)">' +
                 '<span class="text-muted small">m<\/span>' +
             '<\/div>' +
-            '<div class="form-text small" id="faltCfgSpacingHint_' + idBase + '">' + faltSpacingHintText(currentDist) + '<\/div>';
+            '<div class="form-text small" id="faltCfgSpacingHint_' + idBase + '">' + faltSpacingHintText(currentDist) + '<\/div>' +
+            (bounds.eased
+                ? '<div class="form-text small text-success"><i class="bi bi-hand-index-thumb me-1"><\/i>' +
+                  'Stödhand är tillåten på stationen, så maxavståndet är höjt ett steg (SHB D.10.6.1).' +
+                  '<\/div>'
+                : '');
     }
 
     return '<div class="border rounded p-2 mb-2 bg-body-tertiary tg-row" data-tg="' + tgIdx + '">' +
