@@ -159,6 +159,19 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Reset the inactivity timer for a match. Anything a human does to a match — entering
+        /// scores, joining, being let in — counts as activity, otherwise AutoCloseStaleMatches
+        /// reaps a match people are demonstrably still using.
+        /// Swallows errors: the column may not exist yet (migration pending).
+        /// </summary>
+        private static void TouchLastActivity(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int matchId)
+        {
+            try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, matchId); }
+            catch { /* Column not yet added — migration pending */ }
+        }
+
+        /// <summary>
         /// Safely get ClubId from a dynamic match object.
         /// Returns null if the property doesn't exist (e.g., migration hasn't run yet) or is unset.
         /// </summary>
@@ -949,6 +962,10 @@ namespace HpskSite.Controllers
                         TeamId = teamId
                     });
 
+                    // Someone joining is activity — don't let the stale sweep reap a match people
+                    // are still signing up for.
+                    TouchLastActivity(db, (int)match.Id);
+
                     // Get team name for notification
                     string? teamName = null;
                     if (teamId.HasValue)
@@ -1379,8 +1396,9 @@ namespace HpskSite.Controllers
         ///    personal logs/stats. 2) If nothing of value survives (empty match, or a single user
         ///    who never shot a full session), removes the match — detaching any remaining
         ///    TrainingScores first (those rows are never hard-deleted, per the delete-match
-        ///    invariant). 3) Otherwise marks the match Completed and updates statistics for
-        ///    surviving (&gt;=4 series) members. Returns true when the match was deleted.
+        ///    invariant) — but never a match whose StartDate is still in the future, which is empty
+        ///    only because it hasn't run yet. 3) Otherwise marks the match Completed and updates
+        ///    statistics for surviving (&gt;=4 series) members. Returns true when the match was deleted.
         /// Caller owns the SignalR notification.
         /// </summary>
         private async Task<bool> FinalizeMatchCloseAsync(
@@ -1407,7 +1425,15 @@ namespace HpskSite.Controllers
                        TotalScore
                 FROM TrainingScores WHERE TrainingMatchId = @0", matchId);
 
-            if (survivors.Count == 0)
+            // A match that hasn't started yet is empty for the most ordinary reason there is, so
+            // "no scores" says nothing about whether it's junk. Never let it take the delete branch —
+            // participants have a join link to it, and a hard delete leaves them nothing to open.
+            // Closing one still means closing it; it just becomes Completed instead of vanishing.
+            // (An organiser who genuinely wants it gone uses the explicit delete endpoint.)
+            var notStarted = survivors.Count == 0 && db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM TrainingMatches WHERE Id = @0 AND StartDate > GETDATE()", matchId) > 0;
+
+            if (survivors.Count == 0 && !notStarted)
             {
                 // Empty / single-user-without-a-full-session → remove the match shell.
                 // Detach any stragglers first; TrainingScores are never hard-deleted here.
@@ -1645,9 +1671,7 @@ namespace HpskSite.Controllers
                               WHERE Id = @4",
                             updatedSeriesJson, totalScore, totalXCount, DateTime.Now, (int)existingScore.Id);
 
-                        // Touch LastActivityDate for inactivity tracking (column may not exist yet)
-                        try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, (int)match.Id); }
-                        catch { /* migration pending */ }
+                        TouchLastActivity(db, (int)match.Id);
 
                         // Notify other participants via SignalR
                         await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
@@ -1719,9 +1743,7 @@ namespace HpskSite.Controllers
                             });
                         }
 
-                        // Touch LastActivityDate for inactivity tracking (column may not exist yet)
-                        try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, (int)match.Id); }
-                        catch { /* migration pending */ }
+                        TouchLastActivity(db, (int)match.Id);
 
                         // Notify other participants via SignalR
                         await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
@@ -1883,9 +1905,7 @@ namespace HpskSite.Controllers
                           WHERE Id = @4",
                         updatedSeriesJson, totalScore, totalXCount, DateTime.Now, (int)existingScore.Id);
 
-                    // Touch LastActivityDate for inactivity tracking (column may not exist yet)
-                    try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, (int)match.Id); }
-                    catch { /* migration pending */ }
+                    TouchLastActivity(db, (int)match.Id);
 
                     // Notify other participants via SignalR
                     await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
@@ -3031,12 +3051,19 @@ namespace HpskSite.Controllers
                 {
                     // Find stale active matches (inactive > 6 hours). Prefer LastActivityDate; fall
                     // back to StartDate-only if the column hasn't been added yet.
+                    //
+                    // StartDate <= GETDATE() is load-bearing: LastActivityDate is stamped at CREATION,
+                    // so without it a match booked for next Saturday looks six hours idle the same
+                    // evening it was created, and FinalizeMatchCloseAsync hard-deletes it as an empty
+                    // shell (it has no scores — it hasn't run yet). A match cannot be idle before it
+                    // has started. Note the fallback query never had this bug; the column introduced it.
                     List<dynamic> stale;
                     try
                     {
                         stale = db.Fetch<dynamic>(
                             @"SELECT Id, MatchCode, Discipline, WeaponClass FROM TrainingMatches
                               WHERE Status = 'Active'
+                                AND StartDate <= GETDATE()
                                 AND COALESCE(LastActivityDate, StartDate) < DATEADD(hour, -6, GETDATE())");
                     }
                     catch
@@ -3183,6 +3210,8 @@ namespace HpskSite.Controllers
                             FrozenHandicapPerSeries = frozenHandicap,
                             FrozenIsProvisional = frozenIsProvisional
                         });
+
+                        TouchLastActivity(db, (int)match.Id);
 
                         // Get member details for SignalR notification
                         var firstName = member.GetValue<string>("firstName") ?? "";
@@ -3412,6 +3441,8 @@ namespace HpskSite.Controllers
                             FrozenHandicapPerSeries = frozenHandicap,
                             FrozenIsProvisional = frozenIsProvisional
                         });
+
+                        TouchLastActivity(db, (int)match.Id);
 
                         // Send SignalR notification to requester
                         await _hubContext.SendJoinRequestAccepted(requestedMemberId, matchCode);
