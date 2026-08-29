@@ -541,39 +541,6 @@
                                                          (clubsPage != null && clubsPage.IsAncestorOrSelf(Model)) ||
                                                          regionalPages.Any(r => r.IsAncestorOrSelf(Model));
                         }
-                        @* ── Min klubb ──────────────────────────────────────────────────────────────
-                           En medlem rapporterade 2026-08-29 att klubbsidan var gömd under den egna bilden:
-                           "inte svårt i sig men kanske inte intuitivt för många nya som inte gräver runt".
-                           Den egna klubben — och den egna kretsen — hör hemma i navigeringen, inte i en
-                           kontomeny. Flyttat hit FRÅN avatarmenyn, inte kopierat.
-
-                           ⚠️ Menyn listar ALLA medlemmens klubbar. En medlem kan tillhöra fem, och då finns
-                           ingen enskild "min klubb" att länka till — därför en meny och inte en direktlänk,
-                           även när klubbarna är just en. Rubriken är stabil oavsett antal. *@
-                        @if (isLoggedIn && (memberClubs.Count > 0 || memberRegionPages.Count > 0))
-                        {
-                            var myClubActive = memberClubs.Any(c => Model.Url().StartsWith(c.ClubUrl, StringComparison.OrdinalIgnoreCase))
-                                            || memberRegionPages.Any(r => Model.Url().StartsWith(r.RegionUrl, StringComparison.OrdinalIgnoreCase));
-                            <li class="nav-item dropdown">
-                                <a class="nav-link dropdown-toggle @(myClubActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
-                                    <i class="bi bi-building me-1"></i>@(memberClubs.Count > 1 ? "Mina klubbar" : "Min klubb")
-                                </a>
-                                <ul class="dropdown-menu">
-                                    @foreach (var club in memberClubs)
-                                    {
-                                        <li><a class="dropdown-item" href="@club.ClubUrl"><i class="bi bi-building me-2"></i>@club.Name</a></li>
-                                    }
-                                    @if (memberClubs.Count > 0 && memberRegionPages.Count > 0)
-                                    {
-                                        <li><hr class="dropdown-divider"></li>
-                                    }
-                                    @foreach (var region in memberRegionPages)
-                                    {
-                                        <li><a class="dropdown-item" href="@region.RegionUrl"><i class="bi bi-geo-alt me-2"></i>@region.Name</a></li>
-                                    }
-                                </ul>
-                            </li>
-                        }
                         @if (regionalPages.Any())
                         {
                             <!-- Regional Navigation Dropdown (when regional structure exists) -->
@@ -625,13 +592,55 @@
                                 </ul>
                             </li>
                         }
+
+                        @* ── Mina klubbar ───────────────────────────────────────────────────────────
+                           En medlem rapporterade 2026-08-29 att klubbsidan var gömd under den egna bilden:
+                           "inte svårt i sig men kanske inte intuitivt för många nya som inte gräver runt".
+                           Den egna klubben — och den egna kretsen — hör hemma i navigeringen, inte i en
+                           kontomeny. Flyttat hit FRÅN avatarmenyn, inte kopierat.
+
+                           ⚠️ Menyn listar ALLA medlemmens klubbar. En medlem kan tillhöra fem, och då finns
+                           ingen enskild "min klubb" att länka till — därför en meny och inte en direktlänk,
+                           även när klubbarna är just en.
+
+                           Placerad EFTER Kretsar: det allmänna först, det egna sist och närmast avataren. *@
+                        @if (isLoggedIn && (memberClubs.Count > 0 || memberRegionPages.Count > 0))
+                        {
+                            var myClubActive = memberClubs.Any(c => Model.Url().StartsWith(c.ClubUrl, StringComparison.OrdinalIgnoreCase))
+                                            || memberRegionPages.Any(r => Model.Url().StartsWith(r.RegionUrl, StringComparison.OrdinalIgnoreCase));
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle @(myClubActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
+                                    <i class="bi bi-building me-1"></i>@(memberClubs.Count > 1 ? "Mina klubbar" : "Min klubb")
+                                </a>
+                                <ul class="dropdown-menu">
+                                    @foreach (var club in memberClubs)
+                                    {
+                                        <li><a class="dropdown-item" href="@club.ClubUrl"><i class="bi bi-building me-2"></i>@club.Name</a></li>
+                                    }
+                                    @if (memberClubs.Count > 0 && memberRegionPages.Count > 0)
+                                    {
+                                        <li><hr class="dropdown-divider"></li>
+                                    }
+                                    @foreach (var region in memberRegionPages)
+                                    {
+                                        <li><a class="dropdown-item" href="@region.RegionUrl"><i class="bi bi-geo-alt me-2"></i>@region.Name</a></li>
+                                    }
+                                </ul>
+                            </li>
+                        }
                     </ul>
 
-                    <!-- Theme Toggle Button -->
-                    <button type="button" class="btn btn-outline-secondary btn-sm me-2" id="themeToggle"
-                            title="Växla ljus/mörk läge" aria-label="Byt färgtema">
-                        <i class="bi bi-moon-stars-fill" id="themeIcon"></i>
-                    </button>
+                    @* Temaväxlaren bor i avatarmenyn för den som är inloggad (flyttad dit 2026-08-29).
+                       ⚠️ Utloggade har ingen avatarmeny, så knappen står kvar för dem — annars skulle
+                       mörkt läge tyst försvinna för alla besökare som inte har konto. Bara EN av de två
+                       renderas åt gången, så id:t themeToggle förblir unikt och skriptet nedan är oförändrat. *@
+                    @if (!isLoggedIn)
+                    {
+                        <button type="button" class="btn btn-outline-secondary btn-sm me-2" id="themeToggle"
+                                title="Växla ljus/mörk läge" aria-label="Byt färgtema">
+                            <i class="bi bi-moon-stars-fill" id="themeIcon"></i>
+                        </button>
+                    }
 
                     <!-- User Menu -->
                     @if (isLoggedIn)
@@ -671,6 +680,15 @@
                                         var adminPageUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "adminPage")?.Url() ?? "/admin";
                                         <li><a class="dropdown-item" href="@adminPageUrl"><i class="bi bi-gear"></i> Administration</a></li>
                                     }
+                                    <li><hr class="dropdown-divider"></li>
+                                    @* Temaväxlaren. En <button>, inte en <a href="#">: en tom hash hoppar
+                                       till sidans topp innan skriptet hinner köra. Behåller id:na
+                                       themeToggle/themeIcon så den befintliga lyssnaren är oförändrad. *@
+                                    <li>
+                                        <button type="button" class="dropdown-item" id="themeToggle" aria-label="Byt färgtema">
+                                            <i class="bi bi-moon-stars-fill" id="themeIcon"></i> <span id="themeLabel">Mörkt läge</span>
+                                        </button>
+                                    </li>
                                     <li><hr class="dropdown-divider"></li>
                                     <li><a class="dropdown-item" href="#" onclick="logout()"><i class="bi bi-box-arrow-right"></i> Logga ut</a></li>
                                 </ul>
@@ -987,6 +1005,10 @@
                     ? 'bi bi-sun-fill'
                     : 'bi bi-moon-stars-fill';
             }
+            // The menu item needs words — an icon alone in a list of labelled rows says nothing.
+            // Absent for the logged-out icon button, which keeps its tooltip instead.
+            const label = document.getElementById('themeLabel');
+            if (label) label.textContent = theme === 'dark' ? 'Ljust läge' : 'Mörkt läge';
         }
     })();
     </script>
