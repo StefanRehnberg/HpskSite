@@ -2738,6 +2738,39 @@ Club admins migrate a hand-written ledger of past series in bulk on the club **M
 - **Elit timing gate + editable Guldmärke year (2026-06-04):** now enforced — SHB 5.4.2 "Prov för elitmärke får avläggas första gången året efter det guldmärket erövrats." `AnalyzeSeriesProofAsync` for Elit requires a held Pistolskyttemärket Guld (no Guld → no Elit, also fixes prereq-not-enforced-on-award) and only counts series with `Year >= guldBadge.AchievedYear + 1`. Because that depends on an accurate Guld year, the **Guldmärke year is now captured at award and editable afterward**: `AwardBadge` already accepted `Year` (JS now sends it, prompting at Guld award, default current year); the Detaljer Guld row gained an **År** input next to the Nr input; `SetBadgeUniqueNumber` (+ `UniqueNumberRequest.Year`) now also sets `AchievedYear`. The Elit family summary shows a note ("Elitprov får avläggas först {guldYear+1} …") when the member holds Guld but the viewed year isn't past it. Luftpistol's brons prereq stays advisory (only Elit's gate is hard, since the timing rule needs the Guld year).
 - **Remove an auto-awarded family badge (2026-06-04):** awarded badges are persisted `MemberBadge` rows; the engine is add-only, so deleting the source series does NOT retract a badge (it just stops re-deriving). New `POST Marken/DeleteFamilyBadges {memberId, family}` (auth `CanSignOffForMemberAsync`) deletes all of a member's `MemberBadge` + `MemberBadgeQualification` rows for a family; wired to a **"Ta bort" trash button** on each row in the Detaljer "Andra märken" section (`deleteMarkenFamily` JS, functionary-only). Caveat surfaced in the confirm dialog: derived families re-materialize on next read if the underlying evidence still qualifies — remove the series/results first for a lasting removal. (Prior to this there was no UI for the long-existing `DeleteBadge` endpoint — removal required editing the `MemberBadge` table directly.)
 
+### "Inga resultat hittades att ta bort" — på A Opt, aldrig på C1 (2026-08-29)
+
+Vetlanda rapporterade att en skytt som skulle bort ur **A Opt 1** (hans A1-resultat skulle vara kvar)
+inte gick att ta bort: *"Kunde inte ta bort resultat: Inga resultat hittades att ta bort."* Det var
+efterspelet till den skytt han i somras beskrev som fastlåst i ett skjutlag.
+
+**Id-vs-Namn-fällan igen, i den sista metod som blev kvar på fel sida av den.** En klass har ett Id
+(`A_opt_1`) och ett visningsNAMN (`A Opt 1`). De är **identiska för C1/C2/C3** och olika för varje klass
+med ändelse — optik, veteran, dam, junior. Sedan 2026-08-25 kanoniserar `SaveResult` nya resultatrader
+till NAMNET och varje läsväg grupperar på `ShootingClasses.ToCanonicalName` — men
+`DeleteShooterFromClass` löste fortfarande upp till **Id:t** och matchade därför noll rader på precis de
+klasser där formerna skiljer sig. Samma knapp hade fungerat på C1 hela tiden, vilket är varför ingen
+upptäckt det.
+
+- **⚠️ BÅDA formerna matchas nu, inte den kanoniska.** En riktig databas bär båda:
+  `normalize-result-shootingclass-to-display-name.sql` hoppar medvetet över rader vars namnform redan
+  finns, så det blandade läget är permanent för dem. Dev har 223 rader `C Vet Y` bredvid 6 `C_Vet_Y`.
+- Matchat som två exakta värden, **inte** med ett handrullat `UPPER(REPLACE(...))` — det vore en andra
+  normalisering, fri att glida från den alla andra ytor använder.
+- **Meddelandet namnger nu vad som söktes.** *"Inga resultat hittades"* ensamt är ett påstående om
+  DATAT när sanningen kan vara ett påstående om BEGÄRAN — samma felattribution som redan kostat en
+  runda på `DeleteResult`.
+
+⚠️ **Ordningen spelar roll för operatören:** ta bort resultatet i klassen FÖRST, sedan raden i
+startlistan. `RemoveShooterFromStartList` vägrar så länge det finns resultat i klassen — och före
+2026-08-25 var den kontrollen dessutom medlemsbred, så A1-resultaten blockerade borttagningen ur A Opt.
+Det är sannolikt exakt vad han såg i somras.
+
+Verifierat 14/14 `hpsk-verify/delete-class-idname-verify.mjs` (**A/B: 5 av 14 faller**). Sviten bygger
+sin egen fixtur på ett kast-medlems-id och asserterar båda riktningarna (rader lagrade som namn raderade
+via Id, och tvärtom), det blandade fallet i en operation, och — kärnan i rapporten — att skyttens **A1
+står kvar** när A Opt 1 tas bort.
+
 ### "Utvalda tävlingar"-väljaren gick inte att skilja tävlingar åt i (2026-08-29)
 
 Rapporterat med skärmbild: fem rader som alla läste *"Kretsmästerska…"* och ingen ledtråd om vilken som

@@ -1259,25 +1259,48 @@ namespace HpskSite.Controllers
 
                 var tableName = GetResultTableName(compTypeId);
 
-                // The result list JSON stores the display Name ("C 1"); the DB stores the Id ("C1").
-                // Accept either by normalizing through the registry. Fall back to the raw input
-                // for unknown values (e.g. legacy/custom rows) so the existing behaviour is preserved.
-                var resolvedClass = ShootingClasses.GetById(request.ShootingClass)?.Id
-                                 ?? ShootingClasses.GetByName(request.ShootingClass)?.Id
-                                 ?? request.ShootingClass;
+                // ⚠️ MATCH BOTH STORED FORMS — do not pick one.
+                // A class has an Id ("A_opt_1") and a display Name ("A Opt 1"), and they are IDENTICAL
+                // for C1/C2/C3 and different for every class with a suffix — optik, veteran, dam, junior.
+                // Since 2026-08-25 SaveResult canonicalises new rows to the NAME, and every read path
+                // groups on ShootingClasses.ToCanonicalName; this delete was left resolving to the Id and
+                // therefore matched nothing on exactly those classes. Reported from Vetlanda 2026-08-29:
+                // "Kunde inte ta bort resultat: Inga resultat hittades att ta bort" on an A Opt 1 shooter,
+                // while the identical action worked all along on C1.
+                //
+                // Both forms are matched rather than just the canonical one because a real database holds
+                // both: normalize-result-shootingclass-to-display-name.sql deliberately SKIPS rows whose
+                // name-form twin already exists, so the mixed state is permanent for those. Dev carries
+                // 223 rows of "C Vet Y" alongside 6 of "C_Vet_Y".
+                //
+                // Matched as two exact values, not with a hand-rolled UPPER(REPLACE(...)) — that would be
+                // a second normalisation, free to drift from the one every other surface uses.
+                var canonicalName = ShootingClasses.ToCanonicalName(request.ShootingClass);
+                var idForm = ShootingClasses.GetById(request.ShootingClass)?.Id
+                          ?? ShootingClasses.GetByName(request.ShootingClass)?.Id
+                          ?? request.ShootingClass;
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var rowsDeleted = await db.ExecuteAsync(
-                    $"DELETE FROM [{tableName}] WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2",
-                    request.CompetitionId, request.MemberId, resolvedClass);
+                    $"DELETE FROM [{tableName}] WHERE CompetitionId = @0 AND MemberId = @1 AND (ShootingClass = @2 OR ShootingClass = @3)",
+                    request.CompetitionId, request.MemberId, canonicalName, idForm);
 
                 _logger.LogInformation(
-                    "DeleteShooterFromClass: removed {Rows} rows from {Table} for competition {CompetitionId}, member {MemberId}, class '{RequestedClass}' (resolved to '{ResolvedClass}')",
-                    rowsDeleted, tableName, request.CompetitionId, request.MemberId, request.ShootingClass, resolvedClass);
+                    "DeleteShooterFromClass: removed {Rows} rows from {Table} for competition {CompetitionId}, member {MemberId}, class '{RequestedClass}' (matched '{Name}' or '{Id}')",
+                    rowsDeleted, tableName, request.CompetitionId, request.MemberId, request.ShootingClass, canonicalName, idForm);
 
                 if (rowsDeleted == 0)
                 {
-                    return Json(new { success = false, message = "Inga resultat hittades att ta bort." });
+                    // Name what was actually looked for. "Inga resultat hittades" alone is a statement
+                    // about the DATA when the truth may be a statement about the REQUEST — the same
+                    // misattribution that cost a debugging round on DeleteResult.
+                    return Json(new
+                    {
+                        success = false,
+                        message = idForm != canonicalName
+                            ? $"Inga resultat hittades att ta bort (sökte på klassen \"{canonicalName}\" och \"{idForm}\")."
+                            : $"Inga resultat hittades att ta bort (sökte på klassen \"{canonicalName}\")."
+                    });
                 }
 
                 try { _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId); }
