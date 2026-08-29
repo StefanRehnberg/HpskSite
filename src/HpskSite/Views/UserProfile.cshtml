@@ -961,7 +961,10 @@ function openPracticeLogModal() {
         if (!plFlatpickr) {
             plFlatpickr = flatpickr(dateEl, { locale: 'sv', dateFormat: 'Y-m-d', maxDate: 'today', defaultDate: 'today' });
         } else {
-            plFlatpickr.setDate(new Date());
+            // ⚠️ setDate(new Date()) TÖMMER fältet när väljaren har maxDate: 'today'. Ett Date-objekt bär
+            // med sig klockslaget, och maxDate normaliseras till midnatt — så "idag kl 15" ligger efter
+            // gränsen och avvisas tyst. Ett Y-m-d som sträng har inget klockslag att snäva över.
+            plFlatpickr.setDate(new Date().toLocaleDateString('sv-SE'), true);
         }
     } else {
         dateEl.value = new Date().toISOString().slice(0, 10);

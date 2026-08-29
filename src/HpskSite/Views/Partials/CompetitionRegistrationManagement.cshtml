@@ -2463,7 +2463,10 @@ async function openMarkAsPaidForTeam(team) {
     if (!markPaidDatePicker) {
         markPaidDatePicker = flatpickr('#markPaidDate', { locale: 'sv', dateFormat: 'Y-m-d', defaultDate: 'today', maxDate: 'today' });
     } else {
-        markPaidDatePicker.setDate(new Date(), true);
+        // ⚠️ setDate(new Date()) TÖMMER fältet när väljaren har maxDate: 'today'. Ett Date-objekt bär
+        // med sig klockslaget, och maxDate normaliseras till midnatt — så "idag kl 15" ligger efter
+        // gränsen och avvisas tyst. Ett Y-m-d som sträng har inget klockslag att snäva över.
+        markPaidDatePicker.setDate(new Date().toLocaleDateString('sv-SE'), true);
     }
     markPaidModalInstance.show();
 }
@@ -4770,7 +4773,10 @@ function markAsPaid(registrationId) {
             maxDate: 'today'
         });
     } else {
-        markPaidDatePicker.setDate(new Date(), true);
+        // ⚠️ setDate(new Date()) TÖMMER fältet när väljaren har maxDate: 'today'. Ett Date-objekt bär
+        // med sig klockslaget, och maxDate normaliseras till midnatt — så "idag kl 15" ligger efter
+        // gränsen och avvisas tyst. Ett Y-m-d som sträng har inget klockslag att snäva över.
+        markPaidDatePicker.setDate(new Date().toLocaleDateString('sv-SE'), true);
     }
 
     markPaidModalInstance.show();

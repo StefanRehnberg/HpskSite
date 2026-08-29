@@ -1,4 +1,11 @@
-﻿@*
+﻿@using Umbraco.Cms.Core.Security
+@inject IMemberManager MemberManager
+@{
+    // Utkastet nedan sparas per medlem: en delad dator vid banan far aldrig visa nagon annans
+    // paborjade pass.
+    var draftMemberKey = (await MemberManager.GetCurrentMemberAsync())?.Id ?? "anon";
+}
+@*
     Training Score Entry Modal
     Modal form for members to log their training scores with button grid interface
 *@
@@ -21,6 +28,22 @@
             <div class="modal-body">
                 <form id="trainingScoreForm">
                     @Html.AntiForgeryToken()
+
+                    @* Aterupptaget utkast — visas bara nar vi faktiskt hamtat tillbaka ett paborjat pass *@
+                    <div id="trainingDraftBanner" class="alert alert-warning d-none">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <div>
+                                <i class="bi bi-life-preserver"></i>
+                                <strong>Vi hämtade tillbaka det du höll på med</strong>
+                                (sparat <span id="trainingDraftWhen"></span>).
+                                Serierna finns kvar här nedanför. Fortsätt där du var — och tryck
+                                <strong>Spara resultat</strong> längst ner när du är klar.
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="discardTrainingDraft()">
+                                Börja om med tomt pass
+                            </button>
+                        </div>
+                    </div>
 
                     @* Basic Information *@
                     <div class="row mb-3">
@@ -309,6 +332,17 @@
                             <strong id="summaryTotalScore">0</strong> poäng totalt |
                             X-antal: <strong id="summaryXCount">0</strong>
                         </p>
+                    </div>
+
+                    @* Knappsatsens SPARA sparar serien i telefonen, inte i loggen. Exakt den
+                       skillnaden missförstod en skytt 2026-08-29, så den står nu utskriven. *@
+                    <div class="alert alert-light border small d-flex align-items-start gap-2">
+                        <i class="bi bi-shield-check text-success"></i>
+                        <div>
+                            Det du matar in ligger kvar i telefonen om du blir avbruten — du kan stänga fönstret,
+                            svara i telefon och komma tillbaka. Passet hamnar i din logg först när du trycker
+                            <strong>Spara resultat</strong>.
+                        </div>
                     </div>
 
                     @* Optional Notes *@
@@ -649,6 +683,7 @@ function updateSeriesTotalSummary() {
 
     // Enable submit if at least one series has a score
     document.getElementById('submitBtn').disabled = count === 0;
+    saveTrainingDraft();
 }
 
 // Total-Only Functions
@@ -664,6 +699,7 @@ function updateTotalOnlyAverage() {
         document.getElementById('averageScore').textContent = '-';
         document.getElementById('submitBtn').disabled = true;
     }
+    saveTrainingDraft();
 }
 
 // Add shot to current series
@@ -807,6 +843,7 @@ function updateSeriesDisplay() {
     });
 
     updateEntryGuldserieBtn();
+    saveTrainingDraft();
 }
 
 // ── Märken: per-series "Spara som Guldserie / Snabbserie" ───────────────
@@ -887,6 +924,14 @@ function submitTrainingScore() {
     // Validate basic form fields
     if (!form.checkValidity()) {
         form.reportValidity();
+        return;
+    }
+
+    // ⚠️ Datumfältet är required, men flatpickr gör det readonly — och readonly-fält hoppas över av
+    // checkValidity(). Ett tomt datum tog sig därför hela vägen till servern och kom tillbaka som
+    // "Object reference not set to an instance of an object", mitt i ansiktet på en skytt vid banan.
+    if (!document.getElementById('trainingDate').value) {
+        alert('Välj vilket datum du sköt — tryck på datumrutan högst upp.');
         return;
     }
 
@@ -1039,6 +1084,8 @@ function submitTrainingScore() {
     .then(response => response.json())
     .then(result => {
         if (result.success) {
+            // Först nu är passet ur telefonen och nere i loggen.
+            clearTrainingDraft();
             alert('Resultatet har sparats!');
 
             // Close modal
@@ -1057,6 +1104,219 @@ function submitTrainingScore() {
         console.error('Error saving training score:', error);
         alert('Kunde inte spara träningsresultat: ' + (error.message || 'Försök igen.'));
     });
+}
+
+
+// ── Utkast: passet överlever att telefonen kastar ut sidan ─────────────────────────
+//
+// ⚠️ Serierna levde tidigare BARA i trainingEntryState. En medlem som tog ett telefonsamtal mitt i
+// passet (rapporterat 2026-08-29) kom tillbaka till en sida som iOS hade laddat om, och nio serier var
+// borta — samtidigt som knappsatsens "SPARA" hade lovat honom motsatsen. Det räckte dessutom att stänga
+// och öppna fönstret igen, eftersom show.bs.modal nollställer tillståndet.
+//
+// Nu skrivs ett utkast till localStorage vid varje ändring och läses tillbaka när fönstret öppnas.
+// Utkastet är inget kvitto på att något är sparat på servern — det rensas först när passet faktiskt
+// har lagts in i loggen.
+const TRAINING_DRAFT_KEY = 'pistolnu.traningslogg.utkast.v1.@draftMemberKey';
+const TRAINING_DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Sant medan vi själva fyller i fälten. Utan den här spärren skriver återställningen — och framför allt
+// nollställningen i show.bs.modal — över utkastet med tomma värden innan det hunnit läsas.
+let trainingDraftSuspended = false;
+
+const TRAINING_DRAFT_FIELDS = [
+    'trainingDate', 'shootingClass', 'modalDiscipline', 'trainingDescription', 'trainingNotes',
+    'competitionPlace', 'competitionShootingClass', 'competitionStdMedal', 'competitionName',
+    'competitionLocation', 'totalSeriesCount', 'totalScore', 'totalXCount'
+];
+
+// Bevisfilen (skärmdump/PDF) går inte att lagra här och följer därför inte med ett återupptaget utkast.
+function collectTrainingDraft() {
+    const fields = {};
+    TRAINING_DRAFT_FIELDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) fields[id] = el.value;
+    });
+
+    const seriesTotals = [];
+    document.querySelectorAll('.series-input-row').forEach(row => {
+        seriesTotals.push({
+            score: row.querySelector('.series-score-input')?.value || '',
+            x: row.querySelector('.series-x-input')?.value || ''
+        });
+    });
+
+    return {
+        savedAt: new Date().toISOString(),
+        method: document.querySelector('input[name="entryMethod"]:checked')?.value || 'ShotByShot',
+        isCompetition: document.getElementById('isCompetitionCheckbox')?.checked || false,
+        fields: fields,
+        seriesTotals: seriesTotals,
+        allSeries: trainingEntryState.allSeries,
+        currentSeriesIndex: trainingEntryState.currentSeriesIndex
+    };
+}
+
+// Ett utkast är värt att behålla bara om skytten hunnit lägga in något. Annars skulle banderollen dyka
+// upp varje gång fönstret öppnas, vilket bara är i vägen.
+function trainingDraftHasContent(draft) {
+    if (!draft) return false;
+    if ((draft.allSeries || []).some(serie => serie.shots && serie.shots.length > 0)) return true;
+    if ((draft.seriesTotals || []).some(serie => serie.score)) return true;
+    const fields = draft.fields || {};
+    if (fields.totalScore) return true;
+    if ((fields.trainingDescription || '').trim()) return true;
+    return false;
+}
+
+function saveTrainingDraft() {
+    if (trainingDraftSuspended) return;
+
+    // ⚠️ Bara när fönstret är öppet. Sidans egna init-anrop går också genom updaterarna härovanför, och
+    // ett tomt formulär vid sidladdning ska inte få säga något alls om ett påbörjat pass.
+    if (!document.getElementById('addTrainingScoreModal')?.classList.contains('show')) return;
+
+    try {
+        const draft = collectTrainingDraft();
+
+        // Ett tomt formulär skriver aldrig över — och raderar aldrig — ett utkast. Utkastet försvinner på
+        // exakt två sätt: passet sparas i loggen, eller skytten väljer "Börja om med tomt pass".
+        // Första försöket här rensade i stället vid tomt formulär, och då hann sidladdningen sopa bort
+        // precis det utkast som skulle räddas.
+        if (!trainingDraftHasContent(draft)) return;
+
+        localStorage.setItem(TRAINING_DRAFT_KEY, JSON.stringify(draft));
+    } catch (e) {
+        // Privat läge eller full lagring. Utkastet är en räddningsplanka, aldrig något som får stoppa
+        // inmatningen — skytten står på banan.
+    }
+}
+
+function readTrainingDraft() {
+    try {
+        const raw = localStorage.getItem(TRAINING_DRAFT_KEY);
+        if (!raw) return null;
+        const draft = JSON.parse(raw);
+        if (!trainingDraftHasContent(draft)) return null;
+
+        // Ett gammalt utkast är inte en räddning utan en fälla: det skulle tysta smyga in förra veckans
+        // serier i dagens pass.
+        const age = Date.now() - new Date(draft.savedAt).getTime();
+        if (!(age >= 0) || age > TRAINING_DRAFT_MAX_AGE_MS) {
+            localStorage.removeItem(TRAINING_DRAFT_KEY);
+            return null;
+        }
+        return draft;
+    } catch (e) {
+        return null;
+    }
+}
+
+function clearTrainingDraft() {
+    try { localStorage.removeItem(TRAINING_DRAFT_KEY); } catch (e) { }
+    document.getElementById('trainingDraftBanner')?.classList.add('d-none');
+}
+
+function trainingDraftSavedLabel(iso) {
+    const saved = new Date(iso);
+    if (isNaN(saved.getTime())) return '';
+    const time = saved.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    const isToday = saved.toDateString() === new Date().toDateString();
+    return isToday ? ('idag ' + time) : (saved.toLocaleDateString('sv-SE') + ' ' + time);
+}
+
+// Återställer ett utkast rakt av, utan att fråga. En skytt som just blivit avbruten ska hitta sina
+// serier där han lämnade dem, inte få en fråga att ta ställning till; banderollen berättar vad som hänt
+// och "Börja om med tomt pass" finns för den som inte ville ha det.
+function applyTrainingDraft(draft) {
+    if (!draft) return;
+
+    trainingDraftSuspended = true;
+    try {
+        const fields = draft.fields || {};
+        TRAINING_DRAFT_FIELDS.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && fields[id] !== undefined) el.value = fields[id];
+        });
+
+        // Flatpickr håller sitt eget valda datum — sätter man bara .value visar kalendern fel dag.
+        const dateEl = document.getElementById('trainingDate');
+        if (dateEl && dateEl._flatpickr && fields.trainingDate) {
+            dateEl._flatpickr.setDate(fields.trainingDate, false);
+        }
+
+        const competitionCheckbox = document.getElementById('isCompetitionCheckbox');
+        competitionCheckbox.checked = !!draft.isCompetition;
+        document.getElementById('competitionDetailsSection').style.display = competitionCheckbox.checked ? 'block' : 'none';
+        toggleMedalProofBlock();
+
+        if (Array.isArray(draft.allSeries) && draft.allSeries.length > 0) {
+            trainingEntryState = {
+                allSeries: draft.allSeries,
+                currentSeriesIndex: Math.min(draft.currentSeriesIndex || 0, draft.allSeries.length - 1)
+            };
+        }
+
+        // Serie-total-raderna byggs av addSeriesInput(), så de måste återskapas innan de kan fyllas i.
+        document.getElementById('seriesInputsContainer').innerHTML = '';
+        seriesInputs = [];
+        (draft.seriesTotals || []).forEach((serie, index) => {
+            addSeriesInput();
+            const row = document.querySelectorAll('.series-input-row')[index];
+            if (!row) return;
+            row.querySelector('.series-score-input').value = serie.score || '';
+            row.querySelector('.series-x-input').value = serie.x || '';
+        });
+
+        const methodRadio = document.querySelector(`input[name="entryMethod"][value="${draft.method}"]`);
+        if (methodRadio) methodRadio.checked = true;
+        switchEntryMethod(draft.method || 'ShotByShot');
+
+        updateSeriesDisplay();
+        updateNavigationButtons();
+        updateOverallSummary();
+    } finally {
+        trainingDraftSuspended = false;
+    }
+
+    const banner = document.getElementById('trainingDraftBanner');
+    if (banner) {
+        document.getElementById('trainingDraftWhen').textContent = trainingDraftSavedLabel(draft.savedAt);
+        banner.classList.remove('d-none');
+    }
+}
+
+function discardTrainingDraft() {
+    if (!confirm('Vill du börja om med ett tomt pass? Serierna du har lagt in försvinner då.')) return;
+
+    clearTrainingDraft();
+    trainingDraftSuspended = true;
+    try {
+        trainingEntryState = {
+            currentSeriesIndex: 0,
+            allSeries: [{ seriesNumber: 1, shots: [] }]
+        };
+        document.getElementById('trainingScoreForm').reset();
+        document.getElementById('seriesInputsContainer').innerHTML = '';
+        seriesInputs = [];
+        document.getElementById('totalSeriesCount').value = 6;
+        document.getElementById('isCompetitionCheckbox').checked = false;
+        document.getElementById('competitionDetailsSection').style.display = 'none';
+        document.getElementById('medalProofBlock').style.display = 'none';
+
+        // form.reset() tömmer datumfältet till sitt tomma HTML-värde — dagens datum måste sättas tillbaka.
+        const dateEl = document.getElementById('trainingDate');
+        if (dateEl && dateEl._flatpickr) dateEl._flatpickr.setDate(new Date().toLocaleDateString('sv-SE'), true);
+
+        document.getElementById('methodDetailed').checked = true;
+        switchEntryMethod('ShotByShot');
+        updateSeriesDisplay();
+        updateNavigationButtons();
+        updateOverallSummary();
+        document.getElementById('submitBtn').disabled = true;
+    } finally {
+        trainingDraftSuspended = false;
+    }
 }
 
 // Keyboard shortcuts
@@ -1114,6 +1374,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         modal.addEventListener('show.bs.modal', function() {
+            // Läs utkastet FÖRE nollställningen nedan. Nollställningen triggar sparningen, som annars
+            // skriver över just det utkast vi är på väg att återställa.
+            const pendingDraft = readTrainingDraft();
+            trainingDraftSuspended = true;
+
             // Reset state
             trainingEntryState = {
                 currentSeriesIndex: 0,
@@ -1121,7 +1386,10 @@ document.addEventListener('DOMContentLoaded', function() {
             };
 
             // Set default date to today
-            trainingDatePicker.setDate(new Date());
+            // ⚠️ setDate(new Date()) TÖMMER fältet när väljaren har maxDate: 'today'. Ett Date-objekt bär
+            // med sig klockslaget, och maxDate normaliseras till midnatt — så "idag kl 15" ligger efter
+            // gränsen och avvisas tyst. Ett Y-m-d som sträng har inget klockslag att snäva över.
+            trainingDatePicker.setDate(new Date().toLocaleDateString('sv-SE'), true);
 
             // Reset Total-Only fields to defaults
             document.getElementById('totalSeriesCount').value = 6;
@@ -1148,6 +1416,15 @@ document.addEventListener('DOMContentLoaded', function() {
             updateNavigationButtons();
             updateOverallSummary();
             document.getElementById('submitBtn').disabled = true;
+
+            document.getElementById('trainingDraftBanner')?.classList.add('d-none');
+            trainingDraftSuspended = false;
+            applyTrainingDraft(pendingDraft);
+        });
+
+        // Fritextfält, listor och metodvalet — knapparna täcks av updaterarna ovan.
+        ['input', 'change'].forEach(evt => {
+            document.getElementById('trainingScoreForm').addEventListener(evt, saveTrainingDraft);
         });
 
         modal.addEventListener('hidden.bs.modal', function() {
