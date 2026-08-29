@@ -204,7 +204,7 @@
                     </div>
                     <div class="d-flex align-items-center gap-2">
                         <span class="text-muted">
-                            <small><i class="bi bi-keyboard me-1"></i>Använd tangentbordet eller klicka på knapparna</small>
+                            <small><i class="bi bi-keyboard me-1"></i>Använd tangentbordet eller klicka på knapparna — <strong>0–9</strong>, <strong>+</strong> för 10, <strong>X</strong> eller <strong>*</strong></small>
                         </span>
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resultEntrySettingsModal" onclick="event.stopPropagation();" title="Inställningar">
                             <i class="bi bi-gear"></i>
@@ -465,7 +465,7 @@
                     </div>
                 </div>
 
-                <div class="text-muted small mt-2 text-center">Tangentbord: 0–9 / X för värde · Backspace för att ångra · Enter för Spara · Esc för Avbryt</div>
+                <div class="text-muted small mt-2 text-center">Tangentbord: 0–9 · + för 10 · X eller * · Backspace för att ångra · Enter för Spara · Esc för Avbryt</div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -1517,8 +1517,10 @@ function bindShootOffModalHandlersOnce() {
     document.addEventListener('keydown', (e) => {
         if (!modalEl.classList.contains('show')) return;
         const k = e.key;
+        // Same mapping as the main keypad above — a ten needs its own key.
         if (/^[0-9]$/.test(k)) { e.preventDefault(); appendShootOffShot(k); return; }
-        if (k === 'x' || k === 'X') { e.preventDefault(); appendShootOffShot('X'); return; }
+        if (k === '+' || k === '-') { e.preventDefault(); appendShootOffShot('10'); return; }
+        if (k === 'x' || k === 'X' || k === '*') { e.preventDefault(); appendShootOffShot('X'); return; }
         if (k === 'Backspace') { e.preventDefault(); backspaceShootOffShot(); return; }
         if (k === 'Enter') {
             e.preventDefault();
@@ -2670,11 +2672,19 @@ function handleShooterKeydown(e) {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) {
         return;
     }
-    // Handle number keys and X
+    // Handle number keys, ten and X
+    // ⚠️ Keep this mapping identical to the other three keypads (TrainingScoreEntry,
+    // TrainingMatchScoreEntry, and the särskjutning modal below). A ten has no digit of its own, so it
+    // needs a key of its own — requested 2026-08-29 by an organiser entering results at the desk on a
+    // laptop. '+' and '-' are both reachable with and without a numeric keypad; '*' is the numpad twin
+    // of 'x'.
     if (e.key >= '0' && e.key <= '9') {
         e.preventDefault();
         addShot(e.key);
-    } else if (e.key.toLowerCase() === 'x') {
+    } else if (e.key === '+' || e.key === '-') {
+        e.preventDefault();
+        addShot('10');
+    } else if (e.key.toLowerCase() === 'x' || e.key === '*') {
         e.preventDefault();
         addShot('X');
     } else if (e.key === 'Enter') {

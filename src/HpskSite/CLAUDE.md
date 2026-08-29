@@ -2738,6 +2738,49 @@ Club admins migrate a hand-written ledger of past series in bulk on the club **M
 - **Elit timing gate + editable Guldmärke year (2026-06-04):** now enforced — SHB 5.4.2 "Prov för elitmärke får avläggas första gången året efter det guldmärket erövrats." `AnalyzeSeriesProofAsync` for Elit requires a held Pistolskyttemärket Guld (no Guld → no Elit, also fixes prereq-not-enforced-on-award) and only counts series with `Year >= guldBadge.AchievedYear + 1`. Because that depends on an accurate Guld year, the **Guldmärke year is now captured at award and editable afterward**: `AwardBadge` already accepted `Year` (JS now sends it, prompting at Guld award, default current year); the Detaljer Guld row gained an **År** input next to the Nr input; `SetBadgeUniqueNumber` (+ `UniqueNumberRequest.Year`) now also sets `AchievedYear`. The Elit family summary shows a note ("Elitprov får avläggas först {guldYear+1} …") when the member holds Guld but the viewed year isn't past it. Luftpistol's brons prereq stays advisory (only Elit's gate is hard, since the timing rule needs the Guld year).
 - **Remove an auto-awarded family badge (2026-06-04):** awarded badges are persisted `MemberBadge` rows; the engine is add-only, so deleting the source series does NOT retract a badge (it just stops re-deriving). New `POST Marken/DeleteFamilyBadges {memberId, family}` (auth `CanSignOffForMemberAsync`) deletes all of a member's `MemberBadge` + `MemberBadgeQualification` rows for a family; wired to a **"Ta bort" trash button** on each row in the Detaljer "Andra märken" section (`deleteMarkenFamily` JS, functionary-only). Caveat surfaced in the confirm dialog: derived families re-materialize on next read if the underlying evidence still qualifies — remove the series/results first for a lasting removal. (Prior to this there was no UI for the long-existing `DeleteBadge` endpoint — removal required editing the `MemberBadge` table directly.)
 
+### Träningsloggen växte tomma serier · tangent för TIO · klubbsidan ur avatarmenyn (2026-08-29)
+
+Tre punkter ur klubbadminens andra mail. Endast vyer → **ingen ombyggnad krävs**, ingen SQL.
+
+**Träningsloggen lade till en tom serie på varje tryck.** Rapporterat som *"när man trycker på spara
+eller registrera guldserie läggs det till onödigt många serier … efter sista serien tyckte programmet
+att jag var på serie 17, med sjukt många blanka serier däremellan"*. `handleEnterSeries()` i
+`TrainingScoreEntry.cshtml` slutade i ett villkorslöst `addNewSeries()`. **Två oberoende mekanismer**,
+och en fix som bara tar den ena hade lämnat felet kvar:
+1. ENTER på en serie man navigerat TILLBAKA till lade ändå till en tom serie **i slutet**. Nu stegar
+   den bara framåt till den serie som redan finns; `addNewSeries()` vägrar dessutom skapa en andra tom
+   serie när det redan står en sist.
+2. **Tangentbordslyssnaren ägde tangenterna även när en dialog låg ovanpå.** Märkes-/QR-modalen öppnas
+   ÖVER träningsmodalen medan den senare behåller `.show`, så varje ENTER i QR-dialogen gick till
+   `handleEnterSeries()` bakom den — vilket är exakt varför användaren kopplade felet till "registrera
+   guldserie". Guarden är `document.querySelector('.modal.show:not(#addTrainingScoreModal)')`.
+   ⚠️ Samma guard lades i `TrainingMatchScoreEntry.cshtml`, som har samma konstruktion.
+
+**En tia hade ingen tangent.** Fyra knappsatser mappade 0–9 och `x` men saknade väg till 10 — och en
+etta ger 1, så tian gick bara att klicka fram. `+` och `-` ger nu 10, `*` är numpad-tvillingen till
+`x`. Båda är åtkomliga med och utan numeriskt tangentbord, vilket var hela poängen (arrangören matar
+in resultat på en laptop). Ändrat på **alla fyra**: `CompetitionResultsManagement` (huvudknappsatsen
+OCH särskjutningsmodalen), `TrainingScoreEntry`, `TrainingMatchScoreEntry`. ⚠️ De fyra mappningarna är
+kopior av varandra — håll dem lika, eller bryt ut dem.
+
+**Klubbsidan låg bakom avatarbilden.** Medlemmens klubbar och kretsar är **flyttade** från
+avatarmenyn till en egen toppmeny i `Master.cshtml` (`Min klubb` / `Mina klubbar` när det är fler).
+- **En meny, inte en direktlänk, även vid en enda klubb.** En medlem kan tillhöra fem klubbar, och då
+  finns ingen enskild "min klubb" att länka till; en rubrik som byter form efter antal är svårare att
+  lära sig än en som står still.
+- **Flyttade, inte kopierade** — två vägar till samma sida i samma navigering är sin egen förvirring.
+- Startsidans snabbknapp **Tävlingar** är ersatt av en knapp till huvudklubben (namngiven), med
+  Tävlingar kvar som fallback för utloggade och klubblösa så raden aldrig står med ett hål.
+- ⚠️ `clubUrl` resolvas i HomePage-vyns TOPPKODBLOCK. Ett `@@{ }` mitt i markupen där spräcker vyns
+  runtime-kompilering med ett meddelandelöst `UmbracoCompilationException` (står redan i filen).
+
+Verifierat 22/22 `hpsk-verify/vetlanda-batch-verify.mjs` (**A/B: 12 av 22 faller**). ⚠️ Sviten öppnar
+modalen på riktigt och asserterar att den bär `.show` — tangentbordslyssnaren avbryter annars, och en
+svit som bara anropar funktionerna direkt hade varit grön medan tangentbordshalvan var död. Det hände
+på första körningen. ⚠️ Knappsatsen på `/competitionmanagement` renderas bara för den som får
+administrera tävlingen; läst som vanlig medlem svarar sidan 200 utan knappsats, vilket ser ut som en
+saknad funktion.
+
 ### En guldserie finns på ETT ställe — tävlingsserier materialiseras (2026-08-28)
 
 Rapporterat av en klubbadmin, som två klagomål som visade sig vara samma fel sett från två sidor:

@@ -48,6 +48,7 @@
     var isLoggedIn = cm != null;
     var firstName = "";
     var clubName = "";
+    var clubUrl = "";
     var memberRegionCode = "";
     HpskSite.Services.HomeHubSummary? hub = null;
     HpskSite.Services.BoardHubSummary? board = null;
@@ -65,6 +66,10 @@
             {
                 clubName = ClubService.GetClubNameById(pcId) ?? "";
                 memberRegionCode = Umbraco.Content(pcId)?.Value<string>("regionalFederation") ?? "";
+                // Resolved here, in the top code block: a @@{ } block placed down in the markup breaks
+                // this view's runtime compilation with a messageless UmbracoCompilationException.
+                // Empty when the club node is unpublished or gone — the button then isn't offered.
+                clubUrl = Umbraco.Content(pcId)?.Url() ?? "";
             }
             hub = await HomeHub.GetSummaryAsync(member.Id);
             board = BoardHub.GetSummary(member.Id);
@@ -261,7 +266,18 @@ else
         <a class="btn btn-lg btn-primary" href="@(minSidaUrl)#logga"><i class="bi bi-plus-lg me-1"></i>Logga pass</a>
         <a class="btn btn-lg btn-warning fw-bold" href="@(minSidaUrl)#marken"><i class="bi bi-bullseye"></i> Jag har skjutit en GULDSERIE!</a>
         <a class="btn btn-lg btn-outline-secondary" href="@traningsmatchUrl"><i class="bi bi-bullseye me-1"></i>Träningsmatcher</a>
-        <a class="btn btn-lg btn-outline-secondary" href="@competitionsUrl"><i class="bi bi-trophy me-1"></i>Tävlingar</a>
+        @* Klubbknappen ersätter Tävlingar här (2026-08-29). Tävlingar har en egen toppmeny och finns
+           dessutom i korten ovan, medan vägen till den egna klubbsidan var gömd bakom avatarbilden —
+           det var precis det en medlem rapporterade. Faller tillbaka på Tävlingar för den som inte är
+           inloggad eller saknar klubb, så raden aldrig står med ett hål. *@
+        @if (!string.IsNullOrEmpty(clubUrl))
+        {
+            <a class="btn btn-lg btn-outline-secondary" href="@clubUrl"><i class="bi bi-building me-1"></i>@(string.IsNullOrEmpty(clubName) ? "Min klubb" : clubName)</a>
+        }
+        else
+        {
+            <a class="btn btn-lg btn-outline-secondary" href="@competitionsUrl"><i class="bi bi-trophy me-1"></i>Tävlingar</a>
+        }
     </div>
 
     @*

@@ -242,7 +242,7 @@
                             </div>
 
                             <div class="form-text mt-2">
-                                <i class="bi bi-keyboard"></i> Tangentbord: 0-9, X = skott | Enter = spara serie | Esc = rensa
+                                <i class="bi bi-keyboard"></i> Tangentbord: 0–9 och + för 10, X eller * | Enter = spara serie | Esc = rensa
                             </div>
                         </div>
                     </div>
@@ -691,7 +691,13 @@ function clearCurrentSeries() {
     updateSeriesDisplay();
 }
 
-// Handle ENTER - save current series
+// Handle ENTER - commit the current series and move on
+//
+// ⚠️ This used to end in an unconditional addNewSeries(), which is how a shooter ended up "på serie 17
+// med sjukt många blanka serier däremellan" (reported 2026-08-29). Two ways to trigger it: press ENTER
+// while standing on an ALREADY completed series further back — a new empty series was appended at the
+// END every time — and press ENTER while the Märken QR dialog sits on top, which the keyboard handler
+// did not exclude. Committing a series must never create more than the one empty series you shoot next.
 function handleEnterSeries() {
     const currentSeries = trainingEntryState.allSeries[trainingEntryState.currentSeriesIndex];
 
@@ -704,12 +710,30 @@ function handleEnterSeries() {
     updateOverallSummary();
     document.getElementById('submitBtn').disabled = false;
 
-    // Auto-add new series and navigate to it
+    // Standing on a series further back: just step forward to the one that already exists. Appending
+    // here is what produced the blanks — the shooter is revisiting, not shooting a new series.
+    const isLast = trainingEntryState.currentSeriesIndex === trainingEntryState.allSeries.length - 1;
+    if (!isLast) {
+        navigateSeries(1);
+        return;
+    }
+
     addNewSeries();
 }
 
-// Add new series
+// Add new series — at most ONE empty series at the end, ever.
 function addNewSeries() {
+    // An empty trailing series is already "the next one to shoot". Adding a second means the shooter
+    // has to navigate past a blank that nobody asked for, and the count that drives the series number
+    // has already drifted.
+    const last = trainingEntryState.allSeries[trainingEntryState.allSeries.length - 1];
+    if (last && last.shots.length === 0) {
+        trainingEntryState.currentSeriesIndex = trainingEntryState.allSeries.length - 1;
+        updateSeriesDisplay();
+        updateNavigationButtons();
+        return;
+    }
+
     const newSeries = {
         seriesNumber: trainingEntryState.allSeries.length + 1,
         shots: []
@@ -1040,6 +1064,12 @@ document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('addTrainingScoreModal');
     if (!modal.classList.contains('show')) return; // Only when modal is open
 
+    // ⚠️ Another dialog on top owns the keyboard. The Märken submit/QR modal opens over this one and
+    // this modal stays .show — so without the check, every ENTER pressed in that dialog reached
+    // handleEnterSeries() and appended a series to the training log behind it. That is half of the
+    // "onödigt många serier" a member reported on 2026-08-29.
+    if (document.querySelector('.modal.show:not(#addTrainingScoreModal)')) return;
+
     // Prevent if typing in text fields
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
         if (e.key === 'Escape') {
@@ -1052,7 +1082,14 @@ document.addEventListener('keydown', (e) => {
     if (e.key >= '0' && e.key <= '9') {
         e.preventDefault();
         addShot(e.key);
-    } else if (e.key.toLowerCase() === 'x') {
+    } else if (e.key === '+' || e.key === '-') {
+        // A ten has no digit of its own, so it needs a key of its own. + and - are both reachable on a
+        // numeric keypad AND on the main row of a laptop keyboard, which is the case that prompted this
+        // (requested 2026-08-29: entering results at the desk, by keyboard, sometimes without a numpad).
+        e.preventDefault();
+        addShot('10');
+    } else if (e.key.toLowerCase() === 'x' || e.key === '*') {
+        // '*' is the numpad twin of 'x' — same reason.
         e.preventDefault();
         addShot('X');
     } else if (e.key === 'Enter') {

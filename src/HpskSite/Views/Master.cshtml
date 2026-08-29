@@ -541,6 +541,39 @@
                                                          (clubsPage != null && clubsPage.IsAncestorOrSelf(Model)) ||
                                                          regionalPages.Any(r => r.IsAncestorOrSelf(Model));
                         }
+                        @* ── Min klubb ──────────────────────────────────────────────────────────────
+                           En medlem rapporterade 2026-08-29 att klubbsidan var gömd under den egna bilden:
+                           "inte svårt i sig men kanske inte intuitivt för många nya som inte gräver runt".
+                           Den egna klubben — och den egna kretsen — hör hemma i navigeringen, inte i en
+                           kontomeny. Flyttat hit FRÅN avatarmenyn, inte kopierat.
+
+                           ⚠️ Menyn listar ALLA medlemmens klubbar. En medlem kan tillhöra fem, och då finns
+                           ingen enskild "min klubb" att länka till — därför en meny och inte en direktlänk,
+                           även när klubbarna är just en. Rubriken är stabil oavsett antal. *@
+                        @if (isLoggedIn && (memberClubs.Count > 0 || memberRegionPages.Count > 0))
+                        {
+                            var myClubActive = memberClubs.Any(c => Model.Url().StartsWith(c.ClubUrl, StringComparison.OrdinalIgnoreCase))
+                                            || memberRegionPages.Any(r => Model.Url().StartsWith(r.RegionUrl, StringComparison.OrdinalIgnoreCase));
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle @(myClubActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
+                                    <i class="bi bi-building me-1"></i>@(memberClubs.Count > 1 ? "Mina klubbar" : "Min klubb")
+                                </a>
+                                <ul class="dropdown-menu">
+                                    @foreach (var club in memberClubs)
+                                    {
+                                        <li><a class="dropdown-item" href="@club.ClubUrl"><i class="bi bi-building me-2"></i>@club.Name</a></li>
+                                    }
+                                    @if (memberClubs.Count > 0 && memberRegionPages.Count > 0)
+                                    {
+                                        <li><hr class="dropdown-divider"></li>
+                                    }
+                                    @foreach (var region in memberRegionPages)
+                                    {
+                                        <li><a class="dropdown-item" href="@region.RegionUrl"><i class="bi bi-geo-alt me-2"></i>@region.Name</a></li>
+                                    }
+                                </ul>
+                            </li>
+                        }
                         @if (regionalPages.Any())
                         {
                             <!-- Regional Navigation Dropdown (when regional structure exists) -->
@@ -628,20 +661,11 @@
                                     {
                                         <li><a class="dropdown-item" href="/styrelse"><i class="bi bi-clipboard-check"></i> Styrelse</a></li>
                                     }
-                                    @if (memberClubs.Count > 0)
-                                    {
-                                        foreach (var club in memberClubs)
-                                        {
-                                            <li><a class="dropdown-item" href="@club.ClubUrl"><i class="bi bi-building"></i> @club.Name</a></li>
-                                        }
-                                    }
-                                    @if (memberRegionPages.Count > 0)
-                                    {
-                                        foreach (var region in memberRegionPages)
-                                        {
-                                            <li><a class="dropdown-item" href="@region.RegionUrl"><i class="bi bi-geo-alt"></i> @region.Name</a></li>
-                                        }
-                                    }
+                                    @* Klubbarna och kretsarna låg här tidigare. De är FLYTTADE till en egen
+                                       toppmeny ("Min klubb", se navigeringen ovan) — en medlem rapporterade
+                                       2026-08-29 att vägen till den egna klubbsidan var gömd bakom den egna
+                                       bilden och inte gick att gissa sig till. Flyttade, inte kopierade: två
+                                       vägar till samma sida i samma navigering är sin egen förvirring. *@
                                     @if (hasAdminAccess)
                                     {
                                         var adminPageUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "adminPage")?.Url() ?? "/admin";
