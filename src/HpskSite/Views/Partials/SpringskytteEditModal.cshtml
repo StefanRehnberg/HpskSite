@@ -37,6 +37,39 @@
                     </div>
 
                     <div class="mb-3">
+                        <label for="springEdit_competitionName" class="form-label">Tavlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="springEdit_competitionName" name="competitionName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="springEdit_description" name="description" rows="4"></textarea>
+                    </div>
+
+                    <hr>
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-geo-alt me-1"></i>Plats &amp; skjutbana</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="springEdit_venue" name="venue" required>
+                    </div>
+
+                    @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map.
+                       Saves via CompetitionEdit/SaveCompetition (type-agnostic rangeId handling). *@
+                    @await Html.PartialAsync("_CompetitionRangePicker", "springEdit_")
+
+                    <hr>
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-diagram-3 me-1"></i>Omfattning &amp; serie</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
                         <label for="springEdit_competitionScope" class="form-label">Omfattning</label>
                         <select class="form-select" id="springEdit_competitionScope" name="competitionScope">
                             <option value="">-- Valj omfattning --</option>
@@ -46,6 +79,21 @@
                             <option value="Klubbmasterskap">Klubbmasterskap</option>
                         </select>
                         <small class="form-text text-muted">Avgor hur standardmedaljer beraknas</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_seriesId" class="form-label">Tavlingsserie (valfritt)</label>
+                        <select class="form-select" id="springEdit_seriesId" name="seriesId">
+                            <option value="">Ingen serie</option>
+                        </select>
+                        <small class="form-text text-muted">Valj serie som tavlingen ingar i</small>
+                    </div>
+
+                    <hr>
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-signpost-split me-1"></i>Deltävling</h6>
+                        </div>
                     </div>
 
                     <div class="mb-3">
@@ -78,32 +126,6 @@
                         <small class="form-text text-muted mt-2">Avgiften gäller bara skyttar som kryssar i deltävlingen vid anmälan. 0 kr = ingen extra avgift.</small>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="springEdit_seriesId" class="form-label">Tavlingsserie (valfritt)</label>
-                        <select class="form-select" id="springEdit_seriesId" name="seriesId">
-                            <option value="">Ingen serie</option>
-                        </select>
-                        <small class="form-text text-muted">Valj serie som tavlingen ingar i</small>
-                    </div>
-
-                    <div class="mb-3">
-                        <label for="springEdit_competitionName" class="form-label">Tavlingsnamn <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="springEdit_competitionName" name="competitionName" required>
-                    </div>
-
-                    <div class="mb-3">
-                        <label for="springEdit_description" class="form-label">Beskrivning</label>
-                        <textarea class="form-control" id="springEdit_description" name="description" rows="4"></textarea>
-                    </div>
-
-                    <div class="mb-3">
-                        <label for="springEdit_venue" class="form-label">Plats <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="springEdit_venue" name="venue" required>
-                    </div>
-
-                    @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map.
-                       Saves via CompetitionEdit/SaveCompetition (type-agnostic rangeId handling). *@
-                    @await Html.PartialAsync("_CompetitionRangePicker", "springEdit_")
 
                     <hr>
 
