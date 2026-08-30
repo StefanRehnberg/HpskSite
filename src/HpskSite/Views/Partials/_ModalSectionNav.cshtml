@@ -61,6 +61,9 @@
         }
         /* Rubriken inne i avsnittet är överflödig när fliken redan bär namnet. */
         .hpsk-section.hpsk-tabbed > :is(h6, .row:first-child > .col-12 > h6) { display: none; }
+        /* Rubriken inne i avsnittet ar overflodig nar fliken redan bar namnet. */
+        .hpsk-section.hpsk-tabbed > h6,
+        .hpsk-section.hpsk-tabbed > .row:first-child h6 { display: none; }
         .hpsk-section[hidden] { display: none !important; }
         /* Datumvaljaren ar flyttad till dokumentets body (se CompetitionEditModal)
            sa den inte kan klippas av modalkroppens overflow. Da maste den ocksa ligga

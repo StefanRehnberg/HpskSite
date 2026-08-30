@@ -291,9 +291,24 @@
         };
         var overlay = byId('classSelectionOverlay');
         if (!overlay) return;
-        hpskFilterClassSections(owner.type);
+
+        // ⚠ ÅTERSTÄLL FÖRE FILTRERA. Filtret skriver tillbaka "det som fortfarande är
+        // ikryssat" till ägarens fält — körs det först är ingenting ikryssat än, och
+        // då TÖMS fältet. Uppmätt: en tävling med tio klasser öppnade väljaren och
+        // visade "Valda: 0 klasser", och hade sparats utan klasser.
+        // Rätt ordning: kryssa i det som är sparat, låt sedan filtret rensa bort det
+        // som den valda grenen inte har.
         hpskRestoreClassSelections();
+        hpskFilterClassSections(owner.type);
         hpskUpdateOverlayClassCount();
+
+        // Rubriken kommer fran guiden ("Steg 4: ..."), vilket ar fel ord i en
+        // redigering. Agaren far satta den.
+        var heading = overlay.querySelector('.wizard-overlay-header button');
+        if (heading) {
+            heading.innerHTML = '<i class="bi bi-arrow-left me-1"></i>' +
+                (opts.title || 'Välj skytteklasser');
+        }
         overlay.classList.add('active');
         document.addEventListener('keydown', hpskPickerEsc);
         overlay.addEventListener('click', hpskPickerBackdrop);
