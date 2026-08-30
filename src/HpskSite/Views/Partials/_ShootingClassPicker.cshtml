@@ -1,0 +1,427 @@
+@*
+    Skytteklassväljaren — DELAD mellan tävlingsguiden och redigeringsmodalen.
+
+    VARFÖR: guiden hade en riktig väljare (grupperade sektioner, "välj alla" per
+    grupp, sökfilter, räknare) medan redigeringen hade en platt kryssrutelista i en
+    scrollande ruta. Två olika sätt att göra samma sak, och det som mötte arrangören
+    vid en ändring var det sämre. Nu är det samma väljare på båda ställena.
+
+    MARKUPEN ÄR ORÖRD ur guiden — samma id:n, samma sektioner — så guidens beteende
+    är oförändrat. Det enda som generaliserats är de tre punkter som läste och skrev
+    guidens egna fält; de tar nu en ÄGARE.
+
+    ⚠ Överlägget är en SINGLETON på sidan (id `classSelectionOverlay`). Partialen är
+    guardad mot dubbelinkludering, och båda modalerna pekar på samma element. Det är
+    avsiktligt: två överlägg med samma id vore värre än att dela ett.
+
+    Ägaren sätts när väljaren öppnas:
+        hpskOpenClassPicker({
+            hiddenId: 'shootingClassIds',   // fältet som bär "C1,C2"
+            cardPrefix: 'edit_',            // prefix för sammanfattningskortet
+            type: 'Precision'               // avgör vilka sektioner som visas
+        });
+
+    Sammanfattningskortet ritas av _ShootingClassCard.cshtml.
+
+    ⚠ CSS:en nedan är en KOPIA av guidens. I guiden ligger reglerna sammanflätade med
+    dess egna i delade media queries, och en kirurgisk urklippning där hade riskerat
+    guidens layout. Kopian gör partialen självförsörjande på CompetitionManagement,
+    där guiden inte finns alls. Reglerna är identiska — städa ihop dem nästa gång
+    guidens CSS ändå ska röras.
+*@
+@{
+    // ⚠ ViewData duger INTE som guard har. Html.PartialAsync ger varje partial en
+    // KOPIA av foralderns ViewData, sa tva syskonpartialer (guiden och redigeringen)
+    // ser aldrig varandras flagga — resultatet blev tva overlagg med samma id och 96
+    // kryssrutor i stallet for 48. Context.Items lever over hela requesten.
+    var _hpskAlreadyRendered = Context.Items.ContainsKey("_hpskClassPickerLoaded");
+    if (!_hpskAlreadyRendered) { Context.Items["_hpskClassPickerLoaded"] = true; }
+}
+@if (!_hpskAlreadyRendered)
+{
+
+<style>
+.wizard-overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%;
+    max-width: 900px;
+    max-height: 90vh;
+    background-color: var(--bs-body-bg);
+    z-index: 1060;
+    display: none;
+    flex-direction: column;
+    border-radius: .5rem;
+    box-shadow: 0 1rem 3rem rgba(0,0,0,.4);
+}
+.wizard-overlay.active { display: flex; }
+.wizard-overlay-header {
+    background-color: var(--bs-primary);
+    color: white;
+    flex-shrink: 0;
+    border-radius: .5rem .5rem 0 0;
+}
+.wizard-overlay-body { flex: 1; overflow-y: auto; padding: 1rem; }
+.wizard-overlay-footer {
+    padding: 1rem;
+    border-top: 1px solid var(--bs-border-color);
+    background-color: var(--bs-tertiary-bg);
+    flex-shrink: 0;
+    border-radius: 0 0 .5rem .5rem;
+}
+@@media (max-width: 767px) {
+    .wizard-overlay {
+        top: 0; left: 0; transform: none;
+        width: 100%; max-width: none; height: 100%; max-height: none;
+        border-radius: 0;
+    }
+    .wizard-overlay-header, .wizard-overlay-footer { border-radius: 0; }
+}
+</style>
+
+<div class="wizard-overlay" id="classSelectionOverlay">
+    <div class="wizard-overlay-header">
+        <button type="button" class="btn btn-link text-white" onclick="closeClassSelectionOverlay()">
+            <i class="bi bi-arrow-left me-1"></i>Steg 4: Välj Skytteklasser
+        </button>
+    </div>
+    <div class="wizard-overlay-body">
+        <!-- A-klasser -->
+        <div class="class-section mb-3" id="classSection_A">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">A-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A')">
+                    <span class="select-all-a-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A1" id="class_A1"><label class="form-check-label" for="class_A1">A1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A2" id="class_A2"><label class="form-check-label" for="class_A2">A2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A3" id="class_A3"><label class="form-check-label" for="class_A3">A3</label></div></div>
+            </div>
+        </div>
+
+        <!-- A Opt-klasser (own weapon class) -->
+        <div class="class-section mb-3" id="classSection_A_Opt">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">A Opt-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_Opt')">
+                    <span class="select-all-a_opt-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_Opt" type="checkbox" value="A_opt_1" id="class_A_opt_1"><label class="form-check-label" for="class_A_opt_1">A Opt 1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_Opt" type="checkbox" value="A_opt_2" id="class_A_opt_2"><label class="form-check-label" for="class_A_opt_2">A Opt 2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_Opt" type="checkbox" value="A_opt_3" id="class_A_opt_3"><label class="form-check-label" for="class_A_opt_3">A Opt 3</label></div></div>
+            </div>
+        </div>
+
+        <!-- AM-klasser (own weapon class — militära pistoler av äldre modell) -->
+        <div class="class-section mb-3" id="classSection_A_M">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">AM-klasser <small class="text-muted">(militära pistoler av äldre modell)</small></h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_M')">
+                    <span class="select-all-a_m-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_M" type="checkbox" value="A_m_1" id="class_A_m_1"><label class="form-check-label" for="class_A_m_1">AM1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_M" type="checkbox" value="A_m_2" id="class_A_m_2"><label class="form-check-label" for="class_A_m_2">AM2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_M" type="checkbox" value="A_m_3" id="class_A_m_3"><label class="form-check-label" for="class_A_m_3">AM3</label></div></div>
+            </div>
+        </div>
+
+        <!-- AP-klasser (own weapon class — pistoler av fickmodell) -->
+        <div class="class-section mb-3" id="classSection_A_P">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">AP-klasser <small class="text-muted">(pistoler av fickmodell)</small></h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_P')">
+                    <span class="select-all-a_p-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_P" type="checkbox" value="A_p_1" id="class_A_p_1"><label class="form-check-label" for="class_A_p_1">AP1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_P" type="checkbox" value="A_p_2" id="class_A_p_2"><label class="form-check-label" for="class_A_p_2">AP2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_P" type="checkbox" value="A_p_3" id="class_A_p_3"><label class="form-check-label" for="class_A_p_3">AP3</label></div></div>
+            </div>
+        </div>
+
+        <!-- AG-klasser (own weapon class — moderna tjänstepistoler) -->
+        <div class="class-section mb-3" id="classSection_A_G">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">AG-klasser <small class="text-muted">(moderna tjänstepistoler)</small></h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_G')">
+                    <span class="select-all-a_g-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_G" type="checkbox" value="A_g_1" id="class_A_g_1"><label class="form-check-label" for="class_A_g_1">AG1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_G" type="checkbox" value="A_g_2" id="class_A_g_2"><label class="form-check-label" for="class_A_g_2">AG2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_G" type="checkbox" value="A_g_3" id="class_A_g_3"><label class="form-check-label" for="class_A_g_3">AG3</label></div></div>
+            </div>
+        </div>
+
+        <!-- B-klasser -->
+        <div class="class-section mb-3" id="classSection_B">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">B-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('B')">
+                    <span class="select-all-b-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-B" type="checkbox" value="B1" id="class_B1"><label class="form-check-label" for="class_B1">B1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-B" type="checkbox" value="B2" id="class_B2"><label class="form-check-label" for="class_B2">B2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-B" type="checkbox" value="B3" id="class_B3"><label class="form-check-label" for="class_B3">B3</label></div></div>
+            </div>
+        </div>
+
+        <!-- C-klasser -->
+        <div class="class-section mb-3" id="classSection_C">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">C-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('C')">
+                    <span class="select-all-c-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C1" id="class_C1"><label class="form-check-label" for="class_C1">C1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C2" id="class_C2"><label class="form-check-label" for="class_C2">C2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C3" id="class_C3"><label class="form-check-label" for="class_C3">C3</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C_Vet_Y" id="class_C_Vet_Y"><label class="form-check-label" for="class_C_Vet_Y">C Vet Y</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C_Vet_A" id="class_C_Vet_A"><label class="form-check-label" for="class_C_Vet_A">C Vet Ä</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C_Jun" id="class_C_Jun"><label class="form-check-label" for="class_C_Jun">C Jun</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C1_Dam" id="class_C1_Dam"><label class="form-check-label" for="class_C1_Dam">C1 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C2_Dam" id="class_C2_Dam"><label class="form-check-label" for="class_C2_Dam">C2 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C3_Dam" id="class_C3_Dam"><label class="form-check-label" for="class_C3_Dam">C3 Dam</label></div></div>
+            </div>
+        </div>
+
+        <!-- R-klasser -->
+        <div class="class-section mb-3" id="classSection_R">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">R-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('R')">
+                    <span class="select-all-r-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-R" type="checkbox" value="R1" id="class_R1"><label class="form-check-label" for="class_R1">R1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-R" type="checkbox" value="R2" id="class_R2"><label class="form-check-label" for="class_R2">R2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-R" type="checkbox" value="R3" id="class_R3"><label class="form-check-label" for="class_R3">R3</label></div></div>
+            </div>
+        </div>
+
+        <!-- L-klasser -->
+        <div class="class-section mb-3" id="classSection_L">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">L-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('L')">
+                    <span class="select-all-l-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L1" id="class_L1"><label class="form-check-label" for="class_L1">L1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L2" id="class_L2"><label class="form-check-label" for="class_L2">L2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L3" id="class_L3"><label class="form-check-label" for="class_L3">L3</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L_Vet_Y" id="class_L_Vet_Y"><label class="form-check-label" for="class_L_Vet_Y">L Vet Y</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L_Vet_A" id="class_L_Vet_A"><label class="form-check-label" for="class_L_Vet_A">L Vet Ä</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L_Jun" id="class_L_Jun"><label class="form-check-label" for="class_L_Jun">L Jun</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L1_Dam" id="class_L1_Dam"><label class="form-check-label" for="class_L1_Dam">L1 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L2_Dam" id="class_L2_Dam"><label class="form-check-label" for="class_L2_Dam">L2 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L3_Dam" id="class_L3_Dam"><label class="form-check-label" for="class_L3_Dam">L3 Dam</label></div></div>
+            </div>
+        </div>
+
+        <!-- M-klasser -->
+        <div class="class-section mb-3" id="classSection_M">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">M-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('M')">
+                    <span class="select-all-m-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M1" id="class_M1"><label class="form-check-label" for="class_M1">M1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M2" id="class_M2"><label class="form-check-label" for="class_M2">M2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M3" id="class_M3"><label class="form-check-label" for="class_M3">M3</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M4" id="class_M4"><label class="form-check-label" for="class_M4">M4</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M5" id="class_M5"><label class="form-check-label" for="class_M5">M5</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M6" id="class_M6"><label class="form-check-label" for="class_M6">M6</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M7" id="class_M7"><label class="form-check-label" for="class_M7">M7</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M8" id="class_M8"><label class="form-check-label" for="class_M8">M8</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M9" id="class_M9"><label class="form-check-label" for="class_M9">M9</label></div></div>
+            </div>
+        </div>
+    </div>
+    <div class="wizard-overlay-footer">
+        <div class="text-center mb-2">
+            <strong>Valda: <span id="overlay_classCount">0</span> klasser</strong><br>
+            <small id="overlay_classList" class="text-muted"></small>
+        </div>
+        <button type="button" class="btn btn-primary btn-lg w-100" onclick="confirmClassSelection()" id="overlay_btnConfirm" disabled>
+            Klar, fortsätt <i class="bi bi-arrow-right ms-1"></i>
+        </button>
+    </div>
+</div>
+
+<script>
+// Ägaren av väljaren. Sätts av den som öppnar den; guiden och redigeringen delar
+// samma overlägg men skriver till OLIKA dolda fält.
+//
+// ⚠ Redigeringens fält MÅSTE heta `shootingClassIds` (utan prefix) — det är
+// `name`-attributet som hamnar i FormData och därmed i payloaden till
+// SaveCompetition. Att prefixa det hade tyst ändrat vad som sparas.
+(function () {
+    if (window.hpskOpenClassPicker) return;
+
+    var owner = { hiddenId: 'wizard_shootingClassIds', cardPrefix: 'wizard_', type: '' };
+    window.hpskClassPickerOwner = function () { return owner; };
+
+    function byId(id) { return document.getElementById(id); }
+
+    window.hpskOpenClassPicker = function (opts) {
+        opts = opts || {};
+        owner = {
+            hiddenId: opts.hiddenId || 'wizard_shootingClassIds',
+            cardPrefix: opts.cardPrefix || 'wizard_',
+            type: opts.type || ''
+        };
+        var overlay = byId('classSelectionOverlay');
+        if (!overlay) return;
+        hpskFilterClassSections(owner.type);
+        hpskRestoreClassSelections();
+        hpskUpdateOverlayClassCount();
+        overlay.classList.add('active');
+        document.addEventListener('keydown', hpskPickerEsc);
+        overlay.addEventListener('click', hpskPickerBackdrop);
+    };
+
+    window.hpskCloseClassPicker = function () {
+        var overlay = byId('classSelectionOverlay');
+        if (!overlay) return;
+        overlay.classList.remove('active');
+        document.removeEventListener('keydown', hpskPickerEsc);
+        overlay.removeEventListener('click', hpskPickerBackdrop);
+    };
+
+    function hpskPickerEsc(e) { if (e.key === 'Escape') window.hpskCloseClassPicker(); }
+    function hpskPickerBackdrop(e) {
+        if (e.target.id === 'classSelectionOverlay') window.hpskCloseClassPicker();
+    }
+
+    // Visar bara de sektioner som grenen faktiskt har. MagnumPrecision kor bara
+    // M-klasser; Springskytte har inga av de har alls (den har vapen- och
+    // aldersklasser i sitt eget block pa kortet).
+    window.hpskFilterClassSections = function (typeId) {
+        var allSections = ['A', 'B', 'C', 'R', 'L', 'M'];
+        var allowed = (typeId === 'MagnumPrecision') ? ['M'] : allSections;
+        allSections.forEach(function (s) {
+            var el = byId('classSection_' + s);
+            if (!el) return;
+            var ok = allowed.indexOf(s) !== -1;
+            el.style.display = ok ? '' : 'none';
+            if (!ok) {
+                el.querySelectorAll('.class-checkbox:checked').forEach(function (cb) { cb.checked = false; });
+            }
+        });
+
+        // ⚠ Skriv TILLBAKA det som fortfarande ar ikryssat. Filtret kan ha bockat ur
+        // klasser som inte finns i grenen, och utan den har raden skulle det dolda
+        // faltet fortsatta bara dem — alltsa spara klasser som inte gar att valja.
+        // Originalet i guiden gjorde detta mot sitt EGET falt; har gar det till agarens.
+        var hidden = byId(owner.hiddenId);
+        if (hidden) {
+            var still = Array.prototype.slice
+                .call(document.querySelectorAll('.class-checkbox:checked'))
+                .map(function (cb) { return cb.value; });
+            hidden.value = still.join(',');
+        }
+        window.hpskUpdateClassCard(owner.cardPrefix, owner.hiddenId);
+        window.hpskUpdateOverlayClassCount();
+    };
+
+    window.hpskRestoreClassSelections = function () {
+        var hidden = byId(owner.hiddenId);
+        var current = hidden ? (hidden.value || '') : '';
+        var selected = current ? current.split(',').map(function (s) { return s.trim(); }) : [];
+        document.querySelectorAll('.class-checkbox').forEach(function (cb) {
+            cb.checked = selected.indexOf(cb.value) !== -1;
+        });
+    };
+
+    window.hpskConfirmClassSelection = function () {
+        var selected = Array.prototype.slice
+            .call(document.querySelectorAll('.class-checkbox:checked'))
+            .map(function (cb) { return cb.value; });
+        if (selected.length === 0) { alert('Välj minst en klass'); return; }
+        var hidden = byId(owner.hiddenId);
+        if (hidden) {
+            hidden.value = selected.join(',');
+            // Redigeringens egen kod lyssnar pa andringar i faltet.
+            hidden.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        window.hpskUpdateClassCard(owner.cardPrefix, owner.hiddenId);
+        window.hpskCloseClassPicker();
+    };
+
+    window.hpskUpdateClassCard = function (prefix, hiddenId) {
+        var hidden = byId(hiddenId);
+        var ids = hidden ? (hidden.value || '') : '';
+        var arr = ids ? ids.split(',').filter(function (x) { return x.trim(); }) : [];
+        var no = byId(prefix + 'noClassesText');
+        var disp = byId(prefix + 'selectedClassesDisplay');
+        var cnt = byId(prefix + 'classCount');
+        var list = byId(prefix + 'classList');
+        var btn = byId(prefix + 'selectClassesButtonText');
+        if (!no || !disp) return;
+        if (arr.length > 0) {
+            no.style.display = 'none';
+            disp.classList.remove('d-none');
+            if (cnt) cnt.textContent = arr.length;
+            if (list) list.textContent = arr.join(', ');
+            if (btn) btn.textContent = 'Ändra val';
+        } else {
+            no.style.display = 'block';
+            disp.classList.add('d-none');
+            if (btn) btn.textContent = 'Välj skytteklasser';
+        }
+    };
+
+    window.hpskUpdateOverlayClassCount = function () {
+        var selected = document.querySelectorAll('.class-checkbox:checked');
+        var count = selected.length;
+        var el = byId('overlay_classCount');
+        if (el) el.textContent = count;
+        var listEl = byId('overlay_classList');
+        if (listEl) {
+            listEl.textContent = Array.prototype.slice.call(selected)
+                .map(function (cb) { return cb.value; }).join(', ');
+        }
+        var btn = byId('overlay_btnConfirm');
+        if (btn) btn.disabled = count === 0;
+    };
+
+    window.hpskToggleClassSection = function (section) {
+        var el = byId('classSection_' + section);
+        if (!el) return;
+        var boxes = el.querySelectorAll('.class-checkbox');
+        var allOn = Array.prototype.slice.call(boxes).every(function (cb) { return cb.checked; });
+        boxes.forEach(function (cb) { cb.checked = !allOn; });
+        window.hpskUpdateOverlayClassCount();
+    };
+
+    // ⚠ Guidens gamla funktionsnamn behalls som tunna omslag. Overlaggets markup ar
+    // flyttad ORORD och dess onclick-attribut anropar dem — och guidens ovriga JS
+    // gor det ocksa. Att doPa om markupen samtidigt hade gjort en redan stor
+    // andring omojlig att A/B:a mot baseline.
+    if (!window.closeClassSelectionOverlay) window.closeClassSelectionOverlay = window.hpskCloseClassPicker;
+    if (!window.confirmClassSelection) window.confirmClassSelection = window.hpskConfirmClassSelection;
+    if (!window.updateOverlayClassCount) window.updateOverlayClassCount = window.hpskUpdateOverlayClassCount;
+    if (!window.toggleClassSection) window.toggleClassSection = window.hpskToggleClassSection;
+    if (!window.restoreClassSelections) window.restoreClassSelections = window.hpskRestoreClassSelections;
+})();
+</script>
+}

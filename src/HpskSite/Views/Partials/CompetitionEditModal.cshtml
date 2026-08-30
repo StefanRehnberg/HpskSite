@@ -397,11 +397,23 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    @* Skytteklasser — SAMMA väljare som tävlingsguiden (_ShootingClassPicker).
+                       Var tidigare en platt kryssrutelista i en scrollande ruta, alltså ett annat
+                       sätt att göra samma sak än det arrangören lärt sig när tävlingen skapades.
+                       ⚠ Det dolda fältet MÅSTE heta shootingClassIds — det är name-attributet som
+                       hamnar i FormData och därmed i payloaden till SaveCompetition. *@
                     <div class="mb-3">
                         <label class="form-label">Skytteklasser <span class="text-danger">*</span></label>
-                        <div id="shootingClassesContainer" class="border rounded p-3" style="max-height: 300px; overflow-y: auto;">
-                            <div class="text-center text-muted">
-                                <small>Laddar klasser...</small>
+                        <div class="card" id="edit_classSelectionCard">
+                            <div class="card-body text-center">
+                                <p class="text-muted mb-3" id="edit_noClassesText">Inga klasser valda ännu</p>
+                                <div class="d-none" id="edit_selectedClassesDisplay">
+                                    <p class="mb-2"><strong>Valda klasser: <span id="edit_classCount">0</span></strong></p>
+                                    <p class="mb-3" id="edit_classList"></p>
+                                </div>
+                                <button type="button" class="btn btn-primary" onclick="hpskEditOpenClassPicker()">
+                                    <i class="bi bi-ui-checks me-1"></i><span id="edit_selectClassesButtonText">Välj skytteklasser</span>
+                                </button>
                             </div>
                         </div>
                         <input type="hidden" id="shootingClassIds" name="shootingClassIds" value="@shootingClassIds">
@@ -742,15 +754,23 @@ editModal.addEventListener('show.bs.modal', function() {
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
                 locale: 'sv',
-                static: true,
-                onOpen: hpskRevealPicker
+                // ⚠ INTE static: true. Med flikar ar varje flik kort, sa en kalender som
+                // ligger i flodet stack ut i sidfoten och 21 dagsrutor klipptes bort av
+                // kroppens overflow. Lagd pa <body> kan den inte klippas av nagon
+                // forfader; z-index i stilblocket lagger den ovanpa modalen.
+                static: false,
+                appendTo: document.body
             });
 
             flatpickr('#competitionEndDate', {
                 dateFormat: 'Y-m-d',
                 locale: 'sv',
-                static: true,
-                onOpen: hpskRevealPicker
+                // ⚠ INTE static: true. Med flikar ar varje flik kort, sa en kalender som
+                // ligger i flodet stack ut i sidfoten och 21 dagsrutor klipptes bort av
+                // kroppens overflow. Lagd pa <body> kan den inte klippas av nagon
+                // forfader; z-index i stilblocket lagger den ovanpa modalen.
+                static: false,
+                appendTo: document.body
             });
 
             flatpickr('#registrationOpenDate', {
@@ -758,8 +778,12 @@ editModal.addEventListener('show.bs.modal', function() {
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
                 locale: 'sv',
-                static: true,
-                onOpen: hpskRevealPicker
+                // ⚠ INTE static: true. Med flikar ar varje flik kort, sa en kalender som
+                // ligger i flodet stack ut i sidfoten och 21 dagsrutor klipptes bort av
+                // kroppens overflow. Lagd pa <body> kan den inte klippas av nagon
+                // forfader; z-index i stilblocket lagger den ovanpa modalen.
+                static: false,
+                appendTo: document.body
             });
 
             flatpickr('#registrationCloseDate', {
@@ -767,8 +791,12 @@ editModal.addEventListener('show.bs.modal', function() {
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
                 locale: 'sv',
-                static: true,
-                onOpen: hpskRevealPicker
+                // ⚠ INTE static: true. Med flikar ar varje flik kort, sa en kalender som
+                // ligger i flodet stack ut i sidfoten och 21 dagsrutor klipptes bort av
+                // kroppens overflow. Lagd pa <body> kan den inte klippas av nagon
+                // forfader; z-index i stilblocket lagger den ovanpa modalen.
+                static: false,
+                appendTo: document.body
             });
         } catch (e) {
             console.error('Error initializing date pickers:', e);
@@ -843,7 +871,10 @@ editModal.addEventListener('show.bs.modal', function() {
 editModal.addEventListener('hidden.bs.modal', function() {
     document.getElementById('competitionEditForm').reset();
     editModalCurrentSelectedClasses = [];
-    document.getElementById('shootingClassesContainer').innerHTML = '<div class="text-center text-muted"><small>Laddar klasser...</small></div>';
+    // Kryssrutelistan ar ersatt av den delade valjarens sammanfattningskort — elementet
+    // finns inte langre. Guarden star kvar sa aterstallningen inte kastar pa null.
+    var _oldClassBox = document.getElementById('shootingClassesContainer');
+    if (_oldClassBox) _oldClassBox.innerHTML = '';
     if (compDescriptionEditor) {
         compDescriptionEditor.setData('');
     }
@@ -910,6 +941,9 @@ function loadSeries() {
 
 function renderShootingClassCheckboxes(classes) {
     const container = document.getElementById('shootingClassesContainer');
+    // Elementet ar borttaget till forman for den delade valjaren; funktionen har
+    // kvarvarande anropare och far inte kasta.
+    if (!container) return;
     container.innerHTML = '';
     
     if (!classes || classes.length === 0) {
@@ -1313,6 +1347,15 @@ function saveCompetition() {
     fpInputs.forEach(i => i.disabled = true);
     const isValid = form.checkValidity();
     if (!isValid) {
+        // ⚠ Med flikar ligger fälten på olika synliga sidor. reportValidity() kan inte
+        // peka på ett fält som sitter på en flik som inte visas — bubblan hamnar
+        // ingenstans och Spara ser ut att inte göra någonting. Byt till rätt flik
+        // FÖRST, sedan rapportera. Det är exakt det tysta felet flikarna annars inför.
+        const firstBad = Array.prototype.slice.call(form.querySelectorAll('input,select,textarea'))
+            .find(el => !el.disabled && el.checkValidity && !el.checkValidity());
+        if (firstBad && typeof window.hpskRevealField === 'function') {
+            window.hpskRevealField('#competitionEditModal', firstBad);
+        }
         form.reportValidity();
         fpInputs.forEach(i => i.disabled = false);
         return;
@@ -2254,6 +2297,42 @@ function collectEditDpConfig() {
                          parseInt(document.getElementById('competitionId').value, 10) || 0;
                 window.hpskLoadCompetitionTypeState(id);
             } catch (e) { console.warn('grenbyte:', e); }
+            return r;
+        };
+    }
+})();
+</script>
+@* Skytteklassvaljaren — SAMMA som tavlingsguiden. Inkluderas av modalen sjalv sa den
+   foljer med aven till CompetitionManagement, dar guiden inte finns. Guardad. *@
+@await Html.PartialAsync("_ShootingClassPicker")
+<script>
+// Oppnar den DELADE klassvaljaren med redigeringen som agare.
+//
+// ⚠ hiddenId ar 'shootingClassIds' UTAN prefix — det ar name-attributet som hamnar i
+// FormData och darmed i payloaden till SaveCompetition. Ett prefix har hade tyst
+// andrat vad som sparas.
+window.hpskEditOpenClassPicker = function () {
+    var typeSel = document.getElementById('edit_competitionTypeSelect');
+    var type = (typeSel && typeSel.dataset.currentType) || (typeSel && typeSel.value) || '';
+    window.hpskOpenClassPicker({
+        hiddenId: 'shootingClassIds',
+        cardPrefix: 'edit_',
+        type: type
+    });
+};
+
+// Hall kortet i takt med faltet — bade nar modalen fylls och om nagon annan kod
+// skriver till faltet.
+(function () {
+    var sync = function () { window.hpskUpdateClassCard('edit_', 'shootingClassIds'); };
+    var hidden = document.getElementById('shootingClassIds');
+    if (hidden) hidden.addEventListener('change', sync);
+    if (typeof window.populateEditModal === 'function' && !window.__hpskEditClassCardWrapped) {
+        window.__hpskEditClassCardWrapped = true;
+        var inner = window.populateEditModal;
+        window.populateEditModal = function () {
+            var r = inner.apply(this, arguments);
+            setTimeout(sync, 0);
             return r;
         };
     }

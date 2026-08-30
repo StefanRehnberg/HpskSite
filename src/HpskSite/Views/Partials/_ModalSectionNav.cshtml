@@ -1,48 +1,73 @@
 @*
-    Sticky sektionsnavigering för långa redigeringsmodaler.
+    Flikar för långa redigeringsmodaler.
 
-    VARFÖR: tävlingsredigeringen mätte 3,3–5,5 SKÄRMAR hög på 1280×720 … 1920×1080
-    (uppmätt 2026-08-29 över Precision, Fältskytte och Standardpistol). Sektionerna
-    fanns redan — Grundinformation, Datum, Anmälansinformation, Konfiguration,
-    Egenbokning, Fältskytte-inställningar, Arrangör/Synlighet, Tävlingsledning —
-    men de rullade bort tillsammans med innehållet, och Spara låg 3 500 px ned.
-    Det är därför arrangörer hellre raderar tävlingen och börjar om.
+    VARFÖR: tävlingsredigeringen visade ALLT på en gång i en 3,3–5,5 skärmar hög
+    dialog (uppmätt 2026-08-29 över Precision, Fältskytte och Standardpistol på
+    1280×720 … 1920×1080), med Spara 3 500 px ned. Ett första försök gav den en
+    sticky rad med hoppknappar — men det var fortfarande samma röriga formulär,
+    bara med genvägar. Stefan: *"det ska vara mer som wizarden fast med tabbar"*.
+    Nu visas ETT avsnitt i taget, med samma avsnittsindelning som guidens steg.
 
-    HUR: markupen rörs inte. `hpskModalSectionNav` grupperar om befintliga
-    `h6`-rubriker och deras följande syskon till <section>-element vid öppning, och
-    ritar en sticky rad med hoppknappar. Att gruppera i DOM:en i stället för att
-    skriva om markupen kan per konstruktion inte ändra formulärets fältmängd,
-    namn eller värden — bara var noderna sitter. Det är hela poängen: sparvägen
-    läser `new FormData(form)`, så en payload-skillnad vore en regression.
+    HUR: markupen rörs inte. `hpskModalSectionNav` grupperar om befintliga rubriker
+    och deras följande syskon till <section>-element vid öppning och visar en i
+    taget. Att gruppera i DOM:en i stället för att skriva om markupen kan per
+    konstruktion inte ändra formulärets fältmängd, namn eller värden — bara var
+    noderna sitter. Det bär hela verifieringen: sparvägen läser
+    `new FormData(form)`, så en payload-skillnad vore en regression.
 
-    ⚠ Kräver `modal-dialog-scrollable` på dialogen för att bära sin vikt. Utan den
-    växer dialogen förbi skärmen igen och rubrikraden har inget att sitta fast i.
+    ⚠ ETT AVSNITT I TAGET BETYDER ATT RESTEN ÄR display:none. Formulärets fält finns
+    kvar i DOM:en och FormData läser dem ändå — men `checkValidity()` hoppar över
+    dolda fält i vissa webbläsare och `reportValidity()` kan inte fokusera ett fält
+    på en annan flik. Därför byter `hpskRevealField` till rätt flik innan ett
+    ogiltigt fält rapporteras. Utan det blir "Spara gör ingenting" igen, fast av en
+    ny anledning.
 
-    Anropas: hpskModalSectionNav('#competitionEditModal', { headingSelector: 'h6.text-primary' })
+    Anropas: hpskModalSectionNav('#competitionEditModal')
     Idempotent — säker att anropa vid varje öppning.
 *@
-@if (ViewData["_hpskModalSectionNavLoaded"] == null)
+@{
+    // ⚠ ViewData duger INTE som guard har. Html.PartialAsync ger varje partial en
+    // KOPIA av foralderns ViewData, sa tva syskonpartialer (guiden och redigeringen)
+    // ser aldrig varandras flagga — resultatet blev tva overlagg med samma id och 96
+    // kryssrutor i stallet for 48. Context.Items lever over hela requesten.
+    var _hpskAlreadyRendered = Context.Items.ContainsKey("_hpskModalSectionNavLoaded");
+    if (!_hpskAlreadyRendered) { Context.Items["_hpskModalSectionNavLoaded"] = true; }
+}
+@if (!_hpskAlreadyRendered)
 {
-    ViewData["_hpskModalSectionNavLoaded"] = true;
     <style>
-        .hpsk-secnav {
+        .hpsk-sectabs {
             position: sticky; top: 0; z-index: 5;
             background: var(--bs-body-bg);
             border-bottom: 1px solid var(--bs-border-color);
-            margin: -1rem -1rem 1rem -1rem; padding: .6rem 1rem;
-            display: flex; flex-wrap: wrap; gap: .35rem;
+            margin: -1rem -1rem 1rem -1rem; padding: .5rem 1rem 0 1rem;
+            display: flex; flex-wrap: wrap; gap: .15rem;
         }
-        .hpsk-secnav button {
-            border: 1px solid var(--bs-border-color);
-            background: var(--bs-body-bg); color: var(--bs-body-color);
-            border-radius: 999px; padding: .2rem .7rem;
-            font-size: .8rem; line-height: 1.4; white-space: nowrap; cursor: pointer;
+        .hpsk-sectabs button {
+            border: 1px solid transparent;
+            border-bottom: none;
+            background: transparent; color: var(--bs-secondary-color);
+            border-radius: .375rem .375rem 0 0;
+            padding: .4rem .85rem; margin-bottom: -1px;
+            font-size: .875rem; line-height: 1.4; white-space: nowrap; cursor: pointer;
         }
-        .hpsk-secnav button:hover { background: var(--bs-tertiary-bg); }
-        .hpsk-secnav button.active {
-            background: var(--bs-primary); color: #fff; border-color: var(--bs-primary);
+        .hpsk-sectabs button:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+        .hpsk-sectabs button.active {
+            background: var(--bs-body-bg);
+            color: var(--bs-primary);
+            border-color: var(--bs-border-color);
+            border-bottom: 1px solid var(--bs-body-bg);
+            font-weight: 600;
         }
-        .hpsk-section { scroll-margin-top: 3.2rem; }
+        /* Rubriken inne i avsnittet är överflödig när fliken redan bär namnet. */
+        .hpsk-section.hpsk-tabbed > :is(h6, .row:first-child > .col-12 > h6) { display: none; }
+        .hpsk-section[hidden] { display: none !important; }
+        /* Datumvaljaren ar flyttad till dokumentets body (se CompetitionEditModal)
+           sa den inte kan klippas av modalkroppens overflow. Da maste den ocksa ligga
+           OVANPA modalen: Bootstrap-modalen ar 1055, backdrop 1050.
+           OBS: skriv ALDRIG en HTML-tagg i en CSS-kommentar har — Razor laser den som
+           markup och vyn slutar kompilera, utan felmeddelande. Det kostade en bisektion. */
+        .flatpickr-calendar { z-index: 1065 !important; }
     </style>
     <script>
     (function () {
@@ -56,41 +81,30 @@
             if (!body) return 0;
 
             // ⚠ Inte bara h6: "Arrangör / Synlighet" är en .card-header, och med enbart
-            // h6-selektorn svaldes hela det kortet (395 px) av föregående sektion — så
-            // en precisionstävling fick en knapp "Fältskytte-inställningar" som ledde
-            // till nästa avsnitts innehåll. Rubriker MÅSTE speglas mot vad som faktiskt
-            // renderas som avsnitt, inte mot en taggtyp.
+            // h6-selektorn svaldes hela det kortet (395 px) av föregående avsnitt.
             var headingSel = opts.headingSelector || 'h6.text-primary, .card-header';
             var headings = [].slice.call(body.querySelectorAll(headingSel));
             if (!headings.length) return 0;
 
-            // Gruppera EN gång. Att köra om på en redan grupperad modal ska vara
-            // gratis — den anropas vid varje öppning.
             if (!body.querySelector('.hpsk-section')) {
                 headings.forEach(function (h, i) {
-                    // Rubriken kan ligga i en <div class="row"><div class="col-12">-wrapper.
-                    // Klättra upp till den nod som är ett direkt barn till formuläret/kroppen,
-                    // annars sveper vi in fel saker.
                     var anchor = h;
                     while (anchor.parentElement &&
                            anchor.parentElement !== body &&
                            anchor.parentElement.tagName !== 'FORM') {
                         anchor = anchor.parentElement;
                     }
-                    // ⚠ Ett NÄSTLAT kort (en .card-header inuti ett avsnitt) ankrar till
-                    // samma nod som avsnittet självt och skulle annars klyva det mitt itu.
-                    // Är ankaret redan inne i en skapad sektion är rubriken inte ett avsnitt.
+                    // ⚠ Ett NÄSTLAT kort ankrar till samma nod som avsnittet självt och
+                    // skulle annars klyva det mitt itu.
                     if (anchor.closest && anchor.closest('.hpsk-section')) return;
                     var sec = document.createElement('section');
-                    sec.className = 'hpsk-section';
+                    sec.className = 'hpsk-section hpsk-tabbed';
                     sec.id = 'hpsksec-' + i;
                     sec.setAttribute('data-title', (h.textContent || '').trim());
                     anchor.parentElement.insertBefore(sec, anchor);
-                    // Flytta in rubriken och allt fram till nästa rubriks ankare.
                     var node = anchor;
                     while (node) {
                         var next = node.nextSibling;
-                        // Stanna när nästa rubrik nås.
                         if (node.nodeType === 1 && node !== anchor &&
                             (node.matches(headingSel) || node.querySelector(headingSel))) {
                             break;
@@ -104,62 +118,74 @@
             var sections = [].slice.call(body.querySelectorAll('.hpsk-section'));
             if (!sections.length) return 0;
 
-            var nav = body.querySelector('.hpsk-secnav');
+            // ⚠ Synlighet måste mätas på det som DÖLJS, inte på wrappern: det är ett
+            // BARN (#editFaltskytteSection) som bär display:none, och en tom men synlig
+            // wrapper passerar offsetParent-testet. Mät att avsnittet renderar något.
+            // Ett avsnitt som är dolt AV FLIKARNA räknas fortfarande som "finns".
+            var isAvailable = function (s) {
+                var wasHidden = s.hidden;
+                if (wasHidden) s.hidden = false;
+                var rendered = s.offsetParent !== null &&
+                               s.getClientRects().length &&
+                               s.getBoundingClientRect().height > 4;
+                if (wasHidden) s.hidden = true;
+                return rendered;
+            };
+
+            var nav = body.querySelector('.hpsk-sectabs');
             if (!nav) {
                 nav = document.createElement('div');
-                nav.className = 'hpsk-secnav';
+                nav.className = 'hpsk-sectabs';
                 body.insertBefore(nav, body.firstChild);
             }
             nav.innerHTML = '';
 
-            // En dold sektion (t.ex. Fältskytte-inställningar på en precisionstävling)
-            // ska inte ha en knapp som hoppar till ingenting.
-            //
-            // ⚠ `offsetParent !== null` DUGER INTE här, och det gav en tyst felaktig rad
-            // första gången: det som döljs är ett BARN (`#editFaltskytteSection` bär
-            // `display:none`), inte den <section> vi själva svepte runt det. En tom men
-            // synlig wrapper passerar offsetParent-testet. Mät att sektionen faktiskt
-            // renderar något i stället.
-            var isRendered = function (s) {
-                if (s.offsetParent === null) return false;
-                if (!s.getClientRects().length) return false;
-                return s.getBoundingClientRect().height > 4;
-            };
-            var visible = sections.filter(isRendered);
-            visible.forEach(function (s) {
+            var available = sections.filter(isAvailable);
+            sections.forEach(function (s) { s.hidden = available.indexOf(s) === -1; });
+
+            available.forEach(function (s, i) {
                 var b = document.createElement('button');
                 b.type = 'button';
                 b.textContent = s.getAttribute('data-title') || 'Avsnitt';
-                b.addEventListener('click', function () {
-                    s.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                });
+                b.setAttribute('data-target', s.id);
+                b.addEventListener('click', function () { window.hpskShowSection(modalSelector, s.id); });
                 nav.appendChild(b);
             });
 
-            // Markera vilket avsnitt man är i. rAF-strypt: scroll-händelser i en
-            // 3 500 px kropp kommer i hundratal och layout-läsning i varje är dyrt.
-            if (!body.dataset.hpskSecnavBound) {
-                body.dataset.hpskSecnavBound = '1';
-                var ticking = false;
-                body.addEventListener('scroll', function () {
-                    if (ticking) return;
-                    ticking = true;
-                    requestAnimationFrame(function () {
-                        ticking = false;
-                        var btns = nav.querySelectorAll('button');
-                        var vis = [].slice.call(body.querySelectorAll('.hpsk-section'))
-                                    .filter(isRendered);
-                        var top = body.getBoundingClientRect().top + 60;
-                        var idx = 0;
-                        vis.forEach(function (s, i) {
-                            if (s.getBoundingClientRect().top <= top) idx = i;
-                        });
-                        btns.forEach(function (b, i) { b.classList.toggle('active', i === idx); });
-                    });
-                }, { passive: true });
-            }
-            if (nav.firstChild) nav.firstChild.classList.add('active');
-            return visible.length;
+            var current = body.dataset.hpskCurrentSection;
+            var keep = current && available.some(function (s) { return s.id === current; });
+            window.hpskShowSection(modalSelector, keep ? current : (available[0] && available[0].id));
+            return available.length;
+        };
+
+        window.hpskShowSection = function (modalSelector, sectionId) {
+            var modal = document.querySelector(modalSelector);
+            if (!modal || !sectionId) return;
+            var body = modal.querySelector('.modal-body');
+            var nav = body.querySelector('.hpsk-sectabs');
+            var ids = [].slice.call(nav.querySelectorAll('button')).map(function (b) { return b.getAttribute('data-target'); });
+            if (ids.indexOf(sectionId) === -1) return;
+            [].slice.call(body.querySelectorAll('.hpsk-section')).forEach(function (s) {
+                if (ids.indexOf(s.id) === -1) return;   // avsnitt utan flik forblir dolt
+                s.hidden = (s.id !== sectionId);
+            });
+            [].slice.call(nav.querySelectorAll('button')).forEach(function (b) {
+                b.classList.toggle('active', b.getAttribute('data-target') === sectionId);
+            });
+            body.dataset.hpskCurrentSection = sectionId;
+            body.scrollTop = 0;
+        };
+
+        // Byter till den flik som bar ett visst falt, och fokuserar det. Anvands nar
+        // valideringen pekar ut ett falt pa en annan flik — utan detta ser Spara ut
+        // att inte gora nagonting.
+        window.hpskRevealField = function (modalSelector, el) {
+            if (!el) return false;
+            var sec = el.closest ? el.closest('.hpsk-section') : null;
+            if (!sec) return false;
+            window.hpskShowSection(modalSelector, sec.id);
+            try { el.focus({ preventScroll: false }); } catch (e) { }
+            return true;
         };
     })();
     </script>
