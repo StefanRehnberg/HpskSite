@@ -541,7 +541,8 @@ window.populateAdvertEditModal = function(competition) {
     function setAdvertDate(id, dateStr, withTime) {
         var el = document.getElementById(id);
         if (!el) return;
-        var formatted = dateStr && window.formatDateForInput ? window.formatDateForInput(dateStr, withTime) : (dateStr || '');
+        // Delad (_DateInputHelpers) — ingen guard behövs, partialen inkluderas härifrån.
+        var formatted = hpskFormatDateForInput(dateStr, withTime);
         el.value = formatted;
         if (el._flatpickr) {
             if (formatted) el._flatpickr.setDate(formatted, false);
@@ -741,3 +742,5 @@ function showAdvertEditNotification(message, type) {
     }
 })();
 </script>
+
+@await Html.PartialAsync("_DateInputHelpers")

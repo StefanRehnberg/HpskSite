@@ -1,0 +1,107 @@
+@*
+    DATUMFÄLTENS HJÄLPARE — formatering och flatpickr-synk, på ETT ställe.
+
+    ⚠️ VARFÖR DEN FINNS. `formatDateForInput` definierades av CompetitionEditModal, medan
+    SpringskytteEditModal, CompetitionAdvertEditModal och AdminSeriesList ANVÄNDE den —
+    var och en bakom en guard vars else-gren tyst faller tillbaka på den råa strängen:
+
+        var formatted = dateStr && window.formatDateForInput ? formatDateForInput(...) : (dateStr || '');
+
+    Alltså: tre partialer som fungerar bara så länge en FJÄRDE råkar renderas på samma
+    sida. Det höll bara på konvention (`_CompetitionEditDispatch` kräver alla modalerna),
+    och konventionen har brustit förut — klubbsidan saknade en av de tre modalerna.
+
+    ⚠️ Fallbacken är MÄTT och visade sig ofarlig för värdet: flatpickr normaliserar
+    "2026-01-05T14:30:00" till "2026-01-05 14:30" av sig själv
+    (`hpsk-verify/flatpickr-raw-iso-probe.mjs`). Beroendet togs alltså bort för att det är
+    ett beroende, inte för att det brann. Det påståendet är värt att stå kvar: nästa
+    läsare ska slippa göra om mätningen.
+
+    Ligger i en EGEN partial och inte i _CompetitionFormSave, eftersom AdminSeriesList
+    behöver den och inte har med tävlingsformulär att göra.
+
+    ⚠️ Inkluderas av partialerna själva, inte av värdsidorna. Guardad mot dubbelinkludering.
+*@
+@{
+    var dateHelpersIncluded = Context.Items.ContainsKey("hpskDateInputHelpersIncluded");
+    Context.Items["hpskDateInputHelpersIncluded"] = true;
+}
+@if (!dateHelpersIncluded)
+{
+    <script>
+    (function () {
+        'use strict';
+
+        /**
+         * ISO-sträng -> det format flatpickr-fälten använder.
+         *
+         * ⚠️ Parsas med REGEX, aldrig `new Date()`. En Date-parsning tolkar strängen som
+         * UTC och skriver ut den i lokal tid, vilket flyttar tävlingens starttid en eller
+         * två timmar beroende på årstid. Datumet ska tas bokstavligt — det är redan
+         * lagrat i den tid arrangören skrev in.
+         *
+         * @@param {string} dateStr
+         * @@param {boolean} includeTime  false ger bara datumdelen.
+         * @@returns {string} '' för tomt in.
+         */
+        function hpskFormatDateForInput(dateStr, includeTime) {
+            if (!dateStr) return '';
+            if (includeTime === undefined) includeTime = true;
+
+            var str = dateStr.toString();
+
+            // "2026-01-05T14:30:00" eller "2026-01-05 14:30"
+            var m = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+            if (m) {
+                return includeTime
+                    ? m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5]
+                    : m[1] + '-' + m[2] + '-' + m[3];
+            }
+
+            // Bara datum: "2026-01-05"
+            var d = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (d) return d[1] + '-' + d[2] + '-' + d[3];
+
+            // Oigenkänt format lämnas orört hellre än att kastas bort — flatpickr får
+            // försöka själv, och ett fel värde i rutan är lättare att upptäcka än en
+            // tom ruta som ser ut som "inget datum satt".
+            return str;
+        }
+
+        /**
+         * Skriver ett datum till ett fält OCH synkar dess flatpickr.
+         *
+         * ⚠️ Råvärdet sätts alltid först. Ett fält utan flatpickr (den inte hann
+         * initieras, eller biblioteket saknas på sidan) ska ändå visa datumet.
+         *
+         * ⚠️ Tomt värde ska CLEAR:a, inte setDate(''). Se [[flatpickr-setdate-maxdate-trap]]:
+         * setDate med skräp under maxDate:'today' TÖMMER fältet på ett sätt som är svårt
+         * att felsöka — clear() säger det rakt ut.
+         */
+        function hpskSetDateField(fieldId, dateStr, includeTime) {
+            var el = document.getElementById(fieldId);
+            if (!el) return false;
+
+            var formatted = hpskFormatDateForInput(dateStr, includeTime);
+            el.value = formatted;
+
+            if (el._flatpickr) {
+                if (formatted) el._flatpickr.setDate(formatted, false);
+                else el._flatpickr.clear();
+            }
+            return true;
+        }
+
+        window.hpskFormatDateForInput = hpskFormatDateForInput;
+        window.hpskSetDateField = hpskSetDateField;
+
+        // ⚠️ BAKÅTKOMPATIBELT NAMN. Flera vyer kallar `formatDateForInput` direkt. Att
+        // döpa om dem i samma ändring hade blandat ihop "flytta hem funktionen" med
+        // "byt namn överallt", och gjort en regression svårare att lokalisera.
+        // Tilldelas bara om ingen redan äger namnet, så en kvarvarande definition vinner.
+        if (typeof window.formatDateForInput !== 'function') {
+            window.formatDateForInput = hpskFormatDateForInput;
+        }
+    })();
+    </script>
+}

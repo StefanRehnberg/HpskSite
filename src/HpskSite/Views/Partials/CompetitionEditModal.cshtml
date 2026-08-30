@@ -1009,26 +1009,9 @@ window.setCheckboxValue = function(fieldId, checked) {
     // Silently ignore missing checkboxes - they may be optional in different contexts
 }
 
-window.formatDateForInput = function(dateStr, includeTime = true) {
-    if (!dateStr) return '';
-    // Parse ISO string directly without timezone conversion (avoid new Date() which shifts UTC to local)
-    var str = dateStr.toString();
-    // Handle "2026-01-05T14:30:00" or "2026-01-05 14:30" formats
-    var match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
-    if (match) {
-        if (includeTime) {
-            return match[1] + '-' + match[2] + '-' + match[3] + ' ' + match[4] + ':' + match[5];
-        } else {
-            return match[1] + '-' + match[2] + '-' + match[3];
-        }
-    }
-    // Handle date-only "2026-01-05"
-    var dateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (dateOnly) {
-        return dateOnly[1] + '-' + dateOnly[2] + '-' + dateOnly[3];
-    }
-    return str;
-}
+// Formateraren bor i _DateInputHelpers — tre andra partialer använde den härifrån och
+// fungerade bara så länge den här modalen råkade renderas på samma sida.
+// `window.formatDateForInput` finns kvar som namn, tillhandahållet av partialen.
 
 // Populate edit modal with competition data
 window.populateEditModal = function(competition) {
@@ -1054,20 +1037,9 @@ window.populateEditModal = function(competition) {
     if (typeof compRangeInit === 'function') compRangeInit('edit_', { compId: competition.id, clubId: competition.clubId });
 
     // Handle date fields - set value directly, then sync Flatpickr if available
+    // Delad (_DateInputHelpers). Låg i två nästan identiska kopior, en per modal.
     function setDateField(fieldId, dateStr, includeTime) {
-        var formatted = dateStr ? formatDateForInput(dateStr, includeTime !== false) : '';
-        var input = document.getElementById(fieldId);
-        if (!input) return;
-        // Always set the raw input value first
-        input.value = formatted;
-        // Then sync Flatpickr if initialized
-        if (input._flatpickr) {
-            if (formatted) {
-                input._flatpickr.setDate(formatted, false);
-            } else {
-                input._flatpickr.clear();
-            }
-        }
+        hpskSetDateField(fieldId, dateStr, includeTime !== false);
     }
 
     setDateField('competitionDate', competition.competitionDate, true);
@@ -1609,6 +1581,13 @@ function ensureClubsLoaded() {
         if (currentClubId && currentClubId !== '0') {
             clubSelect.value = currentClubId;
         }
+        // ⚠️ DEN HÄR GRENEN GLÖMDE SYNKA — och det är den som körs oftast.
+        // loadClubsForSelector() synkar efter sin fetch, men när listan REDAN är laddad
+        // (andra öppningen, eller en annan modal på samma sida hann fylla den först)
+        // togs den här vägen och "Endast för specifik klubb" behöll sitt gamla
+        // tillstånd. Mätt på en klubbvärd tävling: utgråad i 4 av 5 öppningar, så
+        // arrangören kunde varken kryssa i eller ur den — utan förklaring på skärmen.
+        syncEditClubOnlyAvailability();
     }
 }
 
@@ -1653,6 +1632,11 @@ function loadClubsForSelector() {
                 const currentClubId = clubSelect.dataset.currentValue;
                 if (currentClubId && currentClubId !== '0') {
                     clubSelect.value = currentClubId;
+                    // Synka där klubbvärdet blev känt. SYMMETRI med else-grenen i
+                    // ensureClubsLoaded — det var DÄR det uppmätta felet satt (se den
+                    // kommentaren). Att bara laga den ena grenen hade lämnat samma fälla
+                    // kvar för nästa person som rör den andra. Funktionen är idempotent.
+                    syncEditClubOnlyAvailability();
                 }
 
                 // Store original values for mismatch warning
@@ -2123,6 +2107,7 @@ function collectEditDpConfig() {
 @await Html.PartialAsync("_SwishNumberValidation")
 @* Sektionsnavigering. Inkluderas av modalen sjalv, inte av vardsidorna, sa den
    foljer med till varje yta som renderar modalen. Samma regel som _HtmlEscape. *@
+@await Html.PartialAsync("_DateInputHelpers")
 @await Html.PartialAsync("_CompetitionFormSave")
 @await Html.PartialAsync("_ModalSectionNav")
 <script>

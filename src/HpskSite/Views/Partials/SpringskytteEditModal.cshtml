@@ -635,16 +635,9 @@ window.populateSpringEditModal = function(comp) {
     }
 
     // Dates via Flatpickr — use formatDateForInput to avoid timezone conversion
-    const setDate = (id, dateStr, withTime) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        var formatted = dateStr && window.formatDateForInput ? formatDateForInput(dateStr, withTime) : (dateStr || '');
-        el.value = formatted;
-        if (el._flatpickr) {
-            if (formatted) el._flatpickr.setDate(formatted, false);
-            else el._flatpickr.clear();
-        }
-    };
+    // Delad (_DateInputHelpers). Den gamla kopian bar en guard vars else-gren tyst
+    // matade in rå ISO när formateraren saknades — beroendet finns inte längre.
+    const setDate = (id, dateStr, withTime) => hpskSetDateField(id, dateStr, withTime);
     setDate('springEdit_competitionDate', comp.competitionDate, true);
     setDate('springEdit_competitionEndDate', comp.competitionEndDate, false);
     setDate('springEdit_registrationOpenDate', comp.registrationOpenDate, true);
@@ -1044,6 +1037,7 @@ function springEditSave() {
 @* Sektionsnavigering — samma behandling som den vanliga tavlingsmodalen fick
    2026-08-29. Partialen inkluderas av modalen sjalv sa den foljer med till varje
    yta som renderar den. Guardad mot dubbelinkludering. *@
+@await Html.PartialAsync("_DateInputHelpers")
 @await Html.PartialAsync("_CompetitionFormSave")
 @await Html.PartialAsync("_ModalSectionNav")
 <script>

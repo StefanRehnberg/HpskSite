@@ -649,3 +649,5 @@ function formatSeriesDateForInput(dateStr) {
     return match ? match[1] + '-' + match[2] + '-' + match[3] : '';
 }
 </script>
+
+@await Html.PartialAsync("_DateInputHelpers")
