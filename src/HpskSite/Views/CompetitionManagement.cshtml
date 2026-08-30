@@ -1034,7 +1034,7 @@ window.CompetitionConfig = {
             // when the modal is opened from this page. Only run if the dropdown
             // still only has the hardcoded "Ingen serie" default option.
             setTimeout(() => {
-                const seriesSelect = document.getElementById('competitionSeriesId');
+                const seriesSelect = document.getElementById('edit_seriesId');
                 const alreadyLoaded = seriesSelect && (seriesSelect.options.length > 1 || seriesSelect.dataset.seriesLoaded === 'true');
                 if (!alreadyLoaded && typeof window.loadSeries === 'function') {
                     window.loadSeries();

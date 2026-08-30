@@ -139,7 +139,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
             </div>
             <div class="modal-body">
                 <form id="competitionEditForm">
-                    <input type="hidden" id="competitionId" name="competitionId" value="@(competition?.Id ?? 0)">
+                    <input type="hidden" id="edit_competitionId" name="competitionId" value="@(competition?.Id ?? 0)">
                     <section class="hpsk-section" data-title="Grundinformation">
                     <div class="row">
                         <div class="col-12">
@@ -170,13 +170,13 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
-                        <label for="competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="competitionName" name="competitionName" value="@compName" required>
+                        <label for="edit_competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="edit_competitionName" name="competitionName" value="@compName" required>
                     </div>
 
                     <div class="mb-3">
-                        <label for="description" class="form-label">Beskrivning</label>
-                        <textarea class="form-control" id="description" name="description" rows="4">@compDesc</textarea>
+                        <label for="edit_description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="edit_description" name="description" rows="4">@compDesc</textarea>
                     </div>
 
 
@@ -190,8 +190,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
-                        <label for="venue" class="form-label">Plats <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="venue" name="venue" value="@compVenue" required>
+                        <label for="edit_venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="edit_venue" name="venue" value="@compVenue" required>
                     </div>
 
                     @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map *@
@@ -207,8 +207,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
-                        <label for="competitionScope" class="form-label">Omfattning</label>
-                        <select class="form-select" id="competitionScope" name="competitionScope">
+                        <label for="edit_competitionScope" class="form-label">Omfattning</label>
+                        <select class="form-select" id="edit_competitionScope" name="competitionScope">
                             <option value="">-- Välj omfattning --</option>
                             @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
                             {
@@ -226,8 +226,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
-                        <label for="competitionSeriesId" class="form-label">Tävlingsserie (valfritt)</label>
-                        <select class="form-select" id="competitionSeriesId" name="seriesId">
+                        <label for="edit_seriesId" class="form-label">Tävlingsserie (valfritt)</label>
+                        <select class="form-select" id="edit_seriesId" name="seriesId">
                             <option value="">Ingen serie</option>
                         </select>
                         <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
@@ -256,15 +256,15 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                             <span class="input-group-text">kr</span>
                         </div>
                         <div class="form-check">
-                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="edit_subCompFeeMode_perClass" value="perClass" @(subCompFeeMode == "perClass" ? "checked" : "")>
-                            <label class="form-check-label" for="edit_subCompFeeMode_perClass">
+                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="edit_subCompetitionFeeMode_perClass" value="perClass" @(subCompFeeMode == "perClass" ? "checked" : "")>
+                            <label class="form-check-label" for="edit_subCompetitionFeeMode_perClass">
                                 <strong>Per anmäld klass</strong>
                                 <small class="d-block text-muted">Avgiften läggs till varje anmäld klass (t.ex. 2 klasser × 30 kr = 60 kr tillägg).</small>
                             </label>
                         </div>
                         <div class="form-check">
-                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="edit_subCompFeeMode_perRegistration" value="perRegistration" @(subCompFeeMode == "perRegistration" ? "checked" : "")>
-                            <label class="form-check-label" for="edit_subCompFeeMode_perRegistration">
+                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="edit_subCompetitionFeeMode_perRegistration" value="perRegistration" @(subCompFeeMode == "perRegistration" ? "checked" : "")>
+                            <label class="form-check-label" for="edit_subCompetitionFeeMode_perRegistration">
                                 <strong>En gång per anmälan</strong>
                                 <small class="d-block text-muted">Avgiften tas ut en gång oavsett antal anmälda klasser (t.ex. en engångsavgift till arrangören).</small>
                             </label>
@@ -286,14 +286,14 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control date-input" id="competitionDate" name="competitionDate" value="@compDateStr" required>
+                                <label for="edit_competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="edit_competitionDate" name="competitionDate" value="@compDateStr" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="competitionEndDate" class="form-label">Slutdatum</label>
-                                <input type="text" class="form-control date-input" id="competitionEndDate" name="competitionEndDate" value="@compEndDateStr">
+                                <label for="edit_competitionEndDate" class="form-label">Slutdatum</label>
+                                <input type="text" class="form-control date-input" id="edit_competitionEndDate" name="competitionEndDate" value="@compEndDateStr">
                             </div>
                         </div>
                     </div>
@@ -311,14 +311,14 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control date-input" id="registrationOpenDate" name="registrationOpenDate" value="@regOpenDateStr" required>
+                                <label for="edit_registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="edit_registrationOpenDate" name="registrationOpenDate" value="@regOpenDateStr" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control date-input" id="registrationCloseDate" name="registrationCloseDate" value="@regCloseDateStr" required>
+                                <label for="edit_registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="edit_registrationCloseDate" name="registrationCloseDate" value="@regCloseDateStr" required>
                             </div>
                         </div>
                     </div>
@@ -326,8 +326,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="maxParticipants" class="form-label">Max antal deltagare <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="maxParticipants" name="maxParticipants" value="@maxParticipants" min="1" required>
+                                <label for="edit_maxParticipants" class="form-label">Max antal deltagare <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="edit_maxParticipants" name="maxParticipants" value="@maxParticipants" min="1" required>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -336,11 +336,11 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <div class="d-flex align-items-center flex-wrap gap-2">
                                     <div class="input-group" style="max-width: 220px;">
                                         <span class="input-group-text" style="min-width: 90px;">Individuell</span>
-                                        <input type="number" class="form-control" id="registrationFee" name="registrationFee" value="@regFee" min="0" step="0.01">
+                                        <input type="number" class="form-control" id="edit_registrationFee" name="registrationFee" value="@regFee" min="0" step="0.01">
                                     </div>
                                     <div class="input-group" style="max-width: 220px;">
                                         <span class="input-group-text" style="min-width: 90px;">Junior</span>
-                                        <input type="number" class="form-control" id="juniorRegistrationFee" name="juniorRegistrationFee" value="@juniorRegFee" min="0" step="0.01">
+                                        <input type="number" class="form-control" id="edit_juniorRegistrationFee" name="juniorRegistrationFee" value="@juniorRegFee" min="0" step="0.01">
                                     </div>
                                 </div>
                                 <small class="form-text text-muted">Junioravgift används för juniorklasser. 0 = samma som individuell.</small>
@@ -354,18 +354,18 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="mb-3">
                         <div class="d-flex align-items-center gap-3 mb-2 flex-wrap">
                             <div class="form-check mb-0">
-                                <input class="form-check-input" type="checkbox" id="allowTeams" name="allowTeams" @(allowTeams ? "checked" : "") onchange="onEditAllowTeamsChange()">
-                                <label class="form-check-label" for="allowTeams">
+                                <input class="form-check-input" type="checkbox" id="edit_allowTeams" name="allowTeams" @(allowTeams ? "checked" : "") onchange="onEditAllowTeamsChange()">
+                                <label class="form-check-label" for="edit_allowTeams">
                                     Tillåt laganmälan
                                 </label>
                             </div>
                             <div class="input-group" style="max-width: 200px;">
-                                <input type="number" class="form-control" id="teamRegistrationFee" name="teamRegistrationFee" value="@teamRegFee" min="0" step="0.01" @(!allowTeams ? "disabled" : "") placeholder="Lagavgift">
+                                <input type="number" class="form-control" id="edit_teamRegistrationFee" name="teamRegistrationFee" value="@teamRegFee" min="0" step="0.01" @(!allowTeams ? "disabled" : "") placeholder="Lagavgift">
                                 <span class="input-group-text">kr</span>
                             </div>
                             <div class="input-group" style="max-width: 260px;">
                                 <span class="input-group-text">Serier i lagresultat</span>
-                                <input type="number" class="form-control" id="teamResultSeriesCount" name="teamResultSeriesCount" value="@(teamResultSeriesCount > 0 ? teamResultSeriesCount.ToString() : "")" min="0" step="1" @(!allowTeams ? "disabled" : "") placeholder="auto">
+                                <input type="number" class="form-control" id="edit_teamResultSeriesCount" name="teamResultSeriesCount" value="@(teamResultSeriesCount > 0 ? teamResultSeriesCount.ToString() : "")" min="0" step="1" @(!allowTeams ? "disabled" : "") placeholder="auto">
                             </div>
                         </div>
                         <small class="form-text text-muted d-block">
@@ -377,13 +377,13 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="mb-3 d-none" id="edit_stafettFeeGroup">
                         <div class="d-flex align-items-center gap-3 mb-2">
                             <div class="form-check mb-0">
-                                <input class="form-check-input" type="checkbox" id="allowStafett" name="allowStafett" @(allowStafett ? "checked" : "") onchange="onEditAllowStafettChange()">
-                                <label class="form-check-label" for="allowStafett">
+                                <input class="form-check-input" type="checkbox" id="edit_allowStafett" name="allowStafett" @(allowStafett ? "checked" : "") onchange="onEditAllowStafettChange()">
+                                <label class="form-check-label" for="edit_allowStafett">
                                     Tillåt stafettanmälan
                                 </label>
                             </div>
                             <div class="input-group" style="max-width: 200px;">
-                                <input type="number" class="form-control" id="stafettRegistrationFee" name="stafettRegistrationFee" value="@stafettRegFee" min="0" step="0.01" @(!allowStafett ? "disabled" : "") placeholder="Stafettavgift">
+                                <input type="number" class="form-control" id="edit_stafettRegistrationFee" name="stafettRegistrationFee" value="@stafettRegFee" min="0" step="0.01" @(!allowStafett ? "disabled" : "") placeholder="Stafettavgift">
                                 <span class="input-group-text">kr</span>
                             </div>
                         </div>
@@ -416,41 +416,41 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 </button>
                             </div>
                         </div>
-                        <input type="hidden" id="shootingClassIds" name="shootingClassIds" value="@shootingClassIds">
+                        <input type="hidden" id="edit_shootingClassIds" name="shootingClassIds" value="@shootingClassIds">
                     </div>
 
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="numberOfSeriesOrStations" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="numberOfSeriesOrStations" name="numberOfSeriesOrStations" value="@numSeries" min="1" required>
+                                <label for="edit_numberOfSeriesOrStations" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="edit_numberOfSeriesOrStations" name="numberOfSeriesOrStations" value="@numSeries" min="1" required>
                             </div>
                             <div class="mb-3">
-                                <label for="numberOfFinalSeries" class="form-label">Varav finalserier</label>
-                                <input type="number" class="form-control" id="numberOfFinalSeries" name="numberOfFinalSeries" value="@numberOfFinalSeries" min="0">
+                                <label for="edit_numberOfFinalSeries" class="form-label">Varav finalserier</label>
+                                <input type="number" class="form-control" id="edit_numberOfFinalSeries" name="numberOfFinalSeries" value="@numberOfFinalSeries" min="0">
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="allowDualCClass" name="allowDualCClass" @(allowDualCClass == true ? "checked" : "")>
-                                    <label class="form-check-label" for="allowDualCClass">
+                                    <input class="form-check-input" type="checkbox" id="edit_allowDualCClass" name="allowDualCClass" @(allowDualCClass == true ? "checked" : "")>
+                                    <label class="form-check-label" for="edit_allowDualCClass">
                                         Tillåt dubbel C-klassregistrering
                                     </label>
                                 </div>
                             </div>
                             <div class="mb-3">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="showLiveResults" name="showLiveResults" @(showLiveResults == true ? "checked" : "")>
-                                    <label class="form-check-label" for="showLiveResults">
+                                    <input class="form-check-input" type="checkbox" id="edit_showLiveResults" name="showLiveResults" @(showLiveResults == true ? "checked" : "")>
+                                    <label class="form-check-label" for="edit_showLiveResults">
                                         Visa live-resultat
                                     </label>
                                 </div>
                             </div>
                             <div class="mb-3">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="isAwardingStandardMedals" name="isAwardingStandardMedals" @(isAwardingStandardMedals == true ? "checked" : "")>
-                                    <label class="form-check-label" for="isAwardingStandardMedals">
+                                    <input class="form-check-input" type="checkbox" id="edit_isAwardingStandardMedals" name="isAwardingStandardMedals" @(isAwardingStandardMedals == true ? "checked" : "")>
+                                    <label class="form-check-label" for="edit_isAwardingStandardMedals">
                                         Standardmedaljsgrundande
                                     </label>
                                     <small class="form-text text-muted d-block mt-1" id="standardMedalsClubOnlyHint" style="display:none">
@@ -460,8 +460,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                             </div>
                             <div class="mb-3" id="edit_selfReportingGroup">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="allowSelfReporting" name="allowSelfReporting" @(allowSelfReporting == true ? "checked" : "")>
-                                    <label class="form-check-label" for="allowSelfReporting">
+                                    <input class="form-check-input" type="checkbox" id="edit_allowSelfReporting" name="allowSelfReporting" @(allowSelfReporting == true ? "checked" : "")>
+                                    <label class="form-check-label" for="edit_allowSelfReporting">
                                         Tillåt resultatrapportering (hemmabana)
                                     </label>
                                 </div>
@@ -561,8 +561,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 Lämna båda tomma för nationella tävlingar som ska synas överallt.
                             </p>
                             <div class="form-check mb-3">
-                                <input class="form-check-input" type="checkbox" id="isClubOnly" name="isClubOnly" @(isClubOnly == true ? "checked" : "") onchange="onEditIsClubOnlyChange()">
-                                <label class="form-check-label" for="isClubOnly">
+                                <input class="form-check-input" type="checkbox" id="edit_isClubOnly" name="isClubOnly" @(isClubOnly == true ? "checked" : "") onchange="onEditIsClubOnlyChange()">
+                                <label class="form-check-label" for="edit_isClubOnly">
                                     <i class="bi bi-shield-check me-1"></i>Endast för specifik klubb
                                 </label>
                                 <small class="form-text text-muted d-block mt-1">Begränsa denna tävling till medlemmar från en specifik klubb</small>
@@ -571,8 +571,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                             <div class="row">
                                 <div class="col-md-6" id="clubSelectorContainer">
                                     <div class="mb-3">
-                                        <label for="clubId" class="form-label">Ansvarig klubb</label>
-                                        <select class="form-select" id="clubId" name="clubId" onchange="onEditClubChange()">
+                                        <label for="edit_clubId" class="form-label">Ansvarig klubb</label>
+                                        <select class="form-select" id="edit_clubId" name="clubId" onchange="onEditClubChange()">
                                             <option value="">-- Ingen klubb --</option>
                                         </select>
                                         <small class="form-text text-muted">Laddar klubbar...</small>
@@ -580,8 +580,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 </div>
                                 <div class="col-md-6">
                                     <div class="mb-3">
-                                        <label for="regionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
-                                        <select class="form-select" id="regionalFederation" name="regionalFederation" onchange="onEditRegionChange()">
+                                        <label for="edit_regionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
+                                        <select class="form-select" id="edit_regionalFederation" name="regionalFederation" onchange="onEditRegionChange()">
                                             <option value="">-- Ingen krets --</option>
                                         </select>
                                         <small class="form-text text-muted">Laddar kretsar...</small>
@@ -612,21 +612,21 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
-                        <label for="competitionDirector" class="form-label">Tävlingsledare <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="competitionDirector" name="competitionDirector" value="@compDirector" required>
+                        <label for="edit_competitionDirector" class="form-label">Tävlingsledare <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="edit_competitionDirector" name="competitionDirector" value="@compDirector" required>
                     </div>
 
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="comp_contactEmail" class="form-label">Kontakt e-post <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="comp_contactEmail" name="contactEmail" value="@contactEmail" required>
+                                <label for="edit_contactEmail" class="form-label">Kontakt e-post <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="edit_contactEmail" name="contactEmail" value="@contactEmail" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="comp_contactPhone" class="form-label">Kontakt telefon</label>
-                                <input type="text" class="form-control" id="comp_contactPhone" name="contactPhone" value="@contactPhone">
+                                <label for="edit_contactPhone" class="form-label">Kontakt telefon</label>
+                                <input type="text" class="form-control" id="edit_contactPhone" name="contactPhone" value="@contactPhone">
                             </div>
                         </div>
                     </div>
@@ -634,7 +634,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="mb-3">
                         <label class="form-label">Tävlingsledare</label>
                         <div>
-                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal('comp_competitionManagers_ids', 'selectedManagersBadges')">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal('edit_competitionManagerIds', 'selectedManagersBadges')">
                                 <i class="bi bi-person-plus"></i> Hantera tävlingsledare
                             </button>
                         </div>
@@ -646,17 +646,17 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         <div id="selectedManagersBadges" class="mt-2">
                             <!-- Selected managers shown as removable badges -->
                         </div>
-                        <input type="hidden" id="comp_competitionManagers_ids" name="competitionManagerIds" value="@string.Join(",", competitionManagerIds)" />
+                        <input type="hidden" id="edit_competitionManagerIds" name="competitionManagerIds" value="@string.Join(",", competitionManagerIds)" />
                     </div>
 
                     <div class="mb-3">
-                        <label for="swishNumber" class="form-label">Swish-nummer</label>
+                        <label for="edit_swishNumber" class="form-label">Swish-nummer</label>
                         <div class="input-group">
-                            <input type="text" class="form-control" id="swishNumber" name="swishNumber" value="@swishNumber"
+                            <input type="text" class="form-control" id="edit_swishNumber" name="swishNumber" value="@swishNumber"
                                    pattern="^(07\d{8}|123\d{7})$" maxlength="10"
                                    oninput="validateSwishNumberField(this, 'edit_swishStatus')"
                                    placeholder="0701234567 eller 1234567890">
-                            <button type="button" class="btn btn-outline-secondary" onclick="validateSwishNumberField(document.getElementById('swishNumber'), 'edit_swishStatus', true)">
+                            <button type="button" class="btn btn-outline-secondary" onclick="validateSwishNumberField(document.getElementById('edit_swishNumber'), 'edit_swishStatus', true)">
                                 <i class="bi bi-check2-circle me-1"></i>Validera
                             </button>
                         </div>
@@ -667,8 +667,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     {
                     <div class="mb-3">
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="addToMenu" name="addToMenu" @(addToMenu == true ? "checked" : "")>
-                            <label class="form-check-label" for="addToMenu">
+                            <input class="form-check-input" type="checkbox" id="edit_addToMenu" name="addToMenu" @(addToMenu == true ? "checked" : "")>
+                            <label class="form-check-label" for="edit_addToMenu">
                                 Lägg till genväg till tävlingen i menyn
                             </label>
                         </div>
@@ -758,7 +758,7 @@ editModal.addEventListener('show.bs.modal', function() {
     setTimeout(function() {
         try {
             // Initialize Flatpickr date pickers with Swedish locale
-            flatpickr('#competitionDate', {
+            flatpickr('#edit_competitionDate', {
                 enableTime: true,
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
@@ -771,7 +771,7 @@ editModal.addEventListener('show.bs.modal', function() {
                 appendTo: document.body
             });
 
-            flatpickr('#competitionEndDate', {
+            flatpickr('#edit_competitionEndDate', {
                 dateFormat: 'Y-m-d',
                 locale: 'sv',
                 // ⚠ INTE static: true. Med flikar ar varje flik kort, sa en kalender som
@@ -782,7 +782,7 @@ editModal.addEventListener('show.bs.modal', function() {
                 appendTo: document.body
             });
 
-            flatpickr('#registrationOpenDate', {
+            flatpickr('#edit_registrationOpenDate', {
                 enableTime: true,
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
@@ -795,7 +795,7 @@ editModal.addEventListener('show.bs.modal', function() {
                 appendTo: document.body
             });
 
-            flatpickr('#registrationCloseDate', {
+            flatpickr('#edit_registrationCloseDate', {
                 enableTime: true,
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
@@ -846,7 +846,7 @@ editModal.addEventListener('show.bs.modal', function() {
             }
 
             ClassicEditor
-                .create(document.getElementById('description'), {
+                .create(document.getElementById('edit_description'), {
                     extraPlugins: [CompetitionImageUploadAdapterPlugin],
                     toolbar: [
                         'heading', '|',
@@ -908,7 +908,7 @@ function loadSeries() {
     if (_seriesLoadInFlight) return; // avoid duplicate parallel loads
     _seriesLoadInFlight = true;
     const cacheBuster = new Date().getTime();
-    const initialSelect = document.getElementById('competitionSeriesId');
+    const initialSelect = document.getElementById('edit_seriesId');
     if (initialSelect) {
         // Mark as loading so applyPendingSeriesSelection() waits until we're done
         delete initialSelect.dataset.seriesLoaded;
@@ -916,7 +916,7 @@ function loadSeries() {
     fetch(`/umbraco/surface/CompetitionAdmin/GetSeriesList?_=${cacheBuster}`)
         .then(response => response.json())
         .then(data => {
-            const select = document.getElementById('competitionSeriesId');
+            const select = document.getElementById('edit_seriesId');
             if (data.success && data.data && data.data.length > 0) {
                 select.innerHTML = '<option value="">Ingen serie</option>';
                 // On club pages, only show series belonging to this club
@@ -940,7 +940,7 @@ function loadSeries() {
         })
         .catch(error => {
             console.error('Error loading series:', error);
-            const select = document.getElementById('competitionSeriesId');
+            const select = document.getElementById('edit_seriesId');
             select.innerHTML = '<option value="">Ingen serie</option>';
             select.dataset.seriesLoaded = 'true';
             _seriesLoadInFlight = false;
@@ -983,7 +983,7 @@ function renderShootingClassCheckboxes(classes) {
 // Helper functions for populating the modal
 window.setFieldValue = function(fieldId, value) {
     // Sync CKEditor for description field
-    if (fieldId === 'description' && compDescriptionEditor) {
+    if (fieldId === 'edit_description' && compDescriptionEditor) {
         compDescriptionEditor.setData(value || '');
     }
     const element = document.getElementById(fieldId);
@@ -1028,9 +1028,9 @@ window.populateEditModal = function(competition) {
     }
 
     // Basic fields
-    setFieldValue('competitionName', competition.competitionName || '');
-    setFieldValue('description', competition.description || '');
-    setFieldValue('venue', competition.venue || '');
+    setFieldValue('edit_competitionName', competition.competitionName || '');
+    setFieldValue('edit_description', competition.description || '');
+    setFieldValue('edit_venue', competition.venue || '');
 
     // Shooting-range picker — loads the currently linked range + the club's ranges
     // (club list / search / map). Runs for every competition type.
@@ -1042,29 +1042,29 @@ window.populateEditModal = function(competition) {
         hpskSetDateField(fieldId, dateStr, includeTime !== false);
     }
 
-    setDateField('competitionDate', competition.competitionDate, true);
-    setDateField('competitionEndDate', competition.competitionEndDate, false);
-    setDateField('registrationOpenDate', competition.registrationOpenDate, true);
-    setDateField('registrationCloseDate', competition.registrationCloseDate, true);
+    setDateField('edit_competitionDate', competition.competitionDate, true);
+    setDateField('edit_competitionEndDate', competition.competitionEndDate, false);
+    setDateField('edit_registrationOpenDate', competition.registrationOpenDate, true);
+    setDateField('edit_registrationCloseDate', competition.registrationCloseDate, true);
 
     // Set all form fields
-    setFieldValue('maxParticipants', competition.maxParticipants || 50);
-    setFieldValue('registrationFee', competition.registrationFee || 0);
-    setFieldValue('competitionDirector', competition.competitionDirector || '');
+    setFieldValue('edit_maxParticipants', competition.maxParticipants || 50);
+    setFieldValue('edit_registrationFee', competition.registrationFee || 0);
+    setFieldValue('edit_competitionDirector', competition.competitionDirector || '');
 
-    setFieldValue('comp_contactEmail', competition.contactEmail || '');
-    setFieldValue('comp_contactPhone', competition.contactPhone || '');
+    setFieldValue('edit_contactEmail', competition.contactEmail || '');
+    setFieldValue('edit_contactPhone', competition.contactPhone || '');
 
-    setFieldValue('numberOfSeriesOrStations', competition.numberOfSeriesOrStations || 1);
-    setFieldValue('numberOfFinalSeries', competition.numberOfFinalSeries || 0);
-    setFieldValue('swishNumber', competition.swishNumber || '');
-    setFieldValue('teamRegistrationFee', competition.teamRegistrationFee || 0);
-    setFieldValue('teamResultSeriesCount', competition.teamResultSeriesCount > 0 ? competition.teamResultSeriesCount : '');
-    setFieldValue('juniorRegistrationFee', competition.juniorRegistrationFee || 0);
+    setFieldValue('edit_numberOfSeriesOrStations', competition.numberOfSeriesOrStations || 1);
+    setFieldValue('edit_numberOfFinalSeries', competition.numberOfFinalSeries || 0);
+    setFieldValue('edit_swishNumber', competition.swishNumber || '');
+    setFieldValue('edit_teamRegistrationFee', competition.teamRegistrationFee || 0);
+    setFieldValue('edit_teamResultSeriesCount', competition.teamResultSeriesCount > 0 ? competition.teamResultSeriesCount : '');
+    setFieldValue('edit_juniorRegistrationFee', competition.juniorRegistrationFee || 0);
     setFieldValue('edit_subCompetitionFee', competition.subCompetitionFee || 0);
     const subCompMode = competition.subCompetitionFeeMode || 'perClass';
-    const modePerClassRadio = document.getElementById('edit_subCompFeeMode_perClass');
-    const modePerRegRadio = document.getElementById('edit_subCompFeeMode_perRegistration');
+    const modePerClassRadio = document.getElementById('edit_subCompetitionFeeMode_perClass');
+    const modePerRegRadio = document.getElementById('edit_subCompetitionFeeMode_perRegistration');
     if (modePerClassRadio) modePerClassRadio.checked = (subCompMode === 'perClass');
     if (modePerRegRadio) modePerRegRadio.checked = (subCompMode === 'perRegistration');
 
@@ -1073,7 +1073,7 @@ window.populateEditModal = function(competition) {
     console.log('Competition managers (IDs):', managerIds);
 
     // Store IDs in hidden field
-    setFieldValue('comp_competitionManagers_ids', managerIds.join(','));
+    setFieldValue('edit_competitionManagerIds', managerIds.join(','));
 
     // Render the badges now. refreshManagerBadgesFromIds resolves member names in
     // the background so saved tävlingsledare show immediately (no "Laddar..." that
@@ -1085,22 +1085,22 @@ window.populateEditModal = function(competition) {
         }
     } else if (typeof refreshManagerBadgesFromIds === 'function') {
         if (badgesContainer) badgesContainer.innerHTML = '<small class="text-muted">Laddar...</small>';
-        refreshManagerBadgesFromIds(managerIds, 'comp_competitionManagers_ids', 'selectedManagersBadges');
+        refreshManagerBadgesFromIds(managerIds, 'edit_competitionManagerIds', 'selectedManagersBadges');
     }
 
-    setFieldValue('shootingClassIds', competition.shootingClassIds || '');
-    setFieldValue('competitionId', competition.id || '');
+    setFieldValue('edit_shootingClassIds', competition.shootingClassIds || '');
+    setFieldValue('edit_competitionId', competition.id || '');
 
     // Checkboxes
-    setCheckboxValue('allowDualCClass', competition.allowDualCClass || false);
-    setCheckboxValue('showLiveResults', competition.showLiveResults || false);
-    setCheckboxValue('addToMenu', competition.addToMenu || false);
-    setCheckboxValue('isAwardingStandardMedals', competition.isAwardingStandardMedals || false);
-    setCheckboxValue('allowSelfReporting', competition.allowSelfReporting || false);
-    setCheckboxValue('allowTeams', competition.allowTeams || false);
+    setCheckboxValue('edit_allowDualCClass', competition.allowDualCClass || false);
+    setCheckboxValue('edit_showLiveResults', competition.showLiveResults || false);
+    setCheckboxValue('edit_addToMenu', competition.addToMenu || false);
+    setCheckboxValue('edit_isAwardingStandardMedals', competition.isAwardingStandardMedals || false);
+    setCheckboxValue('edit_allowSelfReporting', competition.allowSelfReporting || false);
+    setCheckboxValue('edit_allowTeams', competition.allowTeams || false);
     onEditAllowTeamsChange();
-    setFieldValue('stafettRegistrationFee', competition.stafettRegistrationFee || 0);
-    setCheckboxValue('allowStafett', competition.allowStafett || false);
+    setFieldValue('edit_stafettRegistrationFee', competition.stafettRegistrationFee || 0);
+    setCheckboxValue('edit_allowStafett', competition.allowStafett || false);
     onEditAllowStafettChange();
 
     // Show/hide stafett row based on competition type
@@ -1159,13 +1159,13 @@ window.populateEditModal = function(competition) {
     loadEditDirektplaceringConfig(competition.direktplaceringConfig);
 
     // Competition scope dropdown
-    setFieldValue('competitionScope', competition.competitionScope || '');
+    setFieldValue('edit_competitionScope', competition.competitionScope || '');
     setFieldValue('edit_subCompetitionName', competition.subCompetitionName || '');
 
     // Series dropdown - store value in dataset for loadSeries() to apply
     const seriesId = competition.seriesId || '';
     const seriesName = competition.seriesName || '';
-    const seriesDropdown = document.getElementById('competitionSeriesId');
+    const seriesDropdown = document.getElementById('edit_seriesId');
     if (seriesDropdown) {
         seriesDropdown.dataset.pendingValue = seriesId;
         // Store original series ID for detecting changes on save
@@ -1182,7 +1182,7 @@ window.populateEditModal = function(competition) {
 // Called both after loadSeries finishes and after populateEditModal sets the pending value,
 // so it handles either ordering robustly.
 function applyPendingSeriesSelection() {
-    const select = document.getElementById('competitionSeriesId');
+    const select = document.getElementById('edit_seriesId');
     if (!select) return;
     const pendingId = select.dataset.pendingValue;
     // Only act when loadSeries has finished populating options
@@ -1237,7 +1237,7 @@ window.renderEditModalShootingClasses = function(classes) {
     }
 
     // Get current selected classes from the hidden input
-    const currentSelected = document.getElementById('shootingClassIds').value.split(',').map(c => c.trim()).filter(c => c);
+    const currentSelected = document.getElementById('edit_shootingClassIds').value.split(',').map(c => c.trim()).filter(c => c);
 
     classes.forEach(cls => {
         const isChecked = currentSelected.includes(cls.id);
@@ -1263,14 +1263,14 @@ function updateShootingClassIds() {
     const selected = Array.from(document.querySelectorAll('.shooting-class-checkbox:checked'))
         .map(cb => cb.value)
         .join(',');
-    document.getElementById('shootingClassIds').value = selected;
+    document.getElementById('edit_shootingClassIds').value = selected;
 }
 
 function onEditIsClubOnlyChange() {
     // Standard medals may not be awarded at club competitions (BR-PS.1.3).
     // When isClubOnly is checked, force-uncheck and disable the standardmedaljs flag.
-    const clubOnly = document.getElementById('isClubOnly')?.checked || false;
-    const medalCb = document.getElementById('isAwardingStandardMedals');
+    const clubOnly = document.getElementById('edit_isClubOnly')?.checked || false;
+    const medalCb = document.getElementById('edit_isAwardingStandardMedals');
     const hint = document.getElementById('standardMedalsClubOnlyHint');
     if (medalCb) {
         if (clubOnly) {
@@ -1287,15 +1287,15 @@ function onEditIsClubOnlyChange() {
 }
 
 function onEditAllowTeamsChange() {
-    const allowTeams = document.getElementById('allowTeams')?.checked || false;
-    const teamFeeField = document.getElementById('teamRegistrationFee');
+    const allowTeams = document.getElementById('edit_allowTeams')?.checked || false;
+    const teamFeeField = document.getElementById('edit_teamRegistrationFee');
     if (teamFeeField) {
         teamFeeField.disabled = !allowTeams;
         if (!allowTeams) {
             teamFeeField.value = 0;
         }
     }
-    const teamSeriesField = document.getElementById('teamResultSeriesCount');
+    const teamSeriesField = document.getElementById('edit_teamResultSeriesCount');
     if (teamSeriesField) {
         teamSeriesField.disabled = !allowTeams;
         if (!allowTeams) {
@@ -1305,8 +1305,8 @@ function onEditAllowTeamsChange() {
 }
 
 function onEditAllowStafettChange() {
-    const allowStafett = document.getElementById('allowStafett')?.checked || false;
-    const stafettFeeField = document.getElementById('stafettRegistrationFee');
+    const allowStafett = document.getElementById('edit_allowStafett')?.checked || false;
+    const stafettFeeField = document.getElementById('edit_stafettRegistrationFee');
     if (stafettFeeField) {
         stafettFeeField.disabled = !allowStafett;
         if (!allowStafett) {
@@ -1318,7 +1318,7 @@ function onEditAllowStafettChange() {
 function saveCompetition() {
     // Sync CKEditor content to textarea before reading form
     if (compDescriptionEditor) {
-        document.getElementById('description').value = compDescriptionEditor.getData();
+        document.getElementById('edit_description').value = compDescriptionEditor.getData();
     }
 
     const form = document.getElementById('competitionEditForm');
@@ -1332,10 +1332,10 @@ function saveCompetition() {
     // be set so CompetitionUrlProvider can produce a clean URL. The wizard mutex is
     // UI-only (a club selection disables the regionalFederation dropdown), so we check
     // disabled state on regionalFederation the same way the field-collection logic does.
-    const _clubIdVal = parseInt(document.getElementById('clubId')?.value || '0', 10);
-    const _regSel = document.getElementById('regionalFederation');
+    const _clubIdVal = parseInt(document.getElementById('edit_clubId')?.value || '0', 10);
+    const _regSel = document.getElementById('edit_regionalFederation');
     const _regFedVal = _regSel && !_regSel.disabled ? (_regSel.value || '').trim() : '';
-    const _scopeVal = (document.getElementById('competitionScope')?.value || '').trim();
+    const _scopeVal = (document.getElementById('edit_competitionScope')?.value || '').trim();
     if (_clubIdVal <= 0 && !_regFedVal && !_scopeVal) {
         const errorList = document.getElementById('errorList');
         errorList.innerHTML = '';
@@ -1384,11 +1384,11 @@ function saveCompetition() {
     // CreateCompetition så tävlingen skapas som barn till serien.
     const newSeriesId = collected.seriesId;
 
-    fields.competitionManagers = hpskReadManagerIds('comp_competitionManagers_ids');
+    fields.competitionManagers = hpskReadManagerIds('edit_competitionManagerIds');
 
     // ⚠ Kretsen skickas som TOM STRÄNG när den är avstängd (klubb vald), aldrig
     // utelämnad — annars står en gammal krets kvar på tävlingen.
-    fields.regionalFederation = hpskReadRegionValue('regionalFederation');
+    fields.regionalFederation = hpskReadRegionValue('edit_regionalFederation');
 
     // Add Direktplacering config
     if (document.getElementById('edit_enableDirektplacering').checked) {
@@ -1419,7 +1419,7 @@ function saveCompetition() {
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Sparar...';
 
-    const competitionId = parseInt(document.getElementById('competitionId').value) || 0;
+    const competitionId = parseInt(document.getElementById('edit_competitionId').value) || 0;
     const isNewCompetition = competitionId === 0;
 
     let endpoint = '/umbraco/surface/CompetitionEdit/SaveCompetition';
@@ -1468,7 +1468,7 @@ function saveCompetition() {
             document.getElementById('editFormErrors').classList.add('d-none');
 
             // Check if series assignment changed — if so, move the competition
-            const seriesDropdown = document.getElementById('competitionSeriesId');
+            const seriesDropdown = document.getElementById('edit_seriesId');
             const originalSeriesId = seriesDropdown ? (seriesDropdown.dataset.originalSeriesId || '') : '';
             const seriesChanged = !isNewCompetition && String(newSeriesId) !== String(originalSeriesId);
 
@@ -1571,7 +1571,7 @@ function showNotification(message, type) {
 
 // Ensure clubs are loaded in the dropdown
 function ensureClubsLoaded() {
-    const clubSelect = document.getElementById('clubId');
+    const clubSelect = document.getElementById('edit_clubId');
     // Load clubs if not already loaded
     if (clubSelect.options.length <= 1) {
         loadClubsForSelector();
@@ -1598,7 +1598,7 @@ let editOriginalClubId = '';
 let editOriginalRegion = '';
 
 function loadClubsForSelector() {
-    const clubSelect = document.getElementById('clubId');
+    const clubSelect = document.getElementById('edit_clubId');
     const helpText = clubSelect.parentElement.querySelector('small');
 
     // Use role-aware endpoint that returns only clubs the user can manage
@@ -1641,7 +1641,7 @@ function loadClubsForSelector() {
 
                 // Store original values for mismatch warning
                 editOriginalClubId = clubSelect.dataset.currentValue || '';
-                const regionSelect = document.getElementById('regionalFederation');
+                const regionSelect = document.getElementById('edit_regionalFederation');
                 editOriginalRegion = regionSelect.dataset.currentValue || '';
 
                 // Club page context: lock dropdowns for non-admin roles
@@ -1654,7 +1654,7 @@ function loadClubsForSelector() {
                     helpText.classList.remove('text-danger', 'text-warning');
                     helpText.classList.add('text-muted');
                     // Also lock region dropdown
-                    document.getElementById('regionalFederation').disabled = true;
+                    document.getElementById('edit_regionalFederation').disabled = true;
                 }
 
                 // Update organizer UI based on club selection
@@ -1677,7 +1677,7 @@ function loadClubsForSelector() {
 }
 
 function loadRegionsForSelector() {
-    const regionSelect = document.getElementById('regionalFederation');
+    const regionSelect = document.getElementById('edit_regionalFederation');
     const helpText = regionSelect.parentElement.querySelector('small');
 
     fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
@@ -1719,7 +1719,7 @@ function loadRegionsForSelector() {
 
 // Ensure regions are loaded
 function ensureRegionsLoaded() {
-    const regionSelect = document.getElementById('regionalFederation');
+    const regionSelect = document.getElementById('edit_regionalFederation');
     if (regionSelect.options.length <= 1) {
         loadRegionsForSelector();
     } else {
@@ -1735,9 +1735,9 @@ function ensureRegionsLoaded() {
 
 // Handle club selection change - disable region if club is selected
 function onEditClubChange() {
-    const regionSelect = document.getElementById('regionalFederation');
+    const regionSelect = document.getElementById('edit_regionalFederation');
     // Clear region when club is selected
-    if (document.getElementById('clubId').value) {
+    if (document.getElementById('edit_clubId').value) {
         regionSelect.value = '';
     }
     syncEditClubOnlyAvailability();
@@ -1745,7 +1745,7 @@ function onEditClubChange() {
     updateEditMismatchWarning();
 
     // Refresh the range picker's "Klubbens banor" quick-pick for the chosen club.
-    if (typeof compRangeLoadClubRanges === 'function') compRangeLoadClubRanges('edit_', document.getElementById('clubId').value);
+    if (typeof compRangeLoadClubRanges === 'function') compRangeLoadClubRanges('edit_', document.getElementById('edit_clubId').value);
 }
 
 // Handle region selection change
@@ -1759,8 +1759,8 @@ function onEditRegionChange() {
 // With no club, the visibility filter (clubId == myClub) would hide the comp
 // everywhere — so we force-uncheck and disable the checkbox in that state.
 function syncEditClubOnlyAvailability() {
-    const clubSelect = document.getElementById('clubId');
-    const cb = document.getElementById('isClubOnly');
+    const clubSelect = document.getElementById('edit_clubId');
+    const cb = document.getElementById('edit_isClubOnly');
     if (!cb) return;
     const hasClub = !!(clubSelect && clubSelect.value);
     if (!hasClub) {
@@ -1777,8 +1777,8 @@ function syncEditClubOnlyAvailability() {
 function updateEditMismatchWarning() {
     const warningDiv = document.getElementById('edit_clubMismatchWarning');
     const warningText = document.getElementById('edit_clubMismatchText');
-    const clubSelect = document.getElementById('clubId');
-    const regionSelect = document.getElementById('regionalFederation');
+    const clubSelect = document.getElementById('edit_clubId');
+    const regionSelect = document.getElementById('edit_regionalFederation');
 
     const newClubId = clubSelect.value || '';
     const newRegion = regionSelect.disabled ? '' : (regionSelect.value || '');
@@ -1817,8 +1817,8 @@ function updateEditMismatchWarning() {
 
 // Update the region dropdown state + the destination summary
 function updateEditOrganizerUI() {
-    const clubSelect = document.getElementById('clubId');
-    const regionSelect = document.getElementById('regionalFederation');
+    const clubSelect = document.getElementById('edit_clubId');
+    const regionSelect = document.getElementById('edit_regionalFederation');
 
     // Don't re-enable region if dropdown is locked on club page
     const isClubPage = window.location.pathname.includes('/clubs/');
@@ -1846,11 +1846,11 @@ function updateEditDestinationSummary() {
     const textEl = document.getElementById('edit_destinationText');
     if (!textEl) return;
 
-    const clubSelect = document.getElementById('clubId');
-    const regionSelect = document.getElementById('regionalFederation');
+    const clubSelect = document.getElementById('edit_clubId');
+    const regionSelect = document.getElementById('edit_regionalFederation');
     const clubVal = clubSelect ? (clubSelect.value || '') : '';
     const regionVal = regionSelect ? (regionSelect.value || '') : '';
-    const clubOnly = document.getElementById('isClubOnly')?.checked || false;
+    const clubOnly = document.getElementById('edit_isClubOnly')?.checked || false;
 
     if (clubSelect && clubSelect.options.length <= 1 && !regionVal) {
         textEl.innerHTML = 'Välj klubb eller krets ovan.';
@@ -1885,14 +1885,14 @@ window.populateEditModal = function(competition) {
 
     // Handle club and region fields
     if (competition) {
-        setCheckboxValue('isClubOnly', competition.isClubOnly || false);
+        setCheckboxValue('edit_isClubOnly', competition.isClubOnly || false);
         onEditIsClubOnlyChange();
 
         // Set clubId as data attribute for later use
-        document.getElementById('clubId').dataset.currentValue = competition.clubId || '0';
+        document.getElementById('edit_clubId').dataset.currentValue = competition.clubId || '0';
 
         // Set regionalFederation as data attribute for later use
-        document.getElementById('regionalFederation').dataset.currentValue = competition.regionalFederation || '';
+        document.getElementById('edit_regionalFederation').dataset.currentValue = competition.regionalFederation || '';
 
         // Store original values for mismatch warning
         editOriginalClubId = String(competition.clubId || '0');
@@ -2190,7 +2190,7 @@ function collectEditDpConfig() {
         var sel = document.getElementById('edit_competitionTypeSelect');
         var btn = document.getElementById('edit_competitionTypeBtn');
         var help = document.getElementById('edit_competitionTypeHelp');
-        var id = parseInt(document.getElementById('competitionId').value, 10) || 0;
+        var id = parseInt(document.getElementById('edit_competitionId').value, 10) || 0;
         if (!id || !sel) return;
         var newType = sel.value;
         if (!newType || newType === sel.dataset.currentType) {
@@ -2247,7 +2247,7 @@ function collectEditDpConfig() {
             var r = inner.apply(this, arguments);
             try {
                 var id = (competition && competition.id) ||
-                         parseInt(document.getElementById('competitionId').value, 10) || 0;
+                         parseInt(document.getElementById('edit_competitionId').value, 10) || 0;
                 window.hpskLoadCompetitionTypeState(id);
             } catch (e) { console.warn('grenbyte:', e); }
             return r;
@@ -2268,7 +2268,7 @@ window.hpskEditOpenClassPicker = function () {
     var typeSel = document.getElementById('edit_competitionTypeSelect');
     var type = (typeSel && typeSel.dataset.currentType) || (typeSel && typeSel.value) || '';
     window.hpskOpenClassPicker({
-        hiddenId: 'shootingClassIds',
+        hiddenId: 'edit_shootingClassIds',
         cardPrefix: 'edit_',
         type: type,
         title: 'Välj skytteklasser'
@@ -2278,8 +2278,8 @@ window.hpskEditOpenClassPicker = function () {
 // Hall kortet i takt med faltet — bade nar modalen fylls och om nagon annan kod
 // skriver till faltet.
 (function () {
-    var sync = function () { window.hpskUpdateClassCard('edit_', 'shootingClassIds'); };
-    var hidden = document.getElementById('shootingClassIds');
+    var sync = function () { window.hpskUpdateClassCard('edit_', 'edit_shootingClassIds'); };
+    var hidden = document.getElementById('edit_shootingClassIds');
     if (hidden) hidden.addEventListener('change', sync);
     if (typeof window.populateEditModal === 'function' && !window.__hpskEditClassCardWrapped) {
         window.__hpskEditClassCardWrapped = true;

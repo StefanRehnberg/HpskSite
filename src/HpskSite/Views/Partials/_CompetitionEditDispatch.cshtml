@@ -84,7 +84,7 @@ window.openInternalEditModal = function(competitionId) {
 
             // Defensively trigger series load if the modal's show.bs.modal handler didn't
             setTimeout(() => {
-                const seriesSelect = document.getElementById('competitionSeriesId');
+                const seriesSelect = document.getElementById('edit_seriesId');
                 const alreadyLoaded = seriesSelect && (seriesSelect.options.length > 1 || seriesSelect.dataset.seriesLoaded === 'true');
                 if (!alreadyLoaded && typeof window.loadSeries === 'function') {
                     window.loadSeries();
