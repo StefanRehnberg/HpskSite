@@ -140,6 +140,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
             <div class="modal-body">
                 <form id="competitionEditForm">
                     <input type="hidden" id="competitionId" name="competitionId" value="@(competition?.Id ?? 0)">
+                    <section class="hpsk-section" data-title="Grundinformation">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary">
@@ -180,6 +181,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
 
                     <hr>
+                    </section>
+                    <section class="hpsk-section" data-title="Plats & skjutbana">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-geo-alt me-1"></i>Plats &amp; skjutbana</h6>
@@ -195,6 +198,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     @await Html.PartialAsync("_CompetitionRangePicker", "edit_")
 
                     <hr>
+                    </section>
+                    <section class="hpsk-section" data-title="Omfattning & serie">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-diagram-3 me-1"></i>Omfattning &amp; serie</h6>
@@ -265,6 +270,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <hr>
+                    </section>
+                    <section class="hpsk-section" data-title="Deltävling">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-signpost-split me-1"></i>Deltävling</h6>
@@ -304,6 +311,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
                     <hr>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Datum">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-calendar me-1"></i>Datum</h6>
@@ -327,6 +336,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
                     <hr>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Anmälansinformation">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-clipboard me-1"></i>Anmälansinformation</h6>
@@ -414,6 +425,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Konfiguration">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Konfiguration</h6>
@@ -494,6 +507,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <!-- Egenbokning Section -->
+                    </section>
+                    <section class="hpsk-section" data-title="Egenbokning">
                     <div id="editDirektplaceringSection">
                         <hr>
                         <h6 class="text-primary mb-3"><i class="bi bi-calendar-check me-1"></i>Egenbokning</h6>
@@ -522,6 +537,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <!-- Fältskytte-specific fields (hidden unless type is Faltskytte/MagnumFalt) -->
+                    </section>
+                    <section class="hpsk-section" data-title="Fältskytte-inställningar">
                     <div id="editFaltskytteSection" style="display:none">
                         <hr>
                         <h6 class="text-primary mb-3"><i class="bi bi-bullseye me-1"></i>Fältskytte-inställningar</h6>
@@ -567,6 +584,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <!-- Organizer Section: Club OR Region -->
+                    </section>
+                    <section class="hpsk-section" data-title="Arrangör / Synlighet">
                     <div class="card mb-3 border-info">
                         <div class="card-header bg-info bg-opacity-10">
                             <i class="bi bi-building me-1"></i>Arrangör / Synlighet
@@ -620,6 +639,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
                     <hr>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Tävlingsledning & Betalning">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-people me-1"></i>Tävlingsledning & Betalning</h6>
@@ -689,6 +710,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
                     }
+                    </section>
                 </form>
 
                 <div id="editFormErrors" class="alert alert-danger d-none mb-0 mt-3" role="alert">

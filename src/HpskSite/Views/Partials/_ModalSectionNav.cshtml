@@ -121,6 +121,16 @@
             var sections = [].slice.call(body.querySelectorAll('.hpsk-section'));
             if (!sections.length) return 0;
 
+            // ⚠ Sektioner som står i MARKUPEN har inget id — och hela flikväxlingen
+            // adresserar avsnitt via id. Utan detta blev `available[0].id` tom sträng,
+            // hpskShowSection returnerade direkt, ingenting doldes och noll flikar blev
+            // aktiva: alla elva avsnitt visades på en gång. Ge dem ett id här i stället
+            // för att kräva att varje <section> i markupen kommer ihåg ett.
+            sections.forEach(function (s, i) {
+                if (!s.id) s.id = 'hpsksec-' + i;
+                s.classList.add('hpsk-tabbed');   // döljer avsnittets egen rubrik
+            });
+
             // ⚠ Synlighet måste mätas på det som DÖLJS, inte på wrappern: det är ett
             // BARN (#editFaltskytteSection) som bär display:none, och en tom men synlig
             // wrapper passerar offsetParent-testet. Mät att avsnittet renderar något.

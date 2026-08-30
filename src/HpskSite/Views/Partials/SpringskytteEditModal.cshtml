@@ -28,6 +28,7 @@
             <div class="modal-body">
                 <form id="springEditForm">
                     <input type="hidden" id="springEdit_competitionId" name="competitionId" value="0">
+                    <section class="hpsk-section" data-title="Grundinformation">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary">
@@ -47,6 +48,8 @@
                     </div>
 
                     <hr>
+                    </section>
+                    <section class="hpsk-section" data-title="Plats & skjutbana">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-geo-alt me-1"></i>Plats &amp; skjutbana</h6>
@@ -63,6 +66,8 @@
                     @await Html.PartialAsync("_CompetitionRangePicker", "springEdit_")
 
                     <hr>
+                    </section>
+                    <section class="hpsk-section" data-title="Omfattning & serie">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-diagram-3 me-1"></i>Omfattning &amp; serie</h6>
@@ -90,6 +95,8 @@
                     </div>
 
                     <hr>
+                    </section>
+                    <section class="hpsk-section" data-title="Deltävling">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-signpost-split me-1"></i>Deltävling</h6>
@@ -129,6 +136,8 @@
 
                     <hr>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Datum">
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-calendar me-1"></i>Datum</h6>
@@ -152,9 +161,11 @@
 
                     <hr>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Anmälansinformation">
                     <div class="row">
                         <div class="col-12">
-                            <h6 class="mb-3 text-primary"><i class="bi bi-clipboard me-1"></i>Anmalansinformation</h6>
+                            <h6 class="mb-3 text-primary"><i class="bi bi-clipboard me-1"></i>Anmälansinformation</h6>
                         </div>
                     </div>
 
@@ -226,9 +237,11 @@
 
                     <hr>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Konfiguration">
                     <div class="row">
                         <div class="col-12">
-                            <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Klasser & Stationer</h6>
+                            <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Konfiguration</h6>
                         </div>
                     </div>
 
@@ -350,6 +363,8 @@
                     </div>
 
                     <!-- Organizer Section -->
+                    </section>
+                    <section class="hpsk-section" data-title="Arrangör / Synlighet">
                     <div class="card mb-3 border-info">
                         <div class="card-header bg-info bg-opacity-10">
                             <i class="bi bi-building me-1"></i>Arrangör / Synlighet
@@ -392,9 +407,11 @@
 
                     <hr>
 
+                    </section>
+                    <section class="hpsk-section" data-title="Tävlingsledning & Betalning">
                     <div class="row">
                         <div class="col-12">
-                            <h6 class="mb-3 text-primary"><i class="bi bi-people me-1"></i>Tavlingsledning & Betalning</h6>
+                            <h6 class="mb-3 text-primary"><i class="bi bi-people me-1"></i>Tävlingsledning &amp; Betalning</h6>
                         </div>
                     </div>
 
@@ -445,6 +462,7 @@
                         </div>
                     </div>
                     }
+                    </section>
                 </form>
 
                 <div id="springEditFormErrors" class="alert alert-danger d-none mb-0 mt-3" role="alert">
