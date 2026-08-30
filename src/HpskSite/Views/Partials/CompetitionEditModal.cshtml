@@ -209,53 +209,17 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <div class="mb-3">
                         <label for="competitionScope" class="form-label">Omfattning</label>
                         <select class="form-select" id="competitionScope" name="competitionScope">
-                            @if (string.IsNullOrEmpty(competitionScope))
+                            <option value="">-- Välj omfattning --</option>
+                            @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
                             {
-                                <option value="" selected>-- Välj omfattning --</option>
-                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
-                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
-                                <option value="Kretsmästerskap">Kretsmästerskap</option>
-                                <option value="Klubbmästerskap">Klubbmästerskap</option>
-                            }
-                            else if (competitionScope == "Svenskt Mästerskap")
-                            {
-                                <option value="">-- Välj omfattning --</option>
-                                <option value="Svenskt Mästerskap" selected>Svenskt Mästerskap</option>
-                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
-                                <option value="Kretsmästerskap">Kretsmästerskap</option>
-                                <option value="Klubbmästerskap">Klubbmästerskap</option>
-                            }
-                            else if (competitionScope == "Landsdelsmästerskap")
-                            {
-                                <option value="">-- Välj omfattning --</option>
-                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
-                                <option value="Landsdelsmästerskap" selected>Landsdelsmästerskap</option>
-                                <option value="Kretsmästerskap">Kretsmästerskap</option>
-                                <option value="Klubbmästerskap">Klubbmästerskap</option>
-                            }
-                            else if (competitionScope == "Kretsmästerskap")
-                            {
-                                <option value="">-- Välj omfattning --</option>
-                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
-                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
-                                <option value="Kretsmästerskap" selected>Kretsmästerskap</option>
-                                <option value="Klubbmästerskap">Klubbmästerskap</option>
-                            }
-                            else if (competitionScope == "Klubbmästerskap")
-                            {
-                                <option value="">-- Välj omfattning --</option>
-                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
-                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
-                                <option value="Kretsmästerskap">Kretsmästerskap</option>
-                                <option value="Klubbmästerskap" selected>Klubbmästerskap</option>
-                            }
-                            else
-                            {
-                                <option value="" selected>-- Välj omfattning --</option>
-                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
-                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
-                                <option value="Kretsmästerskap">Kretsmästerskap</option>
-                                <option value="Klubbmästerskap">Klubbmästerskap</option>
+                                @if (string.Equals(competitionScope, scopeOption, StringComparison.Ordinal))
+                                {
+                                    <option value="@scopeOption" selected>@scopeOption</option>
+                                }
+                                else
+                                {
+                                    <option value="@scopeOption">@scopeOption</option>
+                                }
                             }
                         </select>
                         <small class="form-text text-muted">Avgör hur standardmedaljer beräknas</small>

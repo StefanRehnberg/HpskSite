@@ -73,7 +73,12 @@ namespace HpskSite.CompetitionTypes.Common
             new("subCompetitionName", "Deltävling i tävlingen (valfritt)", FieldControl.Text, "Deltävling", 1,
                 help: "Om ifyllt visas en kryssruta vid anmälan."),
             new("subCompetitionFee", "Anmälningsavgift för Deltävling", FieldControl.Number, "Deltävling", 2),
-            new("subCompetitionFeeMode", "Avgiftsläge", FieldControl.Radio, "Deltävling", 3,
+            // ⚠️ Tom etikett = "katalogen påstår ingenting om etiketten här", och det är
+            // avsiktligt: en radiogrupp har ingen enskild <label for>, bara en per
+            // alternativ. Kontraktstestet hoppar över tomma etiketter i stället för att
+            // jämföra mot ett godtyckligt valt alternativ — ett påstående som inte går
+            // att pröva ärligt ska inte stå i katalogen alls.
+            new("subCompetitionFeeMode", "", FieldControl.Radio, "Deltävling", 3,
                 note: "perClass | perRegistration"),
 
             // ── Datum ───────────────────────────────────────────────────────────
@@ -92,7 +97,7 @@ namespace HpskSite.CompetitionTypes.Common
             new("teamResultSeriesCount", "Antal serier i lagresultat", FieldControl.Number, "Anmälansinformation", 8,
                 notFor: new[] { Springskytte },
                 help: "0 eller tomt = automatiskt (kvalseriernas antal)"),
-            new("allowStafett", "Tillåt stafettlag", FieldControl.Checkbox, "Anmälansinformation", 9),
+            new("allowStafett", "Tillåt stafettanmälan", FieldControl.Checkbox, "Anmälansinformation", 9),
             new("stafettRegistrationFee", "Stafettavgift", FieldControl.Number, "Anmälansinformation", 10),
 
             // ── Konfiguration ───────────────────────────────────────────────────
@@ -124,7 +129,7 @@ namespace HpskSite.CompetitionTypes.Common
             new("rollingStart", "Rullande start", FieldControl.Slot, "Fältskytte-inställningar", 3,
                 onlyFor: FaltFamily, slot: "falt-rollingstart",
                 note: "JSON, byggs av kryssruta + patrullstorlek."),
-            new("faltskytteSelfServiceResults", "Tillåt skyttar i laget att fylla i resultat",
+            new("faltskytteSelfServiceResults", "Tillåt skyttar i laget att fylla i resultat (självservice)",
                 FieldControl.Checkbox, "Fältskytte-inställningar", 4, onlyFor: FaltFamily),
             new("stationConfig", "Stationskonfiguration", FieldControl.Slot, "Fältskytte-inställningar", 5,
                 onlyFor: FaltFamily, slot: "falt-config",
@@ -134,19 +139,19 @@ namespace HpskSite.CompetitionTypes.Common
             new("clubId", "Ansvarig klubb", FieldControl.Select, "Arrangör / Synlighet", 1,
                 note: "⚠ Klubb ELLER krets ELLER mästerskapstyp måste vara satt, annars kan " +
                       "CompetitionUrlProvider inte bilda någon URL."),
-            new("regionalFederation", "Krets", FieldControl.Select, "Arrangör / Synlighet", 2),
-            new("isClubOnly", "Endast för vald klubb", FieldControl.Checkbox, "Arrangör / Synlighet", 3),
+            new("regionalFederation", "Krets (endast om ingen klubb)", FieldControl.Select, "Arrangör / Synlighet", 2),
+            new("isClubOnly", "Endast för specifik klubb", FieldControl.Checkbox, "Arrangör / Synlighet", 3),
 
             // ── Tävlingsledning & Betalning ─────────────────────────────────────
             new("competitionDirector", "Tävlingsledare", FieldControl.Text, "Tävlingsledning & Betalning", 1, required: true),
-            new("contactEmail", "Kontakt-e-post", FieldControl.Text, "Tävlingsledning & Betalning", 2, required: true),
-            new("contactPhone", "Kontakttelefon", FieldControl.Text, "Tävlingsledning & Betalning", 3),
-            new("competitionManagerIds", "Tävlingsansvariga", FieldControl.Slot, "Tävlingsledning & Betalning", 4,
+            new("contactEmail", "Kontakt e-post", FieldControl.Text, "Tävlingsledning & Betalning", 2, required: true),
+            new("contactPhone", "Kontakt telefon", FieldControl.Text, "Tävlingsledning & Betalning", 3),
+            new("competitionManagerIds", "Tävlingsledare", FieldControl.Slot, "Tävlingsledning & Betalning", 4,
                 slot: "manager-picker"),
             new("swishNumber", "Swish-nummer", FieldControl.Text, "Tävlingsledning & Betalning", 5,
                 slot: "swish-validation",
                 note: "Bär egen formatvalidering, se _SwishNumberValidation."),
-            new("addToMenu", "Visa i menyn", FieldControl.Checkbox, "Tävlingsledning & Betalning", 6)
+            new("addToMenu", "Lägg till genväg till tävlingen i menyn", FieldControl.Checkbox, "Tävlingsledning & Betalning", 6)
         };
 
         /// <summary>Alla fält som gäller en viss gren, i flik- och fältordning.</summary>

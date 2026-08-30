@@ -38,7 +38,7 @@
                     </div>
 
                     <div class="mb-3">
-                        <label for="springEdit_competitionName" class="form-label">Tavlingsnamn <span class="text-danger">*</span></label>
+                        <label for="springEdit_competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="springEdit_competitionName" name="competitionName" required>
                     </div>
 
@@ -77,21 +77,27 @@
                     <div class="mb-3">
                         <label for="springEdit_competitionScope" class="form-label">Omfattning</label>
                         <select class="form-select" id="springEdit_competitionScope" name="competitionScope">
-                            <option value="">-- Valj omfattning --</option>
-                            <option value="Svenskt Masterskap">Svenskt Masterskap</option>
-                            <option value="Landsdelsmasterskap">Landsdelsmasterskap</option>
-                            <option value="Kretsmasterskap">Kretsmasterskap</option>
-                            <option value="Klubbmasterskap">Klubbmasterskap</option>
+                            <option value="">-- Välj omfattning --</option>
+                            @* Renderas ur CompetitionScopeHelper.All — aldrig handskrivet.
+                               Värdena här LÅG ISÄR från konstanterna ("Kretsmasterskap" utan diakriter),
+                               och jämförelserna i IsChampionshipScope och CompetitionUrlProvider är
+                               StringComparison.Ordinal — så en springskyttetävling satt till
+                               mästerskap via den här modalen räknades inte som mästerskap alls.
+                               Nuvarande val sätts av populateSpringEditModal, inte av servern. *@
+                            @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
+                            {
+                                <option value="@scopeOption">@scopeOption</option>
+                            }
                         </select>
-                        <small class="form-text text-muted">Avgor hur standardmedaljer beraknas</small>
+                        <small class="form-text text-muted">Avgör hur standardmedaljer beräknas</small>
                     </div>
 
                     <div class="mb-3">
-                        <label for="springEdit_seriesId" class="form-label">Tavlingsserie (valfritt)</label>
+                        <label for="springEdit_seriesId" class="form-label">Tävlingsserie (valfritt)</label>
                         <select class="form-select" id="springEdit_seriesId" name="seriesId">
                             <option value="">Ingen serie</option>
                         </select>
-                        <small class="form-text text-muted">Valj serie som tavlingen ingar i</small>
+                        <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
                     </div>
 
                     <hr>
@@ -147,7 +153,7 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="springEdit_competitionDate" class="form-label">Tavlingsdatum <span class="text-danger">*</span></label>
+                                <label for="springEdit_competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control date-input" id="springEdit_competitionDate" name="competitionDate" required>
                             </div>
                         </div>
@@ -172,13 +178,13 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="springEdit_registrationOpenDate" class="form-label">Anmalan oppnar <span class="text-danger">*</span></label>
+                                <label for="springEdit_registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control date-input" id="springEdit_registrationOpenDate" name="registrationOpenDate" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="springEdit_registrationCloseDate" class="form-label">Anmalan stanger <span class="text-danger">*</span></label>
+                                <label for="springEdit_registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control date-input" id="springEdit_registrationCloseDate" name="registrationCloseDate" required>
                             </div>
                         </div>
@@ -270,7 +276,7 @@
                     <div class="mb-3">
                         <label class="form-label fw-bold">Alders-/konsklasser <span class="text-danger">*</span></label>
                         <div class="mb-2">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="springEditToggleAllAges(true)">Valj alla</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="springEditToggleAllAges(true)">Välj alla</button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="springEditToggleAllAges(false)">Avmarkera alla</button>
                         </div>
 
@@ -416,7 +422,7 @@
                     </div>
 
                     <div class="mb-3">
-                        <label for="springEdit_competitionDirector" class="form-label">Tavlingsledare <span class="text-danger">*</span></label>
+                        <label for="springEdit_competitionDirector" class="form-label">Tävlingsledare <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="springEdit_competitionDirector" name="competitionDirector" required>
                     </div>
 
@@ -436,10 +442,10 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Tavlingsledare</label>
+                        <label class="form-label">Tävlingsledare</label>
                         <div>
                             <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal('springEdit_competitionManagers_ids', 'springEdit_managerBadges')">
-                                <i class="bi bi-person-plus"></i> Hantera tavlingsledare
+                                <i class="bi bi-person-plus"></i> Hantera tävlingsledare
                             </button>
                         </div>
                         <div id="springEdit_managerBadges" class="mt-2"></div>
@@ -662,7 +668,7 @@ window.populateSpringEditModal = function(comp) {
     setVal('springEdit_competitionManagers_ids', managerIds.join(','));
     const badgesEl = document.getElementById('springEdit_managerBadges');
     if (managerIds.length === 0) {
-        if (badgesEl) badgesEl.innerHTML = '<small class="text-muted">Inga tavlingsledare valda</small>';
+        if (badgesEl) badgesEl.innerHTML = '<small class="text-muted">Inga tävlingsledare valda</small>';
     } else if (typeof refreshManagerBadgesFromIds === 'function') {
         if (badgesEl) badgesEl.innerHTML = '<small class="text-muted">Laddar...</small>';
         // Resolve names into the Springskytte modal's own badge container.
