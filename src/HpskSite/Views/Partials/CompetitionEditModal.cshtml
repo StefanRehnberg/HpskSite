@@ -169,6 +169,31 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
+                        <label for="competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="competitionName" name="competitionName" value="@compName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="description" name="description" rows="4">@compDesc</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="venue" name="venue" value="@compVenue" required>
+                    </div>
+
+                    @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map *@
+                    @await Html.PartialAsync("_CompetitionRangePicker", "edit_")
+
+                    <hr>
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-diagram-3 me-1"></i>Omfattning &amp; serie</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
                         <label for="competitionScope" class="form-label">Omfattning</label>
                         <select class="form-select" id="competitionScope" name="competitionScope">
                             @if (string.IsNullOrEmpty(competitionScope))
@@ -224,6 +249,21 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
+                        <label for="competitionSeriesId" class="form-label">Tävlingsserie (valfritt)</label>
+                        <select class="form-select" id="competitionSeriesId" name="seriesId">
+                            <option value="">Ingen serie</option>
+                        </select>
+                        <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
+                    </div>
+
+                    <hr>
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-signpost-split me-1"></i>Deltävling</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
                         <label for="edit_subCompetitionName" class="form-label">Deltävling i tävlingen (valfritt)</label>
                         <input type="text" class="form-control" id="edit_subCompetitionName" name="subCompetitionName"
                                placeholder="T.ex. Svenska Polismästerskapet 2026" autocomplete="off" data-1p-ignore="true">
@@ -253,31 +293,6 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         <small class="form-text text-muted mt-2">Avgiften gäller bara skyttar som kryssar i deltävlingen vid anmälan. 0 kr = ingen extra avgift.</small>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="competitionSeriesId" class="form-label">Tävlingsserie (valfritt)</label>
-                        <select class="form-select" id="competitionSeriesId" name="seriesId">
-                            <option value="">Ingen serie</option>
-                        </select>
-                        <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
-                    </div>
-
-                    <div class="mb-3">
-                        <label for="competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="competitionName" name="competitionName" value="@compName" required>
-                    </div>
-
-                    <div class="mb-3">
-                        <label for="description" class="form-label">Beskrivning</label>
-                        <textarea class="form-control" id="description" name="description" rows="4">@compDesc</textarea>
-                    </div>
-
-                    <div class="mb-3">
-                        <label for="venue" class="form-label">Plats <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="venue" name="venue" value="@compVenue" required>
-                    </div>
-
-                    @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map *@
-                    @await Html.PartialAsync("_CompetitionRangePicker", "edit_")
 
                     <hr>
 
