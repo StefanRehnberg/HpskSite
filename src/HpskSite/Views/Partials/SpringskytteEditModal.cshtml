@@ -890,41 +890,30 @@ function springEditSave() {
 
     const form = document.getElementById('springEditForm');
 
-    // Disable Flatpickr-generated inputs before validation (they have name="" which breaks checkValidity)
-    const fpInputs = form.querySelectorAll('.numInput, .flatpickr-hour, .flatpickr-minute, .flatpickr-am-pm');
-    fpInputs.forEach(i => i.disabled = true);
-    const isValid = form.checkValidity();
-    if (!isValid) {
-        form.reportValidity();
-        fpInputs.forEach(i => i.disabled = false);
-        return;
-    }
-    fpInputs.forEach(i => i.disabled = false);
+    // Delad validering (_CompetitionFormSave). ⚠ Den byter till rätt FLIK innan
+    // reportValidity() -- utan det kan bubblan inte peka på ett fält som ligger på en
+    // dold flik, och Spara ser ut att inte göra någonting alls. Modalen har nio flikar.
+    if (!hpskValidateCompetitionForm(form, '#springEditModal')) return;
 
     // Validate classes
     const classIds = document.getElementById('springEdit_shootingClassIds').value;
     if (!classIds) {
-        alert('Valj minst en vapenklass och en aldersklass.');
+        alert('Välj minst en vapenklass och en åldersklass.');
         return;
     }
 
-    // Temporarily enable disabled fields so FormData includes them
-    const disabledFields = form.querySelectorAll(':disabled');
-    disabledFields.forEach(f => f.disabled = false);
-    const formData = new FormData(form);
-    disabledFields.forEach(f => f.disabled = true);
-    const fields = {};
-
-    for (let [key, value] of formData.entries()) {
-        if (key === 'competitionId' || key === 'competitionManagers' || key === 'competitionManagerIds') continue;
-        if ((key === 'competitionEndDate' || key === 'description' || key === 'contactPhone') && !value) continue;
-
-        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowTeams' || key === 'allowStafett') {
-            fields[key] = value === 'on';
-        } else {
-            fields[key] = value;
-        }
-    }
+    // Delad fältinsamling (_CompetitionFormSave). Listorna är Springskyttes EGNA --
+    // de ska inte harmoniseras med den vanliga modalens, som har fler kryssrutor.
+    const SPRING_BOOLS = ['showLiveResults', 'addToMenu', 'isClubOnly',
+                          'isAwardingStandardMedals', 'allowTeams', 'allowStafett'];
+    const collected = hpskCollectCompetitionFields(form, {
+        skipKeys: ['competitionId', 'competitionManagers', 'competitionManagerIds'],
+        skipEmptyKeys: ['competitionEndDate', 'description', 'contactPhone'],
+        boolKeys: SPRING_BOOLS,
+        forceFalseKeys: SPRING_BOOLS,
+        extractSeriesId: true
+    });
+    const fields = collected.fields;
 
     // Calculate numberOfSeriesOrStations from Class A series (or default 6 for C-only).
     // The select has no name attribute, so it is not in FormData and the value is recomputed here.
@@ -943,22 +932,15 @@ function springEditSave() {
         fields.numberOfSeriesOrStations = 6;
     }
 
-    // Series handling
-    const newSeriesId = fields.seriesId || '';
-    delete fields.seriesId;
+    // seriesId plockas ut av den delade insamlingen (hanteras via Move efter sparning).
+    const newSeriesId = collected.seriesId;
 
-    // Managers
-    const managerIdsStr = document.getElementById('springEdit_competitionManagers_ids').value || '';
-    fields.competitionManagers = managerIdsStr.split(',').map(id => id.trim()).filter(id => id).map(id => parseInt(id));
+    fields.competitionManagers = hpskReadManagerIds('springEdit_competitionManagers_ids');
 
-    // Region
-    const regionSelect = document.getElementById('springEdit_regionalFederation');
-    fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
+    // ⚠ Kretsen skickas som TOM STRÄNG när den är avstängd, aldrig utelämnad -- annars
+    // står en gammal krets kvar på en tävling som blivit klubbvärd.
+    fields.regionalFederation = hpskReadRegionValue('springEdit_regionalFederation');
 
-    // Unchecked checkboxes
-    ['showLiveResults', 'addToMenu', 'isClubOnly', 'isAwardingStandardMedals', 'allowTeams', 'allowStafett'].forEach(f => {
-        if (!(f in fields)) fields[f] = false;
-    });
 
     // Always false for Springskytte
     fields.allowDualCClass = false;
@@ -1062,6 +1044,7 @@ function springEditSave() {
 @* Sektionsnavigering — samma behandling som den vanliga tavlingsmodalen fick
    2026-08-29. Partialen inkluderas av modalen sjalv sa den foljer med till varje
    yta som renderar den. Guardad mot dubbelinkludering. *@
+@await Html.PartialAsync("_CompetitionFormSave")
 @await Html.PartialAsync("_ModalSectionNav")
 <script>
 (function () {

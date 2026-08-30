@@ -1735,30 +1735,22 @@ function submitWizard() {
         return;
     }
 
-    // Temporarily enable disabled fields so FormData includes them
-    const disabledFields = document.querySelectorAll('#competitionWizardForm :disabled');
-    disabledFields.forEach(f => f.disabled = false);
-    const formData = new FormData(document.getElementById('competitionWizardForm'));
-    disabledFields.forEach(f => f.disabled = true);
-    const fields = {};
-
-    for (let [key, value] of formData.entries()) {
-        // Convert checkbox values
-        if (key === 'allowDualCClass' || key === 'showLiveResults' ||
-            key === 'isClubOnly' || key === 'allowSelfReporting' || key === 'isAwardingStandardMedals' ||
-            key === 'allowTeams' || key === 'allowStafett') {
-            fields[key] = value === 'on';
-        } else {
-            fields[key] = value;
-        }
-    }
-
-    // Ensure unchecked checkboxes are false
-    ['allowDualCClass', 'showLiveResults', 'isClubOnly', 'allowSelfReporting', 'isAwardingStandardMedals', 'allowTeams', 'allowStafett'].forEach(field => {
-        if (!(field in fields)) {
-            fields[field] = false;
-        }
-    });
+    // Delad fältinsamling (_CompetitionFormSave) — samma slinga som redigeringsmodalerna.
+    // Listan här motsvarar exakt guidens sju kryssrutor.
+    //
+    // ⚠️ extractSeriesId sätts MEDVETET INTE. Guiden ska skicka seriesId KVAR i
+    // payloaden — det är så CreateCompetition skapar tävlingen som BARN till serien.
+    // Redigeringsmodalerna plockar tvärtom ut den (serien sätts via Move efter sparning).
+    //
+    // Guidens VALIDERING delas inte: den har egen stegvalidering som byter till rätt STEG,
+    // vilket redan löser det flikbytet löser i modalerna.
+    const WIZARD_BOOLS = ['allowDualCClass', 'showLiveResults', 'isClubOnly',
+                          'allowSelfReporting', 'isAwardingStandardMedals',
+                          'allowTeams', 'allowStafett'];
+    const fields = hpskCollectCompetitionFields(
+        document.getElementById('competitionWizardForm'),
+        { boolKeys: WIZARD_BOOLS, forceFalseKeys: WIZARD_BOOLS }
+    ).fields;
 
     // Team result series count: empty = auto (send 0 so the int property stores cleanly)
     if (!('teamResultSeriesCount' in fields) || String(fields.teamResultSeriesCount).trim() === '') {
@@ -2115,4 +2107,5 @@ function collectDirektplaceringConfig() {
 </script>
 
 @* Swish-number format validation — shared with CompetitionEditModal, which is rendered without this partial on CompetitionManagement. *@
+@await Html.PartialAsync("_CompetitionFormSave")
 @await Html.PartialAsync("_SwishNumberValidation")

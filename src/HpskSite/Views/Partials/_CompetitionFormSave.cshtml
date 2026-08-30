@@ -1,0 +1,186 @@
+@*
+    SPARVÄGENS DELADE MEKANIK — validering och fältinsamling, på ETT ställe.
+
+    ⚠️ VARFÖR DEN FINNS. Redigeringsmodalerna hade var sin kopia av samma sekvens, och de
+    hann glida isär på sätt som gav TYSTA fel — inte bara underhållsbörda:
+
+      · Springskyttemodalen fick nio flikar men aldrig `hpskRevealField`. Ett ogiltigt fält
+        på en dold flik gick inte att peka på, så `reportValidity()` visade ingen bubbla:
+        Spara såg ut att inte göra någonting alls. Fixat i EN modal, missat i den andra.
+      · Springskyttemodalen tömde tävlingens klubb/krets vid sparning, vilket förstörde
+        tävlingens URL.
+
+    Båda hörde till samma sekvens. Den bor nu här, så en modal inte kan få hälften av den.
+
+    ⚠️ SPARVÄGEN ÄR EN FIELD BAG (`Dictionary<string,object>`), inte ett typat formulär —
+    ingen typkontroll finns på vägen ut, och `MapFieldNameToAlias` SLÄPPER TYST okända
+    fält. Alltså är "samma payload in = samma beteende" hela säkerhetskontraktet, och det
+    prövas av `hpsk-verify/payload-diff.mjs` mot en fångad baseline.
+
+    ⚠️ INKLUDERAS AV PARTIALERNA SJÄLVA, inte av värdsidorna — samma regel som
+    `_HtmlEscape`. En hjälpare som värdsidan måste komma ihåg att lägga till är ingen
+    säkerhet; den ska följa med koden som behöver den. Guardad mot dubbelinkludering.
+*@
+@{
+    var alreadyIncluded = Context.Items.ContainsKey("hpskCompetitionFormSaveIncluded");
+    Context.Items["hpskCompetitionFormSaveIncluded"] = true;
+}
+@if (!alreadyIncluded)
+{
+    <script>
+    (function () {
+        'use strict';
+
+        // Flatpickr genererar egna inputs (.numInput m.fl.) UTAN name-attribut, och de
+        // spräcker checkValidity(). De stängs av under kontrollen och slås på igen efteråt.
+        var FP_HELPERS = '.numInput, .flatpickr-hour, .flatpickr-minute, .flatpickr-am-pm';
+
+        /**
+         * Validerar formuläret och ser till att ett underkänt fält går att SE.
+         *
+         * @@param {HTMLFormElement} form
+         * @@param {string} modalSel  CSS-väljare för modalen, t.ex. '#springEditModal'.
+         *                           Behövs för att kunna byta till rätt flik.
+         * @@returns {boolean} true om formuläret får sparas.
+         */
+        function hpskValidateCompetitionForm(form, modalSel) {
+            if (!form) return false;
+
+            var fpInputs = form.querySelectorAll(FP_HELPERS);
+            var i;
+            for (i = 0; i < fpInputs.length; i++) { fpInputs[i].disabled = true; }
+
+            var valid;
+            try {
+                valid = form.checkValidity();
+            } finally {
+                // ⚠️ MÅSTE slås på igen på VARJE väg ut. En kvarglömd disabled-input är
+                // osynlig och bryter NÄSTA sparning, alltså ett fel som inte syns där det
+                // orsakades. Därför finally och inte tre kopior av samma rad.
+                for (i = 0; i < fpInputs.length; i++) { fpInputs[i].disabled = false; }
+            }
+
+            if (valid) return true;
+
+            // ⚠️ MED FLIKAR LIGGER FÄLTEN PÅ OLIKA SYNLIGA SIDOR. reportValidity() kan
+            // inte peka på ett fält som sitter på en flik som inte visas — bubblan hamnar
+            // ingenstans och Spara ser ut att inte göra någonting. Byt flik FÖRST.
+            var all = Array.prototype.slice.call(form.querySelectorAll('input,select,textarea'));
+            var firstBad = null;
+            for (i = 0; i < all.length; i++) {
+                var el = all[i];
+                if (!el.disabled && el.checkValidity && !el.checkValidity()) { firstBad = el; break; }
+            }
+            if (firstBad && modalSel && typeof window.hpskRevealField === 'function') {
+                window.hpskRevealField(modalSel, firstBad);
+            }
+            form.reportValidity();
+            return false;
+        }
+
+        /**
+         * Samlar formuläret till den field bag SaveCompetition tar.
+         *
+         * @@param {HTMLFormElement} form
+         * @@param {Object} opts
+         *   skipKeys       {string[]} nycklar som aldrig ska med (hanteras separat)
+         *   skipEmptyKeys  {string[]} nycklar som utelämnas NÄR de är tomma
+         *   boolKeys       {string[]} kryssrutor: 'on' -> true
+         *   forceFalseKeys {string[]} kryssrutor som måste bli false när de saknas
+         *   extractSeriesId {boolean} plocka UT seriesId ur field bagen och returnera den
+         *
+         * ⚠️ extractSeriesId MÅSTE anges medvetet och är false som standard.
+         * Redigeringsmodalerna plockar ut den (serien sätts via Move EFTER sparningen), men
+         * tävlingsGUIDEN skickar den KVAR i payloaden — det är så CreateCompetition vet att
+         * tävlingen ska skapas som barn till serien. Att alltid plocka bort den skulle tyst
+         * bryta "skapa tävling i en serie", vilket är exakt den sortens fel som inte syns
+         * förrän någon undrar var deras omgång tog vägen.
+         *
+         * ⚠️ boolKeys och forceFalseKeys är MEDVETET två listor, inte en. De skiljer sig
+         * faktiskt åt i den vanliga modalen: `isExternal` ska tvingas till false men
+         * behöver ingen 'on'-tolkning, och `faltskytteSelfServiceResults` tolkas men läses
+         * separat ur sitt element. Att slå ihop dem skulle ändra payloaden tyst.
+         *
+         * @@returns {{fields: Object, seriesId: string}}
+         */
+        function hpskCollectCompetitionFields(form, opts) {
+            opts = opts || {};
+            var skipKeys = opts.skipKeys || [];
+            var skipEmptyKeys = opts.skipEmptyKeys || [];
+            var boolKeys = opts.boolKeys || [];
+            var forceFalseKeys = opts.forceFalseKeys || [];
+
+            // FormData hoppar över avstängda fält, men flera av dem (t.ex. krets när en
+            // klubb är vald) MÅSTE med — annars ser servern dem som oförändrade.
+            var disabled = form.querySelectorAll(':disabled');
+            var i, formData;
+            for (i = 0; i < disabled.length; i++) { disabled[i].disabled = false; }
+            try {
+                formData = new FormData(form);
+            } finally {
+                // Samma skäl som ovan: tillståndet måste tillbaka även om något kastar.
+                for (i = 0; i < disabled.length; i++) { disabled[i].disabled = true; }
+            }
+
+            var fields = {};
+            var entries = formData.entries();
+            var next = entries.next();
+            while (!next.done) {
+                var key = next.value[0], value = next.value[1];
+                next = entries.next();
+
+                if (skipKeys.indexOf(key) !== -1) continue;
+                if (!value && skipEmptyKeys.indexOf(key) !== -1) continue;
+
+                fields[key] = (boolKeys.indexOf(key) !== -1) ? (value === 'on') : value;
+            }
+
+            // FormData utelämnar en OKRYSSAD kryssruta helt. Utan det här skulle det
+            // alltså vara omöjligt att stänga AV en flagga: nyckeln saknas, servern rör
+            // inte egenskapen, och rutan är ikryssad igen vid nästa öppning.
+            for (i = 0; i < forceFalseKeys.length; i++) {
+                if (!(forceFalseKeys[i] in fields)) fields[forceFalseKeys[i]] = false;
+            }
+
+            // Se doc-kommentaren: guiden behåller seriesId, redigeringsmodalerna plockar ut den.
+            var seriesId = fields.seriesId || '';
+            if (opts.extractSeriesId) delete fields.seriesId;
+
+            return { fields: fields, seriesId: seriesId };
+        }
+
+        /**
+         * Läser en kommaseparerad dold input med medlems-id till en array av heltal.
+         */
+        function hpskReadManagerIds(hiddenFieldId) {
+            var el = document.getElementById(hiddenFieldId);
+            var raw = (el && el.value) || '';
+            return raw.split(',')
+                .map(function (x) { return x.trim(); })
+                .filter(function (x) { return x; })
+                .map(function (x) { return parseInt(x, 10); });
+        }
+
+        /**
+         * Kretsen är avstängd när en klubb är vald, och ska då skickas som TOM STRÄNG —
+         * inte utelämnas. Att utelämna den lämnar kvar en gammal krets på tävlingen.
+         *
+         * ⚠️ Läs ALDRIG bara `.value` här. En avstängd select behåller sitt värde, så en
+         * tävling som bytt från krets- till klubbvärd skulle behålla båda.
+         */
+        function hpskReadRegionValue(regionFieldId) {
+            var el = document.getElementById(regionFieldId);
+            if (!el) return '';
+            return el.disabled ? '' : (el.value || '');
+        }
+
+        // ⚠️ Exporteras explicit. En funktionsdeklaration inuti det här blocket läcker
+        // inte till global scope (och en `async function` gör det aldrig, ens med
+        // Annex B) — samma fälla som kostade en runda i konsolideringspartialerna.
+        window.hpskValidateCompetitionForm = hpskValidateCompetitionForm;
+        window.hpskCollectCompetitionFields = hpskCollectCompetitionFields;
+        window.hpskReadManagerIds = hpskReadManagerIds;
+        window.hpskReadRegionValue = hpskReadRegionValue;
+    })();
+    </script>
+}

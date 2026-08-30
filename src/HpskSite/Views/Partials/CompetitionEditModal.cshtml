@@ -1351,25 +1351,10 @@ function saveCompetition() {
 
     const form = document.getElementById('competitionEditForm');
 
-    // Disable Flatpickr-generated inputs before validation (they have name="" which breaks checkValidity)
-    const fpInputs = form.querySelectorAll('.numInput, .flatpickr-hour, .flatpickr-minute, .flatpickr-am-pm');
-    fpInputs.forEach(i => i.disabled = true);
-    const isValid = form.checkValidity();
-    if (!isValid) {
-        // ⚠ Med flikar ligger fälten på olika synliga sidor. reportValidity() kan inte
-        // peka på ett fält som sitter på en flik som inte visas — bubblan hamnar
-        // ingenstans och Spara ser ut att inte göra någonting. Byt till rätt flik
-        // FÖRST, sedan rapportera. Det är exakt det tysta felet flikarna annars inför.
-        const firstBad = Array.prototype.slice.call(form.querySelectorAll('input,select,textarea'))
-            .find(el => !el.disabled && el.checkValidity && !el.checkValidity());
-        if (firstBad && typeof window.hpskRevealField === 'function') {
-            window.hpskRevealField('#competitionEditModal', firstBad);
-        }
-        form.reportValidity();
-        fpInputs.forEach(i => i.disabled = false);
-        return;
-    }
-    fpInputs.forEach(i => i.disabled = false);
+    // Delad validering (_CompetitionFormSave) — samma sekvens som Springskyttemodalen,
+    // inklusive flikbytet innan reportValidity(). Den låg i en kopia här och saknades
+    // helt i den andra modalen, vilket är precis den drift partialen finns för.
+    if (!hpskValidateCompetitionForm(form, '#competitionEditModal')) return;
 
     // Soft "at-least-one" check: clubId, regionalFederation, or competitionScope must
     // be set so CompetitionUrlProvider can produce a clean URL. The wizard mutex is
@@ -1398,34 +1383,22 @@ function saveCompetition() {
         rsHidden.value = rsCheckbox.checked ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('edit_patrolSize').value) || 2 }) : '';
     }
 
-    // Temporarily enable disabled fields so they're included in FormData
-    const disabledFields = form.querySelectorAll(':disabled');
-    disabledFields.forEach(f => f.disabled = false);
-    const formData = new FormData(form);
-    disabledFields.forEach(f => f.disabled = true);
-    const fields = {};
-
-    for (let [key, value] of formData.entries()) {
-        // Skip competitionId - it's passed separately
-        if (key === 'competitionId') {
-            continue;
-        }
-
-        // Skip competitionManagers and competitionManagerIds - handled separately below
-        if (key === 'competitionManagers' || key === 'competitionManagerIds') {
-            continue;
-        }
-
-        if ((key === 'competitionEndDate' || key === 'description' || key === 'contactPhone') && !value) {
-            continue;
-        }
-
-        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowSelfReporting' || key === 'allowTeams' || key === 'allowStafett' || key === 'faltskytteSelfServiceResults') {
-            fields[key] = value === 'on';
-        } else {
-            fields[key] = value;
-        }
-    }
+    // Delad fältinsamling (_CompetitionFormSave).
+    // ⚠ De två listorna är MEDVETET olika och får inte slås ihop: `isExternal` ska
+    // tvingas till false men behöver ingen 'on'-tolkning, och
+    // `faltskytteSelfServiceResults` tolkas men läses separat ur sitt element nedan.
+    const collected = hpskCollectCompetitionFields(form, {
+        skipKeys: ['competitionId', 'competitionManagers', 'competitionManagerIds'],
+        skipEmptyKeys: ['competitionEndDate', 'description', 'contactPhone'],
+        boolKeys: ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly',
+                   'isAwardingStandardMedals', 'allowSelfReporting', 'allowTeams',
+                   'allowStafett', 'faltskytteSelfServiceResults'],
+        forceFalseKeys: ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly',
+                         'isAwardingStandardMedals', 'isExternal', 'allowSelfReporting',
+                         'allowTeams', 'allowStafett'],
+        extractSeriesId: true
+    });
+    const fields = collected.fields;
 
     // FormData omits unchecked checkboxes, which means switching one OFF and
     // saving wouldn't actually clear the property. Force the current state
@@ -1434,24 +1407,16 @@ function saveCompetition() {
     var ssEl = document.getElementById('edit_faltskytteSelfServiceResults');
     if (ssEl) fields.faltskytteSelfServiceResults = ssEl.checked;
 
-    // Extract seriesId — for existing competitions it's handled via Move after save,
-    // but for new competitions (copy/create) it must be passed to CreateCompetition
-    // so the competition is created as a child of the series
-    const newSeriesId = fields.seriesId || '';
-    delete fields.seriesId;
+    // seriesId plockas ut av den delade insamlingen. För en BEFINTLIG tävling hanteras
+    // den via Move efter sparning; för en NY (kopiera/skapa) skickas den till
+    // CreateCompetition så tävlingen skapas som barn till serien.
+    const newSeriesId = collected.seriesId;
 
-    // Handle competitionManagers - convert from hidden field to array of integers
-    const managerIdsStr = document.getElementById('comp_competitionManagers_ids').value || '';
-    const managerIds = managerIdsStr.split(',')
-        .map(id => id.trim())
-        .filter(id => id)
-        .map(id => parseInt(id));
-    fields.competitionManagers = managerIds;
+    fields.competitionManagers = hpskReadManagerIds('comp_competitionManagers_ids');
 
-    // Handle regionalFederation - it may be disabled when a club is selected
-    // Always include it explicitly (empty string clears it when club is selected)
-    const regionSelect = document.getElementById('regionalFederation');
-    fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
+    // ⚠ Kretsen skickas som TOM STRÄNG när den är avstängd (klubb vald), aldrig
+    // utelämnad — annars står en gammal krets kvar på tävlingen.
+    fields.regionalFederation = hpskReadRegionValue('regionalFederation');
 
     // Add Direktplacering config
     if (document.getElementById('edit_enableDirektplacering').checked) {
@@ -1460,13 +1425,6 @@ function saveCompetition() {
         fields.direktplaceringConfig = '';
     }
 
-    // Ensure unchecked checkboxes are explicitly set to false
-    const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isAwardingStandardMedals', 'isExternal', 'allowSelfReporting', 'allowTeams', 'allowStafett'];
-    checkboxFields.forEach(field => {
-        if (!(field in fields)) {
-            fields[field] = false;
-        }
-    });
 
     // Team result series count: empty = auto. Normalize to an int (0 = auto) so the
     // int property stores cleanly and an emptied field clears back to auto.
@@ -2165,6 +2123,7 @@ function collectEditDpConfig() {
 @await Html.PartialAsync("_SwishNumberValidation")
 @* Sektionsnavigering. Inkluderas av modalen sjalv, inte av vardsidorna, sa den
    foljer med till varje yta som renderar modalen. Samma regel som _HtmlEscape. *@
+@await Html.PartialAsync("_CompetitionFormSave")
 @await Html.PartialAsync("_ModalSectionNav")
 <script>
 // Rita om sektionsraden EFTER populateEditModal, inte pa en gissad timeout.
