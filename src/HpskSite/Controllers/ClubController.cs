@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Antiforgery;
+﻿using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -2320,7 +2320,12 @@ namespace HpskSite.Controllers
                         eventEndDate = eventContent.GetValue<DateTime?>("eventEndDate")?.ToString("yyyy-MM-dd") ?? "",
                         eventImageUrl = eventImageUrl,
                         contentBlocks = eventContent.GetValue<string>("contentBlocks") ?? "[]",
-                        quickLinks = eventContent.GetValue<string>("quickLinks") ?? "[]"
+                        quickLinks = eventContent.GetValue<string>("quickLinks") ?? "[]",
+                        // Operator-added; the client needs to know whether it may offer the switch
+                        // at all, since saving to a missing property is a silent no-op.
+                        isMandatory = eventContent.GetValue<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                        mandatoryPropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
+                        maxParticipants = eventContent.GetValue<int>("maxParticipants")
                     }
                 });
             }
@@ -2340,7 +2345,8 @@ namespace HpskSite.Controllers
             string eventDate = "", string venue = "", string description = "",
             string contactPerson = "", string contactEmail = "", string contactPhone = "",
             string feeAmount = "", string equipmentRequired = "", string targetAudience = "",
-            bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "")
+            bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "",
+            bool isMandatory = false, string eventFee = "", int maxParticipants = 0)
         {
             try
             {
@@ -2392,6 +2398,41 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("targetAudience", targetAudience);
                 eventContent.SetValue("registrationRequired", registrationRequired);
                 eventContent.SetValue("registrationUrl", registrationUrl);
+                eventContent.SetValue("maxParticipants", maxParticipants > 0 ? maxParticipants : 0);
+
+                // ⚠️ Operator-added properties. SetValue on a property the doctype does not carry is
+                // a SILENT no-op, so the switch would appear to work and revert on next load. Say it
+                // instead — and only when the arrangör actually tried to set something, so a club
+                // that never uses them is not nagged. (Same rule as closeRegistrationOnStartList.)
+                var missingProps = new List<string>();
+                if (eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty))
+                    eventContent.SetValue(HpskSite.Models.ClubEvents.MandatoryProperty, isMandatory);
+                else if (isMandatory)
+                    missingProps.Add(HpskSite.Models.ClubEvents.MandatoryProperty);
+
+                if (eventContent.HasProperty(HpskSite.Models.ClubEvents.FeeProperty))
+                {
+                    if (decimal.TryParse(eventFee, System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out var feeVal) && feeVal > 0)
+                        eventContent.SetValue(HpskSite.Models.ClubEvents.FeeProperty, feeVal);
+                    else
+                        eventContent.SetValue(HpskSite.Models.ClubEvents.FeeProperty, null);
+                }
+                else if (!string.IsNullOrWhiteSpace(eventFee))
+                {
+                    missingProps.Add(HpskSite.Models.ClubEvents.FeeProperty);
+                }
+
+                if (missingProps.Count > 0)
+                {
+                    return Ok(new
+                    {
+                        success = false,
+                        message = "Egenskapen " + string.Join(" och ", missingProps)
+                                  + " saknas på händelsetypen i Umbraco — kontakta en administratör. "
+                                  + "Övriga ändringar sparades inte."
+                    });
+                }
 
                 if (!string.IsNullOrEmpty(eventEndDate) && DateTime.TryParse(eventEndDate, out var parsedEndDate))
                 {

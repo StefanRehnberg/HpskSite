@@ -1,0 +1,234 @@
+@*
+    Deltagarlista och upprop för ett klubb- eller kretsevenemang. EN dialog delad av klubbens och
+    kretsens adminpanel — båda scopen använder samma clubSimpleEvent-doctype och samma endpoints,
+    så en andra kopia skulle bara vara två ställen att glömma en rättelse på.
+
+    Ingår i partialerna själva-mönstret: värdsidan behöver bara inkludera den här filen och anropa
+    window.hpskOpenEventRoster(eventId).
+
+    ⚠️ Exporten är EXPLICIT (window.x = x). En `async function` deklarerad inne i ett block läcker
+    INTE till global scope — Annex B:s webbkompatibla hoisting gäller inte async-deklarationer, och
+    det har redan kostat en felsökningsrunda i konsolideringspartialerna.
+*@
+@if (ViewData["ClubEventRosterLoaded"] == null)
+{
+    ViewData["ClubEventRosterLoaded"] = true;
+
+    <div class="modal fade" id="eventRosterModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title mb-0" id="eventRosterTitle">Deltagare</h5>
+                        <div class="small text-muted" id="eventRosterSubtitle"></div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="eventRosterSummary" class="mb-3"></div>
+
+                    @* Lägg till någon som dök upp oanmäld. Medvetet ovanför listan: på plats är det
+                       den vanligaste åtgärden efter att ha prickat av. *@
+                    <div class="card bg-body-tertiary border-0 mb-3" id="eventRosterAddCard">
+                        <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+                            <label for="eventRosterAddPicker" class="small fw-semibold mb-0">
+                                <i class="bi bi-person-plus me-1"></i>Kom utan att vara anmäld:
+                            </label>
+                            <select id="eventRosterAddPicker" class="form-select form-select-sm" style="max-width:280px;"></select>
+                            <button class="btn btn-sm btn-outline-primary" type="button" id="eventRosterAddBtn">Lägg till som närvarande</button>
+                        </div>
+                    </div>
+
+                    <div id="eventRosterContent">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="small text-muted me-auto" id="eventRosterHint"></span>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        let rosterEventId = 0;
+        let rosterAddLoaded = false;
+
+        const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+        const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+        async function post(action, payload) {
+            const r = await fetch('/umbraco/surface/ClubEvent/' + action, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+                body: JSON.stringify(payload)
+            });
+            const text = await r.text();
+            if (!text) return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' };
+            try { return JSON.parse(text); } catch { return { success: false, message: 'Oväntat svar från servern.' }; }
+        }
+
+        async function openEventRoster(eventId) {
+            rosterEventId = eventId;
+            rosterAddLoaded = false;
+            document.getElementById('eventRosterContent').innerHTML =
+                '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div></div>';
+            document.getElementById('eventRosterSummary').innerHTML = '';
+            new bootstrap.Modal(document.getElementById('eventRosterModal')).show();
+            await loadRoster();
+        }
+
+        async function loadRoster() {
+            const content = document.getElementById('eventRosterContent');
+            try {
+                const r = await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${rosterEventId}`, { cache: 'no-store' });
+                const d = await r.json();
+                if (!d.success) {
+                    content.innerHTML = `<div class="alert alert-warning mb-0">${esc(d.message || 'Kunde inte hämta deltagarlistan.')}</div>`;
+                    document.getElementById('eventRosterAddCard').style.display = 'none';
+                    return;
+                }
+                renderRoster(d);
+                if (!rosterAddLoaded) { rosterAddLoaded = true; loadAddable(); }
+            } catch {
+                content.innerHTML = '<div class="alert alert-danger mb-0">Kunde inte hämta deltagarlistan.</div>';
+            }
+        }
+
+        function renderRoster(d) {
+            document.getElementById('eventRosterTitle').textContent = d.event.name || 'Deltagare';
+            document.getElementById('eventRosterSubtitle').textContent =
+                [d.event.date, d.event.ownerName].filter(Boolean).join(' · ');
+
+            const c = d.counts;
+            let sum = '<div class="d-flex flex-wrap gap-3 small">';
+            sum += `<span><strong>${c.signedUp}</strong> anmälda</span>`;
+            if (d.event.maxParticipants > 0) sum += `<span><strong>${c.seated}</strong> av ${d.event.maxParticipants} platser</span>`;
+            if (c.reserves) sum += `<span class="text-warning-emphasis"><strong>${c.reserves}</strong> reserv${c.reserves === 1 ? '' : 'er'}</span>`;
+            if (c.cancelled) sum += `<span class="text-muted"><strong>${c.cancelled}</strong> avbokade</span>`;
+            sum += `<span class="text-success"><strong>${c.present}</strong> närvarande</span>`;
+            // "Ej registrerad" is deliberately counted and shown: an unfinished roll-call must never
+            // be mistaken for everyone having stayed away, least of all on a mandatory event.
+            if (c.notRecorded) sum += `<span class="text-muted"><strong>${c.notRecorded}</strong> ej avprickade</span>`;
+            sum += '</div>';
+            if (d.event.isMandatory) {
+                sum += '<div class="alert alert-warning py-2 px-3 small mt-2 mb-0">'
+                     + '<i class="bi bi-exclamation-triangle me-1"></i>Obligatoriskt evenemang — närvaron är underlag för Föreningsintyg.'
+                     + '</div>';
+            }
+            document.getElementById('eventRosterSummary').innerHTML = sum;
+            document.getElementById('eventRosterHint').textContent = d.event.isMandatory
+                ? 'Giltig frånvaro kräver en notering.'
+                : '';
+
+            if (!d.rows.length) {
+                document.getElementById('eventRosterContent').innerHTML =
+                    '<div class="alert alert-info mb-0">Ingen är anmäld ännu.</div>';
+                return;
+            }
+
+            let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+            html += '<thead><tr><th>Namn</th><th>Anmäld</th><th style="min-width:230px;">Närvaro</th><th>Notering</th></tr></thead><tbody>';
+
+            d.rows.forEach(r => {
+                const badges = [];
+                if (r.isReserve) badges.push('<span class="badge bg-warning-subtle text-warning-emphasis">reserv</span>');
+                if (r.isWalkIn) badges.push('<span class="badge bg-info-subtle text-info-emphasis">oanmäld</span>');
+                if (r.cancelled) badges.push('<span class="badge bg-secondary-subtle text-secondary-emphasis">avbokad</span>');
+
+                html += `<tr${r.cancelled ? ' class="opacity-50"' : ''}>`;
+                html += `<td>${esc(r.name)} ${badges.join(' ')}</td>`;
+                html += `<td class="small text-muted">${esc(r.signedUpAt || '—')}</td>`;
+                html += '<td>' + statusButtons(r) + '</td>';
+                html += `<td class="small text-muted">${esc(r.attendanceNote || r.note || '')}</td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+            document.getElementById('eventRosterContent').innerHTML = html;
+
+            document.getElementById('eventRosterContent').querySelectorAll('button[data-att]').forEach(btn => {
+                btn.addEventListener('click', () => setAttendance(btn));
+            });
+        }
+
+        // Three states plus "clear", because "ej registrerad" is a real state. Clicking the active
+        // one again clears it — an upprop taken by mistake must be undoable without a separate
+        // control taking up room on a phone.
+        function statusButtons(r) {
+            const opts = [
+                { v: 'Present', label: 'Närvarande', cls: 'success' },
+                { v: 'Absent', label: 'Frånvarande', cls: 'danger' },
+                { v: 'Excused', label: 'Giltig frånvaro', cls: 'secondary' }
+            ];
+            return '<div class="btn-group btn-group-sm" role="group">' + opts.map(o => {
+                const active = r.attendanceStatus === o.v;
+                return `<button type="button" class="btn btn-${active ? '' : 'outline-'}${o.cls}"`
+                     + ` data-att="${o.v}" data-member="${r.memberId}" data-active="${active ? '1' : '0'}"`
+                     + ` title="${o.label}">${o.label}</button>`;
+            }).join('') + '</div>';
+        }
+
+        async function setAttendance(btn) {
+            const memberId = parseInt(btn.dataset.member, 10);
+            const wasActive = btn.dataset.active === '1';
+            const status = wasActive ? '' : btn.dataset.att;
+
+            let note = null;
+            if (status === 'Excused') {
+                note = prompt('Skäl för giltig frånvaro (syns för styrelsen):', '');
+                if (note === null) return;   // avbruten — rör ingenting
+            }
+
+            const group = btn.closest('.btn-group');
+            group.querySelectorAll('button').forEach(b => b.disabled = true);
+            const d = await post('SetAttendance', { eventId: rosterEventId, memberId, status, note });
+            if (!d.success) {
+                group.querySelectorAll('button').forEach(b => b.disabled = false);
+                alert(d.message || 'Kunde inte spara närvaron.');
+                return;
+            }
+            await loadRoster();
+        }
+
+        async function loadAddable() {
+            const picker = document.getElementById('eventRosterAddPicker');
+            try {
+                const r = await fetch(`/umbraco/surface/ClubEvent/SearchAddableMembers?eventId=${rosterEventId}`, { cache: 'no-store' });
+                const d = await r.json();
+                picker.innerHTML = '<option value="">Välj medlem…</option>';
+                if (!d.success) { document.getElementById('eventRosterAddCard').style.display = 'none'; return; }
+                document.getElementById('eventRosterAddCard').style.display = '';
+                (d.members || []).forEach(m => {
+                    const o = document.createElement('option');
+                    o.value = m.memberId; o.textContent = m.name;
+                    picker.appendChild(o);
+                });
+            } catch {
+                document.getElementById('eventRosterAddCard').style.display = 'none';
+            }
+        }
+
+        document.addEventListener('click', async e => {
+            if (e.target && e.target.id === 'eventRosterAddBtn') {
+                const picker = document.getElementById('eventRosterAddPicker');
+                const memberId = parseInt(picker.value, 10);
+                if (!memberId) { alert('Välj en medlem först.'); return; }
+                e.target.disabled = true;
+                const d = await post('SetAttendance', { eventId: rosterEventId, memberId, status: 'Present', note: null });
+                e.target.disabled = false;
+                if (!d.success) { alert(d.message || 'Kunde inte lägga till medlemmen.'); return; }
+                rosterAddLoaded = false;
+                await loadRoster();
+            }
+        });
+
+        // Explicit export — see the header note about async declarations not hoisting to global.
+        window.hpskOpenEventRoster = openEventRoster;
+    })();
+    </script>
+}

@@ -658,20 +658,38 @@
         }
 
         var html = '<div class="table-responsive"><table class="table table-striped">';
-        html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th>Åtgärder</th></tr></thead><tbody>';
+        html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th class="text-end">Åtgärder</th></tr></thead><tbody>';
 
+        // Tre åtgärder på raden → EN Åtgärder-meny, samma mönster som klubbens händelselista.
+        // ⚠️ data-bs-popper-config är lastbärande: tabellen ligger i .table-responsive vars overflow
+        // klipper menyn, och det syns bara på SISTA raden.
+        // ⚠️ Namnet går INTE längre in i ett onclick-attribut. Den gamla raden escapade bara
+        // enkelfnuttar, vilket är exakt den lucka som gav kodexekvering i Fältskyttes lägg-till-skytt.
+        window._regionEventsById = {};
         events.forEach(function(event) {
+            window._regionEventsById[event.id] = event;
             var dateObj = event.date ? new Date(event.date) : null;
             var date = (dateObj && dateObj.getFullYear() > 1900) ? dateObj.toLocaleString('sv-SE') : '-';
             var color = eventTypeColors[event.type] || eventTypeColors['default'];
             html += '<tr>'
-                + '<td><strong>' + event.name + '</strong></td>'
-                + '<td><span class="badge" style="background-color: ' + color + '">' + event.type + '</span></td>'
+                + '<td><strong>' + regionEsc(event.name) + '</strong></td>'
+                + '<td><span class="badge" style="background-color: ' + color + '">' + regionEsc(event.type) + '</span></td>'
                 + '<td>' + date + '</td>'
-                + '<td>' + (event.venue || '-') + '</td>'
-                + '<td>'
-                + '<button class="btn btn-sm btn-outline-primary me-1" onclick="editRegionEvent(' + event.id + ')"><i class="bi bi-pencil"></i></button>'
-                + '<button class="btn btn-sm btn-outline-danger" onclick="deleteRegionEvent(' + event.id + ', \'' + event.name.replace(/'/g, "\\'") + '\')"><i class="bi bi-trash"></i></button>'
+                + '<td>' + regionEsc(event.venue || '-') + '</td>'
+                + '<td class="text-end">'
+                + '<div class="dropdown">'
+                + '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown"'
+                + ' data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">'
+                + '<i class="bi bi-sliders me-2"></i>Åtgärder</button>'
+                + '<ul class="dropdown-menu dropdown-menu-end">'
+                + '<li><button class="dropdown-item" type="button" onclick="hpskOpenEventRoster(' + event.id + ')">'
+                + '<i class="bi bi-people me-2 text-success"></i>Deltagare och upprop</button></li>'
+                + '<li><button class="dropdown-item" type="button" onclick="editRegionEvent(' + event.id + ')">'
+                + '<i class="bi bi-pencil me-2 text-primary"></i>Redigera händelsen</button></li>'
+                + '<li><hr class="dropdown-divider"></li>'
+                + '<li><button class="dropdown-item text-danger" type="button" onclick="deleteRegionEventById(' + event.id + ')">'
+                + '<i class="bi bi-trash me-2"></i>Ta bort händelsen</button></li>'
+                + '</ul></div>'
                 + '</td></tr>';
         });
 
@@ -840,6 +858,21 @@
             saveBtn.disabled = false;
             saveBtn.innerHTML = originalBtnText;
         });
+    };
+
+    // Escaper för händelselistans celler. Namn och plats är fritext som arrangören skriver, och
+    // raderna byggs med innerHTML.
+    window.regionEsc = function (s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    };
+
+    // Radmenyn skickar bara id:t; namnet till bekräftelsedialogen slås upp här i stället för att
+    // resa genom ett onclick-attribut.
+    window.deleteRegionEventById = function (eventId) {
+        var ev = (window._regionEventsById || {})[eventId];
+        window.deleteRegionEvent(eventId, ev ? ev.name : 'händelsen');
     };
 
     window.deleteRegionEvent = function(eventId, eventName) {
@@ -1163,6 +1196,9 @@
 
 @await Html.PartialAsync("_CompetitionTypeCatalogue")
 @await Html.PartialAsync("_CompetitionListRenderer")
+
+@* Deltagare + upprop för kretsens händelser — samma dialog som klubbens panel monterar. *@
+@await Html.PartialAsync("~/Views/Partials/_ClubEventRoster.cshtml")
 
 @* ============================================================
    Tävlingar sub-tab — admin of competitions in the region.

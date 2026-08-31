@@ -1223,6 +1223,9 @@
 @* Member Security modal (lockout / password reset / invitation) — shared with Admin Page → Användare *@
 @await Html.PartialAsync("~/Views/Partials/_MemberSecurityModal.cshtml")
 
+@* Deltagare + upprop för klubbens händelser — samma dialog som kretsens panel monterar. *@
+@await Html.PartialAsync("~/Views/Partials/_ClubEventRoster.cshtml")
+
 <!-- Skjutledare Management Modal -->
 <div class="modal fade" id="skjutledareModal" tabindex="-1">
     <div class="modal-dialog">
@@ -3455,6 +3458,8 @@ function displayEvents(events) {
                             <i class="bi bi-sliders me-2"></i>Åtgärder
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            <li><button class="dropdown-item" type="button" onclick="hpskOpenEventRoster(${event.id})">
+                                <i class="bi bi-people me-2 text-success"></i>Deltagare och upprop</button></li>
                             <li><button class="dropdown-item" type="button" onclick="editEvent(${event.id})">
                                 <i class="bi bi-pencil me-2 text-primary"></i>Redigera händelsen</button></li>
                             <li><button class="dropdown-item" type="button" onclick="copyEvent(${event.id})">

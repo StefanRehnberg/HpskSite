@@ -2818,6 +2818,7 @@ Navigate to **Members → Member Groups**:
 - **regionalPage**: add `orgNumber`, `address`, `city`, `postalCode` Textstring properties (all optional). Org. number + postal address for region-hosted competitions; surfaced in the region edit modal (`RegionalEditModal.cshtml`) and printed on receipts for region-hosted comps (clubId unset → organizer resolved via `regionalFederation`→`regionCode`). Missing properties = silent no-op + blank receipt rows. Added 2026-06-11.
 - **regionalPage**: add `receiptEmail` Textstring property (optional, label "E-post på kvitto"). Same role as the club one — shown on the Kvitto for region-hosted comps, falls back to `contactEmail`. Surfaced in the region edit modal + regional Inställningar tab. Added 2026-06-11.
 - **competition**: add `closeRegistrationOnStartList` True/False property (optional, default false, label "Stäng självanmälan när startlistan publiceras"). Arrangörens val i publiceringsdialogen. **Default false = deploy ändrar ingenting för en tävling vars startlista redan är publicerad** — det är avsiktligt, inte försiktighet: en default-on hade stängt anmälan på levande tävlingar i deploy-ögonblicket utan att någon fick veta det. Utan egenskapen är `SetValue` en tyst no-op, så publiceringen **vägrar och namnger egenskapen** i stället för att rapportera en sparning som inte hände. Added 2026-08-31.
+- **clubSimpleEvent**: add `isMandatory` True/False property (optional, default false, label "Obligatoriskt deltagande"). Marks an event whose attendance is part of the club's Föreningsintyg decision. Klubbens OCH kretsens händelser delar doctype, så den gäller båda. Utan egenskapen är `SetValue` en tyst no-op — därför är kryssrutan avstängd och namnger egenskapen i stället för att se ut att fungera; allt annat (anmälan, reservplats, upprop) fungerar oförändrat. Kör även `Migrations/create-club-event-participant-table.sql`. Added 2026-08-31.
 - **competition**: add `teamResultSeriesCount` Integer property (optional, default 0, label "Antal serier i lagresultat"). How many series count toward a team's total — surfaced next to "Tillåt laganmälan" in the competition wizard + edit modals. 0/empty = auto (defaults to the qualification series count = `numberOfSeriesOrStations − numberOfFinalSeries`), so a 7+3 finals comp counts only the 7 qualifying series without any config. Set a value to override. Read by `CompetitionTeamController.GetTeamResultSeriesCount`. **The team-results-show-0 fix does NOT depend on this property** (the qualification default handles it); the property only adds explicit override. Missing property = silent no-op (auto default used). Added 2026-07-22.
 
 ### Märken (Pistolskyttemärket) ✅ Phase 1 (2026-05-31)
@@ -3241,6 +3242,78 @@ samlad/klassvis resultatlista. Foto i snabbinskicket väntar på Android-appen.
 
 **Operatörssteg:** lägg till `club.markenRequireOnSiteWitness` (True/False). Adds C# → full rebuild.
 Ingen SQL.
+
+### Anmälan och närvaro på klubbens och kretsens evenemang (2026-08-31)
+
+**Kretsen och klubben delade redan evenemangsmodell** — `ClubController.CreateRegionEvent` skapar en
+**`clubSimpleEvent`** under `regionalPage`, samma doctype som klubbens. Ägaren är alltså helt enkelt
+evenemangets FÖRÄLDERNOD, och det finns en kodväg för båda scopen. **Doctypen bar dessutom redan
+`registrationRequired`, `maxParticipants`, `registrationUrl` och `feeAmount`** — avsikten var
+modellerad, bara aldrig byggd. Följden syntes: `ClubSimpleEvent.cshtml` renderade "Anmälan: **Krävs**"
+utan någonting att klicka på när `registrationUrl` var tom, och `maxParticipants` lästes inte alls.
+
+**EN tabell, `ClubEventParticipant`, per (evenemang, medlem) bär BÅDA akterna.** Uppropsvyn *är*
+anmälningslistan plus de som dök upp oanmälda, så en delad rad är den form skärmen har; två tabeller
+hade krävt en outer join på varje läsning och kunnat säga emot varandra om vem som står på listan —
+vilket är hela frågan. Akterna skiljs åt av VILKA FÄLT som är satta, aldrig av en typkolumn:
+`SignedUpAt` utan `AttendanceStatus` = anmäld, tvärtom = walk-in, båda = anmäld och avprickad.
+
+**Två saker är HÄRLEDDA och lagras aldrig** (samma skäl som `scoringMode`-driften):
+- **Ägaren**, ur föräldernoden — inte en klubb-/kretskolumn på varje rad.
+- **Plats vs reserv**, ur anmälningsordningen bland icke-avbokade rader. En lagrad reservflagga hade
+  behövt skrivas om för alla efterföljande varje gång någon avbokar, och en missad omskrivning är en
+  tyst felaktig lista. **Sviten mäter just detta:** när den som håller platsen avbokar tar reserven
+  platsen medan **reservens rad är byte-identisk** — uppflyttningen är alltså härledd, inte skriven.
+
+**⚠️ "Ej registrerad" är ett TREDJE tillstånd, inte frånvaro.** `AttendanceStatus` null betyder att
+uppropet inte gjorts. Ett obligatoriskt evenemang där ingen prickade av får aldrig läsas som att alla
+uteblev — den siffran är på väg att bli underlag för ett Föreningsintyg. Uppropsvyn räknar och visar
+"ej avprickade" separat, och avprickningen går att ångra tillbaka till det läget.
+
+**Tre närvarolägen** (Stefans val 2026-08-31): närvarande / frånvarande / **giltig frånvaro med
+notering**. Utan det tredje hade styrelsen fått föra dispenserna vid sidan om ändå, och
+intygsunderlaget hade sagt "uppfyller inte" om någon som redan fått dispens.
+
+**Två SKILDA grindar, och skillnaden är mätbar på samma person.** `IsEligible` (får jag anmäla mig?)
+är klubbmedlemskap via `MemberClubService.GetAllClubIds` — en klubbs evenemang för klubbens medlemmar,
+en krets evenemang för medlemmar i kretsens klubbar. `CanManageAsync` (får jag hålla upprop?) är
+klubbadmin / styrelse / skjutledare, för krets: kretsadmin / kretsstyrelse. `builder.claude` visar att
+de är olika frågor: han administrerar klubb 2604 men saknar `primaryClubId`, så han får hålla uppropet
+och får **inte** anmäla sig.
+- ⚠️ **Resolvera de behöriga klubbarna EN gång** med `GetEligibleClubIds` innan en loop över
+  medlemsregistret. Per-medlem-överlagringen läser om kretsens klubblista för varje medlem.
+
+**Sekretess:** antalet anmälda är publikt (det är det som säger om det finns plats), **vilka** som
+kommer visas bara för klubbens egna medlemmar och för funktionärer. Sviten assertar båda riktningarna.
+
+**Ytor:** `_ClubEventSignup.cshtml` (självständig partial med egen antiforgery-token, monterad i
+evenemangssidans sidospalt — den göms av sig själv när evenemanget inte tar anmälningar, **eller när
+det har en extern `registrationUrl`**, så en klubb mitt i en flytt aldrig kan bli anmäld på två
+ställen) och `_ClubEventRoster.cshtml` (uppropsdialogen, **EN dialog delad av klubbens och kretsens
+adminpanel**). ⚠️ Exporten är explicit `window.hpskOpenEventRoster = openEventRoster` — en
+`async function` i ett block läcker INTE till global scope.
+
+**Kretsens händelselista blev en Åtgärder-meny** i samma pass (tre åtgärder på raden), med
+`data-bs-popper-config` eftersom tabellen ligger i `.table-responsive`. ⚠️ Den bar samtidigt
+`event.name.replace(/'/g, "\\'")` **inne i ett onclick** — enkelfnutt-escaping, exakt den lucka som
+gav kodexekvering i Fältskyttes lägg-till-skytt. Raden skickar nu bara id:t.
+
+**⚠️ AVGIFT ÄR INTE BYGGD, och det är ett fynd och inte ett förbiseende.** Stefan valde faktura som
+vid tävlingsanmälan; kodläsningen visar att det inte är en integration utan P2-ombyggnaden:
+`ReceiptModelBuilder.Build` (`:69-71`) returnerar **null** om `invoice.competitionId` inte resolvar,
+och utställare/Swish/bankgiro läses ur tävlingen (`:153-162`) — en evenemangsfaktura hade renderat
+ingenting alls. Dessutom står `"club"` i `InvoiceAdminService.DoNotDescend`, så en fakturahubb under
+ett klubbevenemang är osynlig för varje fakturayta. Raden bär därför en **`FeeAmount`-snapshot och en
+tom `InvoiceId`** så betalningen kan kopplas på **utan migrering** den dag ägaren blir ett (typ, id)-par.
+
+**Operatörssteg:** kör `Migrations/create-club-event-participant-table.sql` **och** lägg till
+`clubSimpleEvent.isMandatory` (True/False). Utan egenskapen degraderar allt annat oförändrat —
+kryssrutan är avstängd och namnger egenskapen i stället för att se ut att fungera och tyst återgå
+(`SetValue` på en saknad egenskap är en no-op). Adds C# → full ombyggnad.
+
+Verifierat **70/70 `hpsk-verify/club-event-signup-verify.mjs`**, två körningar i rad — sviten skapar
+sitt eget evenemang genom de riktiga endpointsen, kör hela flödet och raderar både rader och nod.
+Regression: action-menus-sweep 113/113, region-admin-rail 43/43, marken-orderlist 74/74.
 
 ### Att beställa och dela ut — klubbens årslista över märken OCH medaljer (2026-08-31)
 

@@ -105,9 +105,26 @@
                            onchange="toggleRegistrationUrl()">
                     <label class="form-check-label" for="editRegistrationRequired">Anmälan krävs</label>
                 </div>
+                @* Anmälan sköts på pistol.nu om ingen extern länk anges. Innan det gick att anmäla
+                   sig här visade evenemangssidan bara texten "Krävs" utan någonstans att klicka. *@
+                <div id="registrationOwnGroup" style="display: none;">
+                    <div class="mb-3">
+                        <label for="editMaxParticipants" class="form-label">Max antal deltagare</label>
+                        <input type="number" class="form-control" id="editMaxParticipants" min="0" step="1" placeholder="0 = ingen gräns">
+                        <div class="form-text">Är det fullt kan man fortfarande anmäla sig — men hamnar som reserv, och flyttas upp automatiskt om någon avbokar.</div>
+                    </div>
+                    <div class="form-check mb-3" id="isMandatoryGroup">
+                        <input class="form-check-input" type="checkbox" id="editIsMandatory">
+                        <label class="form-check-label" for="editIsMandatory">Obligatoriskt deltagande</label>
+                        <div class="form-text" id="isMandatoryHelp">
+                            Närvaron prickas av på plats och blir underlag för klubbens beslut om Föreningsintyg.
+                        </div>
+                    </div>
+                </div>
                 <div class="mb-3" id="registrationUrlGroup" style="display: none;">
-                    <label for="editRegistrationUrl" class="form-label">Länk till anmälan</label>
+                    <label for="editRegistrationUrl" class="form-label">Länk till anmälan (extern)</label>
                     <input type="text" class="form-control" id="editRegistrationUrl" placeholder="https://...">
+                    <div class="form-text">Lämna tom för att låta medlemmarna anmäla sig här på pistol.nu. Fyller du i en länk skickas de dit i stället, och vi för ingen deltagarlista.</div>
                     <div class="form-text">Länk dit besökare kan anmäla sig.</div>
                 </div>
             </div>
@@ -316,6 +333,15 @@ function loadEventAdminData() {
             document.getElementById('editEquipmentRequired').value = d.equipmentRequired || '';
             document.getElementById('editRegistrationRequired').checked = d.registrationRequired;
             document.getElementById('editRegistrationUrl').value = d.registrationUrl || '';
+            document.getElementById('editMaxParticipants').value = d.maxParticipants > 0 ? d.maxParticipants : '';
+            document.getElementById('editIsMandatory').checked = !!d.isMandatory;
+            // Säg ifrån i förväg i stället för att låta kryssrutan se ut att fungera och tyst
+            // återgå vid nästa laddning: SetValue på en saknad egenskap gör ingenting.
+            if (d.mandatoryPropertyExists === false) {
+                document.getElementById('editIsMandatory').disabled = true;
+                document.getElementById('isMandatoryHelp').innerHTML =
+                    '<span class="text-warning">Egenskapen \'isMandatory\' saknas på händelsetypen i Umbraco — kontakta en administratör innan den kan användas.</span>';
+            }
             toggleRegistrationUrl();
 
             // Image preview
@@ -353,8 +379,13 @@ document.addEventListener('DOMContentLoaded', function() {
 function toggleRegistrationUrl() {
     var checked = document.getElementById('editRegistrationRequired').checked;
     document.getElementById('registrationUrlGroup').style.display = checked ? '' : 'none';
+    document.getElementById('registrationOwnGroup').style.display = checked ? '' : 'none';
     if (!checked) {
         document.getElementById('editRegistrationUrl').value = '';
+        // Kapacitet och obligatoriskt hör till anmälan — lämnas de kvar när anmälan slås av blir
+        // de osynliga inställningar som slår till igen nästa gång någon kryssar i rutan.
+        document.getElementById('editMaxParticipants').value = '';
+        document.getElementById('editIsMandatory').checked = false;
     }
 }
 
@@ -450,6 +481,8 @@ function saveEventDetails() {
     formData.append('equipmentRequired', document.getElementById('editEquipmentRequired').value);
     formData.append('targetAudience', document.getElementById('editTargetAudience').value);
     formData.append('registrationRequired', document.getElementById('editRegistrationRequired').checked);
+    formData.append('maxParticipants', parseInt(document.getElementById('editMaxParticipants').value, 10) || 0);
+    formData.append('isMandatory', document.getElementById('editIsMandatory').checked);
     formData.append('registrationUrl', document.getElementById('editRegistrationUrl').value);
     formData.append('__RequestVerificationToken', getAntiForgeryToken());
 

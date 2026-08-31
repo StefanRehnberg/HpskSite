@@ -1,0 +1,188 @@
+@*
+    Anmälningskortet för ett klubb- eller kretsevenemang (clubSimpleEvent — båda scopen delar
+    doctype). Självständig partial: den bär sin egen antiforgery-token och sitt eget skript, så den
+    kan monteras på vilken yta som helst utan att värdsidan behöver förberedas. Samma regel som
+    _HtmlEscape och _MarkenSerieQuickSubmit.
+
+    ViewData:
+      EventId   (int, obligatorisk)  clubSimpleEvent-nodens id
+      Accent    (string, valfri)     färg på kortets rubrikrad, för att följa evenemangstypen
+
+    ⚠️ ALLT tillstånd kommer från servern (GetSignupState). Kortet räknar aldrig ut platser eller
+    reservordning själv — den ordningen HÄRLEDS ur anmälningstiden i tjänsten, och en andra
+    uträkning i JS vore fri att säga emot den.
+*@
+@{
+    var signupEventId = ViewData["EventId"] as int? ?? 0;
+    var signupAccent = ViewData["Accent"] as string ?? "";
+}
+
+@if (signupEventId > 0)
+{
+    <div class="card mb-4" id="ces-card" data-event-id="@signupEventId" style="display:none;">
+        <div class="card-header @(string.IsNullOrEmpty(signupAccent) ? "bg-primary text-white" : "")"
+             style="@(string.IsNullOrEmpty(signupAccent) ? "" : $"background-color:{signupAccent};color:#fff;")">
+            <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Anmälan</h5>
+        </div>
+        <div class="card-body" id="ces-body">
+            <div class="text-center py-2">
+                <div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Laddar...</span></div>
+            </div>
+        </div>
+    </div>
+
+    @Html.AntiForgeryToken()
+
+    <script>
+    (function () {
+        if (window.cesLoaded) return;
+        window.cesLoaded = true;
+
+        const card = document.getElementById('ces-card');
+        if (!card) return;
+        const eventId = parseInt(card.dataset.eventId, 10);
+        const body = document.getElementById('ces-body');
+
+        const esc = s => {
+            const d = document.createElement('div');
+            d.textContent = s == null ? '' : String(s);
+            return d.innerHTML;
+        };
+        const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+        async function post(action, payload) {
+            const r = await fetch('/umbraco/surface/ClubEvent/' + action, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+                body: JSON.stringify(payload)
+            });
+            // An empty 400 is the stale-antiforgery signature; say so rather than "det gick fel".
+            const text = await r.text();
+            if (!text) return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' };
+            try { return JSON.parse(text); } catch { return { success: false, message: 'Oväntat svar från servern.' }; }
+        }
+
+        function render(d) {
+            // The card only exists for events that actually take sign-ups. An event with an
+            // external registration link keeps that link (the page renders it separately) — we must
+            // not offer a second, competing place to sign up.
+            if (!d.success || !d.event.registrationRequired || d.event.registrationUrl) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+
+            let html = '';
+
+            if (d.event.isMandatory) {
+                html += '<div class="alert alert-warning py-2 px-3 small mb-3">'
+                     +  '<i class="bi bi-exclamation-triangle me-1"></i>'
+                     +  '<strong>Obligatoriskt för klubbens medlemmar.</strong> Närvaron registreras av klubben.'
+                     +  '</div>';
+            }
+
+            // Counts. Shown to everyone who can see the event — that is what tells a besökare
+            // whether there is room, without publishing who is going.
+            const c = d.counts;
+            html += '<div class="mb-3">';
+            html += `<div class="fs-4 fw-semibold">${c.signedUp} anmälda</div>`;
+            if (d.event.maxParticipants > 0) {
+                const left = c.seatsLeft;
+                html += `<div class="small text-muted">${d.event.maxParticipants} platser`
+                     +  (left > 0 ? ` · ${left} kvar` : ' · <span class="text-warning-emphasis">fullt, nya anmälningar blir reserver</span>')
+                     +  (c.reserves > 0 ? ` · ${c.reserves} reserv${c.reserves === 1 ? '' : 'er'}` : '')
+                     +  '</div>';
+            }
+            if (d.event.fee) {
+                html += `<div class="small text-muted mt-1"><i class="bi bi-wallet2 me-1"></i>Avgift ${esc(d.event.fee)} kr</div>`;
+            }
+            html += '</div>';
+
+            if (!d.loggedIn) {
+                const back = encodeURIComponent(window.location.pathname + window.location.search);
+                html += `<a class="btn btn-primary w-100" href="/login-register/?returnUrl=${back}">Logga in för att anmäla dig</a>`;
+            } else if (!d.eligible) {
+                html += '<div class="alert alert-light border small mb-0">'
+                     +  (d.event.isRegion
+                            ? 'Anmälan är öppen för medlemmar i kretsens klubbar.'
+                            : `Anmälan är öppen för medlemmar i ${esc(d.event.ownerName)}.`)
+                     +  '</div>';
+            } else if (d.me && d.me.signedUp) {
+                html += '<div class="alert ' + (d.me.isReserve ? 'alert-warning' : 'alert-success') + ' py-2 px-3 mb-2">'
+                     +  (d.me.isReserve
+                            ? '<i class="bi bi-hourglass-split me-1"></i>Du står som <strong>reserv</strong>. Blir en plats ledig flyttas du upp automatiskt.'
+                            : '<i class="bi bi-check-circle me-1"></i>Du är <strong>anmäld</strong>.')
+                     +  '</div>';
+                if (d.me.note) html += `<div class="small text-muted mb-2">Din notering: ${esc(d.me.note)}</div>`;
+                html += d.signupOpen
+                    ? '<button type="button" class="btn btn-outline-danger w-100" id="ces-cancel">Avboka min anmälan</button>'
+                    : '<div class="small text-muted">Anmälan är stängd — kontakta arrangören om du inte kan komma.</div>';
+            } else if (!d.signupOpen) {
+                html += '<div class="alert alert-light border small mb-0">Anmälan är stängd.</div>';
+            } else {
+                html += '<div class="mb-2"><label for="ces-note" class="form-label small text-muted mb-1">Meddelande till arrangören (valfritt)</label>'
+                     +  '<textarea class="form-control form-control-sm" id="ces-note" rows="2" maxlength="500"></textarea></div>';
+                const full = d.event.maxParticipants > 0 && c.seatsLeft === 0;
+                html += `<button type="button" class="btn btn-primary w-100" id="ces-signup">`
+                     +  (full ? 'Ställ mig som reserv' : 'Anmäl mig')
+                     +  '</button>';
+            }
+
+            // The roster is the club's own business: shown to the owning club's members and to
+            // functionaries, never to a passer-by.
+            if (d.roster && d.roster.length) {
+                const seats = d.roster.filter(r => !r.isReserve);
+                const res = d.roster.filter(r => r.isReserve);
+                html += '<hr><div class="small fw-semibold mb-1">Anmälda</div><ol class="small mb-0 ps-3">';
+                seats.forEach(r => { html += `<li>${esc(r.name)}</li>`; });
+                html += '</ol>';
+                if (res.length) {
+                    html += '<div class="small fw-semibold mt-2 mb-1">Reserver</div><ol class="small mb-0 ps-3">';
+                    res.forEach(r => { html += `<li>${esc(r.name)}</li>`; });
+                    html += '</ol>';
+                }
+            }
+
+            body.innerHTML = html;
+
+            const signupBtn = document.getElementById('ces-signup');
+            if (signupBtn) signupBtn.addEventListener('click', () => act(signupBtn, 'SignUp',
+                { eventId, note: document.getElementById('ces-note')?.value || '' }));
+
+            const cancelBtn = document.getElementById('ces-cancel');
+            if (cancelBtn) cancelBtn.addEventListener('click', () => {
+                if (!confirm('Vill du avboka din anmälan?')) return;
+                act(cancelBtn, 'Cancel', { eventId });
+            });
+        }
+
+        // Pending state on the button itself. The lesson from the scorepad SAVE button: a request
+        // with no visible pending state gets pressed again, and every press queues another action.
+        async function act(btn, action, payload) {
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Skickar…';
+            const d = await post(action, payload);
+            if (!d.success) {
+                btn.disabled = false;
+                btn.innerHTML = label;
+                body.insertAdjacentHTML('afterbegin',
+                    `<div class="alert alert-danger py-2 px-3 small">${esc(d.message || 'Något gick fel.')}</div>`);
+                return;
+            }
+            await load();
+        }
+
+        async function load() {
+            try {
+                const r = await fetch(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${eventId}`, { cache: 'no-store' });
+                render(await r.json());
+            } catch {
+                card.style.display = 'none';
+            }
+        }
+
+        load();
+    })();
+    </script>
+}

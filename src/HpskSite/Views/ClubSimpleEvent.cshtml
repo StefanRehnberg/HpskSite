@@ -479,7 +479,11 @@
                                         }
                                         else
                                         {
+                                            @* Utan extern länk sköts anmälan av rutan "Anmälan" i
+                                               sidospalten. Innan den fanns stod det bara "Krävs"
+                                               här, utan någonstans att klicka — en återvändsgränd. *@
                                             <strong>Krävs</strong>
+                                            <div class="small text-muted">Se rutan <em>Anmälan</em></div>
                                         }
                                     </div>
                                 </div>
@@ -535,6 +539,14 @@
 
         <!-- Sidebar Column -->
         <div class="col-lg-4">
+            @* Anmälningskortet hämtar sitt eget tillstånd och göms av sig självt när evenemanget
+               inte tar anmälningar (eller pekar på en extern länk), så det behöver ingen grind här. *@
+            @await Html.PartialAsync("_ClubEventSignup", new ViewDataDictionary(ViewData)
+            {
+                ["EventId"] = Model.Id,
+                ["Accent"] = eventTypeColor
+            })
+
             <!-- Quick Links Container -->
             <div id="quick-links-container"></div>
 

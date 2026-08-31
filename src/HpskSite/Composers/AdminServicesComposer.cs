@@ -122,6 +122,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<MarkenCompetitionService>();
             // Phase 3: Stormästarmärket inteckningspoäng entries (career championship merits).
             builder.Services.AddScoped<MarkenStormastarService>();
+            // Anmälan + närvaro på klubbens och kretsens evenemang (samma clubSimpleEvent-doctype
+            // för båda scopen; ägaren är evenemangets föräldranod).
+            builder.Services.AddScoped<ClubEventParticipationService>();
             // Årets beställnings- och utdelningslista per klubb (märken + standardmedaljer).
             // Helt härledd ur de två liggarna — ingen egen lagring, se tjänstens doc-kommentar.
             builder.Services.AddScoped<MarkenOrderListService>();
