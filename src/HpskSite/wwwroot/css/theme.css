@@ -101,7 +101,28 @@
     display: flex; align-items: center; gap: .8rem;
     border: 1px solid var(--bs-border-color); border-left: 3px solid var(--bs-border-color);
     border-radius: .5rem; padding: .5rem .7rem; background: var(--bs-body-bg);
+    /* position:relative kravs av .stretched-link nedan. Utan den letar lanken
+       upp narmaste positionerade forfader och tacker halva sidan. */
+    position: relative;
 }
+
+/* Klickbar rad. Hela raden ar malet (fingertoppsvanligt) via en .stretched-link
+   i markupen -- radens EGEN tagg forblir en <div>, sa JS-filtret som satter
+   style.display kan lamnas orort (ett <a> hade fatt display:inline av '').
+   !! Bara rader som FAR lankas far klassen: en maskerad rad (klubbintern
+   tavling eller klubbhandelse, sedd av en utloggad) visar bara "{typ} i
+   {krets}", och en href dit pekar ut precis det maskeringen doljer. */
+.wh-ev.wh-link { cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease; }
+.wh-ev.wh-link:hover {
+    border-color: var(--bs-secondary-color);
+    box-shadow: 0 1px 6px -2px rgba(0, 0, 0, .18);
+}
+.wh-ev.wh-link:focus-within {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), .25);
+}
+/* Lanken bar bara traffytan -- radens text ska inte fa lankfarg. */
+.wh-ev.wh-link > .stretched-link { text-decoration: none; color: inherit; }
 .wh-ev > .wh-min0 { min-width: 0; }
 .wh-ev.wh-tav { border-left-color: var(--bs-primary); }
 .wh-ev.wh-klubb { border-left-color: var(--bs-success); }

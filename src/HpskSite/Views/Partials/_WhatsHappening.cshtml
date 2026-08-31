@@ -34,6 +34,16 @@
     string RowLabel(FeedItem i, bool full) => full ? i.Title : (string.IsNullOrEmpty(i.RegionName) ? i.MaskedTypeLabel : $"{i.MaskedTypeLabel} i {i.RegionName}");
     string BadgeClass(FeedSource s) => s switch { FeedSource.Competition => "text-bg-primary", FeedSource.ClubEvent => "text-bg-success", _ => "text-bg-warning" };
     string EdgeClass(FeedSource s) => s switch { FeedSource.Competition => "wh-tav", FeedSource.ClubEvent => "wh-klubb", _ => "wh-tm" };
+
+    // ⚠️ SEKRETESSGRINDEN. En maskerad rad (klubbintern tävling eller klubbhändelse)
+    // visar för utloggade bara "{typ} i {krets}" — en href till noden pekar ut precis
+    // det som maskeringen döljer. Länka därför bara när besökaren är inloggad ELLER
+    // raden inte är maskerad (en öppen tävling är redan publik på tävlingsnavet).
+    //
+    // Url fylls redan av WhatsHappeningService för alla fyra källorna — den
+    // renderades bara aldrig, vilket är hela buggen: användarna trycker på en
+    // tävling i flödet och rapporterar att sidan är trasig när ingenting händer.
+    bool CanLink(FeedItem i) => !string.IsNullOrEmpty(i.Url) && (isLoggedIn || !i.Masked);
 }
 
 <div class="card mb-4 wh-feed" id="whFeed" data-anon="@(isLoggedIn ? "0" : "1")" data-locked="@(lockedCode ?? "")"
@@ -91,7 +101,11 @@
                 {
                     foreach (var item in ongoing)
                     {
-                        <div class="wh-ev @EdgeClass(item.Source)" data-region="@item.RegionCode">
+                        <div class="wh-ev @EdgeClass(item.Source) @(CanLink(item) ? "wh-link" : "")" data-region="@item.RegionCode">
+                            @if (CanLink(item))
+                            {
+                                <a class="stretched-link" href="@item.Url" aria-label="@item.Title"></a>
+                            }
                             <div class="wh-when"><div class="d text-success">Nu</div><div class="m">Pågår</div></div>
                             <div class="flex-grow-1 wh-min0">
                                 <span class="badge @BadgeClass(item.Source)">@item.SourceLabel · @item.TypeLabel</span>
@@ -118,7 +132,11 @@
                     var daysAhead = (item.Start.Date - today).Days;
                     var label = RowLabel(item, full);
                     var whenClass = daysAhead == 0 ? "wh-today" : daysAhead == 1 ? "wh-tomorrow" : "";
-                    <div class="wh-ev @EdgeClass(item.Source) @whenClass" data-region="@item.RegionCode" data-days="@daysAhead" data-date="@item.Start.ToString("yyyy-MM-dd")" data-label="@label">
+                    <div class="wh-ev @EdgeClass(item.Source) @whenClass @(CanLink(item) ? "wh-link" : "")" data-region="@item.RegionCode" data-days="@daysAhead" data-date="@item.Start.ToString("yyyy-MM-dd")" data-label="@label">
+                        @if (CanLink(item))
+                        {
+                            <a class="stretched-link" href="@item.Url" aria-label="@label"></a>
+                        }
                         <div class="wh-when">
                             <div class="d">@item.Start.Day</div>
                             <div class="m">@item.Start.ToString("MMM", sv)</div>
@@ -153,7 +171,10 @@
 
         @if (!isLoggedIn)
         {
-            <p class="text-muted small mb-0 mt-2"><i class="bi bi-eye me-1"></i>Endast läsvy — klicka dig vidare till tävlings- eller klubbsidan för anmälan och detaljer.</p>
+            @* Texten sa "klicka dig vidare" om en lista där ingenting var klickbart. Nu är
+               öppna tävlingar klickbara även utloggad; de maskerade raderna är det inte, och
+               det är vad andra halvan av meningen förklarar. *@
+            <p class="text-muted small mb-0 mt-2"><i class="bi bi-eye me-1"></i>Tryck på en öppen tävling för att gå vidare till den. <a href="/login-register">Logga in</a> för att se klubbarnas egna händelser.</p>
         }
         else if (!isLocked)
         {
