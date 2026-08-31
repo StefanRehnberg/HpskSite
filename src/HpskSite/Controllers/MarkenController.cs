@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly MarkenCompetitionService _compService;
         private readonly MarkenStormastarService _stormastarService;
         private readonly StandardMedalLedgerService _standardMedals;
+        private readonly MarkenOrderListService _orderList;
         private readonly StandardMedalProofStorage _proofStorage;
         private readonly ITimeLimitedDataProtector _verifyProtector;
 
@@ -68,6 +69,7 @@ namespace HpskSite.Controllers
             MarkenCompetitionService compService,
             MarkenStormastarService stormastarService,
             StandardMedalLedgerService standardMedals,
+            MarkenOrderListService orderList,
             StandardMedalProofStorage proofStorage,
             IDataProtectionProvider dataProtectionProvider)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -84,6 +86,7 @@ namespace HpskSite.Controllers
             _compService = compService;
             _stormastarService = stormastarService;
             _standardMedals = standardMedals;
+            _orderList = orderList;
             _proofStorage = proofStorage;
             _verifyProtector = dataProtectionProvider.CreateProtector("Marken.SeriesVerify.v1").ToTimeLimitedDataProtector();
         }
@@ -1810,6 +1813,111 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Årets beställnings- och utdelningslista för en klubb: antal per valör att beställa från
+        /// förbundet, plus vad varje medlem ska få. Täcker BÅDE märken och standardmedaljer.
+        /// GET /umbraco/surface/Marken/GetClubOrderList?clubId=1098&amp;year=2026
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClubOrderList(int clubId, int? year)
+        {
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
+            if (!await _auth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            int y = year ?? DateTime.Now.Year;
+
+            // Same reason the club summary does it: a member whose only guldserier were shot in
+            // competitions must be materialised into the ledger before the year is counted, or the
+            // order list is short by exactly those people.
+            await EnsureCompetitionSeriesSyncedAsync(y);
+
+            var list = await _orderList.BuildAsync(clubId, y);
+
+            return Json(new
+            {
+                success = true,
+                year = list.Year,
+                clubName = list.ClubName,
+                totalItems = list.TotalItems,
+                unverifiedItems = list.UnverifiedItems,
+                warnings = list.Warnings,
+                order = list.Order.Select(l => new { group = l.Group, item = l.Item, count = l.Count, note = l.Note }),
+                handout = list.Handout.Select(h => new
+                {
+                    memberId = h.MemberId,
+                    name = h.Name,
+                    items = h.Items.Select(i => new
+                    {
+                        group = i.Group,
+                        item = i.Item,
+                        detail = i.Detail,
+                        orderable = i.Orderable,
+                        unverified = i.Unverified
+                    })
+                })
+            });
+        }
+
+        /// <summary>
+        /// CSV of either half of the order list. <paramref name="list"/> = "order" (antal per valör,
+        /// för beställningen) or "handout" (en rad per medlem och sak, för utdelningen).
+        /// GET /umbraco/surface/Marken/ExportClubOrderList?clubId=1098&amp;year=2026&amp;list=order
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ExportClubOrderList(int clubId, int? year, string? list)
+        {
+            if (clubId <= 0) return Content("Ogiltigt klubb-ID.");
+            if (!await _auth.IsClubAdminForClub(clubId)) return Content("Åtkomst nekad.");
+
+            int y = year ?? DateTime.Now.Year;
+            await EnsureCompetitionSeriesSyncedAsync(y);
+            var data = await _orderList.BuildAsync(clubId, y);
+
+            var sb = new System.Text.StringBuilder();
+
+            if (string.Equals(list, "handout", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.AppendLine("Medlem;Grupp;Artikel;Detalj;Att beställa;Granskad");
+                foreach (var h in data.Handout)
+                    foreach (var i in h.Items)
+                        sb.AppendLine(string.Join(";", new[]
+                        {
+                            Csv(h.Name), Csv(i.Group), Csv(i.Item), Csv(i.Detail),
+                            i.Orderable ? "Ja" : "Nej",
+                            i.Unverified ? "Nej" : "Ja"
+                        }));
+
+                return CsvFile(sb.ToString(), $"marken-utdelningslista-{clubId}-{y}.csv");
+            }
+
+            sb.AppendLine("Grupp;Artikel;Antal;Notering");
+            foreach (var l in data.Order)
+                sb.AppendLine(string.Join(";", new[] { Csv(l.Group), Csv(l.Item), l.Count.ToString(), Csv(l.Note) }));
+            sb.AppendLine();
+            sb.AppendLine($"Totalt;;{data.TotalItems};");
+
+            return CsvFile(sb.ToString(), $"marken-bestallningslista-{clubId}-{y}.csv");
+        }
+
+        /// <summary>
+        /// Printable version of both halves on one page — the beställningslista for the förbundet and
+        /// the utdelningslista to read from at the utdelningen. Self-contained HTML, no Umbraco node.
+        /// GET /umbraco/surface/Marken/PrintClubOrderList?clubId=1098&amp;year=2026
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> PrintClubOrderList(int clubId, int? year)
+        {
+            if (clubId <= 0) return Content("Ogiltigt klubb-ID.");
+            if (!await _auth.IsClubAdminForClub(clubId)) return Content("Åtkomst nekad.");
+
+            int y = year ?? DateTime.Now.Year;
+            await EnsureCompetitionSeriesSyncedAsync(y);
+            var data = await _orderList.BuildAsync(clubId, y);
+
+            return Content(BuildOrderListPrintHtml(data), "text/html; charset=utf-8");
+        }
+
+        /// <summary>
         /// A neutral printable record of a member's Märken + Guldfodringar history. Makes no claim
         /// about what the record is for. Self-contained HTML (print-friendly), no Umbraco node needed.
         /// GET /umbraco/surface/Marken/PrintMemberMarken?memberId=2043
@@ -2860,6 +2968,85 @@ namespace HpskSite.Controllers
             sb.Append("</table>");
             sb.Append("<p class='muted'>Utskrift från pistol.nu ").Append(DateTime.Now.ToString("yyyy-MM-dd"))
               .Append(". Underlaget bygger på signerade uppgifter i klubbens märkesregister.</p>");
+            sb.Append("</body></html>");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Both halves of the order list on one printable page. Beställningslistan first (that is the
+        /// thing with a January deadline), utdelningslistan below it with a tick column, because at the
+        /// utdelning someone stands with a pen and needs to mark off what has actually been handed over.
+        /// </summary>
+        private static string BuildOrderListPrintHtml(MarkenOrderList data)
+        {
+            string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? "");
+            var sb = new System.Text.StringBuilder();
+
+            sb.Append("<!DOCTYPE html><html lang='sv'><head><meta charset='utf-8'>");
+            sb.Append("<title>Märken och medaljer ").Append(data.Year).Append(" – ").Append(Enc(data.ClubName)).Append("</title>");
+            sb.Append("<style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;color:#222}");
+            sb.Append("h1{font-size:1.4rem;margin-bottom:.2rem}h2{font-size:1.1rem;margin-top:1.8rem}");
+            sb.Append("table{border-collapse:collapse;width:100%;margin:.5rem 0 1rem}");
+            sb.Append("th,td{border:1px solid #ccc;padding:.35rem .6rem;text-align:left;font-size:.88rem;vertical-align:top}");
+            sb.Append("th{background:#f3f3f3}td.num{text-align:right;font-variant-numeric:tabular-nums}");
+            sb.Append(".muted{color:#666;font-size:.82rem}.warn{border-left:4px solid #d19b00;background:#fff8e6;padding:.5rem .7rem;margin:.6rem 0;font-size:.85rem}");
+            sb.Append(".tick{width:1.6rem;text-align:center}.grp{color:#555}");
+            sb.Append("tr.total td{font-weight:bold;background:#f9f9f9}");
+            sb.Append("@media print{button{display:none}h2{page-break-after:avoid}tr{page-break-inside:avoid}}");
+            sb.Append("</style></head><body>");
+            sb.Append("<button onclick='window.print()'>Skriv ut</button>");
+
+            sb.Append("<h1>Märken och medaljer ").Append(data.Year).Append("</h1>");
+            sb.Append("<p class='muted'>").Append(Enc(data.ClubName))
+              .Append(" · årets förvärvade märken och standardmedaljer · utskriven ")
+              .Append(DateTime.Now.ToString("yyyy-MM-dd")).Append("</p>");
+
+            foreach (var w in data.Warnings)
+                sb.Append("<div class='warn'>").Append(Enc(w)).Append("</div>");
+
+            sb.Append("<h2>Att beställa</h2>");
+            if (data.Order.Count == 0)
+            {
+                sb.Append("<p class='muted'>Inga märken eller medaljer att beställa för ").Append(data.Year).Append(".</p>");
+            }
+            else
+            {
+                sb.Append("<table><tr><th>Grupp</th><th>Artikel</th><th style='width:5rem'>Antal</th><th>Notering</th></tr>");
+                foreach (var l in data.Order)
+                    sb.Append("<tr><td class='grp'>").Append(Enc(l.Group))
+                      .Append("</td><td>").Append(Enc(l.Item))
+                      .Append("</td><td class='num'>").Append(l.Count)
+                      .Append("</td><td class='muted'>").Append(Enc(l.Note)).Append("</td></tr>");
+                sb.Append("<tr class='total'><td>Totalt</td><td></td><td class='num'>").Append(data.TotalItems).Append("</td><td></td></tr>");
+                sb.Append("</table>");
+            }
+
+            sb.Append("<h2>Att dela ut</h2>");
+            if (data.Handout.Count == 0)
+            {
+                sb.Append("<p class='muted'>Ingen medlem tog märke eller medalj under ").Append(data.Year).Append(".</p>");
+            }
+            else
+            {
+                sb.Append("<table><tr><th class='tick'>&#10003;</th><th style='width:14rem'>Medlem</th><th>Utmärkelse</th><th>Detalj</th></tr>");
+                foreach (var h in data.Handout)
+                {
+                    bool first = true;
+                    foreach (var i in h.Items)
+                    {
+                        sb.Append("<tr><td class='tick'>&#9744;</td><td>")
+                          .Append(first ? Enc(h.Name) : "").Append("</td><td>")
+                          .Append("<span class='grp'>").Append(Enc(i.Group)).Append("</span> ")
+                          .Append(Enc(i.Item));
+                        if (!i.Orderable) sb.Append(" <span class='muted'>(inget märke att beställa)</span>");
+                        if (i.Unverified) sb.Append(" <span class='muted'>(ej granskad)</span>");
+                        sb.Append("</td><td class='muted'>").Append(Enc(i.Detail)).Append("</td></tr>");
+                        first = false;
+                    }
+                }
+                sb.Append("</table>");
+            }
+
             sb.Append("</body></html>");
             return sb.ToString();
         }

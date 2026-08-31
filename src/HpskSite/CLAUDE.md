@@ -3242,6 +3242,70 @@ samlad/klassvis resultatlista. Foto i snabbinskicket väntar på Android-appen.
 **Operatörssteg:** lägg till `club.markenRequireOnSiteWitness` (True/False). Adds C# → full rebuild.
 Ingen SQL.
 
+### Att beställa och dela ut — klubbens årslista över märken OCH medaljer (2026-08-31)
+
+Klubben måste en gång om året svara på två frågor: *vad beställer vi från förbundet* och *vad delar
+vi ut*. **Rapporteringshalvan fanns sedan 2026-06-04** (`ExportClubMarken` ger årsrapporten per
+medlem och familj) — men ingenting förvandlade året till ett **antal per artikel**, och ingenting
+höll ihop märken med standardmedaljer, som ligger på två skilda flikar. Deadline för
+märkesbeställningen är **januari** (Stefan 2026-08-29).
+
+**Definitionen är ÅRETS FÖRVÄRVADE MÄRKEN, och det var ett val** (Stefan 2026-08-31): allt
+medlemmarna tog under året, oavsett om klubben redan hunnit beställa det. Alternativet — "det som
+ännu inte beställts" — kräver att beställningar bokförs (vem beställde vad, när) för att nästa års
+lista inte ska dubbelbeställa, alltså en ny tabell och en ny skrivväg. Följden av det valda
+alternativet: **listan är helt HÄRLEDD och lagrar ingenting**, så samma år ger alltid samma svar och
+den kan aldrig glida från liggarna. Avstämningen mot verkliga beställningar stannar hos kassören.
+
+**`Services/MarkenOrderListService.cs` bygger både halvorna, och beställningslistan aggregeras UR
+utdelningslistan** — aldrig ur en egen fråga. Två frågor över samma sak är två svar som är fria att
+säga emot varandra, och här är det ena svaret det man beställer efter. Sviten assertar likheten.
+- **Året läses en gång var** ur tre källor (`GetBadgesEarnedInYearAsync`,
+  `GetFulfilledQualificationsForYearAsync`, `GetAwardsForYearAsync`) — nationellt, och smalnas sedan
+  till klubbens medlemmar. Omvänd riktning (gå klubbens roster och fråga per medlem) kostar en fråga
+  per medlem för alla de som inte tog något.
+- **⚠️ Ett årtalsmärke är en funktion av HELA historiken, inte av årets rad.** Det delas ut var
+  tredje uppfyllt guldfodringsår, så `ArtalsmarkeEarned` jämför steget t.o.m. året med steget t.o.m.
+  året före. Jämförelsen görs på stegets NAMN via `MarkenFamilies.Artalsmarke` och inte på ett
+  omräknat stegindex — kadensen skiljer sig per familj (Pistolskyttets 17-stegsstege vs familjernas
+  egna) och den logiken äger `MarkenFamilies`.
+- **Ett uppfyllt år som INTE korsar ett steg ger ingen beställningsrad** men står kvar i
+  utdelningslistan som `Orderable = false` ("inget märke"), eftersom det läses upp på årsmötet.
+  Utan den skillnaden ser de två halvorna ut att vara oense om antalet.
+- **Två fel flaggas i stället för att tystas:** ett **guldmärke utan registreringsnummer** kan inte
+  beställas (namnges i `Warnings`, och medlemsraden säger "Guldnummer saknas"), och en
+  **egenrapporterad, ej granskad** standardmedalj **räknas med** men flaggas — en lista som tyst
+  utesluter poster läses som komplett.
+- Primärklubb avgör tillhörighet, som på övriga märkesytor, så samma märke aldrig kan hamna på två
+  klubbars beställningslistor.
+
+**Ytor:** kort **"Att beställa och dela ut"** högst upp på klubbadmins Märken-flik — kollapsat och
+lazy-laddat, så det inte trycker ner valideringskön som är det dagliga arbetet, men synligt så det
+går att hitta i januari. Läser tabbens egen årsväljare (`markenOrderYearChanged` hämtar bara om när
+kortet är öppet). Standardmedaljer-fliken bär en **pekare** dit (`goToMarkenOrderList`, som använder
+`.click()` på flikknappen och väntar på `shown.bs.tab` innan kortet öppnas — årsväljaren fylls i den
+handlern och en tidigare öppning hade frågat med tomt år) i stället för en andra kopia av listan.
+Endpoints: `GetClubOrderList` (JSON), `ExportClubOrderList?list=order|handout` (CSV),
+`PrintClubOrderList` (självständig HTML, båda listorna, **kryssruta per utdelningsrad** — vid
+utdelningen står någon med en penna).
+
+⚠️ **`EnsureCompetitionSeriesSyncedAsync(year)` körs före bygget**, av samma skäl som klubbsummeringen
+gör det: en medlem vars guldserier bara skjutits i tävlingar måste materialiseras i liggaren innan
+året räknas, annars är listan kort med exakt de personerna.
+
+Verifierat **74/74 `hpsk-verify/marken-orderlist-verify.mjs`**, två körningar i rad. Sviten bygger sin
+egen fixtur i SQL (märken, sju kvalifikationsår, två standardmedaljer) och mäter **DELTAT** mot ett
+före-läge, så den är repeterbar och tål befintlig dev-data. ⚠️ Tre fällor den dokumenterar:
+kvalifikationsraderna måste bära `Part1Source = 'ManualAttest'` (annars kan en omräkning radera dem
+mitt i körningen och felet läser som en bugg i listan); fixturåret **måste finnas i årsväljaren**
+(`currentYear−6`), annars är `selectOption` en tyst no-op och UI-halvan mäter innevarande års
+verkliga data medan den påstår att den mäter fixturen — det hände på första körningen; och
+klubbsidans URL ska **inte** letas via en katalogsida (`/klubbar/` 404:ar i dev och `/clubs/`
+REDIRIGERAR till en enskild klubb). Regression: marken-witness-date 79/79,
+marken-compseries-sync 59/59.
+
+Adds C# → full rebuild. **Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.**
+
 ### Märken: "Spara som Guldserie/Snabbserie" from Resultat-entry + Training match (2026-06-10)
 A shooter can turn a single just-shot **5-shot series** into a Märken submission from two more places besides the "Jag har skjutit en Guldserie" button on Min sida: the manual **Resultat-entry** modal (`TrainingScoreEntry.cshtml`) and a **Training match** (`TrainingMatchScoreEntry.cshtml`). Per-series, shot-by-shot only — NOT offered in serie-total / total-only entry (no per-shot data).
 - **Discipline → series routing (the crux):** only two disciplines map to a per-series prov. **Precision → Guldserie** (`SeriesType=Precision`, 5 shots) → feeds Pistolskyttemärkets guldfodring part 1 + Elit precision. **Duell → Snabbserie** (`SeriesType=Speed`, `Target=Snabbpistol_25m`, scored 0–50) → feeds **Elitmärket** (needs Guldmärke), *not* the guldfodring (Duell on snabbpistoltavla is the Elit speed series, not a tillämpningsserie). Milsnabb/MagnumPrecision/NatHelmatch/Springskytte map to no per-series prov → button hidden. Weapon group (A/B/C/R) derived from the shooter's class (manual: `#shootingClass`; match: `currentMatch.weaponClass`); button hidden for M/L/unknown.

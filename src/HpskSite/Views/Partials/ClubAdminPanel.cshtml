@@ -602,6 +602,13 @@
                     </button>
                 </div>
             </div>
+            @* Beställningslistan täcker märken OCH medaljer och bor på Märken-fliken — en enda lista,
+               så den som letar den här får en väg dit i stället för en andra kopia. *@
+            <div class="alert alert-light border d-flex justify-content-between align-items-center flex-wrap gap-2 py-2 small">
+                <span><i class="bi bi-box-seam text-warning me-1"></i>Årets <strong>beställnings- och utdelningslista</strong> omfattar både märken och medaljer och finns under fliken Märken.</span>
+                <button class="btn btn-sm btn-outline-warning" type="button" onclick="goToMarkenOrderList()">Öppna listan</button>
+            </div>
+
             <div id="clubMedalsContent">
                 <div class="text-center py-4">
                     <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
@@ -622,10 +629,43 @@
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     <label for="markenYearFilter" class="small text-muted mb-0">År:</label>
-                    <select id="markenYearFilter" class="form-select form-select-sm" style="width:auto;" onchange="loadClubMarken()"></select>
+                    <select id="markenYearFilter" class="form-select form-select-sm" style="width:auto;" onchange="loadClubMarken(); markenOrderYearChanged();"></select>
                     <button class="btn btn-sm btn-outline-secondary" onclick="exportClubMarken()" title="Exportera som CSV (för MAP)">
                         <i class="bi bi-download me-1"></i>Exportera
                     </button>
+                </div>
+            </div>
+
+            @* Årets beställnings- och utdelningslista — märken OCH standardmedaljer i en lista.
+               Ligger högt upp för att den ska gå att hitta i januari när beställningen till förbundet
+               ska in, men kollapsad så den inte trycker ner valideringskön, som är det dagliga arbetet.
+               Läses in först när den öppnas (den räknar över hela året och alla familjer). *@
+            <div id="markenOrderCard" class="card mb-3 border-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+                        <h6 class="card-title mb-0">
+                            <i class="bi bi-box-seam text-warning me-1"></i>Att beställa och dela ut
+                            <span id="markenOrderYearLabel" class="text-muted fw-normal"></span>
+                        </h6>
+                        <button class="btn btn-sm btn-outline-warning" type="button" id="markenOrderToggleBtn" onclick="toggleMarkenOrder()">Visa listan</button>
+                    </div>
+                    <p class="text-muted small mb-0">
+                        Årets förvärvade märken och standardmedaljer: antal per valör att beställa från
+                        förbundet, och vad varje medlem ska få. Beställningen ska in i januari.
+                        Byt år med årsväljaren ovan.
+                    </p>
+                    <div id="markenOrderBody" style="display:none;" class="mt-3">
+                        <div id="markenOrderContent">
+                            <div class="text-center py-3">
+                                <div class="spinner-border spinner-border-sm text-warning" role="status"><span class="visually-hidden">Laddar...</span></div>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap mt-2" id="markenOrderActions" style="display:none;">
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="printMarkenOrder()"><i class="bi bi-printer me-1"></i>Skriv ut båda listorna</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="exportMarkenOrder('order')"><i class="bi bi-download me-1"></i>Beställningslista (CSV)</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="exportMarkenOrder('handout')"><i class="bi bi-download me-1"></i>Utdelningslista (CSV)</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -2022,6 +2062,140 @@ document.getElementById('marken-tab').addEventListener('shown.bs.tab', function 
     loadClubMarkenQueue();
     loadClubMarken();
 });
+
+// ── Att beställa och dela ut (årets märken + standardmedaljer) ─────────
+// Lazy: the build reads the whole year across every family plus the medal ledger, so it runs when
+// the card is opened and when the year changes — never on every validation like loadClubMarken().
+let markenOrderOpen = false;
+
+function markenOrderYear() {
+    return document.getElementById('markenYearFilter')?.value || new Date().getFullYear();
+}
+
+function toggleMarkenOrder() {
+    const body = document.getElementById('markenOrderBody');
+    const btn = document.getElementById('markenOrderToggleBtn');
+    if (!body) return;
+    markenOrderOpen = body.style.display === 'none';
+    body.style.display = markenOrderOpen ? 'block' : 'none';
+    if (btn) btn.textContent = markenOrderOpen ? 'Dölj listan' : 'Visa listan';
+    if (markenOrderOpen) loadMarkenOrder();
+}
+
+// Only refetch when the card is actually open — otherwise the year change is free.
+function markenOrderYearChanged() {
+    const label = document.getElementById('markenOrderYearLabel');
+    if (label) label.textContent = markenOrderOpen ? markenOrderYear() : '';
+    if (markenOrderOpen) loadMarkenOrder();
+}
+
+function loadMarkenOrder() {
+    const content = document.getElementById('markenOrderContent');
+    const actions = document.getElementById('markenOrderActions');
+    const year = markenOrderYear();
+    const label = document.getElementById('markenOrderYearLabel');
+    if (label) label.textContent = year;
+    if (actions) actions.style.display = 'none';
+    if (content) content.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-warning" role="status"><span class="visually-hidden">Laddar...</span></div></div>';
+
+    fetch(`/umbraco/surface/Marken/GetClubOrderList?clubId=${clubId}&year=${year}`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) {
+                if (content) content.innerHTML = `<div class="alert alert-warning mb-0">${escapeHtml(d.message || 'Kunde inte hämta listan.')}</div>`;
+                return;
+            }
+            renderMarkenOrder(d);
+            if (actions) actions.style.display = 'flex';
+        })
+        .catch(() => {
+            if (content) content.innerHTML = '<div class="alert alert-danger mb-0">Kunde inte hämta listan.</div>';
+        });
+}
+
+function renderMarkenOrder(d) {
+    const content = document.getElementById('markenOrderContent');
+    if (!content) return;
+
+    let html = '';
+
+    // Warnings first: a Guld with no registration number cannot be ordered, and an unverified
+    // self-report is something the club may want to look at before ordering on it.
+    (d.warnings || []).forEach(w => {
+        html += `<div class="alert alert-warning py-2 px-3 small mb-2">${escapeHtml(w)}</div>`;
+    });
+
+    // ── Att beställa ──
+    html += '<h6 class="small text-uppercase text-muted mb-1">Att beställa</h6>';
+    if (!d.order || d.order.length === 0) {
+        html += `<p class="text-muted small">Inga märken eller medaljer att beställa för ${escapeHtml(String(d.year))}.</p>`;
+    } else {
+        html += '<div class="table-responsive"><table class="table table-sm align-middle mb-3">';
+        html += '<thead><tr><th>Grupp</th><th>Artikel</th><th class="text-end" style="width:5rem;">Antal</th><th>Notering</th></tr></thead><tbody>';
+        d.order.forEach(l => {
+            html += `<tr><td class="text-muted">${escapeHtml(l.group)}</td>`
+                 +  `<td>${escapeHtml(l.item)}</td>`
+                 +  `<td class="text-end fw-semibold">${l.count}</td>`
+                 +  `<td class="text-muted small">${escapeHtml(l.note || '')}</td></tr>`;
+        });
+        html += `<tr class="table-light"><td class="fw-semibold">Totalt</td><td></td>`
+             +  `<td class="text-end fw-semibold">${d.totalItems}</td><td></td></tr>`;
+        html += '</tbody></table></div>';
+    }
+
+    // ── Att dela ut ──
+    html += '<h6 class="small text-uppercase text-muted mb-1">Att dela ut</h6>';
+    if (!d.handout || d.handout.length === 0) {
+        html += `<p class="text-muted small mb-0">Ingen medlem tog märke eller medalj under ${escapeHtml(String(d.year))}.</p>`;
+    } else {
+        html += '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+        html += '<thead><tr><th style="min-width:150px;">Medlem</th><th>Utmärkelse</th><th>Detalj</th></tr></thead><tbody>';
+        d.handout.forEach(h => {
+            (h.items || []).forEach((i, idx) => {
+                let item = `<span class="text-muted">${escapeHtml(i.group)}</span> ${escapeHtml(i.item)}`;
+                // Say which rows carry no physical badge — otherwise the two lists look like they
+                // disagree about the count, and the count is what you order by.
+                if (!i.orderable) item += ' <span class="badge bg-secondary-subtle text-secondary-emphasis">inget märke</span>';
+                if (i.unverified) item += ' <span class="badge bg-warning-subtle text-warning-emphasis">ej granskad</span>';
+                html += `<tr><td>${idx === 0 ? escapeHtml(h.name) : ''}</td>`
+                     +  `<td>${item}</td>`
+                     +  `<td class="text-muted small">${escapeHtml(i.detail || '')}</td></tr>`;
+            });
+        });
+        html += '</tbody></table></div>';
+    }
+
+    content.innerHTML = html;
+}
+
+function exportMarkenOrder(list) {
+    window.location = `/umbraco/surface/Marken/ExportClubOrderList?clubId=${clubId}&year=${markenOrderYear()}&list=${encodeURIComponent(list)}`;
+}
+
+function printMarkenOrder() {
+    window.open(`/umbraco/surface/Marken/PrintClubOrderList?clubId=${clubId}&year=${markenOrderYear()}`, '_blank', 'noopener');
+}
+
+// From the Standardmedaljer tab's pointer. Uses .click() rather than bootstrap.Tab.show() — the
+// tab's own loaders bind to different events, and a click satisfies every binding style (it is also
+// what the mobile tab picker does).
+function goToMarkenOrderList() {
+    const tabBtn = document.getElementById('marken-tab');
+    if (!tabBtn) return;
+    const open = () => {
+        const body = document.getElementById('markenOrderBody');
+        if (body && body.style.display === 'none') toggleMarkenOrder();
+        document.getElementById('markenOrderCard')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    if (tabBtn.classList.contains('active')) { open(); return; }
+    // Wait for the tab to be shown: its shown.bs.tab handler fills the year select, which the
+    // order list reads. Opening the card before that would query with a blank year.
+    tabBtn.addEventListener('shown.bs.tab', function once() {
+        tabBtn.removeEventListener('shown.bs.tab', once);
+        open();
+    });
+    tabBtn.click();
+}
 
 // False until a read confirms the club doctype actually carries `markenRequireOnSiteWitness`.
 // Everything that touches that switch keys off this, so a missing property disables it in one place

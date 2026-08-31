@@ -583,6 +583,56 @@ namespace HpskSite.Services
             return ids.ToList();
         }
 
+        /// <summary>
+        /// Every non-rejected badge EARNED in a given year, across all members and families.
+        /// One query for the whole year — the club order list needs the year's harvest and then
+        /// filters to its own members, which is the opposite direction from the per-member reads.
+        /// </summary>
+        public async Task<List<MemberBadge>> GetBadgesEarnedInYearAsync(int year)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<MemberBadge>(
+                "WHERE AchievedYear = @0 AND Status <> @1 ORDER BY MemberId, BadgeFamily, LevelOrdinal",
+                year, Marken.StatusRejected);
+        }
+
+        /// <summary>
+        /// Every non-rejected, FULFILLED qualification row for a year (all members, all families).
+        /// Fulfilled-only on purpose: an unfulfilled row is a year in progress, not an achievement.
+        /// </summary>
+        public async Task<List<MemberBadgeQualification>> GetFulfilledQualificationsForYearAsync(int year)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<MemberBadgeQualification>(
+                "WHERE [Year] = @0 AND Fulfilled = 1 AND Status <> @1 ORDER BY MemberId, BadgeFamily",
+                year, Marken.StatusRejected);
+        }
+
+        /// <summary>
+        /// Non-rejected qualification rows for many members, optionally one family. Needed to work
+        /// out whether a member crossed an årtalsmärke STEP in a given year, which is a function of
+        /// their whole history and not of that year's row alone.
+        /// ⚠️ Chunked at 1000 — `IN (@0)` caps out around 2100 parameters and fails silently past it.
+        /// </summary>
+        public async Task<List<MemberBadgeQualification>> GetQualificationsForMembersAsync(
+            IEnumerable<int> memberIds, string? family = null)
+        {
+            var ids = memberIds?.Distinct().ToList() ?? new List<int>();
+            var result = new List<MemberBadgeQualification>();
+            if (ids.Count == 0) return result;
+
+            using var db = _databaseFactory.CreateDatabase();
+            foreach (var chunk in ids.Chunk(1000))
+            {
+                var sql = new Sql("WHERE Status <> @0 AND MemberId IN (@1)", Marken.StatusRejected, chunk.ToArray());
+                if (!string.IsNullOrEmpty(family))
+                    sql.Append("AND BadgeFamily = @0", family);
+                sql.Append("ORDER BY MemberId, BadgeFamily, [Year]");
+                result.AddRange(await db.FetchAsync<MemberBadgeQualification>(sql));
+            }
+            return result;
+        }
+
         /// <summary>Count of reported-but-unverified badges + qualifications for a member (the sign-off queue size).</summary>
         public async Task<int> GetPendingCountAsync(int memberId, string? family = null)
         {

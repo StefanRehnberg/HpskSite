@@ -122,6 +122,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<MarkenCompetitionService>();
             // Phase 3: Stormästarmärket inteckningspoäng entries (career championship merits).
             builder.Services.AddScoped<MarkenStormastarService>();
+            // Årets beställnings- och utdelningslista per klubb (märken + standardmedaljer).
+            // Helt härledd ur de två liggarna — ingen egen lagring, se tjänstens doc-kommentar.
+            builder.Services.AddScoped<MarkenOrderListService>();
 
             // Manual klubb-/kretsmästare entries (auto-compute approach abandoned —
             // many clubs don't run results through pistol.nu)
