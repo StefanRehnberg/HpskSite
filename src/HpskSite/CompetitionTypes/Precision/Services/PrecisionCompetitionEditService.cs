@@ -367,35 +367,103 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// <summary>
         /// Convert field values to appropriate types for Umbraco properties.
         /// </summary>
+        /// <summary>
+        /// Fält vars värde är ett BELOPP och ska lagras som decimal. Allt annat numeriskt
+        /// är ett antal och lagras som int.
+        ///
+        /// ⚠️ Den här listan är den enda som INTE går att härleda ur katalogen: där heter
+        /// både antal och belopp <c>FieldControl.Number</c>, eftersom katalogen beskriver
+        /// formuläret och inte lagringen. Att lägga in lagringstyp där hade gett katalogen
+        /// ett andra ansvar för att spara fem rader här.
+        /// </summary>
+        private static readonly HashSet<string> BeloppsFalt = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "registrationFee", "teamRegistrationFee", "stafettRegistrationFee",
+            "juniorRegistrationFee", "subCompetitionFee"
+        };
+
+        /// <summary>
+        /// Katalogfält som lagras som HELTAL trots att kontrollen inte är
+        /// <see cref="FieldControl.Number"/>.
+        ///
+        /// ⚠️ <c>clubId</c> är en dropdown i formuläret men ett heltal i lagringen. Utan den
+        /// här listan skulle den härledas till text — och en klubbreferens lagrad som sträng
+        /// är en dokumenterad fälla här: <c>GetValue&lt;int&gt;</c> på en strängegenskap ger
+        /// TYST 0, vilket har gett både walk-in-anmälningar med <c>clubId=0</c> och
+        /// "Okänd klubb" på startlistan.
+        /// </summary>
+        private static readonly HashSet<string> HeltalsFalt = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "clubId"
+        };
+
+        /// <summary>
+        /// Fält med egen serialisering — sammansatta värden som inte är en enkel typ.
+        /// </summary>
+        private static readonly HashSet<string> EgenKonvertering = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "shootingClassIds", "competitionManagers"
+        };
+
+        /// <summary>
+        /// Konverterar ett inkommande fältvärde till den typ egenskapen lagras som.
+        ///
+        /// ⚠️ TYPEN HÄRLEDS UR <see cref="CompetitionFieldCatalog"/> där det går. Det här var
+        /// en femte handskriven fältlista, och tre av dess grupper (bool, datum, tid) sa
+        /// exakt samma sak som <see cref="FieldControl"/> redan gör. Två beskrivningar av
+        /// samma sak glider isär; det är hela skälet att katalogen finns.
+        ///
+        /// Fallbacken är strängen — en ny textruta fungerar därför av sig själv. Men ett
+        /// NUMERISKT fält som varken är belopp eller känt av katalogen skulle tyst lagras
+        /// som text, och det säger vi ifrån om i stället.
+        /// </summary>
         private object ConvertFieldValue(string fieldName, object value)
         {
             if (value == null || string.IsNullOrWhiteSpace(value.ToString()))
                 return null;
 
-            return fieldName switch
+            var text = value.ToString();
+
+            if (EgenKonvertering.Contains(fieldName))
             {
-                "maxParticipants" or "numberOfSeriesOrStations" or "numberOfFinalSeries" or "teamResultSeriesCount" or "clubId" =>
-                    int.TryParse(value.ToString(), out var intVal) && intVal >= 0 ? intVal : (object)null,
+                return fieldName.Equals("shootingClassIds", StringComparison.OrdinalIgnoreCase)
+                    ? ConvertShootingClassIds(text)
+                    : ConvertCompetitionManagers(value);
+            }
 
-                "registrationFee" or "teamRegistrationFee" or "stafettRegistrationFee"
-                    or "juniorRegistrationFee" or "subCompetitionFee" =>
-                    decimal.TryParse(value.ToString(), out var decVal) && decVal >= 0 ? decVal : (object)null,
+            if (BeloppsFalt.Contains(fieldName))
+                return decimal.TryParse(text, out var dec) && dec >= 0 ? dec : (object?)null;
 
-                "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" or "allowSelfReporting" or "allowTeams" or "allowStafett" or "faltskytteSelfServiceResults" =>
-                    bool.TryParse(value.ToString(), out var boolVal) ? boolVal : false,
+            if (HeltalsFalt.Contains(fieldName))
+                return int.TryParse(text, out var hi) && hi >= 0 ? hi : (object?)null;
 
-                "competitionDate" or "competitionEndDate" or "registrationOpenDate" or "registrationCloseDate" =>
-                    ConvertDateTime(value.ToString()),
+            var falt = CompetitionFieldCatalog.Find(fieldName);
+            if (falt != null)
+            {
+                switch (falt.Control)
+                {
+                    case FieldControl.Checkbox:
+                        return bool.TryParse(text, out var b) && b;
+                    case FieldControl.Date:
+                    case FieldControl.DateTime:
+                        return ConvertDateTime(text);
+                    case FieldControl.Number:
+                        return int.TryParse(text, out var i) && i >= 0 ? i : (object?)null;
+                }
+                return text;
+            }
 
-                "shootingClassIds" =>
-                    ConvertShootingClassIds(value.ToString()),
+            // Fält utanför katalogen: systemflaggor och härledda värden. De få som finns
+            // är kända, resten är text.
+            if (fieldName.Equals("isActive", StringComparison.OrdinalIgnoreCase))
+                return bool.TryParse(text, out var ab) && ab;
+            if (fieldName.Equals("patrolSize", StringComparison.OrdinalIgnoreCase)
+                || fieldName.Equals("patrolIntervalMinutes", StringComparison.OrdinalIgnoreCase))
+                return int.TryParse(text, out var ai) && ai >= 0 ? ai : (object?)null;
 
-                "competitionManagers" =>
-                    ConvertCompetitionManagers(value),
-
-                _ => value.ToString()
-            };
+            return text;
         }
+
 
         private object ConvertDateTime(string dateStr)
         {
