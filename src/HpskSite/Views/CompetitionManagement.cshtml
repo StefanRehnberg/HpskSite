@@ -1,7 +1,8 @@
-@using Umbraco.Cms.Web.Common.PublishedModels;
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
 @using System.Linq;
 @using System;
 @using HpskSite.Extensions
+@using HpskSite.CompetitionTypes.Common
 @using Newtonsoft.Json
 @inject Umbraco.Cms.Core.Services.IMemberService MemberService
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
@@ -486,11 +487,18 @@
 
     @{
         // Funktionärer is the day-of operational hub (live functionary load + tävlingsledning message
-        // console) for Precision-family + Springskytte — a major comp-management tab. The preparatory
-        // work (Förberedelser + Bemanning) lives on the separate /tavlingsplanering page reached via the
-        // "Planering" header button, since it relates to the comp rather than being part of running it.
-        // See Documentation/COMPETITION_STAFFING_SYSTEM.md.
-        var hasFunktionarerTab = (ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Precision" or "MagnumPrecision" or "Springskytte";
+        // console) for the whole Precision family + Springskytte — a major comp-management tab. The
+        // preparatory work (Förberedelser + Bemanning) lives on the separate /tavlingsplanering page
+        // reached via the "Planering" header button, since it relates to the comp rather than being
+        // part of running it. See Documentation/COMPETITION_STAFFING_SYSTEM.md.
+        //
+        // ⚠️ Grenlistan låg HÄR som en handskriven sträng och hade tappat fem grenar — Milsnabb,
+        // Duell, NationellHelmatch, Standardpistol och Sportpistol saknade fliken trots att de delar
+        // seriemodell, startlistor, resultatendpoints OCH inmatningsskärm med Precision. Svaret bor
+        // nu i CompetitionSurfaces, så en ny gren i PrecisionFamily-registret får fliken automatiskt.
+        var compTypeForTabs = ViewData["CompetitionType"]?.ToString();
+        var hasFunktionarerTab = CompetitionSurfaces.HasFunktionarerHub(compTypeForTabs);
+        var hasStationerTab = CompetitionSurfaces.HasStationerTab(compTypeForTabs);
     }
     <!-- Navigation tabs -->
     <ul class="nav nav-tabs" id="managementTabs" role="tablist">
@@ -504,7 +512,7 @@
                 <i class="bi bi-list-ol me-1"></i>Startlistor
             </button>
         </li>
-        @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")
+        @if (hasStationerTab)
         {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="stationer-tab" data-bs-toggle="tab" data-bs-target="#stationer" type="button" role="tab">
@@ -747,7 +755,13 @@
                     }
                     else
                     {
-                        @await Html.PartialAsync("PrecisionFunktionarerManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                        @* Navet gäller hela precisionsfamiljen. Skjutledare-vyn gör den INTE —
+                           snabbskyttegrenarna har egna kommandoord, så partialen får svaret med sig
+                           och döljer den länken för dem (P2 i backloggen). *@
+                        @await Html.PartialAsync("PrecisionFunktionarerManagement", new ViewDataDictionary(ViewData) {
+                            { "CompetitionId", competitionId },
+                            { "HasSkjutledareView", CompetitionSurfaces.HasSkjutledareView(compTypeForTabs) }
+                        })
                     }
                 </div>
             </div>

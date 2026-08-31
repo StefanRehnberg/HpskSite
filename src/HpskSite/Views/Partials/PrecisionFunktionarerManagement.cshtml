@@ -1,3 +1,4 @@
+﻿@using HpskSite.CompetitionTypes.Common
 @{
     // "Funktionärer" tab (Precision / MagnumPrecision). The competition-day cockpit:
     //  - Skjutlag timeline (each lag + its start time + progress + done/active/stalled/upcoming)
@@ -16,6 +17,14 @@
     // simply unreachable and entry stops at the last qualifying series.
     var numberOfFinalSeries = 0;
     int.TryParse(ViewData["NumberOfFinalSeries"]?.ToString(), out numberOfFinalSeries);
+
+    // ⚠️ Navet gäller hela precisionsfamiljen sedan 2026-08-31, men Skjutledare-vyn gör det inte:
+    // snabbskyttegrenarna (Milsnabb, Duell, Standardpistol, Sportpistol) har andra kommandoord och
+    // annan tidssättning, så vyn skulle ge skjutledaren fel uppläsning. Värdet kommer från
+    // CompetitionSurfaces via värdvyn; faller tillbaka på grenen om det inte skickats med.
+    var hubHasSkjutledareView = ViewData["HasSkjutledareView"] is bool hsv
+        ? hsv
+        : CompetitionSurfaces.HasSkjutledareView(ViewData["CompetitionType"]?.ToString());
 }
 
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -67,6 +76,8 @@
 <script>
 (function () {
     var compId = @competitionId;
+    // Skjutledarvy-länken renderas bara för de grenar som har vyn (se värdvyns kommentar).
+    var pfnHasSkjutledare = @(hubHasSkjutledareView ? "true" : "false");
     var REFRESH = 15000;
     var timer = null;
 
@@ -152,8 +163,8 @@
                 + rosterHtml + help
                 + '</div>'
                 + '<div class="card-footer p-2">'
-                + '<a class="btn btn-primary w-100 mb-2" href="/station?c=' + compId + '&s=' + sl.teamNumber + '" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna resultatinmatning</a>'
-                + '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + sl.teamNumber + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>'
+                + '<a class="btn btn-primary w-100' + (pfnHasSkjutledare ? ' mb-2' : '') + '" href="/station?c=' + compId + '&s=' + sl.teamNumber + '" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna resultatinmatning</a>'
+                + (pfnHasSkjutledare ? '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + sl.teamNumber + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>' : '')
                 + '</div>'
                 + '</div></div>';
         }).join('');
@@ -242,10 +253,10 @@
                 + '<span class="badge bg-secondary">' + shooters.length + ' skyttar</span>'
                 + '</div>'
                 + '<div class="card-footer p-2">'
-                + '<a class="btn btn-primary w-100 mb-2" href="/station?c=' + compId + '&s=' + encodeURIComponent(num)
+                + '<a class="btn btn-primary w-100' + (pfnHasSkjutledare ? ' mb-2' : '') + '" href="/station?c=' + compId + '&s=' + encodeURIComponent(num)
                 + '&phase=finals" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna finalinmatning</a>'
-                + '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + encodeURIComponent(num)
-                + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>'
+                + (pfnHasSkjutledare ? '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + encodeURIComponent(num)
+                + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>' : '')
                 + '</div>'
                 + '</div></div>';
         }).join('');
