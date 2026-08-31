@@ -1904,16 +1904,36 @@ Registreringsbordets egen väg är en annan endpoint och berörs inte.
 **Lag/stafett är medvetet UTANFÖR grinden** — de ligger inte i den individuella startlistan och har
 sin egen frist.
 
-Verifierat 29/29 `hpsk-verify/startlist-closes-registration-verify.mjs`. **⚠️ Läs svitens huvud innan
-den ändras — tre fällor kostade en körning:** sidan tar `?competitionId=`, INTE `?c=` (fel namn ger
-200 + tävlingsVÄLJAREN, och varje "finns inte"-påstående blir grönt på en sida som aldrig visade
-funktionen); två inloggningar i samma `BrowserContext` delar cookie, så funktionären loggades ut av
-skytten och servern svarade "inte behörighet" — vilket såg ut som ett produktfel; och
-`GetStartLists` returnerar `status: "Official"`, inte `isOfficial`, så baseline blev `undefined` och
-återställningskontrollen jämförde `undefined` med `undefined` — grön och helt utan innebörd. En
-släckt Anmäl-knapp betyder dessutom inte att grinden slog till: sista anmälningsdag släcker den
-också, och sviten skiljer orsakerna åt. **Steg 4–8 SKIPPAR tills doctype-egenskapen finns** — en
-grön körning utan den vore ett påstående som inte kan falla.
+Verifierat **41/41 (0 SKIP) `hpsk-verify/startlist-closes-registration-verify.mjs` på 5626
+(Springskytte, öppen anmälan)** och **37/37 på 2576** (precisionsvägen; 4 SKIP eftersom fixturens
+anmälningstid gått ut). Sviten är GRENMEDVETEN och väljer publiceringsendpoint efter fixturen, så
+båda kodvägarna mäts av samma påståenden.
+
+**Diskriminerar utan ombyggnads-A/B:** steg 3 och 8 ÄR baseline-tillståndet — grinden av respektive
+avpublicerad — och de assertar frånvaron av precis det steg 4–7 assertar närvaron av, i samma
+körning på samma binär. Grind-av-vägen är beteendemässigt identisk med koden före ändringen
+(egenskapen saknas → `IsClosed` false → inga grenar renderas, ingen kontroll i endpointen).
+⚠️ Kör INTE sviten mot en baseline-binär utan att först stänga av steg 6: utan grinden fortsätter
+`RegisterForCompetition` förbi kontrollen och in i klassvalideringen, och kan skapa en riktig anmälan.
+
+**⚠️ Läs svitens huvud innan den ändras — fyra fällor kostade körningar:**
+- Sidan tar `?competitionId=`, INTE `?c=`. Fel namn ger 200 + tävlingsVÄLJAREN, och varje
+  "finns inte"-påstående blir grönt på en sida som aldrig visade funktionen.
+- Två inloggningar i samma `BrowserContext` delar cookie, så funktionären loggades ut av skytten och
+  servern svarade "inte behörighet" — vilket såg ut som ett produktfel.
+- `GetStartLists` returnerar `status: "Official"`, inte `isOfficial`; fel fält gav en `undefined`
+  baseline och en återställningskontroll som jämförde `undefined` med `undefined`.
+- **⚠️ Textmatchningen stavade rutan fel** ("självanmälan är stängd" mot rutans "därför är
+  självanmälan stängd"), så matchningen kunde ALDRIG slå till — och därmed blev alla tre
+  "ingen ruta"-påståenden (steg 3, 7, 8) vakuöst gröna. Bara det ENA positiva påståendet avslöjade
+  det. Assertera alltid både närvaro och frånvaro av samma sträng.
+
+En släckt Anmäl-knapp betyder dessutom inte att grinden slog till — sista anmälningsdag släcker den
+också — så knapp-påståendena kräver ÖPPEN anmälningstid och skippar annars, medan rutorna (som
+renderas oberoende av fönstret) mäts alltid. **`PrecisionStartList/GetStartLists` svarar även för en
+Springskyttetävling men med fel innehåll** (bara första listan, `teamCount` 0, tom status); läs
+Springskyttes listor via `GetSpringskytteStartLists` och använd precisionsendpointen enbart för att
+härleda tävlingens publika URL.
 
 Adds C# → full ombyggnad. Ingen SQL. **En doctype-egenskap** (se listan ovan).
 
