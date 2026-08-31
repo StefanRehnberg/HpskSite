@@ -39,6 +39,16 @@ namespace HpskSite.Models
         public string RegionCode { get; set; } = "";
         public string RegionName { get; set; } = "";
 
+        /// <summary>
+        /// The owning club's content-node id, 0 when the item has none (a region-hosted competition).
+        ///
+        /// ⚠️ Exists so the view can answer "may THIS viewer open this row?" — a masked item is only
+        /// linkable for a member of that club (or a region/site admin). Without the id the row could
+        /// only be gated on "is anyone logged in", which let any member click into another club's
+        /// internal competition. See <see cref="WhatsHappeningAccess"/>.
+        /// </summary>
+        public int ClubId { get; set; }
+
         /// <summary>True = identity must be hidden from anonymous visitors (clubOnly comps + all club events).</summary>
         public bool Masked { get; set; }
 

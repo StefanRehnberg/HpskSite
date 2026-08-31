@@ -3,12 +3,28 @@
 @using HpskSite.Models
 @inject HpskSite.Services.WhatsHappeningService WhatsHappening
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject Umbraco.Cms.Core.Services.IMemberService MemberService
+@inject HpskSite.Services.MemberClubService MemberClubService
 @model HpskSite.Models.WhatsHappeningScope
 @{
     var sv = new CultureInfo("sv-SE");
     var today = DateTime.Today;
     var data = WhatsHappening.GetData();
     var isLoggedIn = MemberManager.IsLoggedIn();
+
+    // ⚠️ Åtkomstmängden byggs EN gång per rendering (medlemmens klubbar + roller), aldrig per rad.
+    // Regeln själv bor i WhatsHappeningAccess — se dess kommentar för varför den inte ligger här.
+    var whAccess = HpskSite.Services.WhatsHappeningAccess.Anonymous();
+    if (isLoggedIn)
+    {
+        // Samma mönster som resten av vyerna (Club.cshtml, AdminPage.cshtml m.fl.):
+        // MemberIdentityUser → e-post → IMember.
+        var whUser = await MemberManager.GetCurrentMemberAsync();
+        var whMember = whUser == null || string.IsNullOrEmpty(whUser.Email)
+            ? null
+            : MemberService.GetByEmail(whUser.Email);
+        whAccess = HpskSite.Services.WhatsHappeningAccess.For(whMember, MemberService, MemberClubService);
+    }
 
     var lockedCode = Model?.LockedRegionCode;
     var lockedName = Model?.LockedRegionName;
@@ -35,15 +51,18 @@
     string BadgeClass(FeedSource s) => s switch { FeedSource.Competition => "text-bg-primary", FeedSource.ClubEvent => "text-bg-success", _ => "text-bg-warning" };
     string EdgeClass(FeedSource s) => s switch { FeedSource.Competition => "wh-tav", FeedSource.ClubEvent => "wh-klubb", _ => "wh-tm" };
 
-    // ⚠️ SEKRETESSGRINDEN. En maskerad rad (klubbintern tävling eller klubbhändelse)
-    // visar för utloggade bara "{typ} i {krets}" — en href till noden pekar ut precis
-    // det som maskeringen döljer. Länka därför bara när besökaren är inloggad ELLER
-    // raden inte är maskerad (en öppen tävling är redan publik på tävlingsnavet).
+    // ⚠️ ÅTKOMSTGRINDEN, inte bara en inloggningsgrind. En maskerad rad (klubbintern
+    // tävling eller klubbhändelse) är bara klickbar för den som FÅR se innehållet:
+    // medlem i klubben, kretsadmin för kretsen, eller sajtadmin. En omaskerad rad är
+    // publik och klickbar för alla — en öppen tävling ligger redan på tävlingsnavet.
+    //
+    // Första versionen frågade bara "är någon inloggad", vilket gjorde en klubbintern
+    // tävling klickbar för varje medlem på sajten (rättat 2026-08-31).
     //
     // Url fylls redan av WhatsHappeningService för alla fyra källorna — den
-    // renderades bara aldrig, vilket är hela buggen: användarna trycker på en
+    // renderades bara aldrig, vilket är hela ursprungsbuggen: användarna trycker på en
     // tävling i flödet och rapporterar att sidan är trasig när ingenting händer.
-    bool CanLink(FeedItem i) => !string.IsNullOrEmpty(i.Url) && (isLoggedIn || !i.Masked);
+    bool CanLink(FeedItem i) => whAccess.CanLink(i);
 }
 
 <div class="card mb-4 wh-feed" id="whFeed" data-anon="@(isLoggedIn ? "0" : "1")" data-locked="@(lockedCode ?? "")"

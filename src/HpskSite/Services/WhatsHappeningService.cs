@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using HpskSite.Models;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Models.PublishedContent;
@@ -131,6 +131,10 @@ namespace HpskSite.Services
                         RegionCode = regionCode,
                         RegionName = RegionName(regionCode),
                         Masked = isClubOnly,
+                        // Bärs vidare så vyn kan avgöra om just den här besökaren får
+                        // öppna raden — en klubbintern tävling är bara klickbar för
+                        // klubbens egna medlemmar (eller en krets-/sajtadmin).
+                        ClubId = clubId,
                         SourceLabel = "Tävling",
                         TypeLabel = discipline,
                         MaskedTypeLabel = discipline,
@@ -166,6 +170,7 @@ namespace HpskSite.Services
                         RegionCode = regionCode,
                         RegionName = RegionName(regionCode),
                         Masked = true,
+                        ClubId = clubId,
                         SourceLabel = "Klubbhändelse",
                         TypeLabel = eventType,
                         MaskedTypeLabel = NeutralEventLabel(eventType),
@@ -225,6 +230,7 @@ namespace HpskSite.Services
                         RegionCode = regionCode,
                         RegionName = regionByCode.TryGetValue(regionCode, out var rn) ? rn.Name : regionCode,
                         Masked = false, // träningsmatcher are login-gated, not masked
+                        ClubId = m.ClubId ?? 0,
                         SourceLabel = "Träningsmatch",
                         TypeLabel = discipline,
                         MaskedTypeLabel = discipline,
