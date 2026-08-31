@@ -191,3 +191,623 @@
                     -6px 0 6px -7px rgba(0, 0, 0, .35);
     }
 }
+
+
+/* ==========================================================================
+   Sifferpanelen ("scorepad", .sp-*) -- den DELADE inmatningsytan for alla
+   0-X-grenar. Layouten ar forslag C ur designunderlaget (godkant av Stefan
+   2026-08-31): identiteten fast upptill, sifferpanelen fast nedtill i tummens
+   rackvidd, och en bottenlist med namngivna steg plus en lagesknapp som oppnar
+   hela skjutlaget.
+
+   VARFOR EN DELAD KOMPONENT: samma sifferpanel finns pa sju stallen i repot
+   (CompetitionResultsManagement inkl. sarskjutningsmodalen, TrainingScoreEntry,
+   TrainingMatchScoreEntry, TrainingScoreDetail, DistributedResultEntry,
+   UserProfile, SpringskytteResultsManagement) och hade sju uppsattningar egen
+   CSS. Samma lardom som PrecisionFamily och RoleCatalogService: en karta med
+   "hall de tva i synk" i kommentaren ar lukten, inte skyddet.
+
+   FARGER -- EN REGEL, och den ar inte forhandlingsbar (Stefan 2026-08-31):
+     BLATT (--bs-primary) = BARA sifferpanelens tangenter. Ingenting som inte
+       gar att trycka pa far vara blatt. Forsta versionen lat blatt betyda tre
+       saker samtidigt -- tangent, aktuell serie OCH inmatat skott -- sa fargen
+       slutade betyda nagot alls.
+     NEUTRAL (--bs-emphasis-color mot --bs-body-bg) = all DATA: tavelnummer,
+       inmatade skott, aktuell serie, prickarna i lagvyn. Vikt och kontrast bar
+       informationen i stallen for kulor.
+     GRONT = bara SPARA och "sparat". ROTT = bara RENSA och fel/overhoppad serie.
+   Poangcirklarna har DARFOR ingen vardefargning: en gul X och en gron tia var
+   en fjarde fargkod pa samma yta. Ett X ar redan ett X.
+
+   Allt kommer ur Bootstrap 5.3:s egna variabler, sa bade ljust och morkt lage
+   foljer med utan ett eget [data-bs-theme="dark"]-block. Ror inte en literal
+   farg har -- den skulle bara funka i ett av lagena.
+
+   OBS: klassnamnen .shot-placeholder / .filled / .series-total /
+   .series-xcount / .shooter-overall-total / .shooter-overall-xcount /
+   .entered-by-display / .entered-by-name ar JS-krokar som fanns fore
+   omskrivningen. De behalls med flit sa den befintliga JS:en fortsatter
+   fungera -- byt inte namn utan att soka igenom alla sju filerna.
+   ========================================================================== */
+
+.sp { display: flex; flex-direction: column; }
+.sp-top { background-color: var(--bs-body-bg); }
+
+/* ---- Kortets rubrik pa /station ----------------------------------------
+   Rubriken var en <h5> med "Registrera Resultat - Lag 2 (09:00)" pa EN rad
+   bredvid fyra kontroller, utan flex-wrap. Pa 390 px klamdes den till en smal
+   kolumn och radbrots till fyra-fem rader som tryckte ner hela sidan
+   (rapporterat 2026-08-31). Nu: liten etikett ovanfor, kort rubrik som
+   trunkerar, och kontrollerna far krympa men inte tvinga radbrytning. */
+.sp-cardhead {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.sp-cardhead-main { flex: 1 1 auto; min-width: 0; }
+
+.sp-eyebrow {
+    font-size: .625rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    line-height: 1.2;
+}
+
+.sp-headline {
+    font-size: 1.0625rem;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sp-cardhead-tools {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: .375rem;
+}
+/* ---- Identiteten: det som ska lasas upp (tavla, namn, klass, klubb) ------- */
+.sp-id {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .6rem .75rem;
+    background-color: var(--bs-body-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.sp-tavla {
+    flex: 0 0 auto;
+    width: 62px;
+    height: 62px;
+    border-radius: .625rem;
+    /* DATA, inte en knapp -- darfor neutral. Var blatt forst, vilket lat den se
+       tryckbar ut mitt bland ratt tryckbara ytor. */
+    background-color: var(--bs-emphasis-color);
+    color: var(--bs-body-bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.sp-tavla-n { font-size: 1.875rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.sp-tavla-k {
+    font-size: .5625rem;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    opacity: .85;
+    margin-top: 2px;
+}
+
+.sp-idmain { flex: 1 1 auto; min-width: 0; }
+
+.sp-name {
+    font-size: 1.3125rem;
+    font-weight: 700;
+    line-height: 1.12;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Klubben lases upp tillsammans med namnet (Stefan 2026-08-31), sa den star
+   kvar pa undertexten i stallen for att flytta in i kebaben. */
+.sp-sub {
+    font-size: .84rem;
+    color: var(--bs-secondary-color);
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sp-cls {
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+    background-color: var(--bs-tertiary-bg);
+    border-radius: .1875rem;
+    padding: 0 .3125rem;
+    margin-right: .375rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.sp-kebab {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border-radius: .5rem;
+    border: 1px solid var(--bs-border-color);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    display: grid;
+    place-items: center;
+    font-size: 1.1875rem;
+    line-height: 1;
+    padding: 0;
+}
+
+.sp-kebab::after { display: none; }
+
+/* ---- Serieremsan: alla serier synliga, inte bara ett nummer -------------- */
+.sp-series {
+    display: flex;
+    align-items: center;
+    gap: .375rem;
+    padding: .5rem .75rem;
+    background-color: var(--bs-tertiary-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.sp-series::-webkit-scrollbar { display: none; }
+
+.sp-series-lbl {
+    flex: 0 0 auto;
+    font-size: .6875rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+}
+
+.sp-sn {
+    flex: 0 0 auto;
+    min-width: 30px;
+    height: 30px;
+    padding: 0 .3125rem;
+    border-radius: .3125rem;
+    display: grid;
+    place-items: center;
+    font-size: .8125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background-color: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-secondary-color);
+}
+
+/* Tre steg av NEUTRAL vikt i stallen for tre kulor: tom = svag ram,
+   inmatad = fylld yta, aktuell = inverterad. Rutorna ar tryckbara (hoppa till
+   serien) men signalerar det med form och hover, inte med accentfargen -- den
+   ar reserverad for sifferpanelen. */
+/* Inmatad serie: fylld yta OCH tyngre text. Bara den fyllda ytan var for svag
+   skillnad mot en tom ruta pa en vit yta (matt i webblasaren 2026-08-31) --
+   och att losa det med en kulor hade brutit fargregeln. */
+.sp-sn.is-done {
+    background-color: var(--bs-secondary-bg);
+    border-color: var(--bs-secondary-color);
+    color: var(--bs-emphasis-color);
+    font-weight: 700;
+}
+
+.sp-sn.is-now {
+    background-color: var(--bs-emphasis-color);
+    border-color: var(--bs-emphasis-color);
+    color: var(--bs-body-bg);
+}
+
+.sp-sn:hover:not(.is-now) { border-color: var(--bs-emphasis-color); }
+
+/* Streckad ram = OSPARADE skott ligger pa den serien. Fungerar ovanpa vilket
+   av de tre neutrala stegen som helst, sa den syns aven pa aktuell serie.
+   Gult ar enda undantaget fran fargregeln, och det ar medvetet: osparat arbete
+   ar den enda saken pa skarmen som kan gora att nagot forsvinner. */
+.sp-sn.is-draft {
+    border-style: dashed;
+    border-width: 2px;
+    border-color: var(--bs-warning);
+}
+
+/* ---- Skottraden ---------------------------------------------------------- */
+.sp-shots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    padding: .75rem .5rem;
+}
+
+.sp-shot {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: 2px solid var(--bs-border-color);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    display: grid;
+    place-items: center;
+    font-size: 1.3125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.sp-shot.filled {
+    background-color: var(--bs-emphasis-color);
+    border-color: var(--bs-emphasis-color);
+    color: var(--bs-body-bg);
+}
+
+/* Nasta ruta att fylla -- en streckad ram raknar ner utan att sta i vagen.
+   .active ar sarskjutningsmodalens eget markorklassnamn och far samma utseende. */
+/* OBS: INGEN vardefargning. .shot-x och .shot-10 SATTS fortfarande av JS:en i
+   traningsloggen och traningsmatchen, men ar med flit OSTYLADE: en gul X och en
+   gron tia var en fjarde fargkod pa samma yta som redan bar tangentbla, serie-
+   markering och statusgront (Stefan 2026-08-31). Ett X ar redan ett X. Lagg inte
+   tillbaka reglerna -- ta bort klasserna i JS:en i stallen om de stor. */
+
+/* Nasta ruta att fylla -- en streckad ram raknar ner utan att sta i vagen.
+   .active ar sarskjutningsmodalens eget markorklassnamn och far samma utseende. */
+.sp-shot.is-next,
+.sp-shot.active {
+    border-style: dashed;
+    border-color: var(--bs-emphasis-color);
+    color: var(--bs-emphasis-color);
+}
+
+.sp-sum {
+    margin-left: .25rem;
+    text-align: right;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.sp-sum-big { display: block; font-size: 1.5rem; font-weight: 600; }
+.sp-sum-x { display: block; font-size: .72rem; color: var(--bs-secondary-color); }
+
+/* ---- Sparkvitteringen: en smal rad dar blicken redan ar ------------------
+   Ersatter showSaveMessage()-rutan som lag position:fixed i skarmens motsatta
+   horn och darfor aldrig sags vid skjutplatsen. */
+.sp-saveline {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0 .75rem .5rem;
+    padding: .3125rem .625rem;
+    border-radius: .4375rem;
+    min-height: 34px;
+    font-size: .8125rem;
+    background-color: var(--bs-success-bg-subtle);
+    border: 1px solid var(--bs-success-border-subtle);
+    color: var(--bs-success-text-emphasis);
+}
+
+.sp-saveline.is-error {
+    background-color: var(--bs-danger-bg-subtle);
+    border-color: var(--bs-danger-border-subtle);
+    color: var(--bs-danger-text-emphasis);
+}
+
+/* OSPARADE skott -- aterstallda fran ett utkast. Varning, inte kvitto: en
+   aterstalld serie far ALDRIG se ut som en sparad. Randen ar streckad, samma
+   sprak som .sp-sn.is-draft och .sp-dt.is-draft. */
+.sp-saveline.is-warn {
+    background-color: var(--bs-warning-bg-subtle);
+    border-color: var(--bs-warning-border-subtle);
+    border-style: dashed;
+    color: var(--bs-warning-text-emphasis);
+}
+
+.sp-saveline.is-warn .sp-undo {
+    border-color: var(--bs-warning-border-subtle);
+    color: var(--bs-warning-text-emphasis);
+}
+
+.sp-saveline-text { flex: 1 1 auto; min-width: 0; }
+
+.sp-undo {
+    flex: 0 0 auto;
+    border: 1px solid var(--bs-success-border-subtle);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-success-text-emphasis);
+    border-radius: .375rem;
+    padding: .1875rem .5625rem;
+    font-size: .78rem;
+    font-weight: 600;
+}
+
+.sp-saveline.is-error .sp-undo {
+    border-color: var(--bs-danger-border-subtle);
+    color: var(--bs-danger-text-emphasis);
+}
+
+/* ---- Sifferpanelen ------------------------------------------------------
+   Sex kolumner, samma rutnat som traningspanelerna redan anvande: siffror
+   spanner 2 (tre per rad), 10/X spanner 3 (tva per rad). */
+.sp-pad {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: .5rem;
+    padding: .5rem .75rem .75rem;
+}
+
+.sp-key {
+    grid-column: span 2;
+    min-height: 54px;
+    border-radius: .5625rem;
+    border: 1px solid transparent;
+    background-color: var(--bs-primary);
+    color: #fff;
+    font-size: 1.375rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    display: grid;
+    place-items: center;
+    padding: 0 .25rem;
+    line-height: 1.1;
+    text-align: center;
+}
+
+.sp-key.sp-k-w3 { grid-column: span 3; }
+.sp-key.sp-k-w4 { grid-column: span 4; }
+.sp-key.sp-k-w6 { grid-column: span 6; }
+
+/* Nollan var forst en "ghost"-tangent med bla ram pa vit yta -- en fjarde
+   knappstil utan att skilja sig i funktion. Den ar en siffertangent som alla
+   andra; bara bredare, eftersom den anvands ofta. */
+.sp-key.sp-k-ghost {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+
+.sp-key.sp-k-save {
+    background-color: var(--bs-success);
+    border-color: var(--bs-success);
+    font-size: .9375rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+}
+
+.sp-key.sp-k-clear {
+    background-color: var(--bs-body-bg);
+    border-color: var(--bs-danger);
+    color: var(--bs-danger);
+    font-size: .9375rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+}
+
+/* Avstangd tangent ska las som "inaktiv", inte som ett blekt spoke av en bla
+   knapp. Nar fem skott ar inmatade slas hela sifferdelen av samtidigt, och
+   opacity gjorde da hela panelen tvattad. */
+.sp-key:disabled {
+    opacity: 1;
+    background-color: var(--bs-secondary-bg);
+    border-color: var(--bs-border-color);
+    color: var(--bs-secondary-color);
+}
+.sp-key:active:not(:disabled) { transform: scale(.96); }
+
+/* Sparknappen ar sitt eget kvitto: SPARA -> SPARAR... -> SPARAT.
+   is-busy behaller den grona ytan sa knappen inte "slocknar" (vilket lasts
+   som "inget hande" och var halva orsaken till dubbeltryckningarna). */
+.sp-key.sp-k-save.is-busy { opacity: .8; }
+
+.sp-key.sp-k-save.is-done {
+    background-color: var(--bs-success-bg-subtle);
+    border-color: var(--bs-success-border-subtle);
+    color: var(--bs-success-text-emphasis);
+    opacity: 1;
+}
+
+/* ---- Bottenlisten: manuell navigering med NAMNGIVNA steg ----------------
+   Tva pilar racker inte nar man ar fem skyttar fel -- mittenknappen oppnar
+   hela laget (.sp-picker). */
+.sp-bottom { background-color: var(--bs-body-bg); }
+
+.sp-footbar {
+    display: flex;
+    align-items: center;
+    gap: .375rem;
+    padding: .5rem .625rem;
+    border-top: 1px solid var(--bs-border-color);
+    background-color: var(--bs-tertiary-bg);
+}
+
+.sp-fb {
+    height: 42px;
+    min-width: 44px;
+    padding: 0 .625rem;
+    border-radius: .5rem;
+    border: 1px solid var(--bs-border-color);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    display: grid;
+    place-items: center;
+    font-size: .84rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sp-fb-wide { flex: 1 1 0; min-width: 0; }
+
+.sp-fb-pick {
+    flex: 0 0 auto;
+    background-color: var(--bs-secondary-bg);
+    color: var(--bs-body-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.sp-fb:disabled { opacity: .4; }
+
+/* Lagvyn tar over skarmen medan den ar oppen. Tre regioner (pinnad topp,
+   lista, pinnad panel) ryms inte i 740 px -- de pinnade blocken fangade
+   klicken pa listans rader. Skottraden, sparkvittot och sifferpanelen goms
+   darfor sa lange vyn ar oppen; identiteten star kvar sa man ser var man ar. */
+.sp-picking .sp-bottom,
+.sp-picking .sp-shots,
+.sp-picking .sp-saveline { display: none !important; }
+
+.sp-picker { max-height: 70vh; overflow-y: auto; }
+
+.sp-picker-bar {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .5rem .75rem;
+    background-color: var(--bs-tertiary-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.sp-picker-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: .78rem;
+    color: var(--bs-secondary-color);
+}
+/* ---- Lagvyn: hela skjutlaget med en prick per serie --------------------- */
+.sp-picker { border-top: 1px solid var(--bs-border-color); }
+
+.sp-prow {
+    display: grid;
+    grid-template-columns: 44px 1fr auto;
+    align-items: center;
+    gap: .625rem;
+    width: 100%;
+    text-align: left;
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border: 0;
+    border-bottom: 1px solid var(--bs-border-color);
+    padding: .5rem .75rem;
+}
+
+.sp-prow-head {
+    background-color: var(--bs-tertiary-bg);
+    padding-top: .375rem;
+    padding-bottom: .375rem;
+    font-size: .6875rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+}
+
+.sp-prow.is-now {
+    background-color: var(--bs-secondary-bg);
+    box-shadow: inset 3px 0 0 var(--bs-emphasis-color);
+}
+
+.sp-prow.has-gap { box-shadow: inset 3px 0 0 var(--bs-danger); }
+
+.sp-pt { font-size: 1.25rem; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
+.sp-prow-head .sp-pt { font-size: .6875rem; font-weight: 700; }
+
+.sp-pn { min-width: 0; }
+.sp-pn-name { display: block; font-size: .9375rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-pn-meta { display: block; font-size: .78rem; color: var(--bs-secondary-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sp-ps { display: flex; gap: .25rem; }
+
+/* En prick per serie. Fylld = inmatad, rod ring = overhoppad, halv = pagar.
+   Overhoppade serier syntes inte nagonstans pa skarmen fore detta. */
+.sp-dt {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1.5px solid var(--bs-border-color);
+    background-color: var(--bs-body-bg);
+}
+
+/* Prickarna: fylld = inmatad, tom = inte an, ROD RING = overhoppad. Bara den
+   sista har en farg, och den betyder problem -- inget annat pa skarmen ar rott
+   utom RENSA. Gron for "inmatad" gjorde det svarare att se den roda. */
+.sp-dt.is-ok { background-color: var(--bs-emphasis-color); border-color: var(--bs-emphasis-color); }
+.sp-dt.is-half { background-color: var(--bs-emphasis-color); border-color: var(--bs-emphasis-color); opacity: .4; }
+.sp-dt.is-miss { border-color: var(--bs-danger); border-width: 2px; }
+
+/* OSPARADE skott: fylld gul prick. Skiljer sig fran bade "inmatad" (fylld
+   neutral) och "overhoppad" (rod ring), sa lagvyn visar tre olika saker att
+   agera pa utan att tappa fargregeln. */
+.sp-dt.is-draft {
+    background-color: var(--bs-warning);
+    border-color: var(--bs-warning);
+}
+
+.sp-pnote {
+    padding: .5625rem .75rem;
+    font-size: .78rem;
+    color: var(--bs-danger-text-emphasis);
+    display: flex;
+    align-items: center;
+    gap: .4375rem;
+}
+
+/* ---- Smal skarm: fast upptill och nedtill -------------------------------
+   Identiteten och panelen far aldrig skrolla bort fran varandra -- det var
+   hela problemet. En sticky-wrapper for panel+bottenlist i stallen for tva
+   separata, sa de inte kan glida ifran varandra. */
+/* INGEN sticky. Tva motsatta sticky-block i EN hog flodesbehallare kan inte
+   fungera: `bottom: 0` pinnar elementet vid VIEWPORTENS underkant sa lange
+   behallaren stracker sig nedanfor -- alltsa OVANFOR sin egen naturliga plats --
+   och da la sifferpanelen sig over skottraden sa fort sidan stod hogst upp
+   (skarmdump 2026-08-31). Ett forsta forsok med bara .sp-id sticky hade samma
+   fel i andra riktningen: rubrikraden tackte serieremsan vid skrollning.
+
+   Losningen ar att kortet inte BEHOVER pinnas. Efter omskrivningen ar det
+   ~605 px hogt (topp ~230 + botten ~375), alltsa kortare an en telefonskarm:
+   allt som ska lasas upp och hela sifferpanelen syns samtidigt utan sticky.
+   Verifieringssviten mater att inga tva block overlappar -- lagg inte tillbaka
+   sticky har utan att den matningen fortfarande haller.
+
+   .sp-top och .sp-bottom finns kvar som STRUKTUR: .sp-picking gommer
+   .sp-bottom nar lagvyn tar over skarmen. */
+
+@media (max-width: 399.98px) {
+    .sp-tavla { width: 54px; height: 54px; }
+    .sp-tavla-n { font-size: 1.625rem; }
+    .sp-name { font-size: 1.1875rem; }
+    .sp-shots { gap: .375rem; padding: .5rem .375rem; }
+    .sp-shot { width: 44px; height: 44px; font-size: 1.1875rem; }
+    .sp-key { min-height: 50px; font-size: 1.25rem; }
+    .sp-pad { gap: .375rem; padding: .375rem .5rem .5rem; }
+}
+
+/* Aldrig hoppande layout for den som stangt av rorelse. */
+@media (prefers-reduced-motion: reduce) {
+    .sp-key:active:not(:disabled) { transform: none; }
+}
+
+.sp-key:focus-visible,
+.sp-fb:focus-visible,
+.sp-prow:focus-visible,
+.sp-kebab:focus-visible,
+.sp-undo:focus-visible {
+    outline: 3px solid var(--bs-focus-ring-color, rgba(13, 110, 253, .5));
+    outline-offset: 2px;
+}

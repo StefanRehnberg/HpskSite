@@ -300,8 +300,20 @@
     function positionPanel() {
         if (!el.panel || el.panel.hidden) return;
         var r = el.toggle.getBoundingClientRect();
-        var top = Math.min(r.bottom + 6, window.innerHeight - 120);
-        var right = Math.max(8, window.innerWidth - r.right);
+        var top = Math.round(r.bottom + 6);
+
+        // ⚠️ Kläm BÅDA kanterna. Tidigare sattes bara `right` utifrån knappens
+        // högerkant, och eftersom panelen är upp till 360 px bred pekade det ut
+        // panelens VÄNSTERKANT utanför skärmen så fort knappen satt en bit in:
+        // viewport 390 px, knappens högerkant 200 px -> right = 190 -> panelen
+        // spände från -170 till 200, alltså halva dialogen utanför vänster kant
+        // (rapporterat från telefon 2026-08-31).
+        var vw = window.innerWidth;
+        var pw = el.panel.offsetWidth || Math.min(360, vw - 24);
+        var right = vw - r.right;              // linjera med knappens högerkant
+        right = Math.min(right, vw - pw - 8);  // men aldrig så att vänsterkanten går utanför
+        right = Math.max(8, right);            // och aldrig utanför högerkanten
+
         el.panel.style.top = top + 'px';
         el.panel.style.right = right + 'px';
         el.panel.style.maxHeight = Math.max(220, window.innerHeight - top - 16) + 'px';

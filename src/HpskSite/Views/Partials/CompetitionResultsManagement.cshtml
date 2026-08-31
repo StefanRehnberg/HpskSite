@@ -1,4 +1,5 @@
-﻿@*
+﻿@using HpskSite.CompetitionTypes.Common
+@*
  * Competition Results Management Partial View
  * Handles results entry and management for a specific competition
 *@
@@ -8,7 +9,14 @@
     var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
     var resultPageUrl = ViewData["ResultPageUrl"]?.ToString() ?? "";
     var competitionTypeForView = ViewData["CompetitionType"]?.ToString() ?? "";
-    var supportsSkjutledareView = competitionTypeForView is "Precision" or "MagnumPrecision";
+    // ⚠️ TVÅ SKILDA frågor, som tidigare var samma flagga:
+    //   supportsSkjutledareView — finns Skjutledare-vyn för grenen? (Precision/MagnumPrecision;
+    //     snabbskyttegrenarna har egna kommandoord, P2 i backloggen)
+    //   hasFunktionarerHub     — har grenen en Funktionärer-flik som BÄR startknapparna?
+    // Att de var samma flagga gjorde det omöjligt att ge en gren navet utan vyn: knapparna hade då
+    // hamnat på både Resultat-fliken och i navet samtidigt.
+    var supportsSkjutledareView = CompetitionSurfaces.HasSkjutledareView(competitionTypeForView);
+    var hasFunktionarerHub = CompetitionSurfaces.HasFunktionarerHub(competitionTypeForView);
 
     // Get values from ViewData with appropriate defaults
     var numberOfSeriesOrStations = ViewData["NumberOfSeriesOrStations"] as int?;
@@ -45,10 +53,11 @@
 }
 
 <div class="competition-results-management" data-competition-id="@competitionId" data-preset-phase="@presetPhase">
-    @* Precision/MagnumPrecision launch their scoring + skjutledare screens from the dedicated
-       "Funktionärer" hub tab, so the launcher card is hidden here for them. Duell/Milsnabb/
-       NationellHelmatch have no hub, so they keep it on the Resultat tab. *@
-    @if (!isStationPage && !supportsSkjutledareView)
+    @* Hela precisionsfamiljen startar sin inmatning från "Funktionärer"-fliken, så
+       startknappskortet är dolt här för dem. Gaten går på HUBBEN, inte på Skjutledare-vyn —
+       annars stod knapparna på två ställen för de fem grenar som fick navet 2026-08-31 utan
+       att få vyn. Kortet finns kvar för en gren som varken har hub eller stationer. *@
+    @if (!isStationPage && !hasFunktionarerHub)
     {
     <!-- Team Links — navigate to station page for result entry -->
     <div class="card mb-3">
@@ -169,24 +178,33 @@
     <div class="card" style="@(!isStationPage ? "display:none" : "")">
         @if (isStationPage)
         {
+            @* Rubriken var en <h5> med "Registrera Resultat — Lag 2 (09:00)" bredvid fyra
+               kontroller, utan flex-wrap. På 390 px klämdes den till en smal kolumn och
+               radbröt till fyra-fem rader som tryckte ner hela sidan (rapporterat
+               2026-08-31). Nu: liten etikett + kort rubrik som trunkerar. Lagets nummer
+               och starttid är det enda som behöver stå stort — "Registrera resultat" är
+               kontext, inte information. *@
             <div class="card-header">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="bi bi-bullseye me-2"></i>Registrera Resultat — <span id="presetTeamLabel">@(isFinalsPhase ? $"Final {presetTeamNumber}" : $"Lag {presetTeamNumber}")</span>
-                        @if (isFinalsPhase)
-                        {
-                            <span class="badge bg-warning text-dark ms-2"><i class="bi bi-trophy me-1"></i>Final</span>
-                        }
-                    </h5>
-                    <div class="d-flex align-items-center gap-2">
+                <div class="sp-cardhead">
+                    <div class="sp-cardhead-main">
+                        <div class="sp-eyebrow">Registrera resultat</div>
+                        <div class="sp-headline">
+                            <i class="bi bi-bullseye me-1"></i><span id="presetTeamLabel">@(isFinalsPhase ? $"Final {presetTeamNumber}" : $"Lag {presetTeamNumber}")</span>
+                            @if (isFinalsPhase)
+                            {
+                                <span class="badge bg-warning text-dark ms-1"><i class="bi bi-trophy me-1"></i>Final</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="sp-cardhead-tools">
                         <span id="evtMountPrecisionStation"></span>
                         @* Whether saves are landing at all. On the range this is the difference between
                            "the score was wrong" and "the network is down" — see _ConnectionBadge. *@
                         @await Html.PartialAsync("_ConnectionBadge")
-                        @* Only on the /station pad. A phone or tablet at the firing point locks mid-series
-                           otherwise; the admin page in a desktop browser has no such problem, and an
-                           always-on lock there would just hold a laptop awake for no reason. *@
-                        @await Html.PartialAsync("_ScreenWakeButton")
+                        @* "Håll skärmen vaken" låg HÄR och var den bredaste kontrollen i raden —
+                           den ensam radbröt till tre rader på 390 px. Den är en inställning man
+                           slår på en gång per pass, inte något man behöver nå mellan två serier,
+                           så den bor i kugghjuls-modalen (Stefan 2026-08-31). *@
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resultEntrySettingsModal" title="Inställningar">
                             <i class="bi bi-gear"></i>
                         </button>
@@ -426,43 +444,42 @@
                 <input type="hidden" id="soModalRoundValue" />
                 <input type="hidden" id="soModalIsSub" />
 
-                <div class="d-flex align-items-center justify-content-center gap-3 mb-3">
-                    <div class="so-shots-grid">
-                        <span class="so-shot-placeholder" data-shot="0">_</span>
-                        <span class="so-shot-placeholder" data-shot="1">_</span>
-                        <span class="so-shot-placeholder" data-shot="2">_</span>
-                        <span class="so-shot-placeholder" data-shot="3">_</span>
-                        <span class="so-shot-placeholder" data-shot="4">_</span>
+                <div class="sp-shots mb-2">
+                    <div class="so-shots-grid d-flex align-items-center gap-2">
+                        <span class="sp-shot so-shot-placeholder" data-shot="0">_</span>
+                        <span class="sp-shot so-shot-placeholder" data-shot="1">_</span>
+                        <span class="sp-shot so-shot-placeholder" data-shot="2">_</span>
+                        <span class="sp-shot so-shot-placeholder" data-shot="3">_</span>
+                        <span class="sp-shot so-shot-placeholder" data-shot="4">_</span>
                     </div>
-                    <div class="d-flex align-items-center">
-                        <span class="fw-bold me-2">=</span>
-                        <span class="fs-5 fw-bold" id="soModalTotal">0</span>
-                        <span class="ms-3 fw-bold">X:</span>
-                        <span class="fs-5 fw-bold ms-1" id="soModalXCount">0</span>
-                    </div>
+                    <span class="sp-sum">
+                        <span class="sp-sum-big" id="soModalTotal">0</span>
+                        <span class="sp-sum-x">X <span id="soModalXCount">0</span></span>
+                    </span>
                 </div>
 
                 <!-- Unified num-pad: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3, then
                      0 + SPARA (Enter=save) + RENSA (clear). Ångra skott (backspace)
                      kept as a secondary control below. -->
-                <div class="so-keypad">
-                    <div class="row g-2">
-                        <div class="col-6"><button type="button" class="btn btn-primary w-100 so-key" data-value="10">10</button></div>
-                        <div class="col-6"><button type="button" class="btn btn-primary w-100 so-key" data-value="X">X</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="7">7</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="8">8</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="9">9</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="4">4</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="5">5</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="6">6</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="1">1</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="2">2</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="3">3</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="0">0</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-success w-100" id="soModalSave" disabled><i class="bi bi-check-circle"></i> SPARA</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-danger w-100" id="soModalClear">RENSA</button></div>
-                        <div class="col-12"><button type="button" class="btn btn-outline-secondary w-100 btn-sm" id="soModalBackspace"><i class="bi bi-backspace"></i> Ångra skott</button></div>
-                    </div>
+                @* Samma sifferpanel som huvudskärmen — utseendet kommer helt ur
+                   .sp-* i theme.css. Klassnamnen so-key / soModal* är JS-krokar och
+                   är medvetet oförändrade. *@
+                <div class="so-keypad sp-pad px-0 pb-0">
+                    <button type="button" class="sp-key sp-k-w3 so-key" data-value="10">10</button>
+                    <button type="button" class="sp-key sp-k-w3 so-key" data-value="X">X</button>
+                    <button type="button" class="sp-key so-key" data-value="7">7</button>
+                    <button type="button" class="sp-key so-key" data-value="8">8</button>
+                    <button type="button" class="sp-key so-key" data-value="9">9</button>
+                    <button type="button" class="sp-key so-key" data-value="4">4</button>
+                    <button type="button" class="sp-key so-key" data-value="5">5</button>
+                    <button type="button" class="sp-key so-key" data-value="6">6</button>
+                    <button type="button" class="sp-key so-key" data-value="1">1</button>
+                    <button type="button" class="sp-key so-key" data-value="2">2</button>
+                    <button type="button" class="sp-key so-key" data-value="3">3</button>
+                    <button type="button" class="sp-key sp-k-w4 sp-k-ghost so-key" data-value="0">0</button>
+                    <button type="button" class="sp-key sp-k-clear" id="soModalClear">RENSA</button>
+                    <button type="button" class="sp-key sp-k-w6 sp-k-save" id="soModalSave" disabled>SPARA</button>
+                    <button type="button" class="sp-key sp-k-w6 sp-k-ghost" id="soModalBackspace" style="min-height:44px;font-size:.9375rem;"><i class="bi bi-backspace me-1"></i>Ångra skott</button>
                 </div>
 
                 <div class="text-muted small mt-2 text-center">Tangentbord: 0–9 · + för 10 · X eller * · Backspace för att ångra · Enter för Spara · Esc för Avbryt</div>
@@ -522,6 +539,22 @@
                     </div>
                     <small class="text-muted">Visa endast skyttar i detta platsintervall. Sparas i din webbläsare och gäller alla skjutlag i tävlingen.</small>
                 </div>
+
+                @if (isStationPage)
+                {
+                    @* Flyttad hit från kortets rubrikrad 2026-08-31: den var den bredaste
+                       kontrollen där och radbröt rubriken på telefon. Bara meningsfull på
+                       /station-plattan — en laptop i backoffice ska inte hållas vaken i onödan
+                       (se station-device-battery-cellular-constraint). *@
+                    <hr class="my-3" />
+                    <div class="mb-0">
+                        <label class="form-label small">Skärm</label>
+                        <div class="d-grid">
+                            @await Html.PartialAsync("_ScreenWakeButton")
+                        </div>
+                        <small class="text-muted">Hindrar telefonen från att slockna mitt i en serie. Av som standard — den drar batteri som ska räcka hela tävlingen.</small>
+                    </div>
+                }
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
@@ -1386,42 +1419,18 @@ async function saveShootOffEntry(competitionId, memberId, shootingClass, round, 
 // "so-" class names so it doesn't collide with the page's global
 // .shot-btn / .shot-placeholder handlers.
 
-(function injectShootOffModalStyles() {
-    if (document.getElementById('so-keypad-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'so-keypad-styles';
-    // Theming uses Bootstrap CSS variables so light/dark mode both look right.
-    // Sizes are tuned for thumb-tappable hits on small phone screens (44px+).
-    style.textContent = `
-        .so-shots-grid { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        .so-shot-placeholder {
-            width: 44px; height: 44px;
-            border: 2px solid var(--bs-border-color);
-            background-color: var(--bs-tertiary-bg);
-            color: var(--bs-body-color);
-            border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: bold; font-size: 18px;
-        }
-        .so-shot-placeholder.filled {
-            background-color: var(--bs-primary);
-            color: #fff;
-            border-color: var(--bs-primary);
-        }
-        .so-shot-placeholder.active {
-            box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), .35);
-        }
-        .so-keypad .btn { min-height: 48px; font-size: 1.1rem; font-weight: 600; }
-        @@media (max-width: 380px) {
-            .so-shot-placeholder { width: 36px; height: 36px; font-size: 16px; }
-            .so-keypad .btn { font-size: 1rem; min-height: 44px; }
-        }
-    `;
-    document.head.appendChild(style);
-})();
+// Den lokala CSS-injiceringen togs bort 2026-08-31: sifferpanelen och
+// skottrutorna får sitt utseende ur den delade .sp-*-komponenten i
+// wwwroot/css/theme.css. Bara .so-shots-grid behövs fortfarande, och den är
+// ren layout (flex + gap) som sätts med Bootstrap-klasser i markupen ovan.
 
 const _soModalState = {
     shots: ['', '', '', '', ''],
+    // ⚠️ Samma re-entry-spärr som huvudpanelen. Utan den startar varje tryck under
+    // det pågående anropet en egen sparning — jfr sparbuggen i resultatinmatningen
+    // (rapporterad från banan 2026-08-30). Här stängs inte modalen förrän svaret
+    // kommit, så en dubbelsparning såg ut som att knappen inte fungerade.
+    saving: false,
     cursor: 0,
     keysBound: false,
     bsModal: null
@@ -1463,7 +1472,9 @@ function renderShootOffModal() {
     document.getElementById('soModalTotal').textContent = String(total);
     document.getElementById('soModalXCount').textContent = String(xCount);
     const allFilled = _soModalState.shots.every(s => s !== '');
-    document.getElementById('soModalSave').disabled = !allFilled;
+    // Spärren måste respekteras här också — annars låser en omritning upp knappen
+    // mitt i en pågående sparning.
+    document.getElementById('soModalSave').disabled = !allFilled || _soModalState.saving;
 }
 
 function appendShootOffShot(value) {
@@ -1484,6 +1495,13 @@ function backspaceShootOffShot() {
 function clearShootOffShots() {
     _soModalState.shots = ['', '', '', '', ''];
     _soModalState.cursor = 0;
+    const saveBtn = document.getElementById('soModalSave');
+    if (saveBtn) {
+        // Modalen återanvänds mellan rundor: utan detta står "✓ SPARAT" kvar över
+        // en tömd panel nästa gång den öppnas.
+        saveBtn.classList.remove('is-busy', 'is-done');
+        saveBtn.textContent = 'SPARA';
+    }
     renderShootOffModal();
 }
 
@@ -1500,16 +1518,35 @@ function bindShootOffModalHandlersOnce() {
 
     // Save
     document.getElementById('soModalSave').addEventListener('click', async () => {
+        if (_soModalState.saving) return;
         if (_soModalState.shots.some(s => !s)) return;
-        const ok = await saveShootOffEntry(
-            parseInt(document.getElementById('soModalCompetitionId').value, 10),
-            parseInt(document.getElementById('soModalMemberId').value, 10),
-            document.getElementById('soModalClass').value,
-            parseInt(document.getElementById('soModalRoundValue').value, 10),
-            _soModalState.shots.slice(),
-            document.getElementById('soModalIsSub').value === '1'
-        );
-        if (ok && _soModalState.bsModal) _soModalState.bsModal.hide();
+
+        const saveBtn = document.getElementById('soModalSave');
+        _soModalState.saving = true;
+        saveBtn.disabled = true;
+        saveBtn.classList.add('is-busy');
+        saveBtn.textContent = 'SPARAR…';
+        try {
+            const ok = await saveShootOffEntry(
+                parseInt(document.getElementById('soModalCompetitionId').value, 10),
+                parseInt(document.getElementById('soModalMemberId').value, 10),
+                document.getElementById('soModalClass').value,
+                parseInt(document.getElementById('soModalRoundValue').value, 10),
+                _soModalState.shots.slice(),
+                document.getElementById('soModalIsSub').value === '1'
+            );
+            if (ok) {
+                saveBtn.classList.remove('is-busy');
+                saveBtn.classList.add('is-done');
+                saveBtn.textContent = '✓ SPARAT';
+                if (_soModalState.bsModal) _soModalState.bsModal.hide();
+            }
+        } finally {
+            _soModalState.saving = false;
+            saveBtn.classList.remove('is-busy');
+            if (!saveBtn.classList.contains('is-done')) saveBtn.textContent = 'SPARA';
+            renderShootOffModal();
+        }
     });
 
     // Keyboard support — only when the modal is visible.
@@ -2200,6 +2237,10 @@ async function loadExistingResults(competitionId, seriesId, teamNumber, position
         
         if ((data.Success || data.success) && (data.Results || data.results)) {
             const results = data.Results || data.results;
+
+            // Det här anropet hämtar redan HELA tävlingen — spara det så
+            // serieremsan, lagvyn och totalsumman slipper egna anrop.
+            spResultsCache = results;
             
             // Find existing result for this specific shooter/series/class combination
             // Must include shootingClass to distinguish multi-class shooters
@@ -2241,293 +2282,459 @@ async function loadExistingResults(competitionId, seriesId, teamNumber, position
 }
 
 function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
-    let html = `
-        <div class="precision-results-entry" data-series-id="${seriesId}" data-shooter-id="${shooterData.id}" data-competition-id="${competitionId}">
-            <div class="card">
-                <div class="card-header">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div class="d-flex align-items-center">
-                            <div class="shooter-navigation me-3">
-                                <button type="button" class="btn btn-outline-secondary btn-sm first-shooter-btn" title="Första skytt">
-                                    <i class="bi bi-chevron-bar-left"></i>
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm prev-shooter-btn" title="Föregående skytt">
-                                    <i class="bi bi-chevron-left"></i>
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm next-shooter-btn" title="Nästa skytt">
-                                    <i class="bi bi-chevron-right"></i>
-                                </button>
-                            </div>
-                            <div>
-                                <div class="fs-5">
-                                    <strong>Skytt ${shooterData.position} - ${shooterData.name} - ${shooterData.class}</strong>
-                                    <span class="text-muted ms-2">${shooterData.club}</span>
-                                    <button type="button" class="btn btn-outline-warning btn-sm ms-2"
-                                            onclick="openChangeClassModal(${shooterData.memberId}, '${shooterData.name.replace(/'/g, "\\'")}', '${shooterData.class}')"
-                                            title="Ändra vapenklass">
-                                        <i class="bi bi-pencil-square"></i>
-                                    </button>
-                                    <div class="dropdown d-inline-block ms-1">
-                                        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle"
-                                                data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
-                                                title="Markera att skytten inte producerar fler resultat">
-                                            <i class="bi bi-person-dash"></i>
-                                        </button>
-                                        <ul class="dropdown-menu dropdown-menu-end">
-                                            <li><h6 class="dropdown-header">Deltagande</h6></li>
-                                            <li><a class="dropdown-item" href="#" onclick="resSetParticipantStatus(${shooterData.memberId}, '${shooterData.class}', 'DNS'); return false;">
-                                                <i class="bi bi-dash-circle me-2"></i>Ej start (DNS)
-                                            </a></li>
-                                            <li><a class="dropdown-item" href="#" onclick="resSetParticipantStatus(${shooterData.memberId}, '${shooterData.class}', 'DNF'); return false;">
-                                                <i class="bi bi-x-octagon me-2"></i>Bruten (DNF)
-                                            </a></li>
-                                            <li><hr class="dropdown-divider"></li>
-                                            <li><a class="dropdown-item" href="#" onclick="resClearParticipantStatus(${shooterData.memberId}, '${shooterData.class}'); return false;">
-                                                <i class="bi bi-arrow-counterclockwise me-2"></i>Ta bort status
-                                            </a></li>
-                                        </ul>
-                                    </div>
-                                    <span class="ms-2" id="shooterParticipantStatusBadge"></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="shooter-overall-totals text-end">
-                            <div class="d-inline-block me-3">
-                                <span class="fw-bold">Total: </span><span class="shooter-overall-total fs-5 fw-bold">0</span>
-                            </div>
-                            <div class="d-inline-block me-3">
-                                <span class="fw-bold">X: </span><span class="shooter-overall-xcount fs-5 fw-bold">0</span>
-                            </div>
-                        </div>
-                    </div>
+    // Layout C (godkänd 2264-08-31): tavla + namn + klass + klubb överst — allt som
+    // ska läsas upp — och sifferpanelen i tummens räckvidd nederst. Ingen skrollning
+    // per skytt. All CSS ligger i theme.css under ".sp-*"; lägg inte tillbaka ett
+    // <style>-block här (se minnet razor-partial-styles).
+    const nameEsc = escapeHtml(shooterData.name || '');
+    const clubEsc = escapeHtml(shooterData.club || '');
+    const clsEsc = escapeHtml(shooterData.class || '');
+    const clsAttr = escapeAttr(shooterData.class || '');
+    // Namnet går in i en onclick-sträng, så apostrofer måste escapas separat från
+    // HTML-escapningen ovan.
+    const nameArg = String(shooterData.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const pos = shooterData.position || 0;
+
+    let shotCells = '';
+    for (let i = 0; i < 5; i++) {
+        // .sp-shot ar utseendet (theme.css), .shot-placeholder ar JS-kroken.
+        shotCells += `<span class="sp-shot shot-placeholder" data-shot="${i}">_</span>`;
+    }
+
+    return `
+        <div class="precision-results-entry sp" data-series-id="${seriesId}" data-shooter-id="${shooterData.id}" data-competition-id="${competitionId}">
+
+            <div class="sp-top">
+            <div class="sp-id">
+                <div class="sp-tavla">
+                    <span class="sp-tavla-n">${pos}</span>
+                    <span class="sp-tavla-k">${spPosWord()}</span>
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-8">
-                            <div class="shots-display mb-3">
-                                <div class="d-flex align-items-center gap-3">
-                                    <div class="series-navigation">
-                                        <button type="button" class="btn btn-outline-secondary btn-sm prev-series-btn" title="Previous Series">
-                                            <i class="bi bi-chevron-up"></i>
-                                        </button>
-                                        <button type="button" class="btn btn-outline-secondary btn-sm next-series-btn" title="Next Series">
-                                            <i class="bi bi-chevron-down"></i>
-                                        </button>
-                                    </div>
-                                    <h6 id="seriesTitle" class="mb-0">Serie ${seriesId}</h6>
-                                    <div class="shots-grid">
-                                        <span class="shot-placeholder" data-shot="0">_</span>
-                                        <span class="shot-placeholder" data-shot="1">_</span>
-                                        <span class="shot-placeholder" data-shot="2">_</span>
-                                        <span class="shot-placeholder" data-shot="3">_</span>
-                                        <span class="shot-placeholder" data-shot="4">_</span>
-                                    </div>
-                                    <div class="series-totals d-flex align-items-center ms-3">
-                                        <span class="fw-bold me-2 d-flex align-items-center">=</span><span class="series-total fs-5 fw-bold">0</span>
-                                        <span class="ms-4 fw-bold d-flex align-items-center">X: </span><span class="series-xcount fs-5 fw-bold">0</span>
-                                    </div>
-                                    <span class="entered-by-display ms-3 small text-muted" style="display:none;">
-                                        Inmatat av <span class="entered-by-name"></span>
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div class="entry-buttons">
-                                <!-- Unified num-pad: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3,
-                                     then 0 + SPARA (enter) + RENSA (clear) on the bottom row. -->
-                                <div class="row g-2">
-                                    <div class="col-6">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="10">10</button>
-                                    </div>
-                                    <div class="col-6">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="X">X</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="7">7</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="8">8</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="9">9</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="4">4</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="5">5</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="6">6</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="1">1</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="2">2</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="3">3</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="0">0</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-success w-100 enter-btn">SPARA</button>
-                                    </div>
-                                    <div class="col-4">
-                                        <button type="button" class="btn btn-danger w-100 clear-btn">RENSA</button>
-                                    </div>
+                <div class="sp-idmain">
+                    <div class="sp-name">${nameEsc}</div>
+                    <div class="sp-sub"><span class="sp-cls">${clsEsc}</span>${clubEsc}<span id="shooterParticipantStatusBadge"></span></div>
+                </div>
+                <div class="dropdown">
+                    <button type="button" class="sp-kebab" data-bs-toggle="dropdown"
+                            data-bs-popper-config='{"strategy":"fixed"}'
+                            aria-label="Mer om skytten" title="Mer om skytten">
+                        <i class="bi bi-three-dots-vertical"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><h6 class="dropdown-header">Skytt</h6></li>
+                        <li><a class="dropdown-item" href="#" onclick="openChangeClassModal(${shooterData.memberId}, '${nameArg}', '${clsAttr}'); return false;">
+                            <i class="bi bi-pencil-square me-2"></i>Ändra vapenklass
+                        </a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><h6 class="dropdown-header">Deltagande</h6></li>
+                        <li><a class="dropdown-item" href="#" onclick="resSetParticipantStatus(${shooterData.memberId}, '${clsAttr}', 'DNS'); return false;">
+                            <i class="bi bi-dash-circle me-2"></i>Ej start (DNS)
+                        </a></li>
+                        <li><a class="dropdown-item" href="#" onclick="resSetParticipantStatus(${shooterData.memberId}, '${clsAttr}', 'DNF'); return false;">
+                            <i class="bi bi-x-octagon me-2"></i>Bruten (DNF)
+                        </a></li>
+                        <li><a class="dropdown-item" href="#" onclick="resClearParticipantStatus(${shooterData.memberId}, '${clsAttr}'); return false;">
+                            <i class="bi bi-arrow-counterclockwise me-2"></i>Ta bort status
+                        </a></li>
+                        <li class="entered-by-display" style="display:none;"><hr class="dropdown-divider"></li>
+                        <li class="entered-by-display" style="display:none;">
+                            <span class="dropdown-item-text small text-muted">Inmatat av <span class="entered-by-name"></span></span>
+                        </li>
+                    </ul>
+                </div>
             </div>
-        </div>
-    </div>
 
-        </div>
+            <div class="sp-series" id="spSeriesStrip"></div>
+
+            <div class="sp-shots">
+                ${shotCells}
+                <span class="sp-sum">
+                    <span class="sp-sum-big series-total">0</span>
+                    <span class="sp-sum-x">X <span class="series-xcount">0</span> &middot; tot <span class="shooter-overall-total">0</span></span>
+                </span>
+                <span class="d-none shooter-overall-xcount">0</span>
+            </div>
+
+            <div class="sp-saveline d-none" id="spSaveLine">
+                <span id="spSaveLineIcon"><i class="bi bi-check-lg"></i></span>
+                <span class="sp-saveline-text" id="spSaveLineText"></span>
+                <button type="button" class="sp-undo d-none" id="spUndoBtn">Ångra</button>
+            </div>
+
+            </div>
+
+            <div class="sp-picker d-none" id="spPicker"></div>
+
+            <div class="sp-bottom">
+                <div class="sp-pad">
+                    <button type="button" class="sp-key sp-k-w3 shot-btn" data-value="10">10</button>
+                    <button type="button" class="sp-key sp-k-w3 shot-btn" data-value="X">X</button>
+                    <button type="button" class="sp-key shot-btn" data-value="7">7</button>
+                    <button type="button" class="sp-key shot-btn" data-value="8">8</button>
+                    <button type="button" class="sp-key shot-btn" data-value="9">9</button>
+                    <button type="button" class="sp-key shot-btn" data-value="4">4</button>
+                    <button type="button" class="sp-key shot-btn" data-value="5">5</button>
+                    <button type="button" class="sp-key shot-btn" data-value="6">6</button>
+                    <button type="button" class="sp-key shot-btn" data-value="1">1</button>
+                    <button type="button" class="sp-key shot-btn" data-value="2">2</button>
+                    <button type="button" class="sp-key shot-btn" data-value="3">3</button>
+                    <button type="button" class="sp-key sp-k-w4 sp-k-ghost shot-btn" data-value="0">0</button>
+                    <button type="button" class="sp-key sp-k-clear clear-btn">RENSA</button>
+                    <button type="button" class="sp-key sp-k-w6 sp-k-save enter-btn" id="spSaveBtn">SPARA</button>
+                </div>
+                <div class="sp-footbar">
+                    <button type="button" class="sp-fb sp-fb-wide prev-shooter-btn" id="spPrevBtn">Föregående</button>
+                    <button type="button" class="sp-fb sp-fb-pick" id="spPickBtn">Lag</button>
+                    <button type="button" class="sp-fb sp-fb-wide next-shooter-btn" id="spNextBtn">Nästa</button>
                 </div>
             </div>
         </div>
     `;
-    
-    html += `
-                </div>
-            </div>
-        </div>
-        
-        <style>
-        .shots-grid {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin-bottom: 0;
-            align-items: center;
-            height: 40px; /* Fixed height to ensure consistent alignment */
-        }
-        
-        .shot-placeholder {
-            width: 40px;
-            height: 40px;
-            border: 2px solid #dee2e6;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 18px;
-        }
-        
-        .shot-placeholder.filled {
-            background-color: #007bff;
-            color: white;
-            border-color: #007bff;
-        }
-        
-        .entry-buttons .btn {
-            margin-bottom: 5px;
-        }
-        
-        .shot-btn:disabled {
-            opacity: 0.5;
-        }
-        
-        .shooter-overall-totals {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .series-totals {
-            display: flex;
-            align-items: center;
-            justify-content: flex-start;
-            margin-top: 0;
-        }
-        
-        .shooter-navigation {
-            display: flex;
-            gap: 5px;
-        }
-        
-        .team-navigation {
-            display: flex;
-            align-items: center;
-            gap: 0;
-        }
-        
-        .series-navigation {
-            display: flex;
-            gap: 5px;
-        }
-        
-        /* Mobile responsive styles */
-        @@media (max-width: 575.98px) {
-            /* Control row - stack dropdowns vertically */
-            #resultsEntryBody > .d-flex.flex-wrap {
-                flex-direction: column;
-                align-items: stretch !important;
-            }
-            #resultsEntryBody > .d-flex.flex-wrap > div {
-                width: 100%;
-            }
-            #resultsEntryBody .form-select {
-                width: 100% !important;
-            }
-
-            /* Shot circles - smaller for mobile */
-            .shots-grid {
-                gap: 6px;
-                height: 32px;
-            }
-            .shot-placeholder {
-                width: 32px;
-                height: 32px;
-                font-size: 14px;
-            }
-
-            /* Series row - wrap and center */
-            .shots-display .d-flex.align-items-center.gap-3 {
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-            .series-totals {
-                width: 100%;
-                justify-content: center;
-                margin-top: 8px;
-                margin-left: 0 !important;
-            }
-
-            /* Card header - stack shooter info */
-            .precision-results-entry .card-header > .d-flex {
-                flex-direction: column;
-                gap: 8px;
-            }
-            .shooter-overall-totals {
-                width: 100%;
-                text-align: left !important;
-                justify-content: flex-start;
-            }
-
-            /* Number pad - larger buttons for touch */
-            .entry-buttons .btn {
-                min-height: 48px;
-                font-size: 18px;
-            }
-        }
-
-        /* Small tablets */
-        @@media (min-width: 576px) and (max-width: 767.98px) {
-            .shots-grid {
-                height: 36px;
-            }
-            .shot-placeholder {
-                width: 36px;
-                height: 36px;
-            }
-        }
-        </style>
-    `;
-    
-    return html;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Layout C:s tre nya ytor: serieremsan, bottenlisten och lagvyn.
+//  Alla tre läser samma cache av tävlingens resultat (spResultsCache) som
+//  loadExistingResults redan hämtar — inga extra anrop från banan.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Alla resultat i tävlingen, senast hämtade. Fylls av loadExistingResults och
+// uppdateras efter varje sparning. Före detta gjorde updateOverallTotals ett
+// GetCompetitionResults-anrop PER INMATAT SKOTT — fem anrop per serie per skytt
+// på mobilnät i ett bergtäktsskjul (jfr minnet station-device-battery-cellular-constraint).
+let spResultsCache = null;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Utkast för OSPARADE skott.
+//
+//  ⚠️ Skotten levde tidigare bara i currentShooterData.shots, som byggs om från
+//  databasen vid varje skyttbyte. En funktionär som matat in fem träffar och
+//  råkade trycka "◀ Tavla" i stället för SPARA fick dem raderade — rapporterat
+//  från banan 2026-08-31. Exakt samma fel som träningsloggens serier hade, och
+//  samma lösning (se minnet training-log-draft-localstorage).
+//
+//  ⚠️ REGELN DÄRIFRÅN GÄLLER HÄR OCKSÅ: ett tomt formulär får ALDRIG radera
+//  utkastet. Utkast skrivs bara när det finns skott, och tas bort bara vid
+//  explicit RENSA eller en lyckad sparning.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SP_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000; // en tävlingshelg
+
+function spDraftStorageKey() {
+    const compId = competitionData.competitionId
+        || $('.competition-results-management').data('competition-id') || '0';
+    const phase = (competitionData.currentPhase === 'finals') ? 'finals' : 'qualification';
+    return 'hpsk_entry_drafts_' + compId + '_' + phase;
+}
+
+// Nyckeln är (medlem, klass, serie) — samma nyckel som serverns MERGE, så ett
+// utkast kan aldrig hamna på fel skytt eller fel klass för en flerklasskytt.
+function spDraftKey(memberId, shootingClass, series) {
+    return memberId + '|' + (shootingClass || '') + '|' + series;
+}
+
+function spReadDrafts() {
+    try {
+        const raw = localStorage.getItem(spDraftStorageKey());
+        if (!raw) return {};
+        const parsed = JSON.parse(raw) || {};
+        // Rensa gamla utkast vid läsning, inte med en timer.
+        const now = Date.now();
+        let changed = false;
+        for (const k of Object.keys(parsed)) {
+            if (!parsed[k] || !parsed[k].at || (now - parsed[k].at) > SP_DRAFT_MAX_AGE_MS) {
+                delete parsed[k]; changed = true;
+            }
+        }
+        if (changed) localStorage.setItem(spDraftStorageKey(), JSON.stringify(parsed));
+        return parsed;
+    } catch (e) { return {}; }
+}
+
+function spWriteDrafts(drafts) {
+    try { localStorage.setItem(spDraftStorageKey(), JSON.stringify(drafts)); } catch (e) { /* full/avstängd */ }
+}
+
+// Spara utkast för den skytt och serie som visas just nu.
+function spSaveDraft() {
+    if (!currentShooterData) return;
+    const shots = currentShooterData.shots || [];
+    // Tomt formulär raderar inte utkastet — se regeln ovan.
+    if (shots.length === 0) return;
+    const drafts = spReadDrafts();
+    drafts[spDraftKey(currentShooterData.memberId, currentShooterData.class, currentSeries)] =
+        { shots: shots.slice(), at: Date.now() };
+    spWriteDrafts(drafts);
+}
+
+function spClearDraft(memberId, shootingClass, series) {
+    const drafts = spReadDrafts();
+    const k = spDraftKey(memberId, shootingClass, series);
+    if (k in drafts) { delete drafts[k]; spWriteDrafts(drafts); }
+}
+
+function spGetDraft(memberId, shootingClass, series) {
+    const d = spReadDrafts()[spDraftKey(memberId, shootingClass, series)];
+    return (d && Array.isArray(d.shots) && d.shots.length) ? d.shots : null;
+}
+
+// Finns ett osparat utkast för (skytt, serie)? Används av serieremsan och lagvyn
+// så funktionären SER att något ligger och väntar.
+function spHasDraft(memberId, shootingClass, series) {
+    return spGetDraft(memberId, shootingClass, series) !== null;
+}
+
+// Ordet för skyttens plats. Bara när inmatningen följer en publicerad startlista
+// motsvarar numret en fysisk tavla; i anmälningsordning är det ett löpnummer vi
+// själva satt (position = index + 1), och då får det inte kallas tavla.
+function spPosWord() {
+    return (currentEntryOrder === 'startlist' && hasStartList) ? 'tavla' : 'nr';
+}
+function spPosWordCap() {
+    const w = spPosWord();
+    return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+function spPhaseSeriesRange() {
+    // Vilka serier som hör till den låsta fasen. Samma tak som moveToNextSeriesNew
+    // räknar ut — grundomgången får ALDRIG mata rakt in i finalserierna.
+    const total = competitionData.numberOfSeries || 0;
+    const qual = competitionData.qualificationSeriesCount || total;
+    if (competitionData.hasFinalsRound && competitionData.currentPhase === 'finals') {
+        return { first: qual + 1, last: total };
+    }
+    if (competitionData.hasFinalsRound) {
+        return { first: 1, last: qual };
+    }
+    return { first: 1, last: total };
+}
+
+// Serienummer som har ett sparat resultat för en given (medlem, klass).
+function spSavedSeriesFor(memberId, shootingClass) {
+    const out = {};
+    if (!spResultsCache) return out;
+    for (const r of spResultsCache) {
+        if (r.memberId === memberId && r.shootingClass === shootingClass) {
+            out[r.seriesNumber] = true;
+        }
+    }
+    return out;
+}
+
+function spRenderSeriesStrip() {
+    const strip = document.getElementById('spSeriesStrip');
+    if (!strip || !currentShooterData) return;
+
+    const range = spPhaseSeriesRange();
+    const saved = spSavedSeriesFor(currentShooterData.memberId, currentShooterData.class);
+    const isFinals = competitionData.hasFinalsRound && competitionData.currentPhase === 'finals';
+    const qual = competitionData.qualificationSeriesCount || 0;
+
+    let html = '<span class="sp-series-lbl">serie</span>';
+    for (let s = range.first; s <= range.last; s++) {
+        const label = isFinals ? ('F' + (s - qual)) : String(s);
+        const draft = spHasDraft(currentShooterData.memberId, currentShooterData.class, s);
+        let cls = 'sp-sn';
+        if (s === currentSeries) cls += ' is-now';
+        else if (saved[s]) cls += ' is-done';
+        // En serie med osparade skott får en streckad ram — funktionären ska kunna
+        // SE att något ligger och väntar även när han står på en annan serie.
+        if (draft) cls += ' is-draft';
+        const note = draft ? ' — OSPARADE skott' : (saved[s] ? ' — inmatad' : '');
+        html += `<button type="button" class="${cls} sp-series-btn" data-series="${s}"
+                   title="Serie ${label}${note}">${label}</button>`;
+    }
+    strip.innerHTML = html;
+}
+
+function spShooterLabel(idx) {
+    const s = shootersData[idx];
+    if (!s) return '';
+    const pos = s.position || (idx + 1);
+    return spPosWordCap() + ' ' + pos;
+}
+
+function spRenderFootbar() {
+    const prev = document.getElementById('spPrevBtn');
+    const next = document.getElementById('spNextBtn');
+    const pick = document.getElementById('spPickBtn');
+    if (!prev || !next || !pick) return;
+
+    // Namngivna steg: knappen säger VART man hamnar, inte bara att något händer.
+    if (currentShooterIndex > 0) {
+        prev.disabled = false;
+        prev.innerHTML = '<span><i class="bi bi-chevron-left"></i> ' + escapeHtml(spShooterLabel(currentShooterIndex - 1)) + '</span>';
+    } else {
+        prev.disabled = true;
+        prev.innerHTML = '<span><i class="bi bi-chevron-left"></i> Första</span>';
+    }
+
+    if (currentShooterIndex < shootersData.length - 1) {
+        next.disabled = false;
+        next.innerHTML = '<span>' + escapeHtml(spShooterLabel(currentShooterIndex + 1)) + ' <i class="bi bi-chevron-right"></i></span>';
+    } else {
+        next.disabled = true;
+        next.innerHTML = '<span>Sista <i class="bi bi-chevron-right"></i></span>';
+    }
+
+    const range = spPhaseSeriesRange();
+    const isFinals = competitionData.hasFinalsRound && competitionData.currentPhase === 'finals';
+    const qual = competitionData.qualificationSeriesCount || 0;
+    const seriesLabel = isFinals ? ('F' + (currentSeries - qual)) : String(currentSeries);
+    const teamPart = (currentShooterData && currentShooterData.teamNumber)
+        ? 'Lag ' + currentShooterData.teamNumber + ' · ' : '';
+    const openLabel = document.getElementById('spPicker') && !document.getElementById('spPicker').classList.contains('d-none');
+    pick.innerHTML = escapeHtml(teamPart + 'serie ' + seriesLabel) +
+        ' <i class="bi bi-chevron-' + (openLabel ? 'down' : 'up') + '"></i>';
+    pick.setAttribute('aria-expanded', openLabel ? 'true' : 'false');
+    pick.title = 'Visa hela skjutlaget';
+}
+
+function spTogglePicker() {
+    const el = document.getElementById('spPicker');
+    const root = document.querySelector('.precision-results-entry');
+    if (!el) return;
+    if (el.classList.contains('d-none')) {
+        spRenderPicker();
+        el.classList.remove('d-none');
+        // ⚠️ Lagvyn ar en EGEN skarm. Forsoket att visa den MELLAN den pinnade
+        // toppen och den pinnade botten gjorde raderna omojliga att trycka pa
+        // (Playwright: ".sp-top subtree intercepts pointer events") — tre
+        // regioner ryms inte i 740 px. Sifferpanelen och skottraden goms
+        // darfor medan vyn ar oppen, precis som i mockupen.
+        if (root) root.classList.add('sp-picking');
+    } else {
+        el.classList.add('d-none');
+        if (root) root.classList.remove('sp-picking');
+    }
+    spRenderFootbar();
+}
+
+function spClosePicker() {
+    const el = document.getElementById('spPicker');
+    const root = document.querySelector('.precision-results-entry');
+    if (el) el.classList.add('d-none');
+    if (root) root.classList.remove('sp-picking');
+    spRenderFootbar();
+}
+
+// Hela skjutlaget som lista: en rad per tavla, en prick per serie.
+// Fylld = inmatad, tom = inte inmatad än, RÖD RING = överhoppad (en serie utan
+// resultat som har inmatade serier EFTER sig). Överhoppade serier syntes inte
+// någonstans på skärmen tidigare.
+function spRenderPicker() {
+    const el = document.getElementById('spPicker');
+    if (!el) return;
+
+    const range = spPhaseSeriesRange();
+    const isFinals = competitionData.hasFinalsRound && competitionData.currentPhase === 'finals';
+    const qual = competitionData.qualificationSeriesCount || 0;
+
+    const teamLabel = (currentShooterData && currentShooterData.teamNumber)
+        ? 'Lag ' + currentShooterData.teamNumber : 'Laget';
+
+    let rows = `
+        <div class="sp-picker-bar">
+            <span class="sp-picker-title">${escapeHtml(teamLabel)} — tryck på en rad eller en serie</span>
+            <button type="button" class="sp-fb" id="spPickerCloseBtn" aria-label="Stäng lagvyn">Stäng</button>
+        </div>
+        <div class="sp-prow sp-prow-head">
+            <span class="sp-pt">${spPosWordCap()}</span>
+            <span class="sp-pn">Skytt</span>
+            <span class="sp-ps">Serier</span>
+        </div>`;
+
+    let gapNote = '';
+
+    shootersData.forEach(function (s, idx) {
+        const saved = spSavedSeriesFor(s.memberId, s.shootingClass);
+        let lastSaved = 0;
+        for (let n = range.first; n <= range.last; n++) { if (saved[n]) lastSaved = n; }
+
+        let dots = '';
+        let hasGap = false;
+        for (let n = range.first; n <= range.last; n++) {
+            let dcls = 'sp-dt';
+            const label = isFinals ? ('F' + (n - qual)) : String(n);
+            let dtitle = 'Serie ' + label;
+            const nDraft = spHasDraft(s.memberId, s.shootingClass, n);
+            if (nDraft) { dcls += ' is-draft'; dtitle += ' — OSPARADE skott'; }
+            else if (saved[n]) { dcls += ' is-ok'; dtitle += ' — inmatad'; }
+            else if (n < lastSaved) { dcls += ' is-miss'; hasGap = true; dtitle += ' — SAKNAS'; }
+            else if (idx === currentShooterIndex && n === currentSeries) { dcls += ' is-half'; dtitle += ' — pågår'; }
+            dots += `<button type="button" class="${dcls} sp-dot-btn" data-idx="${idx}" data-series="${n}" title="${escapeAttr(dtitle)}" aria-label="${escapeAttr(dtitle)}"></button>`;
+        }
+
+        if (hasGap && !gapNote) {
+            gapNote = spPosWordCap() + ' ' + (s.position || (idx + 1)) + ' saknar en serie — tryck på den röda ringen för att gå dit.';
+        }
+
+        let rcls = 'sp-prow sp-prow-btn';
+        if (idx === currentShooterIndex) rcls += ' is-now';
+        else if (hasGap) rcls += ' has-gap';
+
+        rows += `
+        <button type="button" class="${rcls}" data-idx="${idx}">
+            <span class="sp-pt">${s.position || (idx + 1)}</span>
+            <span class="sp-pn">
+                <span class="sp-pn-name">${escapeHtml(s.name || '')}</span>
+                <span class="sp-pn-meta">${escapeHtml(s.shootingClass || '')} · ${escapeHtml(s.club || '')}</span>
+            </span>
+            <span class="sp-ps">${dots}</span>
+        </button>`;
+    });
+
+    if (gapNote) {
+        rows += `<div class="sp-pnote"><span class="sp-dt is-miss"></span>${escapeHtml(gapNote)}</div>`;
+    }
+
+    // "Visa hela laget" lyfter platsfiltret tillfälligt utan att skriva om
+    // funktionärens sparade intervall.
+    if (officerRangeStart != null && officerRangeEnd != null) {
+        rows += `
+        <div class="sp-footbar">
+            <button type="button" class="sp-fb sp-fb-wide" id="spClearRangeBtn">Visa hela laget (plats ${officerRangeStart}–${officerRangeEnd} valt)</button>
+        </div>`;
+    }
+
+    el.innerHTML = rows;
+}
+
+// Gå till en bestämd skytt (index i shootersData) och valfritt en bestämd serie.
+function spGoTo(idx, series) {
+    if (idx < 0 || idx >= shootersData.length) return;
+    currentShooterIndex = idx;
+    if (series != null) {
+        const range = spPhaseSeriesRange();
+        if (series >= range.first && series <= range.last) currentSeries = series;
+    }
+    spClosePicker();
+    updateShooterDisplay();
+    updateSeriesDisplay();
+    loadCurrentShooterByIndex();
+    saveCurrentSession();
+}
+
+// Sparkvitteringen — en smal rad direkt över panelen, där blicken redan är.
+// Ersätter showSaveMessage()-rutan i skärmens motsatta hörn för inmatningen;
+// den funktionen finns kvar för resten av sidan.
+function spShowSaveLine(text, opts) {
+    opts = opts || {};
+    const line = document.getElementById('spSaveLine');
+    const txt = document.getElementById('spSaveLineText');
+    const icon = document.getElementById('spSaveLineIcon');
+    const undo = document.getElementById('spUndoBtn');
+    if (!line || !txt) return;
+    txt.textContent = text;
+    line.classList.remove('d-none');
+    line.classList.toggle('is-error', !!opts.error);
+    line.classList.toggle('is-warn', !!opts.warn);
+    if (icon) icon.innerHTML = (opts.error || opts.warn)
+        ? '<i class="bi bi-exclamation-triangle"></i>'
+        : '<i class="bi bi-check-lg"></i>';
+    if (undo) undo.classList.toggle('d-none', !opts.undo);
+}
+
 
 function initializeShooterResultsEntry(shooterData, existingResult = null) {
     // Initialize shooter data
@@ -2536,7 +2743,21 @@ function initializeShooterResultsEntry(shooterData, existingResult = null) {
     let xCount = 0;
     let isComplete = false;
     
-    if (existingResult) {
+    // ⚠️ Utkastet vinner över det sparade resultatet. Kommer man tillbaka till en
+    // serie man var mitt i ska man se sina egna osparade skott, inte den äldre
+    // sparade versionen — annars är arbetet borta igen, bara tystare.
+    const draftShots = spGetDraft(shooterData.memberId, shooterData.class, currentSeries);
+    let restoredFromDraft = false;
+
+    if (draftShots) {
+        shots = draftShots.slice();
+        const t = calculateTotalsFromShots(shots);
+        total = t.total;
+        xCount = t.xCount;
+        isComplete = shots.length === 5;
+        restoredFromDraft = true;
+    }
+    else if (existingResult) {
         // Parse existing shots from JSON
         try {
             shots = JSON.parse(existingResult.shots);
@@ -2577,6 +2798,22 @@ function initializeShooterResultsEntry(shooterData, existingResult = null) {
     // Update display
     updateShooterDisplay();
     updateButtonStates();
+
+    // Kvitteringen från föregående sparning/vändning hör till DEN HÄR skärmen —
+    // den köades innan omritningen eftersom DOM:en byts ut asynkront.
+    if (spPendingSaveLine) {
+        spShowSaveLine(spPendingSaveLine.text, spPendingSaveLine.opts || {});
+        spPendingSaveLine = null;
+    }
+    else if (restoredFromDraft) {
+        // Säg att skotten är återställda och INTE sparade. Utan det här skulle en
+        // återställd serie se ut som en sparad, och funktionären kunde gå vidare
+        // och tro att den låg i databasen.
+        spShowSaveLine(shots.length === 5
+            ? 'Återställd — 5 skott inmatade men INTE sparade. Tryck SPARA.'
+            : 'Återställd — ' + shots.length + ' av 5 skott inmatade, inte sparade.',
+            { warn: true });
+    }
 }
 
 // Global variables for results entry
@@ -2621,6 +2858,53 @@ function handleShooterClick(e) {
     
     if (!button) return;
     
+    // ── Layout C:s nya kontroller ─────────────────────────────────────────
+    // Hanteras före listan nedan eftersom flera av dem ligger inuti varandra
+    // (en serieprick inuti en lagrad) och closest('button') ger den innersta.
+    if (button.classList.contains('sp-dot-btn')) {
+        e.preventDefault();
+        spGoTo(parseInt(button.dataset.idx, 10), parseInt(button.dataset.series, 10));
+        return;
+    }
+    if (button.classList.contains('sp-prow-btn')) {
+        e.preventDefault();
+        spGoTo(parseInt(button.dataset.idx, 10), null);
+        return;
+    }
+    if (button.classList.contains('sp-series-btn')) {
+        e.preventDefault();
+        spGoTo(currentShooterIndex, parseInt(button.dataset.series, 10));
+        return;
+    }
+    if (button.classList.contains('sp-fb-pick')) {
+        e.preventDefault();
+        spTogglePicker();
+        return;
+    }
+    if (button.id === 'spPickerCloseBtn') {
+        e.preventDefault();
+        spClosePicker();
+        return;
+    }
+    if (button.id === 'spUndoBtn') {
+        e.preventDefault();
+        // "Rätta" NAVIGERAR tillbaka till den serie som just sparades — den tar
+        // inte bort något. Att kalla den "Ångra" hade lovat en radering som inte
+        // sker; funktionären rättar genom att mata om serien och spara igen.
+        if (spLastSaved) spGoTo(spLastSaved.idx, spLastSaved.series);
+        return;
+    }
+    if (button.id === 'spClearRangeBtn') {
+        e.preventDefault();
+        // Lyfter platsfiltret för resten av sessionen utan att skriva om det
+        // sparade intervallet i localStorage — funktionären får tillbaka sitt
+        // intervall nästa gång han öppnar laget.
+        officerRangeStart = null;
+        officerRangeEnd = null;
+        loadShooters(currentEntryOrder);
+        return;
+    }
+
     // Check if this is one of our buttons
     const isOurButton = button.classList.contains('shot-btn') ||
                         button.classList.contains('enter-btn') ||
@@ -2720,18 +3004,84 @@ async function addShot(value) {
     const { total, xCount } = calculateTotalsFromShots(currentShooterData.shots);
     currentShooterData.total = total;
     currentShooterData.xCount = xCount;
-    
+
+    // Utkastet skrivs vid VARJE skott, inte vid navigering — en funktionär som
+    // tappar telefonen eller får sidan omladdad mitt i serien ska inte förlora
+    // något heller.
+    spSaveDraft();
+
     updateShooterDisplay();
     updateButtonStates();
 }
 
+// ⚠️ EN sparning i taget. Sätts precis före anropet i saveResults() och släpps i
+// dess finally — täcker även återförsöken i saveResultWithRetry(). Utan den här
+// flaggan köade varje tryck en egen framflyttning (rapporterat från banan
+// 2026-08-30: fyra tryck = fyra skyttar framåt). Gäller BÅDE knapp och Enter,
+// eftersom Enter på en laptop är precis lika lätt att upprepa.
+let spIsSaving = false;
+
+// Meddelande som ska visas på NÄSTA renderade skärm. Skärmen byggs om asynkront
+// efter en framflyttning, så en text som skrivs före bytet skulle hamna i DOM:en
+// som just ska kastas. initializeShooterResultsEntry plockar upp den här.
+let spPendingSaveLine = null;
+
+// Vad som senast sparades, så "Rätta" kan ta funktionären tillbaka dit.
+let spLastSaved = null;
+
 function handleEnter() {
-    if (!currentShooterData || currentShooterData.shots.length === 0) return;
-    
+    if (spIsSaving) return;                     // re-entry-spärr
+    if (!currentShooterData) return;
     if (currentShooterData.shots.length < 5) return;
-    
-    // Automatically save results when Enter is clicked
     saveResults();
+}
+
+function spBeginSave() {
+    spIsSaving = true;
+    const btn = document.querySelector('.enter-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('is-busy');
+        btn.classList.remove('is-done');
+        btn.textContent = 'SPARAR…';
+    }
+    document.querySelectorAll('.shot-btn, .clear-btn').forEach(function (b) { b.disabled = true; });
+}
+
+function spEndSave(ok) {
+    spIsSaving = false;
+    const btn = document.querySelector('.enter-btn');
+    if (btn) {
+        btn.classList.remove('is-busy');
+        if (ok) {
+            // Knappen ÄR kvittot. Den behåller sin gröna yta så den inte "slocknar",
+            // vilket lästes som "inget hände" och var halva orsaken till dubbeltrycken.
+            btn.classList.add('is-done');
+            btn.textContent = '✓ SPARAT';
+        }
+    }
+    if (!ok) {
+        // Vid fel: lås upp allt igen så funktionären kan försöka om.
+        document.querySelectorAll('.shot-btn, .clear-btn').forEach(function (b) { b.disabled = false; });
+        updateButtonStates();
+    }
+}
+
+// Etikett som säger VART sparningen går, inte bara att den sparar.
+function spSaveButtonLabel() {
+    const modeEl = document.getElementById('traversalModeSelect');
+    const mode = modeEl ? modeEl.value : 'nextShooter';
+    if (mode === 'nextShooter') {
+        if (currentShooterIndex < shootersData.length - 1) {
+            return 'SPARA → ' + spShooterLabel(currentShooterIndex + 1).toUpperCase();
+        }
+        const range = spPhaseSeriesRange();
+        if (currentSeries < range.last) return 'SPARA → SERIE ' + (currentSeries + 1);
+        return 'SPARA — SISTA SERIEN';
+    }
+    const range2 = spPhaseSeriesRange();
+    if (currentSeries < range2.last) return 'SPARA → SERIE ' + (currentSeries + 1);
+    return 'SPARA';
 }
 
 async function clearShots() {
@@ -2746,6 +3096,9 @@ async function clearShots() {
         await deleteExistingResults();
     }
     
+    // RENSA är den enda handling utom en lyckad sparning som tar bort utkastet.
+    spClearDraft(currentShooterData.memberId, currentShooterData.class, currentSeries);
+
     // Reset shooter data
     currentShooterData.shots = [];
     currentShooterData.isComplete = false;
@@ -2768,7 +3121,10 @@ function updateShooterDisplay() {
     placeholders.forEach((placeholder, index) => {
         if (index < currentShooterData.shots.length) {
             // Shots are now stored as strings, so display them directly
-            placeholder.textContent = currentShooterData.shots[index];
+            // Ingen värdefärgning: en gul X och en grön tia var en fjärde färgkod
+            // på en yta som redan bär tangentblå, seriemarkering och statusgrönt
+            // (Stefan 2026-08-31). Skottet läses som text — ett X är redan ett X.
+            placeholder.textContent = String(currentShooterData.shots[index]);
             placeholder.classList.add('filled');
         } else {
             placeholder.textContent = '_';
@@ -2796,6 +3152,17 @@ function updateShooterDisplay() {
         }
     }
 
+    // Nästa ruta att fylla får en streckad ram — en nedräkning som inte tar plats.
+    placeholders.forEach((p, i) => {
+        p.classList.toggle('is-next', i === currentShooterData.shots.length && i < 5);
+    });
+
+    // De tre nya ytorna i layout C.
+    spRenderSeriesStrip();
+    spRenderFootbar();
+    const openPicker = document.getElementById('spPicker');
+    if (openPicker && !openPicker.classList.contains('d-none')) spRenderPicker();
+
     // Update overall totals (all series for this shooter)
     updateOverallTotals();
 }
@@ -2806,21 +3173,30 @@ async function updateOverallTotals() {
     const competitionId = $('.competition-results-management').data('competition-id');
 
     try {
-        // Get all results for this shooter across all series
-        const response = await fetch(`/umbraco/surface/CompetitionResults/GetCompetitionResults?competitionId=${competitionId}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
+        // ⚠️ Läs ur cachen. Den här funktionen anropas från updateShooterDisplay,
+        // alltså EN GÅNG PER INMATAT SKOTT, och hämtade tidigare hela tävlingens
+        // resultat varje gång — fem anrop per serie och skytt över mobilnät vid
+        // skjutvallen (se minnet station-device-battery-cellular-constraint).
+        // Cachen fylls av loadExistingResults vid varje skyttbyte och uppdateras
+        // av spCacheSavedSeries efter varje sparning, så den är aldrig äldre än
+        // funktionärens egen senaste åtgärd.
+        let results = spResultsCache;
+        if (!results) {
+            const response = await fetch(`/umbraco/surface/CompetitionResults/GetCompetitionResults?competitionId=${competitionId}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+            if ((data.Success || data.success) && (data.results || data.Results)) {
+                results = data.results || data.Results;
+                spResultsCache = results;
             }
-        });
-
-        const data = await response.json();
+        }
 
         let overallTotal = 0;
         let overallXCount = 0;
 
-        if ((data.Success || data.success) && data.results) {
-            const results = data.results;
+        if (results) {
 
             // Filter results for this specific shooter and class
             // Must include shootingClass to distinguish multi-class shooters
@@ -2858,18 +3234,24 @@ async function updateOverallTotals() {
 
 function updateButtonStates() {
     if (!currentShooterData) return;
-    
-    const shotButtons = document.querySelectorAll('.shot-btn');
+
+    // Rör ingenting medan en sparning pågår — spBeginSave/spEndSave äger
+    // knapparnas tillstånd då, och en omritning härifrån skulle låsa upp dem.
+    if (spIsSaving) return;
+
+    const n = currentShooterData.shots.length;
+
+    document.querySelectorAll('.shot-btn').forEach(btn => { btn.disabled = n >= 5; });
+    document.querySelectorAll('.clear-btn').forEach(btn => { btn.disabled = false; });
+
     const enterButton = document.querySelector('.enter-btn');
-    
-    // Disable shot buttons if 5 shots entered
-    shotButtons.forEach(btn => {
-        btn.disabled = currentShooterData.shots.length >= 5;
-    });
-    
-    // Enable/disable enter button
     if (enterButton) {
-        enterButton.disabled = currentShooterData.shots.length === 0;
+        // ⚠️ Före detta var SPARA aktiv redan vid ETT skott, men handleEnter()
+        // krävde fem och returnerade tyst — ett dött tryck som såg ut som att
+        // knappen inte fungerade. Nu står det hur många skott som saknas.
+        enterButton.disabled = n < 5;
+        enterButton.classList.remove('is-busy', 'is-done');
+        enterButton.textContent = (n < 5) ? (n + ' AV 5 SKOTT') : spSaveButtonLabel();
     }
 }
 
@@ -3021,6 +3403,9 @@ function saveResults() {
         return;
     }
     
+    // Spärren sätts här — efter alla synkrona valideringar, precis före nätanropet.
+    spBeginSave();
+
     // Send to the new CompetitionResults controller (with retry for transient failures)
     saveResultWithRetry('/umbraco/surface/CompetitionResults/SaveResult', resultsData, token);
 }
@@ -3044,9 +3429,29 @@ async function saveResultWithRetry(url, data, token, maxRetries = 1) {
             hpskSetConnection(true);
 
             if (result.success) {
-                showSaveMessage('Resultat sparade!', 'success');
+                // Uppdatera cachen med det som just sparades, så serieremsan och
+                // lagvyn visar rätt utan ett nytt anrop från banan.
+                spCacheSavedSeries(data);
+
+                // Kvitteringen följer med till nästa skärm och namnger vad som
+                // sparades — en felmatning syns direkt i stället för att gömmas
+                // bakom ett generiskt "Resultat sparade!".
+                // Nu ligger serien i databasen — då ska utkastet bort, annars
+                // skulle det vinna över det sparade resultatet nästa gång.
+                spClearDraft(data.shooterMemberId, data.shooterClass, data.seriesNumber);
+
+                spLastSaved = { idx: currentShooterIndex, series: currentSeries };
+                spPendingSaveLine = {
+                    text: 'Serie ' + data.seriesNumber + ' sparad på ' + spPosWord() + ' ' + data.position,
+                    opts: { undo: true }
+                };
+                spEndSave(true);
                 updateOverallTotals();
-                setTimeout(() => { handleTraversalAfterSave(); }, 1000);
+
+                // 1000 ms fanns för att hörnrutan skulle hinna läsas. Kvittot sitter
+                // nu i knappen och följer med till nästa skärm, så 200 ms räcker —
+                // och en sekunds oförändrad skärm var vad som utlöste dubbeltrycken.
+                setTimeout(() => { handleTraversalAfterSave(); }, 200);
                 return;
             }
 
@@ -3058,6 +3463,8 @@ async function saveResultWithRetry(url, data, token, maxRetries = 1) {
             }
 
             console.error('Server returned error after retries:', result);
+            spEndSave(false);
+            spShowSaveLine('Kunde inte spara: ' + (result.message || 'okänt fel') + ' — skotten ligger kvar, försök igen.', { error: true });
             showSaveMessage('Fel vid sparande: ' + result.message, 'error');
         } catch (error) {
             if (attempt < maxRetries) {
@@ -3069,8 +3476,37 @@ async function saveResultWithRetry(url, data, token, maxRetries = 1) {
             // badge blink red on a save that then succeeded, which is how an indicator stops being read.
             hpskSetConnection(false);
             console.error('Error saving results:', error);
+            spEndSave(false);
+            spShowSaveLine('Ingen kontakt med servern — skotten ligger kvar, försök igen.', { error: true });
             showSaveMessage('Ett fel uppstod vid sparande av resultat.', 'error');
         }
+    }
+    // Skyddsnät: en väg ut ur loopen som inte gått via spEndSave får inte lämna
+    // panelen låst för resten av tävlingen.
+    if (spIsSaving) spEndSave(false);
+}
+
+// Lägg in en nyss sparad serie i cachen (samma nyckel som serverns MERGE:
+// tävling + medlem + klass + serie).
+function spCacheSavedSeries(data) {
+    if (!spResultsCache) spResultsCache = [];
+    const existing = spResultsCache.find(function (r) {
+        return r.memberId === data.shooterMemberId
+            && r.shootingClass === data.shooterClass
+            && r.seriesNumber === data.seriesNumber;
+    });
+    const shotsJson = JSON.stringify(data.shots);
+    if (existing) {
+        existing.shots = shotsJson;
+    } else {
+        spResultsCache.push({
+            memberId: data.shooterMemberId,
+            shootingClass: data.shooterClass,
+            seriesNumber: data.seriesNumber,
+            teamNumber: data.teamNumber,
+            position: data.position,
+            shots: shotsJson
+        });
     }
 }
 
@@ -3093,12 +3529,34 @@ function moveToNextShooterNew() {
         updateShooterDisplay();
         loadCurrentShooterByIndex();
         saveCurrentSession();
-    } else {
-        // No more shooters - we've completed all shooters for this series
-        console.log('Completed all shooters for series', currentSeries);
-        // Reset to first shooter or show completion message
-        resetForm();
+        return;
     }
+
+    // Sista skytten i funktionärens lista. Vänd om till FÖRSTA skytten i HANS
+    // lista (inte index 0 i hela laget — shootersData är redan filtrerad av
+    // applyOfficerRange, så index 0 är hans första plats) och stega serien.
+    const range = spPhaseSeriesRange();
+    if (currentSeries < range.last) {
+        const finished = currentSeries;
+        currentSeries = currentSeries + 1;
+        currentShooterIndex = 0;
+        // Kvitteringen ersätter den tysta nollställningen: funktionären ska aldrig
+        // behöva gissa varför skärmen bytte skytt.
+        spPendingSaveLine = {
+            text: 'Serie ' + finished + ' klar för alla dina platser — börjar om på '
+                  + spShooterLabel(0).toLowerCase() + ', serie ' + currentSeries + '.',
+            opts: {}
+        };
+        updateShooterDisplay();
+        updateSeriesDisplay();
+        loadCurrentShooterByIndex();
+        saveCurrentSession();
+        return;
+    }
+
+    // Fasens sista serie för sista skytten — då finns ingen nästa, och rätt svar
+    // är ett tydligt besked, inte en tyst nollställning.
+    spShowSaveLine('Klart — alla serier är inmatade för dina platser.', {});
 }
 
 // NEW: Move to next series for current shooter
@@ -3128,7 +3586,7 @@ function moveToNextSeriesNew() {
             loadCurrentShooterByIndex();
             saveCurrentSession();
         } else {
-            resetForm();
+            spShowSaveLine('Klart — alla serier är inmatade för dina platser.', {});
         }
     }
 }
@@ -3204,14 +3662,19 @@ function showSaveMessage(message, type = 'success') {
 }
 
 function resetForm() {
-    // Reset all dropdowns
-    document.getElementById('teamSelect').value = '';
-    document.getElementById('positionSelect').value = '';
-    document.getElementById('seriesSelect').value = '';
-    
-    // Disable dependent dropdowns
-    document.getElementById('positionSelect').disabled = true;
-    document.getElementById('seriesSelect').disabled = true;
+    // ⚠️ #teamSelect / #positionSelect / #seriesSelect finns INTE i DOM:en — de togs
+    // bort när kontrollerna flyttade in i #resultEntrySettingsModal. Före den här
+    // vakten kastade funktionen på sin första rad, och eftersom den bara anropades
+    // från framflyttningens sista steg blev symptomet "inmatningen stannar på sista
+    // skytten" utan ett synligt fel. Framflyttningen använder inte längre resetForm.
+    ['teamSelect', 'positionSelect', 'seriesSelect'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) { el.value = ''; }
+    });
+    ['positionSelect', 'seriesSelect'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) { el.disabled = true; }
+    });
     
     // Clear results entry container
     document.getElementById('resultsEntryContainer').innerHTML = `

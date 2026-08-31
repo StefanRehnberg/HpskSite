@@ -217,12 +217,12 @@
 
                             @* Shot Display *@
                             <div class="shot-display mb-3 text-center">
-                                <div class="shot-circles">
-                                    <span class="shot-circle" id="shot-circle-0">_</span>
-                                    <span class="shot-circle" id="shot-circle-1">_</span>
-                                    <span class="shot-circle" id="shot-circle-2">_</span>
-                                    <span class="shot-circle" id="shot-circle-3">_</span>
-                                    <span class="shot-circle" id="shot-circle-4">_</span>
+                                <div class="shot-circles sp-shots">
+                                    <span class="sp-shot shot-circle" id="shot-circle-0">_</span>
+                                    <span class="sp-shot shot-circle" id="shot-circle-1">_</span>
+                                    <span class="sp-shot shot-circle" id="shot-circle-2">_</span>
+                                    <span class="sp-shot shot-circle" id="shot-circle-3">_</span>
+                                    <span class="sp-shot shot-circle" id="shot-circle-4">_</span>
                                 </div>
                                 <div class="mt-2">
                                     <strong>Totalt: <span id="currentSeriesTotal">0</span>p</strong> |
@@ -234,25 +234,24 @@
                             <div class="button-grid">
                                 @* Unified num-pad layout: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3,
                                    then 0 + SPARA (enter) + RENSA (clear) on the bottom row. *@
-                                <div class="shot-buttons">
-                                    <button type="button" class="btn btn-primary shot-btn k-wide" data-value="10" onclick="addShot('10')">10</button>
-                                    <button type="button" class="btn btn-primary shot-btn k-wide" data-value="X" onclick="addShot('X')">X</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="7" onclick="addShot('7')">7</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="8" onclick="addShot('8')">8</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="9" onclick="addShot('9')">9</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="4" onclick="addShot('4')">4</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="5" onclick="addShot('5')">5</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="6" onclick="addShot('6')">6</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="1" onclick="addShot('1')">1</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="2" onclick="addShot('2')">2</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="3" onclick="addShot('3')">3</button>
-                                    <button type="button" class="btn btn-primary shot-btn" data-value="0" onclick="addShot('0')">0</button>
-                                    <button type="button" class="btn btn-success enter-btn" id="enterBtn" onclick="handleEnterSeries()" disabled>
-                                        <i class="bi bi-check-circle"></i> SPARA
-                                    </button>
-                                    <button type="button" class="btn btn-danger clear-btn" onclick="clearCurrentSeries()">
-                                        <i class="bi bi-x-circle"></i> RENSA
-                                    </button>
+                                @* Delad sifferpanel — utseendet kommer helt ur .sp-* i
+                                   theme.css. shot-btn / enter-btn / clear-btn behalls som
+                                   JS-krokar (och som mal for addShot-onclick). *@
+                                <div class="shot-buttons sp-pad">
+                                    <button type="button" class="sp-key sp-k-w3 shot-btn k-wide" data-value="10" onclick="addShot('10')">10</button>
+                                    <button type="button" class="sp-key sp-k-w3 shot-btn k-wide" data-value="X" onclick="addShot('X')">X</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="7" onclick="addShot('7')">7</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="8" onclick="addShot('8')">8</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="9" onclick="addShot('9')">9</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="4" onclick="addShot('4')">4</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="5" onclick="addShot('5')">5</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="6" onclick="addShot('6')">6</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="1" onclick="addShot('1')">1</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="2" onclick="addShot('2')">2</button>
+                                    <button type="button" class="sp-key shot-btn" data-value="3" onclick="addShot('3')">3</button>
+                                    <button type="button" class="sp-key sp-k-w4 sp-k-ghost shot-btn" data-value="0" onclick="addShot('0')">0</button>
+                                    <button type="button" class="sp-key sp-k-clear clear-btn" onclick="clearCurrentSeries()">RENSA</button>
+                                    <button type="button" class="sp-key sp-k-w6 sp-k-save enter-btn" id="enterBtn" onclick="handleEnterSeries()" disabled>KLAR SERIE</button>
                                 </div>
                                 @* Märken: turn this single 5-shot series into a Guldserie (Precision) /
                                    Snabbserie (Duell) submission. Shown only for those disciplines + a
@@ -918,7 +917,34 @@ function updateOverallSummary() {
 }
 
 // Submit training score
+// ⚠️ En sparning i taget. RecordTrainingScore SKAPAR en ny loggpost, sa ett andra
+// tryck under en langsam POST la in passet TVA ganger. Ingen pending-state fanns,
+// sa knappen sag oforandrad ut hela tiden — samma fella som sparbuggen i
+// resultatinmatningen, men har med dubbel DATA som foljd, inte bara dubbel
+// navigering. Slapps i finally sa ett fel inte laser knappen for gott.
+let trainingSubmitInFlight = false;
+
+function trainingSubmitBegin() {
+    trainingSubmitInFlight = true;
+    const b = document.getElementById('submitBtn');
+    if (b) {
+        b.disabled = true;
+        b.dataset.spLabel = b.innerHTML;
+        b.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Sparar…';
+    }
+}
+
+function trainingSubmitEnd() {
+    trainingSubmitInFlight = false;
+    const b = document.getElementById('submitBtn');
+    if (b) {
+        b.disabled = false;
+        if (b.dataset.spLabel) { b.innerHTML = b.dataset.spLabel; delete b.dataset.spLabel; }
+    }
+}
+
 function submitTrainingScore() {
+    if (trainingSubmitInFlight) return;
     const form = document.getElementById('trainingScoreForm');
 
     // Validate basic form fields
@@ -1068,6 +1094,10 @@ function submitTrainingScore() {
     // Get anti-forgery token
     const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
 
+    // Spärren sätts först här — alla valideringar ovan är synkrona och returnerar
+    // utan att ha startat något, så flaggan kan inte fastna på en tidig retur.
+    trainingSubmitBegin();
+
     // Resolve proof (new upload, pasted screenshot, or a reused list) first, then submit.
     resolveMedalProofRef(token)
     .then(fileRef => {
@@ -1103,6 +1133,9 @@ function submitTrainingScore() {
     .catch(error => {
         console.error('Error saving training score:', error);
         alert('Kunde inte spara träningsresultat: ' + (error.message || 'Försök igen.'));
+    })
+    .finally(() => {
+        trainingSubmitEnd();
     });
 }
 
@@ -1452,46 +1485,10 @@ document.addEventListener('DOMContentLoaded', function() {
     margin: 0 auto;
 }
 
-.shot-buttons {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 0.5rem;
-}
-
-/* Each number key spans 2 of 6 columns (3 per row); 10/X span 3 (2 per row);
-   0 / SPARA / RENSA each span 2 to form the bottom row. */
-.shot-buttons .shot-btn { grid-column: span 2; }
-.shot-buttons .shot-btn.k-wide { grid-column: span 3; }
-.shot-buttons .enter-btn,
-.shot-buttons .clear-btn { grid-column: span 2; }
-
-.shot-btn {
-    height: 60px;
-    font-size: 1.5rem;
-    font-weight: bold;
-    border: 2px solid;
-    transition: all 0.2s ease;
-}
-
-.shot-btn:hover:not(:disabled) {
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-.shot-btn:active:not(:disabled) {
-    transform: scale(0.95);
-}
-
-.shot-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-.enter-btn, .clear-btn {
-    height: 60px;
-    font-size: 1.1rem;
-    font-weight: bold;
-}
+/* Rutnatet, tangenterna och skottrutorna kommer ur den DELADE .sp-*-komponenten
+   i wwwroot/css/theme.css (2026-08-31). Den lokala uppsattningen togs bort for att
+   panelen ska se likadan ut pa alla fyra installningsytor -- lagg inte tillbaka
+   .shot-btn/.enter-btn/.shot-circle-regler har. */
 
 /* Shot Display - Dark mode compatible */
 .shot-display {
@@ -1509,34 +1506,8 @@ document.addEventListener('DOMContentLoaded', function() {
     font-weight: bold;
 }
 
-.shot-circle {
-    width: 50px;
-    height: 50px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 3px solid var(--bs-border-color);
-    border-radius: 50%;
-    background-color: var(--bs-body-bg);
-    color: var(--bs-secondary-color);
-}
-
-.shot-circle.filled {
-    border-color: var(--bs-primary);
-    color: var(--bs-body-color);
-}
-
-.shot-circle.shot-x {
-    background-color: #ffc107;
-    border-color: #ffc107;
-    color: #000;
-}
-
-.shot-circle.shot-10 {
-    background-color: #198754;
-    border-color: #198754;
-    color: white;
-}
+/* .shot-circle-utseendet (inkl. .filled/.shot-x/.shot-10) ligger nu pa .sp-shot
+   i theme.css och delas med de andra panelerna. */
 
 /* Responsive - Tablets and below */
 @@media (max-width: 768px) {
@@ -1545,20 +1516,7 @@ document.addEventListener('DOMContentLoaded', function() {
         padding: 1rem;
     }
 
-    /* Keep the 6-column num-pad grid; just relax spacing on tablets */
-    .shot-buttons {
-        gap: 0.75rem;
-    }
-
-    .shot-btn {
-        height: 55px;
-        font-size: 1.3rem;
-    }
-
-    .enter-btn, .clear-btn {
-        height: 55px;
-        font-size: 1rem;
-    }
+    /* Tangenternas storlekar hanteras av .sp-* i theme.css. */
 }
 
 /* Responsive - Phones */
@@ -1569,24 +1527,7 @@ document.addEventListener('DOMContentLoaded', function() {
         padding: 0 0.5rem;
     }
 
-    .shot-buttons {
-        gap: 0.5rem;
-    }
-
-    .shot-btn {
-        height: 55px;
-        font-size: 1.2rem;
-    }
-
-    .shot-circles {
-        gap: 0.5rem;
-        font-size: 1.5rem;
-    }
-
-    .shot-circle {
-        width: 45px;
-        height: 45px;
-    }
+    /* Tangenter och skottrutor: se .sp-* i theme.css. */
 
     /* Entry method buttons - stack on very small screens */
     .btn-group-sm .btn {

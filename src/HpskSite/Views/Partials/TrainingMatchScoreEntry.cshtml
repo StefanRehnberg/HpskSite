@@ -34,12 +34,12 @@
                 <div id="matchShotByShotEntry">
                     <!-- Shot Display -->
                     <div class="shot-display mb-3 text-center">
-                        <div class="shot-circles">
-                            <span class="shot-circle" id="match-shot-0" onclick="selectShotForEdit(0)">_</span>
-                            <span class="shot-circle" id="match-shot-1" onclick="selectShotForEdit(1)">_</span>
-                            <span class="shot-circle" id="match-shot-2" onclick="selectShotForEdit(2)">_</span>
-                            <span class="shot-circle" id="match-shot-3" onclick="selectShotForEdit(3)">_</span>
-                            <span class="shot-circle" id="match-shot-4" onclick="selectShotForEdit(4)">_</span>
+                        <div class="shot-circles sp-shots">
+                            <span class="sp-shot shot-circle" id="match-shot-0" onclick="selectShotForEdit(0)">_</span>
+                            <span class="sp-shot shot-circle" id="match-shot-1" onclick="selectShotForEdit(1)">_</span>
+                            <span class="sp-shot shot-circle" id="match-shot-2" onclick="selectShotForEdit(2)">_</span>
+                            <span class="sp-shot shot-circle" id="match-shot-3" onclick="selectShotForEdit(3)">_</span>
+                            <span class="sp-shot shot-circle" id="match-shot-4" onclick="selectShotForEdit(4)">_</span>
                         </div>
                         <div class="mt-2" id="matchShotEditHint" style="display: none;">
                             <small class="text-primary">
@@ -54,25 +54,23 @@
 
                     <!-- Button Grid — unified num-pad: 10/X on top, 7-8-9 / 4-5-6 / 1-2-3,
                          then 0 + SPARA (save) + RENSA (clear) on the bottom row. -->
-                    <div class="match-button-grid">
-                        <button type="button" class="btn btn-primary shot-btn k-wide" onclick="matchAddShot('10')">10</button>
-                        <button type="button" class="btn btn-primary shot-btn k-wide" onclick="matchAddShot('X')">X</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('7')">7</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('8')">8</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('9')">9</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('4')">4</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('5')">5</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('6')">6</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('1')">1</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('2')">2</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('3')">3</button>
-                        <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('0')">0</button>
-                        <button type="button" class="btn btn-success match-enter-btn" id="matchSaveScoreBtn" onclick="matchSaveScore()" disabled>
-                            <i class="bi bi-check-circle"></i> <span id="saveButtonText">SPARA</span>
-                        </button>
-                        <button type="button" class="btn btn-danger match-clear-btn" onclick="matchClearShots()">
-                            <i class="bi bi-x-circle"></i> RENSA
-                        </button>
+                    @* Delad sifferpanel — se .sp-* i theme.css. Klassnamnen shot-btn /
+                       match-enter-btn behalls som JS-krokar. *@
+                    <div class="match-button-grid sp-pad">
+                        <button type="button" class="sp-key sp-k-w3 shot-btn k-wide" onclick="matchAddShot('10')">10</button>
+                        <button type="button" class="sp-key sp-k-w3 shot-btn k-wide" onclick="matchAddShot('X')">X</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('7')">7</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('8')">8</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('9')">9</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('4')">4</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('5')">5</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('6')">6</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('1')">1</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('2')">2</button>
+                        <button type="button" class="sp-key shot-btn" onclick="matchAddShot('3')">3</button>
+                        <button type="button" class="sp-key sp-k-w4 sp-k-ghost shot-btn" onclick="matchAddShot('0')">0</button>
+                        <button type="button" class="sp-key sp-k-clear match-clear-btn" onclick="matchClearShots()">RENSA</button>
+                        <button type="button" class="sp-key sp-k-w6 sp-k-save match-enter-btn" id="matchSaveScoreBtn" onclick="matchSaveScore()" disabled><span id="saveButtonText">SPARA</span></button>
                     </div>
 
                     @* Märken: save this series AND submit it as a Guldserie (Precision) /
@@ -488,7 +486,14 @@ function matchSubmitGuldserie() {
 }
 
 // Save score (handles both create and update)
+// ⚠️ SaveScore skapar en NY serie i matchen (UpdateScore skriver over en
+// befintlig). Utan spärr la tva tryck under en langsam POST in serien tva ganger.
+// Samma orsak som sparbuggen i resultatinmatningen: ingen pending-state, sa
+// knappen sag oforandrad ut medan anropet pagick.
+let matchSaveInFlight = false;
+
 function matchSaveScore() {
+    if (matchSaveInFlight) return;
     const isShotByShot = document.getElementById('matchMethodDetailed').checked;
 
     let total, xCount, shots, entryMethod;
@@ -532,6 +537,16 @@ function matchSaveScore() {
         ? '/umbraco/surface/TrainingMatch/UpdateScore'
         : '/umbraco/surface/TrainingMatch/SaveScore';
 
+    // Spärren sätts efter valideringarna ovan, som alla är synkrona.
+    matchSaveInFlight = true;
+    const saveBtn = document.getElementById('matchSaveScoreBtn');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.classList.add('is-busy');
+        const t = document.getElementById('saveButtonText');
+        if (t) t.textContent = 'SPARAR…';
+    }
+
     fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -559,6 +574,15 @@ function matchSaveScore() {
     .catch(error => {
         console.error('Error saving score:', error);
         alert('Något gick fel vid sparande');
+    })
+    .finally(() => {
+        matchSaveInFlight = false;
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.classList.remove('is-busy');
+            const t = document.getElementById('saveButtonText');
+            if (t) t.textContent = 'SPARA';
+        }
     });
 }
 
@@ -690,28 +714,8 @@ document.addEventListener('keydown', (e) => {
     margin: 0 auto;
 }
 
-.match-button-grid .shot-btn { grid-column: span 2; }
-.match-button-grid .shot-btn.k-wide { grid-column: span 3; }
-.match-button-grid .match-enter-btn,
-.match-button-grid .match-clear-btn { grid-column: span 2; }
-
-.match-button-grid .shot-btn {
-    height: 60px;
-    font-size: 1.5rem;
-    font-weight: bold;
-}
-
-.match-button-grid .match-enter-btn,
-.match-button-grid .match-clear-btn {
-    height: 60px;
-    font-size: 1.1rem;
-    font-weight: bold;
-}
-
-.match-button-grid .shot-btn:disabled,
-.match-button-grid .match-enter-btn:disabled {
-    opacity: 0.4;
-}
+/* Rutnatet och tangenterna kommer ur den DELADE .sp-*-komponenten i
+   wwwroot/css/theme.css (2026-08-31). */
 
 /* Reuse shot display styles */
 #matchScoreEntryModal .shot-display {
@@ -719,43 +723,6 @@ document.addEventListener('keydown', (e) => {
     padding: 1rem;
     border-radius: 0.5rem;
     border: 2px solid #dee2e6;
-}
-
-#matchScoreEntryModal .shot-circles {
-    display: flex;
-    justify-content: center;
-    gap: 0.75rem;
-    font-size: 1.5rem;
-    font-weight: bold;
-}
-
-#matchScoreEntryModal .shot-circle {
-    width: 45px;
-    height: 45px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 3px solid #dee2e6;
-    border-radius: 50%;
-    background-color: white;
-    color: #6c757d;
-}
-
-#matchScoreEntryModal .shot-circle.filled {
-    border-color: #0d6efd;
-    color: #000;
-}
-
-#matchScoreEntryModal .shot-circle.shot-x {
-    background-color: #ffc107;
-    border-color: #ffc107;
-    color: #000;
-}
-
-#matchScoreEntryModal .shot-circle.shot-10 {
-    background-color: #198754;
-    border-color: #198754;
-    color: white;
 }
 
 /* Editable shot circles (when in edit mode) */
@@ -770,10 +737,13 @@ document.addEventListener('keydown', (e) => {
 }
 
 /* Selected shot for editing */
+/* Funktionell markering (skottet som redigeras) — behalls, men med
+   Bootstrap-variabler sa den ocksa funkar i morkt lage. Bas-utseendet kommer
+   fran .sp-shot i theme.css. */
 #matchScoreEntryModal .shot-circle.editing {
-    border-color: #0d6efd;
+    border-color: var(--bs-primary);
     border-width: 4px;
-    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.2);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.2);
     animation: pulse-border 1s ease-in-out infinite;
 }
 
@@ -788,18 +758,14 @@ document.addEventListener('keydown', (e) => {
 
 /* Mobile adjustments */
 @@media (max-width: 480px) {
-    .match-button-grid .shot-btn {
-        height: 55px;
-        font-size: 1.3rem;
-    }
-
-    #matchScoreEntryModal .shot-circle {
-        width: 40px;
-        height: 40px;
-        font-size: 1.2rem;
-    }
 }
 
+
+/* Skottrutornas utseende (inkl. filled/shot-x/shot-10 och morkt lage) ligger nu
+   pa .sp-shot i wwwroot/css/theme.css och delas med de andra sifferpanelerna.
+   Den gamla uppsattningen har hade hardkodade farger + ett eget dark-block, och
+   vann dessutom pa specificitet (#id + klass) sa den delade designen inte slog
+   igenom. Lagg inte tillbaka den. */
 
 /* Dark Mode Support */
 [data-bs-theme="dark"] #matchScoreEntryModal .shot-display {
@@ -807,14 +773,4 @@ document.addEventListener('keydown', (e) => {
     border-color: #495057;
 }
 
-[data-bs-theme="dark"] #matchScoreEntryModal .shot-circle {
-    background-color: #212529;
-    border-color: #495057;
-    color: #adb5bd;
-}
-
-[data-bs-theme="dark"] #matchScoreEntryModal .shot-circle.filled {
-    border-color: #0d6efd;
-    color: #e9ecef;
-}
 </style>
