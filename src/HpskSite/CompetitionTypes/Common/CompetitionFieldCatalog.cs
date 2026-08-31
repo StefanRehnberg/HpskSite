@@ -123,17 +123,21 @@ namespace HpskSite.CompetitionTypes.Common
             // ── Fältskytte-inställningar (bara fältfamiljen) ────────────────────
             new("scoringMode", "Tävlingstyp", FieldControl.Slot, "Fältskytte-inställningar", 1,
                 onlyFor: FaltFamily, slot: "falt-scoringmode",
-                note: "Läs ALDRIG competition.scoringMode ensamt — använd FaltskytteScoringMode.Resolve."),
+                note: "Läs ALDRIG competition.scoringMode ensamt — använd FaltskytteScoringMode.Resolve.",
+                inteIGuiden: "Tävlingstypen bor i den sparade fältkonfigurationen — guiden kopplar en konfiguration i stället."),
             new("maxReshoots", "Max omskjutningar", FieldControl.Number, "Fältskytte-inställningar", 2,
-                onlyFor: FaltFamily),
+                onlyFor: FaltFamily,
+                inteIGuiden: "Fältskytteinställning som sätts efter att tävlingen kopplats till en konfiguration."),
             new("rollingStart", "Rullande start", FieldControl.Slot, "Fältskytte-inställningar", 3,
                 onlyFor: FaltFamily, slot: "falt-rollingstart",
-                note: "JSON, byggs av kryssruta + patrullstorlek."),
+                note: "JSON, byggs av kryssruta + patrullstorlek.",
+                inteIGuiden: "Rullande start konfigureras efter att patrullerna finns, inte vid skapandet."),
             new("faltskytteSelfServiceResults", "Tillåt skyttar i laget att fylla i resultat (självservice)",
                 FieldControl.Checkbox, "Fältskytte-inställningar", 4, onlyFor: FaltFamily),
             new("stationConfig", "Stationskonfiguration", FieldControl.Slot, "Fältskytte-inställningar", 5,
                 onlyFor: FaltFamily, slot: "falt-config",
-                note: "_FaltskytteCompetitionPicker."),
+                note: "_FaltskytteCompetitionPicker.",
+                inteIGuiden: "Stationerna kommer från den sparade konfigurationen (_FaltskytteCompetitionPicker)."),
 
             // ── Arrangör / Synlighet ────────────────────────────────────────────
             new("clubId", "Ansvarig klubb", FieldControl.Select, "Arrangör / Synlighet", 1,
@@ -147,11 +151,13 @@ namespace HpskSite.CompetitionTypes.Common
             new("contactEmail", "Kontakt e-post", FieldControl.Text, "Tävlingsledning & Betalning", 2, required: true),
             new("contactPhone", "Kontakt telefon", FieldControl.Text, "Tävlingsledning & Betalning", 3),
             new("competitionManagerIds", "Tävlingsledare", FieldControl.Slot, "Tävlingsledning & Betalning", 4,
-                slot: "manager-picker"),
+                slot: "manager-picker",
+                inteIGuiden: "Tävlingsansvariga utses efter att tävlingen skapats."),
             new("swishNumber", "Swish-nummer", FieldControl.Text, "Tävlingsledning & Betalning", 5,
                 slot: "swish-validation",
                 note: "Bär egen formatvalidering, se _SwishNumberValidation."),
-            new("addToMenu", "Lägg till genväg till tävlingen i menyn", FieldControl.Checkbox, "Tävlingsledning & Betalning", 6)
+            new("addToMenu", "Lägg till genväg till tävlingen i menyn", FieldControl.Checkbox, "Tävlingsledning & Betalning", 6,
+                inteIGuiden: "Genvägen i menyn är ett publiceringsbeslut, inte en egenskap man tar ställning till när tävlingen skapas.")
         };
 
         /// <summary>Alla fält som gäller en viss gren, i flik- och fältordning.</summary>
@@ -197,11 +203,12 @@ namespace HpskSite.CompetitionTypes.Common
     {
         public CompetitionField(string name, string label, FieldControl control, string tab, int order,
                                 bool required = false, string? help = null, string? note = null,
-                                string? slot = null, string[]? onlyFor = null, string[]? notFor = null)
+                                string? slot = null, string[]? onlyFor = null, string[]? notFor = null,
+                                string? inteIGuiden = null)
         {
             Name = name; Label = label; Control = control; Tab = tab; Order = order;
             Required = required; Help = help; Note = note; Slot = slot;
-            OnlyFor = onlyFor; NotFor = notFor;
+            OnlyFor = onlyFor; NotFor = notFor; InteIGuiden = inteIGuiden;
         }
 
         public string Name { get; }
@@ -217,6 +224,21 @@ namespace HpskSite.CompetitionTypes.Common
         public string? Slot { get; }
         public string[]? OnlyFor { get; }
         public string[]? NotFor { get; }
+
+        /// <summary>
+        /// Satt till ett SKÄL när fältet medvetet saknas i tävlingsguiden. Null = fältet
+        /// ska finnas där.
+        ///
+        /// ⚠️ Guiden och redigeringsmodalerna hade glidit isär på sju fält utan att något
+        /// märkte det — ingenting jämförde guiden mot katalogen. Ett fält som läggs till i
+        /// redigeringen och glöms i guiden är precis den tysta driften registret finns för
+        /// att stoppa. Att utelämna ett fält är helt i sin ordning; att göra det UTAN skäl
+        /// är det inte, och <c>wizard-catalog-verify</c> kräver att listan stämmer.
+        /// </summary>
+        public string? InteIGuiden { get; }
+
+        /// <summary>Fältet ska renderas i tävlingsguiden.</summary>
+        public bool FinnsIGuiden => InteIGuiden == null;
 
         public bool AppliesTo(string competitionType)
         {

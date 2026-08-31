@@ -272,22 +272,22 @@
                         <!-- Standard series selection (non-Springskytte) -->
                         <div id="wizard_standardSeriesSection">
                             <div class="mb-3" id="wizard_seriesGroup">
-                                <label for="wizard_numberOfSeries" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
+                                <label for="wizard_numberOfSeriesOrStations" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
                                 <div class="btn-group mb-2" role="group" id="wizard_seriesButtons">
                                     <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(6)">6</button>
                                     <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(7)">7</button>
                                     <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(10)">10</button>
                                 </div>
-                                <input type="number" class="form-control" id="wizard_numberOfSeries" name="numberOfSeriesOrStations" min="1" max="50" value="6" required>
+                                <input type="number" class="form-control" id="wizard_numberOfSeriesOrStations" name="numberOfSeriesOrStations" min="1" max="50" value="6" required>
                             </div>
 
                             <div class="mb-3" id="wizard_finalsGroup">
-                                <label for="wizard_finalSeries" class="form-label">Varav finalserier</label>
+                                <label for="wizard_numberOfFinalSeries" class="form-label">Varav finalserier</label>
                                 <div class="btn-group mb-2" role="group">
                                     <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(0)">0</button>
                                     <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(3)">3</button>
                                 </div>
-                                <input type="number" class="form-control" id="wizard_finalSeries" name="numberOfFinalSeries" min="0" max="10" value="0">
+                                <input type="number" class="form-control" id="wizard_numberOfFinalSeries" name="numberOfFinalSeries" min="0" max="10" value="0">
                             </div>
 
                             <div class="alert alert-info d-none" id="wizard_milsnabbSeriesNote">
@@ -348,7 +348,7 @@
                             </div>
 
                             <div class="form-check mb-3">
-                                <input class="form-check-input" type="checkbox" id="wizard_faltskytteSelfServiceResults">
+                                <input class="form-check-input" type="checkbox" id="wizard_faltskytteSelfServiceResults" name="faltskytteSelfServiceResults">
                                 <label class="form-check-label fw-bold" for="wizard_faltskytteSelfServiceResults">Tillåt skyttar i laget att fylla i resultat (självservice)</label>
                                 <div class="form-text small mt-1">
                                     Lämpligt för mindre tävlingar utan stationschefer. Skyttar i en patrull kan logga in och
@@ -495,15 +495,15 @@
                                                 <span class="input-group-text">kr</span>
                                             </div>
                                             <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="wizard_subCompFeeMode_perClass" value="perClass" checked>
-                                                <label class="form-check-label" for="wizard_subCompFeeMode_perClass">
+                                                <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="wizard_subCompetitionFeeMode_perClass" value="perClass" checked>
+                                                <label class="form-check-label" for="wizard_subCompetitionFeeMode_perClass">
                                                     <strong>Per anmäld klass</strong>
                                                     <small class="d-block text-muted">Avgiften läggs till varje anmäld klass (t.ex. 2 klasser × 30 kr = 60 kr tillägg).</small>
                                                 </label>
                                             </div>
                                             <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="wizard_subCompFeeMode_perRegistration" value="perRegistration">
-                                                <label class="form-check-label" for="wizard_subCompFeeMode_perRegistration">
+                                                <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="wizard_subCompetitionFeeMode_perRegistration" value="perRegistration">
+                                                <label class="form-check-label" for="wizard_subCompetitionFeeMode_perRegistration">
                                                     <strong>En gång per anmälan</strong>
                                                     <small class="d-block text-muted">Avgiften tas ut en gång oavsett antal anmälda klasser (t.ex. en engångsavgift till arrangören).</small>
                                                 </label>
@@ -905,8 +905,8 @@ function filterClassSections() {
 // Apply series/finals defaults based on selected competition type
 function applySeriesDefaults() {
     const typeId = document.getElementById('wizard_competitionType').value;
-    const seriesInput = document.getElementById('wizard_numberOfSeries');
-    const finalsInput = document.getElementById('wizard_finalSeries');
+    const seriesInput = document.getElementById('wizard_numberOfSeriesOrStations');
+    const finalsInput = document.getElementById('wizard_numberOfFinalSeries');
     const seriesButtons = document.getElementById('wizard_seriesButtons');
     const finalsGroup = document.getElementById('wizard_finalsGroup');
     const milsnabbNote = document.getElementById('wizard_milsnabbSeriesNote');
@@ -976,7 +976,7 @@ function applySeriesDefaults() {
 }
 
 function springSeriesChanged() {
-    const seriesInput = document.getElementById('wizard_numberOfSeries');
+    const seriesInput = document.getElementById('wizard_numberOfSeriesOrStations');
     seriesInput.value = document.getElementById('wizard_springskytteClassASeries').value;
 }
 
@@ -1701,11 +1701,11 @@ function toggleClassSection(section) {
 
 // Preset buttons for series
 function setSeriesCount(count) {
-    document.getElementById('wizard_numberOfSeries').value = count;
+    document.getElementById('wizard_numberOfSeriesOrStations').value = count;
 }
 
 function setFinalSeries(count) {
-    document.getElementById('wizard_finalSeries').value = count;
+    document.getElementById('wizard_numberOfFinalSeries').value = count;
 }
 
 // Submit wizard
