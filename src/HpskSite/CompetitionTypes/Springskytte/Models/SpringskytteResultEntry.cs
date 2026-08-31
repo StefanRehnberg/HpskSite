@@ -535,6 +535,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public int CompetitionId { get; set; }
         public int NodeId { get; set; }
         public bool IsOfficial { get; set; }
+
+        /// <summary>
+        /// Stänga självanmälan på tävlingssidan i samma veva? Null = klienten sa ingenting, och då
+        /// lämnas inställningen orörd. Se <c>StartListRegistrationGate</c>.
+        ///
+        /// ⚠️ Springskytte publicerar EN lista i taget (per vapenklass/dag), så frågan ställs bara
+        /// när den första listan publiceras — annars skulle arrangören få samma fråga fem gånger.
+        /// </summary>
+        public bool? CloseRegistration { get; set; }
     }
 
     /// <summary>

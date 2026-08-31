@@ -223,6 +223,35 @@ namespace HpskSite.Controllers
                     return RedirectToCurrentUmbracoPage();
                 }
 
+                // VALIDATION: startlistan publicerad + arrangören har valt att stänga självanmälan.
+                //
+                // ⚠️ Detta MÅSTE finnas på servern och inte bara som en släckt knapp. Skytten har ofta
+                // tävlingssidan öppen i en flik medan startlistan publiceras; utan kontrollen här
+                // landar just den anmälan som grinden finns för att förhindra — en anmälan ingen har
+                // placerat, upptäckt först av täckningspanelen eller av skytten på plats.
+                //
+                // ⚠️ Funktionärer är UNDANTAGNA, och det är inte en artighet: arrangören anmäler
+                // rutinmässigt någon annan via samma modal (targetMemberId nedan), och en spärr utan
+                // undantag hade tagit bort deras enda självbetjäningsväg samtidigt som den stängde
+                // skyttarnas. Går via HasCompetitionStaffAccessAsync, som bär både klubbvärdad och
+                // kretsvärdad tävling — en handskriven clubId-koll låser ute kretsen på ett SM.
+                // Registreringsbordets egen väg (RegistrationAdmin/AddLateRegistration) är en annan
+                // endpoint och berörs inte alls.
+                var registrationGate = HttpContext?.RequestServices
+                    .GetService(typeof(HpskSite.Services.RegistrationGate.StartListRegistrationGate))
+                    as HpskSite.Services.RegistrationGate.StartListRegistrationGate;
+                if (registrationGate != null && registrationGate.IsClosed(competitionId)
+                    && !await _authorizationService.HasCompetitionStaffAccessAsync(competitionId))
+                {
+                    var errorMsg = HpskSite.Services.RegistrationGate.StartListRegistrationGate.ShooterMessage;
+                    if (IsAjaxRequest())
+                    {
+                        return Json(new { success = false, message = errorMsg });
+                    }
+                    TempData["Error"] = errorMsg;
+                    return RedirectToCurrentUmbracoPage();
+                }
+
                 // Determine target member (who to register)
                 IMember targetMember;
                 var currentMemberData = _memberService.GetById(currentMember.Key);

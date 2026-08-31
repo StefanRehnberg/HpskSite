@@ -2561,11 +2561,30 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 try { _contentService.Publish(node, new[] { "*" }); }
                 catch (Exception pubEx) { _logger.LogWarning(pubEx, "Publish of official toggle failed for {NodeId} (saved value is authoritative)", node.Id); }
 
+                // The publish dialog's "stäng självanmälan" checkbox. Written on the COMPETITION, not
+                // on this list node: Springskytte publishes one list per weapon class / day and the
+                // gate is a property of the competition, so the first published list closes it and
+                // unpublishing that one does not reopen registration while another list is still out.
+                // Gate = choice AND any published list, so that follows without a second write here.
+                string? gateMessage = null;
+                if (request.CloseRegistration != null)
+                {
+                    var gate = HttpContext?.RequestServices
+                        .GetService(typeof(HpskSite.Services.RegistrationGate.StartListRegistrationGate))
+                        as HpskSite.Services.RegistrationGate.StartListRegistrationGate;
+                    if (gate != null)
+                    {
+                        var (ok, msg) = gate.PersistChoice(request.CompetitionId, request.CloseRegistration);
+                        if (!ok) gateMessage = msg;
+                    }
+                }
+
+                var baseMessage = request.IsOfficial ? "Startlistan publicerad som officiell." : "Startlistan satt till preliminär.";
                 return Json(new
                 {
                     success = true,
                     isOfficial = request.IsOfficial,
-                    message = request.IsOfficial ? "Startlistan publicerad som officiell." : "Startlistan satt till preliminär."
+                    message = gateMessage == null ? baseMessage : $"{baseMessage} {gateMessage}"
                 });
             }
             catch (Exception ex)

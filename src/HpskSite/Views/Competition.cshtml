@@ -509,6 +509,24 @@
     var hasOfficialStartList = officialStartList != null;
     var startListPageUrl = hasOfficialStartList ? officialStartList.Url() : "";
 
+    // Är självanmälan stängd för att startlistan är publicerad? Frågan besvaras av
+    // StartListRegistrationGate och INTE härifrån, eftersom RegisterForCompetition måste ge samma
+    // svar — en knapp som är släckt medan endpointen tar emot anmälan är värre än ingen spärr alls.
+    // Grinden är härledd (arrangörens val OCH en publicerad lista), så en avpublicering öppnar
+    // anmälan igen utan att något behöver skrivas.
+    var startListGateActive = HpskSite.Services.RegistrationGate.StartListRegistrationGate.IsClosed(Model);
+
+    // ⚠️ Funktionärer undantas ÄVEN HÄR, inte bara i endpointen. Arrangören anmäler rutinmässigt
+    // någon annan via den här modalen (targetMemberId), så en släckt knapp för dem hade gjort
+    // serverns undantag onåbart från gränssnittet — det hade bara skyddat en gammal flik.
+    //
+    // ⚠️ canManageCompetition måste vara en DELMÄNGD av serverns HasCompetitionStaffAccessAsync,
+    // annars visas en knapp vars anrop nekas. Den är det: samma sajtadmin / tävlingsansvarig /
+    // klubbadmin-för-tävlingen (inkl. regionadmin och kretsvärdad tävling), bara utan Skjutledare —
+    // som servern släpper in men som här får gå via registreringsbordet. Widening this without
+    // widening the server would ship a dead button.
+    var startListClosesRegistration = startListGateActive && !canManageCompetition;
+
     // 2b. Finals start list (championship competitions). Direct child of competition,
     //     gated on isOfficialFinalsStartList. Shown alongside the qualifying button.
     var officialFinalsStartList = competitionChildren.FirstOrDefault(c =>
@@ -1130,8 +1148,55 @@
 							var regClosed = now > registrationCloseDate;
 							var regNotYetOpen = now < registrationOpenDate;
 							var regOpen = !regClosed && !regNotYetOpen;
-							var canRegister = isActive && regOpen && (hasShootingClasses || isSpringskytte);
+							var canRegister = isActive && regOpen && (hasShootingClasses || isSpringskytte) && !startListClosesRegistration;
 						}
+
+						@*
+							Förklaringen ligger FÖRE if/else-kedjan, inte inuti en gren, så den syns
+							både när startlistan stängde anmälan och när sista anmälningsdag redan
+							hade passerat — annars hade texten behövt dupliceras i två grenar och den
+							ena hunnit glida.
+
+							⚠️ Den säger vad skytten KAN göra, inte bara att något är stängt. En
+							släckt knapp utan skäl får folk att antingen mejla och undra eller låta
+							bli att komma; det enda de behöver lära sig är att det går att dyka upp.
+						*@
+						@if (startListGateActive && canManageCompetition)
+						{
+							@* Funktionären ser knappen kvar — men måste få veta att skyttarna inte gör
+							   det, annars läser hen sidan som att grinden inte slog till. *@
+							<div class="alert alert-warning small py-2 mb-3">
+								<i class="bi bi-shield-lock me-1"></i>
+								Självanmälan är stängd för skyttarna eftersom startlistan är publicerad.
+								Du ser knappen som funktionär. För en efteranmäld: använd
+								<strong>Anmälningar → Åtgärder → Anmäl och betala</strong>, som också skapar faktura
+								och placerar skytten i ett skjutlag.
+							</div>
+						}
+						@if (startListClosesRegistration)
+						{
+							<div class="alert alert-info small py-2 mb-3">
+								<i class="bi bi-list-ol me-1"></i>
+								<strong>Startlistan är publicerad</strong> — därför är självanmälan stängd.
+								<br>
+								Du kan fortfarande komma med: kontakta arrangören, eller anmäl dig på plats före start.
+								Du placeras då sist i ett skjutlag utan att någon annans startnummer ändras.
+								@if (!string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
+								{
+									<div class="mt-1">
+										@if (!string.IsNullOrEmpty(contactEmail))
+										{
+											<span class="d-block"><i class="bi bi-envelope me-1"></i><a href="mailto:@contactEmail">@contactEmail</a></span>
+										}
+										@if (!string.IsNullOrEmpty(contactPhone))
+										{
+											<span class="d-block"><i class="bi bi-telephone me-1"></i><a href="tel:@contactPhone">@contactPhone</a></span>
+										}
+									</div>
+								}
+							</div>
+						}
+
 						@if (regClosed)
 						{
 							<p class="text-muted small mb-2">
@@ -1170,6 +1235,30 @@
 							@if (allowStafett)
 							{
 								<button class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
+						}
+						else if (startListClosesRegistration && regOpen && isActive)
+						{
+							@*
+								Anmälningsfönstret är öppet — det är startlistan som stänger. Bara
+								den individuella anmälan spärras: ett lag ligger inte i den
+								individuella startlistan och har sin egen frist, så att stänga det
+								här vore att lösa ett problem laget inte har.
+							*@
+							<button class="btn btn-success w-100" disabled>
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#teamRegistrationModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+							@if (allowStafett)
+							{
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#stafettRegistrationModal">
 									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
 								</button>
 							}

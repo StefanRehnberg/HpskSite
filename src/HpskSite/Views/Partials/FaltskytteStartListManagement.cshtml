@@ -9,6 +9,10 @@
    this partial is added to a new surface. Guarded, so a double include is harmless. *@
 @await Html.PartialAsync("_HtmlEscape")
 
+@* Delad publiceringsdialog (kryssrutan "stäng självanmälan"). Inkluderas av partialen själv, samma
+   regel som _HtmlEscape. Spärrar mot dubbelinkludering internt. *@
+@await Html.PartialAsync("_PublishStartListDialog")
+
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var rollingStartJson = ViewData["RollingStart"]?.ToString() ?? "";
@@ -580,12 +584,32 @@
     function escapeHtmlInline(s) { return hpskEsc(s); }
 
     window.faltPublish = async function(pub) {
-        var msg = pub ? 'Publicera patrullistan? Den blir synlig för alla på tävlingssidan.' : 'Avpublicera patrullistan?';
-        if (!confirm(msg)) return;
-        var data = await apiPost('PublishPatrolList', { competitionId: parseInt(compId), publish: pub });
+        // Kryssrutan "stäng självanmälan" hör bara till publiceringen. Vid AVpublicering skickas
+        // close som null: grinden är härledd (val OCH publicerad lista), så anmälan öppnas igen av
+        // sig själv, och att nollställa valet här vore att radera inställningen som sidoeffekt.
+        var close = null;
+        if (pub) {
+            var res = await window.hpskAskPublishStartList({
+                title: 'Publicera patrullistan',
+                body: 'Patrullistan blir synlig för alla på tävlingssidan, och skyttarna planerar efter tiderna.',
+                confirmLabel: 'Publicera',
+                alreadyPublished: isPublished,
+                currentlyClosed: window.hpskCloseRegistrationCurrent === true
+            });
+            if (!res.proceed) return;
+            close = res.close;
+        } else {
+            if (!confirm('Avpublicera patrullistan?\n\nSjälvanmälan öppnas igen om den stängdes vid publiceringen.')) return;
+        }
+
+        var data = await apiPost('PublishPatrolList', { competitionId: parseInt(compId), publish: pub, closeRegistration: close });
         if (data.success) {
             isPublished = pub;
+            if (close === true || close === false) window.hpskCloseRegistrationCurrent = close;
             updatePublishUI();
+            // Servern svarar success även när patrullistan publicerades men inställningen inte kunde
+            // sparas (t.ex. saknad doctype-egenskap) — den varningen får inte gå tyst förbi.
+            if (data.message) alert(data.message);
         } else { alert('Fel: ' + (data.message || 'Okänt fel')); }
     };
 

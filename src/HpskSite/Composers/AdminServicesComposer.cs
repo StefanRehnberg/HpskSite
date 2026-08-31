@@ -57,6 +57,12 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.StartListCleanup.IStartListCleanupSource, HpskSite.Services.StartListCleanup.FaltskytteStartListCleanupSource>();
             builder.Services.AddScoped<HpskSite.Services.StartListCleanup.IStartListCleanupSource, HpskSite.Services.StartListCleanup.PrecisionFamilyStartListCleanupSource>();
 
+            // "Är självanmälan stängd för att startlistan är publicerad?" — asked by the public
+            // competition page AND by RegisterForCompetition, so both must ask the same object.
+            // No per-discipline sources: the question is answered by two published flags, not by
+            // walking a start list.
+            builder.Services.AddScoped<HpskSite.Services.RegistrationGate.StartListRegistrationGate>();
+
             // Register CompetitionTeamService as scoped
             builder.Services.AddScoped<CompetitionTeamService>();
 

@@ -46,6 +46,13 @@
         ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
         ViewData["NumberOfFinalSeries"] = competition.Value<int>("numberOfFinalSeries");
         ViewData["CompetitionType"] = competition.Value<string>("competitionType") ?? "Precision";
+
+        // Nuvarande val för "stäng självanmälan när startlistan publiceras". Publiceringsdialogen
+        // förkryssar rutan ur detta vid en OMpublicering, så en liten redigering + Publicera aldrig
+        // tyst slår på en spärr arrangören medvetet stängt av. Läses här för alla tre grenarnas
+        // startliste-partialer; se StartListRegistrationGate.
+        ViewData["CloseRegistrationOnStartList"] =
+            competition.Value<bool>(HpskSite.Services.RegistrationGate.StartListRegistrationGate.PropertyAlias);
     }
 
     // Check authorization

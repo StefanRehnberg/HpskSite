@@ -1,0 +1,148 @@
+@*
+    Publiceringsdialogen för startlistor/patrullistor — EN, delad av Precision, Springskytte och
+    Fältskytte. Den ersätter tre `confirm()`-anrop som sa olika saker om samma handling.
+
+    Varför den finns: publiceringen är det ögonblick då skyttarnas startnummer blir ett löfte. Efter
+    den punkten är en självanmälan som landar på tävlingssidan en anmälan ingen har placerat, och den
+    enda knapp en arrangör tillförlitligt hittar på Startlistor-fliken är "Skapa ny startlista" — som
+    numrerar om alla. Kryssrutan här stänger självanmälan så att efteranmälan i stället går via
+    Anmälningar → Åtgärder → Anmäl och betala, som lägger skytten sist i valt skjutlag utan att röra
+    någon annans nummer.
+
+    ⚠️ FÖRVALT PÅ, men bara vid FÖRSTA publiceringen av listan. Vid en ompublicering speglar rutan
+    det arrangören redan valt — annars skulle en liten redigering och ett nytt Publicera tyst slå på
+    en spärr som arrangören medvetet stängt av. Tyst automatik är precis det som ger
+    "min anmälan är borta"-mejl.
+
+    ⚠️ Exporteras med `window.x = x`, inte via hoisting. En `async function`-deklaration inuti ett
+    block läcker INTE till global scope (Annex B täcker bara vanliga funktioner), och den fällan har
+    redan kostat en felsökningsrunda på samlingsfakturapartialerna.
+*@
+@*
+    ⚠️ Dubbelinkluderingsspärren går via Context.Items, inte ViewData: Html.PartialAsync ger
+    partialen en KOPIA av ViewData, så en flagga satt här syns inte hos nästa anropare — och två
+    modaler med samma id gör den andra död för getElementById.
+*@
+@if (!Context.Items.ContainsKey("_publishStartListDialogRendered"))
+{
+    Context.Items["_publishStartListDialogRendered"] = true;
+
+    @* Hoisted ur JS-uttrycket nedan: mönstermatchning direkt i ett @@(...)-uttryck är en
+       balanseringsrisk i Razor, och felet blir ett UmbracoCompilationException utan meddelande. *@
+    var currentlyClosed = ViewData["CloseRegistrationOnStartList"] is true;
+
+    <div class="modal fade" id="hpskPublishStartListModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="hpskPublishDlgTitle">Publicera startlistan</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="hpskPublishDlgBody" class="mb-3"></p>
+
+                    <div class="form-check" id="hpskPublishDlgCloseWrap">
+                        <input class="form-check-input" type="checkbox" id="hpskPublishDlgClose" checked>
+                        <label class="form-check-label" for="hpskPublishDlgClose">
+                            <strong>Stäng självanmälan på tävlingssidan</strong>
+                        </label>
+                        <div class="form-text">
+                            Skyttar kan då inte anmäla sig själva, även om sista anmälningsdag inte har passerat.
+                            De ser i stället att de kan kontakta dig eller anmäla sig på plats.
+                            <br>
+                            Du lägger till en efteranmäld under <strong>Anmälningar → Åtgärder → Anmäl och betala</strong>
+                            — hen hamnar sist i det skjutlag du väljer och ingen annans startnummer ändras.
+                            <br>
+                            Laganmälan och stafett påverkas inte.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-success" id="hpskPublishDlgConfirm">
+                        <i class="bi bi-check-circle me-1"></i>Publicera
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Tävlingens nuvarande "stäng självanmälan"-inställning, satt i CompetitionManagement.cshtml.
+    // Bor här så att alla tre grenarnas partialer får den från ETT ställe — annars hade den behövt
+    // upprepas i var och en, och den som glömdes hade tyst förkryssat rutan fel vid ompublicering.
+    window.hpskCloseRegistrationCurrent = @(currentlyClosed ? "true" : "false");
+
+    (function () {
+        if (window.hpskAskPublishStartList) return;
+
+        var resolver = null;
+
+        function settle(value) {
+            var r = resolver;
+            resolver = null;
+            if (r) r(value);
+        }
+
+        /**
+         * @@param {object} opts
+         *   title            – dialogrubrik
+         *   body             – förklarande text (ren text, inte HTML)
+         *   confirmLabel     – knapptext
+         *   askClose         – false döljer kryssrutan helt (t.ex. avpublicering)
+         *   alreadyPublished – true = ompublicering; rutan speglar då `currentlyClosed`
+         *   currentlyClosed  – nuvarande lagrat värde, används bara vid ompublicering
+         * @@returns {Promise<{proceed:boolean, close:(boolean|null)}>}
+         *   close är null när kryssrutan inte visades — servern lämnar då inställningen orörd.
+         */
+        window.hpskAskPublishStartList = function (opts) {
+            opts = opts || {};
+            var el = document.getElementById('hpskPublishStartListModal');
+            if (!el || !window.bootstrap) {
+                // Ingen dialog tillgänglig: fall tillbaka på ett rakt confirm och rör INTE
+                // inställningen. Att gissa "stäng" här vore att fatta arrangörens beslut åt hen.
+                return Promise.resolve({ proceed: window.confirm(opts.body || 'Publicera startlistan?'), close: null });
+            }
+
+            document.getElementById('hpskPublishDlgTitle').textContent = opts.title || 'Publicera startlistan';
+            document.getElementById('hpskPublishDlgBody').textContent = opts.body || '';
+
+            var confirmBtn = document.getElementById('hpskPublishDlgConfirm');
+            confirmBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>' + (opts.confirmLabel || 'Publicera');
+
+            var wrap = document.getElementById('hpskPublishDlgCloseWrap');
+            var box = document.getElementById('hpskPublishDlgClose');
+            var askClose = opts.askClose !== false;
+            // ⚠️ d-none, INTE .hidden: webbläsarens [hidden]{display:none} har lägre specificitet än
+            // Bootstraps .form-check{display:block}, så elementet hade blivit kvar på skärmen.
+            wrap.classList.toggle('d-none', !askClose);
+            // Förvalt PÅ vid första publiceringen; vid ompublicering speglas arrangörens val.
+            box.checked = askClose ? (opts.alreadyPublished ? !!opts.currentlyClosed : true) : false;
+
+            var modal = bootstrap.Modal.getOrCreateInstance(el);
+
+            return new Promise(function (resolve) {
+                resolver = resolve;
+
+                function onConfirm() {
+                    cleanup();
+                    modal.hide();
+                    settle({ proceed: true, close: askClose ? box.checked : null });
+                }
+                function onHidden() {
+                    cleanup();
+                    settle({ proceed: false, close: null });
+                }
+                function cleanup() {
+                    confirmBtn.removeEventListener('click', onConfirm);
+                    el.removeEventListener('hidden.bs.modal', onHidden);
+                }
+
+                confirmBtn.addEventListener('click', onConfirm);
+                el.addEventListener('hidden.bs.modal', onHidden);
+                modal.show();
+            });
+        };
+    })();
+    </script>
+}

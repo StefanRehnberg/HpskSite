@@ -100,6 +100,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public int CompetitionId { get; set; }
         public bool Publish { get; set; }
+
+        /// <summary>
+        /// Stänga självanmälan på tävlingssidan i samma veva? Null = klienten sa ingenting, och då
+        /// lämnas inställningen orörd. Se <c>StartListRegistrationGate</c>.
+        /// </summary>
+        public bool? CloseRegistration { get; set; }
     }
 
     public class SaveMergeConfigRequest

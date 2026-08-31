@@ -9,6 +9,11 @@
    needs it and cannot be forgotten when the partial is added to a new surface. *@
 @await Html.PartialAsync("_HtmlEscape")
 
+@* Delad publiceringsdialog (kryssrutan "stäng självanmälan"). Inkluderas av partialen själv, inte
+   av värdsidan — samma regel som _HtmlEscape, så den inte kan glömmas när partialen läggs på en ny
+   yta. Spärrar mot dubbelinkludering internt. *@
+@await Html.PartialAsync("_PublishStartListDialog")
+
 <!-- Flatpickr Date/Time Picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -268,8 +273,14 @@
             eftersom skyttar redan kan ha planerat utifrån de publicerade tiderna.
         </p>
         <hr>
+        @* Pekade tidigare på knappen "Lägg till efteranmäld" här på fliken. Den knappen skapade bara
+           en RAD i startlistan — ingen anmälan, ingen avgift — så texten skickade funktionären till
+           den ena vägen som gav en gratisskytt. Den pekar nu på registreringsbordet, som gör båda
+           delarna. *@
         <p class="mb-0 small">
-            <strong>För att lägga till efteranmälningar:</strong> använd <em>Lägg till efteranmäld</em> — skytten placeras sist i valt skjutlag och <strong>ingen annan får nytt startnummer</strong>. Startlistan publiceras om automatiskt.
+            <strong>För att lägga till en efteranmäld:</strong> gå till fliken <em>Anmälningar</em> →
+            <em>Åtgärder</em> → <em>Anmäl och betala</em>. Skytten får en anmälan och en faktura, och placeras
+            sist i det skjutlag du väljer — <strong>ingen annan får nytt startnummer</strong>.
         </p>
     </div>
     }
@@ -336,18 +347,20 @@
 
             <!-- Action Buttons -->
             <div class="d-flex justify-content-end mb-3 flex-wrap gap-2">
-                @* ⚠️ RÄTT VÄG FÖRST. En efteranmäld skytt ska läggas TILL i den
-                   befintliga listan — AddShooterToStartList lägger hen sist i valt
-                   skjutlag, rör inga andras positioner och publicerar om. Att i
-                   stället generera om listan ger alla andra NYA startnummer, och det
-                   var precis vad som hände på tävlingen: funktionären hittade bara
-                   "Skapa ny startlista".
+                @* ⚠️ HÄR SATT "Lägg till efteranmäld", och den är BORTTAGEN 2026-08-31 — den var en
+                   fälla, inte en genväg. Den anropade AddShooterToStartList, som bara skriver en RAD
+                   I STARTLISTAN: ingen anmälan skapades, ingen avgift fakturerades. Skytten stod på
+                   listan, dök upp som "på listan utan anmälan" i täckningspanelen, och sköt gratis.
+                   Att den var placerad först och hette något som lät rätt gjorde den till den väg
+                   funktionären naturligt tog.
 
-                   Vägen fanns, men tre skärmar bort (Redigera → sök → lägg till) och
-                   bara omnämnd i en varningstext. Nu är den en egen knapp. *@
-                <button class="btn btn-primary" id="addLateShooterBtn" onclick="openAddLateShooter()">
-                    <i class="bi bi-person-plus me-1"></i>Lägg till efteranmäld
-                </button>
+                   RÄTT VÄG för en efteranmäld: Anmälningar → Åtgärder → Anmäl och betala. Den skapar
+                   anmälan OCH faktura och lägger skytten sist i valt skjutlag via
+                   AssignWalkInToStartListTeam — inga andras startnummer ändras. Samma resultat på
+                   startlistan, men skytten finns också i tävlingens bokföring.
+
+                   Endpointen AddShooterToStartList är KVAR och används av redigeraren nedan, där den
+                   är rätt verktyg: att placera en REDAN anmäld skytt som saknar plats. *@
                 <button class="btn btn-outline-info" onclick="openStartListEditor(window.currentStartListId)">
                     <i class="bi bi-pencil-square me-1"></i>Redigera
                 </button>
@@ -1169,21 +1182,32 @@ function updateStartListStatus(isOfficial) {
 }
 
 // Publish start list (mark as official)
+// Dialogen är delad med Springskytte och Fältskytte (_PublishStartListDialog) och bär kryssrutan
+// "stäng självanmälan". `alreadyPublished` är false här: Publicera-knappen syns bara när listan
+// INTE är publicerad, så det här är alltid en första publicering och rutan ska vara förkryssad.
 function publishStartList() {
-    if (!confirm('Är du säker på att du vill publicera startlistan?\n\nNär den är publicerad kommer skyttar att planera baserat på tiderna.\nÄndringar efter publicering bör endast göras manuellt via "Redigera" knappen.')) {
-        return;
-    }
-
-    toggleStartListStatus(window.currentStartListId, 'Preliminary', true);
+    window.hpskAskPublishStartList({
+        title: 'Publicera startlistan',
+        body: 'När startlistan är publicerad planerar skyttarna efter tiderna. Ändra den därefter via "Redigera" — att generera om listan ger alla nya startnummer.',
+        confirmLabel: 'Publicera',
+        alreadyPublished: false,
+        currentlyClosed: window.hpskCloseRegistrationCurrent === true
+    }).then(function (res) {
+        if (!res.proceed) return;
+        toggleStartListStatus(window.currentStartListId, 'Preliminary', true, res.close);
+    });
 }
 
 // Unpublish start list (mark as preliminary)
+// ⚠️ Ingen kryssruta här, och `close` skickas som null. Grinden är HÄRLEDD (arrangörens val OCH en
+// publicerad lista), så avpubliceringen öppnar anmälan igen av sig själv — och att nollställa valet
+// här skulle radera arrangörens inställning som sidoeffekt av en tillfällig avpublicering.
 function unpublishStartList() {
-    if (!confirm('Är du säker på att du vill återställa startlistan till preliminär status?\n\nDetta kan förvirra skyttar som redan har sett den publicerade versionen.')) {
+    if (!confirm('Är du säker på att du vill återställa startlistan till preliminär status?\n\nDetta kan förvirra skyttar som redan har sett den publicerade versionen.\n\nSjälvanmälan öppnas igen om den stängdes vid publiceringen.')) {
         return;
     }
 
-    toggleStartListStatus(window.currentStartListId, 'Official', false);
+    toggleStartListStatus(window.currentStartListId, 'Official', false, null);
 }
 
 // Open start list in new tab
@@ -1227,7 +1251,9 @@ function printStartList(url) {
 }
 
 // Simplified toggle function for single-list architecture
-function toggleStartListStatus(startListId, currentStatus, newIsPublished) {
+// closeRegistration: true/false = arrangörens val i publiceringsdialogen, null/undefined = rör inte
+// inställningen (servern lämnar den orörd när fältet är null).
+function toggleStartListStatus(startListId, currentStatus, newIsPublished, closeRegistration) {
     // Get anti-forgery token
     const token = $('input[name="__RequestVerificationToken"]').val() ||
                   $('input[name="__RequestVerificationToken"]:first').val() ||
@@ -1247,13 +1273,17 @@ function toggleStartListStatus(startListId, currentStatus, newIsPublished) {
         },
         body: JSON.stringify({
             startListId: startListId,
-            isPublished: newIsPublished
+            isPublished: newIsPublished,
+            closeRegistration: (closeRegistration === true || closeRegistration === false) ? closeRegistration : null
         })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Status har uppdaterats.');
+            if (closeRegistration === true || closeRegistration === false) {
+                window.hpskCloseRegistrationCurrent = closeRegistration;
+            }
             // Refresh the start list display
             loadStartLists();
         } else {
@@ -1329,28 +1359,12 @@ let editorModal = null;
 // Track if changes were made in the editor
 let editorHasChanges = false;
 
-// Open the start list editor modal
-// Genväg: öppna redigeraren och gå direkt till "lägg till skytt".
-// ⚠️ Modalen måste vänta på att konfigurationen är laddad — skjutlagsväljaren och
-// klasslistan byggs ur currentStartListConfig, och utan den öppnas en tom dialog
-// som ser trasig ut. Därför pollas den i stället för att antas klar.
-function openAddLateShooter() {
-    openStartListEditor(window.currentStartListId);
-    let waited = 0;
-    const tick = setInterval(() => {
-        waited += 150;
-        if (currentStartListConfig && currentStartListConfig.teams) {
-            clearInterval(tick);
-            openAddShooterModal();
-        } else if (waited > 8000) {
-            clearInterval(tick);
-            // Redigeraren står kvar öppen — funktionären kan gå den vanliga vägen
-            // därifrån, i stället för att få en tom dialog eller ingenting.
-            showAlert('warning', 'Kunde inte öppna tilläggsdialogen automatiskt. Använd "Lägg till skytt" i redigeraren.');
-        }
-    }, 150);
-}
+// ⚠️ openAddLateShooter() är borttagen tillsammans med sin knapp — se kommentaren vid
+// knappraden ovan. Den hoppade direkt in i "lägg till skytt", som bara skriver en rad i
+// startlistan utan att skapa anmälan eller avgift. Återinför den inte; en efteranmäld
+// går via Anmälningar → Åtgärder → Anmäl och betala.
 
+// Open the start list editor modal
 function openStartListEditor(startListId) {
     console.log('Opening editor for start list:', startListId);
     window.currentStartListId = startListId;

@@ -6,6 +6,10 @@
  * or the cog in each card header) so the list cards stay clean and un-intimidating.
  *@
 
+@* Delad publiceringsdialog (kryssrutan "stäng självanmälan"). Inkluderas av partialen själv, samma
+   regel som _HtmlEscape. Spärrar mot dubbelinkludering internt. *@
+@await Html.PartialAsync("_PublishStartListDialog")
+
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
 }
@@ -1058,6 +1062,27 @@ function springOnSettingsHidden() {
 async function springToggleOfficial(tempId, makeOfficial) {
     const card = springLocalCards.find(c => c.tempId === tempId);
     if (!card || !card.nodeId) return;
+
+    // ⚠️ Springskytte publicerar EN lista i taget (per vapenklass/dag). Frågan om att stänga
+    // självanmälan ställs därför bara när den FÖRSTA listan blir officiell — annars hade arrangören
+    // fått samma dialog fem gånger, och den femte hade ingen läst. Är någon lista redan officiell är
+    // grinden redan avgjord; `close` lämnas null och servern rör inte inställningen.
+    let closeRegistration = null;
+    if (makeOfficial) {
+        const anyAlreadyOfficial = springLocalCards.some(c => c.nodeId && c.isOfficial && c.tempId !== tempId);
+        if (!anyAlreadyOfficial) {
+            const res = await window.hpskAskPublishStartList({
+                title: 'Publicera startlistan',
+                body: 'Startlistan blir officiell och synlig för skyttarna, som planerar efter tiderna.',
+                confirmLabel: 'Publicera',
+                alreadyPublished: false,
+                currentlyClosed: window.hpskCloseRegistrationCurrent === true
+            });
+            if (!res.proceed) return;
+            closeRegistration = res.close;
+        }
+    }
+
     try {
         const r = await fetch('/umbraco/surface/Springskytte/SetSpringskytteStartListOfficial', {
             method: 'POST',
@@ -1065,10 +1090,14 @@ async function springToggleOfficial(tempId, makeOfficial) {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
             },
-            body: JSON.stringify({ competitionId: parseInt(springCompId, 10), nodeId: card.nodeId, isOfficial: makeOfficial })
+            body: JSON.stringify({ competitionId: parseInt(springCompId, 10), nodeId: card.nodeId, isOfficial: makeOfficial, closeRegistration: closeRegistration })
         });
         const d = await r.json();
-        if (d.success) { card.isOfficial = makeOfficial; springRenderCards(); }
+        if (d.success) {
+            card.isOfficial = makeOfficial;
+            if (closeRegistration === true || closeRegistration === false) window.hpskCloseRegistrationCurrent = closeRegistration;
+            springRenderCards();
+        }
         else alert(d.message || 'Kunde inte ändra status.');
     } catch (e) { alert('Ett fel uppstod.'); }
 }

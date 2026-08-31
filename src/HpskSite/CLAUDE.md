@@ -1841,6 +1841,82 @@ startlist-coverage 27/27, dnsdnf-ui 13/13, row-action-menus 60/60, action-menus-
 
 Adds C# → full rebuild. No SQL, no doctype property.
 
+### Publicerad startlista kan stänga självanmälan — och "Lägg till efteranmäld" är borta (2026-08-31)
+
+**Problemet Stefan beskrev:** en skytt dyker upp oanmäld strax före start. Anmäler hen sig själv på
+tävlingssidan hamnar anmälan utanför den redan genererade startlistan, och den enda knapp en
+funktionär tillförlitligt hittar på Startlistor-fliken är **"Skapa ny startlista"** — som ger alla
+andra NYA startnummer.
+
+**Rätt väg fanns redan och är oförändrad:** Anmälningar → Åtgärder → **Anmäl och betala**. Den
+skapar anmälan OCH faktura, och lägger skytten sist i valt skjutlag via
+`AssignWalkInToStartListTeam` (Fältskytte: patrullväljaren). Ingen annans nummer rörs.
+
+**⚠️ "Lägg till efteranmäld" på Startlistor-fliken är BORTTAGEN — den var en fälla, inte en
+genväg.** Den anropade `AddShooterToStartList`, som bara skriver en RAD i startlistan: ingen
+anmälan, ingen avgift. Skytten stod på listan, dök upp som "på listan utan anmälan" i
+täckningspanelen, och sköt gratis. Att knappen låg först och hette något som lät rätt gjorde den
+till den väg funktionären naturligt tog. **Varningstexten ovanför pekade dessutom i klartext på
+den** och överlevde en första borttagning av själva knappen — en instruktion till en knapp som inte
+fanns; sviten assertar därför på TEXTEN och inte bara på `#addLateShooterBtn`.
+**Endpointen är kvar** och används av redigeraren, där den är rätt verktyg: att placera en REDAN
+anmäld skytt som saknar plats.
+
+**Grinden: `Services/RegistrationGate/StartListRegistrationGate`.**
+- **⚠️ HÄRLEDD, aldrig speglad:** `(arrangörens val) AND (en startlista är publicerad just nu)`,
+  utvärderat vid varje läsning. En första utsåga lagrade en enda "anmälan stängd"-boolean som
+  vändes vid publicering och nollställdes vid avpublicering — det är en spegel, och speglar i den
+  här kodbasen ruttnar så fort en av två skrivare missas (jfr `scoringMode`-driften). Härlett
+  betyder att en avpublicering öppnar anmälan igen utan en andra skrivning att komma ihåg, och att
+  Springskyttes publicering PER VAPENKLASS inte kan lämna flaggan påstående "öppen" medan en lista
+  fortfarande är publik.
+- **Publicerad lista** läses ur den PUBLICERADE cachen: `faltskyttePatrolsPublished` (Fältskytte,
+  flagga på tävlingen) eller någon `precisionStartList`-barnnod med `isOfficialStartList`
+  (precisionsfamiljen OCH Springskytte, som delar doctype). Ett draftvärde betyder att listan inte
+  är publik, och en grind som slog till på det hade stängt anmälan för en lista ingen kan se.
+- **Fail-open** vid uppslagsfel: en skytt som inte kan anmäla sig är ett supportärende om en trasig
+  tävling; en som slinker igenom är en rad täckningspanelen redan flaggar.
+
+**Valet görs i publiceringsdialogen, inte automatiskt.** `Views/Partials/_PublishStartListDialog.cshtml`
+är EN dialog delad av alla tre grenarna (den ersatte tre `confirm()` som sa olika saker om samma
+handling) och inkluderas av startliste-partialerna SJÄLVA, samma regel som `_HtmlEscape`.
+- **Förkryssad vid FÖRSTA publiceringen, speglar tidigare val vid ompublicering.** Annars hade en
+  liten redigering + Publicera tyst slagit på en spärr arrangören medvetet stängt av.
+- `CloseRegistration` är `bool?` på alla tre publish-DTO:erna. **Null = rör inte inställningen** —
+  en äldre klient, och avpubliceringen, får aldrig nollställa valet som sidoeffekt.
+- **Springskytte frågar bara när den FÖRSTA listan blir officiell** (den publicerar en per
+  vapenklass/dag) — annars hade arrangören fått samma dialog fem gånger.
+- Fältskytte skriver valet på den `Save()` metoden ändå gör; Precision/Springskytte går via
+  `PersistChoice`, som **rapporterar en misslyckad `Publish()`** i stället för att låta flaggan bli
+  kvar på draften medan arrangören tror att anmälan är stängd.
+
+**⚠️ Funktionärer undantas på BÅDA sidor.** Servern (`RegisterForCompetition`, via
+`HasCompetitionStaffAccessAsync` som bär både klubb- och kretsvärdad tävling) och vyn
+(`canManageCompetition`). Undantogs bara servern hade undantaget varit onåbart från gränssnittet —
+arrangören anmäler rutinmässigt någon annan via samma modal (`targetMemberId`). **Vyns predikat
+måste förbli en DELMÄNGD av serverns**, annars visas en knapp vars anrop nekas; det är det idag
+(samma roller minus Skjutledare). Funktionären får en gul ruta om att skyttarna inte ser knappen.
+
+**Serverkontrollen är inte valfri.** Skytten har ofta tävlingssidan öppen i en flik medan
+startlistan publiceras. Den ligger FÖRE all klassvalidering, så en nekad begäran skriver ingenting.
+Registreringsbordets egen väg är en annan endpoint och berörs inte.
+
+**Lag/stafett är medvetet UTANFÖR grinden** — de ligger inte i den individuella startlistan och har
+sin egen frist.
+
+Verifierat 29/29 `hpsk-verify/startlist-closes-registration-verify.mjs`. **⚠️ Läs svitens huvud innan
+den ändras — tre fällor kostade en körning:** sidan tar `?competitionId=`, INTE `?c=` (fel namn ger
+200 + tävlingsVÄLJAREN, och varje "finns inte"-påstående blir grönt på en sida som aldrig visade
+funktionen); två inloggningar i samma `BrowserContext` delar cookie, så funktionären loggades ut av
+skytten och servern svarade "inte behörighet" — vilket såg ut som ett produktfel; och
+`GetStartLists` returnerar `status: "Official"`, inte `isOfficial`, så baseline blev `undefined` och
+återställningskontrollen jämförde `undefined` med `undefined` — grön och helt utan innebörd. En
+släckt Anmäl-knapp betyder dessutom inte att grinden slog till: sista anmälningsdag släcker den
+också, och sviten skiljer orsakerna åt. **Steg 4–8 SKIPPAR tills doctype-egenskapen finns** — en
+grön körning utan den vore ett påstående som inte kan falla.
+
+Adds C# → full ombyggnad. Ingen SQL. **En doctype-egenskap** (se listan ovan).
+
 ### Tävlingar-sidan: hitta en viss lokal tävling (2026-08-26)
 
 Klagomål: "rörigt att hitta en viss lokal tävling". **Volymen var inte huvudorsaken** — mätt i dev
@@ -2721,6 +2797,7 @@ Navigate to **Members → Member Groups**:
 - **club**: add `receiptEmail` Textstring property (optional, label "E-post på kvitto"). The email address shown on the printable Kvitto; falls back to `contactEmail` when empty. Surfaced in the club create/edit modal + club Inställningar tab. Added 2026-06-11.
 - **regionalPage**: add `orgNumber`, `address`, `city`, `postalCode` Textstring properties (all optional). Org. number + postal address for region-hosted competitions; surfaced in the region edit modal (`RegionalEditModal.cshtml`) and printed on receipts for region-hosted comps (clubId unset → organizer resolved via `regionalFederation`→`regionCode`). Missing properties = silent no-op + blank receipt rows. Added 2026-06-11.
 - **regionalPage**: add `receiptEmail` Textstring property (optional, label "E-post på kvitto"). Same role as the club one — shown on the Kvitto for region-hosted comps, falls back to `contactEmail`. Surfaced in the region edit modal + regional Inställningar tab. Added 2026-06-11.
+- **competition**: add `closeRegistrationOnStartList` True/False property (optional, default false, label "Stäng självanmälan när startlistan publiceras"). Arrangörens val i publiceringsdialogen. **Default false = deploy ändrar ingenting för en tävling vars startlista redan är publicerad** — det är avsiktligt, inte försiktighet: en default-on hade stängt anmälan på levande tävlingar i deploy-ögonblicket utan att någon fick veta det. Utan egenskapen är `SetValue` en tyst no-op, så publiceringen **vägrar och namnger egenskapen** i stället för att rapportera en sparning som inte hände. Added 2026-08-31.
 - **competition**: add `teamResultSeriesCount` Integer property (optional, default 0, label "Antal serier i lagresultat"). How many series count toward a team's total — surfaced next to "Tillåt laganmälan" in the competition wizard + edit modals. 0/empty = auto (defaults to the qualification series count = `numberOfSeriesOrStations − numberOfFinalSeries`), so a 7+3 finals comp counts only the 7 qualifying series without any config. Set a value to override. Read by `CompetitionTeamController.GetTeamResultSeriesCount`. **The team-results-show-0 fix does NOT depend on this property** (the qualification default handles it); the property only adds explicit override. Missing property = silent no-op (auto default used). Added 2026-07-22.
 
 ### Märken (Pistolskyttemärket) ✅ Phase 1 (2026-05-31)

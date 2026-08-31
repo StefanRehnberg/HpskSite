@@ -595,7 +595,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         NotifyStartListPublished(competitionId, isRepublish);
                     }
 
-                    var actionText = request.IsPublished ? "publicerad" : "avpublicerad";
+                    // The organiser's answer to "stäng självanmälan?" from the publish dialog.
+                    // Deliberately AFTER the list itself is published: the list going public is the
+                    // thing that must not fail, and the gate is derived (choice AND a published list),
+                    // so a failure here leaves registration open rather than closed-by-accident.
+                    var gateMessage = ApplyCloseRegistrationChoice(competitionId, request.CloseRegistration);
+
+                    // "har publicerad" var grammatiskt fel och syntes i varje bekräftelse.
+                    var actionText = request.IsPublished ? "publicerats" : "avpublicerats";
+                    if (gateMessage != null)
+                    {
+                        // Still success:true — the start list DID publish. Reporting a failure here
+                        // would have the organiser press Publicera again to fix an unrelated setting.
+                        return Json(new { success = true, message = $"Startlistan har {actionText}. {gateMessage}" });
+                    }
                     return Json(new { success = true, message = $"Startlistan har {actionText}." });
                 }
                 else
@@ -611,6 +624,34 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 _logger.LogError(ex, "Error {Action} start list {StartListId}", 
                                request.IsPublished ? "publishing" : "unpublishing", request.StartListId);
                 return Json(new { success = false, message = "Ett oväntat fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Persists the publish dialog's "stäng självanmälan" checkbox onto the competition.
+        ///
+        /// Resolved from the service provider rather than the constructor, for the same reason
+        /// <see cref="NotifyStartListPublished"/> is: this controller is already large and neither
+        /// call is on a path that must have the dependency to do its real job.
+        /// </summary>
+        /// <returns>A message to append to the success text, or null when there is nothing to say.</returns>
+        private string? ApplyCloseRegistrationChoice(int competitionId, bool? closeRegistration)
+        {
+            if (closeRegistration == null || competitionId <= 0) return null;
+            try
+            {
+                var gate = HttpContext?.RequestServices
+                    .GetService(typeof(HpskSite.Services.RegistrationGate.StartListRegistrationGate))
+                    as HpskSite.Services.RegistrationGate.StartListRegistrationGate;
+                if (gate == null) return null;
+
+                var (ok, message) = gate.PersistChoice(competitionId, closeRegistration);
+                return ok ? null : message;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not persist close-registration choice for competition {CompetitionId}", competitionId);
+                return "Inställningen för anmälan kunde inte sparas — kontrollera den i tävlingens inställningar.";
             }
         }
 
@@ -3466,6 +3507,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
     {
         public int StartListId { get; set; }
         public bool IsPublished { get; set; }
+
+        /// <summary>
+        /// Stänga självanmälan på tävlingssidan i samma veva? Null = klienten sa ingenting (äldre
+        /// klient, eller en yta som inte frågar), och då lämnas inställningen orörd — den får aldrig
+        /// nollställas som sidoeffekt av en publicering. Se <c>StartListRegistrationGate</c> för
+        /// varför grinden är ett VAL vid publicering och inget som sker automatiskt.
+        /// </summary>
+        public bool? CloseRegistration { get; set; }
     }
 
     public class GenerateFinalsStartListRequest

@@ -3118,6 +3118,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 && competition.GetValue<bool>("faltskyttePatrolsPublished");
 
             competition.SetValue("faltskyttePatrolsPublished", request.Publish);
+
+            // The publish dialog's "stäng självanmälan" checkbox rides along on the save this method
+            // already does — a second Save()+Publish() of the same node would only bump the version.
+            // A missing doctype property is reported rather than silently no-op'd (SetValue on a
+            // property that does not exist writes nothing and returns nothing).
+            var gatePropertyMissing = !HpskSite.Services.RegistrationGate.StartListRegistrationGate
+                .SetChoice(competition, request.CloseRegistration);
+
             _contentService.Save(competition);
             var pub = _contentService.Publish(competition, new[] { "*" }, -1);
 
@@ -3157,6 +3165,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 {
                     _logger.LogWarning(ex, "Patrol publish notification failed for comp {CompetitionId}", request.CompetitionId);
                 }
+            }
+
+            if (gatePropertyMissing)
+            {
+                return Json(new
+                {
+                    success = true,
+                    published = request.Publish,
+                    message = $"Patrullistan publicerades, men anmälan kunde inte stängas: egenskapen '{HpskSite.Services.RegistrationGate.StartListRegistrationGate.PropertyAlias}' saknas på dokumenttypen competition. Lägg till den (True/False) i backoffice."
+                });
             }
 
             return Json(new { success = true, published = request.Publish });
