@@ -832,3 +832,80 @@
     outline: 3px solid var(--bs-focus-ring-color, rgba(13, 110, 253, .5));
     outline-offset: 2px;
 }
+
+/* ==========================================================================
+   /competitionmanagement pa smal skarm
+
+   MATT pa 390 px fore fixen: dokumentets scrollWidth 535 px mot en viewport pa
+   390 -- alltsa 145 px SIDLED-SKROLL for hela sidan, orsakat av rubrikens
+   knapprad (287 px, flex-wrap: nowrap). Rubrikraden var samtidigt 156 px hog och
+   flikraden 124 px (den radbrot till tre rader). Det ar de tre matningarna
+   compmgmt-responsive-verify.mjs vaktar.
+   ========================================================================== */
+
+.cm-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    /* Det som saknades. Utan wrap tvingar knapparna ut dokumentbredden. */
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
+.cm-head-main { flex: 1 1 260px; min-width: 0; }
+
+.cm-eyebrow {
+    font-size: .6875rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    line-height: 1.2;
+}
+
+/* Tavlingens namn ar informationen; 'Tavlingshantering' ar kontext och sitter
+   i eyebrown ovanfor. Namnet far radbryta -- det ar ofta langt och att
+   trunkera det gor sidan svarare att identifiera. */
+.cm-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.cm-head-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+
+@media (min-width: 768px) {
+    .cm-title { font-size: 1.875rem; }
+    .cm-head-tools { justify-content: flex-end; }
+}
+
+/* Knapptexterna kortas pa smal skarm i stallen for att knapparna ska radbryta
+   till tre rader: 'Tillbaka till tavlingen' -> 'tavlingen',
+   'Redigera tavling' -> 'Redigera'. Ikonen bar resten av betydelsen. */
+@media (max-width: 575.98px) {
+    .cm-btn-long { display: none; }
+    .cm-head-tools .btn { font-size: .875rem; }
+}
+
+/* Flikraden: EN rad som skrollar i sig sjalv, i stallen for tre radbrutna
+   rader som trycker ner sidan. Skrollningen ar horisontell och inne i listan,
+   sa dokumentet blir inte bredare. */
+@media (max-width: 991.98px) {
+    #managementTabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    #managementTabs::-webkit-scrollbar { display: none; }
+    #managementTabs .nav-item { flex: 0 0 auto; }
+    #managementTabs .nav-link { white-space: nowrap; }
+}

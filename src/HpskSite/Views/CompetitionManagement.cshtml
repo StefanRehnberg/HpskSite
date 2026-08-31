@@ -445,35 +445,36 @@
 }
 
 <div class="container-fluid mt-4">
-    <!-- Header Section -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h1>
-                <i class="bi bi-gear me-2"></i>Tävlingshantering
-            </h1>
-            <p class="text-muted mb-0">
-                Hanterar: <strong>@(competition?.Value<string>("competitionName") ?? "Okänd tävling")</strong>
-            </p>
+    @* Sidhuvudet mätt på 390 px: knappraden var 287 px bred utan flex-wrap och
+       tvingade ut dokumentbredden till 535 px — HELA sidan skrollade i sidled för
+       att visa tre knappar. Rubrikraden blev samtidigt 156 px hög.
+
+       Nu: eyebrow + tävlingens namn som rubrik (tävlingens namn är information,
+       "Tävlingshantering" är kontext), och en knapprad som får radbryta.
+       Sidled-skroll och rubrikhöjd mäts av compmgmt-responsive-verify.mjs — lägg
+       inte tillbaka en nowrap-rad utan att den mätningen håller. *@
+    <div class="cm-head mb-3">
+        <div class="cm-head-main">
+            <div class="cm-eyebrow"><i class="bi bi-gear me-1"></i>Tävlingshantering</div>
+            <h1 class="cm-title">@(competition?.Value<string>("competitionName") ?? "Okänd tävling")</h1>
         </div>
-        <div class="d-flex flex-column align-items-end gap-2">
-            <div class="d-flex gap-2">
-                <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-outline-secondary">
-                    <i class="bi bi-arrow-left"></i> Tillbaka till tävlingen
+        <div class="cm-head-tools">
+            <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-outline-secondary" title="Tillbaka till tävlingen">
+                <i class="bi bi-arrow-left"></i> <span class="cm-btn-long">Tillbaka till </span>tävlingen
+            </a>
+            @if (canManageCompetition)
+            {
+                var isExternalComp = competition?.Value<bool>("isExternal") ?? false;
+                <a href="/tavlingsplanering?c=@competitionId" class="btn btn-outline-primary" title="Planera tävlingen — förberedelser och bemanning">
+                    <i class="bi bi-clipboard-check"></i> Planering
                 </a>
-                @if (canManageCompetition)
-                {
-                    var isExternalComp = competition?.Value<bool>("isExternal") ?? false;
-                    <a href="/tavlingsplanering?c=@competitionId" class="btn btn-outline-primary" title="Planera tävlingen — förberedelser och bemanning">
-                        <i class="bi bi-clipboard-check"></i> Planering
-                    </a>
-                    <button type="button" class="btn btn-outline-primary"
-                            onclick="openEditCompetitionModal(@competitionId, @(isExternalComp ? "true" : "false"), '@competitionType')">
-                        <i class="bi bi-pencil"></i> Redigera tävling
-                    </button>
-                }
-            </div>
+                <button type="button" class="btn btn-outline-primary"
+                        onclick="openEditCompetitionModal(@competitionId, @(isExternalComp ? "true" : "false"), '@competitionType')">
+                    <i class="bi bi-pencil"></i> Redigera<span class="cm-btn-long"> tävling</span>
+                </button>
+            }
             @* Funktionärsmeddelanden — the discipline's staff-screen partial mounts its message button
-               here (under the two buttons), so it sits with the page's top controls. *@
+               here, så den sitter med sidans toppkontroller. *@
             <div id="evtInboxMount"></div>
         </div>
     </div>
