@@ -607,25 +607,25 @@ window.populateSpringEditModal = function(comp) {
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
     const setCheck = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
 
-    setVal('springEdit_competitionName', comp.competitionName);
-    setVal('springEdit_venue', comp.venue);
+    // KATALOGDRIVEN IFYLLNAD (_CompetitionFieldMap). Ersätter ~20 handskrivna rader.
+    // Ett nytt fält i katalogen fylls härifrån automatiskt, och ett fält UTAN element
+    // rapporteras i stället för att tyst bli ingenting.
+    hpskPopulateFromCatalog('springEdit_', comp, {
+        type: 'Springskytte',
+        // ⚠ Dessa fylls av egen kod nedan och måste undantas, annars skriver drivern
+        // över dem: klubb/krets/serie sätts via dataset eftersom dropdownarna laddas
+        // asynkront, och beskrivningen ägs av CKEditor.
+        hanterasSeparat: ['clubId', 'regionalFederation', 'seriesId'],
+        defaults: { maxParticipants: 50 }
+    });
 
-    // Shooting-range picker — loads the currently linked range + the club's ranges (list/search/map).
+    // Skjutbaneväljaren är en sammansatt kontroll (Slot i katalogen) med egen laddning.
     if (typeof compRangeInit === 'function') compRangeInit('springEdit_', { compId: comp.id, clubId: comp.clubId });
-    setVal('springEdit_maxParticipants', comp.maxParticipants || 50);
-    setVal('springEdit_registrationFee', comp.registrationFee || 0);
-    setVal('springEdit_juniorRegistrationFee', comp.juniorRegistrationFee || 0);
-    setVal('springEdit_teamRegistrationFee', comp.teamRegistrationFee || 0);
-    setCheck('springEdit_allowTeams', comp.allowTeams);
+
+    // ⚠ Kryssrutan sätts av drivern, men onchange-handlaren måste anropas för hand —
+    // setChecked skickar inga events, precis som den gamla setCheck inte gjorde.
     springEditAllowTeamsChange();
-    setVal('springEdit_stafettRegistrationFee', comp.stafettRegistrationFee || 0);
-    setCheck('springEdit_allowStafett', comp.allowStafett);
     springEditAllowStafettChange();
-    setVal('springEdit_competitionDirector', comp.competitionDirector);
-    setVal('springEdit_contactEmail', comp.contactEmail);
-    setVal('springEdit_contactPhone', comp.contactPhone);
-    setVal('springEdit_swishNumber', comp.swishNumber);
-    setVal('springEdit_competitionScope', comp.competitionScope);
 
     // Description via CKEditor
     if (springEditDescEditor) {
@@ -638,18 +638,10 @@ window.populateSpringEditModal = function(comp) {
     // Delad (_DateInputHelpers). Den gamla kopian bar en guard vars else-gren tyst
     // matade in rå ISO när formateraren saknades — beroendet finns inte längre.
     const setDate = (id, dateStr, withTime) => hpskSetDateField(id, dateStr, withTime);
-    setDate('springEdit_competitionDate', comp.competitionDate, true);
-    setDate('springEdit_competitionEndDate', comp.competitionEndDate, false);
-    setDate('springEdit_registrationOpenDate', comp.registrationOpenDate, true);
-    setDate('springEdit_registrationCloseDate', comp.registrationCloseDate, true);
+    // (datumen fylls av katalogdrivningen — Date/DateTime i katalogen avgör om
+    //  klockslaget ska med, så de fyra raderna här var en andra sanning)
 
-    // Checkboxes
-    setCheck('springEdit_showLiveResults', comp.showLiveResults);
-    setCheck('springEdit_isAwardingStandardMedals', comp.isAwardingStandardMedals);
-    setCheck('springEdit_addToMenu', comp.addToMenu);
-    setCheck('springEdit_isClubOnly', comp.isClubOnly);
-    setVal('springEdit_subCompetitionName', comp.subCompetitionName || '');
-    setVal('springEdit_subCompetitionFee', comp.subCompetitionFee || 0);
+    // (kryssrutor och deltävlingsfält fylls av katalogdrivningen ovan)
     const springSubCompMode = comp.subCompetitionFeeMode || 'perClass';
     const springModePerClass = document.getElementById('springEdit_subCompFeeMode_perClass');
     const springModePerReg = document.getElementById('springEdit_subCompFeeMode_perRegistration');
@@ -1038,6 +1030,7 @@ function springEditSave() {
    2026-08-29. Partialen inkluderas av modalen sjalv sa den foljer med till varje
    yta som renderar den. Guardad mot dubbelinkludering. *@
 @await Html.PartialAsync("_DateInputHelpers")
+@await Html.PartialAsync("_CompetitionFieldMap")
 @await Html.PartialAsync("_CompetitionFormSave")
 @await Html.PartialAsync("_ModalSectionNav")
 <script>

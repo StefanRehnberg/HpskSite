@@ -4,7 +4,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using Umbraco.Cms.Core.Services;
+using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Common.Interfaces;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace HpskSite.CompetitionTypes.Precision.Services
@@ -16,10 +18,13 @@ namespace HpskSite.CompetitionTypes.Precision.Services
     public class PrecisionCompetitionEditService : ICompetitionEditService
     {
         private readonly IContentService _contentService;
+        private readonly ILogger<PrecisionCompetitionEditService>? _logger;
 
-        public PrecisionCompetitionEditService(IContentService contentService)
+        public PrecisionCompetitionEditService(IContentService contentService,
+                                               ILogger<PrecisionCompetitionEditService>? logger = null)
         {
             _contentService = contentService;
+            _logger = logger;
         }
 
         public async Task<CompetitionEditResult> SaveCompetitionAsync(int competitionId, Dictionary<string, object> fields)
@@ -304,60 +309,59 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// <summary>
         /// Map UI field names to Umbraco property aliases.
         /// </summary>
-        private string MapFieldNameToAlias(string fieldName)
+        /// <summary>
+        /// Fält som får sparas men INTE står i <see cref="CompetitionFieldCatalog"/> — de är
+        /// inte redigerbara formulärfält utan sätts av kod (systemflaggor, härledda värden,
+        /// och sammansatta konfigurationer som serialiseras till JSON).
+        /// </summary>
+        private static readonly HashSet<string> ExtraSparbaraFalt = new(StringComparer.OrdinalIgnoreCase)
         {
-            // Assuming field names match property aliases
-            // Adjust this if your Umbraco aliases differ from field names
-            return fieldName switch
-            {
-                "competitionName" => "competitionName",
-                "description" => "description",
-                "venue" => "venue",
-                "competitionDate" => "competitionDate",
-                "competitionEndDate" => "competitionEndDate",
-                "registrationOpenDate" => "registrationOpenDate",
-                "registrationCloseDate" => "registrationCloseDate",
-                "maxParticipants" => "maxParticipants",
-                "registrationFee" => "registrationFee",
-                "juniorRegistrationFee" => "juniorRegistrationFee",
-                "subCompetitionFee" => "subCompetitionFee",
-                "subCompetitionFeeMode" => "subCompetitionFeeMode",
-                "competitionDirector" => "competitionDirector",
-                "contactEmail" => "contactEmail",
-                "contactPhone" => "contactPhone",
-                "numberOfSeriesOrStations" => "numberOfSeriesOrStations",
-                "showLiveResults" => "showLiveResults",
-                "isActive" => "isActive",
-                "isClubOnly" => "isClubOnly",
-                "clubId" => "clubId",
-                "regionalFederation" => "regionalFederation",
-                "competitionManagers" => "competitionManagers",
-                "swishNumber" => "swishNumber",
-                "addToMenu" => "addToMenu",
-                "allowDualCClass" => "allowDualCClass",
-                "numberOfFinalSeries" => "numberOfFinalSeries",
-                "shootingClassIds" => "shootingClassIds",
-                "competitionScope" => "competitionScope",
-                "isAwardingStandardMedals" => "isAwardingStandardMedals",
-                "allowSelfReporting" => "allowSelfReporting",
-                "allowTeams" => "allowTeams",
-                "teamRegistrationFee" => "teamRegistrationFee",
-                "teamResultSeriesCount" => "teamResultSeriesCount",
-                "allowStafett" => "allowStafett",
-                "stafettRegistrationFee" => "stafettRegistrationFee",
-                // Fältskytte fields
-                "scoringMode" => "scoringMode",
-                "stationConfig" => "stationConfig",
-                "patrolSize" => "patrolSize",
-                "patrolIntervalMinutes" => "patrolIntervalMinutes",
-                "maxReshoots" => "maxReshoots",
-                "rollingStart" => "rollingStart",
-                "faltskytteSelfServiceResults" => "faltskytteSelfServiceResults",
-                "subCompetitionName" => "subCompetitionName",
-                // Direktplacering
-                "direktplaceringConfig" => "direktplaceringConfig",
-                _ => null
-            };
+            "isActive",
+            "competitionManagers",        // klienten skickar id-ARRAYEN under det här namnet
+            "patrolSize",
+            "patrolIntervalMinutes",
+            "direktplaceringConfig"
+        };
+
+        /// <summary>
+        /// Katalogfält som sätts på ANNAT håll och därför inte får skrivas här — annars
+        /// finns två skribenter till samma egenskap, med var sin konvertering.
+        /// </summary>
+        private static readonly HashSet<string> HanterasAnnorstades = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "rangeId",                    // CompetitionEditController läser och sätter den själv
+            "seriesId",                   // serien flyttas med Move EFTER sparningen
+            "competitionManagerIds"       // klienten omvandlar den till competitionManagers
+        };
+
+        /// <summary>
+        /// Vilka fält får skrivas, och till vilken egenskapsalias.
+        ///
+        /// ⚠️ HÄRLEDD UR KATALOGEN, inte handskriven. Det här var en FJÄRDE lista över samma
+        /// fältnamn — där varje rad mappade ett namn till sig självt — och `_ => null`
+        /// släppte tyst allt den inte kände igen. Glömdes ett nytt fält här sparades det
+        /// aldrig, utan felmeddelande. Det är det värsta stället att tappa något på:
+        /// användaren SER att fältet är ifyllt, och nästa öppning visar det tomt igen.
+        ///
+        /// Namn och alias är identiska i hela registret; skulle de någon gång skilja sig är
+        /// det katalogen som ska bära avvikelsen, inte en switch här.
+        /// </summary>
+        private string? MapFieldNameToAlias(string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(fieldName)) return null;
+            if (HanterasAnnorstades.Contains(fieldName)) return null;
+
+            if (CompetitionFieldCatalog.Find(fieldName) != null) return fieldName;
+            if (ExtraSparbaraFalt.Contains(fieldName)) return fieldName;
+
+            // ⚠️ SÄG IFRÅN. Ett okänt fält är antingen en klient som skickar skräp eller ett
+            // nytt fält någon glömt lägga i katalogen — och det andra fallet är en tyst
+            // dataförlust som annars bara upptäcks av den som undrar vart värdet tog vägen.
+            _logger?.LogWarning(
+                "SaveCompetition: fältet {Field} känns inte igen och SPARAS INTE. " +
+                "Lägg det i CompetitionFieldCatalog om det är ett redigerbart fält.",
+                fieldName);
+            return null;
         }
 
         /// <summary>

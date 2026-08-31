@@ -1,0 +1,168 @@
+@using HpskSite.CompetitionTypes.Common
+@*
+    KATALOGDRIVEN IFYLLNAD — payload → formulär, utan handskriven fältlista.
+
+    ⚠️ VARFÖR DEN FINNS. Varje modal bar en egen lista på ~30 rader av formen
+    "fält X i payloaden går in i element Y". Glöms ett fält i den ena listan fylls det
+    aldrig — och nästa sparning skriver tillbaka det TOMMA värdet. Tyst, och det är
+    samma familj som värdtömningen och den utgråade kryssrutan.
+
+    Nu itereras `CompetitionFieldCatalog` i stället, och elementets id HÄRLEDS
+    (`prefix + name`, se [[element-id-equals-prefix-plus-fieldname]]). Ett nytt fält i
+    katalogen fylls därför automatiskt i varje modal som har elementet.
+
+    ⚠️ VINSTEN ÄR INTE FÄRRE RADER, DET ÄR ATT TYSTNADEN FÖRSVINNER. Saknas ett element
+    för ett fält katalogen säger gäller grenen så RAPPORTERAS det
+    (`window.hpskLastPopulateReport`), i stället för att bli ingenting. Det är den
+    egenskapen `idlookup-null-verify` och `compedit-catalog-verify` hänger på.
+
+    ⚠️ SAMMANSATTA KONTROLLER RÖRS INTE. `FieldControl.Slot` är katalogens egen markering
+    för "egen markup, katalogen placerar den bara" — CKEditor-beskrivningen,
+    klassväljaren, skjutbaneväljaren, Fältskyttes konfigurationskoppling,
+    funktionärsväljaren. Att generalisera dem också är vad som hade gjort det här till
+    ett träsk (står redan i katalogens eget doc-kommentar). `Radio` hoppas över av ett
+    strukturellt skäl: flera element delar ett `name` och har alltså inget enskilt id.
+*@
+@{
+    var fieldMapIncluded = Context.Items.ContainsKey("hpskCompetitionFieldMapIncluded");
+    Context.Items["hpskCompetitionFieldMapIncluded"] = true;
+}
+@if (!fieldMapIncluded)
+{
+    @* Katalogen serialiseras ur C#-KÄLLAN. Ingen endpoint, ingen andra beskrivning som
+       kan drifta — samma objekt som compedit-catalog-verify jämför mot DOM:en. *@
+    <script>
+    window.HPSK_FIELD_CATALOG = [
+    @foreach (var f in CompetitionFieldCatalog.AllFieldNames)
+    {
+        var fld = CompetitionFieldCatalog.Find(f);
+        if (fld == null) { continue; }
+        <text>  { name: "@fld.Name", control: "@fld.Control", onlyFor: @Html.Raw(fld.OnlyFor == null ? "null" : System.Text.Json.JsonSerializer.Serialize(fld.OnlyFor)), notFor: @Html.Raw(fld.NotFor == null ? "null" : System.Text.Json.JsonSerializer.Serialize(fld.NotFor)) },
+    </text>
+    }
+    ];
+
+    (function () {
+        'use strict';
+
+        function appliesTo(f, type) {
+            var t = (type || '').toLowerCase();
+            var i;
+            if (f.onlyFor && f.onlyFor.length) {
+                var hit = false;
+                for (i = 0; i < f.onlyFor.length; i++) { if (f.onlyFor[i].toLowerCase() === t) hit = true; }
+                if (!hit) return false;
+            }
+            if (f.notFor && f.notFor.length) {
+                for (i = 0; i < f.notFor.length; i++) { if (f.notFor[i].toLowerCase() === t) return false; }
+            }
+            return true;
+        }
+
+        /**
+         * Fyller formuläret ur katalogen.
+         *
+         * @@param {string} prefix     modalens id-prefix, t.ex. 'edit_' eller 'springEdit_'
+         * @@param {Object} comp       payloaden från GetCompetitionData
+         * @@param {Object} opts
+         *   type            {string}   tävlingens gren; avgör vilka fält som gäller
+         *   hanterasSeparat {string[]} fältnamn modalen fyller med egen kod
+         *   defaults        {Object}   fältnamn -> värde när payloaden saknar det
+         *   tomOmNoll       {string[]} numeriska fält där 0 ska visas som TOMT
+         *
+         * @@returns {{satta: string[], saknade: string[], separata: string[]}}
+         */
+        function hpskPopulateFromCatalog(prefix, comp, opts) {
+            opts = opts || {};
+            var type = opts.type || '';
+            var separat = opts.hanterasSeparat || [];
+            var defaults = opts.defaults || {};
+            var tomOmNoll = opts.tomOmNoll || [];
+
+            var satta = [], saknade = [], separata = [], hoppade = [];
+
+            (window.HPSK_FIELD_CATALOG || []).forEach(function (f) {
+                if (!appliesTo(f, type)) return;
+
+                // Sammansatt kontroll eller radiogrupp: katalogen placerar, modalen fyller.
+                if (f.control === 'Slot' || f.control === 'Radio') { hoppade.push(f.name); return; }
+                if (separat.indexOf(f.name) !== -1) { separata.push(f.name); return; }
+
+                var id = prefix + f.name;
+                var el = document.getElementById(id);
+                if (!el) {
+                    // ⚠️ DET HÄR ÄR HELA POÄNGEN. Katalogen säger att fältet gäller grenen,
+                    // men modalen har inget element — antingen saknas markupen eller så
+                    // bryter id:t mot konventionen. Förr blev det ingenting alls.
+                    saknade.push(f.name + ' (sökte #' + id + ')');
+                    return;
+                }
+
+                var v = comp ? comp[f.name] : undefined;
+
+                switch (f.control) {
+                    case 'Checkbox':
+                        window.hpskSetChecked ? window.hpskSetChecked(id, !!v) : (el.checked = !!v);
+                        break;
+                    case 'Date':
+                        window.hpskSetDateField(id, v, false);
+                        break;
+                    case 'DateTime':
+                        window.hpskSetDateField(id, v, true);
+                        break;
+                    case 'Number':
+                        // ⚠️ SPEGLAR `||` EXAKT. De handskrivna raderna var
+                        // `competition.maxParticipants || 50`, vilket ersätter ALLA falsy
+                        // värden — 0 inkluderat. En första version bytte bara undefined/null
+                        // och lämnade 0 kvar; fältet har min="1" required, så en tävling
+                        // skapad utan maxParticipants blev OGILTIG och sparningen
+                        // blockerades tyst. Falsy → default är alltså inte slarv, det är
+                        // det beteende som gällde.
+                        var n = v;
+                        if (!n && (f.name in defaults)) n = defaults[f.name];
+                        if (n === undefined || n === null) n = 0;
+                        // Ett nollställt "antal" ska visas TOMT när 0 betyder AUTO — annars
+                        // läser arrangören en 0:a som ett medvetet val.
+                        if (tomOmNoll.indexOf(f.name) !== -1 && !(Number(n) > 0)) n = '';
+                        setVarde(el, n);
+                        break;
+                    default: // Text, Textarea, Select
+                        // Samma skäl: de gamla raderna var `... || ''`.
+                        var s = v || '';
+                        if (s === '' && (f.name in defaults)) s = defaults[f.name];
+                        setVarde(el, s);
+                }
+                satta.push(f.name);
+            });
+
+            var rapport = { satta: satta, saknade: saknade, separata: separata, hoppade: hoppade, prefix: prefix, type: type };
+            window.hpskLastPopulateReport = rapport;
+            if (saknade.length) {
+                // Syns i konsolen OCH går att läsa programmatiskt. En tystnad här är
+                // precis det felläget partialen finns för att ta bort.
+                console.warn('[hpskPopulateFromCatalog] ' + prefix + ' (' + type + '): '
+                    + saknade.length + ' katalogfält utan element: ' + saknade.join(', '));
+            }
+            return rapport;
+        }
+
+        // Samma händelser som den tidigare setFieldValue skickade — flera fält har
+        // onchange-hanterare som annars inte körs vid ifyllnad.
+        function setVarde(el, v) {
+            el.value = v;
+            if (el.tagName === 'TEXTAREA') el.textContent = v;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        function hpskSetChecked(id, checked) {
+            var el = document.getElementById(id);
+            if (el) el.checked = !!checked;
+            return !!el;
+        }
+
+        window.hpskPopulateFromCatalog = hpskPopulateFromCatalog;
+        window.hpskSetChecked = hpskSetChecked;
+    })();
+    </script>
+}

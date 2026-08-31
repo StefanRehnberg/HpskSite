@@ -1027,41 +1027,35 @@ window.populateEditModal = function(competition) {
         return;
     }
 
-    // Basic fields
-    setFieldValue('edit_competitionName', competition.competitionName || '');
+    // KATALOGDRIVEN IFYLLNAD (_CompetitionFieldMap).
+    //
+    // Ersätter ~26 handskrivna rader av formen "fält X går in i element Y". Ett nytt
+    // fält i katalogen fylls härifrån automatiskt i BÅDA modalerna, och ett fält utan
+    // element RAPPORTERAS i stället för att tyst bli ingenting — vilket var felläget
+    // som gjorde dubbleringen farlig: en glömd rad fyllde aldrig fältet, och nästa
+    // sparning skrev tillbaka det tomma värdet.
+    hpskPopulateFromCatalog('edit_', competition, {
+        type: competition.competitionType || 'Precision',
+        // ⚠ Fylls av egen kod nedan och måste undantas:
+        //   clubId/regionalFederation/seriesId — sätts via dataset, dropdownarna laddas
+        //     asynkront; drivern skulle annars skriva över dem med tomt.
+        //   maxReshoots — tillhör Fältskyttesektionen nedan, som hålls samlad med sin
+        //     rollingStart/stationConfig-logik.
+        hanterasSeparat: ['clubId', 'regionalFederation', 'seriesId', 'maxReshoots'],
+        defaults: { maxParticipants: 50, numberOfSeriesOrStations: 1 },
+        // 0 betyder AUTO för antal serier i lagresultat och ska visas TOMT — en 0:a
+        // läses annars som ett medvetet val.
+        tomOmNoll: ['teamResultSeriesCount']
+    });
+
     setFieldValue('edit_description', competition.description || '');
-    setFieldValue('edit_venue', competition.venue || '');
 
     // Shooting-range picker — loads the currently linked range + the club's ranges
     // (club list / search / map). Runs for every competition type.
     if (typeof compRangeInit === 'function') compRangeInit('edit_', { compId: competition.id, clubId: competition.clubId });
 
-    // Handle date fields - set value directly, then sync Flatpickr if available
-    // Delad (_DateInputHelpers). Låg i två nästan identiska kopior, en per modal.
-    function setDateField(fieldId, dateStr, includeTime) {
-        hpskSetDateField(fieldId, dateStr, includeTime !== false);
-    }
 
-    setDateField('edit_competitionDate', competition.competitionDate, true);
-    setDateField('edit_competitionEndDate', competition.competitionEndDate, false);
-    setDateField('edit_registrationOpenDate', competition.registrationOpenDate, true);
-    setDateField('edit_registrationCloseDate', competition.registrationCloseDate, true);
 
-    // Set all form fields
-    setFieldValue('edit_maxParticipants', competition.maxParticipants || 50);
-    setFieldValue('edit_registrationFee', competition.registrationFee || 0);
-    setFieldValue('edit_competitionDirector', competition.competitionDirector || '');
-
-    setFieldValue('edit_contactEmail', competition.contactEmail || '');
-    setFieldValue('edit_contactPhone', competition.contactPhone || '');
-
-    setFieldValue('edit_numberOfSeriesOrStations', competition.numberOfSeriesOrStations || 1);
-    setFieldValue('edit_numberOfFinalSeries', competition.numberOfFinalSeries || 0);
-    setFieldValue('edit_swishNumber', competition.swishNumber || '');
-    setFieldValue('edit_teamRegistrationFee', competition.teamRegistrationFee || 0);
-    setFieldValue('edit_teamResultSeriesCount', competition.teamResultSeriesCount > 0 ? competition.teamResultSeriesCount : '');
-    setFieldValue('edit_juniorRegistrationFee', competition.juniorRegistrationFee || 0);
-    setFieldValue('edit_subCompetitionFee', competition.subCompetitionFee || 0);
     const subCompMode = competition.subCompetitionFeeMode || 'perClass';
     const modePerClassRadio = document.getElementById('edit_subCompetitionFeeMode_perClass');
     const modePerRegRadio = document.getElementById('edit_subCompetitionFeeMode_perRegistration');
@@ -1092,15 +1086,7 @@ window.populateEditModal = function(competition) {
     setFieldValue('edit_competitionId', competition.id || '');
 
     // Checkboxes
-    setCheckboxValue('edit_allowDualCClass', competition.allowDualCClass || false);
-    setCheckboxValue('edit_showLiveResults', competition.showLiveResults || false);
-    setCheckboxValue('edit_addToMenu', competition.addToMenu || false);
-    setCheckboxValue('edit_isAwardingStandardMedals', competition.isAwardingStandardMedals || false);
-    setCheckboxValue('edit_allowSelfReporting', competition.allowSelfReporting || false);
-    setCheckboxValue('edit_allowTeams', competition.allowTeams || false);
     onEditAllowTeamsChange();
-    setFieldValue('edit_stafettRegistrationFee', competition.stafettRegistrationFee || 0);
-    setCheckboxValue('edit_allowStafett', competition.allowStafett || false);
     onEditAllowStafettChange();
 
     // Show/hide stafett row based on competition type
@@ -2108,6 +2094,7 @@ function collectEditDpConfig() {
 @* Sektionsnavigering. Inkluderas av modalen sjalv, inte av vardsidorna, sa den
    foljer med till varje yta som renderar modalen. Samma regel som _HtmlEscape. *@
 @await Html.PartialAsync("_DateInputHelpers")
+@await Html.PartialAsync("_CompetitionFieldMap")
 @await Html.PartialAsync("_CompetitionFormSave")
 @await Html.PartialAsync("_ModalSectionNav")
 <script>
