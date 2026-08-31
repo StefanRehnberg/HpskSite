@@ -1107,6 +1107,42 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Laget kunde inte hittas." });
                 }
 
+                // ⚠️ KAPACITETSKONTROLL. Den här metoden la skytten sist i laget oavsett
+                // hur många skjutplatser laget har — "om det finns plats" kontrollerades
+                // inte alls, så en elfte skytt kunde hamna i ett tiotavlors lag och det
+                // syntes först på plats. Taket är samma tal generatorn byggde listan med
+                // (Settings.MaxShootersPerTeam); saknas inställningarna faller vi tillbaka
+                // på modellens standardvärde i stället för att låta kontrollen tystna.
+                var maxPerTeam = configuration.Settings?.MaxShootersPerTeam ?? new StartListSettings().MaxShootersPerTeam;
+                if (maxPerTeam > 0 && (team.Shooters?.Count ?? 0) >= maxPerTeam)
+                {
+                    // Föreslå ETT lag med plats i stället för att bara neka — funktionären
+                    // står vid disken och behöver nästa steg, inte ett nej.
+                    var withRoom = configuration.Teams
+                        .Where(t => (t.Shooters?.Count ?? 0) < maxPerTeam)
+                        .OrderBy(t => t.TeamNumber)
+                        .Select(t => new
+                        {
+                            t.TeamNumber,
+                            Free = maxPerTeam - (t.Shooters?.Count ?? 0)
+                        })
+                        .ToList();
+
+                    var suggestion = withRoom.Count > 0
+                        ? " Lediga platser finns i " + string.Join(", ",
+                            withRoom.Take(4).Select(t => $"skjutlag {t.TeamNumber} ({t.Free} st)")) + "."
+                        : " Alla skjutlag är fulla — skapa ett nytt skjutlag.";
+
+                    return Json(new
+                    {
+                        success = false,
+                        message = $"Skjutlag {team.TeamNumber} är fullt ({team.Shooters?.Count ?? 0} av {maxPerTeam} platser)." + suggestion,
+                        teamFull = true,
+                        maxPerTeam,
+                        teamsWithRoom = withRoom
+                    });
+                }
+
                 // Create shooter
                 var newShooter = new StartListShooter
                 {

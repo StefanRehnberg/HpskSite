@@ -269,7 +269,7 @@
         </p>
         <hr>
         <p class="mb-0 small">
-            <strong>För att lägga till efteranmälningar:</strong> Använd "Redigera"-knappen för att manuellt lägga till skyttar utan att störa befintliga tilldelningar.
+            <strong>För att lägga till efteranmälningar:</strong> använd <em>Lägg till efteranmäld</em> — skytten placeras sist i valt skjutlag och <strong>ingen annan får nytt startnummer</strong>. Startlistan publiceras om automatiskt.
         </p>
     </div>
     }
@@ -336,6 +336,18 @@
 
             <!-- Action Buttons -->
             <div class="d-flex justify-content-end mb-3 flex-wrap gap-2">
+                @* ⚠️ RÄTT VÄG FÖRST. En efteranmäld skytt ska läggas TILL i den
+                   befintliga listan — AddShooterToStartList lägger hen sist i valt
+                   skjutlag, rör inga andras positioner och publicerar om. Att i
+                   stället generera om listan ger alla andra NYA startnummer, och det
+                   var precis vad som hände på tävlingen: funktionären hittade bara
+                   "Skapa ny startlista".
+
+                   Vägen fanns, men tre skärmar bort (Redigera → sök → lägg till) och
+                   bara omnämnd i en varningstext. Nu är den en egen knapp. *@
+                <button class="btn btn-primary" id="addLateShooterBtn" onclick="openAddLateShooter()">
+                    <i class="bi bi-person-plus me-1"></i>Lägg till efteranmäld
+                </button>
                 <button class="btn btn-outline-info" onclick="openStartListEditor(window.currentStartListId)">
                     <i class="bi bi-pencil-square me-1"></i>Redigera
                 </button>
@@ -599,6 +611,11 @@
                         <select class="form-select" id="targetTeam" required>
                             <option value="">-- Välj lag --</option>
                         </select>
+                        @* Antalet lediga platser skrivs in i varje alternativ av
+                           openAddShooterModal; den här raden visas bara när INGET lag
+                           har plats kvar, så en helt avstängd lista aldrig står
+                           oförklarad. *@
+                        <div class="form-text text-danger d-none" id="addShooterRoomHint"></div>
                     </div>
 
                     <!-- Weapon Class Selection -->
@@ -1313,6 +1330,27 @@ let editorModal = null;
 let editorHasChanges = false;
 
 // Open the start list editor modal
+// Genväg: öppna redigeraren och gå direkt till "lägg till skytt".
+// ⚠️ Modalen måste vänta på att konfigurationen är laddad — skjutlagsväljaren och
+// klasslistan byggs ur currentStartListConfig, och utan den öppnas en tom dialog
+// som ser trasig ut. Därför pollas den i stället för att antas klar.
+function openAddLateShooter() {
+    openStartListEditor(window.currentStartListId);
+    let waited = 0;
+    const tick = setInterval(() => {
+        waited += 150;
+        if (currentStartListConfig && currentStartListConfig.teams) {
+            clearInterval(tick);
+            openAddShooterModal();
+        } else if (waited > 8000) {
+            clearInterval(tick);
+            // Redigeraren står kvar öppen — funktionären kan gå den vanliga vägen
+            // därifrån, i stället för att få en tom dialog eller ingenting.
+            showAlert('warning', 'Kunde inte öppna tilläggsdialogen automatiskt. Använd "Lägg till skytt" i redigeraren.');
+        }
+    }, 150);
+}
+
 function openStartListEditor(startListId) {
     console.log('Opening editor for start list:', startListId);
     window.currentStartListId = startListId;
@@ -2012,14 +2050,46 @@ function openAddShooterModal() {
     document.getElementById('confirmAddShooter').disabled = true;
 
     // Populate team dropdown
+    // ⚠️ Visa LEDIGA PLATSER per skjutlag och stäng av de fulla. Frågan
+    // funktionären ställer vid disken är "finns det plats?", och förut svarade
+    // varken listan eller servern på den — skytten lades bara sist i laget.
+    // Taket är samma tal generatorn byggde listan med (maxShootersPerTeam);
+    // servern kontrollerar det igen, så en inaktuell lista inte kan smita förbi.
     const teamSelect = document.getElementById('targetTeam');
     teamSelect.innerHTML = '<option value="">-- Välj skjutlag --</option>';
     if (currentStartListConfig && currentStartListConfig.teams) {
+        const st = currentStartListConfig.settings || currentStartListConfig.Settings || {};
+        const maxPerTeam = st.maxShootersPerTeam || st.MaxShootersPerTeam || 0;
+        let anyRoom = false;
         currentStartListConfig.teams.forEach(team => {
             const lbl = team.label || team.Label || '';
             const labelSuffix = lbl ? ' — ' + lbl : '';
-            teamSelect.appendChild(new Option(`Skjutlag ${team.teamNumber}${labelSuffix} (${team.startTime} - ${team.endTime})`, String(team.teamNumber)));
+            const count = (team.shooters || team.Shooters || []).length;
+            const free = maxPerTeam > 0 ? maxPerTeam - count : null;
+            let roomText = '';
+            if (free !== null) {
+                roomText = free > 0 ? ` — ${free} lediga` : ' — FULLT';
+                if (free > 0) anyRoom = true;
+            }
+            const opt = new Option(
+                `Skjutlag ${team.teamNumber}${labelSuffix} (${team.startTime} - ${team.endTime})${roomText}`,
+                String(team.teamNumber));
+            if (free !== null && free <= 0) opt.disabled = true;
+            teamSelect.appendChild(opt);
         });
+        // Alla fulla: säg det, och peka på vägen framåt i stället för att lämna
+        // en lista där varje val är avstängt utan förklaring.
+        const hint = document.getElementById('addShooterRoomHint');
+        if (hint) {
+            if (maxPerTeam > 0 && !anyRoom) {
+                hint.textContent = 'Alla skjutlag är fulla ('
+                    + maxPerTeam + (maxPerTeam === 1 ? ' plats' : ' platser')
+                    + ' per lag). Skapa ett nytt skjutlag för att placera fler.';
+                hint.classList.remove('d-none');
+            } else {
+                hint.classList.add('d-none');
+            }
+        }
     }
 
     addShooterModal.show();
