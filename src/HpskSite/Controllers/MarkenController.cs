@@ -1814,7 +1814,8 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Årets beställnings- och utdelningslista för en klubb: antal per valör att beställa från
-        /// förbundet, plus vad varje medlem ska få. Täcker BÅDE märken och standardmedaljer.
+        /// förbundet, plus vad varje medlem ska få. <b>Standardmedaljer ingår INTE</b> — de summeras
+        /// per medlem på sin egen flik (Stefan 2026-08-31).
         /// GET /umbraco/surface/Marken/GetClubOrderList?clubId=1098&amp;year=2026
         /// </summary>
         [HttpGet]
@@ -2983,7 +2984,7 @@ namespace HpskSite.Controllers
             var sb = new System.Text.StringBuilder();
 
             sb.Append("<!DOCTYPE html><html lang='sv'><head><meta charset='utf-8'>");
-            sb.Append("<title>Märken och medaljer ").Append(data.Year).Append(" – ").Append(Enc(data.ClubName)).Append("</title>");
+            sb.Append("<title>Märken ").Append(data.Year).Append(" – ").Append(Enc(data.ClubName)).Append("</title>");
             sb.Append("<style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;color:#222}");
             sb.Append("h1{font-size:1.4rem;margin-bottom:.2rem}h2{font-size:1.1rem;margin-top:1.8rem}");
             sb.Append("table{border-collapse:collapse;width:100%;margin:.5rem 0 1rem}");
@@ -2996,9 +2997,9 @@ namespace HpskSite.Controllers
             sb.Append("</style></head><body>");
             sb.Append("<button onclick='window.print()'>Skriv ut</button>");
 
-            sb.Append("<h1>Märken och medaljer ").Append(data.Year).Append("</h1>");
+            sb.Append("<h1>Märken ").Append(data.Year).Append("</h1>");
             sb.Append("<p class='muted'>").Append(Enc(data.ClubName))
-              .Append(" · årets förvärvade märken och standardmedaljer · utskriven ")
+              .Append(" · årets förvärvade märken · utskriven ")
               .Append(DateTime.Now.ToString("yyyy-MM-dd")).Append("</p>");
 
             foreach (var w in data.Warnings)

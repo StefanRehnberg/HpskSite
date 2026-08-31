@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -251,6 +251,11 @@ namespace HpskSite.Services
                     Note = p.SignedUpNote,
                     AttendanceStatus = p.AttendanceStatus,
                     AttendanceNote = p.AttendanceNote,
+                    // Sjalvregistrerad = medlemmen ar sin egen registrerare (skannade QR-affischen).
+                    // HARLETT, ingen extra kolumn — och viktigt att kunna se: en QR pa en vagg kan
+                    // fotograferas och skickas vidare, sa det ar svagare bevis an en funktionars
+                    // upprop nar narvaron sedan ska bara ett Foreningsintyg.
+                    SelfRegistered = p.AttendanceStatus != null && p.RecordedByMemberId == p.MemberId,
                     FeeAmount = p.FeeAmount
                 });
             }
@@ -452,6 +457,8 @@ namespace HpskSite.Services
         public string? Note { get; set; }
         public string? AttendanceStatus { get; set; }
         public string? AttendanceNote { get; set; }
+        /// <summary>Narvaron registrerades av medlemmen sjalv via QR-affischen, inte av en funktionar.</summary>
+        public bool SelfRegistered { get; set; }
         public decimal? FeeAmount { get; set; }
     }
 }

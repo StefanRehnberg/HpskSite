@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using Umbraco.Cms.Core.Services;
 
 namespace HpskSite.Services
@@ -7,10 +7,14 @@ namespace HpskSite.Services
     /// Builds a club's per-year <see cref="MarkenOrderList"/> — antal per valör att beställa från
     /// förbundet, plus en utdelningslista per medlem.
     ///
+    /// <b>⚠️ STANDARDMEDALJER INGÅR INTE</b> (Stefan 2026-08-31). De räknas samman per medlem på sin
+    /// egen flik och hör inte till den här summeringen — lägg inte tillbaka dem "för fullständighetens
+    /// skull", det gör antalet man beställer efter fel.
+    ///
     /// <b>Definitionen är ÅRETS FÖRVÄRVADE MÄRKEN</b> (Stefan 2026-08-31): allt medlemmarna tog
     /// under året, oavsett om klubben redan hunnit beställa det. Ingenting bokförs, så listan är
-    /// helt HÄRLEDD ur de två liggarna (<see cref="MarkenLedgerService"/> +
-    /// <see cref="StandardMedalLedgerService"/>) och kan därför aldrig glida från dem. Att bokföra
+    /// helt HÄRLEDD ur märkesliggaren (<see cref="MarkenLedgerService"/>) och kan därför aldrig
+    /// glida från den. Att bokföra
     /// beställningar — och därmed kunna svara "det som ännu inte beställts" — är ett medvetet
     /// senare val som kräver en egen tabell.
     ///
@@ -20,25 +24,21 @@ namespace HpskSite.Services
     public class MarkenOrderListService
     {
         private readonly MarkenLedgerService _ledger;
-        private readonly StandardMedalLedgerService _standardMedals;
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
 
         public MarkenOrderListService(
             MarkenLedgerService ledger,
-            StandardMedalLedgerService standardMedals,
             IMemberService memberService,
             ClubService clubService)
         {
             _ledger = ledger;
-            _standardMedals = standardMedals;
             _memberService = memberService;
             _clubService = clubService;
         }
 
         // Group labels — also the render order (see GroupSort).
         public const string GroupArtalsmarken = "Årtalsmärken";
-        public const string GroupStandardmedaljer = "Standardmedaljer";
         public const string GroupGuldfodring = "Guldfodring";
 
         public async Task<MarkenOrderList> BuildAsync(int clubId, int year)
@@ -56,11 +56,9 @@ namespace HpskSite.Services
             // earned nothing.
             var badges = await _ledger.GetBadgesEarnedInYearAsync(year);
             var quals = await _ledger.GetFulfilledQualificationsForYearAsync(year);
-            var medals = await _standardMedals.GetAwardsForYearAsync(year, includeRejected: false);
 
             var candidates = new HashSet<int>(badges.Select(b => b.MemberId));
             foreach (var q in quals) candidates.Add(q.MemberId);
-            foreach (var m in medals) candidates.Add(m.MemberId);
 
             // Narrow to the club. Primary club only — the same rule the rest of the Märken surfaces
             // use, so a member cannot appear on two clubs' order lists for the same badge.
@@ -88,8 +86,6 @@ namespace HpskSite.Services
                 .GroupBy(b => b.MemberId).ToDictionary(g => g.Key, g => g.ToList());
             var qualsByMember = quals.Where(q => mineSet.Contains(q.MemberId))
                 .GroupBy(q => q.MemberId).ToDictionary(g => g.Key, g => g.ToList());
-            var medalsByMember = medals.Where(m => mineSet.Contains(m.MemberId))
-                .GroupBy(m => m.MemberId).ToDictionary(g => g.Key, g => g.ToList());
 
             var sv = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
 
@@ -159,26 +155,6 @@ namespace HpskSite.Services
                             Unverified = q.Status == Marken.StatusReported
                         });
                     }
-                }
-
-                // ── 3. Standardmedaljer tagna i år ────────────────────────────
-                foreach (var m in (medalsByMember.GetValueOrDefault(mid) ?? new List<StandardMedalAward>())
-                                  .OrderBy(m => m.MedalType)
-                                  .ThenBy(m => StandardMedals.DisciplineDisplayName(m.Discipline), sv))
-                {
-                    bool unverified = m.Status == StandardMedals.StatusReported;
-                    var detail = new List<string>();
-                    if (!string.IsNullOrWhiteSpace(m.CompetitionName)) detail.Add(m.CompetitionName!);
-                    if (m.CompetitionDate.HasValue) detail.Add(m.CompetitionDate.Value.ToString("yyyy-MM-dd"));
-                    if (unverified) detail.Add("ej granskad");
-
-                    entry.Items.Add(new MarkenHandoutItem
-                    {
-                        Group = GroupStandardmedaljer,
-                        Item = $"{StandardMedals.MedalDisplayName(m.MedalType)} – {StandardMedals.DisciplineDisplayName(m.Discipline)}",
-                        Detail = string.Join(" · ", detail),
-                        Unverified = unverified
-                    });
                 }
 
                 if (entry.Items.Count > 0) result.Handout.Add(entry);
@@ -258,7 +234,6 @@ namespace HpskSite.Services
         private static int GroupSort(string group) =>
             group == Marken.FamilyDisplayName(Marken.FamilyPistolskytte) ? 0
             : group == GroupArtalsmarken ? 2
-            : group == GroupStandardmedaljer ? 3
             : 1;
 
         private static int ItemSort(string item)

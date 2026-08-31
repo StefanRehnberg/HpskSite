@@ -3312,6 +3312,31 @@ anmälningsfält i bara en av dialogerna igen.
 `event.name.replace(/'/g, "\\'")` **inne i ett onclick** — enkelfnutt-escaping, exakt den lucka som
 gav kodexekvering i Fältskyttes lägg-till-skytt. Raden skickar nu bara id:t.
 
+**Närvaro via QR-affisch (2026-08-31).** `PrintAttendanceQr` ger en utskriftsbar affisch (stor QR +
+tre steg) som tejpas upp på plats; deltagaren skannar, landar på **`/evenemang/narvaro?t=…`**
+(routad `ClubEventCheckInController`, ingen Umbraco-nod) och trycker en knapp.
+- **Token är tidsbegränsad mot EVENEMANGET, inte en fast kort period.** Affischen skrivs ut i förväg,
+  så Märkens 30-minutersmodell hade gjort den oanvändbar. Livslängden räknas till evenemangsdagens
+  slut + marginal (`AttendanceTokenLifetime`).
+- **⚠️ Två grindar, med flit.** Livslängden säger "inte nästa månad"; `IsCheckInWindowOpen` säger
+  "inte dagen före heller" (12 h före start till 12 h efter slut). En fotograferad kod duger alltså
+  inte i efterhand.
+- **⚠️ En skanning är SVAGARE bevis än ett upprop** — affischen kan fotograferas och skickas vidare.
+  Raden registrerar därför medlemmen som sin egen registrerare, och `SelfRegistered` **härleds** ur
+  `RecordedByMemberId == MemberId` (ingen ny kolumn). Uppropet badgar den "självregistrerad", så
+  styrelsen kan skilja de två åt när närvaron bär ett Föreningsintyg.
+- `GetCheckInState` skriver **ingenting** — en QR som öppnas av misstag i en kameraförhandsvisning
+  får inte pricka av någon.
+- Affischen bär länken i `data-checkin-url` (osynligt i utskriften): enda sättet att felsöka en QR
+  som inte fungerar, och det sviten följer för att kunna prova hela skanningsvägen.
+
+**Obligatorisk-badge på FYRA ytor via `_EventBadges.cshtml`** (`hpskEventMandatoryBadge`): klubbens
+startflik, kalendern, klubbens adminlista och kretsens adminlista. ⚠️ **Kalendern har TRE renderare**
+— listvy, dagvy och månadsrutnätet — och första utsågan patchade bara listvyn, vilket rapporterades
+som "badgen syns bara i Listvy". Månadsrutnätet får en varningstriangel i stället för en full badge
+(en badge får inte plats i en dagcell). ⚠️ Kalendern läser **`GetUpcomingEvents`**, en EGEN endpoint
+skild från `GetClubEvents` — ett fält måste läggas till i BÅDA.
+
 **⚠️ AVGIFT ÄR INTE BYGGD, och det är ett fynd och inte ett förbiseende.** Stefan valde faktura som
 vid tävlingsanmälan; kodläsningen visar att det inte är en integration utan P2-ombyggnaden:
 `ReceiptModelBuilder.Build` (`:69-71`) returnerar **null** om `invoice.competitionId` inte resolvar,
@@ -3325,7 +3350,7 @@ tom `InvoiceId`** så betalningen kan kopplas på **utan migrering** den dag äg
 kryssrutan är avstängd och namnger egenskapen i stället för att se ut att fungera och tyst återgå
 (`SetValue` på en saknad egenskap är en no-op). Adds C# → full ombyggnad.
 
-Verifierat **80/80 `hpsk-verify/club-event-signup-verify.mjs`**, två körningar i rad — sviten skapar
+Verifierat **101/101 `hpsk-verify/club-event-signup-verify.mjs`**, två körningar i rad — sviten skapar
 sitt eget evenemang genom de riktiga endpointsen, kör hela flödet och raderar både rader och nod.
 Regression: action-menus-sweep 113/113, region-admin-rail 43/43, marken-orderlist 74/74.
 

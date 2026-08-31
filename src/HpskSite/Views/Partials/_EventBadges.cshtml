@@ -1,0 +1,25 @@
+@*
+    Delade brickor för klubb-/kretshändelser. En rad kod, men den ska se likadan ut och heta samma
+    sak på klubbens startflik, i kalendern och i adminlistan — annars lär sig ingen känna igen den.
+
+    Inkludera partialen och anropa window.hpskEventBadges(ev) med en händelse ur GetClubEvents,
+    GetUpcomingEvents eller GetRegionEvents.
+*@
+@if (ViewData["EventBadgesLoaded"] == null)
+{
+    ViewData["EventBadgesLoaded"] = true;
+    <script>
+    (function () {
+        if (window.hpskEventBadges) return;
+
+        // Obligatorisk händelse: deltagandet är underlag för klubbens beslut om Föreningsintyg, så
+        // det måste synas DÄR man planerar sin tid — inte först när man öppnat händelsens sida.
+        // Varningsfärg och inte fara: det är något att passa, inte något som gått fel.
+        window.hpskEventBadges = function (ev) {
+            if (!ev || !ev.isMandatory) return '';
+            return '<span class="badge bg-warning text-dark ms-1" title="Deltagandet är obligatoriskt och närvaron registreras">'
+                 + '<i class="bi bi-exclamation-triangle-fill me-1"></i>Obligatorisk</span>';
+        };
+    })();
+    </script>
+}

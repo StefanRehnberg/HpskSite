@@ -1,0 +1,168 @@
+@model string
+@{
+    Layout = null;
+    var token = Model ?? "";
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Registrera närvaro – pistol.nu</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.1/font/bootstrap-icons.css">
+    <style>
+        /* Chromelös sida: den öppnas ur en kameraapp med en hand, ofta i solljus vid en skjutbana.
+           Stora tryckytor och hög kontrast är funktionskrav här, inte smak. */
+        body { background: #f6f7f9; }
+        .ces-wrap { max-width: 34rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+        .ces-card { border-radius: .9rem; }
+        .ces-action { font-size: 1.15rem; padding: .9rem 1rem; }
+        .ces-name { font-size: 1.35rem; font-weight: 600; line-height: 1.25; }
+    </style>
+</head>
+<body>
+    <div class="ces-wrap">
+        <div class="text-center mb-3">
+            <span class="fw-bold text-primary fs-5">pistol.nu</span>
+        </div>
+
+        <div class="card ces-card shadow-sm">
+            <div class="card-body" id="cesciBody">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @Html.AntiForgeryToken()
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    (function () {
+        var TOKEN = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(token));
+        var body = document.getElementById('cesciBody');
+
+        function esc(s) {
+            var d = document.createElement('div');
+            d.textContent = s == null ? '' : String(s);
+            return d.innerHTML;
+        }
+        function af() {
+            var i = document.querySelector('input[name="__RequestVerificationToken"]');
+            return i ? i.value : '';
+        }
+
+        function shell(icon, cls, title, text, extra) {
+            return '<div class="text-center py-2">'
+                 + '<div class="mb-2"><i class="bi ' + icon + ' ' + cls + '" style="font-size:2.6rem"></i></div>'
+                 + '<div class="ces-name mb-1">' + title + '</div>'
+                 + (text ? '<p class="text-muted mb-3">' + text + '</p>' : '')
+                 + (extra || '')
+                 + '</div>';
+        }
+
+        function render(d) {
+            if (!d.success) {
+                body.innerHTML = shell('bi-x-circle', 'text-danger', 'Det gick inte', esc(d.message || 'Okänt fel.'));
+                return;
+            }
+
+            var ev = d.event;
+            var head = '<div class="ces-name">' + esc(ev.name) + '</div>'
+                     + '<div class="text-muted small mb-3">'
+                     + [ev.date, ev.venue, ev.ownerName].filter(Boolean).map(esc).join(' · ')
+                     + '</div>';
+
+            if (ev.isMandatory) {
+                head += '<div class="alert alert-warning py-2 px-3 small">'
+                      + '<i class="bi bi-exclamation-triangle-fill me-1"></i>'
+                      + 'Obligatoriskt evenemang — närvaron är underlag för Föreningsintyg.</div>';
+            }
+
+            // Redan avprickad. Visas som ett lugnt kvitto: den vanligaste orsaken till att någon
+            // skannar igen är att de inte vet om det gick igenom.
+            if (d.alreadyPresent) {
+                body.innerHTML = head + shell('bi-check-circle-fill', 'text-success',
+                    'Du är redan registrerad', 'Din närvaro är noterad. Du behöver inte göra något mer.');
+                return;
+            }
+
+            if (!d.loggedIn) {
+                var back = encodeURIComponent(window.location.pathname + window.location.search);
+                body.innerHTML = head + shell('bi-person-lock', 'text-primary',
+                    'Logga in först',
+                    'Närvaron måste kopplas till dig, så du behöver vara inloggad.',
+                    '<a class="btn btn-primary w-100 ces-action" href="/login-register/?returnUrl=' + back + '">Logga in</a>');
+                return;
+            }
+
+            if (!d.windowOpen) {
+                body.innerHTML = head + shell('bi-clock-history', 'text-secondary',
+                    'Koden gäller inte just nu',
+                    'Den här koden går bara att använda i anslutning till evenemanget. Be en funktionär pricka av dig.');
+                return;
+            }
+
+            if (!d.eligible) {
+                body.innerHTML = head + shell('bi-info-circle', 'text-secondary',
+                    'Du står inte som medlem här',
+                    'Närvaroregistreringen är öppen för klubbens medlemmar. Be en funktionär pricka av dig.');
+                return;
+            }
+
+            body.innerHTML = head
+                + (d.signedUp
+                    ? '<p class="text-muted small mb-3"><i class="bi bi-check2 me-1"></i>Du är anmäld till det här evenemanget.</p>'
+                    : '')
+                + '<button type="button" class="btn btn-success w-100 ces-action" id="cesciGo">'
+                + '<i class="bi bi-check2-circle me-2"></i>Registrera min närvaro</button>';
+
+            document.getElementById('cesciGo').addEventListener('click', register);
+        }
+
+        // Pending state på knappen. Samma lärdom som sparaknappen på sifferpanelen: ett anrop utan
+        // synlig väntan trycks igen, och varje tryck startar en ny registrering.
+        async function register(e) {
+            var btn = e.currentTarget;
+            btn.disabled = true;
+            btn.innerHTML = 'Registrerar…';
+            try {
+                var r = await fetch('/umbraco/surface/ClubEvent/SelfCheckIn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': af() },
+                    body: JSON.stringify({ token: TOKEN })
+                });
+                var text = await r.text();
+                var d = text ? JSON.parse(text) : { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' };
+                if (!d.success) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-check2-circle me-2"></i>Registrera min närvaro';
+                    body.insertAdjacentHTML('afterbegin',
+                        '<div class="alert alert-danger py-2 px-3 small">' + esc(d.message || 'Något gick fel.') + '</div>');
+                    return;
+                }
+                await load();
+            } catch (err) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check2-circle me-2"></i>Registrera min närvaro';
+                body.insertAdjacentHTML('afterbegin',
+                    '<div class="alert alert-danger py-2 px-3 small">Nätverksfel. Kontrollera uppkopplingen och försök igen.</div>');
+            }
+        }
+
+        async function load() {
+            try {
+                var r = await fetch('/umbraco/surface/ClubEvent/GetCheckInState?t=' + encodeURIComponent(TOKEN), { cache: 'no-store' });
+                render(await r.json());
+            } catch {
+                body.innerHTML = shell('bi-wifi-off', 'text-danger', 'Ingen kontakt',
+                    'Kunde inte nå pistol.nu. Kontrollera uppkopplingen och ladda om sidan.');
+            }
+        }
+
+        load();
+    })();
+    </script>
+</body>
+</html>

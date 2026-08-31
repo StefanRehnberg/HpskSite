@@ -5,6 +5,7 @@
 
 <!-- Flatpickr Date/Time Picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+@await Html.PartialAsync("_EventBadges")
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
@@ -676,7 +677,7 @@
             var color = eventTypeColors[event.type] || eventTypeColors['default'];
             html += '<tr>'
                 + '<td><strong>' + regionEsc(event.name) + '</strong></td>'
-                + '<td><span class="badge" style="background-color: ' + color + '">' + regionEsc(event.type) + '</span></td>'
+                + '<td><span class="badge" style="background-color: ' + color + '">' + regionEsc(event.type) + '</span>' + hpskEventBadges(event) + '</td>'
                 + '<td>' + date + '</td>'
                 + '<td>' + regionEsc(event.venue || '-') + '</td>'
                 + '<td class="text-end">'
@@ -685,6 +686,10 @@
                 + ' data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">'
                 + '<i class="bi bi-sliders me-2"></i>Åtgärder</button>'
                 + '<ul class="dropdown-menu dropdown-menu-end">'
+                + (event.url
+                    ? '<li><a class="dropdown-item" href="' + regionEsc(event.url) + '">'
+                      + '<i class="bi bi-box-arrow-up-right me-2 text-secondary"></i>Gå till händelsen</a></li>'
+                    : '')
                 + '<li><button class="dropdown-item" type="button" onclick="hpskOpenEventRoster(' + event.id + ')">'
                 + '<i class="bi bi-people me-2 text-success"></i>Deltagare och upprop</button></li>'
                 + '<li><button class="dropdown-item" type="button" onclick="editRegionEvent(' + event.id + ')">'

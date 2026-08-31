@@ -1,4 +1,4 @@
-@*
+﻿@*
     Deltagarlista och upprop för ett klubb- eller kretsevenemang. EN dialog delad av klubbens och
     kretsens adminpanel — båda scopen använder samma clubSimpleEvent-doctype och samma endpoints,
     så en andra kopia skulle bara vara två ställen att glömma en rättelse på.
@@ -47,6 +47,10 @@
                 </div>
                 <div class="modal-footer">
                     <span class="small text-muted me-auto" id="eventRosterHint"></span>
+                    @* Affischen med närvaro-QR:en. Öppnas i egen flik och skrivs ut därifrån. *@
+                    <button type="button" class="btn btn-outline-primary" id="eventRosterQrBtn">
+                        <i class="bi bi-qr-code me-1"></i>Skriv ut närvaro-QR
+                    </button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
                 </div>
             </div>
@@ -139,6 +143,9 @@
                 if (r.isReserve) badges.push('<span class="badge bg-warning-subtle text-warning-emphasis">reserv</span>');
                 if (r.isWalkIn) badges.push('<span class="badge bg-info-subtle text-info-emphasis">oanmäld</span>');
                 if (r.cancelled) badges.push('<span class="badge bg-secondary-subtle text-secondary-emphasis">avbokad</span>');
+                // Sjalvregistrerad via QR ar svagare bevis an ett upprop — sag vilket som ar vilket,
+                // sarskilt nar narvaron ska bara ett Foreningsintyg.
+                if (r.selfRegistered) badges.push('<span class="badge bg-light text-secondary border" title="Registrerade sig sjalv genom att skanna QR-koden">sjalvregistrerad</span>');
 
                 html += `<tr${r.cancelled ? ' class="opacity-50"' : ''}>`;
                 html += `<td>${esc(r.name)} ${badges.join(' ')}</td>`;
@@ -212,6 +219,13 @@
                 document.getElementById('eventRosterAddCard').style.display = 'none';
             }
         }
+
+        document.addEventListener('click', e => {
+            var btn = e.target && e.target.closest ? e.target.closest('#eventRosterQrBtn') : null;
+            if (!btn || !rosterEventId) return;
+            window.open('/umbraco/surface/ClubEvent/PrintAttendanceQr?eventId=' + rosterEventId,
+                '_blank', 'noopener');
+        });
 
         document.addEventListener('click', async e => {
             if (e.target && e.target.id === 'eventRosterAddBtn') {

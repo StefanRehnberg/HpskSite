@@ -104,6 +104,7 @@
 }
 
 <!-- JavaScript global variables - MUST come before partials that use them -->
+@await Html.PartialAsync("_EventBadges")
 <script>
 // Declare clubId and isLoggedIn in global scope so partials can access them
 const clubId = @clubId;
@@ -724,7 +725,7 @@ function loadUpcomingEvents() {
                                         </div>
                                         ${snippet ? `<p class="mb-0 text-muted small event-snippet">${snippet}</p>` : ''}
                                     </div>
-                                    <span class="badge ms-2 flex-shrink-0" style="background-color: ${color}">${event.type}</span>
+                                    <span class="badge ms-2 flex-shrink-0" style="background-color: ${color}">${event.type}</span>${hpskEventBadges(event)}
                                 </div>
                             </li>
                         `;

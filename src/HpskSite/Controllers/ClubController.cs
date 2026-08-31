@@ -262,7 +262,11 @@ namespace HpskSite.Controllers
                                 description = evt.Value<string>("description") ?? "",
                                 venue = evt.Value<string>("venue") ?? "",
                                 contactPerson = evt.Value<string>("contactPerson") ?? "",
-                                url = evt.Url()
+                                url = evt.Url(),
+                                // Kalendern badgar obligatoriska händelser — deltagandet påverkar
+                                // medlemmens Föreningsintyg, så det ska synas där man planerar,
+                                // inte först när man öppnat händelsens egen sida.
+                                isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty)
                             });
                         }
                     }

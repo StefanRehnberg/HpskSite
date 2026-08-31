@@ -1,4 +1,4 @@
-@{
+﻿@{
     var clubId = ViewBag.clubId as int? ?? 0;
 }
 
@@ -384,6 +384,7 @@
 }
 </style>
 
+@await Html.PartialAsync("_EventBadges")
 <script>
 let currentDate = new Date();
 let currentView = 'calendar'; // 'calendar' or 'list'
@@ -525,7 +526,7 @@ function renderListView() {
                         </div>
                     ` : ''}
                     <div class="event-meta">
-                        <span class="badge" style="background-color: ${color}">${event.eventType || event.type}</span>
+                        <span class="badge" style="background-color: ${color}">${event.eventType || event.type}</span>${hpskEventBadges(event)}
                         ${event.venue ? `<span class="ms-2"><i class="bi bi-geo-alt me-1"></i>${event.venue}</span>` : ''}
                         ${event.contactPerson ? `<span class="ms-2"><i class="bi bi-person me-1"></i>${event.contactPerson}</span>` : ''}
                     </div>
@@ -769,7 +770,10 @@ function renderCalendar() {
 
         dayEvents.slice(0, 2).forEach(event => {
             const color = eventTypeColors[event.eventType] || eventTypeColors.default;
-            html += `<div class="event-item-preview"><span class="event-dot" style="background-color: ${color}"></span>${event.name || event.type}</div>`;
+            const mand = event.isMandatory
+                ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" title="Obligatorisk"></i>'
+                : '';
+            html += `<div class="event-item-preview" title="${event.isMandatory ? 'Obligatorisk: ' : ''}${(event.name || event.type)}"><span class="event-dot" style="background-color: ${color}"></span>${mand}${event.name || event.type}</div>`;
         });
 
         if (dayEvents.length > 2) {
@@ -819,7 +823,7 @@ function showDayEvents(dateStr) {
                 ${eventNameHtml}
                 ${event.description ? `<div class="event-description mt-2 mb-2 text-muted" style="font-size: 0.9rem;">${event.description}</div>` : ''}
                 <div class="event-meta">
-                    <span class="badge" style="background-color: ${color}">${event.eventType || event.type}</span>
+                    <span class="badge" style="background-color: ${color}">${event.eventType || event.type}</span>${hpskEventBadges(event)}
                     ${event.venue ? `<span class="ms-2"><i class="bi bi-geo-alt me-1"></i>${event.venue}</span>` : ''}
                     ${event.contactPerson ? `<span class="ms-2"><i class="bi bi-person me-1"></i>${event.contactPerson}</span>` : ''}
                 </div>
