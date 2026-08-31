@@ -724,6 +724,50 @@ then deletes the fixture. **Its teardown sweeps by node NAME, not only by the id
 competition that saves but fails to publish never reaches the id list and would then block
 `DeleteSeries` forever; `faltserie-cleanup.mjs` does the same sweep for a killed run.
 
+### Tävlingens FÄLT ägs av CompetitionFieldCatalog (2026-08-31)
+
+**Ska du lägga till eller ändra ett fält på en tävling? Läs
+[COMPETITION_FIELDS_HOWTO.md](Documentation/COMPETITION_FIELDS_HOWTO.md) först** — den är
+checklistan. Kortversionen:
+
+1. Markup i de modaler fältet gäller, med **`id = prefix + name`**
+   (`wizard_` / `edit_` / `springEdit_`).
+2. En rad i `CompetitionTypes/Common/CompetitionFieldCatalog.cs`.
+3. Egenskapen på doctypen `competition` — utan den är `SetValue` en TYST no-op.
+4. Bara för belopp eller udda heltal: en rad i `BeloppsFalt` / `HeltalsFalt`.
+
+Ur katalograden följer **ifyllnaden** (`_CompetitionFieldMap.cshtml`), **serverns
+sparlista** (`MapFieldNameToAlias`), **typkonverteringen** (`ConvertFieldValue`, via
+`FieldControl`) och **testerna**. Ingen av dem behöver en rad till per fält.
+
+**⚠️ Registret finns för att göra TYSTNADEN omöjlig, inte för att spara rader.** Fälten
+var handskrivna på fyra till fem ställen och listorna hann glida isär. Följden var inte
+dubbelarbete utan tysta fel: Springskyttemodalen tömde tävlingens klubb/krets och
+förstörde dess URL; den fick nio flikar men aldrig `hpskRevealField`, så ett ogiltigt
+fält på en dold flik gjorde att **Spara såg ut att inte göra någonting**; omfattningens
+värden tappade diakriter så springskyttemästerskap inte räknades som mästerskap
+(`StringComparison.Ordinal`); och en glömd ifyllnadsrad skrev tillbaka **tomt** vid
+nästa sparning. Ingenting sa ifrån i något av fallen.
+
+**Delade partialer — skriv inte en fjärde kopia:** `_CompetitionFormSave` (validering +
+fältinsamling) · `_CompetitionFieldMap` (katalogdriven ifyllnad) · `_DateInputHelpers`
+· `_ShootingClassPicker` · `_ModalSectionNav`. **Partialerna inkluderar hjälparna
+själva**, aldrig värdsidan — samma regel som `_HtmlEscape`.
+
+**⚠️ Säkerhetskontraktet vid varje refaktorering är PAYLOAD-LIKHET.** Sparvägen är en
+field bag utan typkontroll (`MapFieldNameToAlias` släpper tyst okända fält), så "samma
+payload in = samma beteende" är det enda som håller. Fånga före, jämför efter:
+`compedit-baseline-capture.mjs` + `payload-diff.mjs` (täcker både payloaden och det
+ifyllda formuläret). **⚠️ Olika fixturer prövar olika VÄRDETILLSTÅND** — baselinens sju
+tävlingar har riktiga värden och missade att en default inte tillämpades på 0;
+`all-surfaces` tomma fixturer fångade det.
+
+**Markupen är medvetet INTE genererad.** 34 av 43 fält är enkla nog, men nio är
+`Slot`/`Radio` och modalerna bär 25 respektive 68 villkorliga visa/dölj-regler. En
+generisk renderare hade behövt uttrycka layout, ordning och villkor för tre genuint olika
+gränssnitt — alltså ett mallspråk. Drift fångas i stället av kontrakten
+(`wizard-catalog-verify`, `compedit-catalog-verify`), som täcker alla tre ytor.
+
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)
 
