@@ -1,0 +1,125 @@
+@*
+    Anmälningsinställningarna för ett klubb-/kretsevenemang: krävs anmälan, extern länk, max antal
+    deltagare, obligatoriskt deltagande.
+
+    ⚠️ FINNS FÖR ATT DET ANNARS BLIR TRE KOPIOR. Händelser redigeras från tre håll — klubbens
+    adminpanel, kretsens adminpanel och evenemangets egen sida — och första utsågan la fälten bara i
+    den sista. Följden var att en arrangör som SKAPADE en händelse inte hade någon väg alls till
+    anmälan, vilket är precis den sortens "rätt väg ligger tre skärmar bort" som redan bitit oss.
+
+    ViewData:
+      Prefix (string, obligatorisk)  id-prefix för fälten, t.ex. "edit" -> editRegistrationRequired
+
+    Fältens id följer konventionen prefix + fältnamn, så mappningen är härledbar:
+      {prefix}RegistrationRequired / {prefix}RegistrationUrl / {prefix}MaxParticipants / {prefix}IsMandatory
+
+    Skriptet definieras EN gång oavsett hur många gånger partialen renderas, och tar prefixet som
+    argument. Anropa hpskEventRegToggle(prefix) från kryssrutans onchange.
+*@
+@{
+    var regPrefix = ViewData["Prefix"] as string ?? "edit";
+}
+
+<div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox" id="@(regPrefix)RegistrationRequired"
+           onchange="hpskEventRegToggle('@regPrefix')">
+    <label class="form-check-label" for="@(regPrefix)RegistrationRequired">Anmälan krävs</label>
+</div>
+
+<div id="@(regPrefix)RegistrationOwnGroup" style="display:none;">
+    <div class="mb-3">
+        <label for="@(regPrefix)MaxParticipants" class="form-label">Max antal deltagare</label>
+        <input type="number" class="form-control" id="@(regPrefix)MaxParticipants" min="0" step="1" placeholder="0 = ingen gräns">
+        <div class="form-text">Är det fullt kan man fortfarande anmäla sig — men hamnar som reserv, och flyttas upp automatiskt om någon avbokar.</div>
+    </div>
+    <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" id="@(regPrefix)IsMandatory">
+        <label class="form-check-label" for="@(regPrefix)IsMandatory">Obligatoriskt deltagande</label>
+        <div class="form-text" id="@(regPrefix)IsMandatoryHelp">
+            Närvaron prickas av på plats och blir underlag för klubbens beslut om Föreningsintyg.
+        </div>
+    </div>
+    <div class="mb-3">
+        <label for="@(regPrefix)RegistrationUrl" class="form-label">Länk till anmälan (extern)</label>
+        <input type="text" class="form-control" id="@(regPrefix)RegistrationUrl" placeholder="https://...">
+        <div class="form-text">Lämna tom för att låta medlemmarna anmäla sig här på pistol.nu. Fyller du i en länk skickas de dit i stället, och vi för ingen deltagarlista.</div>
+    </div>
+</div>
+
+@if (ViewData["EventRegFieldsScriptLoaded"] == null)
+{
+    ViewData["EventRegFieldsScriptLoaded"] = true;
+    <script>
+    (function () {
+        if (window.hpskEventRegToggle) return;
+
+        function el(prefix, name) { return document.getElementById(prefix + name); }
+
+        window.hpskEventRegToggle = function (prefix) {
+            var req = el(prefix, 'RegistrationRequired');
+            if (!req) return;
+            var group = el(prefix, 'RegistrationOwnGroup');
+            if (group) group.style.display = req.checked ? '' : 'none';
+            if (!req.checked) {
+                // Kapacitet, obligatoriskt och länk hör till anmälan. Lämnas de kvar när anmälan
+                // slås av blir de osynliga inställningar som slår till igen nästa gång någon
+                // kryssar i rutan.
+                var max = el(prefix, 'MaxParticipants'); if (max) max.value = '';
+                var man = el(prefix, 'IsMandatory'); if (man) man.checked = false;
+                var url = el(prefix, 'RegistrationUrl'); if (url) url.value = '';
+            }
+        };
+
+        window.hpskEventRegFill = function (prefix, d) {
+            d = d || {};
+            var req = el(prefix, 'RegistrationRequired');
+            if (req) req.checked = !!d.registrationRequired;
+            var max = el(prefix, 'MaxParticipants');
+            if (max) max.value = d.maxParticipants > 0 ? d.maxParticipants : '';
+            var man = el(prefix, 'IsMandatory');
+            if (man) man.checked = !!d.isMandatory;
+            var url = el(prefix, 'RegistrationUrl');
+            if (url) url.value = d.registrationUrl || '';
+
+            // Säg ifrån i förväg i stället för att låta kryssrutan se ut att fungera och tyst
+            // återgå vid nästa laddning: SetValue på en saknad doctype-egenskap är en no-op.
+            if (d.mandatoryPropertyExists === false && man) {
+                man.disabled = true;
+                var help = el(prefix, 'IsMandatoryHelp');
+                if (help) help.innerHTML = '<span class="text-warning">Egenskapen \'isMandatory\' saknas på händelsetypen i Umbraco — kontakta en administratör innan den kan användas.</span>';
+            }
+
+            window.hpskEventRegToggle(prefix);
+        };
+
+        window.hpskEventRegClear = function (prefix) {
+            window.hpskEventRegFill(prefix, {});
+        };
+
+        // Lägger fälten på en FormData med de namn serverns endpoints tar emot.
+        window.hpskEventRegAppend = function (prefix, formData) {
+            var req = el(prefix, 'RegistrationRequired');
+            var max = el(prefix, 'MaxParticipants');
+            var man = el(prefix, 'IsMandatory');
+            var url = el(prefix, 'RegistrationUrl');
+            formData.append('registrationRequired', req ? req.checked : false);
+            formData.append('maxParticipants', max ? (parseInt(max.value, 10) || 0) : 0);
+            formData.append('isMandatory', man ? man.checked : false);
+            formData.append('registrationUrl', url ? url.value : '');
+            return formData;
+        };
+
+        // Samma sak som query-sträng, för de endpoints som tar parametrar i URL:en.
+        window.hpskEventRegQuery = function (prefix) {
+            var req = el(prefix, 'RegistrationRequired');
+            var max = el(prefix, 'MaxParticipants');
+            var man = el(prefix, 'IsMandatory');
+            var url = el(prefix, 'RegistrationUrl');
+            return '&registrationRequired=' + (req && req.checked ? 'true' : 'false')
+                 + '&maxParticipants=' + (max ? (parseInt(max.value, 10) || 0) : 0)
+                 + '&isMandatory=' + (man && man.checked ? 'true' : 'false')
+                 + '&registrationUrl=' + encodeURIComponent(url ? url.value : '');
+        };
+    })();
+    </script>
+}

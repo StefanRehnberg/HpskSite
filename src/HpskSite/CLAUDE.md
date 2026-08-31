@@ -3293,6 +3293,20 @@ ställen) och `_ClubEventRoster.cshtml` (uppropsdialogen, **EN dialog delad av k
 adminpanel**). ⚠️ Exporten är explicit `window.hpskOpenEventRoster = openEventRoster` — en
 `async function` i ett block läcker INTE till global scope.
 
+**⚠️ HÄNDELSER REDIGERAS FRÅN TRE HÅLL, och första utsågan la fälten bara i ett av dem.** Klubbens
+adminpanel (`EditClubEvent`), kretsens adminpanel (`EditRegionEvent`) och evenemangets egen sida
+(`EditEventDetails`) är tre skilda dialoger mot tre skilda endpoints — och klubbens/kretsens hade
+**aldrig** haft anmälningsfälten, inte ens `registrationRequired`. En arrangör som SKAPADE en
+händelse hade alltså ingen väg till anmälan alls; rapporterat samma dag som "ser inget nytt när jag
+skapar Event". Fälten bor nu i **`_EventRegistrationFields.cshtml`** (prefix-parametriserad markup +
+`hpskEventRegFill` / `hpskEventRegAppend` / `hpskEventRegToggle` / `hpskEventRegClear`), monterad av
+alla tre, och **`ApplyEventRegistrationFields` är den enda skrivvägen** på servern. Lägg aldrig ett
+anmälningsfält i bara en av dialogerna igen.
+- ⚠️ `showCreateEventModal` måste anropa `hpskEventRegClear` — `form.reset()` nollställer inputs men
+  kör inte visa/dölj-logiken, så förra händelsens anmälningsblock stod annars öppet på en tom blankett.
+- `GetClubEvents` och `GetRegionEvents` bär nu fälten (inkl. `mandatoryPropertyExists`) så
+  redigera-dialogen kan förfyllas utan ett extra anrop per rad.
+
 **Kretsens händelselista blev en Åtgärder-meny** i samma pass (tre åtgärder på raden), med
 `data-bs-popper-config` eftersom tabellen ligger i `.table-responsive`. ⚠️ Den bar samtidigt
 `event.name.replace(/'/g, "\\'")` **inne i ett onclick** — enkelfnutt-escaping, exakt den lucka som
@@ -3311,7 +3325,7 @@ tom `InvoiceId`** så betalningen kan kopplas på **utan migrering** den dag äg
 kryssrutan är avstängd och namnger egenskapen i stället för att se ut att fungera och tyst återgå
 (`SetValue` på en saknad egenskap är en no-op). Adds C# → full ombyggnad.
 
-Verifierat **70/70 `hpsk-verify/club-event-signup-verify.mjs`**, två körningar i rad — sviten skapar
+Verifierat **80/80 `hpsk-verify/club-event-signup-verify.mjs`**, två körningar i rad — sviten skapar
 sitt eget evenemang genom de riktiga endpointsen, kör hela flödet och raderar både rader och nod.
 Regression: action-menus-sweep 113/113, region-admin-rail 43/43, marken-orderlist 74/74.
 

@@ -1,4 +1,4 @@
-@{
+﻿@{
     var regionContentId = ViewBag.regionContentId as int? ?? 0;
     var regionName = ViewBag.regionName as string ?? "Krets";
 }
@@ -82,6 +82,9 @@
                             <input type="tel" class="form-control" id="regionEventContactPhone" name="contactPhone">
                         </div>
                     </div>
+
+                    <hr>
+                    @await Html.PartialAsync("_EventRegistrationFields", new ViewDataDictionary(ViewData) { ["Prefix"] = "regEvent" })
                 </form>
             </div>
             <div class="modal-footer">
@@ -733,6 +736,7 @@
     window.showCreateRegionEventModal = function() {
         document.getElementById('regionEventModalTitle').textContent = 'Ny Händelse';
         document.getElementById('regionEventForm').reset();
+        hpskEventRegClear('regEvent');
         document.getElementById('regionEventId').value = '';
         document.getElementById('regionEventCustomType').style.display = 'none';
         document.getElementById('regionEventCustomType').required = false;
@@ -799,6 +803,8 @@
             }
         }
 
+        hpskEventRegFill('regEvent', event);
+
         new bootstrap.Modal(document.getElementById('regionEventModal')).show();
     };
 
@@ -829,6 +835,7 @@
             : '/umbraco/surface/Club/CreateRegionEvent';
 
         formData.append('regionId', regionContentId);
+        hpskEventRegAppend('regEvent', formData);
         formData.append('__RequestVerificationToken', getAntiForgeryToken());
 
         regionPostFormWithTokenRetry(url, formData)

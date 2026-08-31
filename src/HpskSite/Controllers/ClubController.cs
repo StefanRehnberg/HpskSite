@@ -455,7 +455,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> CreateClubEvent(int clubId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
-            string pageName = "")
+            string pageName = "",
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
         {
             try
             {
@@ -499,6 +500,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
+                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     newEvent.SetValue("eventDate", parsedEventDate);
@@ -599,7 +601,16 @@ namespace HpskSite.Controllers
                             contactPerson = evt.Value<string>("contactPerson") ?? "",
                             contactEmail = evt.Value<string>("contactEmail") ?? "",
                             isActive = evt.Value<bool>("isActive"),
-                            url = evt.Url()
+                            url = evt.Url(),
+                            // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett
+                            // extra anrop per rad. `mandatoryPropertyExists` följer med för att
+                            // klienten ska kunna stänga av kryssrutan när doctypen saknar
+                            // egenskapen — SetValue på en saknad egenskap är en tyst no-op.
+                            registrationRequired = evt.Value<bool>("registrationRequired"),
+                            registrationUrl = evt.Value<string>("registrationUrl") ?? "",
+                            maxParticipants = evt.Value<int>("maxParticipants"),
+                            isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty)
                         });
                     }
                 }
@@ -729,7 +740,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> EditClubEvent(int eventId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
-            string pageName = "")
+            string pageName = "",
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
         {
             try
             {
@@ -763,6 +775,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
+                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     eventContent.SetValue("eventDate", parsedEventDate);
@@ -1996,7 +2009,16 @@ namespace HpskSite.Controllers
                             contactPerson = evt.Value<string>("contactPerson") ?? "",
                             contactEmail = evt.Value<string>("contactEmail") ?? "",
                             isActive = evt.Value<bool>("isActive"),
-                            url = evt.Url()
+                            url = evt.Url(),
+                            // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett
+                            // extra anrop per rad. `mandatoryPropertyExists` följer med för att
+                            // klienten ska kunna stänga av kryssrutan när doctypen saknar
+                            // egenskapen — SetValue på en saknad egenskap är en tyst no-op.
+                            registrationRequired = evt.Value<bool>("registrationRequired"),
+                            registrationUrl = evt.Value<string>("registrationUrl") ?? "",
+                            maxParticipants = evt.Value<int>("maxParticipants"),
+                            isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty)
                         });
                     }
                 }
@@ -2021,7 +2043,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> CreateRegionEvent(int regionId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
-            string pageName = "")
+            string pageName = "",
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
         {
             try
             {
@@ -2061,6 +2084,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
+                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     newEvent.SetValue("eventDate", parsedEventDate);
@@ -2110,7 +2134,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> EditRegionEvent(int eventId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
-            string pageName = "")
+            string pageName = "",
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
         {
             try
             {
@@ -2155,6 +2180,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
+                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     eventContent.SetValue("eventDate", parsedEventDate);
@@ -2335,6 +2361,33 @@ namespace HpskSite.Controllers
             }
         }
 
+
+        /// <summary>
+        /// Skriver anmälningsinställningarna på en händelsenod. Delad av klubbens och kretsens
+        /// skapa/redigera-endpoints så de tre dialogerna inte kan glida isär.
+        ///
+        /// ⚠️ <c>isMandatory</c> är en operatörstillagd doctype-egenskap. <c>SetValue</c> på en egenskap
+        /// doctypen inte bär är en TYST no-op, så kryssrutan hade sett ut att fungera och gått tillbaka
+        /// vid nästa laddning. Returnerar egenskapens namn när arrangören faktiskt försökte sätta den
+        /// och den saknas — den som aldrig använder funktionen ska inte gnatas på.
+        /// </summary>
+        private static string? ApplyEventRegistrationFields(
+            Umbraco.Cms.Core.Models.IContent eventContent,
+            bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl)
+        {
+            eventContent.SetValue("registrationRequired", registrationRequired);
+            eventContent.SetValue("registrationUrl", registrationUrl ?? "");
+            eventContent.SetValue("maxParticipants", maxParticipants > 0 ? maxParticipants : 0);
+
+            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty))
+            {
+                eventContent.SetValue(HpskSite.Models.ClubEvents.MandatoryProperty, isMandatory);
+                return null;
+            }
+
+            return isMandatory ? HpskSite.Models.ClubEvents.MandatoryProperty : null;
+        }
+
         /// <summary>
         /// Edit event detail fields (fee, equipment, audience, registration required)
         /// </summary>
@@ -2396,41 +2449,15 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("feeAmount", feeAmount);
                 eventContent.SetValue("equipmentRequired", equipmentRequired);
                 eventContent.SetValue("targetAudience", targetAudience);
-                eventContent.SetValue("registrationRequired", registrationRequired);
-                eventContent.SetValue("registrationUrl", registrationUrl);
-                eventContent.SetValue("maxParticipants", maxParticipants > 0 ? maxParticipants : 0);
+                var missingProp = ApplyEventRegistrationFields(
+                    eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
 
-                // ⚠️ Operator-added properties. SetValue on a property the doctype does not carry is
-                // a SILENT no-op, so the switch would appear to work and revert on next load. Say it
-                // instead — and only when the arrangör actually tried to set something, so a club
-                // that never uses them is not nagged. (Same rule as closeRegistrationOnStartList.)
-                var missingProps = new List<string>();
-                if (eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty))
-                    eventContent.SetValue(HpskSite.Models.ClubEvents.MandatoryProperty, isMandatory);
-                else if (isMandatory)
-                    missingProps.Add(HpskSite.Models.ClubEvents.MandatoryProperty);
-
-                if (eventContent.HasProperty(HpskSite.Models.ClubEvents.FeeProperty))
-                {
-                    if (decimal.TryParse(eventFee, System.Globalization.NumberStyles.Any,
-                            System.Globalization.CultureInfo.InvariantCulture, out var feeVal) && feeVal > 0)
-                        eventContent.SetValue(HpskSite.Models.ClubEvents.FeeProperty, feeVal);
-                    else
-                        eventContent.SetValue(HpskSite.Models.ClubEvents.FeeProperty, null);
-                }
-                else if (!string.IsNullOrWhiteSpace(eventFee))
-                {
-                    missingProps.Add(HpskSite.Models.ClubEvents.FeeProperty);
-                }
-
-                if (missingProps.Count > 0)
+                if (missingProp != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Egenskapen " + string.Join(" och ", missingProps)
-                                  + " saknas på händelsetypen i Umbraco — kontakta en administratör. "
-                                  + "Övriga ändringar sparades inte."
+                        message = $"Egenskapen '{missingProp}' saknas på händelsetypen i Umbraco — kontakta en administratör. Övriga ändringar sparades inte."
                     });
                 }
 
