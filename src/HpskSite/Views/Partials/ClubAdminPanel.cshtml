@@ -2131,7 +2131,14 @@ function renderMarkenOrder(d) {
     // ── Att beställa ──
     html += '<h6 class="small text-uppercase text-muted mb-1">Att beställa</h6>';
     if (!d.order || d.order.length === 0) {
-        html += `<p class="text-muted small">Inga märken eller medaljer att beställa för ${escapeHtml(String(d.year))}.</p>`;
+        // Tomma listan måste förklara sig när det SAMTIDIGT står namn under "Att dela ut" — annars
+        // ser de två halvorna ut att säga emot varandra, vilket var precis vad som hände.
+        const hasHandout = (d.handout || []).length > 0;
+        html += `<p class="text-muted small">Inga märken att beställa för ${escapeHtml(String(d.year))}.`
+             +  (hasHandout
+                    ? ' Namnen under <em>Att dela ut</em> är årsprestationer utan föremål att beställa — se noteringen på varje rad.'
+                    : '')
+             +  '</p>';
     } else {
         html += '<div class="table-responsive"><table class="table table-sm align-middle mb-3">';
         html += '<thead><tr><th>Grupp</th><th>Artikel</th><th class="text-end" style="width:5rem;">Antal</th><th>Notering</th></tr></thead><tbody>';
@@ -2155,7 +2162,12 @@ function renderMarkenOrder(d) {
         html += '<thead><tr><th style="min-width:150px;">Medlem</th><th>Utmärkelse</th><th>Detalj</th></tr></thead><tbody>';
         d.handout.forEach(h => {
             (h.items || []).forEach((i, idx) => {
-                let item = `<span class="text-muted">${escapeHtml(i.group)}</span> ${escapeHtml(i.item)}`;
+                // Gruppen står som prefix för att en valör ("Guld") är obegriplig utan sin familj —
+                // men inte när posten redan börjar med gruppnamnet, vilket gav "Guldfodring
+                // Guldfodring 2026 uppfylld".
+                const showGroup = !i.item.toLowerCase().startsWith(i.group.toLowerCase());
+                let item = (showGroup ? `<span class="text-muted">${escapeHtml(i.group)}</span> ` : '')
+                         + escapeHtml(i.item);
                 // Say which rows carry no physical badge — otherwise the two lists look like they
                 // disagree about the count, and the count is what you order by.
                 if (!i.orderable) item += ' <span class="badge bg-secondary-subtle text-secondary-emphasis">inget märke</span>';

@@ -3008,7 +3008,8 @@ namespace HpskSite.Controllers
             sb.Append("<h2>Att beställa</h2>");
             if (data.Order.Count == 0)
             {
-                sb.Append("<p class='muted'>Inga märken eller medaljer att beställa för ").Append(data.Year).Append(".</p>");
+                sb.Append("<p class='muted'>Inga märken att beställa för ").Append(data.Year)
+                  .Append(". Står det ändå namn under <em>Att dela ut</em> är det årsprestationer utan föremål — se noteringen på raden.</p>");
             }
             else
             {
@@ -3036,9 +3037,12 @@ namespace HpskSite.Controllers
                     foreach (var i in h.Items)
                     {
                         sb.Append("<tr><td class='tick'>&#9744;</td><td>")
-                          .Append(first ? Enc(h.Name) : "").Append("</td><td>")
-                          .Append("<span class='grp'>").Append(Enc(i.Group)).Append("</span> ")
-                          .Append(Enc(i.Item));
+                          .Append(first ? Enc(h.Name) : "").Append("</td><td>");
+                        // Samma regel som i kortet: hoppa över gruppprefixet när posten redan
+                        // börjar med det, annars blir det "Guldfodring Guldfodring 2026 uppfylld".
+                        if (!i.Item.StartsWith(i.Group, StringComparison.OrdinalIgnoreCase))
+                            sb.Append("<span class='grp'>").Append(Enc(i.Group)).Append("</span> ");
+                        sb.Append(Enc(i.Item));
                         if (!i.Orderable) sb.Append(" <span class='muted'>(inget märke att beställa)</span>");
                         if (i.Unverified) sb.Append(" <span class='muted'>(ej granskad)</span>");
                         sb.Append("</td><td class='muted'>").Append(Enc(i.Detail)).Append("</td></tr>");

@@ -146,11 +146,19 @@ namespace HpskSite.Services
                     }
                     else
                     {
+                        // Säg NÄR nästa märke kommer. Raden "8 uppfyllda år (inget nytt årtalsmärke)"
+                        // är obegriplig utan den — den ser ut som att systemet glömt något, när
+                        // sanningen är att stegen ligger var tredje år. Rapporterat 2026-08-31.
+                        int nextAt = MarkenFamilies.Artalsmarke(q.BadgeFamily, throughYear).NextAtYears;
+                        string when = nextAt > 0
+                            ? $"nästa årtalsmärke vid {nextAt} år ({nextAt - throughYear} kvar)"
+                            : "högsta årtalsmärket är redan uppnått";
+
                         entry.Items.Add(new MarkenHandoutItem
                         {
                             Group = GroupGuldfodring,
                             Item = $"Guldfodring {year} uppfylld",
-                            Detail = $"{FamilyLabel(q.BadgeFamily)} · {throughYear} uppfyllda år (inget nytt årtalsmärke i år)",
+                            Detail = $"{FamilyLabel(q.BadgeFamily)} · {throughYear} uppfyllda år · {when}",
                             Orderable = false,
                             Unverified = q.Status == Marken.StatusReported
                         });
