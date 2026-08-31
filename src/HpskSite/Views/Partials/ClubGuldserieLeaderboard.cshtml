@@ -27,6 +27,10 @@
         var rows = [];
         var sortKey = 'count';
         var curYear = new Date().getFullYear();
+        // The liga counts every guldserie a member has shot, competitions included, so a club can
+        // easily run to 20+ shooters. Show the podium and let the rest be rolled out.
+        var TOP = 3;
+        var expanded = false;
 
         function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
 
@@ -82,7 +86,10 @@
                 + '<thead><tr><th style="width:2.5rem"></th><th>Medlem</th>'
                 + th('count', 'Guldserier') + th('perfect', '50:or') + th('best', 'Bästa') + '</tr></thead><tbody>';
             rows.forEach(function (r, i) {
-                html += '<tr>'
+                // Hidden with d-none (display:none !important) rather than the hidden attribute —
+                // a table row's UA display:none is easy for table CSS to override.
+                var extra = i >= TOP && !expanded;
+                html += '<tr' + (extra ? ' class="d-none"' : '') + '>'
                     + '<td class="text-center">' + medal(i) + '</td>'
                     + '<td>' + esc(r.name) + '</td>'
                     + '<td class="text-center fw-semibold">' + r.count + '</td>'
@@ -91,11 +98,24 @@
                     + '</tr>';
             });
             html += '</tbody></table></div>';
+
+            var hiddenCount = rows.length - TOP;
+            if (hiddenCount > 0) {
+                html += '<div class="text-center mt-2"><button type="button" class="btn btn-sm btn-outline-secondary" id="ligaToggle">'
+                    + (expanded
+                        ? '<i class="bi bi-chevron-up me-1"></i>Visa bara topp ' + TOP
+                        : '<i class="bi bi-chevron-down me-1"></i>Visa alla ' + rows.length + ' skyttar')
+                    + '</button></div>';
+            }
+
             content.innerHTML = html;
 
             content.querySelectorAll('th[data-sort]').forEach(function (el) {
                 el.addEventListener('click', function () { sortKey = el.getAttribute('data-sort'); render(); });
             });
+
+            var toggle = document.getElementById('ligaToggle');
+            if (toggle) toggle.addEventListener('click', function () { expanded = !expanded; render(); });
         }
 
         document.addEventListener('DOMContentLoaded', function () {

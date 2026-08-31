@@ -1182,7 +1182,15 @@ namespace HpskSite.Controllers
             try { all = await _ledger.GetVerifiedSeriesForClubAsync(clubId); }
             catch { all = new(); }
 
-            var prec = all.Where(s => Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplinePrecision);
+            // Only Pistolskyttemärkets PRECISION series belong in the Guldserie-ligan.
+            // ⚠️ The discipline filter alone is NOT enough: Marken.SeriesDiscipline returns
+            // DisciplinePrecision as its FALLBACK, so anything that is neither Luftpistol-family nor
+            // SeriesTypeSpeed falls through into it. An Elit precision proof series (SubmitProofSeries,
+            // BadgeFamily = Elit) is judged against Elit brons (45) and not the guldkrav, yet it was
+            // counted here as a guldserie. Gate on the family too — a "guldserie" is a Pistolskyttemärke
+            // concept. Duell/snabbserier and luftpistol were already excluded by the discipline test.
+            var prec = all.Where(s => s.BadgeFamily == Family
+                                      && Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplinePrecision);
             if (year is > 0) prec = prec.Where(s => s.Year == year);
 
             var rows = prec.GroupBy(s => s.MemberId)
