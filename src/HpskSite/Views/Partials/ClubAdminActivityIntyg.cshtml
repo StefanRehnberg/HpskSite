@@ -1,0 +1,291 @@
+@*
+    Aktivitet & Intyg — klubbens egen sida under Admin / Medlemmar.
+
+    Låg tidigare som två utfällbara sektioner i medlemmens info-modal. Fel plats av två skäl: modalen
+    är till för att RÄTTA medlemsuppgifter, medan det här är ett återkommande arbete med ett eget
+    syfte (utfärda Föreningsintyg), och en modal ger ingen plats åt en lista man ska läsa och jämföra
+    i. Dessutom var arbetet oåtkomligt utan att först gå omvägen via en penna på en medlemsrad.
+
+    Mönstret är master–detalj: medlemslistan står kvar till vänster medan underlaget läses till
+    höger, så klubbadmin kan gå igenom flera medlemmar utan att öppna och stänga något.
+
+    ⚠️ Id:na `memberActivitySummary` / `memberActivityYear` / `memberIntygList` /
+    `newIntyg*` är MEDVETET desamma som modalen hade. De finns nu på EXAKT ett ställe, och de
+    befintliga laddarna (`loadMemberActivity`, `loadMemberIntyg`, `addMemberIntyg`) fortsätter
+    fungera oförändrade. Två element med samma id på samma sida gör det andra dött för
+    `getElementById` — därför är modalens block borttagna, inte kopierade.
+
+    Medlemsvalet bor i `window._activityMemberId`, inte i `_editMemberId`: den senare betyder "den
+    medlem redigeringsmodalen står på" och de två är nu olika saker.
+*@
+@await Html.PartialAsync("_MemberActivitySummary")
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+        <h5 class="mb-1"><i class="bi bi-clipboard-check me-2"></i>Aktivitet &amp; Intyg</h5>
+        <p class="text-muted small mb-0" style="max-width:60ch;">
+            Underlaget styrelsen utgår från när klubben utfärdar ett <strong>Föreningsintyg</strong>
+            för en vapenlicensansökan: medlemmens träning, tävlingar och närvaro under ett
+            verksamhetsår, med hur starkt underlaget är för varje post.
+        </p>
+    </div>
+</div>
+
+<div class="row g-3">
+    @* ── Master: medlemslistan ───────────────────────────────────── *@
+    <div class="col-lg-4">
+        <div class="card ai-member-card">
+            <div class="card-header py-2">
+                <label for="aiMemberFilter" class="form-label small text-muted mb-1">Sök medlem</label>
+                <input type="search" class="form-control form-control-sm" id="aiMemberFilter"
+                       placeholder="Namn eller e-post" autocomplete="off"
+                       aria-controls="aiMemberList">
+                @* Antalet står alltid framme: ett filter som tyst gömmer medlemmar är vad som
+                   skapar "min medlem är borta". *@
+                <div class="small text-muted mt-1" id="aiMemberCount" aria-live="polite"></div>
+            </div>
+            <div class="list-group list-group-flush ai-member-list" id="aiMemberList" role="listbox"
+                 aria-label="Klubbens medlemmar">
+                <div class="list-group-item text-muted small">Laddar medlemmar…</div>
+            </div>
+        </div>
+    </div>
+
+    @* ── Detalj: den valda medlemmen ─────────────────────────────── *@
+    <div class="col-lg-8">
+        @* Tomt läge. En sida som öppnar med två tomma kort ser trasig ut; den här rutan säger vad
+           som förväntas av användaren i stället. *@
+        <div class="card" id="aiEmptyState">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-person-lines-fill display-5 text-muted d-block mb-3"></i>
+                <h6 class="mb-2">Välj en medlem i listan</h6>
+                <p class="text-muted small mb-0" style="max-width:44ch; margin:0 auto;">
+                    Då visas medlemmens aktivitet för valt år och de föreningsintyg klubben
+                    redan utfärdat.
+                </p>
+            </div>
+        </div>
+
+        <div id="aiDetail" class="d-none">
+            <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+                <div>
+                    <h6 class="mb-0" id="aiMemberName"></h6>
+                    <span class="small text-muted" id="aiMemberMeta"></span>
+                </div>
+                <div>
+                    <label class="form-label small text-muted mb-0" for="memberActivityYear">Verksamhetsår</label>
+                    <select id="memberActivityYear" class="form-select form-select-sm" style="width:8rem;"></select>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <strong><i class="bi bi-list-check me-2"></i>Aktivitet</strong>
+                </div>
+                <div class="card-body">
+                    <div id="memberActivitySummary" class="small text-muted">Laddar…</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header py-2">
+                    <strong><i class="bi bi-file-earmark-check me-2"></i>Föreningsintyg (utfärdade)</strong>
+                </div>
+                <div class="card-body">
+                    <div id="memberIntygList" class="mb-3 small text-muted">Laddar…</div>
+                    <div class="border-top pt-3">
+                        <div class="small text-muted mb-2">Registrera ett utfärdat intyg</div>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label small mb-0" for="newIntygDate">Datum</label>
+                                <input id="newIntygDate" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small mb-0" for="newIntygPurpose">Ändamål</label>
+                                <input id="newIntygPurpose" class="form-control form-control-sm" placeholder="Vapenlicens">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small mb-0" for="newIntygDescription">Beskrivning</label>
+                                <input id="newIntygDescription" class="form-control form-control-sm" placeholder="t.ex. enhandsvapen .22">
+                            </div>
+                            <div class="col-md-2">
+                                <button type="button" class="btn btn-success btn-sm w-100" onclick="addMemberIntyg()">Lägg till</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function activityIntygPage() {
+    if (window.hpskOpenActivityForMember) return;
+
+    var _members = [];
+    var _loaded = false;
+
+    // CSS i runtime, inte som top-level <style> — ett sådant kan få vyn att 500:a i det här
+    // projektet (minnet razor-partial-styles).
+    (function injectStyles() {
+        if (document.getElementById('ai-styles')) return;
+        var css = [
+            '.ai-member-list { max-height: 60vh; overflow-y: auto; }',
+            '.ai-member-list .list-group-item-action { cursor: pointer; }',
+            '.ai-member-list .active { background-color: var(--bs-primary-bg-subtle); color: inherit; border-color: var(--bs-border-color); }',
+            // ⚠️ Dubbelt at-tecken krävs här. Ett ENSAMT at-tecken i en Razor-vy tolkas som början
+            // på ett C#-uttryck även inne i ett <script> (minnet razor-literal-at-in-script) — och
+            // att skriva den felaktiga formen i kommentaren som varnar för den räckte för att
+            // spräcka vyn: klubbsidan svarade 200 anonymt men saknade hela adminpanelen inloggad.
+            '@@media (min-width: 992px) { .ai-member-card { position: sticky; top: 1rem; } }'
+        ].join('\n');
+        var el = document.createElement('style');
+        el.id = 'ai-styles';
+        el.textContent = css;
+        document.head.appendChild(el);
+    })();
+
+    function esc(s) { return hpskEsc(s == null ? '' : String(s)); }
+    function fullName(m) { return ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || ('Medlem ' + m.id); }
+
+    function render() {
+        var box = document.getElementById('aiMemberList');
+        var countBox = document.getElementById('aiMemberCount');
+        if (!box) return;
+
+        var q = (document.getElementById('aiMemberFilter').value || '').trim().toLowerCase();
+        var shown = q
+            ? _members.filter(function (m) {
+                  return (fullName(m) + ' ' + (m.email || '')).toLowerCase().indexOf(q) >= 0;
+              })
+            : _members;
+
+        countBox.textContent = _members.length
+            ? (q ? 'Visar ' + shown.length + ' av ' + _members.length + ' medlemmar'
+                 : _members.length + ' medlemmar')
+            : '';
+
+        if (!_members.length) {
+            box.innerHTML = '<div class="list-group-item text-muted small">Klubben har inga medlemmar att visa.</div>';
+            return;
+        }
+        if (!shown.length) {
+            box.innerHTML = '<div class="list-group-item text-muted small">Ingen medlem matchar sökningen.</div>';
+            return;
+        }
+
+        box.innerHTML = shown.map(function (m) {
+            var active = String(m.id) === String(window._activityMemberId);
+            return '<button type="button" role="option" aria-selected="' + (active ? 'true' : 'false') + '"' +
+                   ' class="list-group-item list-group-item-action py-2' + (active ? ' active' : '') + '"' +
+                   ' data-member-id="' + esc(m.id) + '">' +
+                   '<span class="d-block">' + esc(fullName(m)) + '</span>' +
+                   (m.email ? '<span class="small text-muted">' + esc(m.email) + '</span>' : '') +
+                   '</button>';
+        }).join('');
+    }
+
+    // ⚠️ Medlemsvalet gar via data-attribut och en delegerad lyssnare, aldrig genom att bygga ett
+    // onclick av medlemmens namn. Samma lucka som gav kodexekvering i Faltskyttes "lagg till skytt".
+    function wire() {
+        var box = document.getElementById('aiMemberList');
+        if (box && !box.dataset.wired) {
+            box.dataset.wired = '1';
+            box.addEventListener('click', function (e) {
+                var btn = e.target.closest('[data-member-id]');
+                if (btn) select(Number(btn.dataset.memberId));
+            });
+        }
+        var filter = document.getElementById('aiMemberFilter');
+        if (filter && !filter.dataset.wired) {
+            filter.dataset.wired = '1';
+            filter.addEventListener('input', render);
+        }
+        var year = document.getElementById('memberActivityYear');
+        if (year && !year.dataset.wired) {
+            year.dataset.wired = '1';
+            year.addEventListener('change', function () {
+                if (window._activityMemberId) loadActivity(window._activityMemberId, year.value);
+            });
+        }
+    }
+
+    async function loadActivity(memberId, year) {
+        var d = await window.hpskLoadActivitySummary('memberActivitySummary', memberId, year);
+        if (!d) return;
+        // Arsvaljaren fylls UR svaret, sa den aldrig erbjuder ett tomt ar eller saknar det ar
+        // datat ligger pa.
+        window.hpskFillActivityYears(document.getElementById('memberActivityYear'), d.years, d.data.year);
+    }
+
+    function select(memberId) {
+        window._activityMemberId = memberId;
+        var m = _members.find(function (x) { return String(x.id) === String(memberId); });
+
+        document.getElementById('aiEmptyState').classList.add('d-none');
+        document.getElementById('aiDetail').classList.remove('d-none');
+        document.getElementById('aiMemberName').textContent = m ? fullName(m) : ('Medlem ' + memberId);
+        document.getElementById('aiMemberMeta').textContent = m && m.email ? m.email : '';
+
+        // Nollstall arsvaljaren mellan medlemmar: annars far nasta medlem forra medlemmens ar
+        // forvalt, och sammanstallningen ser tom ut for ett ar hen inte har data pa.
+        var year = document.getElementById('memberActivityYear');
+        if (year) year.innerHTML = '';
+
+        render();
+        loadActivity(memberId, null);
+        if (typeof loadMemberIntyg === 'function') loadMemberIntyg(memberId);
+    }
+
+    async function load(preselectMemberId) {
+        wire();
+        if (!_loaded) {
+            try {
+                var r = await fetch('/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + clubId,
+                                    { credentials: 'same-origin' });
+                var j = await r.json();
+                _members = (j.success ? (j.data || []) : []).slice().sort(function (a, b) {
+                    return fullName(a).localeCompare(fullName(b), 'sv');
+                });
+                _loaded = true;
+            } catch (e) {
+                document.getElementById('aiMemberList').innerHTML =
+                    '<div class="list-group-item text-danger small">Kunde inte ladda medlemmar.</div>';
+                return;
+            }
+        }
+        render();
+        if (preselectMemberId) select(Number(preselectMemberId));
+    }
+
+    // Ingangen fran medlemsmodalen: byter till fliken OCH valjer medlemmen, sa den som stod i
+    // modalen inte hamnar pa en tom sida och far leta upp personen igen.
+    // ⚠️ .click() pa flikknappen, inte bootstrap.Tab.show() — flera laddare i den har panelen ar
+    // bundna till CLICK och skulle annars aldrig kora (samma falla som kretsens mobilvaljare).
+    window.hpskOpenActivityForMember = function (memberId) {
+        var btn = document.getElementById('clubActivity-tab');
+        if (!btn) return;
+        var go = function () { load(memberId); };
+        btn.addEventListener('shown.bs.tab', function once() {
+            btn.removeEventListener('shown.bs.tab', once);
+            go();
+        });
+        btn.click();
+        var sel = document.getElementById('adminTabMobileSelect');
+        if (sel) sel.value = '#clubActivityTab';
+    };
+
+    // Lazy: sidan slar tre kallor per medlem och ska inte kora forr an fliken oppnas.
+    // Ralsknappen renderas FORE innehallspanelen i dokumentet, sa den finns redan nar det har
+    // korr — ingen vantan pa DOMContentLoaded behovs.
+    (function bindTab() {
+        var btn = document.getElementById('clubActivity-tab');
+        if (btn) { btn.addEventListener('shown.bs.tab', function () { load(null); }); return; }
+        document.addEventListener('DOMContentLoaded', function () {
+            var b = document.getElementById('clubActivity-tab');
+            if (b) b.addEventListener('shown.bs.tab', function () { load(null); });
+        });
+    })();
+})();
+</script>

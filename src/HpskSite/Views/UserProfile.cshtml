@@ -58,6 +58,14 @@
                                 <i class="bi bi-clipboard-data"></i> Resultat
                             </button>
                         </li>
+                        @* Aktivitet star mellan Resultat och Utmarkelser: den svarar pa "vad har jag
+                           gjort", vilket ar samma fraga som Resultat men over hela verksamheten och
+                           inte bara poang. *@
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="activity-tab" data-bs-toggle="tab" data-bs-target="#activity-pane" type="button" role="tab">
+                                <i class="bi bi-list-check"></i> Aktivitet
+                            </button>
+                        </li>
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="marken-tab" data-bs-toggle="tab" data-bs-target="#marken-pane" type="button" role="tab">
                                 <i class="bi bi-patch-check"></i> Medaljer &amp; Märken
@@ -145,29 +153,39 @@
                             })();
                             </script>
 
-                            @*
-                                Min aktivitet per år — samma sammanställning klubben läser när den
-                                utfärdar ett Föreningsintyg, och medvetet SAMMA renderare. Ser
-                                medlemmen andra siffror än styrelsen blir varje samtal om intyget
-                                ett samtal om vilken skärm som har rätt.
-                            *@
-                            <div class="card mt-3" id="myActivityCard">
-                                <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-                                    <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Min aktivitet</h5>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <label class="small text-muted mb-0" for="myActivityYear">År</label>
-                                        <select id="myActivityYear" class="form-select form-select-sm" style="width:7.5rem;"></select>
-                                    </div>
-                                </div>
-                                <div class="card-body">
-                                    <p class="small text-muted">
-                                        Det här är underlaget din klubb utgår från vid ett Föreningsintyg.
-                                        Varje post visar sitt underlag, så du kan se vad som är
+                        </div>
+                        @* End Dashboard Tab *@
+
+                        @*
+                            Aktivitet — egen flik. Låg tidigare som ett kort i botten av Dashboard,
+                            där den både konkurrerade med formkurvorna och hämtade tre källor vid
+                            varje sidladdning. Som egen flik hämtar den först när medlemmen går dit.
+
+                            Samma sammanställning klubben läser på Administration → Medlemmar →
+                            Aktivitet & Intyg, genom SAMMA renderare (_MemberActivitySummary).
+                            Skulle de visa olika siffror blir varje samtal om intyget ett samtal om
+                            vilken skärm som har rätt.
+                        *@
+                        <div class="tab-pane fade" id="activity-pane" role="tabpanel">
+                            <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+                                <div>
+                                    <h5 class="mb-1"><i class="bi bi-list-check me-2"></i>Min aktivitet</h5>
+                                    <p class="text-muted small mb-0" style="max-width:66ch;">
+                                        Din träning, dina tävlingar och din närvaro på klubbens och kretsens
+                                        evenemang, samlat per verksamhetsår. Det här är underlaget din klubb
+                                        utgår från när den utfärdar ett <strong>Föreningsintyg</strong> — varje
+                                        post visar hur starkt underlaget är, så du kan se vad som är
                                         självrapporterat och vad en funktionär har registrerat.
                                     </p>
-                                    <div id="myActivitySummary" class="small text-muted">Laddar…</div>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="small text-muted mb-0" for="myActivityYear">År</label>
+                                    <select id="myActivityYear" class="form-select form-select-sm" style="width:7.5rem;"></select>
                                 </div>
                             </div>
+
+                            <div id="myActivitySummary" class="small text-muted">Laddar…</div>
+
                             @await Html.PartialAsync("_MemberActivitySummary")
                             <script>
                             (function myActivityInit() {
@@ -178,6 +196,8 @@
                                 // i en Razor-vy är en fälla som inte alltid hörs av (razor-text-block-less-than).
                                 if (!(MEMBER_ID > 0)) return;
 
+                                var loaded = false;
+
                                 async function load(year) {
                                     var d = await window.hpskLoadActivitySummary('myActivitySummary', MEMBER_ID, year);
                                     if (!d) return;
@@ -187,11 +207,22 @@
 
                                 var sel = document.getElementById('myActivityYear');
                                 if (sel) sel.addEventListener('change', function () { load(sel.value); });
-                                load(null);
+
+                                // Lazy, och EN gång: fliken slår tre källor. `shown.bs.tab` fyrar varje
+                                // gång man går tillbaka till fliken, och en ny hämtning då skulle
+                                // dessutom slå ihjäl medlemmens eget årsval.
+                                var tabBtn = document.getElementById('activity-tab');
+                                if (tabBtn) {
+                                    tabBtn.addEventListener('shown.bs.tab', function () {
+                                        if (loaded) return;
+                                        loaded = true;
+                                        load(null);
+                                    });
+                                }
                             })();
                             </script>
                         </div>
-                        @* End Dashboard Tab *@
+                        @* End Activity Tab *@
 
                         @* Training Results Tab *@
                         <div class="tab-pane fade" id="results-pane" role="tabpanel">

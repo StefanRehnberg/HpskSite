@@ -4043,12 +4043,53 @@ en tabell. `Services/MemberActivitySummaryService.cs` + `Models/MemberActivitySu
 träningsrad eller tar ett upprop i efterhand. Ingen SQL-migrering, ingen doctype-egenskap, ingen nod.
 
 **Läses av TVÅ ytor genom SAMMA renderare** — `Views/Partials/_MemberActivitySummary.cshtml`
-(`hpskLoadActivitySummary` / `hpskRenderActivitySummary` / `hpskFillActivityYears`), monterad på Min
-sidas Dashboard och i klubbadmins medlemsdialog. Två läsvägar över samma sak blir två svar som får
-säga emot varandra, och här är svaret ett myndighetsunderlag. Partialen inkluderar `_HtmlEscape`
-själv och injicerar sin CSS i runtime (ett top-level `<style>` i en partial kan 500:a — se
-`razor-partial-styles`). ⚠️ Exporterna sker med `window.x = x`: en `async function` i ett block läcker
-inte till global scope.
+(`hpskLoadActivitySummary` / `hpskRenderActivitySummary` / `hpskFillActivityYears`). Två läsvägar över
+samma sak blir två svar som får säga emot varandra, och här är svaret ett myndighetsunderlag.
+Partialen inkluderar `_HtmlEscape` själv och injicerar sin CSS i runtime (ett top-level `<style>` i en
+partial kan 500:a — se `razor-partial-styles`). ⚠️ Exporterna sker med `window.x = x`: en
+`async function` i ett block läcker inte till global scope.
+
+**Ytorna är EGNA sidor, inte tillägg på befintliga (omgjort 2026-09-01 på Stefans begäran).** Första
+utsågan la medlemsvyn som ett kort i botten av Min sidas Dashboard och klubbvyn som två utfällbara
+`<details>` i medlemsmodalen. Båda var fel plats:
+- **Min sida → egen flik `Aktivitet`** (`#activity-tab` / `#activity-pane`, mellan Resultat och
+  Medaljer & Märken). På Dashboard konkurrerade den med formkurvorna OCH hämtade tre källor vid varje
+  sidladdning. Nu **lazy och EN gång** på `shown.bs.tab` — `shown` fyrar varje gång man går tillbaka,
+  och en ny hämtning då skulle slå ihjäl medlemmens eget årsval. Sju flikar, alltså kvar under
+  8-gränsen för räls.
+- **Klubben → egen rälspost `Aktivitet & Intyg`** i gruppen *Medlemmar*, direkt efter Medlemmar
+  (`Views/Partials/ClubAdminActivityIntyg.cshtml`, `#clubActivity-tab` / `#clubActivityTab`). Modalen
+  är till för att RÄTTA medlemsuppgifter; intygsarbetet är återkommande, har eget syfte och behöver
+  plats att läsa och jämföra i — och var dessutom oåtkomligt utan omvägen via en penna på en
+  medlemsrad. **Intygsloggen flyttade med**, så sidan bär hela arbetsflödet.
+
+**Klubbsidan är master–detalj:** filtrerbar medlemslista (sticky på ≥lg) kvar till vänster medan
+underlaget läses till höger, så flera medlemmar kan gås igenom utan att öppna och stänga något.
+Tomt läge säger vad användaren ska göra i stället för att visa två tomma kort. Antalet medlemmar står
+alltid framme och filtret skriver ut "Visar X av Y" (`sort-dont-hide-for-anxious-users`).
+⚠️ **Medlemsvalet går via `data-member-id` + en delegerad lyssnare**, aldrig ett `onclick` byggt av
+medlemmens namn — samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt".
+⚠️ **Årsväljaren nollställs vid byte av medlem**, annars får nästa medlem förra medlemmens år förvalt
+och sammanställningen ser tom ut för ett år hen inte har data på.
+
+**⚠️ Id:na `memberActivitySummary` / `memberActivityYear` / `memberIntygList` / `newIntyg*` finns nu
+på EXAKT ett ställe.** De behölls med flit, så `loadMemberIntyg` / `addMemberIntyg` /
+`deleteMemberIntyg` fungerar oförändrade — men modalens block är **borttagna, inte kopierade**: två
+element med samma id gör det andra dött för `getElementById`. Sviten assertar att var container finns
+i precis ett exemplar.
+
+**⚠️ `window._activityMemberId` är sidans medlemsval — INTE `_editMemberId`.** Sedan intygsloggen
+flyttade betyder de två olika saker ("medlemmen fliken står på" vs "medlemmen redigeringsmodalen står
+på"). Läses fel **skrivs intyget på en annan person än den skärmen visar**, och det syns inte. Det är
+enda skälet sviten har ett skrivande påstående: den sätter `_editMemberId` till en ANNAN medlem och
+kontrollerar serversidan att intyget landade på den som visas.
+
+**Modalen lämnar över i stället för att vara en återvändsgränd:** `openActivityIntygForEditedMember()`
+→ `hpskOpenActivityForMember(memberId)` byter flik med medlemmen förvald. ⚠️ Den **väntar in
+`hidden.bs.modal`** innan flikbytet — Bootstrap tar bort backdrop och `overflow:hidden` på `<body>` i
+sin hide-animation, och ett flikbyte mitt i den lämnar sidan låst eller med en grå hinna över det man
+just navigerade till. ⚠️ Och den använder **`.click()` på rälsknappen, inte `bootstrap.Tab.show()`** —
+flera laddare i den här panelen är bundna till CLICK och skulle annars aldrig köra.
 
 **Endpointen är `Foreningsintyg/GetActivitySummary?memberId=&year=`**, medvetet på intygscontrollern:
 den som får utfärda intyget ska få se underlaget. Grinden är utbruten till
@@ -4109,18 +4150,31 @@ medvetet inte — blanda inte in den utan beslutet i `funktionarer-narvaro-backl
 **Namnkollision att känna till:** `MemberActivityService` finns redan och är en helt annan sak
 (throttlad `lastActiveDate`-stämpel). Den nya heter `MemberActivitySummaryService`.
 
+**⚠️ `@media` i en JS-kommentar sprängde vyn — och kommentaren var VARNINGEN om just det.** Ett
+ensamt at-tecken i en Razor-vy tolkas som början på ett C#-uttryck även inne i ett `<script>`
+(`razor-literal-at-in-script`), och jag skrev den felaktiga formen i texten som förklarade regeln.
+Symptomet är värt att känna igen: **klubbsidan svarade 200 anonymt men saknade hela adminpanelen
+inloggad** — panelen renderas bara för klubbadmin, så felet visade sig som "Administration-fliken
+finns inte", vilket läser som ett behörighetsproblem. Samma diagnostiska mönster som
+`deploy-missing-loggedin-partial-500`.
+
 Verifierat **22 enhetstest** (`MemberActivitySummaryTests` — ren aggregering, ingen Umbraco) +
-**61/61 `hpsk-verify/activity-summary-verify.mjs`**, som **mäter varje siffra mot SQL** och inte mot
-en tidigare körning av samma kod. **A/B: 6 av 61 faller** när `ActivityDays` görs till antal poster
+**90/90 `hpsk-verify/activity-summary-verify.mjs`** (två körningar i rad), som **mäter varje siffra mot
+SQL** och inte mot en tidigare körning av samma kod. **A/B: 6 av 61 föll** när `ActivityDays` gjordes till antal poster
 och träningens underlag höjs till funktionärsregistrerat — och 2 av 22 enhetstest faller på den
 första. ⚠️ Två fällor i svitens huvud: medlem **5514 ser tom ut** i träningsloggen men har 7
 tävlingsposter 2026, så det tomma fallet mäts på ett gammalt **ÅR** och inte på en "tom medlem" (det
 kostade fyra falska rödmarkeringar); och klubbsidans URL måste tas som segmentet **direkt efter
 `/klubbar/`** — en bredare länkmatchning plockade en kvarglömd evenemangssida från en annan
 verifieringskörning och rapporterade "ingen Administration-flik", vilket läser som ett
-behörighetsfel. Sviten läser bara och behöver ingen städning.
+behörighetsfel. **Ett enda påstående SKRIVER** — det som bevisar att intyget landar på den medlem
+skärmen visar och inte på den `_editMemberId` pekar på; fixturen raderas i sitt eget `finally`, även
+när något faller, och kontrolleras bort i SQL (`MemberCertificateIssue WHERE Purpose LIKE
+'zz-verify-%'` → 0).
 
 Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.
+**Omorganiseringen av ytorna 2026-09-01 är enbart vyer** — de är runtime-kompilerade, så de kan
+deployas som filer utan ombyggnad.
 **Fildeploy av KB:** `KnowledgeBase/docs/aktivitetssammanstallning.md` (ny).
 
 ## Dubblettsammanslagning av medlemmar (2026-08-25)

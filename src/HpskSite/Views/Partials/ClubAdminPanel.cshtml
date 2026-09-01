@@ -79,6 +79,7 @@
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#membersTab">Medlemmar</option>
+                    <option value="#clubActivityTab">Aktivitet &amp; Intyg</option>
                     <option value="#trainingGroupsTab">Träningsgrupper</option>
                     <option value="#certificationsTab">Certifieringar</option>
                 </optgroup>
@@ -114,6 +115,11 @@
                 <div class="admin-rail-group">Medlemmar</div>
                 <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#membersTab" type="button" role="tab" aria-controls="membersTab" aria-selected="false">
                     <i class="bi bi-people me-2"></i>Medlemmar
+                </button>
+                @* Direkt efter Medlemmar: det ar dar arbetet borjar (valj en medlem) och dit
+                   medlemsmodalen lamnar over. *@
+                <button class="nav-link" id="clubActivity-tab" data-bs-toggle="tab" data-bs-target="#clubActivityTab" type="button" role="tab" aria-controls="clubActivityTab" aria-selected="false">
+                    <i class="bi bi-clipboard-check me-2"></i>Aktivitet &amp; Intyg
                 </button>
                 <button class="nav-link" id="traininggroups-tab" data-bs-toggle="tab" data-bs-target="#trainingGroupsTab" type="button" role="tab" aria-controls="trainingGroupsTab" aria-selected="false">
                     <i class="bi bi-people-fill me-2"></i>Träningsgrupper
@@ -373,6 +379,11 @@
         <div class="tab-pane fade" id="documentsTab">
             @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
             @await Html.PartialAsync("ClubDocumentAdmin")
+        </div>
+
+        <!-- Aktivitet & Intyg Tab -->
+        <div class="tab-pane fade" id="clubActivityTab">
+            @await Html.PartialAsync("ClubAdminActivityIntyg")
         </div>
 
         <!-- Training Groups Tab -->
@@ -1494,38 +1505,25 @@
                     </details>
 
                     @*
-                        Aktivitetssammanställningen ligger FÖRE intygsloggen med flit: den är
-                        underlaget beslutet vilar på, och loggen är kvittot på ett beslut som redan
-                        är fattat. Läs i den ordningen.
-                    *@
-                    <details class="mb-2" id="memberActivityDetails">
-                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Aktivitet per år (underlag för intyg)</summary>
-                        <div class="d-flex align-items-end gap-2 mb-2">
-                            <div>
-                                <label class="form-label small mb-0" for="memberActivityYear">Verksamhetsår</label>
-                                <select id="memberActivityYear" class="form-select form-select-sm" style="width:8rem;"></select>
-                            </div>
-                            <div class="small text-muted pb-1">
-                                Varje post visar sitt underlag. Ett intyg som blandar självrapporterad
-                                träning med funktionärsregistrerad närvaro går inte att tolka.
-                            </div>
-                        </div>
-                        <div id="memberActivitySummary" class="small text-muted">Öppna för att ladda…</div>
-                    </details>
+                        Aktivitet och Föreningsintyg låg tidigare som två utfällbara sektioner HÄR.
+                        De ligger nu på en egen sida (Administration → Medlemmar → Aktivitet &
+                        Intyg): den här modalen är till för att RÄTTA medlemsuppgifter, medan
+                        intygsarbetet är återkommande, har ett eget syfte och behöver plats att läsa
+                        och jämföra i.
 
-                    <details class="mb-2">
-                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Föreningsintyg (utfärdade)</summary>
-                        <div id="memberIntygList" class="mb-2 small text-muted">Öppna för att ladda…</div>
-                        <div class="row g-2 align-items-end">
-                            <div class="col-md-3"><label class="form-label small mb-0">Datum</label>
-                                <input id="newIntygDate" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD"></div>
-                            <div class="col-md-3"><label class="form-label small mb-0">Ändamål</label>
-                                <input id="newIntygPurpose" class="form-control form-control-sm" placeholder="Vapenlicens"></div>
-                            <div class="col-md-4"><label class="form-label small mb-0">Beskrivning</label>
-                                <input id="newIntygDescription" class="form-control form-control-sm" placeholder="t.ex. enhandsvapen .22"></div>
-                            <div class="col-md-2"><button type="button" class="btn btn-success btn-sm w-100" onclick="addMemberIntyg()">Lägg till</button></div>
+                        Kvar står EN väg vidare, inte en återvändsgränd — den som öppnade modalen
+                        för att titta på underlaget ska inte behöva leta upp personen igen.
+                    *@
+                    <div class="d-flex flex-wrap align-items-center gap-2 border rounded p-2 mb-3 bg-light-subtle">
+                        <div class="small text-muted flex-grow-1">
+                            <i class="bi bi-clipboard-check me-1"></i>
+                            Aktivitet och föreningsintyg hanteras på en egen sida.
                         </div>
-                    </details>
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                                onclick="openActivityIntygForEditedMember()">
+                            Öppna Aktivitet &amp; Intyg
+                        </button>
+                    </div>
 
                     <!-- Primary Club -->
                     <div class="row">
@@ -4628,23 +4626,11 @@ function populateEditMemberForm(member) {
     document.getElementById('editMemberPnrIncompleteFlag').style.display =
         (member.pnrIncomplete === 'true' || member.pnrIncomplete === '1' || member.pnrIncomplete === 'True') ? '' : 'none';
 
-    // Per-club membership (ClubMembership), keys + föreningsintyg (member-database expansion)
+    // Per-club membership (ClubMembership) + nycklar. Föreningsintyg och aktivitet laddas INTE
+    // härifrån längre — de bor på fliken Aktivitet & Intyg och laddas när en medlem väljs där.
     window._editMemberId = member.id;
     if (typeof loadClubMembership === 'function') loadClubMembership(member.id);
-    if (typeof loadMemberKeys === 'function') { loadMemberKeys(member.id); loadMemberIntyg(member.id); }
-
-    // Aktivitetssammanställningen är lazy. Öppnar admin nästa medlem medan sektionen står utfälld
-    // MÅSTE den läsa om — annars visas förra medlemmens aktivitet under det nya namnet, vilket är
-    // värre än en tom ruta när siffran är underlag för ett myndighetsintyg.
-    (function resetMemberActivity() {
-        var det = document.getElementById('memberActivityDetails');
-        var box = document.getElementById('memberActivitySummary');
-        if (!det || !box) return;
-        var sel = document.getElementById('memberActivityYear');
-        if (sel) sel.innerHTML = '';
-        if (det.open) { loadMemberActivity(member.id, null); }
-        else { box.innerHTML = '<span class="text-muted">Öppna för att ladda…</span>'; }
-    })();
+    if (typeof loadMemberKeys === 'function') loadMemberKeys(member.id);
 
     // Profile picture
     updateEditMemberProfilePicture(member.profilePictureUrl, member.firstName, member.lastName);
@@ -6492,29 +6478,27 @@ function deleteClubKey(id) {
         });
 }
 
-// ── Aktivitetssammanställning (underlag för Föreningsintyg) ──────────────
-// Lazy: den slår tre källor (träningslogg, tävlingsdeltagande, evenemangsnärvaro) och ska inte
-// köras för varje medlem en klubbadmin råkar öppna. Hämtas när sektionen fälls ut.
-async function loadMemberActivity(memberId, year) {
-    var d = await window.hpskLoadActivitySummary('memberActivitySummary', memberId, year);
-    if (!d) return;
-    // Årsväljaren fylls FRÅN svaret, så den aldrig erbjuder ett år utan data — och det år servern
-    // faktiskt svarade för blir det valda, även när anroparen inte bad om något år.
-    window.hpskFillActivityYears(document.getElementById('memberActivityYear'), d.years, d.data.year);
+// ── Överlämning från medlemsmodalen till fliken Aktivitet & Intyg ────────
+// Aktiviteten och intygsloggen bor på egen flik. Härifrån går bara vägen dit — med medlemmen
+// förvald, så den som stod i modalen inte hamnar på en tom sida och får leta upp personen igen.
+function openActivityIntygForEditedMember() {
+    var memberId = window._editMemberId;
+    if (!memberId || typeof window.hpskOpenActivityForMember !== 'function') return;
+    var modalEl = document.getElementById('editClubMemberModal');
+    var modal = modalEl && window.bootstrap ? bootstrap.Modal.getInstance(modalEl) : null;
+    // ⚠️ Vänta in att modalen är STÄNGD innan flikbytet. Bootstrap tar bort backdrop och
+    // `overflow:hidden` på <body> i sin hide-animation; byter man flik mitt i den blir sidan
+    // kvar olåsbar eller med en grå hinna över det man just navigerade till.
+    if (modal) {
+        modalEl.addEventListener('hidden.bs.modal', function once() {
+            modalEl.removeEventListener('hidden.bs.modal', once);
+            window.hpskOpenActivityForMember(memberId);
+        });
+        modal.hide();
+    } else {
+        window.hpskOpenActivityForMember(memberId);
+    }
 }
-
-(function wireMemberActivity() {
-    var det = document.getElementById('memberActivityDetails');
-    if (!det) return;
-    det.addEventListener('toggle', function () {
-        if (!det.open || !window._editMemberId) return;
-        loadMemberActivity(window._editMemberId, document.getElementById('memberActivityYear').value || null);
-    });
-    var sel = document.getElementById('memberActivityYear');
-    if (sel) sel.addEventListener('change', function () {
-        if (window._editMemberId) loadMemberActivity(window._editMemberId, sel.value);
-    });
-})();
 
 function loadMemberIntyg(memberId) {
     var box = document.getElementById('memberIntygList');
@@ -6535,7 +6519,11 @@ function loadMemberIntyg(memberId) {
         });
 }
 function addMemberIntyg() {
-    var memberId = window._editMemberId;
+    // ⚠️ _activityMemberId, INTE _editMemberId. Sedan intygsloggen flyttade till egen flik betyder
+    // de två olika saker: den ena är "medlemmen fliken står på", den andra "medlemmen
+    // redigeringsmodalen står på". Läses fel skrivs intyget på en annan person än den som visas.
+    var memberId = window._activityMemberId;
+    if (!memberId) { alert('Välj en medlem först.'); return; }
     var fd = new FormData();
     fd.append('__RequestVerificationToken', meToken());
     fd.append('memberId', memberId);
@@ -6558,6 +6546,6 @@ function deleteMemberIntyg(id) {
     fd.append('__RequestVerificationToken', meToken());
     fd.append('id', id);
     fetch('/umbraco/surface/Foreningsintyg/DeleteIntyg', { method: 'POST', body: fd })
-        .then(function (r) { return r.json(); }).then(function () { loadMemberIntyg(window._editMemberId); });
+        .then(function (r) { return r.json(); }).then(function () { loadMemberIntyg(window._activityMemberId); });
 }
 </script>
