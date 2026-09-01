@@ -4084,12 +4084,16 @@ på"). Läses fel **skrivs intyget på en annan person än den skärmen visar**,
 enda skälet sviten har ett skrivande påstående: den sätter `_editMemberId` till en ANNAN medlem och
 kontrollerar serversidan att intyget landade på den som visas.
 
-**Modalen lämnar över i stället för att vara en återvändsgränd:** `openActivityIntygForEditedMember()`
-→ `hpskOpenActivityForMember(memberId)` byter flik med medlemmen förvald. ⚠️ Den **väntar in
-`hidden.bs.modal`** innan flikbytet — Bootstrap tar bort backdrop och `overflow:hidden` på `<body>` i
-sin hide-animation, och ett flikbyte mitt i den lämnar sidan låst eller med en grå hinna över det man
-just navigerade till. ⚠️ Och den använder **`.click()` på rälsknappen, inte `bootstrap.Tab.show()`** —
-flera laddare i den här panelen är bundna till CLICK och skulle annars aldrig köra.
+**⚠️ Medlemsmodalen nämner inte det här arbetet över huvud taget (Stefans beslut 2026-09-01).** En
+första utsåga lämnade en "Öppna Aktivitet & Intyg"-knapp där som överlämning; den är borttagen
+tillsammans med `openActivityIntygForEditedMember` och `hpskOpenActivityForMember`. Lägg den inte
+tillbaka — modalen ska inte antyda att intygsarbetet börjar där. Sviten assertar att båda
+funktionerna är `undefined` och att ingen knapp i modalen nämner sidan; en kvarglömd genväg mot en
+borttagen funktion är tyst död kod.
+
+⚠️ Sidans dubbelinit-guard är en **egen flagga** (`window.__activityIntygPageInit`), inte "finns
+funktionen X?" — den pekade tidigare på den exporterade ingången, och när ingången togs bort blev
+guarden tyst alltid falsk, alltså ingen guard alls.
 
 **Endpointen är `Foreningsintyg/GetActivitySummary?memberId=&year=`**, medvetet på intygscontrollern:
 den som får utfärda intyget ska få se underlaget. Grinden är utbruten till
@@ -4159,7 +4163,7 @@ finns inte", vilket läser som ett behörighetsproblem. Samma diagnostiska möns
 `deploy-missing-loggedin-partial-500`.
 
 Verifierat **22 enhetstest** (`MemberActivitySummaryTests` — ren aggregering, ingen Umbraco) +
-**90/90 `hpsk-verify/activity-summary-verify.mjs`** (två körningar i rad), som **mäter varje siffra mot
+**91/91 `hpsk-verify/activity-summary-verify.mjs`**, som **mäter varje siffra mot
 SQL** och inte mot en tidigare körning av samma kod. **A/B: 6 av 61 föll** när `ActivityDays` gjordes till antal poster
 och träningens underlag höjs till funktionärsregistrerat — och 2 av 22 enhetstest faller på den
 första. ⚠️ Två fällor i svitens huvud: medlem **5514 ser tom ut** i träningsloggen men har 7

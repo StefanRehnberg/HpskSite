@@ -1506,24 +1506,11 @@
 
                     @*
                         Aktivitet och Föreningsintyg låg tidigare som två utfällbara sektioner HÄR.
-                        De ligger nu på en egen sida (Administration → Medlemmar → Aktivitet &
-                        Intyg): den här modalen är till för att RÄTTA medlemsuppgifter, medan
-                        intygsarbetet är återkommande, har ett eget syfte och behöver plats att läsa
-                        och jämföra i.
-
-                        Kvar står EN väg vidare, inte en återvändsgränd — den som öppnade modalen
-                        för att titta på underlaget ska inte behöva leta upp personen igen.
+                        De ligger nu enbart på Administration → Medlemmar → Aktivitet & Intyg: den
+                        här modalen är till för att RÄTTA medlemsuppgifter, och intygsarbetet är ett
+                        annat arbete med eget syfte. Lägg dem inte tillbaka, och lägg inte heller en
+                        genväg hit — modalen ska inte antyda att arbetet börjar här.
                     *@
-                    <div class="d-flex flex-wrap align-items-center gap-2 border rounded p-2 mb-3 bg-light-subtle">
-                        <div class="small text-muted flex-grow-1">
-                            <i class="bi bi-clipboard-check me-1"></i>
-                            Aktivitet och föreningsintyg hanteras på en egen sida.
-                        </div>
-                        <button type="button" class="btn btn-outline-primary btn-sm"
-                                onclick="openActivityIntygForEditedMember()">
-                            Öppna Aktivitet &amp; Intyg
-                        </button>
-                    </div>
 
                     <!-- Primary Club -->
                     <div class="row">
@@ -6476,28 +6463,6 @@ function deleteClubKey(id) {
             if (!d.success) { alert(d.message || 'Kunde inte ta bort'); return; }
             loadClubKeys();
         });
-}
-
-// ── Överlämning från medlemsmodalen till fliken Aktivitet & Intyg ────────
-// Aktiviteten och intygsloggen bor på egen flik. Härifrån går bara vägen dit — med medlemmen
-// förvald, så den som stod i modalen inte hamnar på en tom sida och får leta upp personen igen.
-function openActivityIntygForEditedMember() {
-    var memberId = window._editMemberId;
-    if (!memberId || typeof window.hpskOpenActivityForMember !== 'function') return;
-    var modalEl = document.getElementById('editClubMemberModal');
-    var modal = modalEl && window.bootstrap ? bootstrap.Modal.getInstance(modalEl) : null;
-    // ⚠️ Vänta in att modalen är STÄNGD innan flikbytet. Bootstrap tar bort backdrop och
-    // `overflow:hidden` på <body> i sin hide-animation; byter man flik mitt i den blir sidan
-    // kvar olåsbar eller med en grå hinna över det man just navigerade till.
-    if (modal) {
-        modalEl.addEventListener('hidden.bs.modal', function once() {
-            modalEl.removeEventListener('hidden.bs.modal', once);
-            window.hpskOpenActivityForMember(memberId);
-        });
-        modal.hide();
-    } else {
-        window.hpskOpenActivityForMember(memberId);
-    }
 }
 
 function loadMemberIntyg(memberId) {

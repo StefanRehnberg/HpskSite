@@ -121,7 +121,10 @@
 
 <script>
 (function activityIntygPage() {
-    if (window.hpskOpenActivityForMember) return;
+    // ⚠️ Egen flagga, inte "finns funktionen X?". Guarden pekade tidigare pa en exporterad
+    // funktion; nar den togs bort blev guarden tyst alltid falsk, alltsa ingen guard alls.
+    if (window.__activityIntygPageInit) return;
+    window.__activityIntygPageInit = true;
 
     var _members = [];
     var _loaded = false;
@@ -238,7 +241,7 @@
         if (typeof loadMemberIntyg === 'function') loadMemberIntyg(memberId);
     }
 
-    async function load(preselectMemberId) {
+    async function load() {
         wire();
         if (!_loaded) {
             try {
@@ -256,35 +259,17 @@
             }
         }
         render();
-        if (preselectMemberId) select(Number(preselectMemberId));
     }
-
-    // Ingangen fran medlemsmodalen: byter till fliken OCH valjer medlemmen, sa den som stod i
-    // modalen inte hamnar pa en tom sida och far leta upp personen igen.
-    // ⚠️ .click() pa flikknappen, inte bootstrap.Tab.show() — flera laddare i den har panelen ar
-    // bundna till CLICK och skulle annars aldrig kora (samma falla som kretsens mobilvaljare).
-    window.hpskOpenActivityForMember = function (memberId) {
-        var btn = document.getElementById('clubActivity-tab');
-        if (!btn) return;
-        var go = function () { load(memberId); };
-        btn.addEventListener('shown.bs.tab', function once() {
-            btn.removeEventListener('shown.bs.tab', once);
-            go();
-        });
-        btn.click();
-        var sel = document.getElementById('adminTabMobileSelect');
-        if (sel) sel.value = '#clubActivityTab';
-    };
 
     // Lazy: sidan slar tre kallor per medlem och ska inte kora forr an fliken oppnas.
     // Ralsknappen renderas FORE innehallspanelen i dokumentet, sa den finns redan nar det har
     // korr — ingen vantan pa DOMContentLoaded behovs.
     (function bindTab() {
         var btn = document.getElementById('clubActivity-tab');
-        if (btn) { btn.addEventListener('shown.bs.tab', function () { load(null); }); return; }
+        if (btn) { btn.addEventListener('shown.bs.tab', function () { load(); }); return; }
         document.addEventListener('DOMContentLoaded', function () {
             var b = document.getElementById('clubActivity-tab');
-            if (b) b.addEventListener('shown.bs.tab', function () { load(null); });
+            if (b) b.addEventListener('shown.bs.tab', function () { load(); });
         });
     })();
 })();
