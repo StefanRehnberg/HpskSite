@@ -88,9 +88,18 @@
 
         <div id="aiDetail" class="d-none">
             <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
-                <div>
-                    <h6 class="mb-0" id="aiMemberName"></h6>
-                    <span class="small text-muted" id="aiMemberMeta"></span>
+                @* Avataren till vänster om namn och e-post. align-items-center på just den här
+                   raden, inte -end: bilden ska ligga mitt för de två textraderna, inte i linje med
+                   den nedersta. *@
+                <div class="d-flex align-items-center gap-2">
+                    @* ⚠️ En BEHÅLLARE, inte avataren själv. Fylls med innerHTML — hade select()
+                       satt outerHTML skulle id:t försvinna med första bytet och nästa medlem få
+                       ingen avatar alls. *@
+                    <span id="aiMemberAvatar" class="d-inline-flex"></span>
+                    <div>
+                        <h6 class="mb-0" id="aiMemberName"></h6>
+                        <span class="small text-muted" id="aiMemberMeta"></span>
+                    </div>
                 </div>
                 <div>
                     <label class="form-label small text-muted mb-0" for="memberActivityYear">Verksamhetsår</label>
@@ -411,7 +420,19 @@
             // på ett C#-uttryck även inne i ett <script> (minnet razor-literal-at-in-script) — och
             // att skriva den felaktiga formen i kommentaren som varnar för den räckte för att
             // spräcka vyn: klubbsidan svarade 200 anonymt men saknade hela adminpanelen inloggad.
-            '@@media (min-width: 992px) { .ai-member-card { position: sticky; top: 1rem; } }'
+            '@@media (min-width: 992px) { .ai-member-card { position: sticky; top: 1rem; } }',
+            // Avatar. Samma form och samma fallback som klubbens medlemsregister
+            // (ClubMembersDirectory .member-avatar) — en andra avatarstil på samma sajt gör att
+            // samma person ser olika ut på två sidor. Egna klassnamn eftersom den partialen inte
+            // laddas här; flyttas de någon gång ihop är det EN klass som ska bli kvar.
+            '.ai-avatar { position: relative; width: 32px; height: 32px; border-radius: 50%;' +
+            '  display: inline-flex; align-items: center; justify-content: center; font-size: 12px;' +
+            '  font-weight: 700; color: #fff; background-color: var(--bs-primary);' +
+            '  overflow: hidden; flex-shrink: 0; }',
+            // Bilden ligger OVANPÅ initialerna. Tas den bort av onerror syns de igen — därav
+            // position: absolute i stället för att bilden ersätter textinnehållet.
+            '.ai-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }',
+            '.ai-avatar-lg { width: 44px; height: 44px; font-size: 15px; }'
         ].join('\n');
         var el = document.createElement('style');
         el.id = 'ai-styles';
@@ -421,6 +442,40 @@
 
     function esc(s) { return hpskEsc(s == null ? '' : String(s)); }
     function fullName(m) { return ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || ('Medlem ' + m.id); }
+
+    /// Initialer ur ett namn — första och SISTA ordets begynnelsebokstav, samma regel som
+    /// medlemsregistret. Mellannamn hoppas över med flit: "AH" är igenkännbart, "AJH" är det inte.
+    function initials(name) {
+        var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+        if (!parts.length) return '?';
+        var s = parts[0].charAt(0);
+        if (parts.length > 1) s += parts[parts.length - 1].charAt(0);
+        return s.toUpperCase();
+    }
+
+    /// Avataren. Bild om medlemmen har en, annars initialer.
+    ///
+    /// ⚠️ Alt-texten är TOM och bilden aria-hidden: namnet står i klartext direkt intill, så en
+    /// skärmläsare skulle annars läsa upp det två gånger. Avataren är dekor, inte information.
+    ///
+    /// ⚠️ Initialerna ligger ALLTID i spanen och bilden läggs ovanpå den, absolut positionerad.
+    /// Faller bilden bort (`onerror="this.remove()"`) syns initialerna av sig själva. En profilbild
+    /// kan peka på media som raderats, och utan fallbacken blir raden en trasig bildikon — vilket
+    /// ser ut som ett fel i listan snarare än en saknad bild.
+    ///
+    /// ⚠️ INGEN JS-literal byggs i attributet. Ett `onerror` som skriver in initialen som en
+    /// strängliteral vore samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt": namnet
+    /// är användarens eget, och en initial som är ett fnutt avslutar literalen. `this.remove()` bär
+    /// ingen användartext alls.
+    function avatarHtml(m, extraClass) {
+        var name = fullName(m);
+        var cls = 'ai-avatar' + (extraClass ? ' ' + extraClass : '');
+        var ini = esc(initials(name));
+        var img = (m && m.profilePictureUrl)
+            ? '<img src="' + esc(m.profilePictureUrl) + '" alt="" onerror="this.remove()">'
+            : '';
+        return '<span class="' + cls + '" aria-hidden="true" title="' + esc(name) + '">' + ini + img + '</span>';
+    }
 
     function render() {
         var box = document.getElementById('aiMemberList');
@@ -465,11 +520,16 @@
             return '<button type="button" role="option" aria-selected="' + (active ? 'true' : 'false') + '"' +
                    ' class="list-group-item list-group-item-action py-2' + (active ? ' active' : '') + '"' +
                    ' data-member-id="' + esc(m.id) + '">' +
-                   '<span class="d-flex justify-content-between align-items-start gap-2">' +
+                   '<span class="d-flex justify-content-between align-items-center gap-2">' +
+                   // ⚠️ align-items-center, inte -start: avataren ska ligga mitt för namn+e-post.
+                   // min-width:0 på textblocket är vad som gör text-truncate verksamt inuti en flex —
+                   // utan det växer raden i stället för att kapa namnet, och badgen trycks ut.
+                   '<span class="d-flex align-items-center gap-2" style="min-width:0;">' +
+                   avatarHtml(m) +
                    '<span class="text-truncate">' +
                    '<span class="d-block text-truncate">' + esc(fullName(m)) + '</span>' +
                    (m.email ? '<span class="small text-muted d-block text-truncate">' + esc(m.email) + '</span>' : '') +
-                   '</span>' + badge + '</span>' +
+                   '</span></span>' + badge + '</span>' +
                    '</button>';
         }).join('');
     }
@@ -787,6 +847,11 @@
         document.getElementById('aiDetail').classList.remove('d-none');
         document.getElementById('aiMemberName').textContent = m ? fullName(m) : ('Medlem ' + memberId);
         document.getElementById('aiMemberMeta').textContent = m && m.email ? m.email : '';
+
+        // ⚠️ Avataren måste sättas även när medlemmen INTE hittades i listan (m är null): annars
+        // står förra medlemmens bild kvar intill det nya namnet, vilket är värre än ingen bild.
+        var av = document.getElementById('aiMemberAvatar');
+        if (av) av.innerHTML = avatarHtml(m || { id: memberId }, 'ai-avatar-lg');
 
         // Nollstall arsvaljaren mellan medlemmar: annars far nasta medlem forra medlemmens ar
         // forvalt, och sammanstallningen ser tom ut for ett ar hen inte har data pa.

@@ -4349,6 +4349,43 @@ Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco
 deployas som filer utan ombyggnad.
 **Fildeploy av KB:** `KnowledgeBase/docs/aktivitetssammanstallning.md` (ny).
 
+### Avatarer på Aktivitet & Intyg (2026-09-01)
+
+Medlemsavatar i listan (32 px) och intill namn + e-post ovanför Aktivitet-sektionen (44 px).
+**Ren vy-ändring** — `ClubAdmin/GetClubMembers` returnerade redan `profilePictureUrl` och `email`, så
+ingen ombyggnad behövdes. ⚠️ Vyn är däremot runtime-kompilerad, så **sidladdningen ÄR
+kompileringskontrollen**.
+
+- **Samma form och samma fallback som klubbens medlemsregister** (`ClubMembersDirectory`
+  `.member-avatar`). Egna klassnamn (`.ai-avatar`) eftersom den partialen inte laddas här — slås de
+  någon gång ihop är det EN klass som ska bli kvar. En andra avatarstil gör att samma person ser
+  olika ut på två sidor.
+- **⚠️ Initialerna ligger ALLTID i spanen och bilden absolut positionerad ovanpå**, med
+  `onerror="this.remove()"`. Det är inte en stilfråga: en profilbild kan peka på media som raderats,
+  och utan fallbacken blir raden en trasig bildikon — vilket ser ut som ett fel i listan snarare än
+  en saknad bild.
+- **⚠️ INGEN JS-literal byggs i attributet.** Första utsågan hade
+  `onerror="this.parentNode.textContent='XY'"` med initialen inskriven — och initialen kommer ur
+  medlemmens EGET namn, så en som är ett fnutt avslutar literalen. Exakt samma lucka som gav
+  kodexekvering i Fältskyttes "lägg till skytt", och HTML-escapen hjälper inte: `&#039;` avkodas till
+  `'` inne i attributet. `this.remove()` bär ingen användartext.
+- **⚠️ Detaljvyns `#aiMemberAvatar` är en BEHÅLLARE som fylls med `innerHTML`**, inte avataren själv.
+  En första version satte `outerHTML`, vilket raderade id:t vid första medlemsbytet — nästa medlem
+  fick då ingen avatar alls, och felet syns bara från och med det ANDRA bytet.
+- **Avataren sätts även när medlemmen inte finns i listan** (`m` är null), annars står förra
+  medlemmens bild kvar intill det nya namnet, vilket är värre än ingen bild.
+- `min-width: 0` på textblocket är vad som gör `text-truncate` verksamt inuti flexraden — utan det
+  växer raden i stället för att kapa namnet, och aktivitetsdagar-badgen trycks ut.
+- Avataren är `aria-hidden` med tom `alt`: namnet står i klartext direkt intill, så en skärmläsare
+  skulle annars läsa det två gånger. Dekor, inte information.
+
+Verifierat **24/24 `hpsk-verify/aktivitet-avatar-verify.mjs`** (läser bara). Sviten mäter
+**GEOMETRIN** — att avataren ligger till vänster om namnet och ovanför Aktivitet-sektionen — eftersom
+ett klasspåstående inte kan se skillnad på "renderad" och "renderad på rätt sida". ⚠️ Den assertar
+också att **bildgrenen faktiskt är exercerad** (mätt: 3 av 28 rader i klubb 2604 har profilbild, bl.a.
+medlem 1078); utan det påståendet är kontrollprovet om initialer bakom en bild vakuöst grönt. Och den
+klickar sig igenom **tre** medlemsbyten, eftersom `outerHTML`-felet ovan bara syns från det andra.
+
 ### Incheckning på banan som aktivitet (2026-09-01)
 
 Ett besök på banan där inget resultat loggades är ändå verksamhet, så en klubb kan låta QR-incheckningar
