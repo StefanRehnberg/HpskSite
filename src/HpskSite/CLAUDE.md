@@ -4207,8 +4207,46 @@ instruktioner och inte intygsinnehåll.
 
 ⚠️ **Gränsen följer INTE blankettens sektioner.** Krysset "Guldmärke – SPSF" är ett registerfält
 (märkesliggaren), men `SkjutprovDatum` kan inte vara det: `AwardBadge` stämplar `AchievedDate` med
-dagens datum även för ett märke från 1998, så bara ÅRET är fakta. Året visas som underlag, datumet
-skrivs in.
+dagens datum även för ett märke från 1998, så bara ÅRET är fakta. Datumet skrivs in.
+
+### ⚠️ "Datum för godkänt skjutprov" är INTE märkets datum (rättat 2026-09-01)
+
+Första utsågan lät fältet läsa som *"datumet då guldmärket togs"* — hjälptexten sa till och med
+"liggaren belägger året, inte ett datum, skriv in datumet själv". **Fel ram, och Stefan fångade det.**
+
+Blankettens sida 3: *"Minst en ruta ska vara markerad och datum för genomfört skjutprov under den
+senaste tvåårsperioden ska anges."* **Guldmärket är permanent och upphör aldrig** — vore datumet
+märkets datum kunde fältet inte fyllas ärligt av någon som tog guldet för mer än två år sedan, alltså
+de flesta guldmärkesskyttar. Ett fält som är omöjligt att fylla för normalfallet är fel läst.
+Kryssrutan intygar **meriten**; datumet intygar **provet**. SPSF:s återkommande omprövning av
+guldmärkets fordringar är **guldfodringen**, så datumet är den dag fordringarna **senast uppfylldes**.
+
+**`SkjutprovCandidate.Derive` är regeln, som en REN funktion** (19 enhetstest, `SkjutprovCandidateTests`):
+- Del 1 = dagen den **tredje** kvalificerande guldserien sköts. Inte den första (då var fordringen
+  inte uppfylld) och inte den sista (serier efter fullbordandet uppfyllde ingenting). Sviten prövar
+  alla tre.
+- Del 2 = tredje **tillämpnings**serien, eller **fältstandardmedaljens `CompetitionDate`** när del 2
+  vilar på den. ⚠️ Tillämpning, inte varje Speed-serie — en snabbpistolserie är Elits bevis, samma
+  scoping som `MarkenCandidateService`.
+- Uppfyllelsedatum = det **senare** av de två delarna.
+- Sorterar själv: anroparens ordning får inte avgöra datumet.
+- Flaggar `OlderThanTwoYears` mot blankettens fönster. Gränsen prövas explicit — exakt två år tillbaka
+  ligger INOM fönstret.
+
+⚠️ **Läser INTE `MemberBadgeQualification.Part1Date`/`Part2Date`.** De sätts med `??= DateTime.Now` och
+är bokföringsstämplar. Mätt i dev: en rad bär `Part1Date = 2026-05-31` medan de kvalificerande
+guldserierna börjar 2026-03-15 och det finns serier så sent som 2026-06-07. Egen P2-post finns för att
+rätta kolumnerna; **härledningen ligger redan i `SkjutprovCandidate.Derive` och ska återanvändas där**.
+
+⚠️ **Kandidaten förifyller INTE fältet.** Den visas i utfärdandeformuläret med en **Använd**-knapp,
+och när den inte går att härleda (historiskt år attesterat på plats, medalj utan datum, för få serier)
+sägs skälet rakt ut i stället för att fältet lämnas tyst tomt. Formulärets etikett är därför
+**"Datum då fordringarna senast uppfylldes"** med blankettens egen formulering intill — blankettens
+label står kvar på UTSKRIFTEN.
+
+⚠️ **Öppen regelfråga:** att Polisen godtar guldfodringen som "skjutprov" är en tolkning, inte belagt
+— kryssrutan säger "Guldmärke". Frågan hör hos förbundet (samma kanal som junior/vet); ändra inte
+härledningen på eget bevåg innan svaret finns.
 
 ### ⚠️ REGISTERFÄLTEN KAN INTE POSTAS — det är en säkerhetsegenskap, inte städning
 

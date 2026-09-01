@@ -90,6 +90,9 @@ namespace HpskSite.Controllers
 
         // ── Utkast ───────────────────────────────────────────────────
 
+        /// <summary>
+        /// Ett tomt utkast — bara registerfälten. Används när ingen ifyllnad finns att visa.
+        /// </summary>
         [HttpGet("utkast")]
         public async Task<IActionResult> Draft(int memberId, int clubId, int? year = null)
         {
@@ -103,6 +106,45 @@ namespace HpskSite.Controllers
 
             var doc = await _builder.BuildDraftAsync(memberId, clubId, year ?? DateTime.Today.Year);
             if (doc == null) return NotFound();
+
+            return View("~/Views/ForeningsintygPrint.cshtml", new ForeningsintygPrintModel
+            {
+                Document = doc,
+                IsDraft = true,
+                MemberName = doc.HelaNamnet
+            });
+        }
+
+        /// <summary>
+        /// Utkast MED den ifyllnad som står i utfärdandeformuläret just nu.
+        ///
+        /// <b>Varför det måste vara en POST.</b> "Granska" betyder <i>visa vad jag är på väg att
+        /// utfärda</i>. En förhandsvisning som utelämnar det man just kryssat och skrivit är
+        /// oanvändbar för precis det den finns till för — och den första utsågan gjorde exakt det,
+        /// med motiveringen att osparade kryss vore vilseledande. Det var fel resonemang:
+        /// vattenstämpeln UTKAST säger redan att ingenting är utfärdat, och det är utkastet man
+        /// granskar. Rapporterat av Stefan 2026-09-01.
+        ///
+        /// <b>Skriver ingenting.</b> Ingen loggrad, ingen snapshot. Och precis som vid utfärdandet
+        /// byggs REGISTERFÄLTEN om på servern — de kan inte postas hit heller, så en granskning kan
+        /// aldrig visa ett annat personnummer än registrets.
+        /// </summary>
+        [HttpPost("utkast")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DraftPreview([FromForm] IssueForeningsintygRequest req)
+        {
+            var current = await CurrentMemberAsync();
+            if (current == null)
+                return LoginRedirect($"/foreningsintyg/utkast?memberId={req.MemberId}&clubId={req.ClubId}");
+
+            if (!await MayRead(current, req.MemberId, req.ClubId))
+                return View("~/Views/ForeningsintygPrint.cshtml", Denied());
+
+            var doc = await _builder.BuildDraftAsync(
+                req.MemberId, req.ClubId, req.ActivityYear > 0 ? req.ActivityYear : DateTime.Today.Year);
+            if (doc == null) return NotFound();
+
+            req.ApplyTo(doc);
 
             return View("~/Views/ForeningsintygPrint.cshtml", new ForeningsintygPrintModel
             {

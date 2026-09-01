@@ -81,6 +81,141 @@ namespace HpskSite.Models
     }
 
     /// <summary>
+    /// Underlag till blankettens fält <b>"Datum för godkänt skjutprov"</b>.
+    ///
+    /// <b>Vad blanketten faktiskt frågar efter.</b> Sidan 3 säger: <i>"Minst en ruta ska vara
+    /// markerad och datum för genomfört skjutprov under den senaste tvåårsperioden ska anges."</i>
+    /// Guldmärket är PERMANENT och upphör aldrig — vore datumet märkets datum kunde fältet inte
+    /// fyllas ärligt av någon som tog guldet för mer än två år sedan, alltså de flesta
+    /// guldmärkesskyttar. Kryssrutan intygar MERITEN; datumet intygar PROVET.
+    ///
+    /// SPSF:s återkommande omprövning av guldmärkets fordringar är <b>guldfodringen</b>, så det
+    /// datum blanketten efterfrågar är den dag fordringarna <b>senast uppfylldes</b> — dagen den
+    /// tredje av de nödvändiga serierna sköts (Stefans tolkning 2026-09-01).
+    ///
+    /// ⚠️ <b>Detta är UNDERLAG, aldrig ett ifyllt värde.</b> Rutan och datumet är styrelsens
+    /// juridiska intygande. Kandidaten visas i utfärdandeformuläret med ett klick för att använda
+    /// den; den skrivs aldrig in av sig själv och skrivs aldrig ut på blanketten.
+    ///
+    /// ⚠️ <b>Öppen regelfråga.</b> Att Polisen accepterar guldfodringen som "skjutprov" är en
+    /// tolkning, inte belagt — kryssrutan säger "Guldmärke", inte "guldfodring". Frågan är ställd
+    /// till förbundet; ändra inte härledningen på eget bevåg innan svaret finns.
+    /// </summary>
+    public class SkjutprovCandidate
+    {
+        /// <summary>Antal år bakåt blanketten godtar.</summary>
+        public const int MaxAgeYears = 2;
+
+        /// <summary>Det senaste uppfyllda guldfodringsåret, eller null när inget finns.</summary>
+        public int? Year { get; set; }
+
+        /// <summary>Det härledda datumet, "yyyy-MM-dd". Tomt när det inte går att härleda.</summary>
+        public string Date { get; set; } = "";
+
+        /// <summary>Dagen del 1 (tre kvalificerande guldserier) blev uppfylld.</summary>
+        public string Part1Date { get; set; } = "";
+
+        /// <summary>Dagen del 2 blev uppfylld.</summary>
+        public string Part2Date { get; set; } = "";
+
+        /// <summary>Vad som uppfyllde del 2, i klartext.</summary>
+        public string Part2Basis { get; set; } = "";
+
+        public bool Derivable { get; set; }
+
+        /// <summary>Varför datumet inte kunde härledas. Tomt när det kunde.</summary>
+        public string NotDerivableReason { get; set; } = "";
+
+        /// <summary>Sant när det härledda datumet ligger utanför blankettens tvåårsfönster.</summary>
+        public bool OlderThanTwoYears { get; set; }
+
+        /// <summary>
+        /// Härleder kandidaten ur redan lästa datum. <b>Ren funktion</b> — inga databasanrop — så
+        /// regeln kan A/B-testas utan Umbraco.
+        /// </summary>
+        /// <param name="year">Det senaste uppfyllda guldfodringsåret, null om inget finns.</param>
+        /// <param name="qualifyingPrecisionDates">Datum för årets kvalificerande guldserier, i valfri ordning.</param>
+        /// <param name="requiredPrecisionCount">Antal guldserier del 1 kräver (3).</param>
+        /// <param name="part2Source">Källan för del 2 (<see cref="Marken"/>-konstanterna).</param>
+        /// <param name="tillampningDates">Datum för årets kvalificerande tillämpningsserier.</param>
+        /// <param name="requiredTillampningCount">Antal snabbserier del 2 kräver (3).</param>
+        /// <param name="standardMedalDate">Fältstandardmedaljens tävlingsdatum, när del 2 vilar på den.</param>
+        /// <param name="part2Detail">Klartext om del 2, från kandidatanalysen.</param>
+        /// <param name="today">Referensdag för tvåårsfönstret; injicerbar för testbarhet.</param>
+        public static SkjutprovCandidate Derive(
+            int? year,
+            IEnumerable<DateTime> qualifyingPrecisionDates,
+            int requiredPrecisionCount,
+            string? part2Source,
+            IEnumerable<DateTime> tillampningDates,
+            int requiredTillampningCount,
+            DateTime? standardMedalDate,
+            string? part2Detail,
+            DateTime today)
+        {
+            var c = new SkjutprovCandidate { Year = year, Part2Basis = part2Detail ?? "" };
+
+            if (year == null)
+            {
+                c.NotDerivableReason = "Ingen uppfylld guldfodring finns i märkesliggaren.";
+                return c;
+            }
+
+            // Del 1: dagen den TREDJE kvalificerande guldserien sköts — då blev fordringen uppfylld.
+            // Fler serier efter den ändrar inget; det är fullbordandet som är datumet.
+            var p1 = NthDate(qualifyingPrecisionDates, requiredPrecisionCount);
+
+            DateTime? p2;
+            if (part2Source == Marken.PartSourceStandardMedal)
+            {
+                // Del 2 vilar på en standardmedalj i fält — då är tävlingsdagen datumet, inte en series.
+                p2 = standardMedalDate;
+                if (p2 == null)
+                    c.NotDerivableReason = "Del 2 uppfylldes av en standardmedalj i fält, men medaljen saknar tävlingsdatum.";
+            }
+            else if (part2Source == Marken.PartSourceManualAttest)
+            {
+                // Historiska år är attesterade för hand och har inga serier att härleda ur.
+                p2 = null;
+                c.NotDerivableReason =
+                    $"Guldfodringen för {year} är intygad på plats i efterhand och har inga serier med datum.";
+            }
+            else
+            {
+                p2 = NthDate(tillampningDates, requiredTillampningCount);
+                if (p2 == null)
+                    c.NotDerivableReason = "Del 2:s snabbserier saknar datum.";
+            }
+
+            if (p1 != null) c.Part1Date = p1.Value.ToString("yyyy-MM-dd");
+            if (p2 != null) c.Part2Date = p2.Value.ToString("yyyy-MM-dd");
+
+            if (p1 == null && string.IsNullOrEmpty(c.NotDerivableReason))
+                c.NotDerivableReason = "Del 1:s guldserier saknar datum, eller är färre än kravet.";
+
+            if (p1 == null || p2 == null) return c;
+
+            // Fordringarna är uppfyllda först när BÅDA delarna är det — alltså det SENARE datumet.
+            var fulfilled = p1.Value > p2.Value ? p1.Value : p2.Value;
+            c.Date = fulfilled.ToString("yyyy-MM-dd");
+            c.Derivable = true;
+            c.OlderThanTwoYears = fulfilled.Date < today.Date.AddYears(-MaxAgeYears);
+            return c;
+        }
+
+        /// <summary>
+        /// Det n:te datumet i kronologisk ordning, eller null när de är för få. Null-datum räknas
+        /// inte — en serie utan datum kan inte belägga en dag.
+        /// </summary>
+        private static DateTime? NthDate(IEnumerable<DateTime> dates, int n)
+        {
+            if (n <= 0) return null;
+            var ordered = dates.Where(d => d != default).OrderBy(d => d).ToList();
+            return ordered.Count >= n ? ordered[n - 1] : null;
+        }
+    }
+
+    /// <summary>
     /// Blanketten <b>Föreningsintyg PM 551.24</b> (Ver. 2019-01-18/11) som data.
     ///
     /// <b>Två sorters fält, med olika regler — det är modellens ryggrad:</b>
@@ -262,6 +397,13 @@ namespace HpskSite.Models
 
         /// <summary>Året liggaren belägger guldmärket. Underlag till intygaren, inte blankettens datum.</summary>
         public int? GuldmarkeAr { get; set; }
+
+        /// <summary>
+        /// UNDERLAG till <see cref="SkjutprovDatum"/> — den dag guldmärkets fordringar senast
+        /// uppfylldes, härledd ur guldfodringen. Visas i utfärdandeformuläret med ett klick för att
+        /// använda den. <b>Skrivs aldrig in av sig själv och skrivs aldrig ut på blanketten.</b>
+        /// </summary>
+        public SkjutprovCandidate? SkjutprovForslag { get; set; }
 
         public bool SilvermarkeSkyttesport { get; set; }
         public bool GuldmarkeAutomatvapenSkyttesport { get; set; }

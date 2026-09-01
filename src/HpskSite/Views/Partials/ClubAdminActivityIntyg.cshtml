@@ -252,10 +252,30 @@
                             Sökanden har uppfyllt fordringarna för skjutskicklighet
                         </label>
                     </div>
+                    @*
+                        ⚠️ Etiketten här är INTE blankettens ("Datum för godkänt skjutprov") utan en
+                        förklaring av vad som ska stå där. Blankettens egen formulering står kvar på
+                        UTSKRIFTEN. Skälet: den förra etiketten läste som "datumet då guldmärket togs",
+                        vilket är fel — guldmärket är permanent, och blanketten kräver ett datum inom
+                        två år. Det är den dag fordringarna SENAST uppfylldes.
+                    *@
                     <div class="row g-2 mt-1">
-                        <div class="col-md-4">
-                            <label class="form-label small mb-0" for="fiSkjutprovDatum">Datum för godkänt skjutprov</label>
-                            <input id="fiSkjutprovDatum" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD">
+                        <div class="col-md-5">
+                            <label class="form-label small mb-0" for="fiSkjutprovDatum">
+                                Datum då fordringarna senast uppfylldes
+                            </label>
+                            <div class="input-group input-group-sm">
+                                <input id="fiSkjutprovDatum" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD">
+                                <button type="button" class="btn btn-outline-secondary d-none" id="fiUseSkjutprov"
+                                        title="Använd det härledda datumet">Använd</button>
+                            </div>
+                            <div class="form-text">
+                                Blanketten: <em>"datum för genomfört skjutprov under den senaste
+                                tvåårsperioden ska anges"</em>.
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <div id="fiSkjutprovHint" class="small text-muted"></div>
                         </div>
                     </div>
                     <div class="mt-2">
@@ -509,6 +529,13 @@
         setVal('fiPurpose', 'Vapenlicens');
         setVal('fiNotes', '');
 
+        // ⚠️ Nollställ underlagsrutorna INNAN den tidiga returen. Annars ligger förra medlemmens
+        // skjutprovsdatum och guldmärkesnotering kvar när utkastet inte kunde hämtas — och den som
+        // utfärdar läser dem som den nya medlemmens.
+        renderSkjutprovHint(null);
+        var guldReset = document.getElementById('aiGuldHint');
+        if (guldReset && !draft) guldReset.innerHTML = '';
+
         if (!draft) return;
         setVal('fiOrt', draft.underskriftOrt);
         setChk('fiGuldSpsf', draft.guldmarkeSpsf);
@@ -517,15 +544,16 @@
         if (guldBox) {
             if (draft.guldmarkeSpsf) {
                 var bits = ['Guldmärke i märkesliggaren'];
-                if (draft.guldmarkeAr) bits.push('år ' + draft.guldmarkeAr);
+                if (draft.guldmarkeAr) bits.push('erövrat ' + draft.guldmarkeAr);
                 if (draft.guldmarkeNummer) bits.push('nr ' + hpskEsc(draft.guldmarkeNummer));
-                guldBox.innerHTML = '<i class="bi bi-info-circle me-1"></i>' + bits.join(' · ') +
-                    '. Liggaren belägger <strong>året</strong>, inte ett datum — skriv in datumet för skjutprovet själv.';
+                guldBox.innerHTML = '<i class="bi bi-info-circle me-1"></i>' + bits.join(' · ') + '.';
             } else {
                 guldBox.innerHTML = '<i class="bi bi-info-circle me-1"></i>' +
                     'Inget guldmärke finns i märkesliggaren för den här medlemmen. Finns det på papper kryssar du själv.';
             }
         }
+
+        renderSkjutprovHint(draft.skjutprovForslag);
 
         var missBox = document.getElementById('aiIssueMissing');
         if (missBox) {
@@ -540,6 +568,51 @@
                 missBox.classList.add('d-none');
                 missBox.innerHTML = '';
             }
+        }
+    }
+
+    /// Underlaget till "Datum för godkänt skjutprov": den dag guldmärkets fordringar senast
+    /// uppfylldes, härledd ur guldfodringen.
+    ///
+    /// ⚠️ FÖRIFYLLER INTE fältet. Datumet är en del av styrelsens intygande; kandidaten är ett klick
+    /// bort men aldrig ett faktum vi skriver in. Går den inte att härleda sägs det rakt ut i stället
+    /// för att fältet lämnas tyst tomt.
+    function renderSkjutprovHint(c) {
+        var box = document.getElementById('fiSkjutprovHint');
+        var btn = document.getElementById('fiUseSkjutprov');
+        if (!box) return;
+
+        if (btn) { btn.classList.add('d-none'); btn.onclick = null; }
+
+        if (!c) { box.innerHTML = ''; return; }
+
+        if (!c.derivable) {
+            box.innerHTML = '<i class="bi bi-exclamation-triangle me-1 text-warning"></i>' +
+                'Datumet kunde inte härledas ur märkesliggaren' +
+                (c.year ? ' (senast uppfyllda guldfodring: <strong>' + c.year + '</strong>)' : '') +
+                '. ' + hpskEsc(c.notDerivableReason || '') + ' Skriv in datumet själv.';
+            return;
+        }
+
+        var parts = [];
+        if (c.part1Date) parts.push('tre guldserier klara ' + hpskEsc(c.part1Date));
+        if (c.part2Date) parts.push('del 2 klar ' + hpskEsc(c.part2Date) +
+            (c.part2Basis ? ' (' + hpskEsc(c.part2Basis) + ')' : ''));
+
+        var warn = c.olderThanTwoYears
+            ? '<div class="text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>' +
+              '<strong>Äldre än två år.</strong> Blanketten vill ha ett datum inom den senaste ' +
+              'tvåårsperioden — en nyare uppfylld guldfodring, eller ett annat skjutprov, behövs.</div>'
+            : '';
+
+        box.innerHTML =
+            '<i class="bi bi-lightbulb me-1"></i>Fordringarna uppfyllda <strong>' + hpskEsc(c.date) +
+            '</strong> (guldfodringen för ' + c.year + ')' +
+            (parts.length ? '<div class="text-muted">' + parts.join(' · ') + '</div>' : '') + warn;
+
+        if (btn) {
+            btn.classList.remove('d-none');
+            btn.onclick = function () { setVal('fiSkjutprovDatum', c.date); };
         }
     }
 
@@ -586,6 +659,33 @@
         return fd;
     }
 
+    /// POSTar en FormData till en ny flik genom ett dolt formulär.
+    ///
+    /// En fetch går inte att använda: svaret är en HEL HTML-sida som ska visas, inte data att tolka.
+    /// Och en GET med värdena i query-strängen skulle lägga personuppgifter i webbläsarhistoriken
+    /// och i eventuella serverloggar.
+    ///
+    /// ⚠️ `target="_blank"` utan `rel` ger den nya fliken en `window.opener` mot klubbsidan. Utkastet
+    /// är vår egen sida, men vanan är fel att lära ut — `rel="noopener"` sätts därför även här.
+    function submitPayloadToNewTab(action, fd) {
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = action;
+        form.target = '_blank';
+        form.rel = 'noopener';
+        form.style.display = 'none';
+        fd.forEach(function (value, key) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = key;
+            input.value = value;
+            form.appendChild(input);
+        });
+        document.body.appendChild(form);
+        form.submit();
+        form.remove();
+    }
+
     function wireIssue() {
         var toggle = document.getElementById('aiToggleIssue');
         if (toggle && !toggle.dataset.wired) {
@@ -601,15 +701,16 @@
         var preview = document.getElementById('aiPreviewBtn');
         if (preview && !preview.dataset.wired) {
             preview.dataset.wired = '1';
-            // Utkastet öppnas i en ny flik och är vattenstämplat. Det visar bara REGISTERFÄLTEN —
-            // det som just skrivits in i formuläret är inte sparat någonstans än, och ett utkast som
-            // låtsas visa osparade kryss vore vilseledande.
+            // Granskningen visar utkastet MED det som står i formuläret just nu — det är hela
+            // poängen med att granska innan man utfärdar. Den POSTar därför samma payload som
+            // utfärdandet, till en endpoint som inte skriver något.
+            //
+            // ⚠️ SAMMA payload-byggare som utfärdandet (`collectIssuePayload`). Byggdes granskningen
+            // av en egen fältlista skulle den förr eller senare visa något annat än det som
+            // faktiskt utfärdas, och då är granskningen värre än ingen granskning.
             preview.addEventListener('click', function () {
-                if (!window._activityMemberId) return;
-                var y = getVal('memberActivityYear') || '';
-                window.open('/foreningsintyg/utkast?memberId=' + encodeURIComponent(window._activityMemberId) +
-                            '&clubId=' + encodeURIComponent(_draftClubId || 0) +
-                            (y ? '&year=' + encodeURIComponent(y) : ''), '_blank', 'noopener');
+                if (!window._activityMemberId) { alert('Välj en medlem först.'); return; }
+                submitPayloadToNewTab('/foreningsintyg/utkast', collectIssuePayload());
             });
         }
 
