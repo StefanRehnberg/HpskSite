@@ -63,6 +63,18 @@ namespace HpskSite.Models
         /// <summary>Tävling, egen eller extern.</summary>
         Competition = 2,
 
+        /// <summary>
+        /// Träningsmatch. <b>Egen sort, inte en tävling</b> (Stefans besked 2026-09-01) — en
+        /// träningsmatch är klubbens interna uppgörelse och hör inte i siffran en styrelse eller en
+        /// handläggare läser som "tävlingar".
+        ///
+        /// ⚠️ Avgörs på <c>TrainingScores.TrainingMatchId</c>, som slår <c>IsCompetition</c>. Raderna
+        /// bär båda i verkligheten: mätt i dev har fixturmedlemmen 2026 nio rader med
+        /// <c>IsCompetition = 1</c>, varav TVÅ är träningsmatcher, plus sex matcher utan flaggan. Läses
+        /// flaggan först hamnar de två i tävlingssiffran.
+        /// </summary>
+        TrainingMatch = 4,
+
         /// <summary>Klubbens eller kretsens evenemang (städdag, möte, socialt, träningskväll …).</summary>
         Event = 3
     }
@@ -96,6 +108,19 @@ namespace HpskSite.Models
 
         /// <summary>Varför posten inte räknas, i klartext. Null när den räknas.</summary>
         public string? NotCountedReason { get; set; }
+
+        /// <summary>
+        /// Vapengrupper posten hör till, som gruppKODER ("A", "A_Opt", "B", "C", "R", "M", "L").
+        ///
+        /// <b>Varför en LISTA och inte ett värde:</b> en tävling kan innehålla flera vapenklasser för
+        /// samma skytt — dev-data har anmälningar med både A1 och L_Vet_A på samma tävling — och den
+        /// tävlingen är aktivitet i båda grupperna.
+        ///
+        /// <b>Tom lista = posten hör inte till någon vapengrupp.</b> Gäller evenemang: en städdag är
+        /// klubbverksamhet, inte skjutande i en vapengrupp. Ett vapengruppsfilter måste därför säga
+        /// att sådana poster faller bort, inte tysta räkna bort dem.
+        /// </summary>
+        public List<string> WeaponGroups { get; set; } = new();
 
         /// <summary>Id i källan (träningsrad, tävlingsnod, evenemangsnod) för länkning.</summary>
         public int SourceId { get; set; }
@@ -146,6 +171,7 @@ namespace HpskSite.Models
             ActivityKind.Training => "Träning",
             ActivityKind.Practice => "0-poäng träning",
             ActivityKind.Competition => "Tävling",
+            ActivityKind.TrainingMatch => "Träningsmatch",
             ActivityKind.Event => "Evenemang",
             _ => ""
         };
@@ -190,8 +216,13 @@ namespace HpskSite.Models
         public Dictionary<ActivityEvidence, int> ByEvidence { get; set; } = new();
 
         /// <summary>Distinkta tävlingar (inte anmälningsrader) som räknas. En skytt som anmält sig
-        /// i tre vapenklasser till samma tävling har deltagit i EN tävling.</summary>
+        /// i tre vapenklasser till samma tävling har deltagit i EN tävling.
+        /// <b>Träningsmatcher ingår INTE</b> — de har sin egen siffra.</summary>
         public int Competitions { get; set; }
+
+        /// <summary>Träningsmatcher som räknas. Egen siffra, aldrig inbakad i
+        /// <see cref="Competitions"/>.</summary>
+        public int TrainingMatches { get; set; }
 
         /// <summary>Obligatoriska evenemang under året som medlemmen var närvarande på.</summary>
         public int MandatoryEventsAttended { get; set; }
@@ -199,6 +230,22 @@ namespace HpskSite.Models
         /// <summary>Obligatoriska evenemang under året där närvaro INTE är registrerad — frånvarande,
         /// giltig frånvaro, eller upprop som aldrig togs. Styrelsens intygsbeslut hänger på den här.</summary>
         public int MandatoryEventsMissed { get; set; }
+
+        /// <summary>
+        /// Vapengrupper medlemmen har verksamhet i under året — <b>före filtrering</b>, så väljaren
+        /// inte tappar alternativ i samma stund ett filter läggs på.
+        /// </summary>
+        public List<string> WeaponGroupsAvailable { get; set; } = new();
+
+        /// <summary>De vapengrupper som faktiskt filtrerades på. Tom = ingen filtrering.</summary>
+        public List<string> WeaponGroupFilter { get; set; } = new();
+
+        /// <summary>
+        /// Antal poster ett aktivt filter uteslöt <b>för att de saknar vapengrupp</b> — i praktiken
+        /// evenemangen. Finns för att gränssnittet ska kunna SÄGA det: en aktivitetssiffra som tappat
+        /// tio evenemang utan att någon nämner det är en siffra som betyder något annat än läsaren tror.
+        /// </summary>
+        public int ExcludedWithoutWeaponGroup { get; set; }
 
         /// <summary>
         /// Sådant den som läser sammanställningen MÅSTE veta för att inte övertolka den — att ingen
@@ -212,9 +259,36 @@ namespace HpskSite.Models
         /// A/B-testas utan Umbraco.
         /// </summary>
         public static MemberActivitySummary From(
-            int memberId, string memberName, int year, IEnumerable<MemberActivityEntry> entries)
+            int memberId, string memberName, int year, IEnumerable<MemberActivityEntry> entries,
+            IEnumerable<string>? weaponGroupFilter = null)
         {
-            var all = entries.OrderByDescending(e => e.Date).ThenBy(e => e.Title).ToList();
+            var everything = entries.ToList();
+
+            // Väljarens alternativ tas FÖRE filtreringen — annars försvinner de grupper man just
+            // filtrerade bort ur listan och man kan inte välja tillbaka dem.
+            var available = everything
+                .SelectMany(e => e.WeaponGroups)
+                .Where(g => !string.IsNullOrWhiteSpace(g))
+                .Distinct()
+                .OrderBy(g => g, StringComparer.Ordinal)
+                .ToList();
+
+            var filter = (weaponGroupFilter ?? Enumerable.Empty<string>())
+                .Where(g => !string.IsNullOrWhiteSpace(g))
+                .Select(g => g.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            int excludedWithoutGroup = 0;
+            if (filter.Count > 0)
+            {
+                excludedWithoutGroup = everything.Count(e => e.WeaponGroups.Count == 0);
+                everything = everything
+                    .Where(e => e.WeaponGroups.Any(g => filter.Contains(g, StringComparer.OrdinalIgnoreCase)))
+                    .ToList();
+            }
+
+            var all = everything.OrderByDescending(e => e.Date).ThenBy(e => e.Title).ToList();
             var counted = all.Where(e => e.CountsAsActivity).ToList();
 
             var summary = new MemberActivitySummary
@@ -231,12 +305,28 @@ namespace HpskSite.Models
                 // ur en annan identitetsserie än en egen tävlings, och de kan kollidera.
                 Competitions = counted.Where(e => e.Kind == ActivityKind.Competition)
                                       .Select(e => e.SourceKey).Distinct().Count(),
+                TrainingMatches = counted.Count(e => e.Kind == ActivityKind.TrainingMatch),
                 MandatoryEventsAttended = counted.Count(e => e.Kind == ActivityKind.Event && e.IsMandatoryEvent),
                 MandatoryEventsMissed = all.Count(e =>
-                    e.Kind == ActivityKind.Event && e.IsMandatoryEvent && !e.CountsAsActivity)
+                    e.Kind == ActivityKind.Event && e.IsMandatoryEvent && !e.CountsAsActivity),
+                WeaponGroupsAvailable = available,
+                WeaponGroupFilter = filter,
+                ExcludedWithoutWeaponGroup = excludedWithoutGroup
             };
 
             summary.Warnings = BuildWarnings(all, counted);
+
+            // Ett filter som gömmer poster måste SÄGA det. Utan raden läser man aktivitetsdagarna som
+            // medlemmens hela verksamhet, när de i själva verket är verksamheten i en vapengrupp.
+            if (filter.Count > 0)
+            {
+                var msg = $"Filtrerat på vapengrupp {string.Join(", ", filter)}.";
+                if (excludedWithoutGroup > 0)
+                    msg += $" {excludedWithoutGroup} poster utan vapengrupp (evenemang) visas inte och " +
+                           "räknas inte in i siffrorna.";
+                summary.Warnings.Insert(0, msg);
+            }
+
             return summary;
         }
 
@@ -249,12 +339,28 @@ namespace HpskSite.Models
         {
             var w = new List<string>();
 
+            // ⚠️ VARNINGARNA MÅSTE GÅ IHOP MED BRICKAN "Självrapporterad: N".
+            //
+            // Första utsågan varnade bara om träningspassen, medan brickan räknade ALLA
+            // självrapporterade poster. Rapporterat 2026-09-01: brickan sa 86 och varningen 68, vilket
+            // läser som att systemet räknar fel. Båda var sanna — 86 = 68 träningsposter + 18
+            // egenrapporterade tävlingsresultat — men bara den ena stod på skärmen.
+            //
+            // Därför delas de självrapporterade posterna nu i sina två sorter, och delarna summerar
+            // synligt till brickans tal. Lägg aldrig till en underlagssort utan att den täcks här.
             int selfReportedTraining = counted.Count(e =>
-                (e.Kind == ActivityKind.Training || e.Kind == ActivityKind.Practice)
+                (e.Kind == ActivityKind.Training || e.Kind == ActivityKind.Practice
+                 || e.Kind == ActivityKind.TrainingMatch)
                 && e.Evidence == ActivityEvidence.SelfReported);
             if (selfReportedTraining > 0)
-                w.Add($"{selfReportedTraining} träningspass är självrapporterade och inte intygade av " +
-                      "någon funktionär. Funktionärsverifiering av träning är inte byggd ännu.");
+                w.Add($"{selfReportedTraining} poster från träningsloggen (träning, 0-poängspass och " +
+                      "träningsmatcher) är självrapporterade och inte intygade av någon funktionär.");
+
+            int selfReportedCompetitions = counted.Count(e =>
+                e.Kind == ActivityKind.Competition && e.Evidence == ActivityEvidence.SelfReported);
+            if (selfReportedCompetitions > 0)
+                w.Add($"{selfReportedCompetitions} tävlingsresultat är egenrapporterade i " +
+                      "träningsloggen — de är inte inskrivna av en arrangör.");
 
             int registeredOnly = counted.Count(e => e.Evidence == ActivityEvidence.RegisteredOnly);
             if (registeredOnly > 0)
@@ -279,5 +385,26 @@ namespace HpskSite.Models
         /// <summary>Skälstext för "uppropet togs aldrig". Konstant eftersom varningsbyggaren
         /// räknar just den här sorten och en omformulering annars tystar varningen.</summary>
         public const string NotRecordedReason = "Uppropet togs aldrig — närvaron är okänd";
+
+        // ── Räknereglerna, utbrutna ──────────────────────────────────
+        //
+        // ⚠️ DE BOR HÄR för att detaljvyn och medlemslistans badge ska räkna LIKA. Badgen kan inte
+        // bygga hela sammanställningen per medlem (tre källor × hela klubbens roster är den sortens
+        // sida som tog tolv sekunder att ladda), så den har en egen bulkväg — och två uppsättningar
+        // villkor blir förr eller senare två svar på samma fråga, mitt på ett myndighetsunderlag.
+
+        /// <summary>
+        /// Räknas en tävling som aktivitet? Ja, utom när skytten var anmäld men aldrig startade.
+        /// DNS spelar bara roll när inget resultat finns: har skytten resultatrader har hen skjutit,
+        /// även om en klass markerats som ej start.
+        /// </summary>
+        public static bool CompetitionCounts(bool hasResult, bool hasDns) => hasResult || !hasDns;
+
+        /// <summary>
+        /// Räknas en evenemangsrad som aktivitet? Bara vid registrerad närvaro. Ett upprop som aldrig
+        /// togs är frånvaron av en uppgift, inte frånvaro — och giltig frånvaro är inte verksamhet.
+        /// </summary>
+        public static bool EventCounts(string? attendanceStatus) =>
+            attendanceStatus == ClubEvents.AttendancePresent;
     }
 }

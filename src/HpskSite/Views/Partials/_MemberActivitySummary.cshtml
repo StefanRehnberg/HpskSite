@@ -30,6 +30,11 @@
     // Löpnummer så expanderns id är unikt även om två sammanställningar renderas på samma sida.
     var _masSeq = 0;
 
+    // Senaste hämtningens sammanhang, så vapengruppsfiltret kan läsa om utan att anroparen skickar
+    // in allt igen. ⚠️ Filtreringen sker SERVERSIDE — filtrerades listan här hade aktivitetsdagar,
+    // tävlingar och underlagsfördelningen fortsatt beskriva den ofiltrerade mängden.
+    var _masCtx = { containerId: null, memberId: null, year: null, groups: [] };
+
     (function injectStyles() {
         if (document.getElementById('mas-styles')) return;
         var css = [
@@ -65,6 +70,7 @@
         Training: 'bi-bullseye',
         Practice: 'bi-record-circle',
         Competition: 'bi-trophy',
+        TrainingMatch: 'bi-people',
         Event: 'bi-calendar-event'
     };
 
@@ -77,25 +83,67 @@
         if (!container) return;
         if (!d) { container.innerHTML = '<div class="text-muted small">Ingen sammanställning.</div>'; return; }
 
+        // ⚠️ "poster som räknas" som EGEN ruta togs bort. Rapporterat 2026-09-01: siffran (105) sa
+        // ingenting om VAD posterna var, och en total utan innehåll är just den sortens tal man inte
+        // kan tolka. Totalen står nu som rubrik över sortfördelningen i stället, där delarna
+        // summerar synligt till den.
         var html = '<div class="mas-kpi mb-2">' +
             masKpi(d.activityDays, 'aktivitetsdagar ' + d.year) +
-            masKpi(d.countedEntries, 'poster som räknas') +
-            masKpi(d.competitions, 'tävlingar');
+            masKpi(d.competitions, 'tävlingar') +
+            // Träningsmatcher har sin EGEN ruta och ingår aldrig i tävlingssiffran.
+            masKpi(d.trainingMatches == null ? 0 : d.trainingMatches, 'träningsmatcher');
         if (d.mandatoryEventsAttended + d.mandatoryEventsMissed > 0) {
             html += masKpi(d.mandatoryEventsAttended + ' / ' + (d.mandatoryEventsAttended + d.mandatoryEventsMissed),
                            'obligatoriska evenemang');
         }
         html += '</div>';
 
+        // Vapengruppsfiltret. Ett intyg skrivs för ett vapen i en eller flera bestämda vapengrupper,
+        // så den som utfärdar behöver se aktiviteten i just de grupperna.
+        //
+        // ⚠️ Alternativen kommer ur `weaponGroupsAvailable`, som räknas FÖRE filtreringen — annars
+        // försvinner de grupper man just filtrerade bort och man kan inte välja tillbaka dem.
+        var groupsAvailable = d.weaponGroupsAvailable || [];
+        if (groupsAvailable.length > 0) {
+            var active = (d.weaponGroupFilter || []).map(function (g) { return String(g).toUpperCase(); });
+            html += '<div class="mb-2 small d-flex flex-wrap align-items-center gap-1">' +
+                '<span class="text-muted me-1">Vapengrupp:</span>';
+            html += '<button type="button" class="btn btn-sm ' +
+                (active.length === 0 ? 'btn-primary' : 'btn-outline-secondary') +
+                '" data-mas-group="">Alla</button>';
+            groupsAvailable.forEach(function (g) {
+                var on = active.indexOf(String(g).toUpperCase()) >= 0;
+                html += '<button type="button" class="btn btn-sm ' +
+                    (on ? 'btn-primary' : 'btn-outline-secondary') +
+                    '" data-mas-group="' + hpskEsc(g) + '">' + hpskEsc(g) + '</button>';
+            });
+            html += '</div>';
+        }
+
+        // Vad posterna ÄR. Svarar direkt på "vad är de 105 för något?" — och delarna ska summera till
+        // totalen, så en felräkning syns på skärmen i stället för att behöva letas fram.
+        if (d.byKind && d.byKind.length) {
+            html += '<div class="mb-2 small">' +
+                '<span class="text-muted me-1">' + d.countedEntries + ' poster:</span>' +
+                '<span class="d-inline-flex flex-wrap gap-1 align-middle">';
+            d.byKind.forEach(function (k) {
+                html += '<span class="badge bg-secondary-subtle text-secondary-emphasis">' +
+                    hpskEsc(k.label) + ': ' + k.count + '</span>';
+            });
+            html += '</span></div>';
+        }
+
         // Fördelningen per underlag är inte pynt — en total utan den går inte att tolka, och det är
         // hela skälet att sammanställningen finns.
         if (d.byEvidence && d.byEvidence.length) {
-            html += '<div class="mb-2 d-flex flex-wrap gap-1">';
+            html += '<div class="mb-2 small">' +
+                '<span class="text-muted me-1">Underlag:</span>' +
+                '<span class="d-inline-flex flex-wrap gap-1 align-middle">';
             d.byEvidence.forEach(function (e) {
                 html += '<span class="badge ' + (MAS_EVIDENCE_CLASS[e.key] || 'bg-secondary-subtle') + '">' +
                     hpskEsc(e.label) + ': ' + e.count + '</span>';
             });
-            html += '</div>';
+            html += '</span></div>';
         }
 
         if (d.warnings && d.warnings.length) {
@@ -151,6 +199,27 @@
         html += '</tbody></table></div></div>';
         container.innerHTML = html;
         wireToggles(container);
+        wireGroupFilter(container);
+    }
+
+    /// Vapengruppsknapparna. Flera grupper går att välja samtidigt — ett vapen kan vara avsett för
+    /// mer än en grupp, och då är det summan av aktiviteten i dem som är underlaget.
+    function wireGroupFilter(container) {
+        container.querySelectorAll('[data-mas-group]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var g = btn.getAttribute('data-mas-group');
+                if (!g) {
+                    _masCtx.groups = [];                       // "Alla" nollställer
+                } else {
+                    var key = g.toUpperCase();
+                    var i = _masCtx.groups.indexOf(key);
+                    if (i >= 0) _masCtx.groups.splice(i, 1); else _masCtx.groups.push(key);
+                }
+                if (_masCtx.containerId && _masCtx.memberId) {
+                    masLoad(_masCtx.containerId, _masCtx.memberId, _masCtx.year, _masCtx.groups);
+                }
+            });
+        });
     }
 
     /// Expandern. ⚠️ Använder `hidden`-attributet, inte `style.display` — så en yta som råkar sätta
@@ -171,13 +240,23 @@
         });
     }
 
-    async function masLoad(containerId, memberId, year) {
+    async function masLoad(containerId, memberId, year, groups) {
         var box = document.getElementById(containerId);
         if (!box) return null;
+
+        // Byte av medlem nollställer filtret: en annan medlem har andra vapengrupper, och ett
+        // kvarhängande filter hade visat noll aktivitet för en grupp hen aldrig skjutit i.
+        if (String(_masCtx.memberId) !== String(memberId)) _masCtx.groups = [];
+        _masCtx.containerId = containerId;
+        _masCtx.memberId = memberId;
+        _masCtx.year = year;
+        if (groups) _masCtx.groups = groups.slice();
+
         box.innerHTML = '<div class="text-muted small">Laddar…</div>';
         try {
             var url = '/umbraco/surface/Foreningsintyg/GetActivitySummary?memberId=' + encodeURIComponent(memberId) +
-                      (year ? '&year=' + encodeURIComponent(year) : '');
+                      (year ? '&year=' + encodeURIComponent(year) : '') +
+                      (_masCtx.groups.length ? '&groups=' + encodeURIComponent(_masCtx.groups.join(',')) : '');
             var r = await fetch(url);
             var d = await r.json();
             if (!d.success) {

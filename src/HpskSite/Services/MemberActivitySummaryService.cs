@@ -63,7 +63,8 @@ namespace HpskSite.Services
         /// varning i svaret i stället för att ta ner hela sammanställningen, eftersom en halv
         /// sammanställning med en synlig varning är användbar och ett undantag inte är det.
         /// </summary>
-        public async Task<MemberActivitySummary> GetAsync(int memberId, int year)
+        public async Task<MemberActivitySummary> GetAsync(
+            int memberId, int year, IEnumerable<string>? weaponGroups = null)
         {
             var entries = new List<MemberActivityEntry>();
             var sourceErrors = new List<string>();
@@ -89,7 +90,8 @@ namespace HpskSite.Services
                 sourceErrors.Add("Evenemangsnärvaron kunde inte läsas — sammanställningen är ofullständig.");
             }
 
-            var summary = MemberActivitySummary.From(memberId, ResolveName(memberId), year, entries);
+            var summary = MemberActivitySummary.From(
+                memberId, ResolveName(memberId), year, entries, weaponGroups);
 
             // Källfel först: den som läser måste se att listan är stympad innan hen tolkar siffrorna.
             summary.Warnings.InsertRange(0, sourceErrors);
@@ -146,6 +148,131 @@ namespace HpskSite.Services
             return years.OrderByDescending(y => y).ToList();
         }
 
+        /// <summary>
+        /// Antal aktivitetsdagar per medlem för ett år — för klubbens medlemslista.
+        ///
+        /// <b>⚠️ EGEN BULKVÄG, med flit.</b> Att bygga hela sammanställningen per medlem hade blivit
+        /// tre källor × hela klubbens roster: ~500 frågor plus innehållsläsningar för 129 medlemmar.
+        /// Det är precis den sortens sida som tog tolv sekunder att ladda innan fakturalistan
+        /// beskars. Här är det i stället <b>fyra frågor och två batchade innehållsläsningar för hela
+        /// listan</b>, oavsett antal medlemmar.
+        ///
+        /// <b>⚠️ RÄKNEREGLERNA LÅNAS, INTE KOPIERAS</b> — <see cref="MemberActivitySummary.CompetitionCounts"/>
+        /// och <see cref="MemberActivitySummary.EventCounts"/>. Två uppsättningar villkor blir förr
+        /// eller senare två svar på samma fråga, och då säger badgen en sak och detaljvyn en annan om
+        /// samma medlem. Ändras en regel ska BÅDA vägarna följa med av sig själva.
+        ///
+        /// <b>Filtrerar inte på vapengrupp.</b> Badgen är en översikt; vapengruppen är detaljvyns
+        /// fråga. Skulle den filtreras måste även dess text säga det.
+        /// </summary>
+        public async Task<Dictionary<int, int>> GetActivityDaysForMembersAsync(
+            IEnumerable<int> memberIds, int year)
+        {
+            var ids = memberIds.Where(id => id > 0).Distinct().ToList();
+            var days = ids.ToDictionary(id => id, _ => new HashSet<DateTime>());
+            if (ids.Count == 0) return new Dictionary<int, int>();
+
+            // Taket för en IN-lista är ~2100 parametrar och faller TYST. Klubbens roster kommer aldrig
+            // nära, men chunkningen gör gränsen omöjlig att gå in i av misstag.
+            foreach (var batch in ids.Chunk(1000))
+            {
+                var inList = string.Join(",", batch.Select((_, i) => "@" + i));
+                var args = batch.Cast<object>().ToArray();
+
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var db = scope.Database;
+
+                // 1) Träningsloggen — varje rad räknas.
+                foreach (var row in db.Fetch<MemberDateRow>(
+                    $@"SELECT MemberId, CAST(TrainingDate AS date) AS [Date] FROM TrainingScores
+                       WHERE MemberId IN ({inList}) AND YEAR(TrainingDate) = @{batch.Length}",
+                    args.Append(year).ToArray()))
+                {
+                    if (days.TryGetValue(row.MemberId, out var set)) set.Add(row.Date);
+                }
+
+                // 2) Tävlingar: anmälningar och resultat, plus DNS. Datumet kommer ur tävlingsnoden,
+                //    så id:na samlas först och noderna läses batchat efteråt.
+                var regs = db.Fetch<MemberCompetitionRow>(
+                    $@"SELECT DISTINCT
+                              COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20))) AS MemberId,
+                              COALESCE(cd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(cd.varcharValue, cd.textValue), 20))) AS CompetitionId
+                       FROM umbracoNode n
+                       JOIN umbracoContent c          ON c.nodeId = n.id
+                       JOIN cmsContentType ct         ON ct.nodeId = c.contentTypeId AND ct.alias = 'competitionRegistration'
+                       JOIN umbracoContentVersion cv  ON cv.nodeId = n.id AND cv.[current] = 1
+                       JOIN cmsPropertyType pt        ON pt.contentTypeId = ct.nodeId AND pt.Alias = 'memberId'
+                       JOIN umbracoPropertyData pd    ON pd.versionId = cv.id AND pd.propertyTypeId = pt.id
+                       JOIN cmsPropertyType ctp       ON ctp.contentTypeId = ct.nodeId AND ctp.Alias = 'competitionId'
+                       JOIN umbracoPropertyData cd    ON cd.versionId = cv.id AND cd.propertyTypeId = ctp.id
+                       WHERE n.trashed = 0
+                         AND COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20))) IN ({inList})",
+                    args);
+
+                var results = db.Fetch<MemberCompetitionRow>(
+                    $@"SELECT DISTINCT MemberId, CompetitionId FROM (
+                            SELECT MemberId, CompetitionId FROM PrecisionResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM MilsnabbResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM DuellResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM NationellHelmatchResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM MagnumPrecisionResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM StandardpistolResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM SportpistolResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM FaltskytteResultEntry
+                            UNION ALL SELECT MemberId, CompetitionId FROM SpringskytteResultEntry) x
+                       WHERE MemberId IN ({inList})", args);
+
+                var dnsRows = db.Fetch<MemberCompetitionRow>(
+                    $@"SELECT DISTINCT MemberId, CompetitionId FROM CompetitionParticipantStatus
+                       WHERE Status = 'DNS' AND MemberId IN ({inList})", args);
+
+                var resultSet = results.Select(r => (r.MemberId, r.CompetitionId)).ToHashSet();
+                var dnsSet = dnsRows.Select(r => (r.MemberId, r.CompetitionId)).ToHashSet();
+
+                var compIds = regs.Select(r => r.CompetitionId)
+                    .Concat(results.Select(r => r.CompetitionId))
+                    .Where(id => id > 0).Distinct().ToList();
+                var compDates = LoadCompetitions(compIds);
+
+                foreach (var pair in regs.Select(r => (r.MemberId, r.CompetitionId))
+                                         .Concat(resultSet).Distinct())
+                {
+                    if (!days.TryGetValue(pair.MemberId, out var set)) continue;
+                    if (!compDates.TryGetValue(pair.CompetitionId, out var comp)) continue;
+                    if (comp.Date.Year != year) continue;
+
+                    bool hasResult = resultSet.Contains(pair);
+                    if (MemberActivitySummary.CompetitionCounts(hasResult, dnsSet.Contains(pair)))
+                        set.Add(comp.Date.Date);
+                }
+
+                // 3) Evenemangsnärvaro. Datumet är EVENEMANGETS, inte radens tidsstämplar.
+                var eventRows = db.Fetch<MemberEventRow>(
+                    $@"SELECT MemberId, EventId, AttendanceStatus FROM ClubEventParticipant
+                       WHERE CancelledAt IS NULL AND MemberId IN ({inList})", args);
+
+                foreach (var row in eventRows)
+                {
+                    if (!MemberActivitySummary.EventCounts(row.AttendanceStatus)) continue;
+                    if (!days.TryGetValue(row.MemberId, out var set)) continue;
+                    var ctx = _events.GetEventContext(row.EventId);
+                    if (ctx?.EventDate == null || ctx.EventDate.Value.Year != year) continue;
+                    set.Add(ctx.EventDate.Value.Date);
+                }
+            }
+
+            return days.ToDictionary(kv => kv.Key, kv => kv.Value.Count);
+        }
+
+        private class MemberDateRow { public int MemberId { get; set; } public DateTime Date { get; set; } }
+        private class MemberCompetitionRow { public int MemberId { get; set; } public int CompetitionId { get; set; } }
+        private class MemberEventRow
+        {
+            public int MemberId { get; set; }
+            public int EventId { get; set; }
+            public string? AttendanceStatus { get; set; }
+        }
+
         // ── Källa 1: träningsloggen ───────────────────────────────────
 
         /// <summary>
@@ -168,8 +295,13 @@ namespace HpskSite.Services
             var entries = new List<MemberActivityEntry>();
             foreach (var r in rows)
             {
+                // ⚠️ ORDNINGEN ÄR REGELN. En träningsmatch är en träningsmatch även när någon kryssat
+                // "tävling" på raden, så TrainingMatchId prövas FÖRE IsCompetition. Läses flaggan
+                // först hamnar matcherna i tävlingssiffran — mätt i dev: två av fixturmedlemmens nio
+                // rader med IsCompetition=1 för 2026 är träningsmatcher. Rapporterat 2026-09-01.
                 bool isPractice = !string.IsNullOrWhiteSpace(r.PracticeType);
                 var kind = isPractice ? ActivityKind.Practice
+                         : r.TrainingMatchId.HasValue ? ActivityKind.TrainingMatch
                          : r.IsCompetition ? ActivityKind.Competition
                          : ActivityKind.Training;
 
@@ -179,15 +311,18 @@ namespace HpskSite.Services
                 string title = kind switch
                 {
                     ActivityKind.Practice => $"0-poäng träning ({PracticeLabel(r.PracticeType)})",
+                    ActivityKind.TrainingMatch => $"Träningsmatch, {discipline}",
                     ActivityKind.Competition => "Extern tävling (självrapporterad)",
-                    _ => r.TrainingMatchId.HasValue ? $"Träningsmatch, {discipline}" : $"Träning, {discipline}"
+                    _ => $"Träning, {discipline}"
                 };
 
                 var detail = new List<string>();
                 if (!string.IsNullOrEmpty(weapon)) detail.Add(weapon);
                 if (kind != ActivityKind.Practice && r.TotalScore > 0)
                     detail.Add($"{r.TotalScore} p" + (r.XCount > 0 ? $" ({r.XCount} X)" : ""));
-                if (kind == ActivityKind.Competition)
+                // Klass och placering hör hemma på båda — en träningsmatch har också en placering, och
+                // raderna bar dem redan när matcherna felaktigt klassades som tävlingar.
+                if (kind == ActivityKind.Competition || kind == ActivityKind.TrainingMatch)
                 {
                     if (!string.IsNullOrWhiteSpace(r.CompetitionShootingClass)) detail.Add(r.CompetitionShootingClass!);
                     if (r.CompetitionPlace is > 0) detail.Add($"plats {r.CompetitionPlace}");
@@ -206,11 +341,64 @@ namespace HpskSite.Services
                     Detail = detail.Count > 0 ? string.Join(" · ", detail) : null,
                     SourceId = r.Id,
                     SourceKind = MemberActivityEntry.SourceKindTraining,
+                    WeaponGroups = TrainingWeaponGroups(r),
                     CountsAsActivity = true
                 });
             }
 
             return entries;
+        }
+
+        /// <summary>
+        /// Vapengruppen ur ett värde som kan vara antingen en KLASS ("A3", "C Vet Y", "A Opt 1")
+        /// eller redan en GRUPPKOD ("A", "C", "A_Opt").
+        ///
+        /// ⚠️ <b>Båda formerna förekommer, och det är inte en skönhetsfråga.</b>
+        /// <c>ShootingClasses.GetWeaponClassCode</c> resolvar en klass och svarar <b>tomt</b> på en bar
+        /// gruppkod — och gruppkoder är precis vad <c>TrainingScores.WeaponClass</c> och
+        /// <c>SpringskytteResultEntry.WeaponClass</c> lagrar. Utan det andra steget tappar de källorna
+        /// sin vapengrupp helt och faller bort ur varje filter.
+        ///
+        /// Den råa formen <b>valideras mot <c>WeaponClass</c>-enumet</b>, aldrig gissas: annars hade
+        /// vilket skräpvärde som helst blivit en "vapengrupp" i väljaren.
+        /// </summary>
+        private static string ResolveWeaponGroup(string? classOrGroup)
+        {
+            var raw = (classOrGroup ?? "").Trim();
+            if (raw.Length == 0) return "";
+
+            var fromClass = ShootingClasses.GetWeaponClassCode(raw);
+            if (fromClass.Length > 0) return fromClass;
+
+            return Enum.TryParse<WeaponClass>(raw, ignoreCase: true, out var group)
+                ? group.ToString()
+                : "";
+        }
+
+        /// <summary>
+        /// Vapengruppen för en träningsrad.
+        ///
+        /// ⚠️ <c>TrainingScores.WeaponClass</c> bär redan en gruppKOD, inte en klass — mätt i dev är
+        /// alla förekommande värden A/B/C/L/M/R. Den ska därför INTE köras genom
+        /// <c>ShootingClasses.GetWeaponClassCode</c>, som resolvar en KLASS ("A3" → "A") och svarar
+        /// tomt på en bar gruppkod. Klassresolvern används bara på
+        /// <c>CompetitionShootingClass</c>, som är en riktig klass.
+        ///
+        /// <b>Känd begränsning:</b> träningsloggen skiljer inte på öppet sikte och optik — det finns
+        /// ingen A_Opt bland värdena. Ett intyg för A_Opt får alltså träningen räknad som A. Att
+        /// gissa något annat vore att hitta på uppgifter.
+        /// </summary>
+        private static List<string> TrainingWeaponGroups(TrainingRow r)
+        {
+            var groups = new List<string>();
+
+            var fromWeapon = ResolveWeaponGroup(r.WeaponClass);
+            if (fromWeapon.Length > 0) groups.Add(fromWeapon);
+
+            var fromClass = ResolveWeaponGroup(r.CompetitionShootingClass);
+            if (fromClass.Length > 0) groups.Add(fromClass);
+
+            return groups.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         private static string PracticeLabel(string? practiceType) => practiceType switch
@@ -236,12 +424,12 @@ namespace HpskSite.Services
         /// </summary>
         private List<MemberActivityEntry> ReadCompetitions(int memberId, int year)
         {
-            var registered = GetCompetitionIdsForMember(memberId);
-            var withResults = GetCompetitionIdsWithResults(memberId);
+            var registeredGroups = GetRegisteredWeaponGroups(memberId);
+            var resultGroups = GetResultWeaponGroups(memberId);
             var dns = GetCompetitionIdsWithDnsOnly(memberId);
 
-            var all = new HashSet<int>(registered);
-            all.UnionWith(withResults);
+            var all = new HashSet<int>(registeredGroups.Keys);
+            all.UnionWith(resultGroups.Keys);
 
             var competitions = LoadCompetitions(all);
             var entries = new List<MemberActivityEntry>();
@@ -251,10 +439,20 @@ namespace HpskSite.Services
                 if (!competitions.TryGetValue(id, out var comp)) continue;
                 if (comp.Date.Year != year) continue;
 
-                bool hasResult = withResults.Contains(id);
-                // DNS spelar bara roll när inget resultat finns. Har skytten resultatrader har hen
-                // skjutit, oavsett att en klass markerats som ej start.
-                bool didNotStart = !hasResult && dns.Contains(id);
+                bool hasResult = resultGroups.ContainsKey(id);
+                bool didNotStart = !MemberActivitySummary.CompetitionCounts(hasResult, dns.Contains(id));
+
+                // Vapengrupperna är UNIONEN av det skytten anmälde sig i och det hen faktiskt har
+                // resultat i. De kan skilja sig: en klassändring vid disken flyttar resultatet men
+                // inte anmälan, och en skytt kan ha anmält två klasser men bara skjutit en.
+                var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (registeredGroups.TryGetValue(id, out var rg)) groups.UnionWith(rg);
+                if (resultGroups.TryGetValue(id, out var xg)) groups.UnionWith(xg);
+
+                var detail = new List<string>();
+                if (!string.IsNullOrWhiteSpace(comp.Venue)) detail.Add(comp.Venue);
+                if (groups.Count > 0)
+                    detail.Add(string.Join(", ", groups.OrderBy(g => g, StringComparer.Ordinal)));
 
                 entries.Add(new MemberActivityEntry
                 {
@@ -262,9 +460,10 @@ namespace HpskSite.Services
                     Kind = ActivityKind.Competition,
                     Evidence = hasResult ? ActivityEvidence.OfficialResult : ActivityEvidence.RegisteredOnly,
                     Title = comp.Name,
-                    Detail = string.IsNullOrWhiteSpace(comp.Venue) ? null : comp.Venue,
+                    Detail = detail.Count > 0 ? string.Join(" · ", detail) : null,
                     SourceId = id,
                     SourceKind = MemberActivityEntry.SourceKindCompetition,
+                    WeaponGroups = groups.OrderBy(g => g, StringComparer.Ordinal).ToList(),
                     CountsAsActivity = !didNotStart,
                     NotCountedReason = didNotStart ? "Ej start (DNS) — anmäld men sköt inte" : null
                 });
@@ -301,25 +500,144 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Vapengrupperna medlemmen är ANMÄLD i, per tävling. Behövs för de tävlingar som saknar
+        /// resultatrader — utan dem hade en anmäld-men-oskjuten tävling ingen vapengrupp och fallit
+        /// bort ur varje filter, vilket är precis de poster ett intyg behöver förklara.
+        ///
+        /// Klasserna ligger som JSON på anmälningsnoden (<c>[{"class":"A1", ...}]</c>) och en anmälan
+        /// kan bära flera — dev-data har A1 och L_Vet_A på samma tävling.
+        /// </summary>
+        private Dictionary<int, HashSet<string>> GetRegisteredWeaponGroups(int memberId)
+        {
+            var result = new Dictionary<int, HashSet<string>>();
+
+            List<RegistrationClassRow> rows;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                rows = scope.Database.Fetch<RegistrationClassRow>(
+                    @"SELECT COALESCE(cd.intValue,
+                             TRY_CONVERT(INT, LEFT(COALESCE(cd.varcharValue, cd.textValue), 20))) AS CompetitionId,
+                             COALESCE(sd.textValue, sd.varcharValue) AS ClassesJson
+                      FROM umbracoNode n
+                      JOIN umbracoContent c          ON c.nodeId = n.id
+                      JOIN cmsContentType ct         ON ct.nodeId = c.contentTypeId AND ct.alias = 'competitionRegistration'
+                      JOIN umbracoContentVersion cv  ON cv.nodeId = n.id AND cv.[current] = 1
+                      JOIN umbracoPropertyData pd    ON pd.versionId = cv.id
+                      JOIN cmsPropertyType pt        ON pt.id = pd.propertyTypeId AND pt.Alias = 'memberId'
+                      JOIN cmsPropertyType ctp       ON ctp.contentTypeId = ct.nodeId AND ctp.Alias = 'competitionId'
+                      JOIN umbracoPropertyData cd    ON cd.versionId = cv.id AND cd.propertyTypeId = ctp.id
+                      LEFT JOIN cmsPropertyType stp  ON stp.contentTypeId = ct.nodeId AND stp.Alias = 'shootingClasses'
+                      LEFT JOIN umbracoPropertyData sd ON sd.versionId = cv.id AND sd.propertyTypeId = stp.id
+                      WHERE n.trashed = 0
+                        AND (pd.intValue = @0
+                             OR (pd.intValue IS NULL
+                                 AND TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20)) = @0))",
+                    memberId);
+            }
+
+            foreach (var row in rows)
+            {
+                if (row.CompetitionId is not > 0) continue;
+                var set = result.TryGetValue(row.CompetitionId.Value, out var existing)
+                    ? existing
+                    : result[row.CompetitionId.Value] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var cls in ParseRegistrationClasses(row.ClassesJson))
+                {
+                    var group = ResolveWeaponGroup(cls);
+                    if (!string.IsNullOrWhiteSpace(group)) set.Add(group);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Klassnamnen ur anmälningens JSON. Tolerant med flit: en anmälan kan bära den äldre
+        /// skalära formen eller ren skräp, och ett vapengruppsfilter är inte värt ett undantag.
+        /// </summary>
+        private static IEnumerable<string> ParseRegistrationClasses(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return Array.Empty<string>();
+
+            var trimmed = json.TrimStart();
+            if (!trimmed.StartsWith("["))
+                return new[] { json.Trim() };   // äldre skalär form: ett enda klassnamn
+
+            try
+            {
+                var entries = System.Text.Json.JsonSerializer.Deserialize<List<ShootingClassEntry>>(
+                    json,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return entries?.Select(e => e.Class).Where(c => !string.IsNullOrWhiteSpace(c))
+                       ?? Array.Empty<string>();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        private class RegistrationClassRow
+        {
+            public int? CompetitionId { get; set; }
+            public string? ClassesJson { get; set; }
+        }
+
+        /// <summary>
         /// Tävlingar där medlemmen har minst en inskriven resultatrad. Unionen över de nio
         /// disciplintabellerna är avsiktligt EN fråga — en tabell i taget hade blivit nio
         /// tur-och-retur och, värre, en ny disciplintabell hade tystnat i stället för att märkas.
         /// </summary>
-        private HashSet<int> GetCompetitionIdsWithResults(int memberId)
+        private Dictionary<int, HashSet<string>> GetResultWeaponGroups(int memberId)
         {
+            // ⚠️ DE NIO TABELLERNA HAR INTE SAMMA KOLUMNER. Åtta bär `ShootingClass`;
+            // `SpringskytteResultEntry` har ingen sådan kolumn alls — Springskytte kör vapenklass och
+            // ålders-/könsklass i två separata kolumner (`WeaponClass`, `AgeGenderClass`).
+            //
+            // En union som läste `ShootingClass` överallt gav ett SQL-fel som tog ner HELA
+            // tävlingskällan — sammanställningen tappade varje tävling och sa bara "Tävlingsdeltagandet
+            // kunde inte läsas". Rapporterat 2026-09-01. Springskytte bidrar därför med `WeaponClass`,
+            // som redan är en gruppkod och normaliseras av ResolveWeaponGroup.
+            //
+            // Lägg aldrig till en disciplintabell här utan att kontrollera dess kolumnnamn.
             const string sql = @"
-                SELECT CompetitionId FROM PrecisionResultEntry        WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM MilsnabbResultEntry          WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM DuellResultEntry             WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM NationellHelmatchResultEntry WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM MagnumPrecisionResultEntry   WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM StandardpistolResultEntry    WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM SportpistolResultEntry       WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM FaltskytteResultEntry        WHERE MemberId = @0
-                UNION SELECT CompetitionId FROM SpringskytteResultEntry      WHERE MemberId = @0";
+                SELECT CompetitionId, ShootingClass FROM PrecisionResultEntry        WHERE MemberId = @0
+                UNION SELECT CompetitionId, ShootingClass FROM MilsnabbResultEntry          WHERE MemberId = @0
+                UNION SELECT CompetitionId, ShootingClass FROM DuellResultEntry             WHERE MemberId = @0
+                UNION SELECT CompetitionId, ShootingClass FROM NationellHelmatchResultEntry WHERE MemberId = @0
+                UNION SELECT CompetitionId, ShootingClass FROM MagnumPrecisionResultEntry   WHERE MemberId = @0
+                UNION SELECT CompetitionId, ShootingClass FROM StandardpistolResultEntry    WHERE MemberId = @0
+                UNION SELECT CompetitionId, ShootingClass FROM SportpistolResultEntry       WHERE MemberId = @0
+                UNION SELECT CompetitionId, ShootingClass FROM FaltskytteResultEntry        WHERE MemberId = @0
+                UNION SELECT CompetitionId, WeaponClass   FROM SpringskytteResultEntry      WHERE MemberId = @0";
 
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<int>(sql, memberId).Where(id => id > 0).ToHashSet();
+            List<ResultClassRow> rows;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                rows = scope.Database.Fetch<ResultClassRow>(sql, memberId);
+
+            var result = new Dictionary<int, HashSet<string>>();
+            foreach (var row in rows)
+            {
+                if (row.CompetitionId <= 0) continue;
+                var set = result.TryGetValue(row.CompetitionId, out var existing)
+                    ? existing
+                    : result[row.CompetitionId] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                // ⚠️ Klassen lagras i TVÅ former — id ("C_Vet_Y") och visningsnamn ("C Vet Y") — och
+                // Springskyttes värde är dessutom redan en gruppkod. ResolveWeaponGroup hanterar alla
+                // tre; en egen förstabokstavsläsning hade delat A_opt_1 fel, och optiksikte är inte
+                // samma tävling som öppet sikte.
+                var group = ResolveWeaponGroup(row.ShootingClass);
+                if (!string.IsNullOrWhiteSpace(group)) set.Add(group);
+            }
+            return result;
+        }
+
+        private class ResultClassRow
+        {
+            public int CompetitionId { get; set; }
+            public string? ShootingClass { get; set; }
         }
 
         /// <summary>Tävlingar där medlemmen har en DNS-markering.</summary>
@@ -419,7 +737,7 @@ namespace HpskSite.Services
                     SourceId = ctx.EventId,
                     SourceKind = MemberActivityEntry.SourceKindEvent,
                     IsMandatoryEvent = ctx.IsMandatory,
-                    CountsAsActivity = present,
+                    CountsAsActivity = MemberActivitySummary.EventCounts(row.AttendanceStatus),
                     NotCountedReason = notCounted
                 });
             }

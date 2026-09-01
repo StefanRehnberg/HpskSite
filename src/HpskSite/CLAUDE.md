@@ -4120,6 +4120,67 @@ självrapporterad träning och funktionärsprickad närvaro i samma siffra går 
 pass med olika vapen samma kväll är ETT besök på banan; `TrainingDate` bär klockslag, så `.Date` är
 inte kosmetik. `CountedEntries` finns kvar bredvid.
 
+### Sorterna, filtret och badgen (2026-09-01, ur Stefans genomgång av verklig data)
+
+**⚠️ Träningsmatcher är INTE tävlingar.** Egen `ActivityKind.TrainingMatch`, avgjord på
+`TrainingScores.TrainingMatchId` — som prövas **före** `IsCompetition`. Raderna bär båda: mätt i dev
+har fixturmedlemmen nio rader med `IsCompetition = 1` för 2026, varav **två är träningsmatcher**, plus
+sex matcher utan flaggan. Läses flaggan först hamnar de två i tävlingssiffran, vilket är vad som
+rapporterades. Egen KPI-ruta; aldrig inbakade i `Competitions`.
+
+**"poster som räknas" som egen ruta är borta.** Siffran (105 i rapporten) sa ingenting om VAD
+posterna var. Totalen står nu som rubrik över `ByKind`-fördelningen, så delarna summerar synligt till
+den.
+
+**⚠️ Varningarna MÅSTE gå ihop med brickan "Självrapporterad: N".** Brickan räknade alla
+självrapporterade poster (86) medan varningen bara nämnde träningspassen (68) — båda sanna, men bara
+den ena på skärmen, vilket läser som att systemet räknar fel. De självrapporterade delas nu i
+träningsloggens poster och de egenrapporterade tävlingsresultaten. **Lägg aldrig till en
+underlagssort utan att den täcks av en varningsrad.** Texten "Funktionärsverifiering av träning är
+inte byggd ännu" är borttagen (Stefans begäran) med ett test som hindrar att den smyger tillbaka.
+
+### Vapengruppsfilter
+
+Ett intyg skrivs för ett vapen i bestämda vapengrupper, så utfärdaren måste kunna se aktiviteten i
+just dem. Varje post bär `WeaponGroups` (en LISTA — en tävling kan innehålla flera klasser för samma
+skytt; dev-data har A1 och L_Vet_A på samma anmälan).
+
+- **Tävlingens grupper är UNIONEN av anmälda och skjutna klasser.** De kan skilja sig: ett klassbyte
+  vid disken flyttar resultatet men inte anmälan, och en skytt kan ha anmält två klasser men bara
+  skjutit en.
+- **Filtret arbetar SERVERSIDE.** Filtrerades listan i klienten hade aktivitetsdagar, tävlingar och
+  underlagsfördelningen fortsatt beskriva den ofiltrerade mängden — siffror som inte hör till listan
+  under dem. `WeaponGroupsAvailable` räknas dock **före** filtreringen, annars försvinner de grupper
+  man just valde bort ur väljaren och filtret blir en enkelriktad gata.
+- **⚠️ Evenemang har ingen vapengrupp** och faller bort under ett filter. Det SÄGS, med antalet
+  (`ExcludedWithoutWeaponGroup`) — en aktivitetssiffra som tappat evenemangen utan att någon nämner
+  det betyder något annat än läsaren tror.
+
+**⚠️⚠️ DE NIO RESULTATTABELLERNA HAR INTE SAMMA KOLUMNER.** Åtta bär `ShootingClass`;
+`SpringskytteResultEntry` har **ingen sådan kolumn** — Springskytte kör `WeaponClass` och
+`AgeGenderClass` separat. En union som läste `ShootingClass` överallt gav ett SQL-fel som tog ner
+HELA tävlingskällan, så sammanställningen tappade varje tävling och sa bara *"Tävlingsdeltagandet
+kunde inte läsas"*. CLAUDE.md:s regel att unionen medvetet är EN fråga gäller **raderna, inte
+kolumnerna** — kontrollera kolumnnamnen innan du lägger till en disciplintabell.
+
+**`ResolveWeaponGroup` hanterar de TRE former som förekommer:** klass-id (`C_Vet_Y`),
+klass-visningsnamn (`C Vet Y`) och **redan en gruppkod** (`A`, `C`, `L` — vad träningsloggen och
+Springskytte lagrar). `ShootingClasses.GetWeaponClassCode` resolvar de två första och svarar **tomt**
+på den tredje. Den råa gruppkoden valideras mot `WeaponClass`-enumet, aldrig gissas — annars blir
+vilket skräpvärde som helst en "vapengrupp" i väljaren.
+
+### Badgen i medlemslistan
+
+Aktivitetsdagar per medlem, i **EN bulkfråga för hela klubben** —
+`GetActivityDaysForMembersAsync`: fyra queries och två batchade innehållsläsningar oavsett antal
+medlemmar. Att bygga sammanställningen per medlem hade blivit tre källor × hela rostern, alltså ~500
+frågor; det är precis den sida som tog tolv sekunder innan fakturalistan beskars.
+
+**⚠️ Räknereglerna LÅNAS, inte kopieras** — `MemberActivitySummary.CompetitionCounts` och
+`EventCounts`. Två uppsättningar villkor blir förr eller senare två svar på samma fråga, och då säger
+badgen en sak och detaljvyn en annan om samma medlem. Hämtas SEPARAT och EFTER medlemslistan; en
+medlem utan svar får **ingen** badge, hellre än en nolla som läses som "ingen aktivitet".
+
 **⚠️ `Competitions` räknas på den SAMMANSATTA källnyckeln (`SourceKind:SourceId`), aldrig på id:t.**
 En självrapporterad EXTERN tävling bär **träningsradens** id medan en av våra egna bär
 **tävlingsnodens** — två oberoende identitetsserier där samma heltal betyder olika saker. På id:t

@@ -187,6 +187,78 @@ namespace HpskSite.Tests.Services
             Assert.False(s.ByEvidence.ContainsKey(ActivityEvidence.None));
         }
 
+        // ── Träningsmatcher är inte tävlingar ─────────────────────────
+
+        [Fact]
+        public void TrainingMatches_AreNotCountedAsCompetitions()
+        {
+            // Rapporterat 2026-09-01: tävlingssiffran var för hög eftersom träningsmatcher räknades in.
+            // En träningsmatch är klubbens interna uppgörelse och hör inte i det tal en styrelse eller
+            // en handläggare läser som "tävlingar".
+            var s = Build(
+                Entry("2026-03-01", ActivityKind.Competition, ActivityEvidence.OfficialResult, sourceId: 2171),
+                Entry("2026-03-08", ActivityKind.TrainingMatch, sourceId: 501),
+                Entry("2026-03-15", ActivityKind.TrainingMatch, sourceId: 502));
+
+            Assert.Equal(1, s.Competitions);
+            Assert.Equal(2, s.TrainingMatches);
+        }
+
+        [Fact]
+        public void TrainingMatches_StillCountAsActivity()
+        {
+            // De ska INTE bort ur underlaget — bara ur tävlingssiffran.
+            var s = Build(
+                Entry("2026-03-08", ActivityKind.TrainingMatch, sourceId: 501),
+                Entry("2026-03-15", ActivityKind.TrainingMatch, sourceId: 502));
+
+            Assert.Equal(2, s.ActivityDays);
+            Assert.Equal(2, s.CountedEntries);
+            Assert.Equal(2, s.ByKind[ActivityKind.TrainingMatch]);
+        }
+
+        [Fact]
+        public void TrainingMatches_CountTowardTheTrainingLogWarning()
+        {
+            // Varningen om självrapporterat underlag måste täcka matcherna också — annars summerar
+            // inte delarna till brickan "Självrapporterad: N", vilket är exakt motsägelsen som
+            // rapporterades.
+            var s = Build(
+                Entry("2026-01-05", ActivityKind.Training),
+                Entry("2026-01-06", ActivityKind.Practice),
+                Entry("2026-01-07", ActivityKind.TrainingMatch, sourceId: 501));
+
+            Assert.Contains(s.Warnings, w => w.StartsWith("3 poster från träningsloggen"));
+        }
+
+        [Fact]
+        public void SelfReportedCompetitions_GetTheirOwnWarning()
+        {
+            // ⚠️ Kärnan i den rapporterade motsägelsen: brickan räknade ALLA självrapporterade poster
+            // (86) medan varningen bara nämnde träningspassen (68). Nu redovisas båda sorterna, och
+            // delarna summerar synligt till brickans tal.
+            var s = Build(
+                Entry("2026-01-05", ActivityKind.Training),
+                Entry("2026-02-05", ActivityKind.Competition, ActivityEvidence.SelfReported, sourceId: 900),
+                Entry("2026-03-05", ActivityKind.Competition, ActivityEvidence.SelfReported, sourceId: 901));
+
+            Assert.Contains(s.Warnings, w => w.StartsWith("1 poster från träningsloggen"));
+            Assert.Contains(s.Warnings, w => w.StartsWith("2 tävlingsresultat är egenrapporterade"));
+
+            // Summan av de två varningarna = brickans antal självrapporterade poster.
+            Assert.Equal(3, s.ByEvidence[ActivityEvidence.SelfReported]);
+        }
+
+        [Fact]
+        public void TheOldWarningWordingIsGone()
+        {
+            // Stefan bad uttryckligen att "Funktionärsverifiering av träning är inte byggd ännu"
+            // skulle bort. Ett positivt påstående om frånvaro, så texten inte kan smyga tillbaka.
+            var s = Build(Entry("2026-01-05", ActivityKind.Training));
+
+            Assert.DoesNotContain(s.Warnings, w => w.Contains("inte byggd"));
+        }
+
         [Fact]
         public void PracticeAndTraining_AreSeparateKinds()
         {
@@ -198,6 +270,129 @@ namespace HpskSite.Tests.Services
 
             Assert.Equal(1, s.ByKind[ActivityKind.Training]);
             Assert.Equal(1, s.ByKind[ActivityKind.Practice]);
+        }
+
+        // ── Vapengruppsfiltret ────────────────────────────────────────
+
+        private static MemberActivityEntry GroupEntry(string date, ActivityKind kind, int sourceId,
+            params string[] groups)
+        {
+            var e = Entry(date, kind, sourceId: sourceId);
+            e.WeaponGroups = groups.ToList();
+            return e;
+        }
+
+        private static MemberActivitySummary BuildFiltered(string[] filter, params MemberActivityEntry[] entries) =>
+            MemberActivitySummary.From(42, "Testskytt", 2026, entries, filter);
+
+        [Fact]
+        public void NoFilter_KeepsEverything()
+        {
+            var s = BuildFiltered(Array.Empty<string>(),
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"),
+                GroupEntry("2026-01-06", ActivityKind.Training, 2, "A"),
+                Entry("2026-01-07", ActivityKind.Event, ActivityEvidence.FunctionaryRecorded, sourceId: 900));
+
+            Assert.Equal(3, s.CountedEntries);
+            Assert.Empty(s.WeaponGroupFilter);
+            Assert.Equal(0, s.ExcludedWithoutWeaponGroup);
+        }
+
+        [Fact]
+        public void Filter_KeepsOnlyTheChosenGroup()
+        {
+            var s = BuildFiltered(new[] { "C" },
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"),
+                GroupEntry("2026-01-06", ActivityKind.Training, 2, "A"),
+                GroupEntry("2026-01-07", ActivityKind.Training, 3, "B"));
+
+            Assert.Equal(1, s.CountedEntries);
+            Assert.Equal(1, s.ActivityDays);
+        }
+
+        [Fact]
+        public void Filter_MatchesAnyOfAnEntrysGroups()
+        {
+            // En tävling kan innehålla flera vapenklasser för samma skytt — dev-data har A1 och
+            // L_Vet_A på samma anmälan. Den tävlingen är aktivitet i BÅDA grupperna.
+            var s = BuildFiltered(new[] { "L" },
+                GroupEntry("2026-09-24", ActivityKind.Competition, 2171, "A", "L"));
+
+            Assert.Equal(1, s.Competitions);
+        }
+
+        [Fact]
+        public void Filter_AcceptsSeveralGroupsAtOnce()
+        {
+            // Ett vapen kan vara avsett för mer än en vapengrupp; då är summan underlaget.
+            var s = BuildFiltered(new[] { "C", "A" },
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"),
+                GroupEntry("2026-01-06", ActivityKind.Training, 2, "A"),
+                GroupEntry("2026-01-07", ActivityKind.Training, 3, "B"));
+
+            Assert.Equal(2, s.CountedEntries);
+        }
+
+        [Fact]
+        public void Filter_IsCaseInsensitive()
+        {
+            var s = BuildFiltered(new[] { "c" },
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"));
+
+            Assert.Equal(1, s.CountedEntries);
+        }
+
+        [Fact]
+        public void Filter_DropsEntriesWithoutAGroup_AndSaysSo()
+        {
+            // ⚠️ Evenemang har ingen vapengrupp — en städdag är klubbverksamhet, inte skjutande i en
+            // grupp. De faller bort under ett filter, och det MÅSTE stå på skärmen: en
+            // aktivitetssiffra som tappat evenemangen utan att någon nämner det betyder något annat
+            // än läsaren tror.
+            var s = BuildFiltered(new[] { "C" },
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"),
+                Entry("2026-01-07", ActivityKind.Event, ActivityEvidence.FunctionaryRecorded, sourceId: 900),
+                Entry("2026-01-08", ActivityKind.Event, ActivityEvidence.FunctionaryRecorded, sourceId: 901));
+
+            Assert.Equal(1, s.CountedEntries);
+            Assert.Equal(2, s.ExcludedWithoutWeaponGroup);
+            Assert.Contains(s.Warnings, w => w.Contains("Filtrerat på vapengrupp C"));
+            Assert.Contains(s.Warnings, w => w.Contains("2 poster utan vapengrupp"));
+        }
+
+        [Fact]
+        public void AvailableGroups_AreComputedBEFOREFiltering()
+        {
+            // ⚠️ Annars försvinner de grupper man just filtrerade bort ur väljaren och man kan inte
+            // välja tillbaka dem — filtret blir en enkelriktad gata.
+            var s = BuildFiltered(new[] { "C" },
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"),
+                GroupEntry("2026-01-06", ActivityKind.Training, 2, "A"),
+                GroupEntry("2026-01-07", ActivityKind.Training, 3, "B"));
+
+            Assert.Equal(new[] { "A", "B", "C" }, s.WeaponGroupsAvailable);
+        }
+
+        [Fact]
+        public void AvailableGroups_IgnoreEntriesWithoutAGroup()
+        {
+            var s = BuildFiltered(Array.Empty<string>(),
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"),
+                Entry("2026-01-07", ActivityKind.Event, ActivityEvidence.FunctionaryRecorded, sourceId: 900));
+
+            Assert.Equal(new[] { "C" }, s.WeaponGroupsAvailable);
+        }
+
+        [Fact]
+        public void Filter_OnAGroupWithNoActivity_GivesZeroButStillListsTheOptions()
+        {
+            // Ett tomt svar är ett giltigt svar — men väljaren måste stå kvar så man kommer tillbaka.
+            var s = BuildFiltered(new[] { "R" },
+                GroupEntry("2026-01-05", ActivityKind.Training, 1, "C"));
+
+            Assert.Equal(0, s.CountedEntries);
+            Assert.Equal(0, s.ActivityDays);
+            Assert.Equal(new[] { "C" }, s.WeaponGroupsAvailable);
         }
 
         // ── Varningarna ───────────────────────────────────────────────
@@ -220,7 +415,7 @@ namespace HpskSite.Tests.Services
                 Entry("2026-01-05", ActivityKind.Training),
                 Entry("2026-01-06", ActivityKind.Practice));
 
-            Assert.Contains(s.Warnings, w => w.StartsWith("2 träningspass"));
+            Assert.Contains(s.Warnings, w => w.StartsWith("2 poster från träningsloggen"));
         }
 
         [Fact]

@@ -21,6 +21,7 @@ namespace HpskSite.Controllers
     {
         private readonly ForeningsintygService _foreningsintygService;
         private readonly ForeningsintygDocumentService _intygDocuments;
+        private readonly MemberClubService _memberClubs;
         private readonly MemberActivitySummaryService _activitySummary;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberService _memberService;
@@ -36,6 +37,7 @@ namespace HpskSite.Controllers
             IPublishedUrlProvider publishedUrlProvider,
             ForeningsintygService foreningsintygService,
             ForeningsintygDocumentService intygDocuments,
+            MemberClubService memberClubs,
             MemberActivitySummaryService activitySummary,
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
@@ -45,6 +47,7 @@ namespace HpskSite.Controllers
         {
             _foreningsintygService = foreningsintygService;
             _intygDocuments = intygDocuments;
+            _memberClubs = memberClubs;
             _activitySummary = activitySummary;
             _authorizationService = authorizationService;
             _memberService = memberService;
@@ -156,7 +159,7 @@ namespace HpskSite.Controllers
         /// den som ska få se underlaget.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetActivitySummary(int memberId, int? year = null)
+        public async Task<IActionResult> GetActivitySummary(int memberId, int? year = null, string? groups = null)
         {
             try
             {
@@ -164,7 +167,13 @@ namespace HpskSite.Controllers
                 if (denied != null) return denied;
 
                 int y = year ?? DateTime.Today.Year;
-                var summary = await _activitySummary.GetAsync(memberId, y);
+                // Vapengruppsfiltret filtrerar SERVERSIDE, så varje siffra räknas om ur den filtrerade
+                // mängden. Filtrerades listan i klienten hade aktivitetsdagar, tävlingar och
+                // underlagsfördelningen fortsatt beskriva den ofiltrerade mängden — alltså siffror som
+                // inte hör till listan under dem.
+                var groupFilter = (groups ?? "")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var summary = await _activitySummary.GetAsync(memberId, y, groupFilter);
                 var years = await _activitySummary.GetYearsWithActivityAsync(memberId);
 
                 return Json(new
@@ -179,8 +188,12 @@ namespace HpskSite.Controllers
                         summary.ActivityDays,
                         summary.CountedEntries,
                         summary.Competitions,
+                        summary.TrainingMatches,
                         summary.MandatoryEventsAttended,
                         summary.MandatoryEventsMissed,
+                        summary.WeaponGroupsAvailable,
+                        summary.WeaponGroupFilter,
+                        summary.ExcludedWithoutWeaponGroup,
                         summary.Warnings,
                         // Ordbokarna projiceras med SVENSKA etiketter som nyckel, inte enum-namn:
                         // klienten ska aldrig behöva känna till enum-värdena för att skriva ut dem,
@@ -201,6 +214,7 @@ namespace HpskSite.Controllers
                             e.CountsAsActivity,
                             e.NotCountedReason,
                             e.IsMandatoryEvent,
+                            e.WeaponGroups,
                             e.SourceId,
                             // SourceKind följer med för att klienten ska kunna länka rätt — och för
                             // att en verifiering ska kunna se att id:t tolkas i rätt serie.
@@ -308,7 +322,52 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Antal aktivitetsdagar per medlem för en hel klubb och ett år — badgen i medlemslistan på
+        /// Aktivitet &amp; Intyg.
+        ///
+        /// <b>En fråga för hela listan, inte en per medlem.</b> Se
+        /// <see cref="MemberActivitySummaryService.GetActivityDaysForMembersAsync"/> för varför.
+        ///
+        /// Grindad på KLUBBEN, inte per medlem: den som får se klubbens medlemslista får se hur aktiva
+        /// dess medlemmar är. En per-medlem-kontroll här hade dessutom betytt ett auktoriseringsanrop
+        /// per rad.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClubActivityDays(int clubId, int? year = null)
+        {
+            try
+            {
+                var current = await GetCurrentMemberDataAsync();
+                if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                bool isClubAdmin = clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId);
+                if (!isSiteAdmin && !isClubAdmin)
+                    return Json(new { success = false, message = "Åtkomst nekad" });
+
+                // ⚠️ MemberClubService är ENDA stället en medlems klubbar resolvas. Egen parsning av
+                // primaryClubId + memberClubIds är hur man tappar en medlem som gått med i en andra
+                // klubb — och aliaset stavas dessutom olika i doctypen än i de flesta anropen.
+                var memberIds = _memberService.GetAllMembers()
+                    .Where(m => _memberClubs.IsMemberOfClub(m, clubId))
+                    .Select(m => m.Id)
+                    .ToList();
+
+                int y = year ?? DateTime.Today.Year;
+                var days = await _activitySummary.GetActivityDaysForMembersAsync(memberIds, y);
+
+                return Json(new { success = true, year = y, data = days });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building club activity days for club {ClubId}", clubId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
         // ── Helpers ───────────────────────────────────────────────────
+
 
         /// <summary>
         /// Kort sammanfattning på loggraden, så listan går att läsa utan att öppna varje intyg.
