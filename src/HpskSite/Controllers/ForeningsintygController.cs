@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -20,6 +20,7 @@ namespace HpskSite.Controllers
     public class ForeningsintygController : SurfaceController
     {
         private readonly ForeningsintygService _foreningsintygService;
+        private readonly MemberActivitySummaryService _activitySummary;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
@@ -33,6 +34,7 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             ForeningsintygService foreningsintygService,
+            MemberActivitySummaryService activitySummary,
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
             IMemberManager memberManager,
@@ -40,6 +42,7 @@ namespace HpskSite.Controllers
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _foreningsintygService = foreningsintygService;
+            _activitySummary = activitySummary;
             _authorizationService = authorizationService;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -53,20 +56,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> ListForMember(int memberId)
         {
-            var current = await GetCurrentMemberDataAsync();
-            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
-
-            bool isSelf = current.Id == memberId;
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            if (!isSelf && !isSiteAdmin)
-            {
-                var candidate = _memberService.GetById(memberId);
-                if (candidate == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
-
-                int.TryParse(candidate.GetValue<string>("primaryClubId") ?? "", out int candidateClubId);
-                bool isClubAdmin = candidateClubId > 0 && await _authorizationService.IsClubAdminForClub(candidateClubId);
-                if (!isClubAdmin) return Json(new { success = false, message = "Access denied" });
-            }
+            var denied = await DenyIfCannotReadMemberAsync(memberId);
+            if (denied != null) return denied;
 
             var entries = _foreningsintygService.GetForMember(memberId);
             return Json(new { success = true, data = entries.Select(Project) });
@@ -155,7 +146,97 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Aktivitetssammanställningen för en medlem och ett år — underlaget ett Föreningsintyg
+        /// genereras ur. Läsbar av medlemmen själv, av klubbadmin för medlemmens primära klubb och
+        /// av sajtadmin, alltså exakt samma grind som intygsloggen: den som får utfärda intyget är
+        /// den som ska få se underlaget.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetActivitySummary(int memberId, int? year = null)
+        {
+            try
+            {
+                var denied = await DenyIfCannotReadMemberAsync(memberId);
+                if (denied != null) return denied;
+
+                int y = year ?? DateTime.Today.Year;
+                var summary = await _activitySummary.GetAsync(memberId, y);
+                var years = await _activitySummary.GetYearsWithActivityAsync(memberId);
+
+                return Json(new
+                {
+                    success = true,
+                    years,
+                    data = new
+                    {
+                        summary.MemberId,
+                        summary.MemberName,
+                        summary.Year,
+                        summary.ActivityDays,
+                        summary.CountedEntries,
+                        summary.Competitions,
+                        summary.MandatoryEventsAttended,
+                        summary.MandatoryEventsMissed,
+                        summary.Warnings,
+                        // Ordbokarna projiceras med SVENSKA etiketter som nyckel, inte enum-namn:
+                        // klienten ska aldrig behöva känna till enum-värdena för att skriva ut dem,
+                        // och en ny enum-medlem ska inte kunna dyka upp oöversatt i gränssnittet.
+                        byKind = summary.ByKind.OrderBy(kv => kv.Key)
+                            .Select(kv => new { key = kv.Key.ToString(), label = MemberActivityEntry.KindDisplay(kv.Key), count = kv.Value }),
+                        byEvidence = summary.ByEvidence.OrderByDescending(kv => kv.Key)
+                            .Select(kv => new { key = kv.Key.ToString(), label = MemberActivityEntry.EvidenceDisplay(kv.Key), count = kv.Value }),
+                        entries = summary.Entries.Select(e => new
+                        {
+                            date = e.Date.ToString("yyyy-MM-dd"),
+                            kind = e.Kind.ToString(),
+                            kindLabel = e.KindLabel,
+                            evidence = e.Evidence.ToString(),
+                            evidenceLabel = e.EvidenceLabel,
+                            e.Title,
+                            e.Detail,
+                            e.CountsAsActivity,
+                            e.NotCountedReason,
+                            e.IsMandatoryEvent,
+                            e.SourceId,
+                            // SourceKind följer med för att klienten ska kunna länka rätt — och för
+                            // att en verifiering ska kunna se att id:t tolkas i rätt serie.
+                            e.SourceKind
+                        })
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building activity summary for member {MemberId}", memberId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
         // ── Helpers ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Grinden för att LÄSA en medlems intygsunderlag: medlemmen själv, klubbadmin för
+        /// medlemmens primära klubb, eller sajtadmin. Returnerar null när åtkomsten är godkänd och
+        /// annars det färdiga avslagssvaret — en enda regel på ett enda ställe, så att en ny
+        /// läsyta inte kan få en egen, avvikande tolkning.
+        /// </summary>
+        private async Task<IActionResult?> DenyIfCannotReadMemberAsync(int memberId)
+        {
+            var current = await GetCurrentMemberDataAsync();
+            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            if (current.Id == memberId) return null;
+            if (await _authorizationService.IsCurrentUserAdminAsync()) return null;
+
+            var candidate = _memberService.GetById(memberId);
+            if (candidate == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
+
+            int.TryParse(candidate.GetValue<string>("primaryClubId") ?? "", out int candidateClubId);
+            if (candidateClubId > 0 && await _authorizationService.IsClubAdminForClub(candidateClubId)) return null;
+
+            return Json(new { success = false, message = "Åtkomst nekad" });
+        }
 
         private object Project(MemberCertificateIssue e) => new
         {

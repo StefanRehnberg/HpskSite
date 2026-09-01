@@ -4033,6 +4033,96 @@ X kl 15", "vem bemannar Y kl 15") are in `backlog.md` → *Funktionärer: närva
 that staffed it, so it must be settable per row (a person can be a member of several clubs, and an
 external helper has no member record at all) — today it is only derived from `primaryClubId`.
 
+## Aktivitetssammanställning per medlem och år (2026-09-01)
+
+Mellanlagret mellan närvarologgningen och Föreningsintyget: **ETT svar per (medlem, år)** över de tre
+källorna — träningslogg, tävlingsdeltagande, evenemangsnärvaro. Utan det är närvarologgen bara rader i
+en tabell. `Services/MemberActivitySummaryService.cs` + `Models/MemberActivitySummary.cs`.
+
+**Helt HÄRLEDD, ingen lagring.** Ett lagrat exemplar blir fel i samma stund någon rättar en
+träningsrad eller tar ett upprop i efterhand. Ingen SQL-migrering, ingen doctype-egenskap, ingen nod.
+
+**Läses av TVÅ ytor genom SAMMA renderare** — `Views/Partials/_MemberActivitySummary.cshtml`
+(`hpskLoadActivitySummary` / `hpskRenderActivitySummary` / `hpskFillActivityYears`), monterad på Min
+sidas Dashboard och i klubbadmins medlemsdialog. Två läsvägar över samma sak blir två svar som får
+säga emot varandra, och här är svaret ett myndighetsunderlag. Partialen inkluderar `_HtmlEscape`
+själv och injicerar sin CSS i runtime (ett top-level `<style>` i en partial kan 500:a — se
+`razor-partial-styles`). ⚠️ Exporterna sker med `window.x = x`: en `async function` i ett block läcker
+inte till global scope.
+
+**Endpointen är `Foreningsintyg/GetActivitySummary?memberId=&year=`**, medvetet på intygscontrollern:
+den som får utfärda intyget ska få se underlaget. Grinden är utbruten till
+`DenyIfCannotReadMemberAsync` (medlemmen själv / klubbadmin för medlemmens **primära** klubb /
+sajtadmin) och `ListForMember` delegerar nu dit — en enda regel på ett ställe, så en ny läsyta inte
+kan få en avvikande tolkning.
+
+**⚠️ VARJE POST BÄR SITT UNDERLAG, och det är hela poängen.** `ActivityEvidence`, ordnad svagast →
+starkast och **ordningen är bärande** (styr sortering och färg): `None` · `SelfReported` ·
+`RegisteredOnly` · `SelfRegistered` · `FunctionaryRecorded` · `OfficialResult`. Ett intyg som räknar
+självrapporterad träning och funktionärsprickad närvaro i samma siffra går inte att tolka.
+`ByEvidence` redovisas alltid, aldrig bara totalen.
+
+- **All träningslogg är `SelfReported`.** ⚠️ **Funktionärsverifiering av träning är INTE byggd** —
+  kontrollerat mot schemat 2026-09-01: `TrainingScores` har inga `Verified*`-kolumner och ingen
+  migrering finns. Backlogen påstod motsatsen. `ReadTraining` är det enda stället styrkan höjs den
+  dagen den byggs.
+- **Evenemang:** `SelfRegistered` när `RecordedByMemberId == MemberId` (QR-skanning — svagare, en
+  affisch kan fotograferas), annars `FunctionaryRecorded`.
+- **⚠️ Ett upprop som aldrig togs får `None`, inte `FunctionaryRecorded`** — att märka den raden
+  "funktionärsregistrerad" är att påstå motsatsen av vad som hänt.
+
+**Aktivitetsdagar, inte poster.** `ActivityDays` = distinkta datum bland de poster som räknas. Två
+pass med olika vapen samma kväll är ETT besök på banan; `TrainingDate` bär klockslag, så `.Date` är
+inte kosmetik. `CountedEntries` finns kvar bredvid.
+
+**⚠️ `Competitions` räknas på den SAMMANSATTA källnyckeln (`SourceKind:SourceId`), aldrig på id:t.**
+En självrapporterad EXTERN tävling bär **träningsradens** id medan en av våra egna bär
+**tävlingsnodens** — två oberoende identitetsserier där samma heltal betyder olika saker. På id:t
+ensamt viker en kollision ihop två skilda tävlingar och underrapporterar i ett intyg, tyst. Samma
+lärdom som `SourceTable` i märkessynken. En skytt anmäld i tre klasser till samma tävling deltog
+ändå i EN — därför slås anmälningsraderna ihop per tävlings-id.
+
+**Vad som räknas, och varför asymmetrin är avsiktlig:** en träningsrad och en tävlingsanmälan är
+positiva handlingar medlemmen utfört → räknas. Ett upprop som aldrig togs är *frånvaron av en
+uppgift* → räknas inte, men raden **SYNS** med sitt skäl (`CountsAsActivity = false` +
+`NotCountedReason`), för annars ser en lucka i listan ut som frånvaro utan förklaring — och giltig
+frånvaro på ett obligatoriskt evenemang är precis vad styrelsen behöver läsa. DNS räknas inte
+(anmäld men sköt inte); **DNF räknas** (startade). DNS spelar bara roll när inget resultat finns.
+
+**Tre fällor som är inbyggda i tjänsten, inte lämnade åt anroparen:**
+1. **Anmälningar är OPUBLICERADE noder** → SQL mot `umbracoPropertyData`, aldrig en innehållsfråga
+   (som ger tyst noll). Med `LEFT(...,20)` runt `TRY_CONVERT` — den sväljer inte trunkeringsfel, och
+   en enda överstor RTE-text någon annanstans i tabellen spränger annars hela frågan (i prod, aldrig
+   i dev). Samma mönster som `MemberMergeService.MoveRegistrations`.
+2. **Resultat läses som EN `UNION` över de nio disciplintabellerna** — en tabell i taget vore nio
+   tur-och-retur och, värre, en ny disciplintabell hade tystnat i stället för att märkas. Resultat
+   utan anmälan räknas också (en direktplacerad skytt vid disken har ingen anmälningsnod).
+3. **Evenemangets ÅR är evenemangets, inte radens tidsstämplars** — regeln bor i
+   `ClubEventParticipationService.GetForMemberAsync` och läses därifrån, kopieras inte.
+
+**En fallerande källa tar inte ner sammanställningen** — den loggas och blir en varning i svaret,
+först i listan. En halv sammanställning med en synlig varning är användbar; ett undantag är det inte.
+
+**⚠️ `CheckedInAt` på `StaffAssignment` är en ANNAN sak** (funktionärsnärvaro på tävling) och läses
+medvetet inte — blanda inte in den utan beslutet i `funktionarer-narvaro-backlog`.
+
+**Namnkollision att känna till:** `MemberActivityService` finns redan och är en helt annan sak
+(throttlad `lastActiveDate`-stämpel). Den nya heter `MemberActivitySummaryService`.
+
+Verifierat **22 enhetstest** (`MemberActivitySummaryTests` — ren aggregering, ingen Umbraco) +
+**61/61 `hpsk-verify/activity-summary-verify.mjs`**, som **mäter varje siffra mot SQL** och inte mot
+en tidigare körning av samma kod. **A/B: 6 av 61 faller** när `ActivityDays` görs till antal poster
+och träningens underlag höjs till funktionärsregistrerat — och 2 av 22 enhetstest faller på den
+första. ⚠️ Två fällor i svitens huvud: medlem **5514 ser tom ut** i träningsloggen men har 7
+tävlingsposter 2026, så det tomma fallet mäts på ett gammalt **ÅR** och inte på en "tom medlem" (det
+kostade fyra falska rödmarkeringar); och klubbsidans URL måste tas som segmentet **direkt efter
+`/klubbar/`** — en bredare länkmatchning plockade en kvarglömd evenemangssida från en annan
+verifieringskörning och rapporterade "ingen Administration-flik", vilket läser som ett
+behörighetsfel. Sviten läser bara och behöver ingen städning.
+
+Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.
+**Fildeploy av KB:** `KnowledgeBase/docs/aktivitetssammanstallning.md` (ny).
+
 ## Dubblettsammanslagning av medlemmar (2026-08-25)
 
 Klubbadmin → Medlemmar → Åtgärder → **Hitta dubbletter**. Efter en import finns samma person ofta

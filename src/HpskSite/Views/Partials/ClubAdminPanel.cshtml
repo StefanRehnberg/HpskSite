@@ -11,6 +11,8 @@
 
 @await Html.PartialAsync("_CompetitionTypeCatalogue")
 @await Html.PartialAsync("_CompetitionListRenderer")
+@* Delad renderare för aktivitetssammanställningen (medlemsdialogens intygsunderlag). *@
+@await Html.PartialAsync("_MemberActivitySummary")
 
 <div class="club-admin-panel">
     <!-- Personuppgiftsbiträdesavtal (DPA) acceptance gate — populated by loadDpaGate().
@@ -1489,6 +1491,26 @@
                                 <input id="newKeyIssued" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD"></div>
                             <div class="col-md-2"><button type="button" class="btn btn-success btn-sm w-100" onclick="addMemberKey()">Lägg till</button></div>
                         </div>
+                    </details>
+
+                    @*
+                        Aktivitetssammanställningen ligger FÖRE intygsloggen med flit: den är
+                        underlaget beslutet vilar på, och loggen är kvittot på ett beslut som redan
+                        är fattat. Läs i den ordningen.
+                    *@
+                    <details class="mb-2" id="memberActivityDetails">
+                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Aktivitet per år (underlag för intyg)</summary>
+                        <div class="d-flex align-items-end gap-2 mb-2">
+                            <div>
+                                <label class="form-label small mb-0" for="memberActivityYear">Verksamhetsår</label>
+                                <select id="memberActivityYear" class="form-select form-select-sm" style="width:8rem;"></select>
+                            </div>
+                            <div class="small text-muted pb-1">
+                                Varje post visar sitt underlag. Ett intyg som blandar självrapporterad
+                                träning med funktionärsregistrerad närvaro går inte att tolka.
+                            </div>
+                        </div>
+                        <div id="memberActivitySummary" class="small text-muted">Öppna för att ladda…</div>
                     </details>
 
                     <details class="mb-2">
@@ -4611,6 +4633,19 @@ function populateEditMemberForm(member) {
     if (typeof loadClubMembership === 'function') loadClubMembership(member.id);
     if (typeof loadMemberKeys === 'function') { loadMemberKeys(member.id); loadMemberIntyg(member.id); }
 
+    // Aktivitetssammanställningen är lazy. Öppnar admin nästa medlem medan sektionen står utfälld
+    // MÅSTE den läsa om — annars visas förra medlemmens aktivitet under det nya namnet, vilket är
+    // värre än en tom ruta när siffran är underlag för ett myndighetsintyg.
+    (function resetMemberActivity() {
+        var det = document.getElementById('memberActivityDetails');
+        var box = document.getElementById('memberActivitySummary');
+        if (!det || !box) return;
+        var sel = document.getElementById('memberActivityYear');
+        if (sel) sel.innerHTML = '';
+        if (det.open) { loadMemberActivity(member.id, null); }
+        else { box.innerHTML = '<span class="text-muted">Öppna för att ladda…</span>'; }
+    })();
+
     // Profile picture
     updateEditMemberProfilePicture(member.profilePictureUrl, member.firstName, member.lastName);
 
@@ -6456,6 +6491,30 @@ function deleteClubKey(id) {
             loadClubKeys();
         });
 }
+
+// ── Aktivitetssammanställning (underlag för Föreningsintyg) ──────────────
+// Lazy: den slår tre källor (träningslogg, tävlingsdeltagande, evenemangsnärvaro) och ska inte
+// köras för varje medlem en klubbadmin råkar öppna. Hämtas när sektionen fälls ut.
+async function loadMemberActivity(memberId, year) {
+    var d = await window.hpskLoadActivitySummary('memberActivitySummary', memberId, year);
+    if (!d) return;
+    // Årsväljaren fylls FRÅN svaret, så den aldrig erbjuder ett år utan data — och det år servern
+    // faktiskt svarade för blir det valda, även när anroparen inte bad om något år.
+    window.hpskFillActivityYears(document.getElementById('memberActivityYear'), d.years, d.data.year);
+}
+
+(function wireMemberActivity() {
+    var det = document.getElementById('memberActivityDetails');
+    if (!det) return;
+    det.addEventListener('toggle', function () {
+        if (!det.open || !window._editMemberId) return;
+        loadMemberActivity(window._editMemberId, document.getElementById('memberActivityYear').value || null);
+    });
+    var sel = document.getElementById('memberActivityYear');
+    if (sel) sel.addEventListener('change', function () {
+        if (window._editMemberId) loadMemberActivity(window._editMemberId, sel.value);
+    });
+})();
 
 function loadMemberIntyg(memberId) {
     var box = document.getElementById('memberIntygList');

@@ -144,6 +144,52 @@
                                     .catch(function () { });
                             })();
                             </script>
+
+                            @*
+                                Min aktivitet per år — samma sammanställning klubben läser när den
+                                utfärdar ett Föreningsintyg, och medvetet SAMMA renderare. Ser
+                                medlemmen andra siffror än styrelsen blir varje samtal om intyget
+                                ett samtal om vilken skärm som har rätt.
+                            *@
+                            <div class="card mt-3" id="myActivityCard">
+                                <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                                    <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Min aktivitet</h5>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="small text-muted mb-0" for="myActivityYear">År</label>
+                                        <select id="myActivityYear" class="form-select form-select-sm" style="width:7.5rem;"></select>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <p class="small text-muted">
+                                        Det här är underlaget din klubb utgår från vid ett Föreningsintyg.
+                                        Varje post visar sitt underlag, så du kan se vad som är
+                                        självrapporterat och vad en funktionär har registrerat.
+                                    </p>
+                                    <div id="myActivitySummary" class="small text-muted">Laddar…</div>
+                                </div>
+                            </div>
+                            @await Html.PartialAsync("_MemberActivitySummary")
+                            <script>
+                            (function myActivityInit() {
+                                if (window.__myActivityInit) return;
+                                window.__myActivityInit = true;
+                                var MEMBER_ID = @(memberData?.Id ?? 0);
+                                // Skrivet som > i stället för <= med flit: ett `<` följt av tecken
+                                // i en Razor-vy är en fälla som inte alltid hörs av (razor-text-block-less-than).
+                                if (!(MEMBER_ID > 0)) return;
+
+                                async function load(year) {
+                                    var d = await window.hpskLoadActivitySummary('myActivitySummary', MEMBER_ID, year);
+                                    if (!d) return;
+                                    // Årsväljaren fylls ur svaret, inte ur en gissning om vilka år som finns.
+                                    window.hpskFillActivityYears(document.getElementById('myActivityYear'), d.years, d.data.year);
+                                }
+
+                                var sel = document.getElementById('myActivityYear');
+                                if (sel) sel.addEventListener('change', function () { load(sel.value); });
+                                load(null);
+                            })();
+                            </script>
                         </div>
                         @* End Dashboard Tab *@
 

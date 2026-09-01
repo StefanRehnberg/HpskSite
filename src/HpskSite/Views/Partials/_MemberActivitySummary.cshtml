@@ -1,0 +1,167 @@
+@*
+    Aktivitetssammanställning per medlem och år — DELAD renderare.
+
+    Läses av två ytor: klubbadmins medlemsdialog (funktionären som utfärdar Föreningsintyget) och
+    Min sida (medlemmen själv). En andra kopia av utskriften skulle förr eller senare visa andra
+    siffror än den första, och båda skulle påstå att de är underlaget till samma intyg — samma fälla
+    som startlistans två renderare.
+
+    Partialen inkluderar sin egen escaper, precis som _HtmlEscape-regeln säger: en hjälpare som bara
+    finns hos värdsidan glöms den dagen partialen monteras någon annanstans.
+
+    Exponerar:
+      window.hpskLoadActivitySummary(containerId, memberId, year)   — hämtar och ritar, returnerar svaret
+      window.hpskRenderActivitySummary(container, data)             — ritar färdig data
+      window.hpskFillActivityYears(select, years, preferred)        — fyller årsväljaren
+
+    ⚠️ Exporterna sker med window.x = x, inte genom hoisting: en `async function` deklarerad i ett
+    block läcker INTE till global scope (Annex B:s webbkompatibla hoisting gäller inte async).
+
+    ⚠️ CSS:en injiceras i runtime i stället för att stå som ett top-level <style> — ett sådant kan
+    få vyn att 500:a i det här projektet (minnet razor-partial-styles), och injektionen är dessutom
+    idempotent om partialen skulle monteras två gånger på samma sida.
+*@
+@await Html.PartialAsync("_HtmlEscape")
+
+<script>
+(function () {
+    if (window.hpskRenderActivitySummary) return;
+
+    (function injectStyles() {
+        if (document.getElementById('mas-styles')) return;
+        var css = [
+            '.mas-kpi { display: flex; flex-wrap: wrap; gap: .5rem; }',
+            '.mas-kpi .mas-box { flex: 1 1 8rem; border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .75rem; background: var(--bs-tertiary-bg); }',
+            '.mas-kpi .mas-num { font-size: 1.5rem; font-weight: 600; line-height: 1.1; }',
+            '.mas-kpi .mas-lbl { font-size: .75rem; opacity: .75; }',
+            '.mas-row-uncounted { opacity: .7; }',
+            '.mas-table td, .mas-table th { vertical-align: middle; }'
+        ].join('\n');
+        var el = document.createElement('style');
+        el.id = 'mas-styles';
+        el.textContent = css;
+        document.head.appendChild(el);
+    })();
+
+    // Underlagets styrka styr färgen. Nycklarna är enum-namnen och ordningen speglar C#-enumets
+    // ordning (svagast först) — ändras den där måste den ändras här, annars ljuger färgen om styrkan.
+    var MAS_EVIDENCE_CLASS = {
+        None: 'bg-secondary-subtle text-secondary-emphasis',
+        SelfReported: 'bg-warning-subtle text-warning-emphasis',
+        RegisteredOnly: 'bg-warning-subtle text-warning-emphasis',
+        SelfRegistered: 'bg-info-subtle text-info-emphasis',
+        FunctionaryRecorded: 'bg-success-subtle text-success-emphasis',
+        OfficialResult: 'bg-success-subtle text-success-emphasis'
+    };
+
+    var MAS_KIND_ICON = {
+        Training: 'bi-bullseye',
+        Practice: 'bi-record-circle',
+        Competition: 'bi-trophy',
+        Event: 'bi-calendar-event'
+    };
+
+    function masKpi(value, label) {
+        return '<div class="mas-box"><div class="mas-num">' + hpskEsc(String(value)) + '</div>' +
+               '<div class="mas-lbl">' + hpskEsc(label) + '</div></div>';
+    }
+
+    function masRender(container, d) {
+        if (!container) return;
+        if (!d) { container.innerHTML = '<div class="text-muted small">Ingen sammanställning.</div>'; return; }
+
+        var html = '<div class="mas-kpi mb-2">' +
+            masKpi(d.activityDays, 'aktivitetsdagar ' + d.year) +
+            masKpi(d.countedEntries, 'poster som räknas') +
+            masKpi(d.competitions, 'tävlingar');
+        if (d.mandatoryEventsAttended + d.mandatoryEventsMissed > 0) {
+            html += masKpi(d.mandatoryEventsAttended + ' / ' + (d.mandatoryEventsAttended + d.mandatoryEventsMissed),
+                           'obligatoriska evenemang');
+        }
+        html += '</div>';
+
+        // Fördelningen per underlag är inte pynt — en total utan den går inte att tolka, och det är
+        // hela skälet att sammanställningen finns.
+        if (d.byEvidence && d.byEvidence.length) {
+            html += '<div class="mb-2 d-flex flex-wrap gap-1">';
+            d.byEvidence.forEach(function (e) {
+                html += '<span class="badge ' + (MAS_EVIDENCE_CLASS[e.key] || 'bg-secondary-subtle') + '">' +
+                    hpskEsc(e.label) + ': ' + e.count + '</span>';
+            });
+            html += '</div>';
+        }
+
+        if (d.warnings && d.warnings.length) {
+            html += '<div class="alert alert-warning py-2 px-2 small mb-2"><ul class="mb-0 ps-3">';
+            d.warnings.forEach(function (w) { html += '<li>' + hpskEsc(w) + '</li>'; });
+            html += '</ul></div>';
+        }
+
+        if (!d.entries || !d.entries.length) {
+            html += '<div class="text-muted small">Ingen registrerad verksamhet ' + d.year + '.</div>';
+            container.innerHTML = html;
+            return;
+        }
+
+        html += '<div class="table-responsive"><table class="table table-sm mas-table mb-0">' +
+            '<thead><tr><th>Datum</th><th>Sort</th><th>Vad</th><th>Underlag</th></tr></thead><tbody>';
+
+        d.entries.forEach(function (e) {
+            var icon = MAS_KIND_ICON[e.kind] || 'bi-dot';
+            // En post som inte räknas SYNS ändå. Tas den bort ser en lucka i listan ut som frånvaro
+            // utan förklaring — och skälet är just det styrelsen behöver läsa.
+            html += '<tr' + (e.countsAsActivity ? '' : ' class="mas-row-uncounted"') + '>' +
+                '<td class="text-nowrap">' + hpskEsc(e.date) + '</td>' +
+                '<td class="text-nowrap"><i class="bi ' + icon + ' me-1"></i>' + hpskEsc(e.kindLabel) + '</td>' +
+                '<td>' + hpskEsc(e.title) +
+                    (e.isMandatoryEvent ? ' <span class="badge bg-danger-subtle text-danger-emphasis">Obligatoriskt</span>' : '') +
+                    (e.detail ? '<div class="small text-muted">' + hpskEsc(e.detail) + '</div>' : '') +
+                '</td>' +
+                '<td class="text-nowrap">' +
+                    (e.countsAsActivity
+                        ? '<span class="badge ' + (MAS_EVIDENCE_CLASS[e.evidence] || 'bg-secondary-subtle') + '">' +
+                          hpskEsc(e.evidenceLabel) + '</span>'
+                        : '<span class="small text-muted"><i class="bi bi-dash-circle me-1"></i>' +
+                          hpskEsc(e.notCountedReason || 'Räknas inte') + '</span>') +
+                '</td></tr>';
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    async function masLoad(containerId, memberId, year) {
+        var box = document.getElementById(containerId);
+        if (!box) return null;
+        box.innerHTML = '<div class="text-muted small">Laddar…</div>';
+        try {
+            var url = '/umbraco/surface/Foreningsintyg/GetActivitySummary?memberId=' + encodeURIComponent(memberId) +
+                      (year ? '&year=' + encodeURIComponent(year) : '');
+            var r = await fetch(url);
+            var d = await r.json();
+            if (!d.success) {
+                box.innerHTML = '<div class="text-danger small">' + hpskEsc(d.message || 'Kunde inte ladda.') + '</div>';
+                return null;
+            }
+            masRender(box, d.data);
+            return d;
+        } catch (e) {
+            box.innerHTML = '<div class="text-danger small">Ett fel uppstod vid hämtningen.</div>';
+            return null;
+        }
+    }
+
+    // Fyller en <select> med de år medlemmen har verksamhet på. Behåller ett redan valt år när det
+    // finns kvar i listan — annars byter årsväljaren värde bakom ryggen på den som just valt.
+    function masFillYears(select, years, preferred) {
+        if (!select || !years || !years.length) return;
+        var keep = preferred || select.value;
+        select.innerHTML = years.map(function (y) { return '<option value="' + y + '">' + y + '</option>'; }).join('');
+        if (keep && years.indexOf(Number(keep)) >= 0) select.value = String(keep);
+    }
+
+    window.hpskRenderActivitySummary = masRender;
+    window.hpskLoadActivitySummary = masLoad;
+    window.hpskFillActivityYears = masFillYears;
+})();
+</script>

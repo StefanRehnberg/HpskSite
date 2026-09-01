@@ -125,6 +125,10 @@ namespace HpskSite.Composers
             // Anmälan + närvaro på klubbens och kretsens evenemang (samma clubSimpleEvent-doctype
             // för båda scopen; ägaren är evenemangets föräldranod).
             builder.Services.AddScoped<ClubEventParticipationService>();
+            // Aktivitetssammanställning per medlem och år — mellanlagret mellan närvarologgningen
+            // och Föreningsintyget. Helt härledd ur träningslogg + tävlingsdeltagande +
+            // evenemangsnärvaro; ETT svar som både Min sida och intygsgenereringen läser.
+            builder.Services.AddScoped<MemberActivitySummaryService>();
             // Årets beställnings- och utdelningslista per klubb (märken + standardmedaljer).
             // Helt härledd ur de två liggarna — ingen egen lagring, se tjänstens doc-kommentar.
             builder.Services.AddScoped<MarkenOrderListService>();
