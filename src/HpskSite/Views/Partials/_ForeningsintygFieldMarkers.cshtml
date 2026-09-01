@@ -20,9 +20,15 @@
     `hpskMarkForeningsintygFields('<formulärets id>')` när fälten finns i DOM:en.
 *@
 @{
-    var markerFields = ForeningsintygFields.Personal
-        .Where(f => ForeningsintygFields.SelfServiceAliases.Contains(f.Alias))
-        .Select(f => new { alias = f.Alias, label = f.FormLabel, why = f.Why, required = f.Required })
+    var markerFields = ForeningsintygFields.MarkerFields
+        .Select(f => new
+        {
+            alias = f.Alias,
+            label = f.FormLabel,
+            why = f.Why,
+            required = f.Required,
+            clubManaged = f.ClubManaged
+        })
         .ToList();
     var markerJson = JsonSerializer.Serialize(markerFields);
 }
@@ -41,6 +47,9 @@
         var css = [
             '.fi-need { color: #6f42c1; cursor: help; font-size: .85em; margin-left: .35rem; }',
             '.fi-need-missing { color: #b02a37; }',
+            // Klubbens lucka är gul, inte röd: den är inte medlemmens att åtgärda, och en röd
+            // markering på något man inte kan göra något åt är bara oro.
+            '.fi-need-club { color: #b58900; }',
             '.fi-legend { border-left: 3px solid #6f42c1; background: var(--bs-tertiary-bg); padding: .5rem .75rem; border-radius: .25rem; }'
         ].join('\n');
         var el = document.createElement('style');
@@ -62,57 +71,88 @@
         var form = document.getElementById(formId);
         if (!form) return { missing: [] };
 
-        var missing = [];
+        var missing = [];       // medlemmens egna, som hen kan rätta
+        var clubMissing = [];   // klubbens, som hen bara ska känna till
 
         FIELDS.forEach(function (f) {
             var input = form.querySelector('[name="' + f.alias + '"]');
             if (!input) return;
 
             var filled = hasUsableValue(f.alias, input.value);
-            if (!filled && f.required) missing.push(f.label);
+            if (!filled && f.required) (f.clubManaged ? clubMissing : missing).push(f.label);
 
             var label = form.querySelector('label[for="' + input.id + '"]')
                      || input.closest('.mb-3')?.querySelector('label');
             if (!label) return;
 
-            var existing = label.querySelector('.fi-need');
-            if (existing) existing.remove();
+            // Idempotent: markeringen ritas om varje gang funktionen kors.
+            label.querySelectorAll('.fi-need, .fi-need-sr').forEach(function (n) { n.remove(); });
 
+            // ⚠️ SAKNAT = RÖD VARNINGSTRIANGEL, ifyllt = diskret bock. Samma ikon i två färger
+            // gjorde att en lucka inte stack ut — och det är luckan som är hela poängen med
+            // markeringen (Stefans begäran 2026-09-01).
             var icon = document.createElement('i');
-            icon.className = 'bi bi-patch-check-fill fi-need' + (filled ? '' : ' fi-need-missing');
-            icon.title = filled
-                ? 'Behövs för föreningsintyg — ifyllt. ' + f.why
-                : 'Behövs för föreningsintyg och saknas. ' + f.why;
+            if (filled) {
+                icon.className = 'bi bi-patch-check-fill fi-need';
+                icon.title = 'Behövs för föreningsintyg — ifyllt. ' + f.why;
+            } else if (f.clubManaged) {
+                // Klubbens fält: medlemmen ska SE att det saknas men inte uppmanas fylla i något
+                // hen inte kan ändra.
+                icon.className = 'bi bi-exclamation-triangle-fill fi-need fi-need-club';
+                icon.title = 'Behövs för föreningsintyg och saknas — din klubb fyller i detta. ' + f.why;
+            } else {
+                icon.className = 'bi bi-exclamation-triangle-fill fi-need fi-need-missing';
+                icon.title = 'Behövs för föreningsintyg och saknas. ' + f.why;
+            }
             icon.setAttribute('aria-hidden', 'true');
             label.appendChild(icon);
 
             // Skarmlasare far samma information som ikonens tooltip ger seende.
             var sr = document.createElement('span');
-            sr.className = 'visually-hidden';
+            sr.className = 'visually-hidden fi-need-sr';
             sr.textContent = filled
                 ? ' (behövs för föreningsintyg, ifyllt)'
-                : ' (behövs för föreningsintyg, saknas)';
+                : (f.clubManaged
+                    ? ' (behövs för föreningsintyg, saknas — klubben fyller i)'
+                    : ' (behövs för föreningsintyg, saknas)');
             label.appendChild(sr);
         });
 
-        return { missing: missing };
+        return { missing: missing, clubMissing: clubMissing };
     }
 
     function renderLegend(containerId, result) {
         var box = document.getElementById(containerId);
         if (!box) return;
         var missing = result.missing || [];
+        var clubMissing = result.clubMissing || [];
         box.className = 'fi-legend small mb-3';
-        box.innerHTML =
+
+        var html =
             '<i class="bi bi-patch-check-fill me-1" style="color:#6f42c1"></i>' +
             '<strong>Fält märkta med symbolen behövs för föreningsintyg.</strong> ' +
             'Vill du kunna få ett föreningsintyg från din klubb till en vapenlicensansökan måste de ' +
-            'vara ifyllda — klubben kan inte fylla i dem åt dig.' +
-            (missing.length
-                ? '<div class="mt-2 text-danger"><i class="bi bi-exclamation-triangle me-1"></i>' +
-                  'Saknas just nu: <strong>' + missing.map(hpskEsc).join(', ') + '</strong></div>'
-                : '<div class="mt-2 text-success"><i class="bi bi-check2-circle me-1"></i>' +
-                  'Alla uppgifter som behövs är ifyllda.</div>');
+            'vara ifyllda — klubben kan inte fylla i dina personuppgifter åt dig.';
+
+        if (missing.length) {
+            html += '<div class="mt-2 text-danger">' +
+                '<i class="bi bi-exclamation-triangle-fill me-1"></i>' +
+                'Du behöver fylla i: <strong>' + missing.map(hpskEsc).join(', ') + '</strong></div>';
+        }
+        // Klubbens luckor står SEPARAT. Blandades de in i "du behöver fylla i" skulle medlemmen leta
+        // efter ett fält hen inte kan ändra.
+        if (clubMissing.length) {
+            html += '<div class="mt-2 text-warning-emphasis">' +
+                '<i class="bi bi-exclamation-triangle-fill me-1"></i>' +
+                'Din klubb behöver fylla i: <strong>' + clubMissing.map(hpskEsc).join(', ') +
+                '</strong> — hör av dig till klubben.</div>';
+        }
+        if (!missing.length && !clubMissing.length) {
+            html += '<div class="mt-2 text-success"><i class="bi bi-check2-circle me-1"></i>' +
+                'Alla uppgifter som behövs är ifyllda.</div>';
+        }
+
+        box.innerHTML = html;
     }
 
     window.hpskMarkForeningsintygFields = function (formId, legendContainerId) {

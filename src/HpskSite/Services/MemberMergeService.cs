@@ -220,8 +220,8 @@ namespace HpskSite.Services
             bool sameName = NormalizeName(a).Length > 0 && NormalizeName(a) == NormalizeName(b);
             if (sameName)
             {
-                var bdA = NormalizeDate(Prop(a, "birthDate"));
-                var bdB = NormalizeDate(Prop(b, "birthDate"));
+                var bdA = BirthDateKey(a);
+                var bdB = BirthDateKey(b);
                 if (bdA.Length > 0 && bdA == bdB)
                 {
                     score = Math.Max(score, 85);
@@ -855,6 +855,38 @@ namespace HpskSite.Services
         {
             if (string.IsNullOrWhiteSpace(value)) return "";
             return DateTime.TryParse(value, out var dt) ? dt.ToString("yyyy-MM-dd") : value.Trim();
+        }
+
+        /// <summary>
+        /// Medlemmens födelsedatum för dubblettjämförelsen: egenskapen <c>birthDate</c> när den finns,
+        /// annars <b>härledd ur personnummret</b>.
+        ///
+        /// Härledningen finns för att <c>birthDate</c> togs bort ur medlemmens profilformulär
+        /// 2026-09-01 — <c>personNumber</c> är den kanoniska ålderskällan och krävs av
+        /// föreningsintyget, så två fält för samma sak var en onödig fråga till medlemmen. Men
+        /// dubblettdetekteringen läste BARA <c>birthDate</c>, och utan reserven hade den tappat ett
+        /// signalvärde för varje medlem som framöver bara fyller i personnummer — alltså precis där
+        /// dubbletter uppstår, efter en import.
+        ///
+        /// Egenskapen finns kvar och skrivs fortfarande av importen (kolumnen "Födelsedatum") och av
+        /// klubbadmins medlemsdialog, så den har företräde när den är satt.
+        ///
+        /// ⚠️ Kräver 8 ledande siffror (ÅÅÅÅMMDD). Ett tiosiffrigt personnummer (ÅÅMMDD-XXXX) ger
+        /// inget århundrade, och att gissa det hade kunnat slå ihop en 25-åring med en 125-åring.
+        /// </summary>
+        private static string BirthDateKey(IMember member)
+        {
+            var stored = NormalizeDate(Prop(member, "birthDate"));
+            if (stored.Length > 0) return stored;
+
+            var digits = new string((Prop(member, "personNumber") ?? "").Where(char.IsDigit).ToArray());
+            if (digits.Length < 12) return "";
+
+            return DateTime.TryParseExact(digits.Substring(0, 8), "yyyyMMdd",
+                       System.Globalization.CultureInfo.InvariantCulture,
+                       System.Globalization.DateTimeStyles.None, out var dt)
+                ? dt.ToString("yyyy-MM-dd")
+                : "";
         }
 
         private static string Truncate(string value, int max)

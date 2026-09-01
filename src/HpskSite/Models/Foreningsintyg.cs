@@ -30,8 +30,22 @@ namespace HpskSite.Models
         /// </summary>
         public bool Required { get; init; } = true;
 
+        /// <summary>
+        /// Sant för fält KLUBBEN sätter, inte medlemmen. Markeringen i profilen måste skilja dem åt:
+        /// att be medlemmen fylla i något hen saknar rättighet att ändra är en återvändsgränd, och
+        /// att inte visa fältet alls gör att medlemmen inte förstår varför intyget blir ofullständigt.
+        /// </summary>
+        public bool ClubManaged { get; init; }
+
         /// <summary>E-posten är medlemmens inloggning, inte en doctype-egenskap.</summary>
         public const string NativeEmail = "__email";
+
+        /// <summary>
+        /// "Har varit medlem kontinuerligt sedan datum" — ett faktum om KLUBBMEDLEMSKAPET
+        /// (<c>ClubMembership.MemberSince</c>), inte om medlemmens inloggningskonto. Ligger i
+        /// profilformuläret som skrivskyddat.
+        /// </summary>
+        public const string MemberSinceAlias = "memberSince";
     }
 
     /// <summary>
@@ -68,6 +82,26 @@ namespace HpskSite.Models
         };
 
         /// <summary>
+        /// Fält blanketten kräver som KLUBBEN sätter. De markeras i profilen — medlemmen behöver veta
+        /// att de saknas, för utan dem blir intyget ofullständigt — men med en annan text, eftersom
+        /// hen inte kan fylla i dem själv.
+        /// </summary>
+        public static readonly ForeningsintygField[] ClubFields =
+        {
+            new()
+            {
+                Alias = ForeningsintygField.MemberSinceAlias,
+                FormLabel = "Har varit medlem kontinuerligt sedan datum",
+                Why = "Din klubb registrerar när ditt medlemskap började. Blanketten kräver datumet.",
+                ClubManaged = true
+            }
+        };
+
+        /// <summary>Alla fält markeringen bryr sig om — medlemmens egna plus klubbens.</summary>
+        public static IEnumerable<ForeningsintygField> MarkerFields =>
+            Personal.Where(f => SelfServiceAliases.Contains(f.Alias)).Concat(ClubFields);
+
+        /// <summary>
         /// Duger värdet? Personnummer har en egen regel — <b>12 siffror</b>, samma som importens
         /// <c>IsPnrComplete</c>, för annars skulle profilen kalla ett tiosiffrigt nummer komplett
         /// medan importen flaggar det som ofullständigt.
@@ -89,17 +123,14 @@ namespace HpskSite.Models
     /// fyllas ärligt av någon som tog guldet för mer än två år sedan, alltså de flesta
     /// guldmärkesskyttar. Kryssrutan intygar MERITEN; datumet intygar PROVET.
     ///
-    /// SPSF:s återkommande omprövning av guldmärkets fordringar är <b>guldfodringen</b>, så det
-    /// datum blanketten efterfrågar är den dag fordringarna <b>senast uppfylldes</b> — dagen den
-    /// tredje av de nödvändiga serierna sköts (Stefans tolkning 2026-09-01).
+    /// SPSF:s återkommande omprövning av guldmärkets fordringar är <b>guldfodringen</b>, och att
+    /// guldfodringar används som skjutprovsunderlag i föreningsintyg är <b>vedertaget</b> (bekräftat
+    /// av Stefan 2026-09-01). Datumet blanketten efterfrågar är alltså den dag fordringarna
+    /// <b>senast uppfylldes</b> — dagen den tredje av de nödvändiga serierna sköts.
     ///
     /// ⚠️ <b>Detta är UNDERLAG, aldrig ett ifyllt värde.</b> Rutan och datumet är styrelsens
     /// juridiska intygande. Kandidaten visas i utfärdandeformuläret med ett klick för att använda
     /// den; den skrivs aldrig in av sig själv och skrivs aldrig ut på blanketten.
-    ///
-    /// ⚠️ <b>Öppen regelfråga.</b> Att Polisen accepterar guldfodringen som "skjutprov" är en
-    /// tolkning, inte belagt — kryssrutan säger "Guldmärke", inte "guldfodring". Frågan är ställd
-    /// till förbundet; ändra inte härledningen på eget bevåg innan svaret finns.
     /// </summary>
     public class SkjutprovCandidate
     {
@@ -239,8 +270,25 @@ namespace HpskSite.Models
     /// </summary>
     public class ForeningsintygDocument
     {
-        /// <summary>Blankettens beteckning, skrivs ut i sidfoten så mottagaren ser vad det är.</summary>
-        public const string FormReference = "PM 551.24 Ver. 2019-01-18/11";
+        /// <summary>
+        /// ⚠️ <b>Polismyndighetens blankettnummer skrivs INTE ut på vårt intyg</b> (Stefans beslut
+        /// 2026-09-01). "PM 551.24 Ver. 2019-01-18/11" är deras formulärregisters identifikation, och
+        /// ett dokument som bär den utger sig för att VARA den blanketten. Vårt intyg följer dess
+        /// innehåll men är inte den, så det bär sin egen beteckning.
+        ///
+        /// Konstanten finns kvar som KÄLLHÄNVISNING för koden — vilken blankett fältmodellen är byggd
+        /// efter — och används medvetet inte av utskriftsvyn.
+        /// </summary>
+        public const string SourceFormReference = "Polismyndighetens blankett PM 551.24 Ver. 2019-01-18/11";
+
+        /// <summary>Vår egen beteckning i sidfoten, så mottagaren ser vad dokumentet är och varifrån
+        /// det kommer utan att det ser ut som myndighetens eget formulär.</summary>
+        public const string DocumentTitle = "Föreningsintyg";
+
+        /// <summary>Sidfotens härkomstrad. Nämner INTE blankettnummer — se
+        /// <see cref="SourceFormReference"/>.</summary>
+        public const string DocumentOrigin =
+            "Utfärdat via pistol.nu · Utformat efter Polismyndighetens blankett för föreningsintyg";
 
         // ── Metadata (inte fält på blanketten) ───────────────────────
 

@@ -5,6 +5,7 @@
 @using Umbraco.Cms.Core.Services
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
+@inject HpskSite.Services.ClubMembershipService ClubMemberships
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -15,6 +16,25 @@
 
     // Get member data with properties
     var memberData = isLoggedIn ? MemberService.GetByEmail(currentMember?.Email ?? "") : null;
+
+    // "Medlem sedan" — samma källa som föreningsintyget läser: ClubMembership.MemberSince för
+    // (medlem, primär klubb), med den äldre medlemsegenskapen som reserv.
+    //
+    // Resolvas HÄR i toppblocket och inte mitt i markupen: ett kodblock mellan taggarna spräcker
+    // vyns runtime-kompilering med ett meddelandelöst UmbracoCompilationException. (Kommentaren
+    // skriver medvetet inte ut kodblockets tecken — en klammer i en kommentar är sin egen risk i
+    // Razors klammerbalansering.)
+    var memberSinceDisplay = "";
+    if (memberData != null)
+    {
+        int.TryParse(memberData.GetValue<string>("primaryClubId") ?? "", out int mySincePrimaryClubId);
+        DateTime? since = mySincePrimaryClubId > 0
+            ? ClubMemberships.Get(memberData.Id, mySincePrimaryClubId)?.MemberSince
+            : null;
+        since ??= memberData.GetValue<DateTime?>("memberSince");
+        if (since != null && since.Value != default)
+            memberSinceDisplay = since.Value.ToString("yyyy-MM-dd");
+    }
 }
 
 @* Check if user is logged in *@
@@ -800,34 +820,61 @@
                                         </div>
                                     </div>
                                     <div class="col-md-6">
+                                        @*
+                                            ⚠️ Fältet visade tidigare `memberData.CreateDate` — dagen
+                                            KONTOT skapades — under rubriken "Medlem sedan". Det är en
+                                            annan sak än medlemskapet: föreningsintyget läser
+                                            `ClubMembership.MemberSince` för (medlem, klubb), och ett
+                                            konto skapat 2024 kan tillhöra en medlem sedan 1998.
+
+                                            Nu visas det VERKLIGA värdet, och tomt när klubben inte
+                                            fyllt i det — vilket är information medlemmen behöver, för
+                                            intyget kräver datumet. Fältet är klubbens att sätta, så
+                                            markeringen säger det i stället för att be medlemmen om
+                                            något hen inte kan göra.
+                                        *@
                                         <div class="mb-3">
                                             <label for="memberSince" class="form-label">Medlem sedan</label>
-                                            <input type="text" class="form-control" id="memberSince" name="memberSince" value="@(memberData?.CreateDate.ToString("yyyy-MM-dd") ?? "")" readonly>
-                                            <div class="form-text">Skrivskyddad</div>
+                                            <input type="text" class="form-control" id="memberSince" name="memberSince"
+                                                   value="@memberSinceDisplay" readonly>
+                                            <div class="form-text">
+                                                @if (string.IsNullOrEmpty(memberSinceDisplay))
+                                                {
+                                                    <span>Din klubb fyller i detta. Saknas det kan klubben inte utfärda ett komplett föreningsintyg.</span>
+                                                }
+                                                else
+                                                {
+                                                    <span>Sätts av din klubb.</span>
+                                                }
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div class="row">
-                                    <div class="col-md-4"><div class="mb-3">
-                                        <label for="birthDate" class="form-label">Födelsedatum</label>
-                                        <input type="text" class="form-control" id="birthDate" name="birthDate" value="@(memberData != null && memberData.HasProperty("birthDate") ? memberData.GetValue("birthDate")?.ToString() ?? "" : "")" placeholder="ÅÅÅÅ-MM-DD">
-                                    </div></div>
-                                    <div class="col-md-4"><div class="mb-3">
-                                        <label for="gender" class="form-label">Kön</label>
-                                        <select class="form-select" id="gender" name="gender">
-                                            @{ var g = memberData != null && memberData.HasProperty("gender") ? memberData.GetValue("gender")?.ToString() ?? "" : ""; }
-                                            <option value="" selected="@(g == "")">–</option>
-                                            <option selected="@(g == "Kvinna")">Kvinna</option>
-                                            <option selected="@(g == "Man")">Man</option>
-                                            <option selected="@(g == "Annat")">Annat</option>
-                                        </select>
-                                    </div></div>
-                                    <div class="col-md-4"><div class="mb-3">
-                                        <label for="landlinePhone" class="form-label">Telefon (fast)</label>
-                                        <input type="tel" class="form-control" id="landlinePhone" name="landlinePhone" value="@(memberData != null && memberData.HasProperty("landlinePhone") ? memberData.GetValue("landlinePhone")?.ToString() ?? "" : "")">
-                                    </div></div>
-                                </div>
+                                @*
+                                    ⚠️ HÄR LÅG Födelsedatum, Kön och Telefon (fast). Borttagna
+                                    2026-09-01 på Stefans begäran, efter kontroll av vad som läser dem:
+
+                                    · **Födelsedatum** — `personNumber` är den kanoniska ålderskällan
+                                      (`MarkenCandidateService.GetBirthYear` läser BARA den) och krävs
+                                      dessutom av föreningsintyget. `birthDate` lästes bara av
+                                      dubblettdetekteringen (namn + födelsedatum) och av importens
+                                      kolumnmappning. Dedupen härleder nu datumet ur personnummret när
+                                      `birthDate` är tomt, så det kvarvarande fältet räcker.
+                                    · **Kön** — läses av stafettklassernas könsspärr
+                                      (`CompetitionTeamService.ResolveMemberGender`), som redan har
+                                      **personnummer som reserv** (näst sista siffran). Egenskapen finns
+                                      kvar och klubbadmin kan fortfarande sätta den.
+                                    · **Telefon (fast)** — ingen funktion läser den; blankettens
+                                      Telefon-rad är valfri när mobilnummer finns.
+
+                                    ⚠️ BORTTAGNINGEN ÄR ICKE-DESTRUKTIV. `saveProfile` skickar bara de
+                                    fält som finns i DOM:en, och `UpdateProfile` sätter bara det som
+                                    skickas (`if (x != null)`) — befintliga värden ligger alltså kvar.
+                                    Egenskaperna, importens kolumnmappning och klubbadmins
+                                    medlemsdialog är oförändrade. Lägg inte tillbaka inputen utan att
+                                    först läsa varför den togs bort.
+                                *@
                                 <div class="mb-3">
                                     <label for="coAddress" class="form-label">C/O</label>
                                     <input type="text" class="form-control" id="coAddress" name="coAddress" value="@(memberData != null && memberData.HasProperty("coAddress") ? memberData.GetValue("coAddress")?.ToString() ?? "" : "")">

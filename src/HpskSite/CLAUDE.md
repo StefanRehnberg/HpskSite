@@ -4244,9 +4244,48 @@ sägs skälet rakt ut i stället för att fältet lämnas tyst tomt. Formuläret
 **"Datum då fordringarna senast uppfylldes"** med blankettens egen formulering intill — blankettens
 label står kvar på UTSKRIFTEN.
 
-⚠️ **Öppen regelfråga:** att Polisen godtar guldfodringen som "skjutprov" är en tolkning, inte belagt
-— kryssrutan säger "Guldmärke". Frågan hör hos förbundet (samma kanal som junior/vet); ändra inte
-härledningen på eget bevåg innan svaret finns.
+Att guldfodringar används som skjutprovsunderlag i föreningsintyg är **vedertaget** (bekräftat av
+Stefan 2026-09-01) — tidigare stod här att det var en öppen tolkning.
+
+### Myndighetens blankettnummer skrivs INTE ut (2026-09-01)
+
+`551.24` och `PM 551.24 Ver. 2019-01-18/11` är Polisens formulärregisters identifikation. Ett dokument
+som bär den **utger sig för att VARA blanketten**, och vårt intyg följer innehållet men är inte den.
+Sidfoten anger härkomsten i klartext (`ForeningsintygDocument.DocumentOrigin`) och ett utfärdat intyg
+bär vår egen referens **`Ref FI-{id}`**, som dessutom pekar tillbaka på loggraden. Numret finns kvar i
+koden som `SourceFormReference` — en källhänvisning, inte något utskriften använder. **Sätt inte
+tillbaka det.**
+
+### Profilens fält städade (2026-09-01)
+
+`birthDate`, `gender` och `landlinePhone` är **borttagna ur medlemmens profilformulär** efter kontroll
+av vad som läser dem. ⚠️ **Icke-destruktivt:** `saveProfile` skickar bara fält som finns i DOM:en och
+`UpdateProfile` sätter bara det som skickas, så befintliga värden ligger kvar — och egenskaperna,
+importens kolumnmappning och klubbadmins medlemsdialog är oförändrade.
+
+- **`birthDate`** — `personNumber` är den kanoniska ålderskällan (`MarkenCandidateService.GetBirthYear`
+  läser BARA den) och krävs av intyget; två fält för samma sak var en onödig fråga till medlemmen.
+  ⚠️ `birthDate` lästes av **dubblettdetekteringen** (namn + födelsedatum = 85), så
+  `MemberMergeService.BirthDateKey` **härleder nu datumet ur personnummret** när egenskapen är tom.
+  Utan den reserven hade dedupen tappat en signal precis där dubbletter uppstår — efter en import.
+  Kräver 12 siffror: ett tiosiffrigt nummer ger inget århundrade, och en gissning kan slå ihop en
+  25-åring med en 125-åring.
+- **`gender`** — läses av stafettklassernas könsspärr (`CompetitionTeamService.ResolveMemberGender`),
+  som redan har **personnummer som reserv** (näst sista siffran). ⚠️ Mild men verklig försvagning: en
+  medlem som framöver saknar båda får ingen spärr — koden släpper redan igenom den vars kön inte går
+  att avgöra, med flit.
+- **`landlinePhone`** — ingen funktion läser den; blankettens Telefon-rad är valfri när mobil finns.
+
+**⚠️ "Medlem sedan" visade fel värde.** Fältet renderade `memberData.CreateDate` — dagen KONTOT
+skapades — under en etikett som betyder något annat: intyget läser `ClubMembership.MemberSince` för
+(medlem, klubb), och ett konto skapat 2024 kan tillhöra en medlem sedan 1998. Vyn injicerar nu
+`ClubMembershipService` och visar samma värde intyget läser, tomt när klubben inte fyllt i.
+
+**Markeringen skiljer på VEMS lucka det är.** Saknat fält = **röd varningstriangel** (tidigare samma
+ikon i en annan nyans, vilket gjorde att luckan inte stack ut — och luckan är hela poängen). Klubbens
+fält (`ForeningsintygFields.ClubFields`, i dag bara `memberSince`) får **gul** triangel och en egen
+rad i rutan: "Din klubb behöver fylla i". Rött på något medlemmen inte kan åtgärda är bara oro, och
+att be hen fylla i det är en återvändsgränd.
 
 ### ⚠️ REGISTERFÄLTEN KAN INTE POSTAS — det är en säkerhetsegenskap, inte städning
 

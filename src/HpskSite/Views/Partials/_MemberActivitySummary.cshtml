@@ -27,6 +27,9 @@
 (function () {
     if (window.hpskRenderActivitySummary) return;
 
+    // Löpnummer så expanderns id är unikt även om två sammanställningar renderas på samma sida.
+    var _masSeq = 0;
+
     (function injectStyles() {
         if (document.getElementById('mas-styles')) return;
         var css = [
@@ -35,7 +38,11 @@
             '.mas-kpi .mas-num { font-size: 1.5rem; font-weight: 600; line-height: 1.1; }',
             '.mas-kpi .mas-lbl { font-size: .75rem; opacity: .75; }',
             '.mas-row-uncounted { opacity: .7; }',
-            '.mas-table td, .mas-table th { vertical-align: middle; }'
+            '.mas-table td, .mas-table th { vertical-align: middle; }',
+            // Utfälld lista scrollar INNE i sitt eget block i stället för att skjuta ner allt under
+            // sig — samma mönster som notiskortet. Utan taket blir en hundraradig lista en sida man
+            // scrollar bort från sammandraget.
+            '.mas-rows { max-height: 60vh; overflow-y: auto; }'
         ].join('\n');
         var el = document.createElement('style');
         el.id = 'mas-styles';
@@ -103,6 +110,21 @@
             return;
         }
 
+        // Listan kan bli väldigt lång — en aktiv skytt har lätt hundra poster på ett år. Sammandraget
+        // (dagar, sorter, underlagsfördelning, varningar) är vad man läser i normalfallet; posterna
+        // är detaljen man går ner i när något behöver kontrolleras. Därför kollapsad som standard.
+        //
+        // ⚠️ Varningarna och KPI-raden ligger UTANFÖR det som kollapsas. Göms de med tabellen
+        // försvinner larmet om svagt underlag ur synfältet, och då är sammanställningen tillbaka i
+        // att vara en total man inte kan tolka.
+        var tableId = 'mas-rows-' + (++_masSeq);
+        html += '<div class="d-flex justify-content-between align-items-center mb-2">' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" data-mas-toggle="' + tableId + '"' +
+            ' aria-expanded="false" aria-controls="' + tableId + '">' +
+            '<i class="bi bi-chevron-right me-1"></i>Visa alla ' + d.entries.length + ' poster</button>' +
+            '</div>';
+
+        html += '<div id="' + tableId + '" class="mas-rows" hidden>';
         html += '<div class="table-responsive"><table class="table table-sm mas-table mb-0">' +
             '<thead><tr><th>Datum</th><th>Sort</th><th>Vad</th><th>Underlag</th></tr></thead><tbody>';
 
@@ -126,8 +148,27 @@
                 '</td></tr>';
         });
 
-        html += '</tbody></table></div>';
+        html += '</tbody></table></div></div>';
         container.innerHTML = html;
+        wireToggles(container);
+    }
+
+    /// Expandern. ⚠️ Använder `hidden`-attributet, inte `style.display` — så en yta som råkar sätta
+    /// en egen display-regel på containern inte kan låsa den i öppet läge.
+    function wireToggles(container) {
+        container.querySelectorAll('[data-mas-toggle]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var box = document.getElementById(btn.getAttribute('data-mas-toggle'));
+                if (!box) return;
+                var open = !box.hidden;
+                box.hidden = open;
+                btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+                var count = box.querySelectorAll('tbody tr').length;
+                btn.innerHTML = open
+                    ? '<i class="bi bi-chevron-right me-1"></i>Visa alla ' + count + ' poster'
+                    : '<i class="bi bi-chevron-down me-1"></i>Dölj posterna';
+            });
+        });
     }
 
     async function masLoad(containerId, memberId, year) {

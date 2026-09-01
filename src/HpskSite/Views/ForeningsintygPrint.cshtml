@@ -6,7 +6,13 @@
     var title = Model.IsDraft ? "Föreningsintyg (utkast)" : "Föreningsintyg";
 }
 @*
-    Föreningsintyg — utskriftsvy efter Polisens blankett PM 551.24 (Ver. 2019-01-18/11).
+    Föreningsintyg — utskriftsvy byggd efter innehållet i Polismyndighetens blankett för
+    föreningsintyg (källhänvisning i ForeningsintygDocument.SourceFormReference).
+
+    ⚠️ MYNDIGHETENS BLANKETTNUMMER SKRIVS INTE UT (Stefans beslut 2026-09-01). Det är deras
+    formulärregisters identifikation, och ett dokument som bär den utger sig för att VARA blanketten.
+    Vårt intyg följer innehållet men är inte den. Sidfoten anger härkomsten i klartext och ett
+    utfärdat intyg bär vår egen referens (FI-{id}). Sätt inte tillbaka numret.
 
     ⚠️ DETTA ÄR EN ÅTERGIVNING AV BLANKETTENS INNEHÅLL, INTE EN KOPIA AV BLANKETTEN. Originalet är
     en platt PDF utan formulärfält, så det finns ingen väg att "fylla i" den; att stämpla text på
@@ -197,7 +203,22 @@
             <h1>FÖRENINGSINTYG</h1>
             <div class="sub">bilaga till ansökan om tillstånd att inneha skjutvapen för målskjutning</div>
         </div>
-        <div class="pageno">Sida 1 (2)<br>551.24</div>
+        @*
+            ⚠️ HÄR STOD "551.24". Polismyndighetens blankettnummer skrivs inte ut på vårt intyg —
+            det är deras formulärregisters identifikation, och ett dokument som bär den utger sig
+            för att VARA den blanketten. Vi följer innehållet men är inte blanketten.
+            Sätt inte tillbaka numret; sidfoten säger härkomsten i klartext i stället.
+        *@
+        <div class="pageno">
+            Sida 1 (2)
+            @if (Model.IssueId != null)
+            {
+                @* Vår EGEN referens, så ett utfärdat intyg går att spåra tillbaka till loggraden.
+                   Det är också poängen med att inte låna myndighetens nummer: dokumentet får en
+                   identitet som pekar på oss, inte på deras formulärregister. *@
+                <br><span>Ref FI-@Model.IssueId</span>
+            }
+        </div>
     </div>
 
     <div class="grid">
@@ -300,7 +321,7 @@
     </div>
 
     <div class="fi-foot">
-        <span>@ForeningsintygDocument.FormReference</span>
+        <span>@ForeningsintygDocument.DocumentOrigin</span>
         <span>@d.HelaNamnet@(string.IsNullOrWhiteSpace(d.Personnummer) ? "" : " · " + d.Personnummer)</span>
     </div>
 </div>
@@ -384,7 +405,7 @@
     <div class="note">* Som medlem och vapeninnehavare, utifrån vad som är känt.</div>
 
     <div class="fi-foot">
-        <span>@ForeningsintygDocument.FormReference</span>
+        <span>@ForeningsintygDocument.DocumentOrigin</span>
         <span>@d.HelaNamnet@(string.IsNullOrWhiteSpace(d.Personnummer) ? "" : " · " + d.Personnummer)</span>
     </div>
 </div>
