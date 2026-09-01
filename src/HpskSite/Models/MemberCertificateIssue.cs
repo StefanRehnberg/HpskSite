@@ -20,6 +20,20 @@ namespace HpskSite.Models
         public string? Notes { get; set; }
         public DateTime CreatedDate { get; set; }
 
+        /// <summary>
+        /// Hela det utfärdade intyget som JSON (<see cref="ForeningsintygDocument"/>).
+        ///
+        /// <b>Ett föreningsintyg är ett juridiskt dokument styrelsen undertecknat.</b> Varje fält på
+        /// blanketten kan ändras efteråt — medlemmen flyttar, klubben byter ordförande, en
+        /// resultatrad rättas, ett märke makuleras — så en återutskrift ur DAGENS data visar något
+        /// annat än det som skrevs under, utan att något säger ifrån. Snapshotten gör
+        /// återutskriften till en återgivning i stället för en ny beräkning.
+        ///
+        /// <b>NULL = utfärdat innan snapshot fanns.</b> Sådana rader syns i loggen men kan inte
+        /// skrivas ut; läsvägen ska säga just det och aldrig tyst bygga ett nytt intyg.
+        /// </summary>
+        public string? Snapshot { get; set; }
+
         // Display-only properties (not mapped to DB columns)
         [ResultColumn]
         public string? MemberName { get; set; }

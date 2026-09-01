@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Scoping;
 
@@ -83,7 +83,7 @@ namespace HpskSite.Services
                     MemberId = role.MemberId,
                     RoleTitle = role.DisplayTitle,
                     AttendanceStatus = "Närvarande",
-                    IsChairman = role.RoleKey == "Ordforande",
+                    IsChairman = role.RoleKey == BoardRoleDefinitions.RoleOrdforande,
                     IsSecretary = role.RoleKey == "Sekreterare",
                     IsAdjuster = false
                 });
@@ -554,7 +554,7 @@ namespace HpskSite.Services
                     MemberId = role.MemberId,
                     RoleTitle = role.DisplayTitle,
                     AttendanceStatus = "Närvarande",
-                    IsChairman = role.RoleKey == "Ordforande",
+                    IsChairman = role.RoleKey == BoardRoleDefinitions.RoleOrdforande,
                     IsSecretary = role.RoleKey == "Sekreterare"
                 });
                 added++;

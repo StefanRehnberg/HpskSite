@@ -1,0 +1,124 @@
+@using HpskSite.Models
+@using System.Text.Json
+@*
+    Markerar de fält i ett medlemsformulär som klubben behöver för att kunna utfärda ett
+    Föreningsintyg (Polisens blankett PM 551.24).
+
+    ⚠️ FÄLTLISTAN KOMMER UR `ForeningsintygFields`, inte ur den här filen. Det är hela poängen:
+    markeringen och intyget läser samma katalog, så profilen kan inte börja markera fält intyget
+    inte behöver — eller, värre, sluta markera ett fält intyget kräver. Lägg till ett registerfält i
+    katalogen och markeringen dyker upp här av sig själv.
+
+    ⚠️ Markupen dekoreras i runtime i stället för att sju inputblock ändras för hand. Sju handskrivna
+    markeringar är sju ställen som kan glida från katalogen — samma skäl som `CompetitionFieldCatalog`
+    finns för.
+
+    Ingen SPÄRR någonstans. Ett intyg kan utfärdas med luckor; det ligger i medlemmens eget intresse
+    att fylla i, och det här är hjälpen att se vilka fält det gäller (Stefans beslut 2026-09-01).
+
+    Monteras av det formulär som ska dekoreras. Anropa
+    `hpskMarkForeningsintygFields('<formulärets id>')` när fälten finns i DOM:en.
+*@
+@{
+    var markerFields = ForeningsintygFields.Personal
+        .Where(f => ForeningsintygFields.SelfServiceAliases.Contains(f.Alias))
+        .Select(f => new { alias = f.Alias, label = f.FormLabel, why = f.Why, required = f.Required })
+        .ToList();
+    var markerJson = JsonSerializer.Serialize(markerFields);
+}
+@* Partialen tar in sin egen escaper — en hjälpare som bara finns hos värdsidan glöms den dagen
+   partialen monteras någon annanstans. *@
+@await Html.PartialAsync("_HtmlEscape")
+
+<script>
+(function foreningsintygFieldMarkers() {
+    if (window.hpskMarkForeningsintygFields) return;
+
+    var FIELDS = @Html.Raw(markerJson);
+
+    (function injectStyles() {
+        if (document.getElementById('fi-marker-styles')) return;
+        var css = [
+            '.fi-need { color: #6f42c1; cursor: help; font-size: .85em; margin-left: .35rem; }',
+            '.fi-need-missing { color: #b02a37; }',
+            '.fi-legend { border-left: 3px solid #6f42c1; background: var(--bs-tertiary-bg); padding: .5rem .75rem; border-radius: .25rem; }'
+        ].join('\n');
+        var el = document.createElement('style');
+        el.id = 'fi-marker-styles';
+        el.textContent = css;
+        document.head.appendChild(el);
+    })();
+
+    // Personnummer kraver 12 siffror — samma regel som importens IsPnrComplete och serverns
+    // HasUsableValue. Ett tiosiffrigt nummer far inte se komplett ut har medan intyget raknar det
+    // som en lucka.
+    function hasUsableValue(alias, value) {
+        if (!value || !String(value).trim()) return false;
+        if (alias === 'personNumber') return (String(value).match(/\d/g) || []).length === 12;
+        return true;
+    }
+
+    function decorate(formId) {
+        var form = document.getElementById(formId);
+        if (!form) return { missing: [] };
+
+        var missing = [];
+
+        FIELDS.forEach(function (f) {
+            var input = form.querySelector('[name="' + f.alias + '"]');
+            if (!input) return;
+
+            var filled = hasUsableValue(f.alias, input.value);
+            if (!filled && f.required) missing.push(f.label);
+
+            var label = form.querySelector('label[for="' + input.id + '"]')
+                     || input.closest('.mb-3')?.querySelector('label');
+            if (!label) return;
+
+            var existing = label.querySelector('.fi-need');
+            if (existing) existing.remove();
+
+            var icon = document.createElement('i');
+            icon.className = 'bi bi-patch-check-fill fi-need' + (filled ? '' : ' fi-need-missing');
+            icon.title = filled
+                ? 'Behövs för föreningsintyg — ifyllt. ' + f.why
+                : 'Behövs för föreningsintyg och saknas. ' + f.why;
+            icon.setAttribute('aria-hidden', 'true');
+            label.appendChild(icon);
+
+            // Skarmlasare far samma information som ikonens tooltip ger seende.
+            var sr = document.createElement('span');
+            sr.className = 'visually-hidden';
+            sr.textContent = filled
+                ? ' (behövs för föreningsintyg, ifyllt)'
+                : ' (behövs för föreningsintyg, saknas)';
+            label.appendChild(sr);
+        });
+
+        return { missing: missing };
+    }
+
+    function renderLegend(containerId, result) {
+        var box = document.getElementById(containerId);
+        if (!box) return;
+        var missing = result.missing || [];
+        box.className = 'fi-legend small mb-3';
+        box.innerHTML =
+            '<i class="bi bi-patch-check-fill me-1" style="color:#6f42c1"></i>' +
+            '<strong>Fält märkta med symbolen behövs för föreningsintyg.</strong> ' +
+            'Vill du kunna få ett föreningsintyg från din klubb till en vapenlicensansökan måste de ' +
+            'vara ifyllda — klubben kan inte fylla i dem åt dig.' +
+            (missing.length
+                ? '<div class="mt-2 text-danger"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                  'Saknas just nu: <strong>' + missing.map(hpskEsc).join(', ') + '</strong></div>'
+                : '<div class="mt-2 text-success"><i class="bi bi-check2-circle me-1"></i>' +
+                  'Alla uppgifter som behövs är ifyllda.</div>');
+    }
+
+    window.hpskMarkForeningsintygFields = function (formId, legendContainerId) {
+        var result = decorate(formId);
+        if (legendContainerId) renderLegend(legendContainerId, result);
+        return result;
+    };
+})();
+</script>

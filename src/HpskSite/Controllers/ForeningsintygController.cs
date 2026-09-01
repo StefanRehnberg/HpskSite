@@ -20,6 +20,7 @@ namespace HpskSite.Controllers
     public class ForeningsintygController : SurfaceController
     {
         private readonly ForeningsintygService _foreningsintygService;
+        private readonly ForeningsintygDocumentService _intygDocuments;
         private readonly MemberActivitySummaryService _activitySummary;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberService _memberService;
@@ -34,6 +35,7 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             ForeningsintygService foreningsintygService,
+            ForeningsintygDocumentService intygDocuments,
             MemberActivitySummaryService activitySummary,
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
@@ -42,6 +44,7 @@ namespace HpskSite.Controllers
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _foreningsintygService = foreningsintygService;
+            _intygDocuments = intygDocuments;
             _activitySummary = activitySummary;
             _authorizationService = authorizationService;
             _memberService = memberService;
@@ -213,7 +216,122 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Utkastet till blanketten PM 551.24 — registerfälten ifyllda, intygsfälten tomma, plus
+        /// listan över registerfält som saknas. Läsbar av samma krets som underlaget.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetIntygDraft(int memberId, int? clubId = null, int? year = null)
+        {
+            try
+            {
+                var denied = await DenyIfCannotReadMemberAsync(memberId);
+                if (denied != null) return denied;
+
+                int resolvedClubId = clubId ?? PrimaryClubIdOf(memberId);
+                var doc = await _intygDocuments.BuildDraftAsync(memberId, resolvedClubId, year ?? DateTime.Today.Year);
+                if (doc == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
+
+                return Json(new { success = true, data = doc, clubId = resolvedClubId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building föreningsintyg draft for member {MemberId}", memberId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Utfärdar ett föreningsintyg: bygger dokumentet, lägger på intygsfälten från formuläret,
+        /// och sparar loggraden med hela dokumentet som snapshot.
+        ///
+        /// <b>⚠️ REGISTERFÄLTEN TAS ALDRIG FRÅN KLIENTEN.</b> De byggs om på servern vid
+        /// utfärdandet. Ett intyg är en handling till en myndighet — kunde klienten posta
+        /// personnummer, föreningsnamn eller ordförandens namn hade sidan varit ett verktyg för att
+        /// tillverka ett intyg med påhittade uppgifter, undertecknat i klubbens namn. Bara
+        /// intygsfälten (vapnet, §5/§6, behov, ort, datum) kommer utifrån.
+        ///
+        /// Att UTFÄRDA är en klubb-/styrelseakt — samma grind som <see cref="AddIntyg"/>, alltså
+        /// aldrig medlemmen själv.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> IssueIntyg([FromForm] IssueForeningsintygRequest req)
+        {
+            try
+            {
+                var current = await GetCurrentMemberDataAsync();
+                if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var member = _memberService.GetById(req.MemberId);
+                if (member == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
+
+                int clubId = req.ClubId > 0 ? req.ClubId : PrimaryClubIdOf(req.MemberId);
+
+                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                bool isClubAdmin = clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId);
+                if (!isSiteAdmin && !isClubAdmin)
+                    return Json(new { success = false, message = "Du har inte behörighet att utfärda föreningsintyg för den här medlemmen." });
+
+                var doc = await _intygDocuments.BuildDraftAsync(req.MemberId, clubId, req.ActivityYear > 0 ? req.ActivityYear : DateTime.Today.Year);
+                if (doc == null) return Json(new { success = false, message = "Kunde inte bygga intyget." });
+
+                req.ApplyTo(doc);
+                doc.IssuedAt = DateTime.Now;
+                doc.IssuedByMemberId = current.Id;
+
+                var entry = _foreningsintygService.Add(
+                    req.MemberId,
+                    clubId,
+                    DateTime.Today,
+                    string.IsNullOrWhiteSpace(req.Purpose) ? "Vapenlicens" : req.Purpose.Trim(),
+                    BuildDescription(doc),
+                    current.Id,
+                    string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim(),
+                    doc.ToSnapshot());
+
+                _logger.LogInformation(
+                    "Föreningsintyg {Id} utfärdat för medlem {MemberId} (klubb {ClubId}) av {IssuerId}",
+                    entry.Id, req.MemberId, clubId, current.Id);
+
+                return Json(new
+                {
+                    success = true,
+                    message = "Föreningsintyget är utfärdat.",
+                    data = new { entry.Id, printUrl = $"/foreningsintyg/{entry.Id}" }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error issuing föreningsintyg for member {MemberId}", req?.MemberId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
         // ── Helpers ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Kort sammanfattning på loggraden, så listan går att läsa utan att öppna varje intyg.
+        /// Snapshotten är den fullständiga sanningen; det här är bara en rubrik.
+        /// </summary>
+        private static string BuildDescription(ForeningsintygDocument doc)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(doc.Vapentyp)) parts.Add(doc.Vapentyp);
+            if (!string.IsNullOrWhiteSpace(doc.Fabrikat)) parts.Add(doc.Fabrikat);
+            if (!string.IsNullOrWhiteSpace(doc.KaliberPatronbeteckning)) parts.Add(doc.KaliberPatronbeteckning);
+            if (!string.IsNullOrWhiteSpace(doc.VapengruppSkytteform)) parts.Add(doc.VapengruppSkytteform);
+            return parts.Count > 0 ? string.Join(" · ", parts) : "";
+        }
+
+        private int PrimaryClubIdOf(int memberId)
+        {
+            var member = _memberService.GetById(memberId);
+            if (member == null) return 0;
+            // ⚠️ primaryClubId är en STRÄNG-egenskap. GetValue<int> konverterar inte och ger tyst 0.
+            int.TryParse(member.GetValue<string>("primaryClubId") ?? "", out int clubId);
+            return clubId;
+        }
 
         /// <summary>
         /// Grinden för att LÄSA en medlems intygsunderlag: medlemmen själv, klubbadmin för
@@ -250,7 +368,10 @@ namespace HpskSite.Controllers
             e.IssuedByMemberId,
             e.IssuedByName,
             e.Notes,
-            createdDate = e.CreatedDate.ToString("yyyy-MM-dd")
+            createdDate = e.CreatedDate.ToString("yyyy-MM-dd"),
+            // Går raden att skriva ut? Bara när dokumentet sparades vid utfärdandet. Snapshotten
+            // SKICKAS INTE med — den bär personnummer och hela intyget, och listan är en översikt.
+            canPrint = !string.IsNullOrWhiteSpace(e.Snapshot)
         };
 
         private static DateTime? ParseDate(string? value) =>

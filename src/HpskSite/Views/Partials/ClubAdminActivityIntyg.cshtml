@@ -87,6 +87,234 @@
                 </div>
             </div>
 
+            @*
+                Utfärdandet. ⚠️ Kryssen här är styrelsens juridiska intygande — aktiviteten ovanför
+                är UNDERLAG intill rutorna, den sätter dem aldrig. Formuläret bär bara INTYGSFÄLT;
+                registerfälten byggs om på servern vid utfärdandet och kan inte postas härifrån.
+            *@
+            <div class="card mb-3">
+                <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <strong><i class="bi bi-pencil-square me-2"></i>Utfärda föreningsintyg</strong>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="aiToggleIssue">
+                        Visa formuläret
+                    </button>
+                </div>
+                <div class="card-body d-none" id="aiIssueBody">
+                    <div id="aiIssueMissing" class="alert alert-warning py-2 px-2 small d-none"></div>
+
+                    <div class="alert alert-secondary py-2 px-2 small">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Uppgifterna om medlemmen, föreningen och styrelsen hämtas ur registret och kan
+                        inte ändras här. Nedan fyller <strong>du som intygar</strong> i det blanketten
+                        kräver av styrelsen.
+                    </div>
+
+                    <h6 class="small fw-bold text-uppercase text-muted mt-3">Aktivt deltagande</h6>
+                    <div id="aiEvidenceHint" class="small text-muted mb-2"></div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fiAktivtDeltagit">
+                        <label class="form-check-label" for="fiAktivtDeltagit">
+                            Aktivt deltagit i föreningens verksamhet de senaste 6 månaderna
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fiParagraf5">
+                        <label class="form-check-label" for="fiParagraf5">
+                            Aktiv medlem enligt <strong>5 §</strong>
+                            <span class="text-muted">— för den som inte tidigare har enhandsvapen. Snitt minst två gånger per månad de senaste sex månaderna.</span>
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fiParagraf6">
+                        <label class="form-check-label" for="fiParagraf6">
+                            Aktiv medlem enligt <strong>6 §</strong>
+                            <span class="text-muted">— för den som sedan tidigare innehar enhandsvapen. Snitt minst en gång per månad de senaste sex månaderna.</span>
+                        </label>
+                    </div>
+                    <div class="d-flex flex-wrap gap-3 mt-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiVisasLoggbok">
+                            <label class="form-check-label" for="fiVisasLoggbok">Visas genom loggbok</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiVisasSarskilda">
+                            <label class="form-check-label" for="fiVisasSarskilda">Särskilda skäl enligt bilaga</label>
+                        </div>
+                    </div>
+
+                    <h6 class="small fw-bold text-uppercase text-muted mt-4">Vapnet intyget gäller</h6>
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0" for="fiVapentyp">Typ</label>
+                            <select id="fiVapentyp" class="form-select form-select-sm">
+                                <option value="">Välj…</option>
+                                <option>Pistol</option><option>Revolver</option>
+                                <option>Kulgevär</option><option>Hagelgevär</option><option>Annat</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0" for="fiFabrikat">Fabrikat</label>
+                            <input id="fiFabrikat" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0" for="fiKaliber">Kaliber/patronbeteckning</label>
+                            <input id="fiKaliber" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0" for="fiModell">Modell</label>
+                            <input id="fiModell" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0" for="fiPiplangd">Piplängd</label>
+                            <input id="fiPiplangd" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small mb-0" for="fiVapengrupp">Vapengrupp/skytteform</label>
+                            <input id="fiVapengrupp" class="form-control form-control-sm" placeholder="t.ex. C-vapen">
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check mb-1">
+                                <input class="form-check-input" type="checkbox" id="fiForeningenBedriver">
+                                <label class="form-check-label small" for="fiForeningenBedriver">
+                                    Föreningen bedriver verksamhet i denna vapengrupp
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="small fw-bold text-uppercase text-muted mt-4">Behov av skjutvapen kan visas genom</h6>
+                    <div class="d-flex flex-wrap gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiBehovInterna">
+                            <label class="form-check-label" for="fiBehovInterna">Interna tävlingar</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiBehovExterna">
+                            <label class="form-check-label" for="fiBehovExterna">Externa tävlingar</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiBehovLoggbok">
+                            <label class="form-check-label" for="fiBehovLoggbok">Loggbok över skytteaktivitet</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiBehovAnnat">
+                            <label class="form-check-label" for="fiBehovAnnat">Annat</label>
+                        </div>
+                        <input id="fiBehovAnnatText" class="form-control form-control-sm" style="max-width:18rem;" placeholder="Annat, ange vad">
+                    </div>
+
+                    <h6 class="small fw-bold text-uppercase text-muted mt-4">Behov av enhandsvapen</h6>
+                    <div class="small text-muted mb-1">Ska inte anges vid det första enhandsvapnet.</div>
+                    <div class="d-flex flex-wrap gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiAvserYtterligare">
+                            <label class="form-check-label" for="fiAvserYtterligare">Ytterligare enhandsvapen</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiAvserFornyelse">
+                            <label class="form-check-label" for="fiAvserFornyelse">Förnyelse av tidsbegränsat tillstånd</label>
+                        </div>
+                    </div>
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" id="fiTranat2">
+                        <label class="form-check-label" for="fiTranat2">
+                            Tränat/tävlat minst två gånger senaste sex månaderna med respektive tidigare innehavt enhandsvapen
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fiTranat4">
+                        <label class="form-check-label" for="fiTranat4">
+                            Tränat/tävlat med sökt vapen minst fyra gånger per år de senaste två åren
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fiEnhandsAnnat">
+                        <label class="form-check-label" for="fiEnhandsAnnat">Annat (visas i bilaga)</label>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0" for="fiAntalVapen">
+                                Antal vapen sedan tidigare
+                            </label>
+                            <input id="fiAntalVapen" type="number" min="0" step="1" class="form-control form-control-sm">
+                            <div class="form-text">
+                                Räknas för <strong>det förbund som anges på intyget</strong>, inte medlemmens
+                                hela vapeninnehav.
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="small fw-bold text-uppercase text-muted mt-4">Skjutskicklighet</h6>
+                    <div id="aiGuldHint" class="small text-muted mb-2"></div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fiUppfyllerSkjut">
+                        <label class="form-check-label" for="fiUppfyllerSkjut">
+                            Sökanden har uppfyllt fordringarna för skjutskicklighet
+                        </label>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0" for="fiSkjutprovDatum">Datum för godkänt skjutprov</label>
+                            <input id="fiSkjutprovDatum" class="form-control form-control-sm" placeholder="ÅÅÅÅ-MM-DD">
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiGuldSpsf">
+                            <label class="form-check-label" for="fiGuldSpsf">Guldmärke — Svenska Pistolskytteförbundet</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiSilverDynamiska">
+                            <label class="form-check-label" for="fiSilverDynamiska">Silvermärke — Svenska Dynamiska Sportskytteförbundet</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiSilverSkyttesport">
+                            <label class="form-check-label" for="fiSilverSkyttesport">Silvermärke — Svenska Skyttesportförbundet</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="fiGuldAutomat">
+                            <label class="form-check-label" for="fiGuldAutomat">Guldmärke automatvapen — Svenska Skyttesportförbundet</label>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center mt-1">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="fiSkjutAnnat">
+                                <label class="form-check-label" for="fiSkjutAnnat">Annat</label>
+                            </div>
+                            <input id="fiSkjutAnnatText" class="form-control form-control-sm" style="max-width:18rem;" placeholder="Annat, ange vad">
+                        </div>
+                    </div>
+
+                    <h6 class="small fw-bold text-uppercase text-muted mt-4">Underskrift</h6>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0" for="fiOrt">Ort</label>
+                            <input id="fiOrt" class="form-control form-control-sm">
+                            <div class="form-text">Förifylld med klubbens ort.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0" for="fiPurpose">Ändamål (logg)</label>
+                            <input id="fiPurpose" class="form-control form-control-sm" value="Vapenlicens">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0" for="fiNotes">Anteckning (klubbintern)</label>
+                            <input id="fiNotes" class="form-control form-control-sm">
+                        </div>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2 mt-3 border-top pt-3">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="aiPreviewBtn">
+                            <i class="bi bi-eye me-1"></i>Granska utkast
+                        </button>
+                        <button type="button" class="btn btn-primary btn-sm" id="aiIssueBtn">
+                            <i class="bi bi-file-earmark-check me-1"></i>Utfärda intyget
+                        </button>
+                        <span class="small text-muted align-self-center">
+                            Beslutet att utfärda ska fattas av styrelsen och noteras i protokollet.
+                        </span>
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-header py-2">
                     <strong><i class="bi bi-file-earmark-check me-2"></i>Föreningsintyg (utfärdade)</strong>
@@ -94,7 +322,7 @@
                 <div class="card-body">
                     <div id="memberIntygList" class="mb-3 small text-muted">Laddar…</div>
                     <div class="border-top pt-3">
-                        <div class="small text-muted mb-2">Registrera ett utfärdat intyg</div>
+                        <div class="small text-muted mb-2">Registrera ett utfärdat intyg (utan att skapa dokumentet)</div>
                         <div class="row g-2 align-items-end">
                             <div class="col-md-3">
                                 <label class="form-label small mb-0" for="newIntygDate">Datum</label>
@@ -220,6 +448,194 @@
         // Arsvaljaren fylls UR svaret, sa den aldrig erbjuder ett tomt ar eller saknar det ar
         // datat ligger pa.
         window.hpskFillActivityYears(document.getElementById('memberActivityYear'), d.years, d.data.year);
+        renderEvidenceHint(d.data);
+    }
+
+    // ── Utfärdandet ──────────────────────────────────────────────────
+
+    var _draftClubId = 0;
+
+    // Kryssrutorna kartläggs EN gång, element-id → DTO-fält. Att skriva formuläret av för hand i
+    // insamlingen är hur listorna glider isär (samma skäl som CompetitionFieldCatalog finns för).
+    var ISSUE_CHECKS = {
+        fiAktivtDeltagit:     'AktivtDeltagitSexManader',
+        fiParagraf5:          'AktivMedlemParagraf5',
+        fiParagraf6:          'AktivMedlemParagraf6',
+        fiVisasLoggbok:       'VisasGenomLoggbok',
+        fiVisasSarskilda:     'VisasGenomSarskildaSkal',
+        fiForeningenBedriver: 'ForeningenBedriverVerksamhet',
+        fiBehovInterna:       'BehovInternaTavlingar',
+        fiBehovExterna:       'BehovExternaTavlingar',
+        fiBehovLoggbok:       'BehovLoggbok',
+        fiBehovAnnat:         'BehovAnnat',
+        fiAvserYtterligare:   'IntygetAvserYtterligareEnhandsvapen',
+        fiAvserFornyelse:     'IntygetAvserFornyelse',
+        fiTranat2:            'Tranat2GangerSexManader',
+        fiTranat4:            'Tranat4GangerPerArTvaAr',
+        fiEnhandsAnnat:       'EnhandsvapenAnnatBilaga',
+        fiUppfyllerSkjut:     'UppfyllerSkjutskicklighet',
+        fiGuldSpsf:           'GuldmarkeSpsf',
+        fiSilverDynamiska:    'SilvermarkeDynamiska',
+        fiSilverSkyttesport:  'SilvermarkeSkyttesport',
+        fiGuldAutomat:        'GuldmarkeAutomatvapenSkyttesport',
+        fiSkjutAnnat:         'SkjutskicklighetAnnat'
+    };
+
+    var ISSUE_TEXTS = {
+        fiVapentyp:        'Vapentyp',
+        fiFabrikat:        'Fabrikat',
+        fiKaliber:         'KaliberPatronbeteckning',
+        fiModell:          'Modell',
+        fiPiplangd:        'Piplangd',
+        fiVapengrupp:      'VapengruppSkytteform',
+        fiBehovAnnatText:  'BehovAnnatText',
+        fiSkjutprovDatum:  'SkjutprovDatum',
+        fiSkjutAnnatText:  'SkjutskicklighetAnnatText',
+        fiOrt:             'UnderskriftOrt'
+    };
+
+    function setVal(id, v) { var el = document.getElementById(id); if (el) el.value = v == null ? '' : v; }
+    function setChk(id, v) { var el = document.getElementById(id); if (el) el.checked = !!v; }
+    function getVal(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    function getChk(id) { var el = document.getElementById(id); return !!(el && el.checked); }
+
+    /// Nollställer formuläret och lägger tillbaka FÖRSLAGEN. ⚠️ Bara guldmärkeskrysset och orten
+    /// föreslås — §5/§6, vapenuppgifterna och behovsraderna lämnas ALLTID tomma. Ett förkryssat
+    /// juridiskt intygande är precis vad den här funktionen inte får göra.
+    function resetIssueForm(draft) {
+        Object.keys(ISSUE_CHECKS).forEach(function (id) { setChk(id, false); });
+        Object.keys(ISSUE_TEXTS).forEach(function (id) { setVal(id, ''); });
+        setVal('fiAntalVapen', '');
+        setVal('fiPurpose', 'Vapenlicens');
+        setVal('fiNotes', '');
+
+        if (!draft) return;
+        setVal('fiOrt', draft.underskriftOrt);
+        setChk('fiGuldSpsf', draft.guldmarkeSpsf);
+
+        var guldBox = document.getElementById('aiGuldHint');
+        if (guldBox) {
+            if (draft.guldmarkeSpsf) {
+                var bits = ['Guldmärke i märkesliggaren'];
+                if (draft.guldmarkeAr) bits.push('år ' + draft.guldmarkeAr);
+                if (draft.guldmarkeNummer) bits.push('nr ' + hpskEsc(draft.guldmarkeNummer));
+                guldBox.innerHTML = '<i class="bi bi-info-circle me-1"></i>' + bits.join(' · ') +
+                    '. Liggaren belägger <strong>året</strong>, inte ett datum — skriv in datumet för skjutprovet själv.';
+            } else {
+                guldBox.innerHTML = '<i class="bi bi-info-circle me-1"></i>' +
+                    'Inget guldmärke finns i märkesliggaren för den här medlemmen. Finns det på papper kryssar du själv.';
+            }
+        }
+
+        var missBox = document.getElementById('aiIssueMissing');
+        if (missBox) {
+            var miss = draft.saknadeRegisterfalt || [];
+            if (miss.length) {
+                missBox.classList.remove('d-none');
+                missBox.innerHTML = '<strong>Uppgifter saknas i registret:</strong> ' +
+                    miss.map(hpskEsc).join(', ') +
+                    '. Intyget kan ändå utfärdas, men Polisen avvisar ofta ett ofullständigt intyg. ' +
+                    'Medlemmen fyller i sina uppgifter på Min sida → Profil.';
+            } else {
+                missBox.classList.add('d-none');
+                missBox.innerHTML = '';
+            }
+        }
+    }
+
+    /// Underlaget som visas intill §5/§6. ⚠️ Det SÄTTER ingenting — sammanställningen är per
+    /// kalenderår medan paragraferna kräver ett rullande sexmånadersfönster med ett snitt per
+    /// månad, så en automatisk slutsats hade varit fel räknad OCH fel att dra.
+    function renderEvidenceHint(summary) {
+        var box = document.getElementById('aiEvidenceHint');
+        if (!box) return;
+        if (!summary) { box.innerHTML = ''; return; }
+        box.innerHTML =
+            '<i class="bi bi-clipboard-data me-1"></i>Underlag ' + summary.year + ': <strong>' +
+            summary.activityDays + '</strong> aktivitetsdagar, <strong>' + summary.competitions +
+            '</strong> tävlingar. Kryssen nedan är styrelsens bedömning — paragraferna räknar ett ' +
+            'rullande halvår, inte ett kalenderår, så siffran är en utgångspunkt och inget svar.';
+    }
+
+    async function loadDraft(memberId, year) {
+        var url = '/umbraco/surface/Foreningsintyg/GetIntygDraft?memberId=' + encodeURIComponent(memberId) +
+                  (year ? '&year=' + encodeURIComponent(year) : '');
+        try {
+            var r = await fetch(url, { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) { resetIssueForm(null); return; }
+            _draftClubId = j.clubId || 0;
+            resetIssueForm(j.data);
+        } catch (e) {
+            resetIssueForm(null);
+        }
+    }
+
+    function collectIssuePayload() {
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', meToken());
+        fd.append('MemberId', window._activityMemberId);
+        fd.append('ClubId', _draftClubId || 0);
+        fd.append('ActivityYear', getVal('memberActivityYear') || new Date().getFullYear());
+        fd.append('Purpose', getVal('fiPurpose'));
+        fd.append('Notes', getVal('fiNotes'));
+        Object.keys(ISSUE_CHECKS).forEach(function (id) { fd.append(ISSUE_CHECKS[id], getChk(id)); });
+        Object.keys(ISSUE_TEXTS).forEach(function (id) { fd.append(ISSUE_TEXTS[id], getVal(id)); });
+        var antal = getVal('fiAntalVapen');
+        if (String(antal).trim() !== '') fd.append('AntalVapenSedanTidigare', antal);
+        return fd;
+    }
+
+    function wireIssue() {
+        var toggle = document.getElementById('aiToggleIssue');
+        if (toggle && !toggle.dataset.wired) {
+            toggle.dataset.wired = '1';
+            toggle.addEventListener('click', function () {
+                var body = document.getElementById('aiIssueBody');
+                var open = !body.classList.contains('d-none');
+                body.classList.toggle('d-none', open);
+                toggle.textContent = open ? 'Visa formuläret' : 'Dölj formuläret';
+            });
+        }
+
+        var preview = document.getElementById('aiPreviewBtn');
+        if (preview && !preview.dataset.wired) {
+            preview.dataset.wired = '1';
+            // Utkastet öppnas i en ny flik och är vattenstämplat. Det visar bara REGISTERFÄLTEN —
+            // det som just skrivits in i formuläret är inte sparat någonstans än, och ett utkast som
+            // låtsas visa osparade kryss vore vilseledande.
+            preview.addEventListener('click', function () {
+                if (!window._activityMemberId) return;
+                var y = getVal('memberActivityYear') || '';
+                window.open('/foreningsintyg/utkast?memberId=' + encodeURIComponent(window._activityMemberId) +
+                            '&clubId=' + encodeURIComponent(_draftClubId || 0) +
+                            (y ? '&year=' + encodeURIComponent(y) : ''), '_blank', 'noopener');
+            });
+        }
+
+        var issue = document.getElementById('aiIssueBtn');
+        if (issue && !issue.dataset.wired) {
+            issue.dataset.wired = '1';
+            issue.addEventListener('click', async function () {
+                if (!window._activityMemberId) { alert('Välj en medlem först.'); return; }
+                // Utfärdandet är en styrelseakt och går inte att ångra utan att raderas ur loggen.
+                if (!confirm('Utfärda föreningsintyg? Intyget sparas som det ser ut nu och kan skrivas ut igen oförändrat.')) return;
+
+                issue.disabled = true;
+                try {
+                    var r = await fetch('/umbraco/surface/Foreningsintyg/IssueIntyg',
+                                        { method: 'POST', body: collectIssuePayload(), credentials: 'same-origin' });
+                    var j = await r.json();
+                    if (!j.success) { alert(j.message || 'Kunde inte utfärda intyget.'); return; }
+                    if (typeof loadMemberIntyg === 'function') loadMemberIntyg(window._activityMemberId);
+                    window.open(j.data.printUrl, '_blank', 'noopener');
+                } catch (e) {
+                    alert('Ett fel uppstod.');
+                } finally {
+                    issue.disabled = false;
+                }
+            });
+        }
     }
 
     function select(memberId) {
@@ -239,10 +655,15 @@
         render();
         loadActivity(memberId, null);
         if (typeof loadMemberIntyg === 'function') loadMemberIntyg(memberId);
+        // ⚠️ Utkastet MÅSTE läsas om vid medlemsbyte. Annars ligger förra medlemmens guldmärkeskryss
+        // och ort kvar i formuläret, och nästa utfärdande skulle bära dem — på ett dokument som är
+        // en handling till en myndighet.
+        loadDraft(memberId, null);
     }
 
     async function load() {
         wire();
+        wireIssue();
         if (!_loaded) {
             try {
                 var r = await fetch('/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + clubId,

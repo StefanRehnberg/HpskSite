@@ -4181,6 +4181,139 @@ Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco
 deployas som filer utan ombyggnad.
 **Fildeploy av KB:** `KnowledgeBase/docs/aktivitetssammanstallning.md` (ny).
 
+## Föreningsintyg — utfärdande och utskrift, fas 1 (2026-09-01)
+
+Kedjans punkt 4. Polisens blankett **PM 551.24 Ver. 2019-01-18/11** som data, ett utfärdandeflöde och
+en utskriftsvy. Bygger på aktivitetssammanställningen (punkt 3) och lägger ingen andra läsväg över den.
+
+**Egen HTML-blankett, ingen PDF** (Stefans beslut 2026-09-01). Originalet är en **platt PDF utan
+formulärfält** — kontrollerat, `get_fields()` ger noll — så "fyll i PDF:en" finns inte som väg; en
+overlay hade krävt ~60 handmätta koordinater över tre sidor som måste mätas om vid varje ny version av
+blanketten. Projektet har dessutom **ingen PDF-motor** (`.pdf` förekommer bara som uppladdad eller
+utlämnad fil), och husmönstret är chromeless Razor + webbläsarens utskrift. Målet är att varje FÄLT och
+varje KRYSSRUTA finns, i blankettens ordning och med blankettens egna formuleringar.
+⚠️ **Blankettens sida 3 återges medvetet inte** — den är Polisens anvisningar TILL utfärdaren, alltså
+instruktioner och inte intygsinnehåll.
+
+### Modellens ryggrad: två sorters fält
+
+`Models/Foreningsintyg.cs`.
+
+- **REGISTERFÄLT** läses ur medlemsregistret, klubbnoden, styrelseregistret och märkesliggaren. De
+  skrivs aldrig in och **skrivs aldrig tillbaka**: personuppgifterna ligger på det delade
+  inloggningskontot och en medlem kan tillhöra flera klubbar, så en klubbs intygsutfärdande får inte
+  mutera data en annan klubb förlitar sig på.
+- **INTYGSFÄLT** skrivs av intygaren varje gång och lever bara i intygets snapshot.
+
+⚠️ **Gränsen följer INTE blankettens sektioner.** Krysset "Guldmärke – SPSF" är ett registerfält
+(märkesliggaren), men `SkjutprovDatum` kan inte vara det: `AwardBadge` stämplar `AchievedDate` med
+dagens datum även för ett märke från 1998, så bara ÅRET är fakta. Året visas som underlag, datumet
+skrivs in.
+
+### ⚠️ REGISTERFÄLTEN KAN INTE POSTAS — det är en säkerhetsegenskap, inte städning
+
+`Models/IssueForeningsintygRequest.cs` bär **bara intygsfält**. `IssueIntyg` bygger om registerfälten
+på servern via `ForeningsintygDocumentService.BuildDraftAsync` och applicerar sedan DTO:n.
+Kunde klienten posta `Personnummer`, `Skytteforening` eller `Namnfortydligande` hade sidan varit ett
+verktyg för att tillverka ett intyg med påhittade uppgifter, **undertecknat i klubbens namn, till en
+myndighet**. Lägg därför aldrig ett registerfält i den DTO:n. Sviten postar lögner i registerfältens
+namn och kontrollerar i SQL att de inte finns i snapshotten.
+
+### Ingenting kryssas av oss
+
+§5/§6, behovsraderna, skjutskicklighetsraderna och vapenrutorna kommer alltid från intygaren.
+Aktivitetssammanställningen visas som UNDERLAG intill §-rutorna och sätter dem aldrig — dels är
+underlaget till stor del självrapporterat (varningslagret), dels **räknar paragraferna ett rullande
+halvår med ett snitt per månad** medan sammanställningen är per kalenderår. Guldmärket är enda
+förslaget, eftersom det är ett registerfaktum.
+
+### Snapshot: ett utfärdat intyg är en handling
+
+`MemberCertificateIssue.Snapshot` (NVARCHAR(MAX), NULL tillåtet) bär hela dokumentet som JSON.
+Varje fält kan ändras efter utfärdandet — medlemmen flyttar, klubben byter ordförande, ett resultat
+rättas, ett märke makuleras — så en återutskrift ur dagens data visar **något annat än det som skrevs
+under**, tyst. Samma mönster och skäl som `MemberMerge.LoserSnapshot`.
+**NULL = utfärdat innan snapshot fanns eller en ren logganteckning.** Utskriftsvyn säger då att intyget
+inte kan återges och bygger ALDRIG ett nytt ur dagens data; listan visar "Endast logg" i stället för en
+knapp som leder till ett felmeddelande. `canPrint` i listprojektionen är just den skillnaden —
+**snapshotten skickas inte med i listan**, den bär personnummer och hela intyget.
+
+### Ytor
+
+- **`/foreningsintyg/{id}`** — utfärdat intyg ur snapshotten. **`/foreningsintyg/utkast?memberId=&clubId=&year=`**
+  — utkast, vattenstämplat UTKAST. Routad MVC (`ForeningsintygPrintController`), ingen Umbraco-nod,
+  `Layout = null` — samma mönster som `ReceiptController`. Grinden är medlemmen själv / klubbadmin /
+  sajtadmin, och **klubben på RADEN kontrolleras också**, så klubb B:s admin inte kan läsa klubb A:s
+  intyg bara för att medlemmen bytt primär klubb.
+- **Utfärdandeformuläret** i `ClubAdminActivityIntyg.cshtml`. Kryssrutorna kartläggs EN gång i
+  `ISSUE_CHECKS`/`ISSUE_TEXTS`; att skriva formuläret av för hand i insamlingen är hur listorna glider
+  isär. ⚠️ **Formuläret nollställs vid byte av medlem** — annars bär nästa utfärdande förra medlemmens
+  guldmärkeskryss och ort.
+- **Markeringen i medlemmens profil** (`_ForeningsintygFieldMarkers.cshtml`): fälten som behövs för ett
+  intyg får en symbol, saknade i rött, plus en förklarande ruta. **Fältlistan kommer ur
+  `ForeningsintygFields`** — samma katalog intyget läser, så profilen kan inte markera fält intyget
+  inte behöver eller sluta markera ett det kräver. Markupen dekoreras i runtime i stället för att sju
+  inputblock ändras för hand. Körs på `shown.bs.tab` (panelen är `display:none` innan dess).
+  **Personnummer kräver 12 siffror**, samma regel som importens `IsPnrComplete` — ett tiosiffrigt
+  nummer får inte se komplett ut här medan intyget räknar det som en lucka.
+
+### Ingen spärr någonstans
+
+Stefans beslut: ett intyg kan utfärdas med luckor, och det ligger i medlemmens eget intresse att fylla
+i. `SaknadeRegisterfalt` finns för att den som skriver under ska se luckorna INNAN, i stället för att
+upptäcka dem när Polisen avvisar intyget — de renderas som punktade linjer i utskriften och som en ruta
+på skärmen (aldrig i utskriften; det är en anmärkning till utfärdaren, inte en del av handlingen).
+
+### Två fällor som kostade tid
+
+⚠️ **`ClubService` går INTE att använda här.** `GetClubById` returnerar ett tunt `ClubInfo` utan
+`orgNumber`, `address`, `postalCode` och `contactPhone` — precis de fält blanketten kräver. Husregeln
+"använd alltid ClubService för klubbuppslag" gäller namnuppslag, inte adressblocket.
+⚠️ **`BoardRoleService` resolvar bara NAMNET** — ingen e-post, inget telefonnummer. Signaturblocket
+kräver båda, så kontakten hämtas per medlem via `IMemberService`. Rollnyckeln är den nya konstanten
+`BoardRoleDefinitions.RoleOrdforande`; de två befintliga ordförandekontrollerna i `BoardMeetingService`
+pekar nu på den i stället för på en literal.
+
+### Styrelsebeslutet
+
+`BoardAgendaItemCatalog` fick nyckeln `foreningsintyg` (`ItemType = "text"`). Blanketten säger
+uttryckligen att beslutet ska fattas av styrelsen och bör noteras i protokollet; utan en egen punkt
+hamnar besluten under "Beslutsärenden" och går inte att hitta den dag någon frågar vilket möte som
+beslutade om ett visst intyg.
+
+### Verifiering
+
+**73/73 `hpsk-verify/foreningsintyg-verify.mjs`**, två körningar i rad, plus 91/91
+`activity-summary-verify` oförändrad. ⚠️ **Sviten SKRIVER** — den utfärdar ett riktigt intyg och
+raderar det i sitt `finally`, med en SQL-städning som sista utpost.
+⚠️ **Fyra fällor dokumenterade i svitens huvud, tre av dem läste som produktfel:**
+- **En POST från utskriftsvyn ger tomt 400.** Den vyn är fristående och har ingen antiforgery-token;
+  `r.json()` kraschar då med ett `SyntaxError` som gömmer statuskoden. Sviten navigerar till en sida
+  med token först och läser svaret som TEXT innan den parsar.
+- **sqlcmd trunkerar NVARCHAR(MAX) vid 256 tecken.** En snapshot-kontroll blev grön på LÄNGDEN och röd
+  på INNEHÅLLET, fast utskriften visade fälten. `-y 0` lyfter taket men är ömsesidigt uteslutande med
+  **både `-W` och `-h`**. Lösningen är att göra jämförelsen **i SQL** (`LIKE` → skalärt 1/0) — ett
+  skalärt svar kan inte trunkeras, och därmed kan ett FRÅNVARO-påstående inte bli vakuöst grönt.
+  Sviten bär ett **kontrollprov** som letar något som bevisligen finns, av exakt det skälet.
+- **Ett dubbelfnutt i ett sqlcmd-argument spränger argumenttolkningen** ("Unexpected argument") — och
+  nålarna som bevisar kryssen ÄR JSON. De byggs med `CHAR(34)` på serversidan.
+
+**Operatörssteg:** kör `Migrations/add-snapshot-to-foreningsintyg-log.sql` (körd i dev 2026-09-01).
+Adds C# → **full ombyggnad**. Ingen doctype-egenskap, ingen Umbraco-nod.
+**Fildeploy av KB:** `KnowledgeBase/docs/foreningsintyg.md` (ny) + `aktivitetssammanstallning.md`.
+
+### Fas 2 och 3 (inte byggda)
+
+- **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att
+  `MemberActivitySummaryService` arbetar på ett datumintervall internt (behåll `GetAsync(memberId, year)`
+  som omslag) och att **årsregeln för evenemang får en intervallmotsvarighet i
+  `ClubEventParticipationService`** — inte kopieras in i sammanställningen.
+- **Fas 3:** vapenuppgifter ur kedjans punkt 5. ⚠️ **Ett vapen måste bära vilket förbunds verksamhet
+  det används i** — blanketten skopar antalet till "det förbund som anges ovan" och samma vapen kan
+  lagligen användas i flera förbunds grenar, alltså en **relation, inte en kolumn**. Byggs punkt 5 utan
+  det kan raden aldrig fyllas korrekt. Även med registret klart bör den vara ett förslag: den handlar
+  om sökandens innehav, och delar av det känner klubben inte till.
+
 ## Dubblettsammanslagning av medlemmar (2026-08-25)
 
 Klubbadmin → Medlemmar → Åtgärder → **Hitta dubbletter**. Efter en import finns samma person ofta

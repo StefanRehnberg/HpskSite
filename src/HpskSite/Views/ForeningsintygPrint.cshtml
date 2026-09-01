@@ -1,0 +1,393 @@
+@using HpskSite.Models
+@model HpskSite.Controllers.ForeningsintygPrintModel
+@{
+    Layout = null;
+    var d = Model.Document;
+    var title = Model.IsDraft ? "Föreningsintyg (utkast)" : "Föreningsintyg";
+}
+@*
+    Föreningsintyg — utskriftsvy efter Polisens blankett PM 551.24 (Ver. 2019-01-18/11).
+
+    ⚠️ DETTA ÄR EN ÅTERGIVNING AV BLANKETTENS INNEHÅLL, INTE EN KOPIA AV BLANKETTEN. Originalet är
+    en platt PDF utan formulärfält, så det finns ingen väg att "fylla i" den; att stämpla text på
+    absoluta koordinater ovanpå den hade krävt ~60 handmätta punkter över tre sidor som måste mätas om
+    vid varje ny version. Valet (Stefan 2026-09-01) är en egen HTML-blankett, och husmönstret i den
+    här kodbasen är chromeless Razor + webbläsarens utskrift — ingen serverside-PDF finns.
+
+    Målet är att varje FÄLT och varje KRYSSRUTA på blanketten finns här, i blankettens ordning och med
+    blankettens egna rubriker och formuleringar, så en handläggare känner igen dokumentet.
+
+    ⚠️ Blankettens SIDA 3 återges medvetet inte. Den innehåller Polisens förklaringar och anvisningar
+    till den som utfärdar intyget — instruktioner, inte intygsinnehåll. De hör i vår
+    utfärdandedialog, inte i det undertecknade dokumentet.
+
+    ⚠️ Kryssen är styrelsens juridiska intygande. Ingenting här kryssas av systemet; vyn skriver bara
+    ut det som faktiskt sparades vid utfärdandet.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>@title</title>
+    <style>
+        :root { --line: #000; --muted: #555; }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 1.5rem;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 9.5pt; line-height: 1.35; color: #000; background: #f2f2f2;
+        }
+
+        .sheet {
+            background: #fff; width: 210mm; min-height: 297mm;
+            margin: 0 auto 1.5rem; padding: 14mm 12mm 18mm;
+            position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.18);
+        }
+
+        /* Sidhuvud, efter blankettens egen uppställning */
+        .fi-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6mm; }
+        .fi-head h1 { font-size: 15pt; margin: 0 0 1mm; letter-spacing: .5px; }
+        .fi-head .sub { font-size: 8.5pt; max-width: 95mm; }
+        .fi-head .pageno { font-size: 8.5pt; white-space: nowrap; }
+
+        h2.sec {
+            font-size: 9.5pt; margin: 5mm 0 1.5mm; padding: 1mm 2mm;
+            background: #e8e8e8; border: .3pt solid var(--line); font-weight: bold;
+        }
+
+        /* Fältrutor: etiketten liten ovanför värdet, som på blanketten */
+        .grid { display: flex; flex-wrap: wrap; border-left: .3pt solid var(--line); border-top: .3pt solid var(--line); }
+        .fld {
+            border-right: .3pt solid var(--line); border-bottom: .3pt solid var(--line);
+            padding: 1mm 2mm 1.5mm; min-height: 11mm; flex: 1 1 0;
+        }
+        .fld .lbl { font-size: 7pt; color: var(--muted); display: block; }
+        .fld .val { font-size: 10.5pt; min-height: 5mm; word-break: break-word; }
+        .w25 { flex: 0 0 25%; max-width: 25%; }
+        .w33 { flex: 0 0 33.333%; max-width: 33.333%; }
+        .w50 { flex: 0 0 50%; max-width: 50%; }
+        .w75 { flex: 0 0 75%; max-width: 75%; }
+        .w100 { flex: 0 0 100%; max-width: 100%; }
+
+        /* Saknat registervärde: en synlig lucka, inte en tom rad som ser ifylld ut */
+        .val.empty::after { content: ""; display: block; border-bottom: .5pt dotted #999; margin-top: 3mm; }
+
+        /* Kryssrutor */
+        .boxes { display: flex; flex-wrap: wrap; gap: 1mm 4mm; padding: 2mm; border: .3pt solid var(--line); border-top: 0; }
+        .box { display: flex; align-items: flex-start; gap: 1.5mm; flex: 0 0 auto; max-width: 100%; font-size: 8.5pt; }
+        .box .mark {
+            width: 3.6mm; height: 3.6mm; border: .5pt solid var(--line);
+            display: inline-block; flex: 0 0 auto; text-align: center; line-height: 3.4mm; font-size: 8pt; font-weight: bold;
+        }
+        .box.wide { flex: 1 1 100%; }
+        .statement { padding: 2mm; border: .3pt solid var(--line); border-top: 0; font-size: 8.5pt; }
+
+        .note { font-size: 7.5pt; color: var(--muted); padding: 1mm 2mm 0; }
+
+        .sign-rule { border-bottom: .5pt solid var(--line); height: 14mm; }
+
+        .fi-foot {
+            position: absolute; bottom: 8mm; left: 12mm; right: 12mm;
+            display: flex; justify-content: space-between;
+            font-size: 7pt; color: var(--muted); border-top: .3pt solid #bbb; padding-top: 1mm;
+        }
+
+        /* Utkast: vattenstämpel så det inte kan misstas för ett undertecknat intyg */
+        .sheet.draft::before {
+            content: "UTKAST"; position: absolute; top: 45%; left: 0; right: 0;
+            text-align: center; font-size: 64pt; font-weight: bold;
+            color: rgba(200,0,0,.10); letter-spacing: 12px; pointer-events: none;
+        }
+
+        .toolbar { width: 210mm; margin: 0 auto 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+        .toolbar button, .toolbar a {
+            font: inherit; padding: .4rem .9rem; border: 1px solid #888; background: #fff;
+            border-radius: 4px; cursor: pointer; text-decoration: none; color: #000;
+        }
+        .toolbar .primary { background: #0d6efd; border-color: #0d6efd; color: #fff; }
+        .warn {
+            width: 210mm; margin: 0 auto 1rem; padding: .6rem .9rem;
+            border: 1px solid #b58900; background: #fff8e1; font-size: 9pt;
+        }
+        .warn ul { margin: .3rem 0 0; padding-left: 1.2rem; }
+
+        @@media print {
+            body { background: #fff; padding: 0; }
+            .sheet { box-shadow: none; margin: 0; width: auto; min-height: 0; padding: 10mm 10mm 16mm; }
+            .toolbar, .warn { display: none !important; }
+            .page-break { page-break-before: always; }
+        }
+        @@page { size: A4; margin: 8mm; }
+    </style>
+</head>
+<body>
+
+@if (Model.AccessDenied)
+{
+    <div class="sheet"><h1>Åtkomst nekad</h1>
+        <p>Du har inte behörighet att se det här föreningsintyget.</p></div>
+    return;
+}
+
+@if (Model.NotReprintable)
+{
+    <div class="sheet">
+        <h1>Intyget kan inte skrivas ut igen</h1>
+        <p>
+            Det här intyget registrerades @(Model.IssuedDate?.ToString("yyyy-MM-dd")) för
+            <strong>@Model.MemberName</strong>, men utan en sparad kopia av vad som stod i det.
+        </p>
+        <p>
+            Intyg som registrerats som en ren logganteckning — eller utfärdats innan intyget kunde
+            sparas i sin helhet — går bara att se i loggen. Ett nytt intyg som byggs ur dagens
+            uppgifter skulle inte vara samma dokument som styrelsen skrev under, så det görs inte här.
+            Utfärda i stället ett nytt intyg.
+        </p>
+    </div>
+    return;
+}
+
+@if (d == null)
+{
+    <div class="sheet"><h1>Intyget hittades inte</h1></div>
+    return;
+}
+
+@*
+    Hjälparna ligger på modellen (Model.Mark / Model.ValClass), inte i ett @@functions-block här.
+    Kodbasens egen lärdom: lokala hjälpfunktioner i en Razor-vy är en klammerfälla som fallerar med
+    ett meddelandelöst UmbracoCompilationException, så vyn hålls ren markup.
+*@
+<div class="toolbar">
+    <button type="button" class="primary" onclick="window.print()">Skriv ut</button>
+    @if (Model.IsDraft)
+    {
+        <span style="font-size:9pt;color:#a00;">
+            Utkast — inte utfärdat. Kontrollera uppgifterna innan intyget utfärdas.
+        </span>
+    }
+    else
+    {
+        <span style="font-size:9pt;color:#555;">
+            Utfärdat @(Model.IssuedDate?.ToString("yyyy-MM-dd"))@(string.IsNullOrWhiteSpace(Model.IssuedByName) ? "" : " av " + Model.IssuedByName)
+        </span>
+    }
+</div>
+
+@if (d.SaknadeRegisterfalt.Any())
+{
+    @* Syns bara på skärmen, aldrig i utskriften: det är en anmärkning till den som utfärdar,
+       inte en del av handlingen. *@
+    <div class="warn">
+        <strong>Uppgifter saknas i medlemsregistret.</strong>
+        Intyget kan ändå skrivas ut, men Polisen avvisar ofta ett ofullständigt intyg. Medlemmen
+        fyller i sina uppgifter på Min sida → Profil; klubbens uppgifter rättas under Inställningar.
+        <ul>
+            @foreach (var f in d.SaknadeRegisterfalt) { <li>@f</li> }
+        </ul>
+    </div>
+}
+
+@* ═══════════════════════════ SIDA 1 ═══════════════════════════ *@
+<div class="sheet @(Model.IsDraft ? "draft" : "")">
+    <div class="fi-head">
+        <div>
+            <h1>FÖRENINGSINTYG</h1>
+            <div class="sub">bilaga till ansökan om tillstånd att inneha skjutvapen för målskjutning</div>
+        </div>
+        <div class="pageno">Sida 1 (2)<br>551.24</div>
+    </div>
+
+    <div class="grid">
+        <div class="fld w50"><span class="lbl">Datum</span><div class="val">@d.UnderskriftDatum</div></div>
+        @* Diarienummer fylls av Polismyndigheten — lämnas alltid tomt. *@
+        <div class="fld w50"><span class="lbl">Diarienummer</span><div class="val">&nbsp;</div></div>
+    </div>
+
+    <h2 class="sec">Personuppgifter</h2>
+    <div class="grid">
+        <div class="fld w50"><span class="lbl">Efternamn</span><div class="@Model.ValClass(d.Efternamn)">@d.Efternamn</div></div>
+        <div class="fld w50"><span class="lbl">Tilltalsnamn</span><div class="@Model.ValClass(d.Tilltalsnamn)">@d.Tilltalsnamn</div></div>
+        <div class="fld w50"><span class="lbl">Personnummer eller organisationsnummer</span><div class="@Model.ValClass(d.Personnummer)">@d.Personnummer</div></div>
+        <div class="fld w50"><span class="lbl">E-postadress</span><div class="@Model.ValClass(d.EPostadress)">@d.EPostadress</div></div>
+        <div class="fld w50"><span class="lbl">Adress</span><div class="@Model.ValClass(d.Adress)">@d.Adress</div></div>
+        <div class="fld w25"><span class="lbl">Postnummer</span><div class="@Model.ValClass(d.Postnummer)">@d.Postnummer</div></div>
+        <div class="fld w25"><span class="lbl">Ort</span><div class="@Model.ValClass(d.Ort)">@d.Ort</div></div>
+        <div class="fld w50"><span class="lbl">Telefon</span><div class="val">@d.Telefon</div></div>
+        <div class="fld w50"><span class="lbl">Telefon (mobil)</span><div class="@Model.ValClass(d.TelefonMobil)">@d.TelefonMobil</div></div>
+    </div>
+
+    <h2 class="sec">Information om skytteförening och aktivt deltagande</h2>
+    <div class="grid">
+        <div class="fld w33"><span class="lbl">Organisationsnummer</span><div class="@Model.ValClass(d.Organisationsnummer)">@d.Organisationsnummer</div></div>
+        <div class="fld w50"><span class="lbl">Skytteförening</span><div class="@Model.ValClass(d.Skytteforening)">@d.Skytteforening</div></div>
+        <div class="fld w100"><span class="lbl">Har varit medlem kontinuerligt sedan datum</span><div class="@Model.ValClass(d.MedlemSedan)">@d.MedlemSedan</div></div>
+    </div>
+    <div class="boxes">
+        <div class="box wide"><span class="mark">@Model.Mark(d.AktivtDeltagitSexManader)</span>
+            <span>Aktivt deltagit i föreningens verksamhet de senaste 6 månaderna</span></div>
+    </div>
+    <div class="statement">
+        Sökanden är aktiv medlem i skytteföreningen enligt 5 kap RPSFS 2016:4, FAP 551-3
+    </div>
+    <div class="boxes">
+        <div class="box"><span class="mark">@Model.Mark(d.AktivMedlemParagraf5)</span><span>Aktiv medlem enligt 5 §</span></div>
+        <div class="box"><span class="mark">@Model.Mark(d.AktivMedlemParagraf6)</span><span>Aktiv medlem enligt 6 §</span></div>
+    </div>
+    <div class="statement">Aktivt medlemskap kan visas genom</div>
+    <div class="boxes">
+        <div class="box"><span class="mark">@Model.Mark(d.VisasGenomLoggbok)</span><span>Loggbok</span></div>
+        <div class="box"><span class="mark">@Model.Mark(d.VisasGenomSarskildaSkal)</span><span>Särskilda skäl enligt bilaga</span></div>
+    </div>
+
+    <h2 class="sec">Information om auktoriserat förbund (sammanslutning)</h2>
+    <div class="statement">
+        Skytteföreningen är ansluten till auktoriserat förbund (sammanslutning).
+        Markera endast det förbund vars tävlingsgren/skytteform vapnet avses användas.
+    </div>
+    <div class="boxes">
+        @foreach (var f in ForeningsintygDocument.AllaForbund)
+        {
+            var on = string.Equals(f, d.Forbund, StringComparison.Ordinal);
+            <div class="box" style="flex:0 0 31%;max-width:31%;">
+                <span class="mark">@Model.Mark(on)</span><span>@f</span>
+            </div>
+        }
+        @if (!string.IsNullOrWhiteSpace(d.AnnatForbund))
+        {
+            <div class="box wide"><span class="mark">&nbsp;</span><span>Annat förbund: <strong>@d.AnnatForbund</strong></span></div>
+        }
+    </div>
+
+    <h2 class="sec">Föreningsintyget gäller</h2>
+    <div class="boxes">
+        @foreach (var t in ForeningsintygDocument.AllaVapentyper)
+        {
+            var on = string.Equals(t, d.Vapentyp, StringComparison.Ordinal);
+            <div class="box"><span class="mark">@Model.Mark(on)</span><span>@t</span></div>
+        }
+        @if (!string.IsNullOrWhiteSpace(d.AnnanVapentyp))
+        {
+            <div class="box wide"><span class="mark">&nbsp;</span><span>Annat: <strong>@d.AnnanVapentyp</strong></span></div>
+        }
+    </div>
+    <div class="grid">
+        <div class="fld w50"><span class="lbl">Fabrikat</span><div class="val">@d.Fabrikat</div></div>
+        <div class="fld w50"><span class="lbl">Kaliber/patronbeteckning</span><div class="val">@d.KaliberPatronbeteckning</div></div>
+        <div class="fld w50"><span class="lbl">Modell</span><div class="val">@d.Modell</div></div>
+        <div class="fld w50"><span class="lbl">Piplängd</span><div class="val">@d.Piplangd</div></div>
+    </div>
+    <div class="statement">
+        Vapnet överensstämmer med tekniska bestämmelser för nedanstående vapengrupp/skytteform, som
+        även är reglerad i skjutreglemente för det auktoriserade förbund som angivits ovan.
+    </div>
+    <div class="boxes">
+        <div class="box wide"><span class="mark">@Model.Mark(d.ForeningenBedriverVerksamhet)</span>
+            <span>Föreningen bedriver skytteverksamhet i denna vapengrupp/skytteform</span></div>
+    </div>
+    <div class="grid">
+        <div class="fld w100"><span class="lbl">Vapengrupp/skytteform</span><div class="val">@d.VapengruppSkytteform</div></div>
+    </div>
+
+    <h2 class="sec">Behov av skjutvapen kan visas genom</h2>
+    <div class="boxes">
+        <div class="box"><span class="mark">@Model.Mark(d.BehovInternaTavlingar)</span><span>Interna tävlingar</span></div>
+        <div class="box"><span class="mark">@Model.Mark(d.BehovExternaTavlingar)</span><span>Externa tävlingar</span></div>
+        <div class="box"><span class="mark">@Model.Mark(d.BehovLoggbok)</span><span>Loggbok över skytteaktivitet</span></div>
+        <div class="box"><span class="mark">@Model.Mark(d.BehovAnnat)</span><span>Annat@(string.IsNullOrWhiteSpace(d.BehovAnnatText) ? "" : ": " + d.BehovAnnatText)</span></div>
+    </div>
+
+    <div class="fi-foot">
+        <span>@ForeningsintygDocument.FormReference</span>
+        <span>@d.HelaNamnet@(string.IsNullOrWhiteSpace(d.Personnummer) ? "" : " · " + d.Personnummer)</span>
+    </div>
+</div>
+
+@* ═══════════════════════════ SIDA 2 ═══════════════════════════ *@
+<div class="sheet page-break @(Model.IsDraft ? "draft" : "")">
+    <div class="fi-head">
+        <div>
+            <h1>FÖRENINGSINTYG</h1>
+            <div class="sub">bilaga till ansökan om tillstånd att inneha skjutvapen för målskjutning</div>
+        </div>
+        <div class="pageno">Sida 2 (2)</div>
+    </div>
+
+    <div class="grid">
+        <div class="fld w50"><span class="lbl">Sökande</span><div class="val">@d.HelaNamnet</div></div>
+        <div class="fld w50"><span class="lbl">Diarienummer</span><div class="val">&nbsp;</div></div>
+    </div>
+
+    <h2 class="sec">Behov av enhandsvapen</h2>
+    <div class="note">Ska inte anges vid det första enhandsvapnet.</div>
+    <div class="statement">Intyget avser</div>
+    <div class="boxes">
+        <div class="box"><span class="mark">@Model.Mark(d.IntygetAvserYtterligareEnhandsvapen)</span><span>Ytterligare enhandsvapen</span></div>
+        <div class="box"><span class="mark">@Model.Mark(d.IntygetAvserFornyelse)</span><span>Förnyelse av tidsbegränsat tillstånd</span></div>
+    </div>
+    <div class="boxes">
+        <div class="box wide"><span class="mark">@Model.Mark(d.Tranat2GangerSexManader)</span>
+            <span>Sökanden har tränat eller tävlat minst två gånger under de senaste sex månaderna
+                  med respektive tidigare innehavt enhandsvapen
+                  <em>(ansökan om ytterligare enhandsvapen)</em></span></div>
+        <div class="box wide"><span class="mark">@Model.Mark(d.Tranat4GangerPerArTvaAr)</span>
+            <span>Sökanden har tränat eller tävlat med sökt vapen minst fyra gånger per år under de
+                  senaste två åren
+                  <em>(ansökan om förnyelse av tidsbegränsat tillstånd)</em></span></div>
+        <div class="box wide"><span class="mark">@Model.Mark(d.EnhandsvapenAnnatBilaga)</span>
+            <span>Annat (visas i bilaga)</span></div>
+    </div>
+
+    <div class="statement">
+        Sökanden har sedan tidigare
+        <strong style="display:inline-block;min-width:14mm;border-bottom:.5pt solid #000;text-align:center;">
+            @(d.AntalVapenSedanTidigare?.ToString() ?? "")
+        </strong>
+        st skjutvapen för målskjutning i den verksamhet som bedrivs av det förbund som anges ovan och
+        har behov av samtliga vapen.
+    </div>
+
+    <h2 class="sec">Skjutskicklighet — för enhandsvapen och automatvapen</h2>
+    <div class="grid">
+        <div class="fld w100"><span class="lbl">Datum för godkänt skjutprov</span><div class="@Model.ValClass(d.SkjutprovDatum)">@d.SkjutprovDatum</div></div>
+    </div>
+    <div class="boxes">
+        <div class="box wide"><span class="mark">@Model.Mark(d.UppfyllerSkjutskicklighet)</span>
+            <span>Sökanden har uppfyllt nedanstående fordringar för skjutskicklighet</span></div>
+    </div>
+    <div class="boxes">
+        <div class="box" style="flex:0 0 48%;max-width:48%;"><span class="mark">@Model.Mark(d.GuldmarkeSpsf)</span>
+            <span>Guldmärke – Svenska Pistolskytteförbundet@(string.IsNullOrWhiteSpace(d.GuldmarkeNummer) ? "" : " (nr " + d.GuldmarkeNummer + ")")</span></div>
+        <div class="box" style="flex:0 0 48%;max-width:48%;"><span class="mark">@Model.Mark(d.SilvermarkeDynamiska)</span>
+            <span>Silvermärke – Svenska Dynamiska Sportskytteförbundet</span></div>
+        <div class="box" style="flex:0 0 48%;max-width:48%;"><span class="mark">@Model.Mark(d.SilvermarkeSkyttesport)</span>
+            <span>Silvermärke – Svenska Skyttesportförbundet</span></div>
+        <div class="box" style="flex:0 0 48%;max-width:48%;"><span class="mark">@Model.Mark(d.GuldmarkeAutomatvapenSkyttesport)</span>
+            <span>Guldmärke automatvapen – Svenska Skyttesportförbundet</span></div>
+        <div class="box wide"><span class="mark">@Model.Mark(d.SkjutskicklighetAnnat)</span>
+            <span>Annat@(string.IsNullOrWhiteSpace(d.SkjutskicklighetAnnatText) ? "" : ": " + d.SkjutskicklighetAnnatText)</span></div>
+    </div>
+
+    <h2 class="sec">På styrelsens vägnar intygas att uppgifterna är riktiga och att sökanden är lämplig*</h2>
+    <div class="grid">
+        <div class="fld w25"><span class="lbl">Datum</span><div class="val">@d.UnderskriftDatum</div></div>
+        <div class="fld w25"><span class="lbl">Ort</span><div class="@Model.ValClass(d.UnderskriftOrt)">@d.UnderskriftOrt</div></div>
+        <div class="fld w50"><span class="lbl">Namnteckning</span><div class="sign-rule"></div></div>
+        <div class="fld w50"><span class="lbl">Namnförtydligande</span><div class="@Model.ValClass(d.Namnfortydligande)">@d.Namnfortydligande</div></div>
+        <div class="fld w50"><span class="lbl">Befattning/funktion i föreningen</span><div class="@Model.ValClass(d.BefattningFunktion)">@d.BefattningFunktion</div></div>
+        <div class="fld w33"><span class="lbl">Telefon</span><div class="val">@d.UnderskriftTelefon</div></div>
+        <div class="fld w33"><span class="lbl">Telefon (mobil)</span><div class="val">@d.UnderskriftTelefonMobil</div></div>
+        <div class="fld w33"><span class="lbl">E-postadress</span><div class="@Model.ValClass(d.UnderskriftEPost)">@d.UnderskriftEPost</div></div>
+    </div>
+    <div class="note">* Som medlem och vapeninnehavare, utifrån vad som är känt.</div>
+
+    <div class="fi-foot">
+        <span>@ForeningsintygDocument.FormReference</span>
+        <span>@d.HelaNamnet@(string.IsNullOrWhiteSpace(d.Personnummer) ? "" : " · " + d.Personnummer)</span>
+    </div>
+</div>
+
+</body>
+</html>

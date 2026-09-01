@@ -24,6 +24,14 @@ namespace HpskSite.Models
         /// <summary>Role keys that belong to the valberedning (managed on the Valberedning tab, never board members).</summary>
         public static readonly string[] ValberedningRoleKeys = { "Valberedning", "ValberedningSammankallande" };
 
+        /// <summary>
+        /// The chairman's role key. Named because three places now ask "is this the ordförande?" —
+        /// the two meeting-attendance seeders and the föreningsintyg signatory proposal — and a
+        /// misspelled literal in any of them fails silently: nobody is chairman, no quorum flag, no
+        /// name on the certificate. The other keys stay literals until something needs them.
+        /// </summary>
+        public const string RoleOrdforande = "Ordforande";
+
         public static string GetLabel(string roleKey)
         {
             var match = AllRoles.FirstOrDefault(r => r.Key == roleKey);

@@ -45,6 +45,11 @@ namespace HpskSite.Models
 
             // --- Decision items (text: anteckningar + beslut) ---
             new AgendaItemDef { Key = "beslutsarenden",      Heading = "Beslutsärenden",                            ItemType = "text" },
+            // Polisens blankett PM 551.24 säger uttryckligen att beslutet att utfärda ett
+            // föreningsintyg ska fattas av STYRELSEN och bör noteras i mötesprotokollet. Utan en egen
+            // punkt hamnar besluten under "Beslutsärenden" eller "Övriga frågor", och då går de inte
+            // att hitta den dag någon frågar vilket möte som beslutade om ett visst intyg.
+            new AgendaItemDef { Key = "foreningsintyg",      Heading = "Föreningsintyg",                            ItemType = "text" },
             new AgendaItemDef { Key = "ansvarsfrihet",       Heading = "Fråga om ansvarsfrihet för styrelsen",      ItemType = "text" },
             new AgendaItemDef { Key = "medlemsavgift",       Heading = "Fastställande av medlemsavgift",            ItemType = "text" },
             new AgendaItemDef { Key = "verksamhetsplan-budget",Heading = "Fastställande av verksamhetsplan och budget", ItemType = "text" },

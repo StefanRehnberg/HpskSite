@@ -726,6 +726,16 @@
                                 </div>
                             </div>
 
+                            @*
+                                Vilka uppgifter klubben behöver för att kunna utfärda ett
+                                Föreningsintyg. Rutan och symbolerna kommer ur samma katalog som
+                                intyget läser (`ForeningsintygFields`) — så de kan inte glida isär.
+                                Ingen spärr: det är medlemmens egna uppgifter och medlemmens eget
+                                intresse att fylla i dem.
+                            *@
+                            <div id="foreningsintygLegend"></div>
+                            @await Html.PartialAsync("_ForeningsintygFieldMarkers")
+
                             <form id="profileForm">
                                 <div class="row">
                                     <div class="col-md-6">
@@ -2025,6 +2035,26 @@ function renderHandicapInfo(weaponClasses, shooterClass, settings, containerId =
     }
     container.innerHTML = html;
 }
+
+// ── Föreningsintygsmarkeringar i profilformuläret ────────────────────────
+// Katalogdriven (se _ForeningsintygFieldMarkers). Körs när Profil-fliken visas i stället för vid
+// sidladdning — panelen är display:none tills dess, och labels i en dold panel går att dekorera men
+// rutan syns inte, så en användare som aldrig öppnar fliken har inget att vinna på arbetet.
+(function wireForeningsintygMarkers() {
+    var run = function () {
+        if (typeof window.hpskMarkForeningsintygFields === 'function') {
+            window.hpskMarkForeningsintygFields('profileForm', 'foreningsintygLegend');
+        }
+    };
+    var tab = document.getElementById('profile-tab');
+    if (tab) tab.addEventListener('shown.bs.tab', run);
+    // Om Profil redan är den aktiva fliken (t.ex. efter en omladdning) körs den direkt.
+    if (document.getElementById('profile-pane')?.classList.contains('active')) run();
+
+    // Efter en sparning ska markeringarna spegla det NYA läget. Sparningen laddar om sidan idag,
+    // men blir det en tystare sparning senare ska rutan inte ligga kvar och påstå att något saknas.
+    window.hpskRefreshForeningsintygMarkers = run;
+})();
 
 function saveProfile() {
     const formData = new FormData();

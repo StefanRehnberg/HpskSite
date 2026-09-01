@@ -6477,9 +6477,18 @@ function loadMemberIntyg(memberId) {
             box.innerHTML = d.data.map(function (i) {
                 var desc = i.description ? (' – ' + meEsc(i.description)) : '';
                 var by = i.issuedByName ? (' · ' + meEsc(i.issuedByName)) : '';
-                return '<div class="d-flex justify-content-between align-items-center border-bottom py-1">' +
+                // Utskrift erbjuds bara när det FINNS en snapshot. En rad utan snapshot är en ren
+                // logganteckning (eller utfärdad innan snapshot fanns) och kan inte återges — en
+                // knapp som leder till "kan inte skrivas ut" är sämre än ingen knapp.
+                var print = i.canPrint
+                    ? '<a class="btn btn-outline-secondary btn-sm" href="/foreningsintyg/' + i.id +
+                      '" target="_blank" rel="noopener" title="Skriv ut intyget"><i class="bi bi-printer"></i></a>'
+                    : '<span class="badge bg-secondary-subtle text-secondary-emphasis align-self-center"' +
+                      ' title="Registrerad som logganteckning — dokumentet finns inte sparat">Endast logg</span>';
+                return '<div class="d-flex justify-content-between align-items-center border-bottom py-1 gap-2">' +
                     '<span><strong>' + meEsc(i.issuedDate) + '</strong> · ' + meEsc(i.purpose) + desc + by + '</span>' +
-                    '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteMemberIntyg(' + i.id + ')"><i class="bi bi-trash"></i></button></div>';
+                    '<span class="d-flex gap-1">' + print +
+                    '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteMemberIntyg(' + i.id + ')"><i class="bi bi-trash"></i></button></span></div>';
             }).join('');
         });
 }

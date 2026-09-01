@@ -66,10 +66,12 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Record a new föreningsintyg.
+        /// Record a new föreningsintyg. <paramref name="snapshot"/> is the full signed document as
+        /// JSON — see <see cref="MemberCertificateIssue.Snapshot"/>. Null for a bare log entry
+        /// (the pre-existing "registrera ett utfärdat intyg" path), which then cannot be reprinted.
         /// </summary>
         public MemberCertificateIssue Add(int memberId, int clubId, DateTime issuedDate, string purpose,
-            string? description, int? issuedByMemberId, string? notes)
+            string? description, int? issuedByMemberId, string? notes, string? snapshot = null)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -83,10 +85,26 @@ namespace HpskSite.Services
                 Description = description,
                 IssuedByMemberId = issuedByMemberId,
                 Notes = notes,
+                Snapshot = snapshot,
                 CreatedDate = DateTime.UtcNow
             };
 
             db.Insert(entry);
+            return entry;
+        }
+
+        /// <summary>
+        /// En enskild intygsrad, för utskrift. Returnerar raden även när <c>Snapshot</c> är null —
+        /// anroparen ska då säga att intyget inte kan återges, inte bygga ett nytt ur dagens data.
+        /// </summary>
+        public MemberCertificateIssue? GetById(int id)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var entry = scope.Database.SingleOrDefaultById<MemberCertificateIssue>(id);
+            if (entry == null) return null;
+
+            var list = new List<MemberCertificateIssue> { entry };
+            ResolveMemberNames(list);
             return entry;
         }
 

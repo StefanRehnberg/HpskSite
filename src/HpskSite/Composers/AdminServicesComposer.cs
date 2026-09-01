@@ -72,6 +72,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();
             builder.Services.AddScoped<ForeningsintygService>();
+            // Bygger utkastet till Polisens blankett PM 551.24 genom att fylla i REGISTERFÄLTEN.
+            // Kryssar ingenting — §5/§6 och vapenuppgifterna är styrelsens intygande.
+            builder.Services.AddScoped<ForeningsintygDocumentService>();
             builder.Services.AddScoped<MembershipFeeService>();
             // Hard-delete purge of a member's subject-owned rows across all custom DB tables.
             builder.Services.AddScoped<MemberDataPurgeService>();
