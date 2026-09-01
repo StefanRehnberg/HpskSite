@@ -159,7 +159,8 @@ namespace HpskSite.Controllers
         /// den som ska få se underlaget.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetActivitySummary(int memberId, int? year = null, string? groups = null)
+        public async Task<IActionResult> GetActivitySummary(
+            int memberId, int? year = null, string? groups = null, int? clubId = null)
         {
             try
             {
@@ -173,7 +174,10 @@ namespace HpskSite.Controllers
                 // inte hör till listan under dem.
                 var groupFilter = (groups ?? "")
                     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                var summary = await _activitySummary.GetAsync(memberId, y, groupFilter);
+                // ⚠️ Klubben skickas med: incheckning-som-aktivitet är den UTFÄRDANDE klubbens
+                // inställning, och bara dess länkade banor räknas. Utan clubId faller tjänsten
+                // tillbaka på medlemmens primära klubb, vilket är rätt för Min sida.
+                var summary = await _activitySummary.GetAsync(memberId, y, groupFilter, clubId);
                 var years = await _activitySummary.GetYearsWithActivityAsync(memberId);
 
                 return Json(new
@@ -213,6 +217,11 @@ namespace HpskSite.Controllers
                             e.Detail,
                             e.CountsAsActivity,
                             e.NotCountedReason,
+                            // Skälet NAMNGER den andra sortens post ("...: tävling"); nyckeln
+                            // IDENTIFIERAR den. Utan nyckeln kan varken gränssnittet eller en
+                            // verifiering visa VILKEN post incheckningen ansågs vara samma
+                            // tillfälle som — och då är påståendet inte granskningsbart.
+                            e.SameOccasionAs,
                             e.IsMandatoryEvent,
                             e.WeaponGroups,
                             e.SourceId,
@@ -355,7 +364,7 @@ namespace HpskSite.Controllers
                     .ToList();
 
                 int y = year ?? DateTime.Today.Year;
-                var days = await _activitySummary.GetActivityDaysForMembersAsync(memberIds, y);
+                var days = await _activitySummary.GetActivityDaysForMembersAsync(memberIds, y, clubId);
 
                 return Json(new { success = true, year = y, data = days });
             }
@@ -366,7 +375,123 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Inställningen "incheckning på banan räknas som aktivitet", för klubbens Aktivitet &amp;
+        /// Intyg-sida. Returnerar även om klubben HAR en länkad skjutbana — utan en sådan finns
+        /// ingenting att räkna, och switchen ska då vara avstängd och förklarad, inte klickbar.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRangeCheckInSetting(int clubId)
+        {
+            try
+            {
+                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                bool isClubAdmin = clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId);
+                if (!isSiteAdmin && !isClubAdmin)
+                    return Json(new { success = false, message = "Åtkomst nekad" });
+
+                var club = clubId > 0 ? Services.ContentService.GetById(clubId) : null;
+                if (club == null || club.ContentType.Alias != "club")
+                    return Json(new { success = false, message = "Klubben hittades inte." });
+
+                bool propertyExists = club.HasProperty(MemberActivitySummary.ClubActivityFromRangeCheckInProperty);
+                bool enabled = propertyExists
+                    && club.GetValue<bool>(MemberActivitySummary.ClubActivityFromRangeCheckInProperty);
+
+                var ranges = _rangeCheckInRanges(clubId);
+
+                return Json(new
+                {
+                    success = true,
+                    enabled,
+                    propertyExists,
+                    propertyAlias = MemberActivitySummary.ClubActivityFromRangeCheckInProperty,
+                    hasLinkedRange = ranges.Count > 0,
+                    rangeCount = ranges.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading range check-in setting for club {ClubId}", clubId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Sätter inställningen.
+        ///
+        /// <b>⚠️ Två vägranden, båda med flit:</b>
+        /// <list type="bullet">
+        /// <item><b>Saknad doctype-egenskap.</b> <c>SetValue</c> på en egenskap som inte finns är en
+        /// TYST no-op — switchen hade sett ut att slås på och återgått vid nästa laddning. Vi vägrar
+        /// och namnger egenskapen i stället.</item>
+        /// <item><b>Ingen länkad skjutbana.</b> Utan en <c>ClubRangeLink</c> finns inga incheckningar
+        /// att räkna, så en påslagen switch hade lovat något den inte kan hålla.</item>
+        /// </list>
+        /// Att stänga AV är alltid tillåtet, även utan länkad bana — annars kan en klubb som tappat
+        /// sin banlänk inte stänga av en inställning som redan står på.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetRangeCheckInSetting(int clubId, bool enabled)
+        {
+            try
+            {
+                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                bool isClubAdmin = clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId);
+                if (!isSiteAdmin && !isClubAdmin)
+                    return Json(new { success = false, message = "Åtkomst nekad" });
+
+                var club = clubId > 0 ? Services.ContentService.GetById(clubId) : null;
+                if (club == null || club.ContentType.Alias != "club")
+                    return Json(new { success = false, message = "Klubben hittades inte." });
+
+                var alias = MemberActivitySummary.ClubActivityFromRangeCheckInProperty;
+                if (!club.HasProperty(alias))
+                    return Json(new
+                    {
+                        success = false,
+                        message = $"Doctype-egenskapen \"{alias}\" (True/False) saknas på klubb-doctypen. " +
+                                  "Lägg till den i backoffice först — utan den sparas inställningen inte."
+                    });
+
+                if (enabled && _rangeCheckInRanges(clubId).Count == 0)
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Klubben har ingen länkad skjutbana. Länka en bana under Skjutbanor " +
+                                  "först — utan den finns inga incheckningar att räkna."
+                    });
+
+                club.SetValue(alias, enabled);
+                Services.ContentService.Save(club);
+
+                _logger.LogInformation("Klubb {ClubId}: incheckning som aktivitet satt till {Enabled}", clubId, enabled);
+                return Json(new
+                {
+                    success = true,
+                    enabled,
+                    message = enabled
+                        ? "Incheckning på banan räknas nu som aktivitet."
+                        : "Incheckning på banan räknas inte längre som aktivitet."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving range check-in setting for club {ClubId}", clubId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
         // ── Helpers ───────────────────────────────────────────────────
+
+        /// <summary>Banor länkade till klubben. Egen liten läsning för att slippa dra in hela
+        /// <c>ShootingRangeService</c> i den här controllern för en enda fråga.</summary>
+        private List<int> _rangeCheckInRanges(int clubId)
+        {
+            using var db = DatabaseFactory.CreateDatabase();
+            return db.Fetch<int>("SELECT RangeId FROM ClubRangeLink WHERE ClubId = @0", clubId);
+        }
 
 
         /// <summary>

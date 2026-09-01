@@ -272,6 +272,163 @@ namespace HpskSite.Tests.Services
             Assert.Equal(1, s.ByKind[ActivityKind.Practice]);
         }
 
+        // ── Incheckning på banan ──────────────────────────────────────
+        //
+        // Problemet: någon skannar QR-koden på banan OCH loggar en träningsmatch samma dag. Ett
+        // tillfälle, två poster. Räknas båda blir dagen dubbelräknad i postantalet.
+
+        private static MemberActivityEntry CheckIn(string date, int sourceId) =>
+            new()
+            {
+                Date = DateTime.Parse(date),
+                Kind = ActivityKind.RangeCheckIn,
+                Evidence = ActivityEvidence.SelfRegistered,
+                CountsAsActivity = true,
+                SourceId = sourceId,
+                SourceKind = MemberActivityEntry.SourceKindRangeCheckIn,
+                Title = "Incheckad på banan"
+            };
+
+        [Fact]
+        public void CheckIn_Alone_CountsAsActivity()
+        {
+            // Hela poängen med inställningen: ett besök på banan där inget resultat loggades är ändå
+            // verksamhet.
+            var s = Build(CheckIn("2026-04-10", 1));
+
+            Assert.Equal(1, s.ActivityDays);
+            Assert.Equal(1, s.CountedEntries);
+            Assert.Equal(1, s.ByKind[ActivityKind.RangeCheckIn]);
+        }
+
+        [Fact]
+        public void CheckIn_SameDayAsTraining_IsShownButNotCounted()
+        {
+            var s = Build(
+                Entry("2026-04-10", ActivityKind.Training, sourceId: 500),
+                CheckIn("2026-04-10", 1));
+
+            Assert.Equal(1, s.CountedEntries);          // bara träningen
+            Assert.Equal(1, s.ActivityDays);
+            Assert.Equal(2, s.Entries.Count);          // men incheckningen SYNS
+            var ci = s.Entries.Single(e => e.Kind == ActivityKind.RangeCheckIn);
+            Assert.False(ci.CountsAsActivity);
+            Assert.Contains(MemberActivitySummary.RedundantCheckInReason, ci.NotCountedReason);
+            Assert.Equal("training:500", ci.SameOccasionAs);
+        }
+
+        [Fact]
+        public void CheckIn_SameDayAsCompetition_IsShownButNotCounted()
+        {
+            var s = Build(
+                Entry("2026-04-10", ActivityKind.Competition, ActivityEvidence.OfficialResult, sourceId: 2171),
+                CheckIn("2026-04-10", 1));
+
+            Assert.Equal(1, s.Competitions);
+            Assert.Equal(1, s.CountedEntries);
+            Assert.Equal("comp:2171", s.Entries.Single(e => e.Kind == ActivityKind.RangeCheckIn).SameOccasionAs);
+        }
+
+        [Fact]
+        public void CheckIn_OnAnotherDay_StillCounts()
+        {
+            // Motsatsprovet — utan det kan koden nolla varje incheckning och ändå se grön ut.
+            var s = Build(
+                Entry("2026-04-10", ActivityKind.Training, sourceId: 500),
+                CheckIn("2026-04-11", 1));
+
+            Assert.Equal(2, s.CountedEntries);
+            Assert.Equal(2, s.ActivityDays);
+        }
+
+        [Fact]
+        public void CheckIn_SameDayAsAnUNCOUNTEDEntry_StillCounts()
+        {
+            // ⚠️ En DNS-tävling räknas inte, och ska därför inte kunna knuffa bort incheckningen:
+            // medlemmen var ändå på banan den dagen, och det är allt vi vet. Skulle regeln titta på
+            // ALLA poster i stället för de räknade skulle en utebliven start radera beviset för att
+            // hen var där.
+            var s = Build(
+                Entry("2026-04-10", ActivityKind.Competition, ActivityEvidence.RegisteredOnly,
+                      counts: false, sourceId: 2171, notCountedReason: "Ej start (DNS)"),
+                CheckIn("2026-04-10", 1));
+
+            Assert.Equal(1, s.CountedEntries);
+            Assert.True(s.Entries.Single(e => e.Kind == ActivityKind.RangeCheckIn).CountsAsActivity);
+        }
+
+        [Fact]
+        public void TwoCheckInsSameDay_OnlyTheFirstCounts()
+        {
+            // In, ut och in igen är ett besök. Utan den här regeln hade båda sett "ingen annan post"
+            // och räknats — alltså dubbelräkning av just det fallet regeln finns för.
+            var s = Build(CheckIn("2026-04-10", 1), CheckIn("2026-04-10", 2));
+
+            Assert.Equal(1, s.CountedEntries);
+            Assert.Equal(1, s.ActivityDays);
+            var second = s.Entries.Single(e => e.SourceId == 2);
+            Assert.False(second.CountsAsActivity);
+            Assert.Equal(MemberActivitySummary.DuplicateCheckInReason, second.NotCountedReason);
+            Assert.Equal("checkin:1", second.SameOccasionAs);
+        }
+
+        [Fact]
+        public void TwoCheckInsSameDayWithOtherActivity_NEITHERCounts()
+        {
+            var s = Build(
+                Entry("2026-04-10", ActivityKind.TrainingMatch, sourceId: 500),
+                CheckIn("2026-04-10", 1),
+                CheckIn("2026-04-10", 2));
+
+            Assert.Equal(1, s.CountedEntries);
+            Assert.All(s.Entries.Where(e => e.Kind == ActivityKind.RangeCheckIn),
+                       e => Assert.False(e.CountsAsActivity));
+        }
+
+        [Fact]
+        public void ExplicitLink_IsRespected_EvenWithNoOtherEntryThatDay()
+        {
+            // Lager 2: tjänsten sätter CountsAsActivity=false och SameOccasionAs när passet bär en
+            // LinkedCompetitionId. Deduperingen får inte ångra det bara för att den länkade posten
+            // inte råkar ligga i samma årsurval.
+            var linked = CheckIn("2026-04-10", 1);
+            linked.CountsAsActivity = false;
+            linked.NotCountedReason = MemberActivitySummary.RedundantCheckInReason + ": tävling";
+            linked.SameOccasionAs = "comp:9999";
+
+            var s = Build(linked);
+
+            Assert.Equal(0, s.CountedEntries);
+            Assert.Equal("comp:9999", s.Entries.Single().SameOccasionAs);
+        }
+
+        [Fact]
+        public void CheckIn_HasNoWeaponGroup_AndIsDroppedByAFilter()
+        {
+            // En incheckning säger inte VAD som sköts, så den kan inte höra till en vapengrupp. Under
+            // ett filter faller den bort — och det räknas som en post utan vapengrupp, så rutan kan
+            // säga det.
+            var s = BuildFiltered(new[] { "C" },
+                GroupEntry("2026-04-11", ActivityKind.Training, 1, "C"),
+                CheckIn("2026-04-10", 1));
+
+            Assert.Equal(1, s.CountedEntries);
+            Assert.Equal(1, s.ExcludedWithoutWeaponGroup);
+        }
+
+        [Fact]
+        public void NoCheckIns_LeavesEverythingUntouched()
+        {
+            // Klubbar som inte slår på inställningen får aldrig någon incheckning inläst, och då ska
+            // dedupliceringen vara en no-op.
+            var s = Build(
+                Entry("2026-04-10", ActivityKind.Training, sourceId: 500),
+                Entry("2026-04-10", ActivityKind.TrainingMatch, sourceId: 501));
+
+            Assert.Equal(2, s.CountedEntries);
+            Assert.Equal(1, s.ActivityDays);
+        }
+
         // ── Vapengruppsfiltret ────────────────────────────────────────
 
         private static MemberActivityEntry GroupEntry(string date, ActivityKind kind, int sourceId,

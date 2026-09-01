@@ -75,6 +75,13 @@ namespace HpskSite.Models
         /// </summary>
         TrainingMatch = 4,
 
+        /// <summary>
+        /// Incheckning på klubbens skjutbana (QR-skanning på plats). Räknas bara när klubben slagit
+        /// på det, och bara när den inte beskriver samma tillfälle som en annan post — se
+        /// <see cref="MemberActivitySummary.MarkRedundantCheckIns"/>.
+        /// </summary>
+        RangeCheckIn = 5,
+
         /// <summary>Klubbens eller kretsens evenemang (städdag, möte, socialt, träningskväll …).</summary>
         Event = 3
     }
@@ -141,9 +148,16 @@ namespace HpskSite.Models
         /// <summary>Den sammansatta källnyckeln. Räkna alltid distinkt på DEN, aldrig på id:t.</summary>
         public string SourceKey => $"{SourceKind}:{SourceId}";
 
+        /// <summary>
+        /// Källnyckeln för den post detta är samma tillfälle som. Sätts på en incheckning som
+        /// beskriver ett tillfälle en annan post redan bär, så gränssnittet kan peka på vilken.
+        /// </summary>
+        public string? SameOccasionAs { get; set; }
+
         public const string SourceKindCompetition = "comp";
         public const string SourceKindTraining = "training";
         public const string SourceKindEvent = "event";
+        public const string SourceKindRangeCheckIn = "checkin";
 
         /// <summary>Sant för evenemang som klubben märkt som obligatoriska — styrelsens
         /// intygsbeslut vilar särskilt på dessa.</summary>
@@ -172,6 +186,7 @@ namespace HpskSite.Models
             ActivityKind.Practice => "0-poäng träning",
             ActivityKind.Competition => "Tävling",
             ActivityKind.TrainingMatch => "Träningsmatch",
+            ActivityKind.RangeCheckIn => "Incheckning på banan",
             ActivityKind.Event => "Evenemang",
             _ => ""
         };
@@ -288,6 +303,10 @@ namespace HpskSite.Models
                     .ToList();
             }
 
+            // ⚠️ MÅSTE ske innan något räknas: en incheckning som beskriver samma tillfälle som en
+            // annan post får inte bli en egen post.
+            MarkRedundantCheckIns(everything);
+
             var all = everything.OrderByDescending(e => e.Date).ThenBy(e => e.Title).ToList();
             var counted = all.Where(e => e.CountsAsActivity).ToList();
 
@@ -385,6 +404,90 @@ namespace HpskSite.Models
         /// <summary>Skälstext för "uppropet togs aldrig". Konstant eftersom varningsbyggaren
         /// räknar just den här sorten och en omformulering annars tystar varningen.</summary>
         public const string NotRecordedReason = "Uppropet togs aldrig — närvaron är okänd";
+
+        /// <summary>
+        /// Doctype-egenskapen på <c>club</c> som slår på "incheckning på banan räknas som aktivitet"
+        /// (True/False, valfri, standard AV).
+        ///
+        /// Standard av med flit: en deploy ska inte ändra någon klubbs aktivitetssiffror i
+        /// deploy-ögonblicket, allra minst siffror som är underlag för ett intyg.
+        ///
+        /// ⚠️ <b>Utan egenskapen är <c>SetValue</c> en TYST no-op</b> — switchen hade sett ut att
+        /// fungera och återgått vid nästa laddning. Skrivvägen vägrar därför och namnger egenskapen.
+        /// </summary>
+        public const string ClubActivityFromRangeCheckInProperty = "activityFromRangeCheckIn";
+
+        /// <summary>Skälstexten för en incheckning som beskriver ett tillfälle en annan post redan bär.</summary>
+        public const string RedundantCheckInReason = "Samma tillfälle som en annan post samma dag";
+
+        /// <summary>Skälstexten för en andra incheckning samma dag.</summary>
+        public const string DuplicateCheckInReason = "Redan incheckad samma dag";
+
+        /// <summary>
+        /// Nollar räkningen för incheckningar som beskriver ett tillfälle någon annan post redan bär.
+        ///
+        /// <b>Problemet:</b> någon skannar QR-koden på banan, skjuter en träningsmatch och loggar den.
+        /// Det är ETT tillfälle men två poster. Slår klubben på incheckning som aktivitet blir varje
+        /// sådan dag dubbelräknad i postantalet.
+        ///
+        /// <b>Tre lager, i den ordningen:</b>
+        /// <list type="number">
+        /// <item><see cref="ActivityDays"/> är redan immun — den räknar distinkta DATUM, så en
+        /// incheckning och en tävling samma dag är en dag. Det var skälet att rubriksiffran blev dagar
+        /// och inte poster.</item>
+        /// <item><b>Explicit länk vinner.</b> <c>RangeActivitySession.LinkedCompetitionId</c> /
+        /// <c>LinkedTrainingScoreId</c> pekar ut vilket tillfälle passet hör till. ⚠️ Kolumnerna finns
+        /// men <b>ingenting skriver dem i dag</b> — lagret är förberett, inte i drift, och tjänsten
+        /// sätter <see cref="MemberActivityEntry.SameOccasionAs"/> när de börjar fyllas.</item>
+        /// <item><b>Samma dag</b> är den regel som faktiskt arbetar: en incheckning räknas bara när den
+        /// är dagens enda räknade post.</item>
+        /// </list>
+        ///
+        /// <b>Raden försvinner aldrig.</b> Den visas med skälet utskrivet — en incheckning som tystnat
+        /// bort ser ut som saknad data, och det är just incheckningen som bevisar att medlemmen var på
+        /// banan den dagen.
+        ///
+        /// <b>Incheckningen är alltid den som viker.</b> Ett inskrivet tävlingsresultat eller ett
+        /// loggat träningspass säger mer om vad som gjordes än en QR-skanning gör.
+        /// </summary>
+        public static void MarkRedundantCheckIns(List<MemberActivityEntry> entries)
+        {
+            var checkIns = entries.Where(e => e.Kind == ActivityKind.RangeCheckIn).ToList();
+            if (checkIns.Count == 0) return;
+
+            foreach (var byDate in checkIns.GroupBy(e => e.Date.Date))
+            {
+                // Räknade poster den dagen som INTE är incheckningar. En DNS-tävling räknas inte, och
+                // ska därför inte kunna knuffa bort incheckningen — den dagen var medlemmen ändå på
+                // banan, och det är allt vi vet.
+                var other = entries.FirstOrDefault(e =>
+                    e.Kind != ActivityKind.RangeCheckIn &&
+                    e.Date.Date == byDate.Key &&
+                    e.CountsAsActivity);
+
+                var ordered = byDate.OrderBy(e => e.SourceId).ToList();
+
+                if (other != null)
+                {
+                    foreach (var c in ordered)
+                    {
+                        c.CountsAsActivity = false;
+                        c.NotCountedReason = $"{RedundantCheckInReason}: {other.KindLabel.ToLowerInvariant()}";
+                        c.SameOccasionAs = other.SourceKey;
+                    }
+                    continue;
+                }
+
+                // Ingen annan post den dagen — den FÖRSTA incheckningen räknas, resten är dubbletter
+                // av samma besök (in och ut och in igen).
+                for (int i = 1; i < ordered.Count; i++)
+                {
+                    ordered[i].CountsAsActivity = false;
+                    ordered[i].NotCountedReason = DuplicateCheckInReason;
+                    ordered[i].SameOccasionAs = ordered[0].SourceKey;
+                }
+            }
+        }
 
         // ── Räknereglerna, utbrutna ──────────────────────────────────
         //

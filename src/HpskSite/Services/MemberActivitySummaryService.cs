@@ -64,7 +64,7 @@ namespace HpskSite.Services
         /// sammanställning med en synlig varning är användbar och ett undantag inte är det.
         /// </summary>
         public async Task<MemberActivitySummary> GetAsync(
-            int memberId, int year, IEnumerable<string>? weaponGroups = null)
+            int memberId, int year, IEnumerable<string>? weaponGroups = null, int? clubId = null)
         {
             var entries = new List<MemberActivityEntry>();
             var sourceErrors = new List<string>();
@@ -88,6 +88,13 @@ namespace HpskSite.Services
             {
                 _logger.LogError(ex, "Aktivitetssammanställning: evenemangsnärvaron kunde inte läsas för {MemberId}", memberId);
                 sourceErrors.Add("Evenemangsnärvaron kunde inte läsas — sammanställningen är ofullständig.");
+            }
+
+            try { entries.AddRange(await ReadRangeCheckInsAsync(memberId, year, clubId)); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Aktivitetssammanställning: incheckningar kunde inte läsas för {MemberId}", memberId);
+                sourceErrors.Add("Incheckningar på banan kunde inte läsas — sammanställningen är ofullständig.");
             }
 
             var summary = MemberActivitySummary.From(
@@ -166,7 +173,7 @@ namespace HpskSite.Services
         /// fråga. Skulle den filtreras måste även dess text säga det.
         /// </summary>
         public async Task<Dictionary<int, int>> GetActivityDaysForMembersAsync(
-            IEnumerable<int> memberIds, int year)
+            IEnumerable<int> memberIds, int year, int? clubId = null)
         {
             var ids = memberIds.Where(id => id > 0).Distinct().ToList();
             var days = ids.ToDictionary(id => id, _ => new HashSet<DateTime>());
@@ -258,6 +265,31 @@ namespace HpskSite.Services
                     var ctx = _events.GetEventContext(row.EventId);
                     if (ctx?.EventDate == null || ctx.EventDate.Value.Year != year) continue;
                     set.Add(ctx.EventDate.Value.Date);
+                }
+
+                // 4) Incheckningar, om klubben räknar dem. Badgen MÅSTE hedra samma inställning som
+                //    detaljvyn, annars säger de olika om samma medlem.
+                //
+                //    ⚠️ Dedupliceringen sköter sig själv här: aktivitetsdagar är en MÄNGD av datum, så
+                //    en incheckning samma dag som en tävling lägger inte till något. Det är samma
+                //    egenskap som gör rubriksiffran immun mot dubbelräkning i detaljvyn.
+                if (clubId is > 0 && ClubCountsRangeCheckIns(clubId.Value))
+                {
+                    var rangeIds = db.Fetch<int>("SELECT RangeId FROM ClubRangeLink WHERE ClubId = @0", clubId.Value);
+                    if (rangeIds.Count > 0)
+                    {
+                        var rangeIn = string.Join(",", rangeIds.Select((_, i) => "@" + (i + batch.Length + 1)));
+                        var checkInArgs = args.Append((object)year).Concat(rangeIds.Cast<object>()).ToArray();
+
+                        foreach (var row in db.Fetch<MemberDateRow>(
+                            $@"SELECT MemberId, [Date] FROM RangeActivitySession
+                               WHERE MemberId IN ({inList}) AND YEAR([Date]) = @{batch.Length}
+                                 AND RangeId IN ({rangeIn})",
+                            checkInArgs))
+                        {
+                            if (days.TryGetValue(row.MemberId, out var set)) set.Add(row.Date.Date);
+                        }
+                    }
                 }
             }
 
@@ -743,6 +775,150 @@ namespace HpskSite.Services
             }
 
             return entries;
+        }
+
+        // ── Källa 4: incheckning på banan ─────────────────────────────
+
+        /// <summary>
+        /// Incheckningar på klubbens skjutbana, som aktivitet — <b>bara när klubben slagit på det</b>
+        /// (<c>club.activityFromRangeCheckIn</c>). Standard av, så en deploy inte ändrar någon klubbs
+        /// siffror i deploy-ögonblicket.
+        ///
+        /// <b>Vilken klubbs inställning?</b> Den som ska utfärda intyget — <paramref name="clubId"/>,
+        /// annars medlemmens primära klubb. Det är rätt nivå: en medlem kan tillhöra två klubbar, och
+        /// vad klubb A intygar är A:s beslut, inte B:s.
+        ///
+        /// <b>⚠️ Bara incheckningar på banor som är LÄNKADE till den klubben räknas.</b> Klubben
+        /// intygar verksamhet på sin egen bana; ett pass på någon annans anläggning är inte dess sak
+        /// att gå i god för. Det är också därför switchen kräver en <c>ClubRangeLink</c> — utan
+        /// länkad bana finns ingenting att räkna.
+        ///
+        /// <b>⚠️ Bara pass med MemberId.</b> Den manuella banloggen (<c>ShotSourceManual</c>) skriver
+        /// sessioner utan medlem — de är anläggningsstatistik (antal skyttar, antal skott), inte
+        /// någons aktivitet.
+        /// </summary>
+        private async Task<List<MemberActivityEntry>> ReadRangeCheckInsAsync(int memberId, int year, int? clubId)
+        {
+            int club = clubId ?? PrimaryClubIdOf(memberId);
+            if (club <= 0) return new List<MemberActivityEntry>();
+            if (!ClubCountsRangeCheckIns(club)) return new List<MemberActivityEntry>();
+
+            List<int> rangeIds;
+            List<RangeCheckInRow> rows;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                var db = scope.Database;
+                rangeIds = db.Fetch<int>("SELECT RangeId FROM ClubRangeLink WHERE ClubId = @0", club);
+                if (rangeIds.Count == 0) return new List<MemberActivityEntry>();
+
+                var inList = string.Join(",", rangeIds.Select((_, i) => "@" + (i + 2)));
+                var args = new List<object> { memberId, year };
+                args.AddRange(rangeIds.Cast<object>());
+
+                rows = db.Fetch<RangeCheckInRow>(
+                    $@"SELECT s.Id, s.RangeId, s.[Date], s.StartTime, s.EndTime, s.ShotCount,
+                              s.ShotCountSource, s.LinkedCompetitionId, s.LinkedTrainingScoreId,
+                              r.Name AS RangeName
+                       FROM RangeActivitySession s
+                       JOIN ShootingRange r ON r.Id = s.RangeId
+                       WHERE s.MemberId = @0 AND YEAR(s.[Date]) = @1 AND s.RangeId IN ({inList})
+                       ORDER BY s.[Date], s.Id",
+                    args.ToArray());
+            }
+
+            var entries = new List<MemberActivityEntry>();
+            foreach (var r in rows)
+            {
+                var detail = new List<string>();
+                if (!string.IsNullOrWhiteSpace(r.RangeName)) detail.Add(r.RangeName!);
+                if (r.StartTime != null)
+                    detail.Add(r.EndTime != null
+                        ? $"{r.StartTime:hh\\:mm}–{r.EndTime:hh\\:mm}"
+                        : $"från {r.StartTime:hh\\:mm}");
+                if (r.ShotCount > 0) detail.Add($"{r.ShotCount} skott");
+
+                var entry = new MemberActivityEntry
+                {
+                    Date = r.Date,
+                    Kind = ActivityKind.RangeCheckIn,
+                    // En QR-skanning på banan har samma tillitsnivå som evenemangets QR-affisch: den
+                    // visar att telefonen var där, inte att en funktionär såg personen.
+                    Evidence = r.ShotCountSource == RangeConstants.ShotSourceQr
+                        ? ActivityEvidence.SelfRegistered
+                        : ActivityEvidence.FunctionaryRecorded,
+                    Title = "Incheckad på banan",
+                    Detail = detail.Count > 0 ? string.Join(" · ", detail) : null,
+                    SourceId = r.Id,
+                    SourceKind = MemberActivityEntry.SourceKindRangeCheckIn,
+                    // Ingen vapengrupp: en incheckning säger inte VAD som sköts. Under ett
+                    // vapengruppsfilter faller den därför bort, och det redovisas med antal.
+                    CountsAsActivity = true
+                };
+
+                // Lager 2: den explicita länken. ⚠️ Ingenting skriver kolumnerna i dag, så det här är
+                // förberedelse — men när de börjar fyllas är passet BEVISLIGEN samma tillfälle, och då
+                // ska samma-dag-gissningen inte få avgöra.
+                if (r.LinkedCompetitionId is > 0)
+                {
+                    entry.CountsAsActivity = false;
+                    entry.NotCountedReason = MemberActivitySummary.RedundantCheckInReason + ": tävling";
+                    entry.SameOccasionAs = $"{MemberActivityEntry.SourceKindCompetition}:{r.LinkedCompetitionId}";
+                }
+                else if (r.LinkedTrainingScoreId is > 0)
+                {
+                    entry.CountsAsActivity = false;
+                    entry.NotCountedReason = MemberActivitySummary.RedundantCheckInReason + ": träning";
+                    entry.SameOccasionAs = $"{MemberActivityEntry.SourceKindTraining}:{r.LinkedTrainingScoreId}";
+                }
+
+                entries.Add(entry);
+            }
+
+            return entries;
+        }
+
+        /// <summary>
+        /// Räknar klubben incheckning som aktivitet? Saknas doctype-egenskapen svarar
+        /// <c>GetValue&lt;bool&gt;</c> false, vilket är rätt standard — men det gör också att en
+        /// klubb som tror sig ha slagit på det tyst inte har det. Skrivvägen vägrar därför när
+        /// egenskapen saknas, i stället för att låta switchen se ut att fungera.
+        /// </summary>
+        private bool ClubCountsRangeCheckIns(int clubId)
+        {
+            try
+            {
+                var club = _contentService.GetById(clubId);
+                if (club == null || club.ContentType.Alias != "club") return false;
+                return club.GetValue<bool>(MemberActivitySummary.ClubActivityFromRangeCheckInProperty);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa incheckningsinställningen för klubb {ClubId}", clubId);
+                return false;
+            }
+        }
+
+        private int PrimaryClubIdOf(int memberId)
+        {
+            var member = _memberService.GetById(memberId);
+            if (member == null) return 0;
+            // ⚠️ primaryClubId är en STRÄNG-egenskap; GetValue<int> ger tyst 0.
+            int.TryParse(member.GetValue<string>("primaryClubId") ?? "", out int id);
+            return id;
+        }
+
+        private class RangeCheckInRow
+        {
+            public int Id { get; set; }
+            public int RangeId { get; set; }
+            public DateTime Date { get; set; }
+            public TimeSpan? StartTime { get; set; }
+            public TimeSpan? EndTime { get; set; }
+            public int ShotCount { get; set; }
+            public string? ShotCountSource { get; set; }
+            public int? LinkedCompetitionId { get; set; }
+            public int? LinkedTrainingScoreId { get; set; }
+            public string? RangeName { get; set; }
         }
 
         // ── Hjälpare ──────────────────────────────────────────────────

@@ -20,6 +20,26 @@
 *@
 @await Html.PartialAsync("_MemberActivitySummary")
 
+@*
+    Klubbens inställning för vad som räknas som aktivitet. Ligger HÄR och inte på Inställningar-fliken
+    (Stefans val 2026-09-01): den ändrar vad siffrorna på den här sidan betyder, och en inställning
+    som styr ett tal hör intill talet.
+*@
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <strong><i class="bi bi-sliders me-2"></i>Vad räknas som aktivitet</strong>
+    </div>
+    <div class="card-body py-2">
+        <div class="form-check form-switch mb-1">
+            <input class="form-check-input" type="checkbox" role="switch" id="aiRangeCheckInSwitch" disabled>
+            <label class="form-check-label" for="aiRangeCheckInSwitch">
+                Räkna <strong>incheckning på klubbens skjutbana</strong> som aktivitet
+            </label>
+        </div>
+        <div id="aiRangeCheckInHint" class="small text-muted">Laddar…</div>
+    </div>
+</div>
+
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
     <div>
         <h5 class="mb-1"><i class="bi bi-clipboard-check me-2"></i>Aktivitet &amp; Intyg</h5>
@@ -802,6 +822,84 @@
         }
         render();
         loadActivityDays();
+        loadRangeCheckInSetting();
+    }
+
+    /// Inställningen "räkna incheckning på banan som aktivitet".
+    ///
+    /// ⚠️ Switchen är AVSTÄNGD tills servern svarat, och förblir avstängd när förutsättningen saknas
+    /// — doctype-egenskapen eller en länkad skjutbana. En klickbar switch som inte kan sparas är
+    /// sämre än en låst med en förklaring intill.
+    async function loadRangeCheckInSetting() {
+        var sw = document.getElementById('aiRangeCheckInSwitch');
+        var hint = document.getElementById('aiRangeCheckInHint');
+        if (!sw || !hint) return;
+
+        try {
+            var r = await fetch('/umbraco/surface/Foreningsintyg/GetRangeCheckInSetting?clubId=' +
+                                encodeURIComponent(clubId), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) { hint.textContent = j.message || 'Kunde inte läsa inställningen.'; return; }
+
+            sw.checked = !!j.enabled;
+
+            if (!j.propertyExists) {
+                sw.disabled = true;
+                hint.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-1"></i>' +
+                    'Egenskapen <code>' + hpskEsc(j.propertyAlias) + '</code> saknas på klubb-doctypen. ' +
+                    'En sajtadministratör behöver lägga till den (True/False) i backoffice innan ' +
+                    'inställningen kan sparas.';
+                return;
+            }
+            if (!j.hasLinkedRange && !j.enabled) {
+                sw.disabled = true;
+                hint.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-1"></i>' +
+                    'Klubben har ingen länkad skjutbana. Länka en bana under <strong>Skjutbanor</strong> ' +
+                    'först — utan den finns inga incheckningar att räkna.';
+                return;
+            }
+
+            sw.disabled = false;
+            hint.innerHTML = j.enabled
+                ? '<i class="bi bi-info-circle me-1"></i>Incheckningar på klubbens ' +
+                  (j.rangeCount === 1 ? 'bana' : j.rangeCount + ' banor') + ' räknas som aktivitet. ' +
+                  'En incheckning som beskriver samma tillfälle som en tävling eller ett träningspass ' +
+                  'samma dag visas men räknas inte dubbelt.'
+                : '<i class="bi bi-info-circle me-1"></i>Incheckningar räknas inte. Slå på om klubben ' +
+                  'vill att ett besök på banan ska räknas som aktivitet även när inget resultat loggats.';
+
+            if (!sw.dataset.wired) {
+                sw.dataset.wired = '1';
+                sw.addEventListener('change', async function () {
+                    var want = sw.checked;
+                    sw.disabled = true;
+                    try {
+                        var fd = new FormData();
+                        fd.append('__RequestVerificationToken', meToken());
+                        fd.append('clubId', clubId);
+                        fd.append('enabled', want);
+                        var res = await fetch('/umbraco/surface/Foreningsintyg/SetRangeCheckInSetting',
+                                              { method: 'POST', body: fd, credentials: 'same-origin' });
+                        var d = await res.json();
+                        if (!d.success) {
+                            sw.checked = !want;          // rulla tillbaka: servern sparade inte
+                            alert(d.message || 'Kunde inte spara inställningen.');
+                        } else if (window._activityMemberId) {
+                            // Inställningen ändrar vad siffrorna betyder — läs om det som visas.
+                            loadActivity(window._activityMemberId, getVal('memberActivityYear') || null);
+                            loadActivityDays();
+                        }
+                    } catch (e) {
+                        sw.checked = !want;
+                        alert('Ett fel uppstod.');
+                    } finally {
+                        await loadRangeCheckInSetting();
+                    }
+                });
+            }
+        } catch (e) {
+            hint.textContent = 'Kunde inte läsa inställningen.';
+        }
     }
 
     /// Aktivitetsdagar för hela klubben i EN fråga.

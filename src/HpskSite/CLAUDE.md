@@ -2819,6 +2819,7 @@ Navigate to **Members → Member Groups**:
 - **regionalPage**: add `receiptEmail` Textstring property (optional, label "E-post på kvitto"). Same role as the club one — shown on the Kvitto for region-hosted comps, falls back to `contactEmail`. Surfaced in the region edit modal + regional Inställningar tab. Added 2026-06-11.
 - **competition**: add `closeRegistrationOnStartList` True/False property (optional, default false, label "Stäng självanmälan när startlistan publiceras"). Arrangörens val i publiceringsdialogen. **Default false = deploy ändrar ingenting för en tävling vars startlista redan är publicerad** — det är avsiktligt, inte försiktighet: en default-on hade stängt anmälan på levande tävlingar i deploy-ögonblicket utan att någon fick veta det. Utan egenskapen är `SetValue` en tyst no-op, så publiceringen **vägrar och namnger egenskapen** i stället för att rapportera en sparning som inte hände. Added 2026-08-31.
 - **clubSimpleEvent**: add `isMandatory` True/False property (optional, default false, label "Obligatoriskt deltagande"). Marks an event whose attendance is part of the club's Föreningsintyg decision. Klubbens OCH kretsens händelser delar doctype, så den gäller båda. Utan egenskapen är `SetValue` en tyst no-op — därför är kryssrutan avstängd och namnger egenskapen i stället för att se ut att fungera; allt annat (anmälan, reservplats, upprop) fungerar oförändrat. Kör även `Migrations/create-club-event-participant-table.sql`. Added 2026-08-31.
+- **club**: add `activityFromRangeCheckIn` True/False property (optional, default false, label "Incheckning på banan räknas som aktivitet"). Låter QR-incheckningar på klubbens länkade banor räknas i aktivitetssammanställningen. **Av som standard, så en deploy ändrar ingen klubbs siffror.** Utan egenskapen är `SetValue` en tyst no-op — därför **vägrar** skrivvägen och namnger egenskapen, och switchen renderas låst med förklaringen intill. Added 2026-09-01.
 - **competition**: add `teamResultSeriesCount` Integer property (optional, default 0, label "Antal serier i lagresultat"). How many series count toward a team's total — surfaced next to "Tillåt laganmälan" in the competition wizard + edit modals. 0/empty = auto (defaults to the qualification series count = `numberOfSeriesOrStations − numberOfFinalSeries`), so a 7+3 finals comp counts only the 7 qualifying series without any config. Set a value to override. Read by `CompetitionTeamController.GetTeamResultSeriesCount`. **The team-results-show-0 fix does NOT depend on this property** (the qualification default handles it); the property only adds explicit override. Missing property = silent no-op (auto default used). Added 2026-07-22.
 
 ### Märken (Pistolskyttemärket) ✅ Phase 1 (2026-05-31)
@@ -4241,6 +4242,74 @@ Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco
 **Omorganiseringen av ytorna 2026-09-01 är enbart vyer** — de är runtime-kompilerade, så de kan
 deployas som filer utan ombyggnad.
 **Fildeploy av KB:** `KnowledgeBase/docs/aktivitetssammanstallning.md` (ny).
+
+### Incheckning på banan som aktivitet (2026-09-01)
+
+Ett besök på banan där inget resultat loggades är ändå verksamhet, så en klubb kan låta QR-incheckningar
+räknas. **Klubbinställning, av som standard** — `club.activityFromRangeCheckIn` (True/False). Default av
+betyder att en deploy inte ändrar en enda klubbs siffror; att slå på den är ett beslut, inte något som
+händer av sig självt.
+
+**⚠️ Problemet inställningen skapar: ett tillfälle blir flera poster.** Någon skannar QR-koden på banan
+OCH loggar en träningsmatch samma kväll. `MemberActivitySummary.MarkRedundantCheckIns` löser det i tre
+lager, körda ur `From()` **före** något räknas:
+
+1. **Explicit länk** — passet bär `LinkedCompetitionId`/`LinkedTrainingScoreId`. ⚠️ **Lagret är
+   förberett men VILANDE: ingenting i kodbasen skriver de kolumnerna** (kontrollerat 2026-09-01). Det är
+   alltså regel 2 som gör arbetet i dag. Deduperingen får ändå aldrig ångra en satt länk — den länkade
+   posten kan ligga utanför årsurvalet.
+2. **Samma dag som en annan RÄKNAD post** — incheckningen visas men räknas inte, och skälet **namnger
+   den andra sortens post** ("Samma tillfälle som en annan post samma dag: tävling"). ⚠️ Regeln tittar
+   på de **räknade** posterna, inte på alla: en DNS-tävling räknas inte och får därför inte knuffa bort
+   incheckningen — medlemmen var på banan den dagen, och det är allt vi vet.
+3. **Två incheckningar samma dag** — in, ut och in igen är ett besök. Utan det lagret hade båda sett
+   "ingen annan post" och räknats, alltså dubbelräkning av precis det fall regeln finns för.
+
+**`ActivityDays` (distinkta datum) är i sig immun mot dubbelräkning** — det är grunden hela svaret står
+på. Lagren finns för att `CountedEntries`, `ByKind` och `ByEvidence` ska säga samma sak som dagsiffran.
+
+- **Underlaget:** `SelfRegistered` för en QR-skanning (affischen kan fotograferas), annars
+  `FunctionaryRecorded`. ⚠️ **Bara QR-incheckningar bär `MemberId`** — den manuella bulkloggen är
+  anläggningsstatistik utan person och kan aldrig bli någons aktivitet.
+- **Ingen vapengrupp.** En incheckning säger inte VAD som sköts, så den faller bort under ett
+  vapengruppsfilter och räknas då i `ExcludedWithoutWeaponGroup`.
+- **Bara banor ur `ClubRangeLink`** för den intygande klubben, och bara när klubbens inställning är på.
+- **Badgen i medlemslistan lånar samma inställning**, så badge och detaljvy inte kan säga emot varandra.
+
+**Två vägranden i `SetRangeCheckInSetting`, båda med flit:** saknad doctype-egenskap (`SetValue` är en
+TYST no-op — switchen hade sett ut att spara och återgått vid nästa laddning) och ingen länkad
+skjutbana när man slår PÅ. **Att slå AV är alltid tillåtet.** Switchen på klubbens Aktivitet & Intyg
+är låst med förklaringen intill när förutsättningen saknas — en klickbar switch som inte kan sparas är
+sämre än en låst som säger varför.
+
+**Operatörssteg:** lägg till `club.activityFromRangeCheckIn` (True/False, valfri, av). Adds C# → full
+ombyggnad. Ingen SQL.
+
+Verifierat **10 nya enhetstest** i `MemberActivitySummaryTests` (46/46 i klassen — de tre lagren, att
+en ensam incheckning räknas, att en DNS inte knuffar bort den, och att en satt länk respekteras) och
+**148/148 `hpsk-verify/foreningsintyg-verify.mjs`**, två körningar i rad.
+
+⚠️ **Sviten SKRIVER: den slår PÅ inställningen och återställer klubbens eget val i `finally`.** Det
+är enda sättet att mäta den halva som är hela poängen. Den bygger sin egen `RangeActivitySession`-fixtur
+(dev har noll incheckningsrader) och mäter, i tur och ordning: att grinden håller med inställningen AV,
+att incheckningen syns med underlag `SelfRegistered` när den slås på, att en ensam incheckning räknas
+och ökar dagsiffran med exakt en, att **en incheckning samma dag som en räknad tävling** syns men inte
+räknas och lämnar dagsiffran orörd, att två incheckningar samma dag är ett besök, och att **badgen i
+medlemslistan svarar samma sak som detaljvyn** (två skilda kodvägar, som lånar räknereglerna av varandra
+just för att inte glida isär).
+
+⚠️ **Samma-dag-provet bär ett KONTROLLPROV** — att postantalet ökade. Utan det kunde "oförändrade
+aktivitetsdagar" lika gärna betyda att incheckningen aldrig lästes in, alltså ett vakuöst grönt
+påstående om precis den regel som prövas.
+
+⚠️ **Fälla i sviten:** en räkning över *alla* incheckningsposter mäter fel dag så snart samma-dag-provet
+lagt en post på ett annat datum — den rapporterade 3 där 2 var rätt, och läste som ett produktfel.
+Scopa varje sådant påstående till sitt datum.
+
+**Fynd på vägen:** `SameOccasionAs` fanns på modellen men **saknades i JSON-projektionen**. Skälet på
+raden namnger *sorten* ("...: tävling"); nyckeln identifierar *vilken* post. Utan nyckeln kan varken
+gränssnittet eller en verifiering visa vad incheckningen ansågs vara samma tillfälle som — påståendet
+var alltså inte granskningsbart.
 
 ## Föreningsintyg — utfärdande och utskrift, fas 1 (2026-09-01)
 
