@@ -46,6 +46,7 @@ namespace HpskSite.Models
         //   "note"     — heading + Anteckningar only (no Beslut)
         //   "text"     — heading + Anteckningar + Beslut (the original behaviour; also "Övrigt")
         //   "election" — pick ElectionCount present persons; ElectionRole maps them to a signing role.
+        //   "awards"   — årsmötets utdelning av märken/medaljer; listan ligger i AwardsData.
         public string ItemType { get; set; } = "text";
         // For ItemType="election": "chairman" / "secretary" / "adjuster" (sets the attendee flag that
         // drives the protokoll signatures), or "" for a generic election (e.g. valberedning).
@@ -56,6 +57,12 @@ namespace HpskSite.Models
         public string ElectionSource { get; set; } = "attendees";
         // CSV of elected member ids (the persons chosen in an election item).
         public string? ElectedMemberIds { get; set; }
+
+        // For ItemType="awards": the year's handout list as a JSON SNAPSHOT, with what happened when
+        // each name was read out. See BoardMeetingAwards — it is deliberately not re-derived on read,
+        // because the ledger it came from keeps changing and a protokoll must not.
+        // NULL = no list fetched yet; the read path then shows nothing rather than building one.
+        public string? AwardsData { get; set; }
     }
 
     [TableName("BoardMeetingAttendees")]

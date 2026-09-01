@@ -3,7 +3,7 @@ namespace HpskSite.Models
     /// <summary>
     /// Ready-made, typed agenda items. The agenda editor offers these in a dropdown (plus the free-named
     /// "Övrigt"); meeting-type templates and saved club templates are just ordered lists of these keys.
-    /// Each item carries its ItemType (note/text/election) so it renders + prints with the right fields.
+    /// Each item carries its ItemType (note/text/election/awards) so it renders + prints with the right fields.
     /// "election" items with a role (chairman/secretary/adjuster) drive who signs/justerar the protokoll.
     /// </summary>
     public static class BoardAgendaItemCatalog
@@ -12,7 +12,7 @@ namespace HpskSite.Models
         {
             public string Key { get; set; } = "";
             public string Heading { get; set; } = "";
-            public string ItemType { get; set; } = "text";   // note / text / election
+            public string ItemType { get; set; } = "text";   // note / text / election / awards
             public string? ElectionRole { get; set; }         // chairman / secretary / adjuster / "" (generic)
             public int ElectionCount { get; set; } = 1;
             public string ElectionSource { get; set; } = "attendees";   // attendees / members
@@ -54,6 +54,13 @@ namespace HpskSite.Models
             new AgendaItemDef { Key = "medlemsavgift",       Heading = "Fastställande av medlemsavgift",            ItemType = "text" },
             new AgendaItemDef { Key = "verksamhetsplan-budget",Heading = "Fastställande av verksamhetsplan och budget", ItemType = "text" },
             new AgendaItemDef { Key = "motioner",            Heading = "Behandling av motioner och propositioner",  ItemType = "text" },
+            // Utdelningen av årets märken och medaljer. Underlaget är färdigberäknat sedan tidigare
+            // (MarkenOrderListService bygger både beställnings- och utdelningslistan) — det som
+            // saknades var vägen in i protokollet, som är klubbens enda beständiga uppgift om vem
+            // som faktiskt FICK sitt märke. Den utskrivna listan säger vem som SKULLE få, och den
+            // som inte är på årsmötet får sitt senare eller aldrig.
+            new AgendaItemDef { Key = "utmarkelser",         Heading = "Utdelning av märken och medaljer",          ItemType = "awards",
+                                Hint = "Hämtar årets utdelningslista ur märkesliggaren. Pricka av vem som tog emot — det följer med i protokollet." },
             new AgendaItemDef { Key = "val-foreningsordforande",Heading = "Val av ordförande",                      ItemType = "text", Hint = "Val av föreningens ordförande (antecknas som beslut)." },
             new AgendaItemDef { Key = "val-ledamoter",       Heading = "Val av styrelseledamöter och suppleanter",  ItemType = "text" },
             new AgendaItemDef { Key = "val-revisorer",       Heading = "Val av revisorer",                          ItemType = "text" },

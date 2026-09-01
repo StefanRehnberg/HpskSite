@@ -26,6 +26,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly EmailService _emailService;
         private readonly ClubService _clubService;
+        private readonly MarkenOrderListService _markenOrderList;
         private readonly IDataProtector _protector;
         private readonly ILogger<BoardMeetingController> _logger;
 
@@ -43,6 +44,7 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             EmailService emailService,
             ClubService clubService,
+            MarkenOrderListService markenOrderList,
             IDataProtectionProvider dataProtection,
             ILogger<BoardMeetingController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -54,6 +56,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _emailService = emailService;
             _clubService = clubService;
+            _markenOrderList = markenOrderList;
             _protector = dataProtection.CreateProtector("Board.Justering.v1");
             _logger = logger;
         }
@@ -142,7 +145,11 @@ namespace HpskSite.Controllers
                         a.ItemType, electionRole = a.ElectionRole ?? "", a.ElectionCount, a.ElectionSource,
                         electedMemberIds = eids,
                         // Aligned 1:1 with electedMemberIds (may contain "" if a member was deleted).
-                        electedNames = eids.Select(id => nameById.TryGetValue(id, out var nm) ? nm : "").ToArray()
+                        electedNames = eids.Select(id => nameById.TryGetValue(id, out var nm) ? nm : "").ToArray(),
+                        // ⚠️ Only a SUMMARY of an awards item here, never the rows. This payload is
+                        // re-read on every meeting open, and the full handout list is long; the rows
+                        // come from GetAgendaAwards when the item is actually looked at.
+                        awardsSummary = AwardsSummaryDto(a)
                     };
                 }),
                 attendees = attendees.Select(AttendeeDto),
@@ -414,6 +421,124 @@ namespace HpskSite.Controllers
             return Json(new { success = ok });
         }
 
+        // ---- Awards item (årsmötets utdelning av märken och medaljer) -------
+
+        /// <summary>
+        /// Läser utdelningspunktens lista. Utan <paramref name="refresh"/> returneras den lagrade
+        /// snapshotten oförändrad; med refresh hämtas årets underlag ur märkesliggaren och slås
+        /// samman med redan antecknade statusar.
+        ///
+        /// <para><b>⚠️ En läsning hämtar aldrig av sig själv.</b> Protokollet ska visa vad som
+        /// beslutades, och en automatisk omhämtning vid varje läsning skulle låta en ändring i
+        /// liggaren skriva om en punkt någon redan prickat av.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAgendaAwards(int agendaItemId, int? year = null, bool refresh = false)
+        {
+            var mid = _meetingService.GetAgendaItemMeetingId(agendaItemId);
+            if (mid == null || !await CanAccessMeeting(mid.Value))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var meeting = _meetingService.GetMeeting(mid.Value);
+            if (meeting == null) return Json(new { success = false, message = "Mötet hittades inte." });
+
+            var stored = _meetingService.GetAgendaAwards(agendaItemId);
+            int defaultYear = BoardMeetingService.DefaultAwardsYear(meeting);
+
+            // ⚠️ Utdelningslistan är KLUBBSCOPAD (MarkenOrderListService tar ett clubId, och märken
+            // hör till en klubbmedlem). En kretsstyrelse har alltså ingen lista — säg det, i stället
+            // för att visa en tom lista som läses som "ingen fick något i år".
+            if (meeting.OwnerType != DocumentOwnerType.Club)
+                return Json(new
+                {
+                    success = true,
+                    supported = false,
+                    year = year ?? defaultYear,
+                    defaultYear,
+                    message = "Märken och medaljer delas ut av klubben, så det finns ingen " +
+                              "utdelningslista för en krets. Punkten kan ändå användas för att " +
+                              "anteckna vad som delades ut.",
+                    awards = (object?)null
+                });
+
+            var result = stored;
+            if (refresh || stored == null)
+            {
+                int y = year ?? stored?.Year ?? defaultYear;
+                var list = await _markenOrderList.BuildAsync(meeting.OwnerId, y);
+                var fresh = BoardMeetingAwards.FromOrderList(list);
+                // Slå samman så en omhämtning inte raderar avprickningen (se BoardMeetingAwards.Merge).
+                result = BoardMeetingAwards.Merge(fresh, stored);
+
+                // Spara bara när något faktiskt begärdes eller när punkten var tom — en ren läsning
+                // ska inte skriva.
+                if (refresh || stored == null)
+                    _meetingService.SaveAgendaAwards(agendaItemId, result);
+            }
+
+            return Json(new
+            {
+                success = true,
+                supported = true,
+                defaultYear,
+                locked = meeting.Status == "Justerat",
+                year = result?.Year ?? defaultYear,
+                awards = result == null ? null : new
+                {
+                    year = result.Year,
+                    capturedAt = result.CapturedAt.ToString("yyyy-MM-dd HH:mm"),
+                    recipientCount = result.RecipientCount,
+                    orderableCount = result.OrderableCount,
+                    receivedCount = result.ReceivedCount,
+                    absentCount = result.AbsentCount,
+                    laterCount = result.LaterCount,
+                    uncalledCount = result.UncalledCount,
+                    rows = result.Rows.Select(r => new
+                    {
+                        r.MemberId, r.Name, r.Group, r.Item, r.Detail,
+                        r.Orderable, r.Unverified, r.Status, r.Note, r.NoLongerInLedger,
+                        statusLabel = BoardMeetingAwards.StatusLabel(r.Status)
+                    })
+                }
+            });
+        }
+
+        /// <summary>
+        /// Prickar av EN rad: vad hände när namnet lästes upp.
+        ///
+        /// <para><b>⚠️ Vägrar på ett justerat protokoll.</b> Utdelningsraden ÄR protokolluppgiften
+        /// om vem som fick sitt märke, och ett justerat protokoll är underskrivet. Vägen tillbaka är
+        /// "Återöppna för redigering", som redan finns och nollställer signaturerna.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetAgendaAwardStatus(int agendaItemId, int memberId,
+            string group, string item, string? status, string? note)
+        {
+            var mid = _meetingService.GetAgendaItemMeetingId(agendaItemId);
+            if (mid == null || !await CanAccessMeeting(mid.Value))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var meeting = _meetingService.GetMeeting(mid.Value);
+            if (meeting?.Status == "Justerat")
+                return Json(new
+                {
+                    success = false,
+                    message = "Protokollet är justerat och kan inte ändras. Använd " +
+                              "\"Återöppna för redigering\" om något behöver rättas."
+                });
+
+            if (!BoardMeetingAwards.IsValidStatus(status))
+                return Json(new { success = false, message = "Ogiltig status." });
+
+            var ok = _meetingService.SetAgendaAwardStatus(agendaItemId, memberId, group, item, status, note);
+            return Json(new
+            {
+                success = ok,
+                message = ok ? null : "Raden hittades inte i listan. Hämta listan igen."
+            });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateAgendaItem(int agendaItemId, string heading, string? discussion, string? decision)
@@ -632,6 +757,28 @@ namespace HpskSite.Controllers
             kallelseSentDate = m.KallelseSentDate?.ToString("yyyy-MM-dd"),
             m.KallelseRecipientCount
         };
+
+        /// <summary>
+        /// Kort lägesrapport för en utdelningspunkt — inte raderna. null när punkten inte är en
+        /// utdelningspunkt eller ingen lista är hämtad, vilket är just den skillnad kortet i
+        /// dagordningen behöver för att erbjuda "Hämta listan" i stället för en tom tabell.
+        /// </summary>
+        private static object? AwardsSummaryDto(BoardMeetingAgendaItem a)
+        {
+            if (a.ItemType != "awards") return null;
+            var aw = BoardMeetingAwards.FromJson(a.AwardsData);
+            if (aw == null) return null;
+            return new
+            {
+                year = aw.Year,
+                rowCount = aw.Rows.Count,
+                recipientCount = aw.RecipientCount,
+                receivedCount = aw.ReceivedCount,
+                absentCount = aw.AbsentCount,
+                laterCount = aw.LaterCount,
+                uncalledCount = aw.UncalledCount
+            };
+        }
 
         private static object AttendeeDto(BoardMeetingAttendee a) => new
         {

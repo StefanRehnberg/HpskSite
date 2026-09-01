@@ -3419,6 +3419,112 @@ marken-compseries-sync 59/59.
 
 Adds C# → full rebuild. **Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.**
 
+### Årsmötets utdelning — märkeslistan in i protokollet (2026-09-01)
+
+Märkesarbetets sista halva. **Beställningshalvan byggdes 2026-08-31** (`MarkenOrderListService` ger
+både beställnings- och utdelningslistan, och kortet "Att beställa och dela ut" skriver ut båda). Det
+som saknades var vägen in i **protokollet** — klubbens enda beständiga uppgift om vem som faktiskt
+**FICK** sitt märke. Den utskrivna listan säger vem som **SKULLE** få, och den som inte är på
+årsmötet får sitt senare eller aldrig.
+
+Byggt som en **dagordningspunkt**, inte som en ny beräkning: underlaget var redan färdigt.
+`BoardAgendaItemCatalog` fick nyckeln `utmarkelser` med den nya punkttypen **`awards`**, seedad i
+`BoardMeetingTemplates`-mallen `Arsmote` **efter valen och före Övriga frågor** — ceremonin hör sist
+i mötet, men en punkt som ligger efter "Övriga frågor" faller bort när mötet börjar avrundas.
+
+**⚠️⚠️ KÖR `Migrations/add-awardsdata-to-board-agenda-items.sql` FÖRE DEPLOYEN, INTE EFTER.**
+Så snart `BoardMeetingAgendaItem` bär `AwardsData` genererar NPoco:s `db.Update()` ett
+`SET … AwardsData = @n` för **varje** punkttyp. Saknas kolumnen kraschar alltså inte bara
+utdelningspunkten utan varje sparning av en rubrik, en anteckning, ett beslut och ett personval —
+hela dagordningsredigeringen. (`SELECT *` tolererar den saknade kolumnen; `UPDATE` gör det inte.)
+Samma fälla som `FaltskyttePatrol.DepartedAt`. **Körd i prod 2026-09-01, före deploy.**
+
+**⚠️ Listan är en SNAPSHOT på punkten, aldrig en läsning.** Utdelningslistan är HÄRLEDD ur
+märkesliggaren — vilket är rätt för beställningskortet, som alltid ska visa nuläget. Ett protokoll är
+däremot en **handling**: ett märke kan makuleras, en valör rättas, en egenrapporterad medalj avvisas,
+en medlem byta klubb. En läsning hade alltså tyst ändrat vad årsmötet står som att ha delat ut, i
+efterhand, utan att något sa ifrån. Samma mönster och samma skäl som
+`MemberCertificateIssue.Snapshot` och `MemberMerge.LoserSnapshot`.
+- **En egen kolumn, inte en ny tabell:** raden hör till EN dagordningspunkt och lever exakt så länge
+  punkten gör. En tabell hade behövt egen livscykel och egen behörighetsväg för en fråga som bara
+  ställs inifrån punkten.
+- **JSON, versionerat**, så formen kan utökas utan migrering. Läsning är därför alltid defensiv:
+  `BoardMeetingAwards.FromJson` returnerar **null** för tom/trasig data — aldrig ett tomt objekt,
+  eftersom anroparen måste kunna skilja *"ingen lista hämtad"* från *"en hämtad lista utan rader"*.
+  Det första ska visa en hämta-knapp, det andra ska säga att året var tomt.
+
+**⚠️ `BoardMeetingAwards.Merge` finns för att en omhämtning inte ska radera avprickningen.** Listan
+kan ändras medan mötet pågår — någon validerar en kvarglömd serie, eller sekreteraren hämtade fel år
+först. Utan sammanslagningen vore "Hämta om listan" en knapp som tystnadslöst slänger arbetet som
+redan gjorts i rummet. Matchar på **(medlem, grupp, artikel)**. En rad som hunnit få en status men
+försvunnit ur liggaren **behålls och flaggas** (`NoLongerInLedger`) — protokollet beskriver vad som
+hände i rummet, inte vad liggaren säger i efterhand.
+
+**⚠️ TRE lägen plus FRÅNVARON av läge.** `Mottaget` / `Franvarande` / `Senare`, och **`null` = "inte
+upplast"**, vilket är ett eget tillstånd och **inte** frånvaro. Ett årsmöte där sekreteraren inte hann
+pricka av får inte protokollföras som att ingen fick sitt märke — exakt samma regel som
+evenemangsuppropets tredje läge. Utskriften skriver därför ut **"Inte upplast"** i klartext; ett tomt
+fält läses som frånvaro. Antalet oupplasta sägs dessutom uttryckligen under tabellen.
+
+**Året föreslås som mötesåret MINUS ETT** (`BoardMeetingService.DefaultAwardsYear`): ett årsmöte
+behandlar föregående verksamhetsår — det är vad verksamhetsberättelsen, den ekonomiska berättelsen
+och ansvarsfriheten handlar om — så märkena som delas ut är föregående års skörd. **Bara ett
+förslag**; sekreteraren kan byta år, eftersom ett möte som hålls i efterhand eller en klubb som delar
+ut två år på en gång inte får låsas av vår gissning.
+
+**Skrivningen sker PER RAD** (`SetAgendaAwardStatus`), inte som en hel blob: mötet prickar av en
+person i taget och två sekreterare kan ha punkten öppen samtidigt — en helblobbskrivning från den ena
+hade skrivit över den andras avprickning.
+
+**Två vägranden:**
+- `SaveAgendaAwards` vägrar på en punkt som **inte** är en utdelningspunkt. `AwardsData` ligger på en
+  tabell som delas av alla punkttyper, så en felriktad skrivning hade lagrats tyst och aldrig visats
+  någonstans — vilket läser som att sparningen inte fungerade.
+- **Ett JUSTERAT protokoll vägrar avprickning.** Utdelningsraden ÄR protokolluppgiften om vem som fick
+  sitt märke, och ett justerat protokoll är underskrivet; svaret pekar på **"Återöppna för
+  redigering"**, som redan finns och nollställer signaturerna. ⚠️ **De ÖVRIGA agendaskrivningarna
+  saknar den spärren** (`UpdateAgendaItem`, `SaveAgendaElection` — låsningen är bara klientsidig där).
+  Det är en befintlig lucka, inte något det här arbetet införde; egen post i backloggen.
+
+**⚠️ En KRETS får en förklaring, inte en tom lista.** `MarkenOrderListService` tar ett `clubId` och
+märken hör till klubbens medlemmar, så en kretsstyrelse har ingen utdelningslista. `supported:false`
+med ett meddelande i klartext — en tom lista hade lästs som *"ingen fick något i år"*, vilket är ett
+helt annat påstående.
+
+**⚠️ Knapparna bär ett INDEX, aldrig radens text.** Ett `onclick` byggt av strängar med
+enkelfnutt-escaping är precis den lucka som gav kodexekvering i Fältskyttes "lägg till skytt" — ett
+dubbelfnutt avslutar attributet. Raderna ligger i `window._awRows[itemId]`.
+
+**⚠️ Mallredigerarens typväljare måste erbjuda `awards`** (`Styrelse.cshtml`). Utan alternativet står
+väljaren på "Anteckningar" för en utdelningspunkt, och nästa sparning av klubbens egen mall skulle
+TYST göra om den till en anteckning — punkten står kvar men tappar hela listan. Hittat och åtgärdat i
+samma omgång; sviten assertar att alternativet finns.
+
+**Ytor:** dagordningspunkten i `Views/Styrelse.cshtml` (`loadAwards` / `renderAwards` /
+`setAwardStatus`, plus ett låst läge för ett justerat protokoll) · protokollet och dagordningen i
+`Views/StyrelseProtokoll.cshtml` (dagordningen listar **vad** som ska delas ut men **ingen** status —
+den skickas ut före mötet och kan inte veta vem som kom) · en **pekare** från Märken-flikens
+beställningskort till `/styrelse`, så vägen går att hitta för den som står där i januari.
+`table.awards` sätter `page-break-inside: avoid` på raden, så en mottagares namn aldrig hamnar på en
+annan sida än sin utmärkelse.
+
+Verifierat **69/69 `hpsk-verify/styrelse-utmarkelser-verify.mjs`**. Sviten SKRIVER: den skapar ett
+riktigt årsmöte, lägger två märken i SQL ett gammalt år, prickar av, och raderar allt i sitt
+`finally` med en SQL-städning som sista utpost. ⚠️ **Fällor den dokumenterar:** assertera
+mottagarens namn **som listan bär det**, inte ett namn skrivet in i testet (en första version letade
+efter fixturnamnet ur en ANNAN svit och rödmarkerade en korrekt rendering); och `DeleteMeeting`
+**soft-deletar** (`IsActive=0`), så fixturmötena måste rensas hårt i SQL för att nästa körning inte
+ska ärva dem. Regression: marken-orderlist **71/71**, marken-compseries-sync 59/59,
+foreningsintyg 148/148, activity-summary 103/103, enhetstest 725 passerade (samma 17 befintliga röda
+som på HEAD, alla i orelaterade sviter).
+
+⚠️ **Notera:** marken-orderlist mäter **71/71**, medan den här filen tidigare angav 74/74. Sviten är
+komplett — den har en enda villkorad gren och den **avbryter** i stället för att hoppa, så det finns
+inga tysta bortfall. Siffran 74 reproducerar inte; 71 är det mätta värdet 2026-09-01.
+
+Adds C# → **full ombyggnad**. **En SQL-migrering, som ska köras FÖRE deployen.** Ingen
+doctype-egenskap, ingen Umbraco-nod.
+
 ### Märken: "Spara som Guldserie/Snabbserie" from Resultat-entry + Training match (2026-06-10)
 A shooter can turn a single just-shot **5-shot series** into a Märken submission from two more places besides the "Jag har skjutit en Guldserie" button on Min sida: the manual **Resultat-entry** modal (`TrainingScoreEntry.cshtml`) and a **Training match** (`TrainingMatchScoreEntry.cshtml`). Per-series, shot-by-shot only — NOT offered in serie-total / total-only entry (no per-shot data).
 - **Discipline → series routing (the crux):** only two disciplines map to a per-series prov. **Precision → Guldserie** (`SeriesType=Precision`, 5 shots) → feeds Pistolskyttemärkets guldfodring part 1 + Elit precision. **Duell → Snabbserie** (`SeriesType=Speed`, `Target=Snabbpistol_25m`, scored 0–50) → feeds **Elitmärket** (needs Guldmärke), *not* the guldfodring (Duell on snabbpistoltavla is the Elit speed series, not a tillämpningsserie). Milsnabb/MagnumPrecision/NatHelmatch/Springskytte map to no per-series prov → button hidden. Weapon group (A/B/C/R) derived from the shooter's class (manual: `#shootingClass`; match: `currentMatch.weaponClass`); button hidden for M/L/unknown.

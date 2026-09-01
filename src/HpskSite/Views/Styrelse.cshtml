@@ -446,6 +446,18 @@
             let body;
             if (type === 'election') {
                 body = electedDisplay.length ? `<div class="mt-1">Valda: <strong>${electedDisplay.map(esc).join(', ')}</strong></div>` : '';
+            } else if (type === 'awards') {
+                // Justerat protokoll: bara utfallet, inga knappar. Raderna hämtas som vanligt så
+                // listan går att läsa på skärmen — protokollutskriften renderar samma sak server-side.
+                const s = it.awardsSummary;
+                body = s
+                    ? `<div class="mt-1">Utdelning ${s.year}: <strong>${s.receivedCount}</strong> mottog`
+                      + `${s.absentCount ? `, ${s.absentCount} ej närvarande` : ''}`
+                      + `${s.laterCount ? `, ${s.laterCount} delas ut senare` : ''}`
+                      + `${s.uncalledCount ? `, ${s.uncalledCount} inte upplast` : ''}.</div>`
+                      + `<div id="aw_body_${it.id}" class="mt-2"></div>`
+                    : '<div class="mt-1 sv-help">Ingen utdelningslista hämtades till mötet.</div>';
+                if (s) setTimeout(() => loadAwards(it.id, null, false), 0);
             } else {
                 body = `${it.discussion ? `<div class="mt-1" style="white-space:pre-wrap;">${esc(it.discussion)}</div>` : ''}`
                     + `${type !== 'note' && it.decision ? `<div class="mt-1"><strong>Beslut:</strong> <span style="white-space:pre-wrap;">${esc(it.decision)}</span></div>` : ''}`;
@@ -488,6 +500,23 @@
                 : '<p class="sv-help mb-0">Inga närvarande att välja – markera närvaro först.</p>';
             fields = `<label class="sv-help">Välj ${count === 1 ? 'en person' : count + ' personer'} bland de närvarande</label>
                 <div class="mb-1">${boxes}</div>`;
+        } else if (type === 'awards') {
+            // Årets utdelningslista. Underlaget är färdigt sedan tidigare (märkesliggaren) — det som
+            // saknades var vägen in i protokollet. Raderna hämtas separat (de kan vara många) och
+            // ritas i #aw_body_.
+            const s = it.awardsSummary;
+            const yr = s ? s.year : (window._mYear || new Date().getFullYear()) - 1;
+            fields = `<div class="d-flex gap-2 flex-wrap align-items-center mb-2 sv-noprint">
+                    <label class="sv-help mb-0" for="aw_year_${it.id}">Verksamhetsår</label>
+                    <input type="number" class="form-control form-control-sm" style="width:100px;"
+                           id="aw_year_${it.id}" value="${yr}">
+                    <button class="btn btn-sm btn-outline-primary" onclick="loadAwards(${it.id}, null, true)">
+                        <i class="bi bi-arrow-repeat me-1"></i>${s ? 'Hämta om listan' : 'Hämta årets lista'}
+                    </button>
+                    <span class="sv-help">Årsmötet delar ut föregående års märken.</span>
+                </div>
+                <div id="aw_body_${it.id}">${s ? '' : '<p class="sv-help mb-0">Ingen lista hämtad än.</p>'}</div>`;
+            if (s) setTimeout(() => loadAwards(it.id, null, false), 0);
         } else {
             fields = `<label class="sv-help">Anteckningar</label>
                 <textarea class="form-control mb-2" rows="2" id="ag_disc_${it.id}" onchange="saveAgenda(${it.id})" placeholder="Vad sas under punkten?">${esc(it.discussion || '')}</textarea>`;
@@ -541,6 +570,101 @@
         post('BoardMeeting', 'SaveAgendaElection', { agendaItemId: itemId, memberIds: ids.join(',') })
             .then(r => { if (r.success) flash($('ag_saved_' + itemId)); });
     };
+    // ── Utdelning av märken och medaljer (ItemType "awards") ─────────────────
+    //
+    // ⚠️ Statusen sätts PER RAD mot servern, inte som en hel blob. Mötet prickar av en person i
+    // taget, och två sekreterare kan ha punkten öppen samtidigt — en helblobbskrivning från den ena
+    // hade skrivit över den andras avprickning.
+    window.loadAwards = function (itemId, year, refresh) {
+        const body = $('aw_body_' + itemId);
+        if (!body) return;
+        const yEl = $('aw_year_' + itemId);
+        const y = year || (yEl ? yEl.value : '') || '';
+        if (refresh) body.innerHTML = '<p class="sv-help mb-0">Hämtar listan…</p>';
+
+        get('BoardMeeting', 'GetAgendaAwards', { agendaItemId: itemId, year: y, refresh: !!refresh })
+            .then(r => {
+                if (!r.success) { body.innerHTML = `<p class="text-danger mb-0">${esc(r.message || 'Kunde inte hämta listan.')}</p>`; return; }
+                // En kretsstyrelse har ingen utdelningslista — märken hör till klubbens medlemmar.
+                if (r.supported === false) { body.innerHTML = `<p class="sv-help mb-0">${esc(r.message)}</p>`; return; }
+                renderAwards(itemId, r);
+            })
+            .catch(() => { body.innerHTML = '<p class="text-danger mb-0">Fel vid inläsning.</p>'; });
+    };
+
+    // ⚠️ Knappen bär ett INDEX, aldrig radens text. Ett onclick byggt av strängar med
+    // enkelfnutt-escaping är precis den lucka som gav kodexekvering i Fältskyttes "lägg till skytt"
+    // — ett dubbelfnutt avslutar attributet. Raderna ligger i window._awRows.
+    function awStatusBtn(itemId, idx, r, value, label, cls) {
+        const on = (r.status || null) === value;
+        // Klick på ett redan valt läge nollar det — tillbaka till "inte upplast", som är ett eget
+        // tillstånd och inte samma sak som frånvaro.
+        const send = on ? '' : value;
+        return `<button type="button" class="btn btn-sm ${on ? cls : 'btn-outline-secondary'}"
+                    onclick="setAwardStatus(${itemId}, ${idx}, '${send}')"
+                    title="${on ? 'Klicka igen för att nollställa' : esc(label)}">${esc(label)}</button>`;
+    }
+
+    function renderAwards(itemId, r) {
+        const body = $('aw_body_' + itemId);
+        const a = r.awards;
+        if (!a || !a.rows || !a.rows.length) {
+            body.innerHTML = `<p class="sv-help mb-0">Inga märken eller medaljer att dela ut för ${esc(a ? a.year : '')}.</p>`;
+            return;
+        }
+        const locked = !!r.locked;
+
+        // Raderna behålls per punkt så knapparna kan referera dem med index i stället för att bära
+        // texten i ett attribut.
+        window._awRows = window._awRows || {};
+        window._awRows[itemId] = a.rows;
+
+        let html = `<div class="mb-2 sv-help">Hämtad ${esc(a.capturedAt)} · ${a.recipientCount} mottagare · `
+            + `${a.orderableCount} föremål`
+            + (a.uncalledCount ? ` · <strong>${a.uncalledCount} inte upplast</strong>` : '')
+            + `</div><div class="table-responsive"><table class="table table-sm align-middle mb-0"><tbody>`;
+
+        let lastMember = null;
+        a.rows.forEach((row, idx) => {
+            // Gruppera visuellt per person: det är en person som kallas fram, inte en rad.
+            const newMember = row.memberId !== lastMember;
+            lastMember = row.memberId;
+            html += `<tr${newMember ? ' style="border-top:2px solid var(--bs-border-color);"' : ''}>
+                <td style="min-width:150px;">${newMember ? `<strong>${esc(row.name)}</strong>` : ''}</td>
+                <td>${esc(row.item)}
+                    <div class="sv-help">${esc(row.group)}${row.detail ? ' · ' + esc(row.detail) : ''}</div>
+                    ${row.orderable ? '' : '<span class="badge bg-secondary-subtle text-secondary">inget märke</span> '}
+                    ${row.unverified ? '<span class="badge bg-warning-subtle text-warning-emphasis">ej granskad</span> ' : ''}
+                    ${row.noLongerInLedger ? '<span class="badge bg-danger-subtle text-danger">finns inte längre i liggaren</span>' : ''}
+                </td>
+                <td class="text-end" style="white-space:nowrap;">`;
+            if (locked) {
+                html += `<span class="badge ${row.status === 'Mottaget' ? 'bg-success' : row.status ? 'bg-secondary' : 'bg-light text-muted border'}">${esc(row.statusLabel)}</span>`;
+            } else {
+                html += `<span class="btn-group btn-group-sm sv-noprint">`
+                    + awStatusBtn(itemId, idx, row, 'Mottaget', 'Mottaget', 'btn-success')
+                    + awStatusBtn(itemId, idx, row, 'Franvarande', 'Ej närv.', 'btn-secondary')
+                    + awStatusBtn(itemId, idx, row, 'Senare', 'Senare', 'btn-warning')
+                    + `</span>`;
+            }
+            html += `</td></tr>`;
+        });
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+    }
+
+    window.setAwardStatus = function (itemId, idx, status) {
+        const row = ((window._awRows || {})[itemId] || [])[idx];
+        if (!row) { alert('Raden kunde inte läsas. Hämta listan igen.'); return; }
+        post('BoardMeeting', 'SetAgendaAwardStatus',
+             { agendaItemId: itemId, memberId: row.memberId, group: row.group, item: row.item, status: status || '' })
+            .then(rr => {
+                if (!rr.success) { alert(rr.message || 'Kunde inte spara.'); return; }
+                flash($('ag_saved_' + itemId));
+                loadAwards(itemId, null, false);
+            });
+    };
+
     // "members"-source election: search any club/region member, then add/remove from the chosen set.
     let elTimer = null;
     window.elSearch = function (itemId, q) {
@@ -847,6 +971,10 @@
                     <option value="note" ${it.itemType === 'note' ? 'selected' : ''}>Anteckningar</option>
                     <option value="text" ${it.itemType === 'text' ? 'selected' : ''}>Beslut</option>
                     <option value="election" ${it.itemType === 'election' ? 'selected' : ''}>Personval</option>
+                    @* ⚠️ Måste finnas här. Utan alternativet står väljaren på "Anteckningar" för en
+                       utdelningspunkt, och nästa sparning av mallen skulle TYST göra om den till en
+                       anteckning — punkten skulle se ut att finnas kvar men tappa hela listan. *@
+                    <option value="awards" ${it.itemType === 'awards' ? 'selected' : ''}>Utdelning av märken</option>
                 </select>`;
             let electOpts = '';
             if (it.itemType === 'election') {

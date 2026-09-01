@@ -49,6 +49,10 @@ namespace HpskSite.Models
                     "val-justerare-2", "faststall-dagordning", "verksamhetsberattelse", "ekonomisk-berattelse",
                     "revisionsberattelse", "ansvarsfrihet", "medlemsavgift", "verksamhetsplan-budget",
                     "motioner", "val-foreningsordforande", "val-ledamoter", "val-revisorer", "val-valberedning",
+                    // Efter valen och före övriga frågor: utdelningen är ceremoniell och hör sist i
+                    // mötet, men den ska ligga FÖRE "Övriga frågor" så den inte blir en punkt som
+                    // faller bort när mötet börjar avrundas.
+                    "utmarkelser",
                     "ovriga-fragor", "motets-avslutande",
                 }
             },

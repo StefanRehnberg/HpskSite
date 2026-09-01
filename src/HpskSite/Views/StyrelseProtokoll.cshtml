@@ -48,6 +48,14 @@
         .item .beslut { margin-top: .12cm; }
         .item .beslut b { text-decoration: underline; }
         .bilaga { font-style: italic; color: var(--muted); font-size: 10.5pt; }
+
+        /* Utdelningstabellen. page-break-inside: avoid pa raden sa en mottagare inte delas
+           mellan tva sidor — namnet ska aldrig hamna pa en annan sida an sin utmarkelse. */
+        table.awards { width: 100%; border-collapse: collapse; margin-top: .15cm; font-size: 10.5pt; }
+        table.awards th { text-align: left; border-bottom: 1px solid var(--muted); padding: .06cm .2cm .06cm 0; font-weight: 600; }
+        table.awards td { padding: .06cm .2cm .06cm 0; vertical-align: top; page-break-inside: avoid; }
+        table.awards tr { page-break-inside: avoid; }
+        .q { color: var(--muted); font-size: 10pt; }
         .people { columns: 2; margin: .1cm 0 .3cm; }
         .people div { break-inside: avoid; }
         .sign { margin-top: 1.4cm; display: flex; gap: 1.5cm; flex-wrap: wrap; page-break-inside: avoid; }
@@ -120,6 +128,67 @@
                 if (!string.IsNullOrEmpty(who))
                 {
                     <div class="beslut"><b>Beslut:</b> @who valdes.</div>
+                }
+            }
+            else if (it.ItemType == "awards")
+            {
+                @* Utdelningen av märken och medaljer. Renderas UR SNAPSHOTTEN på punkten, aldrig ur
+                   märkesliggaren — liggaren fortsätter ändras (ett märke makuleras, en valör rättas)
+                   och ett protokoll får inte ändra sig i efterhand. Se BoardMeetingAwards. *@
+                var aw = HpskSite.Models.BoardMeetingAwards.FromJson(it.AwardsData);
+                if (aw == null || aw.Rows.Count == 0)
+                {
+                    <div class="body">Inga märken eller medaljer delades ut.</div>
+                }
+                else
+                {
+                    <div class="body">
+                        Utdelning av @aw.Year års märken och medaljer.
+                        @if (isProt)
+                        {
+                            <text>@aw.ReceivedCount av @aw.Rows.Count togs emot på mötet.</text>
+                        }
+                    </div>
+                    <table class="awards">
+                        <thead>
+                            <tr><th>Medlem</th><th>Utmärkelse</th>@if (isProt) { <th>Mottaget</th> }</tr>
+                        </thead>
+                        <tbody>
+                            @{ int lastMember = 0; }
+                            @foreach (var r in aw.Rows)
+                            {
+                                var isNew = r.MemberId != lastMember;
+                                lastMember = r.MemberId;
+                                <tr>
+                                    <td>@(isNew ? r.Name : "")</td>
+                                    <td>
+                                        @r.Item
+                                        @if (!string.IsNullOrWhiteSpace(r.Group)) { <span class="q">(@r.Group)</span> }
+                                        @if (!string.IsNullOrWhiteSpace(r.Detail)) { <span class="q">@r.Detail</span> }
+                                    </td>
+                                    @if (isProt)
+                                    {
+                                        @* ⚠️ Tomt läge skrivs ut som "Ej upplast", inte som ett tomt fält:
+                                           ett upprop som aldrig togs får aldrig läsas som frånvaro. *@
+                                        @* ⚠️ Ingen property pattern (`is { Length: > 0 }`) här — måsvingar
+                                           i ett Razor-uttryck är en brace-balancing-fälla som spräcker
+                                           vyns runtime-kompilering utan felmeddelande. *@
+                                        <td>
+                                            @HpskSite.Models.BoardMeetingAwards.StatusLabel(r.Status)
+                                            @if (!string.IsNullOrWhiteSpace(r.Note))
+                                            {
+                                                <span class="q">— @r.Note</span>
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (isProt && aw.UncalledCount > 0)
+                    {
+                        <div class="q">@aw.UncalledCount rad(er) prickades inte av på mötet.</div>
+                    }
                 }
             }
             else

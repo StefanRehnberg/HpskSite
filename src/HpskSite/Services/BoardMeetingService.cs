@@ -398,6 +398,87 @@ namespace HpskSite.Services
                 .ToList();
         }
 
+        // ---- Awards item (årsmötets utdelning) -----------------------------
+
+        /// <summary>
+        /// Läser dagordningspunktens utdelningssnapshot. null = ingen lista hämtad än.
+        /// </summary>
+        public BoardMeetingAwards? GetAgendaAwards(int agendaItemId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var item = scope.Database.SingleOrDefaultById<BoardMeetingAgendaItem>(agendaItemId);
+            return BoardMeetingAwards.FromJson(item?.AwardsData);
+        }
+
+        /// <summary>
+        /// Skriver snapshotten.
+        ///
+        /// <para><b>⚠️ Vägrar på en punkt som inte är en utdelningspunkt.</b> AwardsData är en
+        /// NVARCHAR(MAX) på en tabell som delas av alla punkttyper, så en felriktad skrivning skulle
+        /// annars lagras tyst och aldrig visas någonstans — vilket läser som att sparningen inte
+        /// fungerade.</para>
+        /// </summary>
+        public bool SaveAgendaAwards(int agendaItemId, BoardMeetingAwards awards)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var item = db.SingleOrDefaultById<BoardMeetingAgendaItem>(agendaItemId);
+            if (item == null || item.ItemType != "awards") return false;
+
+            item.AwardsData = awards.ToJson();
+            db.Update(item);
+            return true;
+        }
+
+        /// <summary>
+        /// Sätter status/anteckning på EN rad, matchad på (medlem, grupp, artikel).
+        ///
+        /// <para>Per rad och inte hela blobben, eftersom mötet prickar av en person i taget och två
+        /// sekreterare kan ha punkten öppen samtidigt — en helblobbskrivning från den ena hade då
+        /// skrivit över den andras avprickning.</para>
+        /// </summary>
+        public bool SetAgendaAwardStatus(int agendaItemId, int memberId, string group, string item,
+                                         string? status, string? note)
+        {
+            if (!BoardMeetingAwards.IsValidStatus(status)) return false;
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var row = db.SingleOrDefaultById<BoardMeetingAgendaItem>(agendaItemId);
+            if (row == null || row.ItemType != "awards") return false;
+
+            var awards = BoardMeetingAwards.FromJson(row.AwardsData);
+            if (awards == null) return false;
+
+            var target = awards.Rows.FirstOrDefault(r =>
+                r.MemberId == memberId &&
+                string.Equals((r.Group ?? "").Trim(), (group ?? "").Trim(), StringComparison.Ordinal) &&
+                string.Equals((r.Item ?? "").Trim(), (item ?? "").Trim(), StringComparison.Ordinal));
+            if (target == null) return false;
+
+            target.Status = status;
+            target.Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+            row.AwardsData = awards.ToJson();
+            db.Update(row);
+            return true;
+        }
+
+        /// <summary>
+        /// Vilket år en utdelningspunkt gäller som standard.
+        ///
+        /// <para><b>Ett årsmöte behandlar föregående verksamhetsår</b> — det är vad
+        /// verksamhetsberättelsen, den ekonomiska berättelsen och ansvarsfriheten handlar om — så
+        /// märkena som delas ut är föregående års skörd. Övriga möten föreslår sitt eget år.</para>
+        ///
+        /// <para>⚠️ Bara ett FÖRSLAG: sekreteraren kan byta år. Ett möte som hålls i efterhand, eller
+        /// en klubb som delar ut två år på en gång, får inte låsas av vår gissning.</para>
+        /// </summary>
+        public static int DefaultAwardsYear(BoardMeeting meeting)
+        {
+            int y = meeting.MeetingDate.Year;
+            return meeting.MeetingType is "Arsmote" or "ExtraArsmote" ? y - 1 : y;
+        }
+
         public bool UpdateAgendaItem(int id, string heading, string? discussion, string? decision)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
