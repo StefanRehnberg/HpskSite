@@ -319,13 +319,35 @@ const main = async () => {
     ok('skanningen skapar lånet', scanOut.success, scanOut.message);
 
     scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokB)}`);
-    eq('nästa skanning är en återlämning', scan.action, 'Return');
+    eq('nästa skanning säger att vapnet står på mig', scan.action, 'OutToYou');
     // ⚠️ Skanningen kan inte ha fel om VILKET vapen. Det är hela vinsten, och den är en
     // riktighetsvinst — inte en bekvämlighetsvinst.
     eq('lånet pekar på det skannade vapnet', scan.firearmId, wB.id);
+    // Skytten måste få veta VEM som registrerar återlämningen. Utan det läses "du kan inte" som
+    // "systemet är trasigt", och då skannar hen inte nästa gång heller.
+    eq('svaret säger att någon annan registrerar återlämningen', scan.returnedByStaffOnly, true);
 
-    const scanRet = await api('/umbraco/surface/Firearm/ScanReturn', { t: tokB });
-    ok('skanningen registrerar återlämningen', scanRet.success, scanRet.message);
+    // ── ⚠️⚠️ LÅNTAGAREN FÅR INTE STÄNGA SITT EGET LÅN ─────────────────────────────────────────
+    //
+    // Rapporterat av Stefan 2026-09-02: samma etikett stängde lånet vid en andra skanning. Alltså
+    // kunde skytten skanna vid bilen och åka hem medan registret sa att vapnet står i skåpet — den
+    // enda person som har intresse av att lånet ser stängt ut var också den som kunde stänga det.
+    //
+    // Regeln: EN SKANNING FÅR BARA ÖKA DET MAN SVARAR FÖR, ALDRIG MINSKA DET. Utlämning via egen
+    // skanning består (den lägger ansvar PÅ skytten); återlämningen registreras av den som TAR
+    // EMOT vapnet.
+    const gone = await api('/umbraco/surface/Firearm/ScanReturn', { t: tokB });
+    ok('det finns ingen väg för skytten att stänga sitt lån',
+       gone.success === false, JSON.stringify(gone).slice(0, 160));
+    // ⚠️ Och lånet ska fortfarande vara ÖPPET efteråt. Ett avslag som ändå hunnit skriva vore
+    // värre än ingen kontroll alls.
+    scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokB)}`);
+    eq('lånet står kvar öppet efter försöket', scan.action, 'OutToYou');
+
+    // Den som TAR EMOT vapnet stänger det, och då blir vapnet ledigt igen.
+    const staffReturn = await api('/umbraco/surface/FirearmAdmin/SetBookingState',
+      { clubId: CLUB_ID, bookingId: scan.bookingId, action: 'return', reason: '' });
+    ok('vapenansvarig kan registrera återlämningen', staffReturn.success, staffReturn.message);
     scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokB)}`);
     eq('vapnet är fritt igen', scan.action, 'Offer');
 

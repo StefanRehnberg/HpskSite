@@ -110,11 +110,23 @@
             return;
         }
 
-        if (state.action === 'Return') {
-            body.innerHTML = '<div class="text-center">' + weapon() +
-                '<p class="text-muted">Vapnet är utlämnat till dig.</p>' +
-                '<button type="button" class="btn btn-success btn-lg w-100 sc-act" data-sc="return">' +
-                'Lämna tillbaka</button></div>';
+        // ⚠️⚠️ INGEN ÅTERLÄMNINGSKNAPP HÄR, och det är inte en glömska (ändrat 2026-09-02).
+        //
+        // Knappen fanns, och den stängde lånet. Alltså kunde skytten skanna vid bilen och åka hem
+        // medan registret sa att vapnet står i skåpet — den enda person som har intresse av att
+        // lånet ser stängt ut var också den som kunde stänga det. Regeln som ersatte den:
+        // EN SKANNING FÅR BARA ÖKA DET MAN SVARAR FÖR, ALDRIG MINSKA DET.
+        //
+        // Läget är därför ett KVITTO: det säger vad som står på hen och vem som registrerar
+        // återlämningen. Att bara neka utan att säga vem läses som "systemet är trasigt", och då
+        // struntar hen i att skanna nästa gång också.
+        if (state.action === 'OutToYou') {
+            body.innerHTML = '<div class="text-center">' + weapon() + '</div>' +
+                '<div class="alert alert-info"><i class="bi bi-person-check me-1"></i>' +
+                '<strong>Det här vapnet står på dig.</strong>' +
+                '<p class="mb-0 mt-2">Lämna det till vapenansvarig när du är klar — <strong>hen ' +
+                'registrerar återlämningen</strong>. Det är hen som tar emot vapnet, så det är hen ' +
+                'som kan bekräfta att det är tillbaka i skåpet.</p></div>';
             return;
         }
 
@@ -162,19 +174,12 @@
                                { t: t, accepted: accepted ? 'true' : 'false' });
             body.innerHTML = j.success
                 ? '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>' +
-                  esc(j.message) + '<p class="small mb-0 mt-2">Skanna samma etikett när du lämnar ' +
-                  'tillbaka vapnet.</p></div>'
+                  esc(j.message) + '<p class="small mb-0 mt-2">Lämna vapnet till vapenansvarig ' +
+                  'när du är klar — hen registrerar återlämningen.</p></div>'
                 : '<div class="alert alert-warning">' + esc(j.message || 'Det gick inte.') + '</div>';
             return;
         }
 
-        if (action === 'return') {
-            var r = await post('/umbraco/surface/Firearm/ScanReturn', { t: t });
-            body.innerHTML = r.success
-                ? '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>' +
-                  esc(r.message) + '</div>'
-                : '<div class="alert alert-warning">' + esc(r.message || 'Det gick inte.') + '</div>';
-        }
     });
 
     load();

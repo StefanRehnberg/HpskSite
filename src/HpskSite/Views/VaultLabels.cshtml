@@ -50,19 +50,37 @@
     {
         var one = Model.Firearms[0];
         <h1>Etikett för @(one.Number.HasValue ? $"nr {one.Number}" : one.Alias) — @Model.ClubName</h1>
+        @* ⚠️ TEXTEN FÅR INTE LOVA ATT SKYTTEN SKANNAR TILLBAKA VAPNET. Den gjorde det, och det
+           var fel: en skanning kan bara lägga ansvar PÅ skytten, aldrig ta bort det. Se
+           kommentaren i det andra fallet nedan. *@
         <p class="lead">
-            Klipp ut, laminera och sätt etiketten <strong>på vapnet</strong>. Skytten skannar den när
-            hen hämtar vapnet, och en gång till när hen lämnar tillbaka det. Etiketten slutar aldrig
-            gälla, så den behöver bara skrivas ut en gång.
+            Klipp ut, laminera och sätt etiketten <strong>på vapnet</strong>. Skytten skannar den
+            <strong>när hen hämtar vapnet</strong> — då registreras lånet på rätt vapen.
+            Etiketten slutar aldrig gälla, så den behöver bara skrivas ut en gång.
+        </p>
+        <p class="lead">
+            <strong>Återlämningen registrerar du</strong>, i valvet. Skytten kan inte stänga sitt
+            eget lån.
         </p>
     }
     else
     {
         <h1>Vapenetiketter — @Model.ClubName</h1>
+        @* ⚠️⚠️ TEXTEN LOVADE ATT SKYTTEN SKANNAR TILLBAKA VAPNET, och det var både felaktigt
+           och farligt att skriva på ett papper som sitter i ett vapenvalv. Skanningen kan bara
+           LÄGGA ansvar på skytten — att låta samma kod stänga lånet hade gjort att den enda person
+           som har intresse av att lånet ser stängt ut också var den som kunde stänga det. Ett
+           falskt "återlämnat" är det enda felet ett vapenregister inte får ha. *@
         <p class="lead">
-            Klipp ut, laminera och sätt <strong>en etikett på varje vapen</strong>. Skytten skannar sin
-            etikett när hen hämtar vapnet, och en gång till när hen lämnar tillbaka det.
-            Etiketterna slutar aldrig gälla, så de behöver bara skrivas ut en gång.
+            Klipp ut, laminera och sätt <strong>en etikett på varje vapen</strong>. Skytten skannar
+            sin etikett <strong>när hen hämtar vapnet</strong> — då registreras lånet på rätt vapen,
+            även om hen inte bokat i förväg. Etiketterna slutar aldrig gälla, så de behöver bara
+            skrivas ut en gång.
+        </p>
+        <p class="lead">
+            <strong>Återlämningen registrerar du</strong>, i valvet: <em>Tillbaka</em> på raden, eller
+            <em>Kvällen är klar</em> när du låser. Skytten kan inte stänga sitt eget lån — det är du
+            som tar emot vapnet, så det är bara du som kan bekräfta att det är tillbaka i skåpet.
         </p>
     }
 

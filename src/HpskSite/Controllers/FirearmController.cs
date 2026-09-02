@@ -514,6 +514,10 @@ namespace HpskSite.Controllers
                     ? _firearms.GetById(w)?.ClubWeaponNumber : null,
                 claimedByOther = scan.ClaimedByOther is not null,
                 claimedByName = scan.ClaimedByOther is null ? null : NameOf(scan.ClaimedByOther.MemberId),
+
+                // ⚠️ Skytten måste få veta VEM som registrerar återlämningen, annars läser hen
+                // "du kan inte" som "systemet är trasigt" och struntar i det nästa gång.
+                returnedByStaffOnly = scan.Action == FirearmScanAction.OutToYou,
             });
         }
 
@@ -539,7 +543,7 @@ namespace HpskSite.Controllers
             if (scan.Action == FirearmScanAction.Refused)
                 return Json(new { success = false, message = scan.Message });
 
-            if (scan.Action == FirearmScanAction.Return)
+            if (scan.Action == FirearmScanAction.OutToYou)
                 return Json(new { success = false, message = "Vapnet är redan utlämnat till dig." });
 
             // ⚠️ Krockvarningen kräver ett medvetet ja. Utan det tar den som skannar först den
@@ -579,26 +583,25 @@ namespace HpskSite.Controllers
             });
         }
 
-        /// <summary>Registrerar återlämningen från en skanning.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ScanReturn(string? t)
-        {
-            var memberId = await CurrentMemberIdAsync();
-            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
-
-            var firearmId = UnprotectLabel(t);
-            if (firearmId <= 0) return Json(new { success = false, message = "Ogiltig kod." });
-
-            var scan = _bookings.ResolveScan(memberId, firearmId, DateTime.Now);
-            if (scan.Action != FirearmScanAction.Return)
-                return Json(new { success = false, message = "Vapnet är inte utlämnat till dig." });
-
-            var error = _bookings.MarkReturned(scan.Booking!.Id, memberId);
-            return error is null
-                ? Json(new { success = true, message = "Tack — återlämningen är registrerad." })
-                : Json(new { success = false, message = error });
-        }
+        // ⚠️⚠️ HÄR LÅG `ScanReturn`, OCH DEN ÄR BORTTAGEN MED FLIT (2026-09-02).
+        //
+        // Den stängde lånet när skytten skannade samma etikett en andra gång. Det betyder att den
+        // enda person som har intresse av att lånet ser stängt ut också var den som kunde stänga
+        // det — hen kunde skanna vid bilen och åka hem, och registret hade sagt att vapnet står i
+        // skåpet. Skadan är inte att skanningen möjliggör stölden (inget hindrar någon från att
+        // bära ut ett vapen, och den som inte skannar alls lämnar ett ÖPPET lån som syns) utan att
+        // den DÖLJER den. För ett vapenregister är ett falskt "återlämnat" det enda felet som inte
+        // får finnas: ett kvarglömt öppet lån är billigt, ett felaktigt stängt gör hela registret
+        // oanvändbart som underlag.
+        //
+        // Regeln som ersatte den: EN SKANNING FÅR BARA ÖKA DET MAN SVARAR FÖR, ALDRIG MINSKA DET.
+        // Utlämning via egen skanning består därför — den lägger ansvar PÅ skytten, och en lögn där
+        // är mot hens eget intresse. Återlämningen registreras av den som TAR EMOT vapnet:
+        // vapenansvarigs "Tillbaka" på raden i valvet, eller "Kvällen är klar" när hen låser.
+        //
+        // ⚠️ ÅTERSKAPA DEN INTE. Behövs ett sätt för skytten att SÄGA att vapnet är lämnat (t.ex.
+        // när vapenansvarig gått hem) ska det vara ett eget tillstånd som fortsätter blockera
+        // vapnet till någon bekräftar — aldrig en stängning.
 
         /// <summary>
         /// Vapen-id ur etikettens token, eller 0.

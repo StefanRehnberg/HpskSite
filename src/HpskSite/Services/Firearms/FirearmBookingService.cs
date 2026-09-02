@@ -785,9 +785,12 @@ namespace HpskSite.Services.Firearms
                 .ToList();
 
             // Redan utlämnat till mig — skanningen är då en återlämning.
+            // Redan utlämnat till mig. ⚠️ Skanningen är då INGEN återlämning — se regeln vid
+            // `FirearmScanResult`. Den bekräftar bara att vapnet står på mig, och säger vem som
+            // registrerar återlämningen.
             var already = mine.FirstOrDefault(b => b.IsOut && b.AssignedFirearmId == firearmId);
             if (already is not null)
-                return FirearmScanResult.Return(already, firearm);
+                return FirearmScanResult.OutToYou(already, firearm);
 
             var reserved = mine.FirstOrDefault(b => b.Status == FirearmBookingStatus.Reserverad);
             if (reserved is not null)
@@ -1155,8 +1158,11 @@ namespace HpskSite.Services.Firearms
         /// <summary>Medlemmen har en reservation — vapnet kan lämnas ut mot den.</summary>
         HandOut,
 
-        /// <summary>Vapnet är redan ute hos medlemmen — skanningen är en återlämning.</summary>
-        Return,
+        /// <summary>
+        /// Vapnet är redan ute hos den som skannar. <b>Ett upplysningsläge, ingen handling</b> —
+        /// se regeln vid <c>FirearmScanResult</c>: en skanning får bara öka det man svarar för.
+        /// </summary>
+        OutToYou,
 
         /// <summary>
         /// Ingen bokning, men lånet kan skapas på plats.
@@ -1167,6 +1173,26 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         Offer,
     }
+
+    // ⚠️⚠️ REGELN SOM STYR HELA SKANNINGEN, tillagd 2026-09-02 efter Stefans fråga:
+    //
+    //     EN SKANNING FÅR BARA ÖKA DET MAN SVARAR FÖR, ALDRIG MINSKA DET.
+    //
+    // Utlämning via egen skanning är säker eftersom den bara lägger ansvar PÅ skytten — hen säger
+    // "jag har nr 7", och en lögn där är mot hens eget intresse. Återlämning är det motsatta: den
+    // tar bort ansvar, och lånet stängs då av den enda person som har intresse av att det ser
+    // stängt ut. Skytten kunde skanna vid bilen och åka hem, och registret hade sagt att vapnet
+    // står i skåpet.
+    //
+    // ⚠️ Skadan är INTE att skanningen möjliggör stölden — inget i systemet hindrar någon från att
+    // bära ut ett vapen, och den som inte skannar alls lämnar tvärtom ett ÖPPET lån som syns.
+    // Skadan är att den DÖLJER den: felet biasas mot "vi tror att vapnet är tillbaka", vilket för
+    // ett vapenregister är det enda felet som inte får finnas. Ett kvarglömt öppet lån är billigt;
+    // ett falskt återlämnat är det som gör hela registret oanvändbart som underlag.
+    //
+    // Därför: en återlämning registreras av den som TAR EMOT vapnet — vapenansvarigs "Tillbaka" på
+    // raden i valvet, eller "Kvällen är klar" när hen låser. Det är också det enda som fysiskt
+    // motsvarar en överlämning av ansvar.
 
     /// <summary>
     /// Svaret på en skanning. <b>Beskriver bara vad som är möjligt</b> — ingenting är skrivet, så
@@ -1208,10 +1234,17 @@ namespace HpskSite.Services.Firearms
                 ClaimedByOther = claimedByOther,
             };
 
-        public static FirearmScanResult Return(FirearmBooking booking, Firearm firearm) =>
+        /// <summary>
+        /// Vapnet är redan utlämnat till den som skannar.
+        ///
+        /// <para><b>⚠️ Det här är ett UPPLYSNINGSLÄGE, inte en handling.</b> Hette tidigare
+        /// <c>Return</c> och stängde lånet — se regeln ovanför <c>FirearmScanResult</c>. Namnet är
+        /// bytt just för att ingen ska läsa <c>Return</c> och bygga tillbaka knappen.</para>
+        /// </summary>
+        public static FirearmScanResult OutToYou(FirearmBooking booking, Firearm firearm) =>
             new()
             {
-                Action = FirearmScanAction.Return,
+                Action = FirearmScanAction.OutToYou,
                 Booking = booking,
                 Firearm = firearm,
                 ClubId = booking.ClubId,
