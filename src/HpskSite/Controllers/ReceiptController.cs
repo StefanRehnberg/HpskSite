@@ -60,8 +60,15 @@ namespace HpskSite.Controllers
             // Authorization: the buyer themselves, an admin of the club that PAID (a samlingsfaktura is
             // billed to "club-<id>", which never parses as a member, so the paying club would otherwise
             // be locked out of its own receipt), or staff for the hosting competition.
+            // A team invoice has no member owner (its memberId is "team-{id}", so model.MemberId is 0)
+            // and, on a region-hosted competition such as an SM, the paying club is not staff either —
+            // so without CanClaimPaymentForInvoice the club that paid for its own lag could not print
+            // the receipt for it. Same right, same resolution, as the Faktura document. (2026-09-02)
             var isOwner = int.TryParse(current.Id, out var currentId) && currentId == model.MemberId;
-            if (!isOwner && !await IsPayingClubAdmin(invoiceId) && !await IsStaffForCompetition(model.CompetitionId))
+            if (!isOwner
+                && !await _auth.CanClaimPaymentForInvoice(invoiceId)
+                && !await IsPayingClubAdmin(invoiceId)
+                && !await IsStaffForCompetition(model.CompetitionId))
             {
                 // Not Forbid(): that redirects to /Account/AccessDenied, which isn't an Umbraco
                 // document, so the visitor gets a raw 404 quoting an internal path.

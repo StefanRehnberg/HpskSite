@@ -19,6 +19,8 @@ namespace HpskSite.Services
         private readonly IMemberGroupService _memberGroupService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly HpskSite.Services.Staffing.StaffingService _staffingService;
+        private readonly IContentService _contentService;
+        private readonly Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory _databaseFactory;
 
         // Per-request memo for the roster app-access lookup (this service is scoped). A page can ask
         // "may this person manage the competition?" several times; the answer can't change mid-request.
@@ -29,13 +31,17 @@ namespace HpskSite.Services
             IMemberManager memberManager,
             IMemberGroupService memberGroupService,
             IUmbracoContextAccessor umbracoContextAccessor,
-            HpskSite.Services.Staffing.StaffingService staffingService)
+            HpskSite.Services.Staffing.StaffingService staffingService,
+            IContentService contentService,
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory)
         {
             _memberService = memberService;
             _memberManager = memberManager;
             _memberGroupService = memberGroupService;
             _umbracoContextAccessor = umbracoContextAccessor;
             _staffingService = staffingService;
+            _contentService = contentService;
+            _databaseFactory = databaseFactory;
         }
 
         /// <summary>
@@ -803,6 +809,20 @@ namespace HpskSite.Services
         ///   • the shooter the invoice belongs to (self-pay), OR
         ///   • a club admin for the invoice's member's primary club (individual invoices), or for
         ///     the team's club (team invoices) — i.e. the club paying on its members' behalf.
+        ///
+        /// <para><b>Reads DRAFTS, deliberately (2026-09-02).</b> This used to resolve everything
+        /// through the published cache while the surfaces that LIST and RENDER the same invoices
+        /// (<c>InvoiceAdminService</c>, <c>ReceiptModelBuilder</c>) read <see cref="IContentService"/>.
+        /// A club admin therefore saw their own team invoices in Fakturor and got "Fakturan tillhör
+        /// någon annan" on opening one — the list found the row, the gate could not. Both sides must
+        /// read the same tree.</para>
+        ///
+        /// <para><b>A team's club comes from <c>CompetitionTeam</c>, not from the invoice's
+        /// <c>registrationId</c>.</b> That link is optional (<c>CreateTeamInvoiceAsync</c> takes
+        /// <c>registrationId = 0</c> when the caller cannot find the doc, and two of the three call
+        /// sites look it up in the PUBLISHED cache, where an unpublished team registration is
+        /// invisible) — so it is absent on real invoices, and an absent link read as "belongs to
+        /// nobody". The SQL row is the ground truth every other surface already uses.</para>
         /// </summary>
         public async Task<bool> CanClaimPaymentForInvoice(int invoiceId)
         {
@@ -810,22 +830,26 @@ namespace HpskSite.Services
             {
                 if (await IsCurrentUserAdminAsync()) return true;
 
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
-                    return false;
-
-                var invoice = ctx.Content.GetById(invoiceId);
+                var invoice = _contentService.GetById(invoiceId);
                 if (invoice == null || invoice.ContentType.Alias != "registrationInvoice")
                     return false;
 
-                var memberIdStr = invoice.Value<string>("memberId") ?? "";
+                var memberIdStr = invoice.GetValue<string>("memberId") ?? "";
 
                 int payerClubId = 0;
                 if (memberIdStr.StartsWith("team-"))
                 {
-                    // Team invoice: the payer club is the team registration doc's club.
-                    var regId = invoice.Value<int>("registrationId");
-                    if (regId > 0)
-                        payerClubId = ctx.Content.GetById(regId)?.Value<int>("clubId") ?? 0;
+                    if (int.TryParse(memberIdStr.Substring(5), out var teamId) && teamId > 0)
+                        payerClubId = ReadTeamClubId(teamId);
+
+                    // Fallback for a team row that is gone (deleted team, invoice left behind): the
+                    // team registration doc still names the club that was billed.
+                    if (payerClubId <= 0)
+                    {
+                        var regId = invoice.GetValue<int>("registrationId");
+                        if (regId > 0)
+                            payerClubId = _contentService.GetById(regId)?.GetValue<int>("clubId") ?? 0;
+                    }
                 }
                 else if (int.TryParse(memberIdStr, out var memberId) && memberId > 0)
                 {
@@ -847,6 +871,24 @@ namespace HpskSite.Services
             catch
             {
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// The club that entered a team, from the <c>CompetitionTeam</c> row. 0 when the team no
+        /// longer exists — its invoice may well still be there, see
+        /// <see cref="CanClaimPaymentForInvoice"/>.
+        /// </summary>
+        private int ReadTeamClubId(int teamId)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.ExecuteScalar<int>("SELECT ISNULL(ClubId, 0) FROM CompetitionTeam WHERE Id = @0", teamId);
+            }
+            catch
+            {
+                return 0;
             }
         }
 

@@ -56,6 +56,15 @@
             // get the payment through their own bookkeeping.
             let items = `<li><a class="dropdown-item" href="/faktura/${id}" target="_blank" rel="noopener">`
                 + `<i class="bi bi-file-earmark-text me-2 text-secondary"></i>Visa fakturan (för utskrift)</a></li>`;
+
+            // Kvittot, men bara när den är betald: /kvitto/ svarar med "inte betald ännu" annars, och
+            // en länk som aldrig ger ett kvitto är sämre än ingen länk. Den fanns tidigare bara på
+            // Min sida → Tävlingar, dvs. skyttens egen — så en klubbkassör som betalat en LAGavgift
+            // (som inte har någon skytt som ägare) hade ingen väg till kvittot alls. (2026-09-02)
+            if (cfg.paid) {
+                items += `<li><a class="dropdown-item" href="/kvitto/${id}" target="_blank" rel="noopener">`
+                    + `<i class="bi bi-receipt me-2 text-success"></i>Visa kvittot (för utskrift)</a></li>`;
+            }
             if (cfg.qrFn) {
                 items += `<li><button class="dropdown-item" type="button" onclick="${cfg.qrFn}(${id})">`
                     + `<i class="bi bi-qr-code me-2 text-primary"></i>Visa betalningsuppgifter</button></li>`;

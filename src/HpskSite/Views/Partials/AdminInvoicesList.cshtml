@@ -600,6 +600,7 @@ function renderInvoices(invoices) {
                 creditFn: 'openCreditNoteModal',
                 creditable: isConsolidated && invoice.paymentStatus !== 'Cancelled',
                 cancelled: invoice.paymentStatus === 'Cancelled',
+                paid: invoice.paymentStatus === 'Paid',
                 markItems: invoice.paymentStatus === 'Paid' ? [] : [
                     { label: 'Markera som betald (mottagen)', icon: 'bi-check-circle', fn: 'markInvoiceAsPaid' }
                 ]
