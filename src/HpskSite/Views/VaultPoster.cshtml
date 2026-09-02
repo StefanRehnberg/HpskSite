@@ -1,0 +1,112 @@
+@model HpskSite.Controllers.VaultPosterModel
+@{
+    Layout = null;
+}
+@*
+    /valvet/affisch — A4:an som tejpas på insidan av valvdörren.
+
+    ⚠️ DET HÄR ÄR HUR VAPENANSVARIG HITTAR SIDAN ALLS. Gunnar är 74, är skjutledare och inte
+    klubbadministratör, och kommer aldrig att navigera in i en klubbpanel för att leta en knapp.
+    Han riktar kameran mot väggen — samma gest han ska lära nybörjarna vid vapnen. En funktion
+    ingen hittar är inte byggd, och det var precis felet i första versionen: knappen låg inne i
+    klubbadministrationen, där han aldrig är.
+
+    ⚠️ AFFISCHEN SÄGER VAD MAN SER, INTE VAD SYSTEMET HETER. "Kvällens lånevapen" är hans ord.
+    "Valvet" är vårt.
+
+    ⚠️ EN SAK PER RAD, INGA STEG ATT MINNAS. Instruktionen är två meningar, i imperativ, och den
+    står under koden — den som redan vet skannar direkt och läser aldrig texten.
+
+    Chromeless och renodlad för utskrift: ingen navigation, ingen sidfot, svart på vitt (färg
+    kostar och klubbens skrivare är sällan en färgskrivare).
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Affisch till valvet — @Model.ClubName · pistol.nu</title>
+    <style>
+        /* ⚠️ Inga externa beroenden. Affischen skrivs ut, ofta från en dålig uppkoppling i
+           klubbstugan, och en CSS som inte hämtas ger ett tomt papper. */
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+               color: #000; background: #f4f4f5; }
+
+        .sheet { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff;
+                 padding: 22mm 18mm; display: flex; flex-direction: column; }
+
+        .eyebrow { font-size: 13pt; letter-spacing: .18em; text-transform: uppercase;
+                   color: #444; margin: 0 0 4mm; }
+        h1 { font-size: 40pt; line-height: 1.05; margin: 0 0 3mm; font-weight: 800; }
+        .club { font-size: 22pt; font-weight: 600; margin: 0 0 14mm; }
+
+        .qr { text-align: center; margin: 0 0 12mm; }
+        .qr img { width: 105mm; height: 105mm; display: block; margin: 0 auto;
+                  border: 1.5mm solid #000; }
+
+        .lead { font-size: 20pt; line-height: 1.35; font-weight: 600; margin: 0 0 8mm;
+                text-align: center; }
+        .steps { font-size: 14pt; line-height: 1.5; margin: 0 0 10mm; padding-left: 8mm; }
+        .steps li { margin-bottom: 3mm; }
+
+        .foot { margin-top: auto; border-top: .4mm solid #000; padding-top: 5mm;
+                font-size: 11pt; color: #333; }
+        .url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+               font-size: 11pt; word-break: break-all; }
+
+        .toolbar { max-width: 210mm; margin: 8mm auto 0; text-align: center; }
+        .toolbar button, .toolbar a { font-size: 15px; padding: .5rem 1rem; margin: 0 .25rem;
+                                      cursor: pointer; }
+
+        @@media print {
+            body { background: #fff; }
+            .sheet { width: auto; min-height: auto; margin: 0; padding: 14mm; }
+            .toolbar { display: none; }
+            @@page { size: A4; margin: 8mm; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="sheet">
+    <p class="eyebrow">Sätt upp i vapenvalvet</p>
+    <h1>Kvällens<br>lånevapen</h1>
+    <p class="club">@Model.ClubName</p>
+
+    @* ⚠️ Adressen bärs som text under bilden, precis som på vapenetiketterna. Det är enda sättet
+       att felsöka en QR som inte fungerar — och enda sättet någon kan skriva in adressen för hand
+       den dagen kameran krånglar. *@
+    <div class="qr">
+        <img src="/umbraco/surface/FirearmAdmin/GetVaultPosterQr?clubId=@Model.ClubId&amp;size=14"
+             alt="QR-kod till @Model.ClubName lånevapenlista">
+    </div>
+
+    <p class="lead">Rikta telefonens kamera mot koden.</p>
+
+    <ol class="steps">
+        <li>Du ser <strong>vilka vapen som ska ut</strong> och till vem.</li>
+        <li>Tryck <strong>Lämna ut</strong> och välj numret du tog fram.</li>
+        <li>När vapnet kommer tillbaka trycker du <strong>Tillbaka</strong>.</li>
+        <li>Innan du låser: <strong>Kvällen är klar</strong>.</li>
+    </ol>
+
+    <div class="foot">
+        <p style="margin:0 0 2mm">
+            <strong>Fungerar inte kameran?</strong> Skriv in adressen i webbläsaren:
+        </p>
+        <p class="url" style="margin:0 0 4mm">@Model.VaultUrl</p>
+        <p style="margin:0">
+            Du behöver vara inloggad som <strong>skjutledare eller klubbadministratör</strong> i
+            @Model.ClubName. Spara sidan på telefonens hemskärm så slipper du koden nästa gång.
+        </p>
+    </div>
+</div>
+
+<div class="toolbar">
+    <button type="button" onclick="window.print()">Skriv ut affischen</button>
+    <a href="/valvet?club=@Model.ClubId">Öppna valvet</a>
+</div>
+
+</body>
+</html>

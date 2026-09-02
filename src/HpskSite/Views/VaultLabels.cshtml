@@ -41,20 +41,50 @@
     </style>
 </head>
 <body>
-    <h1>Vapenetiketter — @Model.ClubName</h1>
-    <p class="lead">
-        Klipp ut, laminera och sätt <strong>en etikett på varje vapen</strong>. Skytten skannar sin
-        etikett när hen hämtar vapnet, och en gång till när hen lämnar tillbaka det.
-        Etiketterna slutar aldrig gälla, så de behöver bara skrivas ut en gång.
-    </p>
+    @* ⚠️ RUBRIKEN MÅSTE STÄMMA MED URVALET. Rapporterat från prod 2026-09-02: sidan hette
+       "Vapenetiketter — Varbergs Pistolklubb" för någon som tryckte på knappen inne i Falkenbergs
+       administration, alltså ett ark med FEL klubbs vapen att klistra på rätt klubbs vapen. Den
+       buggen låg i routens parameternamn, men rubriken var det enda som avslöjade den — därför
+       står klubbnamnet kvar stort, och när sidan bara bär ETT vapen säger den det också. *@
+    @if (Model.SingleFirearmId > 0 && Model.Firearms.Count == 1)
+    {
+        var one = Model.Firearms[0];
+        <h1>Etikett för @(one.Number.HasValue ? $"nr {one.Number}" : one.Alias) — @Model.ClubName</h1>
+        <p class="lead">
+            Klipp ut, laminera och sätt etiketten <strong>på vapnet</strong>. Skytten skannar den när
+            hen hämtar vapnet, och en gång till när hen lämnar tillbaka det. Etiketten slutar aldrig
+            gälla, så den behöver bara skrivas ut en gång.
+        </p>
+    }
+    else
+    {
+        <h1>Vapenetiketter — @Model.ClubName</h1>
+        <p class="lead">
+            Klipp ut, laminera och sätt <strong>en etikett på varje vapen</strong>. Skytten skannar sin
+            etikett när hen hämtar vapnet, och en gång till när hen lämnar tillbaka det.
+            Etiketterna slutar aldrig gälla, så de behöver bara skrivas ut en gång.
+        </p>
+    }
 
     <p class="noprint"><button type="button" onclick="window.print()">Skriv ut</button></p>
 
     @if (Model.Firearms.Count == 0)
     {
         <div class="empty">
-            Klubben har inga vapen markerade som <strong>lånebara</strong>. Markera dem under
-            Klubbadministration → Vapen &amp; lånevapen, så kommer etiketterna hit.
+            @if (Model.SingleFirearmId > 0)
+            {
+                <text>
+                    Vapnet är inte markerat som <strong>lånebart</strong>, så det har ingen etikett.
+                    Ett vapen som inte kan lånas har inget att skanna.
+                </text>
+            }
+            else
+            {
+                <text>
+                    Klubben har inga vapen markerade som <strong>lånebara</strong>. Markera dem under
+                    Klubbadministration → Vapen &amp; lånevapen, så kommer etiketterna hit.
+                </text>
+            }
         </div>
     }
     else

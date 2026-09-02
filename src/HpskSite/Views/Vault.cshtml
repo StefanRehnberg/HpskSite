@@ -46,6 +46,9 @@
                  font-variant-numeric: tabular-nums; }
         .vt-btn { font-weight: 700; padding: .55rem 1rem; white-space: nowrap; }
         .vt-done { opacity: .72; }
+        .vt-sec { font-size: .8125rem; font-weight: 700; letter-spacing: .06em;
+                  text-transform: uppercase; color: var(--bs-secondary-color);
+                  margin: 1.5rem 0 .25rem; }
         .vt-pick { display: flex; flex-wrap: wrap; gap: .5rem; width: 100%; margin-top: .5rem; }
         .vt-pick .btn { font-size: 1.15rem; font-weight: 700; min-width: 4.5rem;
                         font-variant-numeric: tabular-nums; }
@@ -62,11 +65,16 @@
 <body>
 <div class="vt-wrap">
 
-    <h1 class="h4 mb-1 vt-noprint"><i class="bi bi-safe2 text-primary me-2"></i>Valvet</h1>
-    @if (!string.IsNullOrEmpty(Model.ClubName))
-    {
-        <p class="text-muted">@Model.ClubName · @Model.LoanableCount lånevapen</p>
-    }
+    @* ⚠️ KLUBBNAMNET ÄR INTE DEKORATION. Den som skannat affischen i valvet har inte valt någon
+       klubb i något gränssnitt — namnet är hens enda kvitto på att hen tittar på rätt lista. Det
+       stod tidigare i grå småtext under rubriken; nu står det I rubriken. *@
+    <h1 class="h5 mb-3 vt-noprint">
+        <i class="bi bi-safe2 text-primary me-2"></i>Valvet
+        @if (!string.IsNullOrEmpty(Model.ClubName))
+        {
+            <span class="text-body">· @Model.ClubName</span>
+        }
+    </h1>
 
     @if (Model.RequiresLogin)
     {
@@ -81,33 +89,39 @@
     }
     else
     {
-        @* Klubbväljaren visas bara när det finns något att välja mellan — en rullgardin med ett
-           alternativ är brus på en yta som ska vara tom. *@
-        @if (Model.Clubs.Count > 1)
+        @* ⚠️ INGEN KLUBBVÄLJARE NÄR KLUBBEN ÄR GIVEN. Rapporterat från prod 2026-09-02: man
+           trycker på knappen inne i EN klubbs administration och möts av en rullgardin som frågar
+           vilken klubb man menar. Frågan är redan besvarad av vägen hit. Väljaren visas bara i det
+           enda läge där svaret saknas — och då som stora knappar, inte en rullgardin, för det är
+           ett val man gör en gång och sedan aldrig igen.
+        *@
+        @if (Model.SelectedClubId == 0)
         {
-            <div class="mb-3 vt-noprint">
-                <label class="form-label small" for="vtClub">Klubb</label>
-                <select class="form-select" id="vtClub">
-                    @foreach (var c in Model.Clubs)
-                    {
-                        if (c.ClubId == Model.SelectedClubId)
-                        {
-                            <option value="@c.ClubId" selected>@c.Name</option>
-                        }
-                        else
-                        {
-                            <option value="@c.ClubId">@c.Name</option>
-                        }
-                    }
-                </select>
+            <div class="vt-head mb-3">Vilket valv?</div>
+            <div class="d-grid gap-2">
+                @foreach (var c in Model.Clubs)
+                {
+                    <a class="btn btn-outline-primary btn-lg vt-btn" href="/valvet?club=@c.ClubId">@c.Name</a>
+                }
             </div>
         }
-
-        <div id="vtBoard" data-club="@Model.SelectedClubId" data-day="@Model.Day.ToString("yyyy-MM-dd")">
-            <div class="text-center py-5">
-                <div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div>
+        else
+        {
+            <div id="vtBoard" data-club="@Model.SelectedClubId" data-day="@Model.Day.ToString("yyyy-MM-dd")">
+                <div class="text-center py-5">
+                    <div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div>
+                </div>
             </div>
-        </div>
+
+            @* Byte av klubb är en LÄNK längst ned, inte en väljare längst upp: de allra flesta
+               hanterar en klubb, och de ska inte behöva se frågan alls. *@
+            if (Model.Clubs.Count > 1)
+            {
+                <p class="text-center mt-4 vt-noprint">
+                    <a class="small text-muted" href="/valvet">Byt klubb</a>
+                </p>
+            }
+        }
     }
 </div>
 
@@ -163,39 +177,79 @@
         }
     }
 
+    // ⚠️ TVÅ SEKTIONER EFTER VAD SOM SKA GÖRAS, inte en lista över allt som hänt.
+    //
+    // Rapporterat från prod 2026-09-02: listan visade även återlämnade lån, alltså växte den hela
+    // kvällen och det som skulle GÖRAS hamnade längre och längre ner. För den som står i valvet är
+    // ett återlämnat vapen inte information — det är avklarat arbete, och avklarat arbete ska inte
+    // konkurrera med oavklarat om plats på skärmen. Det ligger kvar bakom en rad man kan öppna,
+    // eftersom ÅNGRA måste finnas: rädslan för att inte kunna rätta är det som gör att man inte
+    // rör knappen alls.
+    var showDone = false;
+
     function render() {
         var loans = state.loans || [];
         var waiting = loans.filter(function (b) { return b.status === 'Reserverad'; });
         var out = loans.filter(function (b) { return b.isOut; });
+        var done = loans.filter(function (b) { return !b.isActive; });
 
         var html = '';
 
         // Rubriken är det ENDA vapenansvarig behöver läsa för att veta vad han ska göra.
-        html += '<div class="mb-1 vt-head">' +
-            (waiting.length === 0
-                ? (out.length ? 'Allt är utlämnat' : 'Inga lån i dag')
-                : 'Ta ut ' + waiting.length + (waiting.length === 1 ? ' vapen' : ' vapen')) +
-            '</div>';
-        html += '<p class="text-muted mb-3">' + esc(dayLabel()) +
-            (out.length ? ' · ' + out.length + ' ute' : '') + '</p>';
+        html += '<div class="mb-1 vt-head">' + headline(waiting, out) + '</div>';
+        html += '<p class="text-muted mb-4">' + esc(dayLabel()) + '</p>';
 
         if (loans.length === 0) {
             html += '<div class="alert alert-secondary">Ingen har bokat lånevapen i dag. ' +
                 'Dyker någon upp ändå kan du lägga in lånet här när du lämnat ut vapnet.</div>';
         }
 
-        loans.forEach(function (b) { html += row(b); });
+        if (waiting.length) {
+            html += section('Ska ut', waiting.length);
+            waiting.forEach(function (b) { html += row(b); });
+        }
+
+        if (out.length) {
+            html += section('Ute nu', out.length);
+            out.forEach(function (b) { html += row(b); });
+        }
 
         html += '<div class="vt-noprint d-grid gap-2 mt-4">';
-        if (out.length || waiting.length) {
-            html += '<button type="button" class="btn btn-outline-dark btn-lg vt-btn" data-vt="close">' +
-                '<i class="bi bi-lock me-1"></i>Kvällen är klar — alla vapen tillbaka</button>';
+        // ⚠️ Stängningsknappen bara när det FINNS något ute. En knapp som säger "alla vapen
+        // tillbaka" när inget är ute är en knapp man trycker på i onödan och sedan misstror.
+        if (out.length) {
+            html += '<button type="button" class="btn btn-dark btn-lg vt-btn" data-vt="close">' +
+                '<i class="bi bi-lock me-1"></i>Kvällen är klar — alla ' + out.length +
+                ' tillbaka</button>';
         }
         html += '<button type="button" class="btn btn-outline-secondary" data-vt="print">' +
             '<i class="bi bi-printer me-1"></i>Skriv ut listan</button>';
         html += '</div>';
 
+        // De klara raderna, ihopvikta. Siffran räcker som kvitto på att de finns.
+        if (done.length) {
+            html += '<div class="mt-4 vt-noprint">';
+            html += '<button type="button" class="btn btn-link btn-sm px-0 text-muted" data-vt="toggledone">' +
+                (showDone ? 'Göm ' : 'Visa ') + 'klara i dag (' + done.length + ')</button>';
+            html += '</div>';
+            if (showDone) {
+                html += '<div class="vt-noprint">';
+                done.forEach(function (b) { html += row(b); });
+                html += '</div>';
+            }
+        }
+
         board.innerHTML = html;
+    }
+
+    function headline(waiting, out) {
+        if (waiting.length) return 'Ta ut ' + waiting.length + ' vapen';
+        if (out.length) return out.length + (out.length === 1 ? ' vapen är ute' : ' vapen är ute');
+        return 'Inga lån i dag';
+    }
+
+    function section(label, n) {
+        return '<div class="vt-sec">' + esc(label) + ' <span class="text-muted">· ' + n + '</span></div>';
     }
 
     function dayLabel() {
@@ -237,9 +291,11 @@
         if (b.status === 'Reserverad')
             return '<button type="button" class="btn btn-primary vt-btn" data-vt="handout" ' +
                    'data-id="' + b.id + '">Lämna ut</button>';
+        // ⚠️ "Tillbaka" och inte "Återlämna": det är GUNNAR som trycker, och han tar EMOT
+        // vapnet. Ett imperativ riktat åt fel håll får den som står med vapnet i handen att tveka.
         if (b.isOut)
             return '<button type="button" class="btn btn-success vt-btn" data-vt="return" ' +
-                   'data-id="' + b.id + '">Återlämna</button>';
+                   'data-id="' + b.id + '"><i class="bi bi-check2 me-1"></i>Tillbaka</button>';
         // ⚠️ Ångra finns även på en avslutad rad. Rädslan för att inte kunna rätta är det som gör
         // att man inte rör knappen alls.
         return '<button type="button" class="btn btn-outline-secondary btn-sm" data-vt="undo" ' +
@@ -278,6 +334,8 @@
 
         if (action === 'print') { window.print(); return; }
 
+        if (action === 'toggledone') { showDone = !showDone; render(); return; }
+
         if (action === 'handout') {
             showPicker(id, btn.parentNode);
             return;
@@ -315,13 +373,6 @@
         }
     });
 
-    var clubSel = document.getElementById('vtClub');
-    if (clubSel) {
-        clubSel.addEventListener('change', function () {
-            window.location = '/valvet?club=' + encodeURIComponent(clubSel.value);
-        });
-    }
-
     // ⚠️ Pollar, så raderna blir gröna av sig själva när skyttarna skannar. Utan det visar
     // skärmen ett läge som är en sidladdning gammalt — och då börjar vapenansvarig trycka på
     // saker som redan är gjorda.
@@ -331,6 +382,9 @@
     }
     document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
 
+    // ⚠️ `load()` får inte nollställa den öppnade historiken: pollningen kallar den var 20:e
+    // sekund, och en sektion som viks ihop av sig själv medan man tittar på den är samma sak som
+    // att sidan tar tillbaka ett val man just gjort.
     load();
     startPoll();
 })();

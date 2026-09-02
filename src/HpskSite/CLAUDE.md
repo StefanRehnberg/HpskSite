@@ -5391,6 +5391,46 @@ SELECT COUNT(*) FROM FirearmBooking b WITH (UPDLOCK, HOLDLOCK)
 bort en hel klubbs kapacitet. Överlapp och kapacitet är **två skilda block**: överlappet gäller bara
 namngivna önskemål, kapaciteten hela klubben. Inget unikt index kan uttrycka "överlappar i tiden".
 
+### ⚠️ Omgjord efter prodtest samma dag — fyra fynd
+
+Ytorna byggdes, deployades och föll på UX i prod. Rättningarna är principiella, inte kosmetiska:
+
+**1. Fel klubb, tyst.** `/valvet` och `/valvet/etiketter` läser parametern **`club`**; klubbpanelens
+länkar skickade `clubId`. Parametern ignorerades, och båda routerna föll då tillbaka på medlemmens
+**primära** klubb — en styrelsemedlem i Falkenberg med Varberg som primärklubb fick rubriken
+*"Vapenetiketter — Varbergs Pistolklubb"*, alltså ett ark med FEL klubbs vapen att klistra på rätt
+klubbs vapen. Routerna tar nu emot båda namnen, och **fallbacken är borta**: finns ingen klubb
+angiven och hanterar man flera är det en fråga, inte en gissning. En klubb som inte finns vägras
+också — `?club=1` gav tidigare ett trovärdigt ark rubricerat *"Klubb 1"*, eftersom
+`GetClubNameById(x) ?? $"Klubb {x}"` gjorde det okända legitimt.
+
+**2. En lista som växer i oändlighet är ingen lista.** Både valvet och klubbpanelen visade
+återlämnade lån. Valvet har nu **två sektioner efter vad som ska göras** — *Ska ut* och *Ute nu* —
+och de klara ligger bakom *"Visa klara i dag (N)"*, där Ångra finns kvar. Klubbpanelen visar **en
+rad** (*"3 vapen är ute · 12 lånebara vapen"*); historiken är en modal.
+
+**3. Klubbväljare på en sida man nådde från en bestämd klubb.** Frågan var redan besvarad av vägen
+dit. Väljaren visas nu bara när svaret faktiskt saknas, och då som stora knappar; byte av klubb är
+en länk längst ned.
+
+**4. Inställningar mitt på sidan.** Två val styrelsen gör en gång om året låg mellan det dagliga
+arbetet och vapenlistan. De ligger nu i en modal bakom **Åtgärder**, tillsammans med etikettarket,
+affischen och historiken. Etiketten för **ett** vapen är en knapp på vapnets egen rad — normalfallet
+är att man lagt in ett nytt lånevapen och behöver en etikett, inte hela arket.
+
+### ⚠️ `/valvet/affisch` — hur vapenansvarig hittar sidan alls
+
+Gunnar är 74, **skjutledare och inte klubbadministratör**, och kommer aldrig att navigera in i en
+klubbpanel för att leta en knapp. Första versionen la knappen precis där han aldrig är. Rättningen är
+en A4 att tejpa på valvdörren med en QR till `/valvet?club=N` — han riktar kameran mot väggen, samma
+gest han ska lära nybörjarna vid vapnen. **En funktion ingen hittar är inte byggd.** Klubbpanelen
+säger i klartext att arket ska sättas upp, riktat till den som läser sidan, eftersom hen är den enda
+som kan göra det.
+
+Affischens QR bär **bara ett klubb-id**, ingen `IDataProtector`-token: adressen är ingen hemlighet
+och `/valvet` grindar ändå på inloggning + klubbadmin/skjutledare. En token hade dessutom gjort
+affischen omöjlig att felsöka och känslig för nyckelbyte.
+
 ### Deploy
 
 `Migrations/alter-firearm-booking-wish-and-assign.sql` — **måste köras FÖRE deploy** (NPoco emitterar
@@ -5405,12 +5445,25 @@ Fildeploy av `KnowledgeBase/docs/vapenregister.md` och `vapen-klubbadmin.md`.
 
 ### Verifiering
 
-**`hpsk-verify/lanevapen-verify.mjs` — 108/108 gröna** (2026-09-02). Täcker klubbens regler med
+**`hpsk-verify/lanevapen-verify.mjs` — 127/127 gröna** (2026-09-02). Täcker klubbens regler med
 `propertyExists`, etikettarket och QR-PNG:en, händelsens kryssruta hela vägen genom anmälan, valvet
 (utlämning → rätt vapen på raden → stängning), skanningen (`Offer` → lån → `Return` → fritt igen),
 det vanliga vapnet, namngiven bokning med numret i beskedet, horisonten, externa lån i fyra lägen,
 medföljandegrinden, kurstilldelningen — och **laddar vyerna**, eftersom Razor kompileras runtime och
 `dotnet build` inte säger någonting om en `.cshtml`.
+
+**⚠️ ANDRA GÅNGEN ETT PÅSTÅENDE INTE KUNDE FALLA.** Sviten hade *"valvlänken pekar på rätt klubb"* —
+grönt hela tiden, medan sidan man LANDADE på visade fel klubb. Den läste `href`-strängen, inte
+destinationen. Läxan är generell: **mät destinationen, inte adressen.** Påståendena laddar nu sidan
+och letar klubbnamnet i `body`.
+
+Och även de klarar bara halva jobbet: en A/B som lät alla tre routerna ignorera `club` helt förblev
+grön, eftersom fixturkontot hanterar **exakt en klubb** — återfallet på primärklubben landar då på
+samma klubb som parametern pekade på, vilket är precis den konstellation prodbuggen krävde (två
+klubbar). Det som går att mäta utan fixturändring är att parametern **binds**: begär en klubb kontot
+inte hanterar och kräv ett avslag. Under samma mutation faller de tre påståendena. Den A/B:n fann
+dessutom att en **sajtadministratör är klubbadmin överallt**, så det som faktiskt stoppar en okänd
+klubb är namnuppslagningen — inte behörigheten.
 
 **A/B mot en byggd mutation:** `Source = Tilldelad` → `Web` fällde **6 påståenden**. Självfiltret
 `m.MemberId != memberId` borttaget fällde **0** — och det är ett fynd om sviten, inte om koden:

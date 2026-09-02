@@ -62,8 +62,16 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet("")]
-        public async Task<IActionResult> Index(int club = 0, string? day = null)
+        public async Task<IActionResult> Index(int club = 0, int clubId = 0, string? day = null)
         {
+            // ⚠️ BÅDA NAMNEN. Rapporterat från prod 2026-09-02: klubbpanelens länk skickade
+            // `clubId` medan routen bara läste `club`, så parametern ignorerades och sidan föll
+            // tillbaka på medlemmens PRIMÄRA klubb — en styrelsemedlem i Falkenberg med Varberg
+            // som primärklubb landade i Varbergs valv. Felläget var tyst: sidan visade en riktig
+            // klubb med en riktig lista, bara inte den man kom från. Resten av kodbasen använder
+            // `clubId`, alltså tar den här sidan emot båda i stället för att vara den enda som
+            // heter något annat.
+            if (club <= 0) club = clubId;
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return StatusCode(500, "Umbraco-kontext saknas.");
 
@@ -113,16 +121,26 @@ namespace HpskSite.Controllers
                 return View("Vault", model);
             }
 
-            var clubId = club > 0 ? club : model.Clubs[0].ClubId;
-            if (!candidates.Contains(clubId))
+            // ⚠️ EN ENDA KLUBB VÄLJS ÅT ANVÄNDAREN, aldrig en av flera. Att gissa när det finns
+            // två kandidater ger en sida som ser riktig ut men visar fel klubbs lån — och den som
+            // står i valvet upptäcker det först när namnen inte stämmer. Har hen flera klubbar och
+            // ingen är angiven frågar sidan i stället.
+            var selected = club > 0
+                ? club
+                : (model.Clubs.Count == 1 ? model.Clubs[0].ClubId : 0);
+
+            if (selected > 0 && !candidates.Contains(selected))
             {
                 model.Message = "Du hanterar inte lånevapen i den klubben.";
                 return View("Vault", model);
             }
 
-            model.SelectedClubId = clubId;
-            model.ClubName = _clubService.GetClubNameById(clubId) ?? $"Klubb {clubId}";
-            model.LoanableCount = _firearms.CountLoanable(clubId);
+            model.SelectedClubId = selected;
+            if (selected > 0)
+            {
+                model.ClubName = _clubService.GetClubNameById(selected) ?? $"Klubb {selected}";
+                model.LoanableCount = _firearms.CountLoanable(selected);
+            }
 
             return View("Vault", model);
         }
@@ -150,8 +168,9 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet("etiketter")]
-        public async Task<IActionResult> Labels(int club = 0)
+        public async Task<IActionResult> Labels(int club = 0, int clubId = 0, int firearm = 0)
         {
+            if (club <= 0) club = clubId;
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return StatusCode(500, "Umbraco-kontext saknas.");
 
@@ -160,19 +179,42 @@ namespace HpskSite.Controllers
 
             var member = _memberService.GetByEmail(current.Email);
             var mine = _memberClubs.GetAllClubIds(member);
-            var clubId = club > 0 ? club : mine.FirstOrDefault();
+
+            // ⚠️ INGEN FALLBACK PÅ PRIMÄRKLUBBEN. `mine.FirstOrDefault()` gav rubriken
+            // "Vapenetiketter — Varbergs Pistolklubb" åt någon som tryckte på knappen inne i
+            // Falkenbergs klubbadministration, alltså ett ark med FEL klubbs vapen att klistra på
+            // rätt klubbs vapen. En saknad klubb ska vara ett fel, inte en gissning.
+            var target = club > 0 ? club : (mine.Count == 1 ? mine[0] : 0);
 
             // Etikettarket är klubbadministration — det är en engångsutskrift, inte något
             // skjutledaren gör på banan.
-            if (clubId <= 0 || !await _adminAuth.IsClubAdminForClub(clubId))
+            if (target <= 0)
+                return Content("Ingen klubb angiven. Öppna etiketterna från klubbens vapenflik.");
+            if (!await _adminAuth.IsClubAdminForClub(target))
                 return Content("Åtkomst nekad");
+
+            // ⚠️ EN KLUBB SOM INTE FINNS SKA VÄGRAS, inte döpas till "Klubb 1". Funnet av sviten
+            // 2026-09-02: `?club=1` gav ett ark med rubriken "Vapenetiketter — Klubb 1" och noll
+            // vapen, alltså en sida som ser fullt legitim ut för något som inte existerar. Det är
+            // samma form som prodbuggen — en trovärdig sida för fel klubb — och `??`-fallbacken
+            // var det som gjorde den trovärdig. En sajtadministratör är dessutom klubbadmin
+            // överallt, så behörighetskontrollen ovan stoppar den inte.
+            var labelClubName = _clubService.GetClubNameById(target);
+            if (string.IsNullOrWhiteSpace(labelClubName))
+                return Content("Klubben hittades inte.");
 
             var model = new VaultLabelsModel
             {
-                ClubId = clubId,
-                ClubName = _clubService.GetClubNameById(clubId) ?? $"Klubb {clubId}",
-                Firearms = _firearms.GetForScope(Models.Firearms.FirearmScope.Club(clubId))
+                ClubId = target,
+                ClubName = labelClubName,
+                // ⚠️ ETT VAPEN I TAGET ÄR NORMALFALLET, inte hela arket. Rapporterat från prod
+                // 2026-09-02: man lägger in ett nytt lånevapen och behöver EN etikett — hela arket
+                // är en engångsutskrift när klubben börjar. Därför tar sidan emot `firearm`, och
+                // knappen sitter på vapnets egen rad i klubbpanelen.
+                SingleFirearmId = firearm,
+                Firearms = _firearms.GetForScope(Models.Firearms.FirearmScope.Club(target))
                     .Where(f => f.IsLoanable)
+                    .Where(f => firearm <= 0 || f.Id == firearm)
                     .OrderBy(f => f.ClubWeaponNumber ?? int.MaxValue)
                     .ThenBy(f => f.Alias, StringComparer.Ordinal)
                     .Select(f => new VaultLabel
@@ -192,12 +234,63 @@ namespace HpskSite.Controllers
 
             return View("VaultLabels", model);
         }
+
+        /// <summary>
+        /// <c>/valvet/affisch?club=</c> — A4:an som tejpas på insidan av valvdörren.
+        ///
+        /// <para><b>⚠️ Det här är hur vapenansvarig hittar valvet alls.</b> Gunnar är 74, är
+        /// skjutledare och inte klubbadministratör, och kommer aldrig att navigera in i en
+        /// klubbpanel för att leta en knapp. Han riktar kameran mot väggen. Första versionen la
+        /// knappen där han aldrig är — en funktion ingen hittar är inte byggd.</para>
+        /// </summary>
+        [HttpGet("affisch")]
+        public async Task<IActionResult> Poster(int club = 0, int clubId = 0)
+        {
+            if (club <= 0) club = clubId;
+
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current?.Email == null) return Redirect("/login-register/?tab=login");
+
+            var member = _memberService.GetByEmail(current.Email);
+            var mine = _memberClubs.GetAllClubIds(member);
+            var target = club > 0 ? club : (mine.Count == 1 ? mine[0] : 0);
+
+            // Samma grind som etikettarket: att sätta upp affischen är klubbadministration.
+            if (target <= 0)
+                return Content("Ingen klubb angiven. Öppna affischen från klubbens vapenflik.");
+            if (!await _adminAuth.IsClubAdminForClub(target))
+                return Content("Åtkomst nekad");
+
+            // Samma skäl som etikettarket: en affisch för "Klubb 1" är en affisch någon tejpar upp.
+            var posterClubName = _clubService.GetClubNameById(target);
+            if (string.IsNullOrWhiteSpace(posterClubName))
+                return Content("Klubben hittades inte.");
+
+            var req = HttpContext.Request;
+            return View("VaultPoster", new VaultPosterModel
+            {
+                ClubId = target,
+                ClubName = posterClubName,
+                VaultUrl = $"{req.Scheme}://{req.Host}/valvet?club={target}",
+            });
+        }
+    }
+
+    public class VaultPosterModel
+    {
+        public int ClubId { get; set; }
+        public string ClubName { get; set; } = "";
+        public string VaultUrl { get; set; } = "";
     }
 
     public class VaultLabelsModel
     {
         public int ClubId { get; set; }
         public string ClubName { get; set; } = "";
+
+        /// <summary>&gt; 0 när sidan begärdes för ETT vapen. Styr rubriken, inte urvalet.</summary>
+        public int SingleFirearmId { get; set; }
+
         public List<VaultLabel> Firearms { get; set; } = new();
     }
 

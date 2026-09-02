@@ -551,20 +551,102 @@ const main = async () => {
        String(await page.locator('#lvExtEscort option').count()));
     eq('/lanevapen är fri från JS-fel', realErrs(), errsView);
 
-    // Klubbens sida bär både inställningskortet och kurstilldelningsdialogen.
+    // Klubbens sida: sammanfattningsraden, Åtgärder-menyn och de två modalerna.
     resp = await page.goto(`${BASE}/halland/klubbar/haaplinge-goass/`, { waitUntil: 'domcontentloaded' });
     eq('klubbsidan svarar 200', resp && resp.status(), 200);
-    await page.waitForTimeout(1500);
-    ok('lånevapenkortet finns i klubbadmin', await page.locator('#vapLwBody').count() > 0);
-    ok('valvlänken pekar på rätt klubb',
-       (await page.getAttribute('#vapVaultLink', 'href') || '').includes(String(CLUB_ID)),
-       await page.getAttribute('#vapVaultLink', 'href'));
-    ok('etikettlänken pekar på rätt klubb',
-       (await page.getAttribute('#vapLabelLink', 'href') || '').includes(String(CLUB_ID)));
-    ok('horisontfältet renderas', await page.locator('#vapLwHorizon').count() > 0);
-    ok('externswitchen renderas', await page.locator('#vapLwExternal').count() > 0);
+    await page.waitForTimeout(2000);
+    ok('lånevapenraden finns i klubbadmin', await page.locator('#vapLwSummary').count() > 0);
+    // ⚠️ Sammanfattningen måste bära en SIFFRA, inte "Laddar…". Ett kort som står kvar i
+    // laddningsläge ser ut att fungera på en tom klubb och avslöjar sig först på en riktig.
+    const sumText = (await page.textContent('#vapLwSummary')) || '';
+    ok('sammanfattningen är ifylld', /\d/.test(sumText) && !sumText.includes('Laddar'), sumText.trim());
+
+    // ⚠️ REGLERNA LIGGER I EN MODAL, inte på sidan. Att fältet finns i DOM:en räcker inte som
+    // påstående — det gjorde det i förra versionen också, mitt på sidan. Här mäts att det ligger
+    // GÖMT innan man öppnar Åtgärder.
+    ok('horisontfältet är inte synligt på sidan',
+       await page.locator('#vapLwHorizon').isVisible().catch(() => false) === false);
+    ok('inställningsmodalen finns', await page.locator('#vapLwModal').count() > 0);
+    ok('historikmodalen finns', await page.locator('#vapBookModal').count() > 0);
+    ok('den gamla bokningslistan ligger inte kvar på sidan',
+       await page.locator('#vapBookBody').isVisible().catch(() => false) === false);
+
     ok('kurstilldelningsdialogen finns i DOM:en',
        await page.locator('#tgLoanWeaponModal #tgLoanDate').count() > 0);
+
+    // ── Fel klubb: buggen som prodtestet fann ─────────────────────────────────────────────────
+    //
+    // ⚠️ FÖRRA SVITEN MÄTTE LÄNKEN, INTE SIDAN. Påståendet "valvlänken pekar på rätt klubb"
+    // läste href-strängen och var grönt — medan routen läste parametern `club` och länken
+    // skickade `clubId`, så sidan man LANDADE på visade medlemmens primära klubb. En
+    // styrelsemedlem i Falkenberg fick Varbergs valv, med en rubrik som såg helt riktig ut.
+    // Läxan: mät destinationen, inte adressen.
+    const vaultHref = await page.getAttribute('#vapVaultLink', 'href');
+    const labelHref = await page.getAttribute('#vapLabelLink', 'href');
+    const posterHref = await page.getAttribute('#vapPosterLink', 'href');
+    ok('valvlänken bär klubben', (vaultHref || '').includes(String(CLUB_ID)), vaultHref);
+    ok('etikettlänken bär klubben', (labelHref || '').includes(String(CLUB_ID)), labelHref);
+    ok('affischlänken bär klubben', (posterHref || '').includes(String(CLUB_ID)), posterHref);
+
+    const clubName = 'Haaplinge';
+    for (const [what, href] of [['valvet', vaultHref], ['etiketterna', labelHref],
+                                ['affischen', posterHref]]) {
+      const r = await page.goto(new URL(href, BASE).toString(), { waitUntil: 'domcontentloaded' });
+      eq(`${what} svarar 200`, r && r.status(), 200);
+      const body = (await page.textContent('body')) || '';
+      ok(`${what} visar klubben man kom från`, body.includes(clubName),
+         body.replace(/\s+/g, ' ').slice(0, 120));
+    }
+
+    // ⚠️ PÅSTÅENDENA OVAN KAN INTE FALLA MED DEN HÄR FIXTUREN, och det är mätt, inte antaget:
+    // en A/B (2026-09-02) lät alla tre routerna ignorera `club` helt och de förblev gröna. Kontot
+    // sviten kör hanterar exakt EN klubb, så återfallet på primärklubben landar på samma klubb som
+    // parametern pekade på. Det är precis den formen prodbuggen hade — en styrelsemedlem i
+    // Falkenberg med Varberg som primärklubb — och den kräver ett konto med två klubbar för att
+    // synas i utfallet.
+    //
+    // Det som DÄREMOT går att mäta utan fixturändring är att parametern faktiskt BINDS: begär en
+    // klubb kontot inte hanterar. Ignoreras `club` renderas den egna klubben i stället för ett
+    // avslag, och då faller de tre påståendena nedan. De är alltså kontrollprovet på ovanstående.
+    const foreign = 1;   // ett id kontot omöjligt kan hantera
+    for (const [what, url, needle] of [
+      ['valvet', `/valvet?club=${foreign}`, 'hanterar inte lånevapen'],
+      // ⚠️ Andra avslagsgrund för de två: en SAJTADMINISTRATÖR är klubbadmin överallt, så
+      // behörighetskontrollen släpper igenom och det är "klubben finns inte" som stoppar.
+      // Sviten fann just därför att sidan renderade "Vapenetiketter — Klubb 1".
+      ['etiketterna', `/valvet/etiketter?club=${foreign}`, 'hittades inte'],
+      ['affischen', `/valvet/affisch?club=${foreign}`, 'hittades inte'],
+    ]) {
+      await page.goto(`${BASE}${url}`, { waitUntil: 'domcontentloaded' });
+      const body = (await page.textContent('body')) || '';
+      ok(`${what} nekar en klubb man inte hanterar (parametern binds)`,
+         body.includes(needle) && !body.includes(clubName),
+         body.replace(/\s+/g, ' ').slice(0, 120));
+    }
+
+    // Etiketten för ETT vapen — knappen på vapnets egen rad.
+    const oneLabel = await page.goto(
+      `${BASE}/valvet/etiketter?club=${CLUB_ID}&firearm=${wA.id}`, { waitUntil: 'domcontentloaded' });
+    eq('enskild etikett svarar 200', oneLabel && oneLabel.status(), 200);
+    const oneBody = (await page.textContent('body')) || '';
+    ok('enskild etikett namnger vapnet i rubriken', oneBody.includes(`nr ${NR_A}`),
+       oneBody.replace(/\s+/g, ' ').slice(0, 140));
+    eq('enskild etikett bär exakt en etikett', await page.locator('.lab').count(), 1);
+    eq('etiketten är det begärda vapnet',
+       await page.getAttribute('.lab', 'data-firearm-id'), String(wA.id));
+
+    // ── Valvet: inga återlämnade rader, ingen väljare när klubben är given ────────────────────
+    await page.goto(`${BASE}/valvet?club=${CLUB_ID}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+    // ⚠️ Rapporterat från prodtest: väljaren frågade vilken klubb man menade, trots att man kom
+    // från en bestämd klubbs administration. Frågan är redan besvarad av vägen hit.
+    eq('ingen klubbväljare när klubben är given', await page.locator('#vtClub').count(), 0);
+    const vaultBody = (await page.textContent('#vtBoard')) || '';
+    // ⚠️ Och listan får inte bära återlämnade lån. Fixturen har flera vid det här laget: de ska
+    // ligga bakom "Visa klara i dag", inte konkurrera med det som ska göras.
+    ok('återlämnade lån ligger bakom en rad man öppnar',
+       !vaultBody.includes('Ångra') || vaultBody.includes('klara i dag'),
+       vaultBody.replace(/\s+/g, ' ').slice(0, 160));
 
     await backToTokenPage();
 

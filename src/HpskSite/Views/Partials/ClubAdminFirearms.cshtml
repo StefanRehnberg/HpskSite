@@ -87,59 +87,75 @@
     </div>
 
     @* ── Lånevapensbokningar ────────────────────────────────────────────────────────────────── *@
-    @* ── Lånevapen: reglerna och vägen till valvet ──────────────────────────────────────────
+    @* ── Lånevapen: EN rad, och resten bakom Åtgärder ───────────────────────────────────────
 
-       ⚠️ VALVLÄNKEN LIGGER FÖRST OCH ÄR STOR med flit. Det är den enda knapp vapenansvarig
-       behöver, och han står i valvet med en telefon i handen och nybörjare som vill igång.
-       En länk begravd under två inställningar är en länk han aldrig hittar — och då lämnar han
-       ut vapnen utan att registrera något, vilket är exakt det utfall hela ytan finns för att
-       undvika. Inställningarna under är styrelsens engångsval; de får se ut som administration.
+       ⚠️ OMGJORD 2026-09-02 efter prodtest. Första versionen la ett helt kort med inställningar
+       MITT PÅ SIDAN och ett andra kort med varje bokning som någonsin gjorts. Två fel i ett:
+       inställningar är något styrelsen rör en gång om året och ska inte konkurrera med dagligt
+       arbete om plats, och en lista som växer i oändlighet slutar vara en lista.
+
+       ⚠️ VALVET ÄGER HANTERINGEN (Stefans beslut). Utlämning och återlämning sker på /valvet, som
+       är byggt för en telefon i handen. Panelen visar EN siffra och en väg dit — två ytor som gör
+       samma sak lämnar frågan "vilken av dem gäller?" obesvarad, och den frågan är värre än att
+       behöva byta sida.
     *@
     <div class="card mb-4">
         <div class="card-body">
-            <h5 class="card-title mb-3">
-                <i class="bi bi-safe2 text-primary me-2"></i>Lånevapen
-            </h5>
-
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <a class="btn btn-primary" id="vapVaultLink" href="/valvet" target="_blank" rel="noopener">
-                    <i class="bi bi-box-arrow-right me-1"></i>Öppna valvet
-                </a>
-                <a class="btn btn-outline-secondary" id="vapLabelLink" href="/valvet/etiketter"
-                   target="_blank" rel="noopener">
-                    <i class="bi bi-qr-code me-1"></i>Skriv ut etiketter
-                </a>
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h5 class="card-title mb-1">
+                        <i class="bi bi-safe2 text-primary me-2"></i>Lånevapen
+                    </h5>
+                    <div id="vapLwSummary" class="text-muted small">Laddar…</div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <a class="btn btn-primary" id="vapVaultLink" href="/valvet" target="_blank" rel="noopener">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Öppna valvet
+                    </a>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary dropdown-toggle" type="button"
+                                data-bs-toggle="dropdown" aria-expanded="false">
+                            Åtgärder
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li>
+                                <a class="dropdown-item" id="vapPosterLink" href="/valvet/affisch"
+                                   target="_blank" rel="noopener">
+                                    <i class="bi bi-qr-code-scan me-2"></i>Affisch till valvet
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" id="vapLabelLink" href="/valvet/etiketter"
+                                   target="_blank" rel="noopener">
+                                    <i class="bi bi-tags me-2"></i>Etiketter till alla vapen
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <button class="dropdown-item" type="button" data-vap-action="lw-settings">
+                                    <i class="bi bi-sliders me-2"></i>Regler för lånevapen
+                                </button>
+                            </li>
+                            <li>
+                                <button class="dropdown-item" type="button" data-vap-action="lw-history">
+                                    <i class="bi bi-clock-history me-2"></i>Alla lån och historik
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
             </div>
-            <p class="text-muted small">
-                <strong>Valvet</strong> visar vilka vapen som ska ut i kväll och till vem, med en
-                knapp per vapen och en knapp som stänger kvällen när du låser. Det fungerar på
-                telefonen där du står.
-                <br>
-                <strong>Etiketterna</strong> sätts <em>på vapnen</em> — en QR-kod per vapen. Den som
-                lånar skannar med telefonens kamera, och då blir lånet registrerat på rätt vapen
-                utan att du behöver skriva någonting.
-            </p>
 
-            <hr class="my-3">
-
-            <div id="vapLwBody"><div class="text-muted small">Laddar…</div></div>
-        </div>
-    </div>
-
-    @* Ligger före vapenlistan av samma skäl som inkorgen: en utlämning som väntar är arbete,
-       vapenlistan är uppslagsdata. *@
-    <div class="card mb-4">
-        <div class="card-body">
-            <h5 class="card-title mb-3">
-                <i class="bi bi-calendar-check text-primary me-2"></i>Bokade lånevapen
-                <span class="badge bg-primary ms-1 d-none" id="vapBookBadge">0</span>
-            </h5>
-            <p class="text-muted small">
-                Utlämning och återlämning kan registreras av <strong>klubbadministratör eller
-                skjutledare</strong> — det är den som står på banan. Bokningen är ingen behörighet;
-                den fysiska överlämningen är det som gäller.
-            </p>
-            <div id="vapBookBody"><div class="text-muted small">Laddar…</div></div>
+            @* ⚠️ AFFISCHEN ÄR INTE EN KURIOSITET — den är hur vapenansvarig hittar valvet alls.
+               Gunnar är skjutledare, inte klubbadministratör, och är aldrig inne på den här sidan.
+               Därför står uppmaningen i klartext här, riktad till DIG som läser: skriv ut den och
+               sätt upp den, annars finns funktionen bara för dig. *@
+            <div class="alert alert-light border small mt-3 mb-0" id="vapPosterNudge">
+                <i class="bi bi-pin-angle me-1"></i>
+                <strong>Skriv ut affischen och sätt upp den i vapenvalvet.</strong>
+                Den som lämnar ut vapnen är oftast skjutledare och kommer aldrig hit — hen riktar
+                kameran mot väggen i stället, och behöver då ingen adress och ingen meny.
+            </div>
         </div>
     </div>
 
@@ -191,6 +207,59 @@
     licensnummer. NB autocomplete="off" är en stark uppmaning, inte en garanti — därför bär fälten
     dessutom namn som ingen autofyll-heuristik känner igen.
 *@
+@* ── Reglerna för lånevapen ──────────────────────────────────────────────────────────────────
+
+   ⚠️ I EN MODAL, inte mitt på sidan (rapporterat från prodtest 2026-09-02). Det här är två val
+   styrelsen gör en gång och sedan aldrig rör — de ska inte ligga mellan det dagliga arbetet och
+   vapenlistan och konkurrera om uppmärksamhet med saker som händer varje vecka.
+*@
+<div class="modal fade" id="vapLwModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-sliders me-2"></i>Regler för lånevapen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="vapLwBody"><div class="text-muted small">Laddar…</div></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Alla lån och historik ────────────────────────────────────────────────────────────────────
+
+   ⚠️ HISTORIKEN ÄR EN MODAL, INTE SIDANS INNEHÅLL. Den växer med varje lån klubben någonsin
+   gjort. Den finns kvar av två skäl: att kunna svara på "vem hade nr 7 i förra veckan", och att
+   kunna rätta ett lån någon glömde stänga. Bägge är efterhandsarbete vid en dator, inte något
+   man gör i valvet — det gör man på /valvet.
+*@
+<div class="modal fade" id="vapBookModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-clock-history me-2"></i>Alla lån</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    Utlämning och återlämning på träningskvällen görs i
+                    <a href="/valvet" id="vapBookVaultLink" target="_blank" rel="noopener">valvet</a>,
+                    som är byggt för telefonen. Knapparna här finns för att <strong>rätta i
+                    efterhand</strong> — till exempel ett lån någon glömde stänga.
+                </p>
+                <div id="vapBookBody"><div class="text-muted small">Laddar…</div></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="vapCfModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -547,6 +616,18 @@
 
         if (action === 'lw-save') { await saveLoanSettings(btn); return; }
 
+        if (action === 'lw-settings') {
+            await loadLoanSettings();
+            new bootstrap.Modal(document.getElementById('vapLwModal')).show();
+            return;
+        }
+
+        if (action === 'lw-history') {
+            await loadBookings();
+            new bootstrap.Modal(document.getElementById('vapBookModal')).show();
+            return;
+        }
+
         if (action === 'cf-add') { openClubFirearm(0); return; }
         if (action === 'cf-edit') { openClubFirearm(btn.getAttribute('data-firearm-id')); return; }
         if (action === 'cf-save') { await saveClubFirearm(); return; }
@@ -669,6 +750,16 @@
                     ? '<i class="bi bi-check-circle text-success" title="L\u00e5nebart"></i>'
                     : '<span class="text-muted">\u2014</span>') + '</td>' +
                 '<td class="text-end">' +
+                // ⚠️ ETIKETTEN HÖR TILL VAPNET, inte till en arksida. Rapporterat från prod
+                // 2026-09-02: man lägger in ETT nytt lånevapen och behöver EN etikett — att då
+                // skriva ut hela arket är fel handling. Knappen visas bara för lånebara vapen:
+                // ett vapen som inte kan lånas har inget att skanna.
+                (f.isLoanable
+                    ? '<a class="btn btn-sm btn-outline-secondary me-1" target="_blank" ' +
+                      'rel="noopener" href="/valvet/etiketter?club=' + vapClubId() +
+                      '&firearm=' + f.id + '" title="Skriv ut etiketten f\u00f6r det h\u00e4r vapnet">' +
+                      '<i class="bi bi-qr-code"></i></a>'
+                    : '') +
                 '<button type="button" class="btn btn-sm btn-outline-primary me-1" ' +
                 'data-vap-action="cf-edit" data-firearm-id="' + f.id + '">\u00c4ndra</button>' +
                 '<button type="button" class="btn btn-sm btn-outline-danger" ' +
@@ -960,6 +1051,7 @@
     async function loadLoanSettings() {
         var body = document.getElementById('vapLwBody');
         if (!body) return;
+        body.innerHTML = '<div class="text-muted small">Laddar…</div>';
         try {
             var r = await fetch('/umbraco/surface/FirearmAdmin/GetLoanWeaponSettings?clubId=' +
                                 encodeURIComponent(vapClubId()), { credentials: 'same-origin' });
@@ -989,8 +1081,6 @@
         if (!body || !j) return;
 
         var h = '';
-        h += '<div class="text-muted small mb-3">Klubben har <strong>' + (j.loanable || 0) +
-             '</strong> lånebara vapen.</div>';
 
         // Horisonten. Sätts i dagar, och 0 betyder ingen gräns — sagt i klartext, för "0" som
         // "obegränsat" är inte självklart för någon.
@@ -1059,12 +1149,16 @@
         await loadBookings();
     }
 
-    // ── Lånevapensbokningar ──────────────────────────────────────────────────────────────────
+    // ── Lånevapen: EN rad på sidan, allt annat bakom Åtgärder ────────────────────────────────
+    //
+    // ⚠️ EN SIFFRA, INTE EN LISTA. Rapporterat från prod 2026-09-02: kortet visade varje bokning
+    // som någonsin gjorts, inklusive återlämnade, alltså en lista som växer i oändlighet. Det som
+    // faktiskt angår den som läser sidan är hur många vapen som är UTE just nu — resten är
+    // historik och ligger i en modal.
     var bookState = null;
 
     async function loadBookings() {
-        var body = document.getElementById('vapBookBody');
-        if (!body) return;
+        var sum = document.getElementById('vapLwSummary');
         try {
             var r = await fetch('/umbraco/surface/FirearmAdmin/GetClubBookings?clubId=' +
                                 encodeURIComponent(vapClubId()), { credentials: 'same-origin' });
@@ -1072,27 +1166,39 @@
             if (!j.success) {
                 // ⚠️ Nekad åtkomst är inte ett fel här: en klubbadmin utan skjutledarroll ser
                 // ändå kortet. Säg vad som gäller i stället för att visa en röd ruta.
-                body.innerHTML = '<div class="alert alert-secondary small mb-0">' +
-                    esc(j.message || 'Kunde inte läsa bokningarna.') + '</div>';
+                if (sum) sum.textContent = j.message || 'Kunde inte läsa bokningarna.';
                 return;
             }
             bookState = j;
+            renderLoanSummary();
             renderBookings();
         } catch (e) {
-            body.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
+            if (sum) sum.textContent = 'Kunde inte läsa bokningarna.';
         }
+    }
+
+    function renderLoanSummary() {
+        var sum = document.getElementById('vapLwSummary');
+        if (!sum) return;
+        var list = (bookState && bookState.bookings) || [];
+        var out = list.filter(function (b) { return b.isOut; }).length;
+        var res = list.filter(function (b) { return b.status === 'Reserverad'; }).length;
+        var loanable = (lwState && lwState.loanable) || 0;
+
+        var parts = [];
+        // Ordningen är inte slumpmässig: det som är UTE är det enda som kan vara ett problem.
+        if (out) parts.push('<strong>' + out + (out === 1 ? ' vapen är ute' : ' vapen är ute') + '</strong>');
+        if (res) parts.push(res + (res === 1 ? ' reserverat' : ' reserverade'));
+        if (!parts.length) parts.push('Inget utlånat just nu');
+        parts.push(loanable + (loanable === 1 ? ' lånebart vapen' : ' lånebara vapen'));
+
+        sum.innerHTML = parts.join(' · ');
     }
 
     function renderBookings() {
         var body = document.getElementById('vapBookBody');
+        if (!body) return;
         var list = (bookState && bookState.bookings) || [];
-
-        var badge = document.getElementById('vapBookBadge');
-        if (badge) {
-            var n = (bookState && bookState.activeCount) || 0;
-            badge.textContent = n;
-            badge.classList.toggle('d-none', n === 0);
-        }
 
         if (list.length === 0) {
             body.innerHTML = '<p class="text-muted small mb-0">Inga bokningar.</p>';
@@ -1170,16 +1276,27 @@
         // ⚠️ Länkarna måste bära klubb-id. Utan det landar en admin i flera klubbar i valvet för
         // fel klubb — och ser en tom lista i stället för kvällens vapen, vilket ser ut som att
         // ingen har bokat.
+        // ⚠️ PARAMETERN HETER `club` PÅ /valvet-routerna. Rapporterat från prod 2026-09-02:
+        // länkarna skickade `clubId`, routen läste bara `club`, och sidan föll då tillbaka på
+        // medlemmens PRIMÄRA klubb — en styrelsemedlem i Falkenberg landade i Varbergs valv, med
+        // en rubrik som såg helt riktig ut. Routerna tar nu emot båda namnen, men länkarna ska
+        // ändå skicka det rätta.
         var vl = document.getElementById('vapVaultLink');
-        if (vl) vl.href = '/valvet?clubId=' + vapClubId();
+        if (vl) vl.href = '/valvet?club=' + vapClubId();
         var ll = document.getElementById('vapLabelLink');
-        if (ll) ll.href = '/valvet/etiketter?clubId=' + vapClubId();
+        if (ll) ll.href = '/valvet/etiketter?club=' + vapClubId();
+        var pl = document.getElementById('vapPosterLink');
+        if (pl) pl.href = '/valvet/affisch?club=' + vapClubId();
+        var bvl = document.getElementById('vapBookVaultLink');
+        if (bvl) bvl.href = '/valvet?club=' + vapClubId();
 
         load();
         loadClubFirearms();
         loadRequests();
-        loadBookings();
-        loadLoanSettings();
+        // ⚠️ Reglerna läses vid start ÄNDÅ, trots att de bara visas i modalen: antalet lånebara
+        // vapen står i sammanfattningsraden, och utan det blir raden ofullständig till första
+        // gången någon öppnar Åtgärder.
+        loadLoanSettings().then(loadBookings);
     }
 
     window.hpskReloadFirearmViewers = load;

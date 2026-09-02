@@ -986,6 +986,31 @@ namespace HpskSite.Controllers
             return png is null ? Content("Kunde inte skapa QR-kod") : File(png, "image/png");
         }
 
+        /// <summary>
+        /// QR-koden till klubbens VALV, för affischen som tejpas på valvväggen.
+        ///
+        /// <para><b>⚠️ Det här är hur vapenansvarig hittar sidan alls.</b> Gunnar är 74, är
+        /// skjutledare och inte klubbadministratör, och kommer aldrig att navigera in i en
+        /// klubbpanel för att hitta en knapp. Han riktar kameran mot väggen — samma gest han redan
+        /// ska lära nybörjarna vid vapnen. En funktion ingen hittar är inte byggd.</para>
+        ///
+        /// <para><b>Adressen är ingen hemlighet</b> och behöver inget skydd: <c>/valvet</c> kräver
+        /// inloggning och att man är klubbadministratör eller skjutledare i klubben. Därför är det
+        /// bara ett klubb-id i koden, inte en <c>IDataProtector</c>-token — en token hade dessutom
+        /// gjort affischen omöjlig att felsöka och känslig för nyckelbyte.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetVaultPosterQr(int clubId, int size = 14)
+        {
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Content("Åtkomst nekad");
+
+            var req = HttpContext.Request;
+            var url = $"{req.Scheme}://{req.Host}/valvet?club={clubId}";
+            var png = QrPng(url, Math.Clamp(size, 4, 24));
+            return png is null ? Content("Kunde inte skapa QR-kod") : File(png, "image/png");
+        }
+
         /// <summary>Etikettens adress. Absolut, för den ska skannas från papper.</summary>
         private string LabelUrl(int firearmId)
         {
