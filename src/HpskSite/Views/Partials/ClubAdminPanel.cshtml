@@ -79,7 +79,8 @@
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#membersTab">Medlemmar</option>
-                    <option value="#clubActivityTab">Aktivitet &amp; Intyg</option>
+                    <option value="#clubActivityTab">Aktivitet</option>
+                    <option value="#foreningsintygTab">Föreningsintyg</option>
                     <option value="#trainingGroupsTab">Träningsgrupper</option>
                     <option value="#certificationsTab">Certifieringar</option>
                 </optgroup>
@@ -91,7 +92,7 @@
                 <optgroup label="Klubben">
                     <option value="/styrelse?type=0&id=@clubId">Styrelsearbete ↗</option>
                     <option value="#invoicesTab">Fakturor</option>
-                    <option value="#firearmsTab">Vapen &amp; lånevapen</option>
+                    <option value="#clubFirearmsTab">Klubbvapen</option>
                     <option value="#settingsTab">Inställningar</option>
                     <option value="#documentsTab">Dokument</option>
                     <option value="#clubStatsTab">Statistik</option>
@@ -120,7 +121,17 @@
                 @* Direkt efter Medlemmar: det ar dar arbetet borjar (valj en medlem) och dit
                    medlemsmodalen lamnar over. *@
                 <button class="nav-link" id="clubActivity-tab" data-bs-toggle="tab" data-bs-target="#clubActivityTab" type="button" role="tab" aria-controls="clubActivityTab" aria-selected="false">
-                    <i class="bi bi-clipboard-check me-2"></i>Aktivitet &amp; Intyg
+                    <i class="bi bi-clipboard-check me-2"></i>Aktivitet
+                </button>
+                @* ⚠️ FÖRENINGSINTYGET LIGGER I *MEDLEMMAR*, INTE I KLUBBEN (Stefans beslut
+                   2026-09-02). Det handlar om en enskild medlems ansökan och om vem klubben ger
+                   rätt att läsa medlemmars vapeninnehav — alltså medlemsadministration. Klubbens
+                   EGNA vapen är en annan sak och ligger under Klubben.
+                   Varningsmärket när läsarrollen är obesatt sätts av loadFirearmViewerState(), och
+                   `d-flex` krävs för att `ms-auto` ska trycka det åt höger. *@
+                <button class="nav-link d-flex align-items-center" id="foreningsintyg-tab" data-bs-toggle="tab" data-bs-target="#foreningsintygTab" type="button" role="tab" aria-controls="foreningsintygTab" aria-selected="false">
+                    <i class="bi bi-shield-lock me-2"></i>Föreningsintyg
+                    <i class="bi bi-exclamation-triangle-fill ms-auto text-warning d-none" id="firearmsRailWarning" title="Ingen kan läsa medlemmarnas vapeninnehav"></i>
                 </button>
                 <button class="nav-link" id="traininggroups-tab" data-bs-toggle="tab" data-bs-target="#trainingGroupsTab" type="button" role="tab" aria-controls="trainingGroupsTab" aria-selected="false">
                     <i class="bi bi-people-fill me-2"></i>Träningsgrupper
@@ -148,14 +159,10 @@
                 <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button" role="tab" aria-controls="invoicesTab" aria-selected="false">
                     <i class="bi bi-receipt me-2"></i>Fakturor
                 </button>
-                @* Vapenregistret ligger i Klubben-gruppen, inte i Medlemmar: klubbens EGNA vapen
-                   är klubbadministration, och behörighetsrutan handlar om vem klubben ger insyn.
-                   Ett varningsmärke när rollen är obesatt sätts av loadFirearmViewerState(). *@
-                @* d-flex krävs för att ms-auto ska trycka varningsmärket åt höger — samma som
-                   Styrelsearbete-länken nedan gör med sin externa-pil. *@
-                <button class="nav-link d-flex align-items-center" id="firearms-tab" data-bs-toggle="tab" data-bs-target="#firearmsTab" type="button" role="tab" aria-controls="firearmsTab" aria-selected="false">
-                    <i class="bi bi-safe me-2"></i>Vapen &amp; lånevapen
-                    <i class="bi bi-exclamation-triangle-fill ms-auto text-warning d-none" id="firearmsRailWarning" title="Ingen kan läsa medlemmarnas vapeninnehav"></i>
+                @* Klubbens EGNA vapen och lånevapenhanteringen. Föreningsintyget ligger under
+                   Medlemmar — det är en medlems ansökan, inte klubbens inventarie. *@
+                <button class="nav-link" id="clubFirearms-tab" data-bs-toggle="tab" data-bs-target="#clubFirearmsTab" type="button" role="tab" aria-controls="clubFirearmsTab" aria-selected="false">
+                    <i class="bi bi-safe me-2"></i>Klubbvapen
                 </button>
                 <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settingsTab" type="button" role="tab" aria-controls="settingsTab" aria-selected="false">
                     <i class="bi bi-gear me-2"></i>Inställningar
@@ -413,11 +420,14 @@
             </div>
         </div>
 
-        @* Vapen & lånevapen — innehållet i en egen partial. Panelen är över 6 500 rader, och
-           behörighetsrutan plus (senare) klubbens vapenlista hör inte hit i sin helhet. *@
-        <div class="tab-pane fade" id="firearmsTab">
-            @await Html.PartialAsync("ClubAdminFirearms")
-        </div>
+        @* ⚠️ EN PARTIAL, TVÅ PANELER, och därför INGEN tab-pane-wrapper här. Partialen skriver
+           ut `#foreningsintygTab` och `#clubFirearmsTab` själv, eftersom halvorna hör till olika
+           menysektioner men delar `vapClubId()`, antiforgery-hämtningen, `post()` och
+           klickdispatchern. Två partialfiler hade betytt två kopior av dem — och två kopior av en
+           regel glider isär, vilket den här kodbasen redan bevisat en gång (fönsterregeln låg i
+           både tillgänglighetslistan och bokningen och svarade olika på samma fönster).
+           Lägger du tillbaka en wrapper här hamnar en av panelerna inne i den andra. *@
+        @await Html.PartialAsync("ClubAdminFirearms")
 
         <!-- Settings Tab -->
         <div class="tab-pane fade" id="settingsTab">

@@ -5324,6 +5324,33 @@ löftet som avgör om hen kommer alls. En PLATSbokning får omvänt **inte** utl
 | Kurstilldelning | klubbpanelen → träningsgrupp | klubbadmin/skjutledare |
 | Externt lån + medföljande | `/lanevapen` | medlem |
 
+### ⚠️⚠️ EN SKANNING FÅR BARA ÖKA DET MAN SVARAR FÖR, ALDRIG MINSKA DET
+
+Första versionen lät samma etikett **stänga** lånet vid en andra skanning. Stefan fann det direkt:
+den enda person som har intresse av att lånet ser stängt ut var också den som kunde stänga det —
+skytten kunde skanna vid bilen och åka hem.
+
+**Skadan är inte att skanningen möjliggör stölden.** Inget i systemet hindrar någon från att bära ut
+ett vapen, och den som inte skannar alls lämnar tvärtom ett **öppet** lån som syns i valvet. Skadan
+är att den **döljer** den: felet biasas mot *"vi tror att vapnet är tillbaka"*, och för ett
+vapenregister är det det enda felet som inte får finnas. Ett kvarglömt öppet lån är billigt; ett
+felaktigt stängt gör hela registret oanvändbart som underlag. Jag hade själv skrivit *"ett falskt
+'återlämnat' är sämre än ett gammalt"* i designen — och sedan byggt just det.
+
+Följden: **`ScanReturn` är borttagen**, enumvärdet `FirearmScanAction.Return` heter **`OutToYou`**
+(namnbytet finns för att ingen ska läsa `Return` och bygga tillbaka knappen), och skanningssidan är
+ett **kvitto** som säger vem som registrerar återlämningen. Att bara neka utan att säga vem läses som
+*"systemet är trasigt"*, och då skannar hen inte nästa gång heller.
+
+Utlämning via egen skanning består oförändrad: den lägger ansvar **på** skytten, och en lögn där är
+mot hens eget intresse. Återlämningen registreras av den som **tar emot** vapnet — *Tillbaka* på
+raden i valvet, eller *Kvällen är klar*.
+
+⚠️ **Behövs ett sätt för skytten att SÄGA att vapnet är lämnat** (vapenansvarig har gått hem) ska
+det vara ett eget tillstånd som **fortsätter blockera** vapnet till någon bekräftar — aldrig en
+stängning. `Status` är en strängkolumn med en `Blocking`-mängd, så ett fjärde värde kostar ingen
+migrering.
+
 ### ⚠️ Skanningen är en RIKTIGHETSvinst, inte en bekvämlighetsvinst
 
 En skanning kan inte ha fel om vilket vapen som gick ut. Det kan en människa med en penna.
@@ -5431,6 +5458,25 @@ Affischens QR bär **bara ett klubb-id**, ingen `IDataProtector`-token: adressen
 och `/valvet` grindar ändå på inloggning + klubbadmin/skjutledare. En token hade dessutom gjort
 affischen omöjlig att felsöka och känslig för nyckelbyte.
 
+### Menyerna: två rälsposter ur EN partial
+
+Uppdelat 2026-09-02 på Stefans begäran: *Vapen & lånevapen* blev **Klubbvapen** (sektionen
+*Klubben*) och **Föreningsintyg** (sektionen *Medlemmar*), och *Aktivitet & Intyg* heter nu bara
+**Aktivitet**. Skälet är vems arbete det är: klubbens egna vapen är klubbadministration, medan
+föreningsintyget handlar om en enskild medlems ansökan och om vem klubben ger rätt att läsa
+medlemmars vapeninnehav.
+
+⚠️ **`ClubAdminFirearms.cshtml` skriver ut BÅDA tab-panelerna själv**, och panelen inkluderar
+partialen **utan** en `tab-pane`-wrapper. Halvorna delar `vapClubId()`, antiforgery-hämtningen,
+`post()` och klickdispatchern — två partialfiler hade betytt två kopior av dem, och två kopior av en
+regel glider isär (fönsterregeln låg i både tillgänglighetslistan och bokningen och svarade olika på
+samma fönster). Sätter du tillbaka en wrapper hamnar båda panelerna i en tredje som aldrig aktiveras,
+och **båda flikarna blir permanent tomma utan att något felar**.
+
+⚠️ Varningsmärket för obesatt läsarroll (`#firearmsRailWarning`) flyttade till **Föreningsintyg** —
+det är dess ämne — och hämtningen är fortfarande ivrig, inte lazy, av samma skäl som förut: märket
+ska synas för en klubbadmin som aldrig öppnar fliken.
+
 ### Deploy
 
 `Migrations/alter-firearm-booking-wish-and-assign.sql` — **måste köras FÖRE deploy** (NPoco emitterar
@@ -5445,7 +5491,7 @@ Fildeploy av `KnowledgeBase/docs/vapenregister.md` och `vapen-klubbadmin.md`.
 
 ### Verifiering
 
-**`hpsk-verify/lanevapen-verify.mjs` — 127/127 gröna** (2026-09-02). Täcker klubbens regler med
+**`hpsk-verify/lanevapen-verify.mjs` — 147/147 gröna** (2026-09-02). Täcker klubbens regler med
 `propertyExists`, etikettarket och QR-PNG:en, händelsens kryssruta hela vägen genom anmälan, valvet
 (utlämning → rätt vapen på raden → stängning), skanningen (`Offer` → lån → `Return` → fritt igen),
 det vanliga vapnet, namngiven bokning med numret i beskedet, horisonten, externa lån i fyra lägen,
@@ -5473,7 +5519,23 @@ mäta något.** Det är utbytt mot ett som kan falla (ingen kandidat utanför kl
 notis om att självuteslutningen är OMÄTT av den här sviten. Att kontot syns i
 `ClubAdmin/GetClubMembers` räcker INTE som bevis — de två listorna har olika urval.
 
-Regression: `vapen-verify.mjs` 209/209, enhetstesten 879/899 (samma 16 sedan tidigare).
+**⚠️ TREDJE GÅNGEN ETT PÅSTÅENDE INTE KUNDE FALLA — och den här formen är värd att känna igen.**
+Nivåkontrollen för de två nya panelerna stod först som *"ingen av panelerna ligger inuti den andra"*.
+En A/B som satte tillbaka `tab-pane`-wrappern förblev **grön**: wrappern lägger BÅDA panelerna i en
+tredje, så de är fortfarande syskon *till varandra* — bara instängda i något som aldrig aktiveras.
+*"Ingen `.tab-pane` inuti en `.tab-pane`"* duger inte heller, för hela klubbpanelen sitter redan i en
+flik på klubbsidan och **varje** panel har därför en sådan förälder. Det som faktiskt gäller är att de
+nya panelerna ligger på **samma nivå som `#membersTab`**, en panel vi vet ligger rätt. Så formulerad
+faller den under mutationen (2 röda).
+
+⚠️ Klickning av rälsposterna mäter inget: rälsen är `d-none d-lg-block` och ligger bakom
+klubbpanelens egen upplåsning, så en klickning testar Bootstrap och layouten. Sviten läser
+panelernas innehåll i stället, och kräver att båda är fyllda och inte står kvar på *"Laddar…"* — en
+panel vars laddning aldrig kallas ser annars ut som en tom klubb, inte som ett fel.
+
+Regression: `vapen-verify.mjs` 209/209 (dess rälspostpåstående var uppdaterat till `Klubbvapen` —
+det matchade ingenting efter uppdelningen och sviten föll på en rälspost, inte på en bugg),
+enhetstesten 879/899 (samma 16 sedan tidigare).
 
 ## Dubblettsammanslagning av medlemmar (2026-08-25)
 

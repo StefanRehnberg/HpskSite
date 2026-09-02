@@ -596,6 +596,80 @@ const main = async () => {
     ok('kurstilldelningsdialogen finns i DOM:en',
        await page.locator('#tgLoanWeaponModal #tgLoanDate').count() > 0);
 
+    // ── De två rälsposterna ───────────────────────────────────────────────────────────────────
+    //
+    // Uppdelat 2026-09-02: klubbens EGNA vapen är klubbadministration, föreningsintyget är
+    // medlemsadministration. Halvorna kommer ur EN partial med ETT script, så panelerna måste
+    // vara SYSKON — hamnar den ena inne i den andra fungerar bara en av flikarna, och den andra
+    // är tom utan att något felar.
+    eq('rälsposten Klubbvapen finns', await page.locator('#clubFirearms-tab').count(), 1);
+    eq('rälsposten Föreningsintyg finns', await page.locator('#foreningsintyg-tab').count(), 1);
+    eq('den gamla sammanslagna rälsposten är borta',
+       await page.locator('#firearms-tab').count(), 0);
+    eq('Klubbvapen-panelen finns', await page.locator('#clubFirearmsTab').count(), 1);
+    eq('Föreningsintyg-panelen finns', await page.locator('#foreningsintygTab').count(), 1);
+    // ⚠️ NIVÅKONTROLLEN, och den fick fel form första gången — värt att skriva ner.
+    //
+    // Först stod här "ingen av panelerna ligger inuti den andra". En A/B som satte tillbaka
+    // tab-pane-wrappern runt partialen förblev GRÖN, eftersom wrappern lägger BÅDA panelerna
+    // inuti en tredje: de är fortfarande syskon till varandra, bara instängda i en panel som
+    // aldrig aktiveras. Båda flikarna hade då varit permanent tomma utan att något felade.
+    //
+    // "Ingen .tab-pane inuti en .tab-pane" duger inte heller: hela klubbpanelen sitter redan i en
+    // flik på klubbsidan, så VARJE panel har en sådan förälder. Det som faktiskt gäller är att de
+    // två nya panelerna ligger på SAMMA nivå som de befintliga — mätt mot `#membersTab`, som är
+    // en panel vi vet ligger rätt.
+    const levels = await page.evaluate(() => {
+      const anc = id => {
+        const el = document.getElementById(id);
+        if (!el) return 'FINNS-INTE';
+        const a = el.parentElement && el.parentElement.closest('.tab-pane');
+        return a ? (a.id || '(namnlos)') : 'ingen';
+      };
+      return { ref: anc('membersTab'), cf: anc('clubFirearmsTab'), fi: anc('foreningsintygTab') };
+    });
+    eq('Klubbvapen ligger på samma nivå som de andra panelerna', levels.cf, levels.ref);
+    eq('Föreningsintyg ligger på samma nivå som de andra panelerna', levels.fi, levels.ref);
+
+    // Innehållet ska ligga i RÄTT panel — annars är uppdelningen bara två knappar.
+    eq('lånevapenraden ligger under Klubbvapen',
+       await page.locator('#clubFirearmsTab #vapLwSummary').count(), 1);
+    eq('klubbens vapenlista ligger under Klubbvapen',
+       await page.locator('#clubFirearmsTab #vapClubBody').count(), 1);
+    eq('läsbehörigheten ligger under Föreningsintyg',
+       await page.locator('#foreningsintygTab #vapViewerBody').count(), 1);
+    eq('intygsinkorgen ligger under Föreningsintyg',
+       await page.locator('#foreningsintygTab #vapReqBody').count(), 1);
+
+    // Menytexterna, som Stefan namngav.
+    const railKlubbvapen = (await page.textContent('#clubFirearms-tab')) || '';
+    const railIntyg = (await page.textContent('#foreningsintyg-tab')) || '';
+    const railAktivitet = (await page.textContent('#clubActivity-tab')) || '';
+    ok('rälsposten heter Klubbvapen', railKlubbvapen.trim().startsWith('Klubbvapen'), railKlubbvapen.trim());
+    ok('rälsposten heter Föreningsintyg', railIntyg.includes('Föreningsintyg'), railIntyg.trim());
+    ok('Aktivitet heter bara Aktivitet',
+       railAktivitet.trim() === 'Aktivitet', railAktivitet.trim());
+
+    // Varningsmärket för obesatt läsarroll följde med till Föreningsintyg — det är dess ämne.
+    eq('varningsmärket sitter på Föreningsintyg',
+       await page.locator('#foreningsintyg-tab #firearmsRailWarning').count(), 1);
+
+    // ⚠️ BÅDA HALVORNAS JS MÅSTE FYLLA SIN PANEL. Det är det uppdelningen faktiskt riskerar:
+    // scriptdelen är EN, men den hämtar via två olika funktioner, och en panel vars laddning
+    // aldrig kallas står kvar med "Laddar…" — vilket ser ut som en tom klubb, inte som ett fel.
+    //
+    // Klickas flikarna inte här är det med flit: rälsen är `d-none d-lg-block` och ligger dessutom
+    // bakom klubbpanelens egen upplåsning, så en klickning mäter Bootstrap och sidans layout i
+    // stället för den här ändringen. Innehållet går att läsa oavsett synlighet.
+    for (const [label, probe] of [
+      ['Klubbvapen', '#clubFirearmsTab #vapClubBody'],
+      ['Föreningsintyg', '#foreningsintygTab #vapViewerBody'],
+    ]) {
+      const txt = ((await page.textContent(probe)) || '').trim();
+      ok(`panelen ${label} är fylld av sin egen laddning`,
+         txt.length > 0 && !txt.includes('Laddar'), `${label}: "${txt.slice(0, 80)}"`);
+    }
+
     // ── Fel klubb: buggen som prodtestet fann ─────────────────────────────────────────────────
     //
     // ⚠️ FÖRRA SVITEN MÄTTE LÄNKEN, INTE SIDAN. Påståendet "valvlänken pekar på rätt klubb"

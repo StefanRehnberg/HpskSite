@@ -976,9 +976,13 @@ const main = async () => {
       if (hasAdminTab) {
         await page.click('#clubAdmin-tab');
         await page.waitForTimeout(800);
-        const railBtn = page.locator('#firearms-tab, [data-bs-target="#firearmsTab"]');
+        // ⚠️ UPPDELAT 2026-09-02: rälsposten "Vapen & lånevapen" är två poster — **Klubbvapen**
+        // under Klubben och **Föreningsintyg** under Medlemmar. Det här avsnittet handlar om
+        // klubbens EGNA vapen och deras formulär, alltså Klubbvapen. Den gamla väljaren matchade
+        // ingenting efter uppdelningen och sviten föll på en rälspost, inte på en bugg.
+        const railBtn = page.locator('#clubFirearms-tab, [data-bs-target="#clubFirearmsTab"]');
         const hasRail = await railBtn.count() > 0;
-        ok('rälsposten för vapen & lånevapen finns', hasRail);
+        ok('rälsposten Klubbvapen finns', hasRail);
 
         if (hasRail) {
           await railBtn.first().click();

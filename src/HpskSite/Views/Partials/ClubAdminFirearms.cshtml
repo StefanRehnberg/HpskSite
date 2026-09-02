@@ -31,8 +31,21 @@
     var vapClubId = ViewBag.clubId as int? ?? 0;
 }
 
-<div id="vapPanel" data-club-id="@vapClubId">
+@*
+    ⚠️ TVÅ RÄLSPOSTER, EN PARTIAL, ETT SCRIPT (uppdelat 2026-09-02 på Stefans begäran).
 
+    Ytorna hör till olika personer och olika sektioner: klubbens EGNA vapen är klubbadministration
+    (sektionen *Klubben*), medan föreningsintyget handlar om en enskild medlems ansökan och den
+    behörighet klubben ger någon att läsa medlemmars vapeninnehav (sektionen *Medlemmar*).
+
+    ⚠️ MEN DE DELAR EN SCRIPT-DEL, med flit. Halvorna använder samma `vapClubId()`, samma
+    antiforgery-hämtning, samma `post()` och samma klickdispatcher. Två partialfiler hade betytt
+    två kopior av dem — och två kopior av en regel glider isär, vilket den här kodbasen redan
+    bevisat en gång: tillgänglighetslistan och bokningen bar var sin kopia av fönsterregeln och
+    svarade olika på samma fönster. Panelen inkluderar därför partialen EN gång, utanför sina
+    tab-pane-wrappers, och partialen skriver ut båda panelerna själv.
+*@
+<div class="tab-pane fade" id="foreningsintygTab">
     @* ── Behörigheten ───────────────────────────────────────────────────────────────────────── *@
     <div class="card mb-4" id="vapViewerCard">
         <div class="card-body">
@@ -86,7 +99,14 @@
         </div>
     </div>
 
-    @* ── Lånevapensbokningar ────────────────────────────────────────────────────────────────── *@
+</div>
+
+@* ⚠️ `vapPanel` bär klubb-id:t och måste ligga i den panel som laddas FÖRST vid sidladdning —
+   `vapClubId()` slår upp det per anrop, så det räcker att elementet finns i DOM:en. Det ligger
+   här, runt klubbvapnen, eftersom den panelen är den som har mest att hämta. *@
+<div class="tab-pane fade" id="clubFirearmsTab">
+<div id="vapPanel" data-club-id="@vapClubId">
+
     @* ── Lånevapen: EN rad, och resten bakom Åtgärder ───────────────────────────────────────
 
        ⚠️ OMGJORD 2026-09-02 efter prodtest. Första versionen la ett helt kort med inställningar
@@ -185,6 +205,7 @@
             </div>
         </div>
     </div>
+</div>
 </div>
 
 @* Klubbvapnets redigeringsdialog. Enkel med flit: klubbvapnets skyddade uppgifter (serienummer,
@@ -1265,12 +1286,18 @@
     // `shown.bs.tab` används därefter bara som ett nytt försök om den första hämtningen fallerade
     // — inte som en omladdning. Eventet fyrar varje gång man går tillbaka till fliken, och en
     // omladdning då skulle slå ihjäl ett påbörjat val i väljaren.
-    var tabBtn = document.getElementById('firearms-tab');
-    if (tabBtn) {
+    //
+    // ⚠️ Rälsposten heter `foreningsintyg-tab` sedan uppdelningen 2026-09-02, och klubbvapnen har
+    // sin egen. Båda lyssnas på: halvorna laddas av olika funktioner, och den som öppnar bara den
+    // ena fliken ska inte få ett nytt försök för den andra halvan i stället för sin egen.
+    ['foreningsintyg-tab', 'clubFirearms-tab'].forEach(function (id) {
+        var tabBtn = document.getElementById(id);
+        if (!tabBtn) return;
         tabBtn.addEventListener('shown.bs.tab', function () {
             if (!state) load();
+            if (!clubState) loadClubFirearms();
         });
-    }
+    });
 
     if (vapClubId() > 0) {
         // ⚠️ Länkarna måste bära klubb-id. Utan det landar en admin i flera klubbar i valvet för
