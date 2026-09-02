@@ -91,6 +91,7 @@
                 <optgroup label="Klubben">
                     <option value="/styrelse?type=0&id=@clubId">Styrelsearbete ↗</option>
                     <option value="#invoicesTab">Fakturor</option>
+                    <option value="#firearmsTab">Vapen &amp; lånevapen</option>
                     <option value="#settingsTab">Inställningar</option>
                     <option value="#documentsTab">Dokument</option>
                     <option value="#clubStatsTab">Statistik</option>
@@ -146,6 +147,15 @@
                 </a>
                 <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button" role="tab" aria-controls="invoicesTab" aria-selected="false">
                     <i class="bi bi-receipt me-2"></i>Fakturor
+                </button>
+                @* Vapenregistret ligger i Klubben-gruppen, inte i Medlemmar: klubbens EGNA vapen
+                   är klubbadministration, och behörighetsrutan handlar om vem klubben ger insyn.
+                   Ett varningsmärke när rollen är obesatt sätts av loadFirearmViewerState(). *@
+                @* d-flex krävs för att ms-auto ska trycka varningsmärket åt höger — samma som
+                   Styrelsearbete-länken nedan gör med sin externa-pil. *@
+                <button class="nav-link d-flex align-items-center" id="firearms-tab" data-bs-toggle="tab" data-bs-target="#firearmsTab" type="button" role="tab" aria-controls="firearmsTab" aria-selected="false">
+                    <i class="bi bi-safe me-2"></i>Vapen &amp; lånevapen
+                    <i class="bi bi-exclamation-triangle-fill ms-auto text-warning d-none" id="firearmsRailWarning" title="Ingen kan läsa medlemmarnas vapeninnehav"></i>
                 </button>
                 <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settingsTab" type="button" role="tab" aria-controls="settingsTab" aria-selected="false">
                     <i class="bi bi-gear me-2"></i>Inställningar
@@ -401,6 +411,12 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        @* Vapen & lånevapen — innehållet i en egen partial. Panelen är över 6 500 rader, och
+           behörighetsrutan plus (senare) klubbens vapenlista hör inte hit i sin helhet. *@
+        <div class="tab-pane fade" id="firearmsTab">
+            @await Html.PartialAsync("ClubAdminFirearms")
         </div>
 
         <!-- Settings Tab -->

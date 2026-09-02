@@ -1,0 +1,7 @@
+{
+  "name": "hpsk-verify",
+  "private": true,
+  "type": "module",
+  "description": "Disposable end-to-end verification scripts for pistol.nu. Not part of the app build.",
+  "dependencies": { "playwright": "^1.49.0" }
+}

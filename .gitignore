@@ -82,3 +82,8 @@ appsettings.Development.json
 # views, and is excluded via .git/info/exclude.)
 /notes/*
 !/notes/README.md
+
+# hpsk-verify: verifieringsskripten committas (CLAUDE.md refererar dem per funktion),
+# men aldrig deras beroenden. Playwright drar in 160+ filer och browsrarna laddas
+# separat med `npx playwright install`.
+/hpsk-verify/node_modules/

@@ -1,0 +1,769 @@
+@*
+    Medlemmens eget vapenregister — Min sida, fliken "Vapen".
+
+    ⚠️ MASKERAT SOM STANDARD, ÄVEN FÖR ÄGAREN. Två skäl, och det andra är det viktiga:
+       1. Någon står bakom dig på banan.
+       2. Maskeringen gör skyddet SYNLIGT i stället för bara påstått. Ett register som visar
+          licensnummer direkt ser ut precis som ett oskyddat register.
+    Avmaskeringen är ett POST-anrop som loggas, och kortet återmaskeras av sig självt.
+
+    ⚠️ FÖRTROENDERADEN LIGGER FÖRST och namnger den som kan läsa. Löftet skrevs om 2026-09-02:
+    medlemmen har inte längre ensamrätt till sina uppgifter (klubbens föreningsintygsansvarige kan
+    läsa dem för att skriva ett intyg), och transparens är det enda vi kan ge tillbaka.
+
+    ⚠️ Ingen användartext i något onclick-attribut. Korten bär data-firearm-id och en delegerad
+    lyssnare läser det — samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt".
+*@
+@await Html.PartialAsync("_HtmlEscape")
+
+<div id="fwPanel">
+    <div id="fwTrust" class="mb-3"></div>
+    <div id="fwBody">
+        <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm" role="status">
+                <span class="visually-hidden">Laddar…</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Redigeringsmodalen. Tvådelningen Synligt / Krypterat är BOKSTAVLIG och inramad — det är i den
+   rutan medlemmen bestämmer om hen litar på oss, och den ska inte se ut som ett vanligt formulär. *@
+<div class="modal fade" id="fwEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="fwEditTitle">Lägg till vapen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="fwEditError" class="alert alert-danger small d-none"></div>
+                <input type="hidden" id="fwId" value="0">
+
+                <fieldset class="fw-box fw-box-open mb-3">
+                    <legend class="fw-legend"><i class="bi bi-tag me-1"></i>Synligt</legend>
+                    <p class="small text-muted mb-3">
+                        Det här kan visas på dina resultat och i klubbens listor.
+                    </p>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold" for="fwAlias">Namn på vapnet *</label>
+                        <input type="text" class="form-control" id="fwAlias" maxlength="80"
+                               placeholder="t.ex. Match .22">
+                        <div class="form-text">
+                            <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+                            <strong>Skriv inte licensnummer eller tillverkningsnummer här</strong> — det
+                            här namnet är inte skyddat. Använd något du känner igen vapnet på.
+                        </div>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="fwWeaponClass">Vapengrupp</label>
+                            <select class="form-select" id="fwWeaponClass"></select>
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="fwVapentyp">Vapentyp</label>
+                            <select class="form-select" id="fwVapentyp"></select>
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="fwStatus">Status</label>
+                            <select class="form-select" id="fwStatus"></select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3 mt-3 d-none" id="fwAnnanTypWrap">
+                        <label class="form-label small" for="fwAnnanVapentyp">Vilken typ?</label>
+                        <input type="text" class="form-control" id="fwAnnanVapentyp" maxlength="60">
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label small" for="fwExpires">Licensen förfaller</label>
+                        <input type="text" class="form-control" id="fwExpires" placeholder="ÅÅÅÅ-MM-DD">
+                        <div class="form-text">
+                            Alla vapen har inte ett förfallodatum. Fyller du i det påminner vi dig
+                            <strong>tre månader innan</strong>, så du hinner söka om i tid.
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label small d-block">Förbund vapnet används i</label>
+                        <div id="fwForbund" class="d-flex flex-column gap-1"></div>
+                        <div class="form-text">
+                            Ett föreningsintyg gäller <strong>ett förbunds verksamhet</strong>, och samma
+                            vapen kan användas i flera. Kryssa alla som stämmer.
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label small d-block">Grenar vapnet används i</label>
+                        <div id="fwDisciplines" class="d-flex flex-wrap gap-2"></div>
+                        <div class="form-text">
+                            Används för att visa din aktivitet i just den grenen när klubben skriver
+                            ett intyg.
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="fw-box fw-box-locked">
+                    <legend class="fw-legend"><i class="bi bi-lock-fill me-1"></i>Krypterat</legend>
+                    <p class="small text-muted mb-3" id="fwLockedIntro"></p>
+
+                    <div class="row g-3">
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="fwFabrikat">Fabrikat</label>
+                            <input type="text" class="form-control" id="fwFabrikat" maxlength="80">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="fwModell">Modell</label>
+                            <input type="text" class="form-control" id="fwModell" maxlength="80">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="fwKaliber">Kaliber / patronbeteckning</label>
+                            <input type="text" class="form-control" id="fwKaliber" maxlength="60">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="fwPiplangd">Piplängd</label>
+                            <input type="text" class="form-control" id="fwPiplangd" maxlength="30"
+                                   placeholder="anges i cm">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="fwTillverkningsnummer">Tillverkningsnummer</label>
+                            <input type="text" class="form-control" id="fwTillverkningsnummer" maxlength="60">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="fwLicensnummer">Licensnummer</label>
+                            <input type="text" class="form-control" id="fwLicensnummer" maxlength="60">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="fwLicensdatum">Licensdatum</label>
+                            <input type="text" class="form-control" id="fwLicensdatum" placeholder="ÅÅÅÅ-MM-DD">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small" for="fwAnteckning">Egen anteckning</label>
+                            <textarea class="form-control" id="fwAnteckning" rows="2" maxlength="500"></textarea>
+                        </div>
+                    </div>
+                </fieldset>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="fwSaveBtn">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Begar foreningsintyg av klubben. Stanger cirkeln: paminnelse -> forfragan -> intyg. *@
+<div class="modal fade" id="fwReqModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Begär föreningsintyg</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="fwReqError" class="alert alert-danger small d-none"></div>
+                <input type="hidden" id="fwReqFirearmId" value="0">
+
+                <p class="small text-muted">
+                    Klubben får en förfrågan och kan läsa vapnets uppgifter för att fylla i intyget.
+                    <strong id="fwReqAlias"></strong>
+                </p>
+
+                <div class="mb-3">
+                    <label class="form-label small" for="fwReqClub">Klubb</label>
+                    <select class="form-select" id="fwReqClub"></select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label small d-block">Vad gäller det?</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="fwReqKind" id="fwReqNy" value="NyttVapen" checked>
+                        <label class="form-check-label small" for="fwReqNy">
+                            <strong>Nytt vapen</strong> — jag söker licens
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="fwReqKind" id="fwReqForny" value="Fornyelse">
+                        <label class="form-check-label small" for="fwReqForny">
+                            <strong>Förnyelse</strong> — av det här vapnet
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label small" for="fwReqForbund">Förbund intyget gäller</label>
+                    <select class="form-select" id="fwReqForbund"></select>
+                    <div class="form-text">
+                        Blanketten skopar antalet vapen till <strong>ett</strong> förbunds verksamhet.
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label small" for="fwReqVapengrupp">Vapengrupp / skytteform</label>
+                    <input type="text" class="form-control" id="fwReqVapengrupp" maxlength="200"
+                           placeholder="t.ex. Precision C">
+                </div>
+
+                <div>
+                    <label class="form-label small" for="fwReqMessage">Meddelande till klubben</label>
+                    <textarea class="form-control" id="fwReqMessage" rows="2" maxlength="1000"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="fwReqSend">Skicka förfrågan</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Läsloggen. *@
+<div class="modal fade" id="fwLogModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Vem har läst dina vapenuppgifter?</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="fwLogBody"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__fwInit) return;
+    window.__fwInit = true;
+
+    // ⚠️ CSS i runtime — ett top-level <style> i en partial kan spräcka vyns runtime-kompilering.
+    var css = document.createElement('style');
+    css.textContent =
+        '.fw-box{border:1px solid var(--bs-border-color);border-radius:.5rem;padding:1rem 1.25rem}' +
+        '.fw-box-open{border-left:4px solid var(--bs-secondary)}' +
+        '.fw-box-locked{border-left:4px solid var(--bs-primary);background:var(--bs-tertiary-bg)}' +
+        '.fw-legend{float:none;width:auto;font-size:.8rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:.04em;padding:0 .4rem;margin-bottom:0}' +
+        '.fw-card{border:1px solid var(--bs-border-color);border-radius:.5rem;height:100%}' +
+        '.fw-masked{font-family:monospace;letter-spacing:.1em;color:var(--bs-secondary-color)}' +
+        '.fw-trust{background:var(--bs-tertiary-bg);border-left:3px solid var(--bs-primary);' +
+        'padding:.75rem 1rem;border-radius:.25rem}' +
+        '.fw-expiry-soon{color:var(--bs-warning-text-emphasis)}' +
+        '.fw-expiry-past{color:var(--bs-danger)}';
+    document.head.appendChild(css);
+
+    function esc(s) { return window.hpskEsc ? window.hpskEsc(s) : String(s == null ? '' : s); }
+    function token() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    async function post(url, fields) {
+        var fd = new FormData();
+        Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+        fd.append('__RequestVerificationToken', token());
+        var r = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+        // ⚠️ TEXT först. Ett antiforgery-avslag är ett tomt 400 och r.json() kastar då ett
+        // SyntaxError som gömmer statuskoden.
+        var t = await r.text();
+        try { return JSON.parse(t); }
+        catch (e) { return { success: false, message: 'Oväntat svar från servern (' + r.status + ').' }; }
+    }
+
+    var state = null;
+    var revealTimers = {};
+
+    // ── Förtroenderaden ──────────────────────────────────────────────────────────────────────────
+    function renderTrust() {
+        var el = document.getElementById('fwTrust');
+        if (!el || !state) return;
+
+        var names = (state.viewers || []).map(function (v) { return v.name; });
+        var who = names.length === 0
+            ? '<strong>Ingen i din klubb kan läsa det här just nu.</strong>'
+            : 'Läsbart för dig och för <strong>' + esc(names.join(', ')) + '</strong> ' +
+              '(föreningsintygsansvarig i din klubb).';
+
+        el.innerHTML =
+            '<div class="fw-trust small">' +
+            '<div class="mb-1"><i class="bi bi-lock-fill text-primary me-1"></i>' +
+            '<strong>Krypterat.</strong> ' + who + '</div>' +
+            '<div class="d-flex flex-wrap align-items-center gap-2">' +
+            '<span class="text-muted">Senast läst av någon annan: ' +
+            (state.lastForeignRead ? esc(state.lastForeignRead) : 'aldrig') + '.</span>' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" data-fw="log">' +
+            'Visa läslogg</button></div></div>';
+    }
+
+    // ── Tomt läge ────────────────────────────────────────────────────────────────────────────────
+    // ⚠️ Inte ett blankt formulär. Målgruppen är delvis integritetsskygg, och den tomma rutan är
+    // vad som gör att man aldrig börjar. Tre steg som förklarar vad som händer, och EN knapp.
+    function emptyState() {
+        return '<div class="text-center py-4">' +
+            '<i class="bi bi-shield-lock display-5 text-primary opacity-50"></i>' +
+            '<h5 class="mt-3">Ditt vapenregister är tomt</h5>' +
+            '<div class="row g-3 justify-content-center my-4 text-start" style="max-width:44rem;margin:auto">' +
+            step('bi-tag', 'Vad som syns',
+                 'Ett namn du väljer själv, t.ex. "Match .22", plus vapengrupp och gren.') +
+            step('bi-lock-fill', 'Vad som krypteras',
+                 'Fabrikat, modell, kaliber, piplängd, tillverknings- och licensnummer.') +
+            step('bi-file-earmark-text', 'Vad du får',
+                 'Påminnelse innan licensen förfaller, och underlag när klubben skriver ett föreningsintyg.') +
+            '</div>' +
+            '<button type="button" class="btn btn-primary" data-fw="add">' +
+            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button></div>';
+    }
+    function step(icon, title, text) {
+        return '<div class="col-md-4"><div class="d-flex gap-2">' +
+            '<i class="bi ' + icon + ' text-primary mt-1"></i><div>' +
+            '<div class="fw-semibold small">' + title + '</div>' +
+            '<div class="small text-muted">' + text + '</div></div></div></div>';
+    }
+
+    // ── Korten ───────────────────────────────────────────────────────────────────────────────────
+    function renderCards() {
+        var body = document.getElementById('fwBody');
+        if (!body || !state) return;
+
+        var list = state.firearms || [];
+        if (list.length === 0) { body.innerHTML = emptyState(); return; }
+
+        var html = '<div class="d-flex justify-content-between align-items-center mb-3">' +
+            '<span class="text-muted small">' + list.length +
+            (list.length === 1 ? ' vapen' : ' vapen') + '</span>' +
+            '<button type="button" class="btn btn-sm btn-primary" data-fw="add">' +
+            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button></div>' +
+            '<div class="row g-3">';
+
+        list.forEach(function (f) {
+            html += '<div class="col-md-6 col-xl-4"><div class="fw-card p-3" data-fw-card="' + f.id + '">';
+
+            html += '<div class="d-flex align-items-start gap-2 mb-1">' +
+                '<div class="flex-grow-1"><div class="fw-semibold">' + esc(f.alias) + '</div>' +
+                '<div class="small text-muted">' +
+                [f.vapentypDisplay, f.statusLabel].filter(Boolean).map(esc).join(' · ') +
+                '</div></div>';
+            if (f.weaponClass)
+                html += '<span class="badge bg-secondary-subtle text-secondary-emphasis">' +
+                    esc(f.weaponClass) + '</span>';
+            html += '<i class="bi bi-lock-fill text-primary" title="Krypterat"></i></div>';
+
+            if ((f.disciplineLabels || []).length)
+                html += '<div class="small text-muted mb-1"><i class="bi bi-bullseye me-1"></i>' +
+                    esc(f.disciplineLabels.join(', ')) + '</div>';
+            if ((f.federations || []).length)
+                html += '<div class="small text-muted mb-1"><i class="bi bi-bank me-1"></i>' +
+                    esc(f.federations.join(', ')) + '</div>';
+
+            if (f.licenseExpiresOn) {
+                var cls = f.daysUntilExpiry < 0 ? 'fw-expiry-past'
+                        : f.daysUntilExpiry <= 90 ? 'fw-expiry-soon' : 'text-muted';
+                var suffix = f.daysUntilExpiry < 0
+                    ? ' (förfallen)'
+                    : ' (' + f.daysUntilExpiry + ' dagar kvar)';
+                html += '<div class="small ' + cls + ' mb-1"><i class="bi bi-calendar-event me-1"></i>' +
+                    'Licens t.o.m. ' + esc(f.licenseExpiresOn) + suffix + '</div>';
+            }
+
+            html += '<hr class="my-2">';
+            html += '<div data-fw-details="' + f.id + '">';
+            if (f.hasDetails) {
+                html += '<div class="fw-masked small mb-2">•••••• ·  ••••••  ·  ••••</div>' +
+                        '<button type="button" class="btn btn-sm btn-outline-secondary" ' +
+                        'data-fw="reveal" data-firearm-id="' + f.id + '">' +
+                        '<i class="bi bi-eye me-1"></i>Visa uppgifter</button>';
+            } else {
+                html += '<div class="small text-muted mb-2">Inga skyddade uppgifter ifyllda.</div>';
+            }
+            html += '</div>';
+
+            // "Anvant vid N tillfallen" — det som gor att man orkar fylla i registret alls.
+            if (f.usageCount > 0)
+                html += '<div class="small text-muted mt-2"><i class="bi bi-clipboard-data me-1"></i>' +
+                    'Anv\u00e4nt vid ' + f.usageCount +
+                    (f.usageCount === 1 ? ' tillf\u00e4lle' : ' tillf\u00e4llen') + '</div>';
+
+            // En OPPEN forfragan visas pa kortet, sa medlemmen inte begar samma intyg tva ganger
+            // och undrar varfor klubben inte svarar. Servern vagrar dubbletten anda, men ett nej i
+            // efterhand ar samre an en knapp som redan sager "begard".
+            if (f.openRequest) {
+                html += '<div class="alert alert-info small py-2 px-2 mt-2 mb-0">' +
+                    '<i class="bi bi-hourglass-split me-1"></i>F\u00f6reningsintyg beg\u00e4rt (' +
+                    esc(f.openRequest.kind) + ') \u2014 ' + esc(f.openRequest.status) + '</div>';
+            }
+
+            html += '<div class="d-flex gap-2 mt-2 flex-wrap">' +
+                '<button type="button" class="btn btn-sm btn-outline-primary" data-fw="edit" ' +
+                'data-firearm-id="' + f.id + '">Redigera</button>';
+            if (!f.openRequest)
+                html += '<button type="button" class="btn btn-sm btn-outline-success" data-fw="request" ' +
+                    'data-firearm-id="' + f.id + '">Beg\u00e4r intyg</button>';
+            html += '<button type="button" class="btn btn-sm btn-outline-danger ms-auto" data-fw="remove" ' +
+                'data-firearm-id="' + f.id + '">Ta bort</button></div>';
+
+            html += '</div></div>';
+        });
+
+        body.innerHTML = html + '</div>';
+    }
+
+    // ── Avmaskering ──────────────────────────────────────────────────────────────────────────────
+    // Återmaskerar efter 60 s. En avmaskering som ligger kvar tills sidan laddas om är i praktiken
+    // ingen maskering.
+    var REMASK_MS = 60000;
+
+    async function reveal(id) {
+        var wrap = document.querySelector('[data-fw-details="' + id + '"]');
+        if (!wrap) return;
+        wrap.innerHTML = '<div class="small text-muted">Läser…</div>';
+
+        var j = await post('/umbraco/surface/Firearm/RevealDetails', { firearmId: id });
+        if (!j.success) {
+            wrap.innerHTML = '<div class="small text-danger">' + esc(j.message || 'Kunde inte läsa.') + '</div>';
+            return;
+        }
+
+        var d = j.details || {};
+        var rows = [
+            ['Fabrikat', d.fabrikat], ['Modell', d.modell], ['Kaliber', d.kaliber],
+            ['Piplängd', d.piplangd], ['Tillv.nr', d.tillverkningsnummer],
+            ['Licensnr', d.licensnummer], ['Licensdatum', d.licensdatum],
+        ].filter(function (r) { return r[1]; });
+
+        var html = '<dl class="row small mb-2">';
+        rows.forEach(function (r) {
+            html += '<dt class="col-5 fw-normal text-muted">' + r[0] + '</dt>' +
+                    '<dd class="col-7 mb-1">' + esc(r[1]) + '</dd>';
+        });
+        html += '</dl>';
+        if (d.anteckning) html += '<div class="small mb-2">' + esc(d.anteckning) + '</div>';
+        html += '<button type="button" class="btn btn-sm btn-outline-secondary" data-fw="hide" ' +
+                'data-firearm-id="' + id + '"><i class="bi bi-eye-slash me-1"></i>Dölj</button>';
+        wrap.innerHTML = html;
+
+        if (revealTimers[id]) clearTimeout(revealTimers[id]);
+        revealTimers[id] = setTimeout(function () { remask(id); }, REMASK_MS);
+    }
+
+    function remask(id) {
+        if (revealTimers[id]) { clearTimeout(revealTimers[id]); delete revealTimers[id]; }
+        var wrap = document.querySelector('[data-fw-details="' + id + '"]');
+        if (!wrap) return;
+        wrap.innerHTML = '<div class="fw-masked small mb-2">•••••• ·  ••••••  ·  ••••</div>' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" data-fw="reveal" ' +
+            'data-firearm-id="' + id + '"><i class="bi bi-eye me-1"></i>Visa uppgifter</button>';
+    }
+
+    // ── Modalen ──────────────────────────────────────────────────────────────────────────────────
+    function fillOptions() {
+        var o = state.options || {};
+        var wc = document.getElementById('fwWeaponClass');
+        wc.innerHTML = '<option value="">— välj —</option>' +
+            (o.weaponClasses || []).map(function (c) {
+                return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+            }).join('');
+
+        var vt = document.getElementById('fwVapentyp');
+        vt.innerHTML = '<option value="">— välj —</option>' +
+            (o.vapentyper || []).map(function (t) {
+                return '<option value="' + esc(t) + '">' + esc(t) + '</option>';
+            }).join('');
+
+        var st = document.getElementById('fwStatus');
+        st.innerHTML = (o.statuses || []).map(function (s) {
+            return '<option value="' + esc(s.id) + '">' + esc(s.label) + '</option>';
+        }).join('');
+
+        document.getElementById('fwForbund').innerHTML = (o.forbund || []).map(function (f, i) {
+            return '<div class="form-check"><input class="form-check-input" type="checkbox" ' +
+                'id="fwFb' + i + '" value="' + esc(f) + '">' +
+                '<label class="form-check-label small" for="fwFb' + i + '">' + esc(f) + '</label></div>';
+        }).join('');
+
+        document.getElementById('fwDisciplines').innerHTML = (o.disciplines || []).map(function (d, i) {
+            return '<div class="form-check"><input class="form-check-input" type="checkbox" ' +
+                'id="fwDs' + i + '" value="' + esc(d.id) + '">' +
+                '<label class="form-check-label small" for="fwDs' + i + '">' + esc(d.label) + '</label></div>';
+        }).join('');
+    }
+
+    function setChecks(containerId, values) {
+        var set = (values || []).map(function (v) { return String(v).toLowerCase(); });
+        document.getElementById(containerId).querySelectorAll('input[type=checkbox]').forEach(function (cb) {
+            cb.checked = set.indexOf(String(cb.value).toLowerCase()) >= 0;
+        });
+    }
+    function getChecks(containerId) {
+        return [...document.getElementById(containerId).querySelectorAll('input[type=checkbox]:checked')]
+            .map(function (cb) { return cb.value; });
+    }
+
+    function val(id, v) { var el = document.getElementById(id); if (el) el.value = v == null ? '' : v; }
+
+    async function openEdit(id) {
+        fillOptions();
+        document.getElementById('fwEditError').classList.add('d-none');
+        var f = (state.firearms || []).find(function (x) { return String(x.id) === String(id); });
+
+        document.getElementById('fwEditTitle').textContent = f ? 'Redigera vapen' : 'Lägg till vapen';
+        val('fwId', f ? f.id : 0);
+        val('fwAlias', f ? f.alias : '');
+        val('fwWeaponClass', f ? (f.weaponClass || '') : '');
+        val('fwVapentyp', f ? (f.vapentyp || '') : '');
+        val('fwAnnanVapentyp', f ? (f.annanVapentyp || '') : '');
+        val('fwStatus', f ? f.acquisitionStatus : 'Innehas');
+        val('fwExpires', f ? (f.licenseExpiresOn || '') : '');
+        setChecks('fwForbund', f ? f.federations : []);
+        setChecks('fwDisciplines', f ? f.disciplines : []);
+        syncAnnanTyp();
+
+        ['fwFabrikat','fwModell','fwKaliber','fwPiplangd','fwTillverkningsnummer',
+         'fwLicensnummer','fwLicensdatum','fwAnteckning'].forEach(function (k) { val(k, ''); });
+
+        // ⚠️ De skyddade fälten fylls INTE i automatiskt vid redigering. Att göra det vore en
+        // avmaskering som ingen bett om och som inte loggats. I stället hämtas de på begäran, och
+        // sparas de utan att ha hämtats skickas WriteDetails=0 — alltså "rör dem inte".
+        var intro = document.getElementById('fwLockedIntro');
+        if (f && f.hasDetails) {
+            intro.innerHTML = 'Uppgifterna finns sparade och visas inte automatiskt. ' +
+                '<button type="button" class="btn btn-sm btn-outline-primary ms-1" data-fw="load-details">' +
+                '<i class="bi bi-eye me-1"></i>Hämta för att ändra</button>';
+        } else {
+            intro.textContent = 'Krypteras innan de lagras. Bara du och klubbens ' +
+                'föreningsintygsansvarige kan läsa dem.';
+        }
+        _detailsLoaded = !(f && f.hasDetails);
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwEditModal')).show();
+        initDatePickers();
+    }
+
+    var _detailsLoaded = true;
+
+    async function loadDetailsIntoForm() {
+        var id = document.getElementById('fwId').value;
+        var j = await post('/umbraco/surface/Firearm/RevealDetails', { firearmId: id });
+        if (!j.success) { showError(j.message); return; }
+        var d = j.details || {};
+        val('fwFabrikat', d.fabrikat); val('fwModell', d.modell);
+        val('fwKaliber', d.kaliber); val('fwPiplangd', d.piplangd);
+        val('fwTillverkningsnummer', d.tillverkningsnummer);
+        val('fwLicensnummer', d.licensnummer); val('fwLicensdatum', d.licensdatum);
+        val('fwAnteckning', d.anteckning);
+        _detailsLoaded = true;
+        document.getElementById('fwLockedIntro').textContent =
+            'Uppgifterna är hämtade. Ändringar sparas krypterat.';
+    }
+
+    function syncAnnanTyp() {
+        var wrap = document.getElementById('fwAnnanTypWrap');
+        var isOther = document.getElementById('fwVapentyp').value === 'Annat';
+        wrap.classList.toggle('d-none', !isOther);
+    }
+
+    function showError(msg) {
+        var box = document.getElementById('fwEditError');
+        box.textContent = msg || 'Kunde inte spara.';
+        box.classList.remove('d-none');
+    }
+
+    async function save() {
+        var alias = document.getElementById('fwAlias').value.trim();
+        if (!alias) { showError('Vapnet måste ha ett namn.'); return; }
+
+        var btn = document.getElementById('fwSaveBtn');
+        btn.disabled = true;
+        var j = await post('/umbraco/surface/Firearm/SaveFirearm', {
+            Id: document.getElementById('fwId').value,
+            Alias: alias,
+            WeaponClass: document.getElementById('fwWeaponClass').value,
+            Vapentyp: document.getElementById('fwVapentyp').value,
+            AnnanVapentyp: document.getElementById('fwAnnanVapentyp').value,
+            AcquisitionStatus: document.getElementById('fwStatus').value,
+            LicenseExpiresOn: document.getElementById('fwExpires').value,
+            Federations: getChecks('fwForbund').join(','),
+            Disciplines: getChecks('fwDisciplines').join(','),
+            WriteDetails: _detailsLoaded ? '1' : '0',
+            Fabrikat: document.getElementById('fwFabrikat').value,
+            Modell: document.getElementById('fwModell').value,
+            Kaliber: document.getElementById('fwKaliber').value,
+            Piplangd: document.getElementById('fwPiplangd').value,
+            Tillverkningsnummer: document.getElementById('fwTillverkningsnummer').value,
+            Licensnummer: document.getElementById('fwLicensnummer').value,
+            Licensdatum: document.getElementById('fwLicensdatum').value,
+            Anteckning: document.getElementById('fwAnteckning').value
+        });
+        btn.disabled = false;
+
+        if (!j.success) { showError(j.message); return; }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwEditModal')).hide();
+        await load();
+    }
+
+    function openRequest(id) {
+        var f = (state.firearms || []).find(function (x) { return String(x.id) === String(id); });
+        if (!f) return;
+
+        document.getElementById('fwReqError').classList.add('d-none');
+        document.getElementById('fwReqFirearmId').value = id;
+        document.getElementById('fwReqAlias').textContent = f.alias;
+        document.getElementById('fwReqVapengrupp').value = f.weaponClass || '';
+        document.getElementById('fwReqMessage').value = '';
+
+        // Klubbvaljaren: bara de klubbar medlemmen tillhor. Servern kontrollerar det anda.
+        var clubs = {};
+        (state.viewers || []).forEach(function (v) { clubs[v.clubId] = true; });
+        var sel = document.getElementById('fwReqClub');
+        var ids = Object.keys(clubs);
+        if (ids.length === 0) {
+            // ⚠️ Ingen klubb har en foreningsintygsansvarig. Da finns ingen att begara av, och det
+            // ska sagas i klartext i stallet for att erbjuda en tom valjare.
+            sel.innerHTML = '';
+            showReqError('Ingen av dina klubbar har utsett n\u00e5gon f\u00f6reningsintygsansvarig \u00e4n. ' +
+                'Prata med styrelsen \u2014 de utser en under Klubbadministration \u2192 Vapen & l\u00e5nevapen.');
+        } else {
+            sel.innerHTML = ids.map(function (cid) {
+                var name = (state.viewers.find(function (v) { return String(v.clubId) === String(cid); }) || {}).clubName;
+                return '<option value="' + cid + '">' + esc(name || ('Klubb ' + cid)) + '</option>';
+            }).join('');
+        }
+
+        var fb = document.getElementById('fwReqForbund');
+        fb.innerHTML = ((state.options || {}).forbund || []).map(function (x) {
+            return '<option value="' + esc(x) + '"' +
+                (x.indexOf('Pistolskytte') >= 0 ? ' selected' : '') + '>' + esc(x) + '</option>';
+        }).join('');
+
+        // En fornyelse galler per definition ett vapen man INNEHAR. Att erbjuda valet pa ett
+        // planerat vapen skulle ge klubben en motsagelse att tolka; servern vagrar det ocksa.
+        var fornyBtn = document.getElementById('fwReqForny');
+        var held = f.acquisitionStatus === 'Innehas';
+        fornyBtn.disabled = !held;
+        if (!held) document.getElementById('fwReqNy').checked = true;
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwReqModal')).show();
+    }
+
+    function showReqError(msg) {
+        var box = document.getElementById('fwReqError');
+        box.innerHTML = msg;
+        box.classList.remove('d-none');
+    }
+
+    async function sendRequest() {
+        var clubSel = document.getElementById('fwReqClub');
+        if (!clubSel.value) { showReqError('V\u00e4lj en klubb.'); return; }
+
+        var kind = document.querySelector('input[name=fwReqKind]:checked').value;
+        var btn = document.getElementById('fwReqSend');
+        btn.disabled = true;
+        var j = await post('/umbraco/surface/Firearm/RequestIntyg', {
+            clubId: clubSel.value,
+            firearmId: document.getElementById('fwReqFirearmId').value,
+            kind: kind,
+            forbund: document.getElementById('fwReqForbund').value,
+            vapengrupp: document.getElementById('fwReqVapengrupp').value,
+            message: document.getElementById('fwReqMessage').value
+        });
+        btn.disabled = false;
+        if (!j.success) { showReqError(esc(j.message || 'Kunde inte skicka.')); return; }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwReqModal')).hide();
+        await load();
+    }
+
+    document.addEventListener('click', function (ev) {
+        if (ev.target && ev.target.id === 'fwReqSend') sendRequest();
+    });
+
+    async function showLog() {
+        var body = document.getElementById('fwLogBody');
+        body.innerHTML = '<div class="text-muted small">Laddar…</div>';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwLogModal')).show();
+
+        var r = await fetch('/umbraco/surface/Firearm/GetMyAccessLog', { credentials: 'same-origin' });
+        var j = await r.json();
+        if (!j.success) { body.innerHTML = '<div class="text-danger small">Kunde inte läsa loggen.</div>'; return; }
+
+        if (!j.entries.length) {
+            body.innerHTML = '<p class="small text-muted mb-0">Ingen annan än du har läst dina ' +
+                'vapenuppgifter.</p>';
+            return;
+        }
+        body.innerHTML = '<table class="table table-sm small"><thead><tr>' +
+            '<th>När</th><th>Vem</th><th>Grund</th></tr></thead><tbody>' +
+            j.entries.map(function (e) {
+                return '<tr><td>' + esc(e.at) + '</td><td>' + esc(e.reader) +
+                    (e.club ? ' <span class="text-muted">(' + esc(e.club) + ')</span>' : '') +
+                    '</td><td>' + esc(e.reason) + '</td></tr>';
+            }).join('') + '</tbody></table>';
+    }
+
+    function initDatePickers() {
+        if (typeof flatpickr !== 'function') return;   // degraderar till textfält
+        ['#fwExpires', '#fwLicensdatum'].forEach(function (sel) {
+            var el = document.querySelector(sel);
+            if (el && !el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d' });
+        });
+    }
+
+    // ── Händelser ────────────────────────────────────────────────────────────────────────────────
+    document.addEventListener('click', async function (ev) {
+        var btn = ev.target.closest('[data-fw]');
+        if (!btn) return;
+        var action = btn.getAttribute('data-fw');
+        var id = btn.getAttribute('data-firearm-id');
+
+        if (action === 'add') { await openEdit(0); return; }
+        if (action === 'edit') { await openEdit(id); return; }
+        if (action === 'reveal') { await reveal(id); return; }
+        if (action === 'hide') { remask(id); return; }
+        if (action === 'log') { await showLog(); return; }
+        if (action === 'load-details') { await loadDetailsIntoForm(); return; }
+
+        if (action === 'request') { openRequest(id); return; }
+
+        if (action === 'remove') {
+            var f = (state.firearms || []).find(function (x) { return String(x.id) === String(id); });
+            if (!confirm('Ta bort ' + (f ? f.alias : 'vapnet') + ' ur listan?\n\n' +
+                         'Uppgifterna finns kvar i registret men visas inte längre.')) return;
+            var j = await post('/umbraco/surface/Firearm/RemoveFirearm', { firearmId: id });
+            if (!j.success) { alert(j.message || 'Kunde inte ta bort.'); return; }
+            await load();
+        }
+    });
+
+    document.addEventListener('change', function (ev) {
+        if (ev.target && ev.target.id === 'fwVapentyp') syncAnnanTyp();
+    });
+    document.addEventListener('click', function (ev) {
+        if (ev.target && ev.target.id === 'fwSaveBtn') save();
+    });
+
+    async function load() {
+        var body = document.getElementById('fwBody');
+        try {
+            var r = await fetch('/umbraco/surface/Firearm/GetMyFirearms', { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) {
+                body.innerHTML = '<div class="alert alert-warning small mb-0">' +
+                    esc(j.message || 'Kunde inte läsa vapenregistret.') + '</div>';
+                return;
+            }
+            state = j;
+            renderTrust();
+            renderCards();
+        } catch (e) {
+            body.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
+        }
+    }
+
+    // Lazy: hämtas när fliken öppnas, EN gång. `shown.bs.tab` fyrar varje gång man går tillbaka,
+    // och en omladdning då skulle stänga ett öppet kort.
+    var tabBtn = document.getElementById('firearms-member-tab');
+    if (tabBtn) {
+        tabBtn.addEventListener('shown.bs.tab', function () { if (!state) load(); });
+    }
+
+    window.hpskLoadMyFirearms = load;
+})();
+</script>

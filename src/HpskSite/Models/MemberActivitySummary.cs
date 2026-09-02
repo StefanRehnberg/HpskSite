@@ -129,6 +129,22 @@ namespace HpskSite.Models
         /// </summary>
         public List<string> WeaponGroups { get; set; } = new();
 
+        /// <summary>
+        /// Grenar posten hör till, som kanoniska id:n ur <see cref="ActivityDiscipline"/>
+        /// ("Precision", "Faltskytte", "MagnumFalt", …).
+        ///
+        /// <b>Varför en LISTA och inte ett värde:</b> samma skäl som <see cref="WeaponGroups"/> — en
+        /// Nationell helmatch är precision, snabbskytte OCH fält, och en tävling kan i princip bära
+        /// flera grenar för samma skytt. Att tvinga in det i ett värde skulle kräva ett val som inte
+        /// finns.
+        ///
+        /// <b>Tom lista = posten hör inte till någon gren.</b> Gäller evenemang (en städdag är
+        /// klubbverksamhet, inte en gren) och incheckningar på banan (de säger inte VAD som sköts).
+        /// Ett grenfilter måste därför SÄGA att sådana poster faller bort — se
+        /// <see cref="MemberActivitySummary.ExcludedWithoutDiscipline"/>.
+        /// </summary>
+        public List<string> Disciplines { get; set; } = new();
+
         /// <summary>Id i källan (träningsrad, tävlingsnod, evenemangsnod) för länkning.</summary>
         public int SourceId { get; set; }
 
@@ -263,6 +279,24 @@ namespace HpskSite.Models
         public int ExcludedWithoutWeaponGroup { get; set; }
 
         /// <summary>
+        /// Grenar medlemmen har verksamhet i under året — <b>före filtrering</b>, av samma skäl som
+        /// <see cref="WeaponGroupsAvailable"/>: annars försvinner de grenar man just filtrerade bort
+        /// ur väljaren och filtret blir en enkelriktad gata.
+        /// </summary>
+        public List<string> DisciplinesAvailable { get; set; } = new();
+
+        /// <summary>De grenar som faktiskt filtrerades på. Tom = ingen filtrering.</summary>
+        public List<string> DisciplineFilter { get; set; } = new();
+
+        /// <summary>
+        /// Antal poster ett aktivt grenfilter uteslöt <b>för att de saknar gren</b> — evenemang och
+        /// incheckningar på banan. Samma skäl som <see cref="ExcludedWithoutWeaponGroup"/>: en
+        /// aktivitetssiffra som tappat poster utan att någon nämner det betyder något annat än
+        /// läsaren tror.
+        /// </summary>
+        public int ExcludedWithoutDiscipline { get; set; }
+
+        /// <summary>
         /// Sådant den som läser sammanställningen MÅSTE veta för att inte övertolka den — att ingen
         /// träning är verifierad, att upprop saknas, att resultat inte skrivits in. Tomt är ett
         /// giltigt svar, men en tom lista när det finns svagt underlag är en bugg.
@@ -275,7 +309,8 @@ namespace HpskSite.Models
         /// </summary>
         public static MemberActivitySummary From(
             int memberId, string memberName, int year, IEnumerable<MemberActivityEntry> entries,
-            IEnumerable<string>? weaponGroupFilter = null)
+            IEnumerable<string>? weaponGroupFilter = null,
+            IEnumerable<string>? disciplineFilter = null)
         {
             var everything = entries.ToList();
 
@@ -288,18 +323,50 @@ namespace HpskSite.Models
                 .OrderBy(g => g, StringComparer.Ordinal)
                 .ToList();
 
+            // Samma regel för grenarna, sorterade i KATALOGENS ordning (Precision först) och inte
+            // alfabetiskt — en bokstavsordning hade lagt Duell före den ojämförligt största grenen.
+            var disciplinesAvailable = everything
+                .SelectMany(e => e.Disciplines)
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(ActivityDiscipline.SortKey)
+                .ThenBy(d => d, StringComparer.Ordinal)
+                .ToList();
+
             var filter = (weaponGroupFilter ?? Enumerable.Empty<string>())
                 .Where(g => !string.IsNullOrWhiteSpace(g))
                 .Select(g => g.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            // ⚠️ Grenfiltrets värden NORMALISERAS. Klienten skickar tillbaka det vi gav den, men en
+            // länk eller ett sparat filter kan bära visningsnamnet ("Magnum Fält"), och ett
+            // literalt filter skulle då matcha noll poster och läsa som "ingen aktivitet i grenen".
+            var dFilter = (disciplineFilter ?? Enumerable.Empty<string>())
+                .Select(ActivityDiscipline.Canonical)
+                .Where(d => d.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // ⚠️ ORDNINGEN AVGÖR SIFFRORNA. Vapenfiltret läggs på först och räknar sina bortfall på
+            // hela mängden; grenfiltret räknar sina på det som ÅTERSTÅR. Räknades båda mot hela
+            // mängden skulle samma evenemangsrad rapporteras som bortfiltrerad två gånger, och
+            // varningstexten hade dubbelräknat den.
             int excludedWithoutGroup = 0;
             if (filter.Count > 0)
             {
                 excludedWithoutGroup = everything.Count(e => e.WeaponGroups.Count == 0);
                 everything = everything
                     .Where(e => e.WeaponGroups.Any(g => filter.Contains(g, StringComparer.OrdinalIgnoreCase)))
+                    .ToList();
+            }
+
+            int excludedWithoutDiscipline = 0;
+            if (dFilter.Count > 0)
+            {
+                excludedWithoutDiscipline = everything.Count(e => e.Disciplines.Count == 0);
+                everything = everything
+                    .Where(e => e.Disciplines.Any(d => dFilter.Contains(d, StringComparer.OrdinalIgnoreCase)))
                     .ToList();
             }
 
@@ -330,7 +397,10 @@ namespace HpskSite.Models
                     e.Kind == ActivityKind.Event && e.IsMandatoryEvent && !e.CountsAsActivity),
                 WeaponGroupsAvailable = available,
                 WeaponGroupFilter = filter,
-                ExcludedWithoutWeaponGroup = excludedWithoutGroup
+                ExcludedWithoutWeaponGroup = excludedWithoutGroup,
+                DisciplinesAvailable = disciplinesAvailable,
+                DisciplineFilter = dFilter,
+                ExcludedWithoutDiscipline = excludedWithoutDiscipline
             };
 
             summary.Warnings = BuildWarnings(all, counted);
@@ -343,6 +413,19 @@ namespace HpskSite.Models
                 if (excludedWithoutGroup > 0)
                     msg += $" {excludedWithoutGroup} poster utan vapengrupp (evenemang) visas inte och " +
                            "räknas inte in i siffrorna.";
+                summary.Warnings.Insert(0, msg);
+            }
+
+            // Samma regel för grenen. Den här varningen är dessutom den som gör underlaget till ett
+            // föreningsintyg ärligt: intygaren läser aktiviteten i EN gren, och måste se att
+            // evenemangen och banincheckningarna inte finns med i de siffrorna.
+            if (dFilter.Count > 0)
+            {
+                var names = dFilter.Select(ActivityDiscipline.Label);
+                var msg = $"Filtrerat på gren {string.Join(", ", names)}.";
+                if (excludedWithoutDiscipline > 0)
+                    msg += $" {excludedWithoutDiscipline} poster utan gren (evenemang och " +
+                           "incheckningar på banan) visas inte och räknas inte in i siffrorna.";
                 summary.Warnings.Insert(0, msg);
             }
 

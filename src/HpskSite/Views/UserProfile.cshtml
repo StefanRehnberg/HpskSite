@@ -102,6 +102,13 @@
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
+                            @* Vapenregistret ligger EFTER Handikapp och FÖRE Profil: det är ett
+                               personligt register, inte en prestationsyta. *@
+                            <button class="nav-link" id="firearms-member-tab" data-bs-toggle="tab" data-bs-target="#firearms-member-pane" type="button" role="tab">
+                                <i class="bi bi-shield-lock"></i> Vapen
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
                             <button class="nav-link" id="profile-tab" data-bs-toggle="tab" data-bs-target="#profile-pane" type="button" role="tab">
                                 <i class="bi bi-person-circle"></i> Profil
                             </button>
@@ -702,6 +709,12 @@
 
                         </div>
                         @* End Handikapp Tab *@
+
+                        @* Vapen — innehållet i en egen partial, så den här filen (5 600+ rader)
+                           inte växer med ett helt register. Samma mönster som _MemberActivitySummary. *@
+                        <div class="tab-pane fade" id="firearms-member-pane" role="tabpanel">
+                            @await Html.PartialAsync("_MemberFirearms")
+                        </div>
 
                         @* Profile Tab *@
                         <div class="tab-pane fade" id="profile-pane" role="tabpanel">

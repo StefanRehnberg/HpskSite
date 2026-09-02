@@ -4664,6 +4664,333 @@ Adds C# → **full ombyggnad**. Ingen doctype-egenskap, ingen Umbraco-nod.
   det kan raden aldrig fyllas korrekt. Även med registret klart bör den vara ett förslag: den handlar
   om sökandens innehav, och delar av det känner klubben inte till.
 
+## Krypterat vapeninnehav — registret, behörigheten och kryptot (2026-09-02)
+
+Kedjans punkt 5. **Läs det här avsnittet innan du rör något under `Services/Firearms/`.**
+
+### Vad som skyddar vad
+
+```
+Rotnyckel (appsettings.Production.json, "Firearm:MasterKeys")
+  --HKDF-SHA256(ägare, version)-->  KEK
+    --AES-256-GCM-->                 inpackad DEK   (FirearmKeyVault, EN rad per ägare)
+      --AES-256-GCM-->               Firearm.EncryptedDetails
+```
+
+**⚠️ FÖRLORAD ROTNYCKEL = FÖRLORAD ANVÄNDARDATA.** Inte en trasig länk. Rutinen står i
+`Documentation/FIREARM_KEY_MANAGEMENT.md` och ska följas innan en enda krypterad rad skrivs.
+`FirearmKeyGuardHostedService` larmar `LogCritical` vid start om det finns valv men ingen nyckel —
+**sök på `Vapenregistret` i loggen efter varje deploy som rör det här.**
+
+**⚠️ Rotnyckeln ligger i KONFIGURATIONEN, inte i DataProtection-nyckelringen.** DataProtection är
+byggt för kortlivade, återkallningsbara nyttolaster, roterar var 90:e dag och är en katalog i
+`App_Data` som inte överlever att Simply flyttar oss. Det här datat ska läsas om 20 år. Tokens
+fortsätter använda DataProtection, som är det den är bra på.
+
+**Rotation** = lägg till en NY version i `MasterKeys`, höj `CurrentKeyVersion`, kör
+`FirearmVaultService.RewrapAll()`. Bara DEK:ens *inpackning* byts — **ingen vapenrad krypteras om**.
+Den gamla nyckeln måste ligga kvar tills varje valv är ompackat; `RewrapAll` namnger varje valv som
+inte gick, i stället för att hoppa över det tyst.
+
+### ⚠️ AAD:n är bindningen till RADEN, inte dekoration
+
+`FirearmCrypto.DetailsAad` = `firearm|{id}|{ScopeKind}|{ScopeId}`. Utan den kan någon med
+databasåtkomst kopiera medlem A:s `EncryptedDetails` till medlem B:s vapenrad, och B:s session skulle
+avkryptera och visa A:s uppgifter. **Bevisat i dev 2026-09-02**: blobben flyttades i SQL, och
+`RevealDetails` nekade med det namngivna felet utan att läcka fabrikatet.
+
+**⚠️ AAD- och HKDF-strängarna, och namnen i `FirearmOwnerKind`, är EN DEL AV CHIFFRET.** Ändras de
+blir varje lagrad rad permanent oläsbar — utan kompileringsfel och utan runtime-varning.
+`FirearmCryptoTests` pinnar dem, inklusive en HKDF-testvektor som är **korsvaliderad mot en oberoende
+RFC 5869-implementation** (inte avskriven ur .NET:s utdata). Faller de testerna: ändra tillbaka
+strängen, uppdatera inte testet. Behövs en ny form — höj `FirearmCrypto.PayloadVersion`.
+
+### ⚠️ SKRIVNINGEN ÄR TVÅSTEGS
+
+AAD:n binder till `Firearm.Id`, så id:t måste finnas innan uppgifterna kan krypteras: **infoga raden
+→ läs id:t → kryptera → uppdatera**. `FirearmProtector` vägrar ett id som inte är satt, så felet blir
+högljutt i stället för en rad ingen kan läsa. `FirearmService.Create` gör det rätt; kopiera mönstret.
+
+**⚠️ Valvet skapas FÖRE raden.** Går nyckelhanteringen fel ska ingenting ha skrivits — annars står en
+vapenrad kvar vars uppgifter aldrig kan skrivas.
+
+### Klartext vs krypterat — och varför gränsen ligger där den ligger
+
+**Krypterat betyder oräkningsbart, osökbart, ojoinbart.** Därför:
+
+| Klartext | Varför |
+|---|---|
+| `Alias` | Visas på resultat och i lånevapenlistan. Formuläret varnar: skriv inte licensnummer där. |
+| `WeaponClass` | Samma gruppKODER som `MemberActivityEntry.WeaponGroups`. Lagras klassNAMNET missar kopplingen "mitt vapen är klass C" ↔ "aktivitet i grupp C", tyst. |
+| `LicenseExpiresOn` | Påminnelsesvepet läser den över ALLA medlemmar. I bloben hade det krävt nattlig avkryptering av varje vapen. |
+| `FirearmFederation` | Gör "antal vapen inom förbund X" till ett `COUNT(*)`. **Antalet är inte det känsliga — vapnets identitet är det.** |
+| `FirearmDiscipline` | Kopplar vapnet till aktivitetssammanställningens grenfilter. |
+
+Krypterat: fabrikat · modell · kaliber · piplängd · tillverkningsnummer · licensnummer · licensdatum
+· fritext.
+
+**⚠️ Förvaringssätt lagras INTE.** Ingen funktion läser det, ingen intygsrad kräver det, och det är
+det mest inbrottskänsliga fältet blanketten har. Data vi inte har kan inte läcka.
+
+**⚠️ Två RELATIONER, inte kolumner.** Blanketten skopar antalet vapen till *ett* förbunds verksamhet
+medan samma vapen lagligen kan användas i flera; och ett A-vapen kan tjäna både precision och
+fältskytte. Byggs registret med en förbundskolumn kan intygets vapenrad aldrig fyllas korrekt.
+
+### Behörigheten är HÄRLEDD, inte tilldelad
+
+```
+CanReadMemberFirearms = medlemmen själv
+                      OR (gruppen Foreningsintygsansvarig_{klubb}
+                          AND aktiv styrelserad i SAMMA klubb)
+```
+
+`BoardRoles` mjukraderar (`IsActive=0`) vid avgång, så **behörigheten upphör i samma sekund** — inget
+städjobb, ingen påminnelse. Det motsatta felet (klubben står utan läsare) varnas för på
+Styrelsen-fliken *innan* borttagningen, och på klubbens vapenflik.
+
+**⚠️ `ViewerHasAccess` HAR INGEN `isSiteAdmin`-PARAMETER, och det är löftet.** Varje annan
+klubbkontroll i `AdminAuthorizationService` börjar med `if (IsCurrentUserAdminAsync()) return true;`
+— den här får inte göra det. Ett **strukturellt test** i `FirearmAccessRulesTests` läser metodens
+parametrar via reflektion och faller om någon lägger till en. Ta bort parametern, uppdatera inte
+testet.
+
+**⚠️ `IsClubAdminForClub` viker in klubbens KRETSADMINISTRATÖRER** (står i metodens egen
+dokumentation). Därför kräver `CanAssign` *både* klubbadmin och ett styrelseuppdrag i samma klubb —
+annars kunde en kretsadmin utan uppdrag utse den som läser klubbens medlemmars vapeninnehav.
+
+**⚠️ Ett UTGÅNGET MANDAT revoquerar ingenting.** En styrelse sitter regelmässigt kvar från mandatets
+utgång till nästa årsmöte; skulle luckan stänga läsrätten stod klubben utan läsare i just det
+fönstret. `IsBoardMemberOf` frågar bara efter `IsActive=1`, och det är rätt. Utgånget mandat är en
+VARNING på adminytan.
+
+**Besluten bor i `FirearmAccessRules` som RENA predikat**, eftersom tjänsten hänger på fyra konkreta
+klasser med databasberoenden — annars hade den mest säkerhetskritiska logiken varit den enda
+otestade. A/B: med båda konjunktionerna borttagna faller 4 av 60 test, exakt de rätta.
+
+### Läsloggen
+
+**⚠️ Samma metod som lämnar ut klartext skriver loggraden** (`FirearmService.RevealDetailsAsync`).
+Ett separat loggningsanrop är något en ny kodväg glömmer, och då är löftet "du ser vem som läst" tomt
+utan att någon märker det. Skrivningen är best-effort — en loggmiss får inte bli ett driftavbrott —
+men den är inte valfri.
+
+Loggen bär **aldrig klartext**: raden säger att uppgifterna lästes, aldrig vad de var. Medlemmens
+egen vy filtrerar bort hens EGNA läsningar som standard; de är majoriteten och skulle begrava
+klubbens enda läsning.
+
+**Ingen loggrad på den maskerade LISTAN** — bara när klartext faktiskt lämnas ut. En logg som fylls
+av varje sidrendering är brus, och en logg ingen läser är ingen kontroll.
+
+### Påminnelserna (90 / 30 / förfallen)
+
+`FirearmReminderHostedService`, var 12:e timme. **Claim-then-send**: raden i `FirearmReminder` skrivs
+FÖRE utskicket, och det unika indexet är spärren — inte koden. En krasch mellan skrivning och utskick
+kostar en missad påminnelse; motsatt ordning kostar spam, och spam är vad som gör att folk stänger av
+notiser helt. Samma mönster som `ScheduleReminderLog`.
+
+**⚠️ `ExpiresOnAtSend` ligger i det unika indexet, och det är inte redundans.** Rättar medlemmen ett
+feltypat datum måste stegen BEVÄPNAS OM — utan fältet är de redan "skickade" för ett datum som inte
+längre gäller, och nästa påminnelse kommer aldrig. Verifierat i dev.
+
+**⚠️ Det SMALASTE steget som passar**, inte det bredaste: 25 dagar kvar hör till 30-steget, inte 90.
+Annars får en medlem som lade in datumet sent höra "90 dagar kvar" när det är en månad.
+
+**`LicenseRemindersEnabled` defaultar till 1** — ett medvetet undantag från husregeln att
+deltagarpushar är opt-in (Stefans beslut 2026-09-02). Medlemmen har själv skrivit in ett
+förfallodatum, och den handlingen ÄR opt-in:en. Jämför `ScheduleRemindersEnabled`, default 0.
+
+**Bara MEDLEMMARS vapen och bara `Innehas`.** Ett klubbvapens licens har ingen enskild person att
+påminna; ett planerat vapen har ingen licens att förnya.
+
+### Grenen: `ActivityDiscipline`
+
+Kanonisk mängd = `CompetitionTypes.All`. **Ingen fjärde disciplinlista** — kodbasen bär redan tre som
+är oense (`MemberDataPresenceService` har `Faltskytte`, `RankingSnapshotService` saknar den,
+`MarkenFamilies` stavar den `Falt`).
+
+**⚠️ Använder INTE `CompetitionTypes.GetFuzzy`.** GetFuzzy faller tillbaka på PREFIXmatchning, så
+`"Magnum"` resolvar där till `MagnumPrecision` — den kommer först i katalogen. På ett filter som ska
+belägga aktivitet inför en licensansökan är tyst felattribution sämre än inget svar.
+`Canonical` matchar bara EXAKT (id, namn, eller normaliserat).
+
+**Mätt i prod 2026-09-02** — normaliseringen är byggd på vad som FINNS: `TrainingScores.Discipline`
+bär sex kanoniska id:n; `competition.competitionType` bär åtta värden varav **`"Magnum Fält"` (2
+tävlingar) är visningsNAMNET**, inte id:t. En literal jämförelse tappar dem ur varje grenfilter, tyst.
+A/B: utan den normaliserade jämförelsen faller 5 av 27 test, inklusive prod-datatestet.
+
+### Övrigt värt att veta
+
+- **`ForeningsintygRequest` bär inga vapenuppgifter** — den pekar på en `Firearm`-rad, och utfärdaren
+  läser genom grinden med en loggrad. Kopierades de dit vore de en andra, okrypterad kopia.
+- **`FirearmUsage` är en SIDOTABELL** med `SourceKind + SourceId` som nyckel — samma lärdom som
+  `SourceKind` i aktivitetssammanställningen och `SourceTable` i märkessynken. Alternativet vore en
+  `FirearmId`-kolumn på nio resultattabeller och en öppning av den delade `.sp-*`-panelen.
+  **Unikt på (MemberId, SourceKind, SourceId)** — ett tillfälle bär ETT vapen, annars dubbelräknas
+  "använt vid N tillfällen".
+- **Kravet "tränat två gånger med vapnet" är STRUKET** (Stefans beslut 2026-09-02): en
+  förstagångssökande har tränat med lånevapen, så per-vapen-historik för det sökta vapnet kan aldrig
+  finnas. Kryssen förblir intygarens.
+- **`Firearm.IsActive=0` GÖMMER, raderar aldrig.** Gamla intyg refererar raden och "antal vapen sedan
+  tidigare" räknar historik.
+- **`AcquisitionStatus = 'Planerat'` är inte ett kantfall** — ett föreningsintyg gäller oftast ett
+  vapen medlemmen ännu inte äger, eftersom man söker licens före köpet.
+- **Ett FILTRERAT index på `Firearm.LicenseExpiresOn`** gör `QUOTED_IDENTIFIER ON` obligatoriskt för
+  ALL DML mot tabellen — och sqlcmd har det AV som standard och exitar 0 på felet utan `-b`. Varje
+  skript som rör `Firearm` måste sätta det själv.
+- **`window.clubId` är undefined** — värdsidorna deklarerar `const clubId`, som inte hamnar på
+  window. Partialerna läser klubb-id ur ett data-attribut renderat serverside.
+
+### Fixat på vägen (orelaterat, men i kod jag ändrade)
+
+**⚠️ `Styrelse.cshtml` byggde `removeRole(id, 'namn', 'titel')` som JS-literaler i ett onclick**,
+escapade med `esc()` — men `esc` mappar `'` → `&#039;`, och en HTML-entitet avkodas INNE i
+attributvärdet innan JS parsar det. En styrelsemedlem som heter O'Brien slog sönder knappen; ett
+riggat namn körde kod i klubbadmins webbläsare. **Tredje instansen av samma lucka i kodbasen**
+(efter Fältskyttes "lägg till skytt" och `CompetitionStartListManagement`). Knappen bär nu ett
+heltal och slår upp resten ur `SV_ROLE_BY_ID`.
+
+### Deploy
+
+Fyra migreringar, **i den ordningen** (de tre senare har FK mot `Firearm`):
+`create-firearm-key-vault-table.sql` → `create-firearm-tables.sql` →
+`create-firearm-reminder-table.sql` → `create-foreningsintyg-request-table.sql` →
+`create-firearm-usage-table.sql`.
+
+Plus `Firearm:MasterKeys` i `appsettings.Production.json` **med dokumenterad backup**. Adds C# →
+full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod. Fildeploy av
+`Documentation/FIREARM_KEY_MANAGEMENT.md`, `KnowledgeBase/docs/vapenregister.md`,
+`vapen-klubbadmin.md` och den uppdaterade `foreningsintyg.md`.
+
+### Verifiering
+
+**87 enhetstest**: `FirearmCryptoTests` 35 · `FirearmAccessRulesTests` 25 · `ActivityDisciplineTests`
+27. Tre A/B-mutationer, alla med rätt utfall: AAD borttagen → 4 röda · kryptering avstängd → 4 röda ·
+båda behörighetskonjunktionerna borttagna → 4 röda · disciplinnormaliseringen borttagen → 5 röda.
+
+**`hpsk-verify/vapen-verify.mjs` — 44/44 gröna** (kört 2026-09-02), täcker steg 4–8 end-to-end.
+**`vapen-rawdb.sql`** bär rå-DB-påståendet och gick igenom mot svitens egen fixtur: alla tio nålar
+0 i klartext, `ControlProbeFound = 1`, blob 236 byte.
+
+Kör så:
+```
+HPSK_USER="admin.claude@pistol.nu" HPSK_PASS="123456" node hpsk-verify/vapen-verify.mjs
+sqlcmd -S localhost\SQLEXPRESS -d Umbraco -E -C -b -W -i hpsk-verify/vapen-rawdb.sql
+```
+
+⚠️ **Sviten avbryter högljutt (exit 1) utan inloggning** i stället för att rapportera 0 fel — annars
+blir varje "finns inte"-påstående grönt på en sida som aldrig visade funktionen. `--headed` väntar i
+tre minuter på manuell inloggning.
+
+⚠️⚠️ **DEV-INLOGGNINGEN `admin.claude@pistol.nu` / `123456` FUNGERAR.** En tidigare anteckning här
+påstod motsatsen — den var FEL, och orsaken är värd att känna igen: **inloggningsformuläret bär ett
+dolt `ufprt`-fält** (Umbracos surface-form-routing). En curl- eller fetch-post som utelämnar det når
+aldrig inloggningshandlern; servern svarar **200 med inloggningssidan igen, ingen auth-cookie och
+inget felmeddelande** — alltså exakt som ett fel lösenord. Driv formuläret som en webbläsare
+(Playwright klickar submit och får `ufprt` gratis), eller läs ut fältet och skicka med det. Dra
+aldrig slutsatsen "lösenordet är fel" ur ett tomt 200 från den sidan.
+
+
+## Lånevapensbokning (2026-09-02)
+
+Kedjans punkt 6. **Ett rent lager ovanpå punkt 5** — ingen ny vapenmodell, ingen ny behörighet.
+Bokar `Firearm` med `ScopeKind='Club'` och `IsLoanable=1`.
+
+### ⚠️ INGET GODKÄNNANDESTEG, och det är ett val
+
+Backloggen nämnde "klubbadmin/styrelse godkänner eller autogodkänn". Det är medvetet **inte** byggt.
+Den verkliga grinden är den **fysiska utlämningen**: någon hämtar vapnet ur skåpet och lämnar över
+det. Ett godkännandesteg ovanpå det lägger ett administrativt moment mellan medlemmen och en handling
+som ändå kräver en människa på banan — och en obehandlad bokningsförfrågan blir ett nytt sätt att stå
+utan vapen på tävlingsdagen. Krockkontrollen hindrar dubbelbokning; klubben ser listan och kan
+avboka. **`Status`-kolumnen rymmer ett godkännandesteg utan migrering** den dag det efterfrågas.
+
+### ⚠️ LOKAL TID, inte UTC
+
+Kedjans spec sa `FromUtc`/`ToUtc`. Det är **rättat**: hela kodbasen arbetar i lokal tid
+(`DateTime.Now`, `competitionDate`, skjutlagens `"HH:mm"`). UTC just i den här tabellen hade gett fel
+svar vid varje jämförelse mot ett tävlingsdatum — och felet hade varit en timme, alltså precis stort
+nog att missas.
+
+### ⚠️ Krockkontrollen läser INNE i transaktionen, med UPDLOCK/HOLDLOCK
+
+```sql
+NOT (ToTime <= @nyFrån OR FromTime >= @nyTill)
+```
+
+- **Inget unikt index kan uttrycka regeln** — "överlappar i tid" är ett intervallvillkor, inte en
+  likhet. Spärren ligger därför i `FirearmBookingService.Create`.
+- **Läses den utanför transaktionen kan två samtidiga bokningar båda se ett ledigt vapen** och båda
+  landa. Två personer som tror att de har samma pistol på tävlingsdagen är precis det funktionen
+  finns för att förhindra.
+- **Kant-i-kant TILLÅTS** (en bokning slutar 12:00, nästa börjar 12:00) — överlämningen sker just då,
+  och utan det kunde två pass i följd aldrig dela ett vapen.
+- **Regeln är strikt här**, till skillnad från konfliktkontrollen i `MyScheduleService` som medvetet
+  är försiktig: ett schemakrock är en varning till en människa, men två personer kan fysiskt inte
+  hålla samma vapen.
+
+### ⚠️ Tillgänglighet finns bara FÖR ETT FÖNSTER
+
+`/lanevapen` har ett datum högst upp, och listan svarar på "vad är ledigt DÅ". En lista som säger
+"ledigt" utan att säga när är det enda som är säkert fel — vapnet kan vara bokat i morgon. Därför
+bygger `LoanWeaponController` **inte** vapenlistan; den kommer från
+`LoanWeaponApi/GetAvailability`, som kräver `from`.
+
+**Tom sluttid = hela dagen** (00:00–23:59). Regeln finns på TVÅ ställen —
+`FirearmBookingService.NormaliseWindow` och `LoanWeaponApiController.TryWindow` — och det är
+avsiktligt men skört: **visade listan tillgänglighet för ett annat fönster än bokningen sedan tar,
+skulle en "ledig" rad kunna nekas i nästa klick.** Ändras den ena måste den andra följa.
+
+### Statusarna och vad de blockerar
+
+| Status | Blockerar vapnet? |
+|---|---|
+| `Reserverad` | **Ja** |
+| `Utlamnad` | **Ja** — vapnet är ute, även om fönstret hunnit passera |
+| `Aterlamnad` | Nej — vapnet är i skåpet igen |
+| `Avbokad` | Nej |
+
+**⚠️ `Aterlamnad` får inte blockera.** Gjorde den det vore vapnet obokbart i sitt gamla fönster för
+alltid, vilket låter harmlöst men bryter varje efterhandsrättelse.
+
+**⚠️ En UTLÄMNAD bokning kan inte avbokas.** Vapnet är fysiskt hos medlemmen, och att låta bokningen
+försvinna vore att tappa spåret till vem som har det. Den ska återlämnas.
+
+**⚠️ `MarkReturned` går även från `Reserverad`.** En återlämning som krävde att utlämningen
+registrerats först hade strandat varje vapen där funktionären glömde första klicket — och då är
+alternativet att bokningen blockerar vapnet i evighet.
+
+### Behörigheten: ingen ny roll
+
+Utlämning och återlämning: **klubbadmin ELLER skjutledare**
+(`FirearmAdminController.CanHandleBookingsAsync`). Skjutledaren är den som står på banan. En egen
+"lånevapenansvarig" hade gett mindre än vad de rollerna redan har, och dess felläge är en tyst
+utelåsning på tävlingsdagen — samma resonemang som när Skjutledare togs bort från fakturaytan och
+ingen ny fakturabehörighet infördes.
+
+**Att boka** kräver bara medlemskap i vapnets klubb. Det är carve-outen som gör funktionen förenlig
+med "inget publikt bokningssystem": klubbens egna vapen till klubbens egna medlemmar.
+
+### Övrigt
+
+- **`OccasionKind + OccasionId` är en sammansatt nyckel** — samma lärdom som `SourceKind` i
+  aktivitetssammanställningen och `SourceTable` i märkessynken. En tävlingsnods och en
+  evenemangsnods id kommer ur samma serie i Umbraco men betyder olika saker, och `'Fritt'` har inget
+  id (lagras som 0, aldrig som ett skräpvärde).
+- **`Service` och `Utgallrat` blockerar ny bokning** oavsett kalender — det är ett fysiskt läge.
+  `Utlanat` gör det inte: det är en grov administrativ flagga, och den verkliga tillgängligheten är
+  bokningskalendern.
+- **Tak:** 365 dagar framåt, högst 14 dagar per bokning. Utan det senare kan ett lånevapen beläggas
+  en hel månad av en person.
+- **Krockmeddelandet namnger tiden.** "Vapnet är bokat" utan tid lämnar medlemmen utan nästa steg.
+- **Individmodell, ingen pool** (Stefans beslut). Poolvyn "2 av 5 lediga" byggs genom att gruppera i
+  gränssnittet — utlämning av ETT bestämt vapen är omöjlig i en poolmodell.
+
+### Deploy
+
+`Migrations/create-firearm-booking-table.sql` (FK mot `Firearm`, så punkt 5:s migreringar först).
+Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod. Fildeploy av
+`KnowledgeBase/docs/vapenregister.md` och `vapen-klubbadmin.md`.
+
 ## Dubblettsammanslagning av medlemmar (2026-08-25)
 
 Klubbadmin → Medlemmar → Åtgärder → **Hitta dubbletter**. Efter en import finns samma person ofta

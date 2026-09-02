@@ -33,7 +33,7 @@
     // Senaste hämtningens sammanhang, så vapengruppsfiltret kan läsa om utan att anroparen skickar
     // in allt igen. ⚠️ Filtreringen sker SERVERSIDE — filtrerades listan här hade aktivitetsdagar,
     // tävlingar och underlagsfördelningen fortsatt beskriva den ofiltrerade mängden.
-    var _masCtx = { containerId: null, memberId: null, year: null, groups: [] };
+    var _masCtx = { containerId: null, memberId: null, year: null, groups: [], disciplines: [] };
 
     (function injectStyles() {
         if (document.getElementById('mas-styles')) return;
@@ -120,6 +120,28 @@
             html += '</div>';
         }
 
+        // GRENFILTRET. Söker någon licens för ett fältvapen måste utfärdaren se att skytten har
+        // aktivitet just i FÄLTSKYTTE, inte bara att hen är aktiv.
+        //
+        // Chippet bär det kanoniska ID:t i data-attributet men visar VISNINGSNAMNET. Servern
+        // normaliserar dessutom det den får tillbaka, så ett id och ett namn ger samma svar.
+        var discAvailable = d.disciplinesAvailable || [];
+        if (discAvailable.length > 0) {
+            var dActive = (d.disciplineFilter || []).map(function (x) { return String(x).toLowerCase(); });
+            html += '<div class="mb-2 small d-flex flex-wrap align-items-center gap-1">' +
+                '<span class="text-muted me-1">Gren:</span>';
+            html += '<button type="button" class="btn btn-sm ' +
+                (dActive.length === 0 ? 'btn-primary' : 'btn-outline-secondary') +
+                '" data-mas-disc="">Alla</button>';
+            discAvailable.forEach(function (x) {
+                var on = dActive.indexOf(String(x.id).toLowerCase()) >= 0;
+                html += '<button type="button" class="btn btn-sm ' +
+                    (on ? 'btn-primary' : 'btn-outline-secondary') +
+                    '" data-mas-disc="' + hpskEsc(x.id) + '">' + hpskEsc(x.label) + '</button>';
+            });
+            html += '</div>';
+        }
+
         // Vad posterna ÄR. Svarar direkt på "vad är de 105 för något?" — och delarna ska summera till
         // totalen, så en felräkning syns på skärmen i stället för att behöva letas fram.
         if (d.byKind && d.byKind.length) {
@@ -200,6 +222,7 @@
         container.innerHTML = html;
         wireToggles(container);
         wireGroupFilter(container);
+        wireDisciplineFilter(container);
     }
 
     /// Vapengruppsknapparna. Flera grupper går att välja samtidigt — ett vapen kan vara avsett för
@@ -224,6 +247,25 @@
 
     /// Expandern. ⚠️ Använder `hidden`-attributet, inte `style.display` — så en yta som råkar sätta
     /// en egen display-regel på containern inte kan låsa den i öppet läge.
+    /// Grenknapparna. Flera grenar går att välja samtidigt, av samma skäl som vapengrupperna:
+    /// ett vapen kan lagligen användas i flera grenar, och då är summan av aktiviteten underlaget.
+    function wireDisciplineFilter(container) {
+        container.querySelectorAll('[data-mas-disc]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var id = btn.getAttribute('data-mas-disc');
+                if (!id) {
+                    _masCtx.disciplines = [];                  // "Alla" nollställer
+                } else {
+                    var i = _masCtx.disciplines.indexOf(id);
+                    if (i >= 0) _masCtx.disciplines.splice(i, 1); else _masCtx.disciplines.push(id);
+                }
+                if (_masCtx.containerId && _masCtx.memberId) {
+                    masLoad(_masCtx.containerId, _masCtx.memberId, _masCtx.year, _masCtx.groups);
+                }
+            });
+        });
+    }
+
     function wireToggles(container) {
         container.querySelectorAll('[data-mas-toggle]').forEach(function (btn) {
             btn.addEventListener('click', function () {
@@ -246,7 +288,7 @@
 
         // Byte av medlem nollställer filtret: en annan medlem har andra vapengrupper, och ett
         // kvarhängande filter hade visat noll aktivitet för en grupp hen aldrig skjutit i.
-        if (String(_masCtx.memberId) !== String(memberId)) _masCtx.groups = [];
+        if (String(_masCtx.memberId) !== String(memberId)) { _masCtx.groups = []; _masCtx.disciplines = []; }
         _masCtx.containerId = containerId;
         _masCtx.memberId = memberId;
         _masCtx.year = year;
@@ -256,7 +298,8 @@
         try {
             var url = '/umbraco/surface/Foreningsintyg/GetActivitySummary?memberId=' + encodeURIComponent(memberId) +
                       (year ? '&year=' + encodeURIComponent(year) : '') +
-                      (_masCtx.groups.length ? '&groups=' + encodeURIComponent(_masCtx.groups.join(',')) : '');
+                      (_masCtx.groups.length ? '&groups=' + encodeURIComponent(_masCtx.groups.join(',')) : '') +
+                      (_masCtx.disciplines.length ? '&disciplines=' + encodeURIComponent(_masCtx.disciplines.join(',')) : '');
             var r = await fetch(url);
             var d = await r.json();
             if (!d.success) {

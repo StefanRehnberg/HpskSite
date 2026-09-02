@@ -1070,7 +1070,17 @@
         }).catch(() => c.innerHTML = errBox('Kunde inte hämta styrelsen.'));
     }
 
+    // ⚠️ Rollerna cachas per id för att knapparna ska kunna bära ETT HELTAL i sitt onclick.
+    // Tidigare byggdes `removeRole(id, 'namn', 'titel')` som JS-literaler i attributet, escapade
+    // med esc() — men esc mappar ' till &#039;, och en HTML-entitet avkodas INNE i attributvärdet
+    // innan JS parsar det. En styrelsemedlem som heter O'Brien slog alltså sönder knappen, och ett
+    // riggat namn körde kod i klubbadmins webbläsare. Samma lucka som redan åtgärdats i Fältskyttes
+    // "lägg till skytt" och i CompetitionStartListManagement. Bygg aldrig en JS-literal av
+    // användartext i ett attribut — bär ett id och slå upp resten.
+    let SV_ROLE_BY_ID = {};
+
     function personRow(r) {
+        SV_ROLE_BY_ID[r.id] = r;
         const term = r.termEndsDate
             ? (r.isTermExpired
                 ? `<span class="text-danger">Mandat gick ut ${esc(r.termEndsDate)}</span>`
@@ -1080,7 +1090,7 @@
             <span><strong style="font-size:1.1rem;">${esc(r.memberName || '-')}</strong>
                 <span class="d-block">${esc(r.title)}</span>
                 <span class="sv-help d-block">${term}</span></span>
-            ${CAN_MANAGE ? `<button class="btn btn-outline-danger btn-sm sv-noprint" onclick="removeRole(${r.id}, '${esc(r.memberName)}', '${esc(r.title)}')">Ta bort</button>` : ''}
+            ${CAN_MANAGE ? `<button class="btn btn-outline-danger btn-sm sv-noprint" onclick="removeRole(${r.id})">Ta bort</button>` : ''}
         </div>`;
     }
 
@@ -1206,10 +1216,44 @@
             electedDate: $('addElected').value || '', termEndsDate: $('addEnds').value || '', termYears: $('addYears').value || ''
         }).then(r => { if (r.success) loadStyrelse(); else alert(r.message || 'Kunde inte lägga till'); });
     };
-    window.removeRole = function (id, name, title) {
-        if (!confirm(`Ta bort ${name} (${title})?`)) return;
-        post('BoardRole', 'RemoveBoardRole', { boardRoleId: id }).then(r => {
-            if (!r.success) return;
+    window.removeRole = async function (id) {
+        const r = SV_ROLE_BY_ID[id];
+        const name = (r && r.memberName) || 'personen';
+        const title = (r && r.title) || '';
+
+        let msg = `Ta bort ${name}${title ? ` (${title})` : ''}?`;
+
+        // ⚠️ Vapenbehörigheten måste kontrolleras FÖRE borttagningen. Den är härledd ur det aktiva
+        // styrelseuppdraget, så efteråt är den redan borta och det går inte längre att se att den
+        // fanns — varningen skulle bli omöjlig att ge i efterhand.
+        //
+        // Bara för KLUBBAR: ett föreningsintyg är en klubbangelägenhet, och kretsstyrelser har
+        // ingen sådan behörighet.
+        if (IS_CLUB && r && r.memberId) {
+            try {
+                const impact = await get('FirearmAdmin', 'GetRemovalImpact',
+                                         { clubId: OWNER_ID, memberId: r.memberId });
+                if (impact.success && impact.isFirearmViewer) {
+                    msg += `\n\n${name} är klubbens föreningsintygsansvarige och kan läsa ` +
+                           `medlemmarnas vapeninnehav. Den behörigheten upphör OMEDELBART när ` +
+                           `personen tas bort ur styrelsen.`;
+                    if (impact.wouldLeaveClubWithout) {
+                        msg += `\n\nOBS: klubben har då INGEN som kan läsa vapeninnehav, och kan ` +
+                               `inte fylla i vapenuppgifterna på ett föreningsintyg. Utse en ` +
+                               `efterträdare i samma möte.`;
+                    }
+                }
+            } catch (e) {
+                // Ett misslyckat uppslag får inte blockera en helt legitim borttagning. Varningen
+                // uteblir då, vilket är sämre än att den kommer — men bättre än en knapp som
+                // slutar fungera för att en sidoförfrågan fallerade.
+            }
+        }
+
+        if (!confirm(msg)) return;
+
+        post('BoardRole', 'RemoveBoardRole', { boardRoleId: id }).then(res => {
+            if (!res.success) return;
             // Refresh whichever roster is showing (the valberedning roster reuses this same button).
             if ($('svValb') && $('svValb').style.display !== 'none') loadValberedning();
             else loadStyrelse();

@@ -1,0 +1,298 @@
+@model HpskSite.Controllers.LoanWeaponPageModel
+@{
+    Layout = null;
+    var title = string.IsNullOrEmpty(Model.ClubName) ? "Lånevapen" : $"Lånevapen — {Model.ClubName}";
+}
+@*
+    /lanevapen — medlemmens vy av klubbens lånevapen, med bokning (kedjans punkt 6).
+
+    ⚠️ TILLGÄNGLIGHET ÄR ALLTID FÖR ETT FÖNSTER, aldrig "i allmänhet". Sidan har därför ett datum
+    högst upp och listan svarar på "vad är ledigt DÅ". En lista som säger "ledigt" utan att säga när
+    är det enda som är säkert fel — vapnet kan vara bokat i morgon.
+
+    ⚠️ Kolumnerna är fortfarande NUMMER · NAMN · STATUS (Stefans beslut 2026-09-02). Bokningen lade
+    till en knapp, inte fler uppgifter om föreningens vapen.
+
+    Chromeless (Layout = null) som de andra routade sidorna, så den inte behöver en Umbraco-nod.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>@title · pistol.nu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <style>
+        body { background: var(--bs-body-bg); }
+        .lv-wrap { max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+        .lv-num { font-weight: 700; font-size: 1.15rem; width: 3.5rem; }
+        .lv-when { background: var(--bs-tertiary-bg); border-left: 3px solid var(--bs-primary);
+                   padding: .75rem 1rem; border-radius: .25rem; }
+    </style>
+</head>
+<body>
+<div class="lv-wrap">
+
+    <h1 class="h4 mb-1"><i class="bi bi-safe text-primary me-2"></i>Lånevapen</h1>
+    @if (!string.IsNullOrEmpty(Model.ClubName))
+    {
+        <p class="text-muted">@Model.ClubName</p>
+    }
+
+    @if (Model.RequiresLogin)
+    {
+        <div class="alert alert-info">
+            <p class="mb-2">Klubbens lånevapen visas bara för klubbens medlemmar.</p>
+            <a class="btn btn-primary btn-sm" href="@Model.LoginUrl">Logga in</a>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <div class="alert alert-warning">@Model.Message</div>
+    }
+    else
+    {
+        @* Klubbväljaren visas bara vid FLERA klubbar — en väljare som inte går att ändra är brus. *@
+        @if (Model.Clubs.Count > 1)
+        {
+            <form method="get" action="/lanevapen" class="mb-3">
+                <label class="form-label small" for="clubPick">Klubb</label>
+                <select class="form-select form-select-sm" id="clubPick" name="club"
+                        onchange="this.form.submit()" style="max-width:22rem">
+                    @foreach (var c in Model.Clubs)
+                    {
+                        <option value="@c.ClubId" selected="@(c.ClubId == Model.SelectedClubId)">@c.Name</option>
+                    }
+                </select>
+            </form>
+        }
+
+        <div class="lv-when small mb-3" id="lvWhenBox">
+            <div class="row g-2 align-items-end">
+                <div class="col-sm-5">
+                    <label class="form-label small mb-1" for="lvDate">När vill du låna?</label>
+                    <input type="text" class="form-control form-control-sm" id="lvDate" placeholder="ÅÅÅÅ-MM-DD">
+                </div>
+                <div class="col-sm-3">
+                    <label class="form-label small mb-1" for="lvFrom">Från</label>
+                    <input type="text" class="form-control form-control-sm" id="lvFrom" placeholder="hela dagen">
+                </div>
+                <div class="col-sm-3">
+                    <label class="form-label small mb-1" for="lvTo">Till</label>
+                    <input type="text" class="form-control form-control-sm" id="lvTo" placeholder="hela dagen">
+                </div>
+                <div class="col-sm-1">
+                    <button type="button" class="btn btn-sm btn-outline-primary w-100" id="lvCheck"
+                            title="Uppdatera">
+                        <i class="bi bi-arrow-repeat"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="form-text mt-1">
+                Lämnar du tiderna tomma gäller bokningen <strong>hela dagen</strong>.
+            </div>
+        </div>
+
+        <div id="lvList">
+            <div class="text-muted small">Laddar…</div>
+        </div>
+
+        <h2 class="h6 mt-4">Dina bokningar</h2>
+        <div id="lvMine"><div class="text-muted small">Laddar…</div></div>
+    }
+
+    <hr class="my-4">
+    <a href="/" class="small text-muted"><i class="bi bi-arrow-left me-1"></i>Till startsidan</a>
+</div>
+
+@* Antiforgery: sidan är fristående och behöver sitt eget token för POST-anropen. *@
+<form id="lvTokenForm" style="display:none">@Html.AntiForgeryToken()</form>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+<script>
+(function () {
+    var CLUB = @Model.SelectedClubId;
+    if (!CLUB) return;
+
+    function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function token() {
+        var el = document.querySelector('#lvTokenForm input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    async function post(url, fields) {
+        var fd = new FormData();
+        Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+        fd.append('__RequestVerificationToken', token());
+        var r = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+        // ⚠️ TEXT först — ett antiforgery-avslag är ett tomt 400 och r.json() kastar då ett
+        // SyntaxError som gömmer statuskoden.
+        var t = await r.text();
+        try { return JSON.parse(t); }
+        catch (e) { return { success: false, message: 'Oväntat svar från servern (' + r.status + ').' }; }
+    }
+
+    if (typeof flatpickr === 'function') {
+        flatpickr('#lvDate', { locale: 'sv', dateFormat: 'Y-m-d', minDate: 'today', defaultDate: 'today' });
+        flatpickr('#lvFrom', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
+        flatpickr('#lvTo', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
+    } else {
+        // Degraderar till textfält. Datumet måste ändå ha ett värde, annars frågar sidan om
+        // tillgänglighet för ingenting.
+        document.getElementById('lvDate').value = new Date().toISOString().slice(0, 10);
+    }
+
+    function windowFields() {
+        var d = document.getElementById('lvDate').value.trim();
+        var f = document.getElementById('lvFrom').value.trim();
+        var t = document.getElementById('lvTo').value.trim();
+        if (!d) return null;
+        // Tomma tider = hela dagen. Servern normaliserar 00:00 → 00:00–23:59, så vi skickar bara
+        // datumet och låter EN implementation äga regeln.
+        return (f && t) ? { from: d + ' ' + f, to: d + ' ' + t } : { from: d, to: '' };
+    }
+
+    async function loadList() {
+        var box = document.getElementById('lvList');
+        var w = windowFields();
+        if (!w) { box.innerHTML = '<div class="alert alert-warning small mb-0">Välj ett datum.</div>'; return; }
+
+        var url = '/umbraco/surface/LoanWeaponApi/GetAvailability?clubId=' + encodeURIComponent(CLUB) +
+                  '&from=' + encodeURIComponent(w.from) + '&to=' + encodeURIComponent(w.to);
+        try {
+            var j = await (await fetch(url, { credentials: 'same-origin' })).json();
+            if (!j.success) {
+                box.innerHTML = '<div class="alert alert-warning small mb-0">' +
+                    esc(j.message || 'Kunde inte läsa listan.') + '</div>';
+                return;
+            }
+            render(box, j);
+        } catch (e) {
+            box.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
+        }
+    }
+
+    function render(box, j) {
+        var list = j.weapons || [];
+        if (list.length === 0) {
+            box.innerHTML = '<div class="alert alert-secondary small mb-0">' +
+                'Klubben har inte lagt in några lånevapen ännu.</div>';
+            return;
+        }
+
+        var html = '<p class="small text-muted mb-2">Visar tillgänglighet ' +
+            esc(j.windowLabel) + '.</p>' +
+            '<div class="table-responsive"><table class="table align-middle">' +
+            '<thead><tr><th>Nr</th><th>Vapen</th><th>Status</th><th></th></tr></thead><tbody>';
+
+        list.forEach(function (w) {
+            html += '<tr><td class="lv-num">' + (w.number == null ? '—' : w.number) + '</td>' +
+                '<td>' + esc(w.alias) + '</td><td>';
+            if (w.isBookable) {
+                html += '<span class="badge bg-success-subtle text-success-emphasis">' +
+                    '<i class="bi bi-check-circle me-1"></i>Ledigt</span>';
+            } else if (w.bookedByMe) {
+                html += '<span class="badge bg-primary-subtle text-primary-emphasis">' +
+                    '<i class="bi bi-person-check me-1"></i>Bokat av dig</span>';
+            } else if (w.isBooked) {
+                html += '<span class="badge bg-warning-subtle text-warning-emphasis">' +
+                    '<i class="bi bi-clock-history me-1"></i>Bokat</span>';
+            } else {
+                html += '<span class="badge bg-secondary-subtle text-secondary-emphasis">' +
+                    esc(w.statusLabel) + '</span>';
+            }
+            html += '</td><td class="text-end">';
+            if (w.isBookable)
+                html += '<button type="button" class="btn btn-sm btn-primary" data-lv="book" ' +
+                    'data-firearm-id="' + w.id + '">Boka</button>';
+            html += '</td></tr>';
+        });
+
+        box.innerHTML = html + '</tbody></table></div>';
+    }
+
+    async function loadMine() {
+        var box = document.getElementById('lvMine');
+        try {
+            var j = await (await fetch('/umbraco/surface/Firearm/GetMyLoanBookings',
+                                       { credentials: 'same-origin' })).json();
+            if (!j.success) { box.innerHTML = '<div class="small text-muted">—</div>'; return; }
+            var list = j.bookings || [];
+            if (list.length === 0) {
+                box.innerHTML = '<p class="small text-muted mb-0">Du har inga bokningar.</p>';
+                return;
+            }
+            var html = '<div class="table-responsive"><table class="table table-sm align-middle">' +
+                '<thead><tr><th>Nr</th><th>Vapen</th><th>När</th><th>Status</th><th></th></tr>' +
+                '</thead><tbody>';
+            list.forEach(function (b) {
+                html += '<tr' + (b.isActive ? '' : ' class="opacity-75"') + '>' +
+                    '<td>' + (b.number == null ? '—' : b.number) + '</td>' +
+                    '<td>' + esc(b.firearmAlias) + '</td>' +
+                    '<td class="small">' + esc(b.from) + ' – ' + esc(b.to.slice(-5)) + '</td>' +
+                    '<td><span class="badge ' + (b.isOut ? 'bg-warning' :
+                        b.isActive ? 'bg-primary' : 'bg-secondary') + '">' +
+                        esc(b.statusLabel) + '</span></td>' +
+                    '<td class="text-end">';
+                // ⚠️ Avboka erbjuds bara för RESERVERAD. Ett utlämnat vapen ska återlämnas, inte
+                // avbokas — servern vägrar det ändå, men en knapp som nekas är sämre än ingen.
+                if (b.status === 'Reserverad')
+                    html += '<button type="button" class="btn btn-sm btn-outline-danger" ' +
+                        'data-lv="cancel" data-booking-id="' + b.id + '">Avboka</button>';
+                html += '</td></tr>';
+            });
+            box.innerHTML = html + '</tbody></table></div>';
+        } catch (e) {
+            box.innerHTML = '<div class="small text-danger">Kunde inte läsa dina bokningar.</div>';
+        }
+    }
+
+    document.addEventListener('click', async function (ev) {
+        var btn = ev.target.closest('[data-lv]');
+        if (!btn) return;
+        var action = btn.getAttribute('data-lv');
+
+        if (action === 'check') { await loadList(); return; }
+
+        if (action === 'book') {
+            var w = windowFields();
+            if (!w) { alert('Välj ett datum först.'); return; }
+            btn.disabled = true;
+            var j = await post('/umbraco/surface/Firearm/BookLoanWeapon', {
+                firearmId: btn.getAttribute('data-firearm-id'),
+                occasionKind: 'Fritt', occasionId: 0,
+                from: w.from, to: w.to, note: ''
+            });
+            btn.disabled = false;
+            if (!j.success) { alert(j.message || 'Kunde inte boka.'); return; }
+            await loadList(); await loadMine();
+            return;
+        }
+
+        if (action === 'cancel') {
+            if (!confirm('Avboka?')) return;
+            var res = await post('/umbraco/surface/Firearm/CancelLoanBooking',
+                                 { bookingId: btn.getAttribute('data-booking-id'), reason: '' });
+            if (!res.success) { alert(res.message || 'Kunde inte avboka.'); return; }
+            await loadList(); await loadMine();
+        }
+    });
+
+    document.getElementById('lvCheck').addEventListener('click', loadList);
+    ['lvDate', 'lvFrom', 'lvTo'].forEach(function (id) {
+        document.getElementById(id).addEventListener('change', loadList);
+    });
+
+    loadList();
+    loadMine();
+})();
+</script>
+</body>
+</html>

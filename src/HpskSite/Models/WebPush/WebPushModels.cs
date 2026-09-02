@@ -13,6 +13,14 @@
         public bool RankingEnabled { get; set; } = true;
         /// <summary>Opt-in for start-time reminders ("du borjar om 30 min"). Defaults OFF by design.</summary>
         public bool ScheduleRemindersEnabled { get; set; }
+
+        /// <summary>
+        /// Opt-in för licenspåminnelser. <b>Default 1 i schemat</b>, till skillnad från
+        /// <see cref="ScheduleRemindersEnabled"/> — medlemmen har själv skrivit in ett
+        /// förfallodatum, och den handlingen är opt-in:en.
+        /// </summary>
+        public bool LicenseRemindersEnabled { get; set; } = true;
+
         public DateTime CreatedAt { get; set; }
         public DateTime? LastUsedAt { get; set; }
     }

@@ -64,7 +64,8 @@ namespace HpskSite.Services
         /// sammanställning med en synlig varning är användbar och ett undantag inte är det.
         /// </summary>
         public async Task<MemberActivitySummary> GetAsync(
-            int memberId, int year, IEnumerable<string>? weaponGroups = null, int? clubId = null)
+            int memberId, int year, IEnumerable<string>? weaponGroups = null, int? clubId = null,
+            IEnumerable<string>? disciplines = null)
         {
             var entries = new List<MemberActivityEntry>();
             var sourceErrors = new List<string>();
@@ -98,7 +99,7 @@ namespace HpskSite.Services
             }
 
             var summary = MemberActivitySummary.From(
-                memberId, ResolveName(memberId), year, entries, weaponGroups);
+                memberId, ResolveName(memberId), year, entries, weaponGroups, disciplines);
 
             // Källfel först: den som läser måste se att listan är stympad innan hen tolkar siffrorna.
             summary.Warnings.InsertRange(0, sourceErrors);
@@ -374,6 +375,10 @@ namespace HpskSite.Services
                     SourceId = r.Id,
                     SourceKind = MemberActivityEntry.SourceKindTraining,
                     WeaponGroups = TrainingWeaponGroups(r),
+                    // Grenen ur radens egen kolumn. `discipline` ovan har redan fallit tillbaka på
+                    // "Precision" för en tom kolumn (samma default som kolumnen själv bär), och
+                    // Canonical svarar tomt på ett värde den inte känner igen i stället för att gissa.
+                    Disciplines = DisciplineList(discipline),
                     CountsAsActivity = true
                 });
             }
@@ -394,6 +399,24 @@ namespace HpskSite.Services
         /// Den råa formen <b>valideras mot <c>WeaponClass</c>-enumet</b>, aldrig gissas: annars hade
         /// vilket skräpvärde som helst blivit en "vapengrupp" i väljaren.
         /// </summary>
+        /// <summary>
+        /// Ett kanoniskt disciplin-id som en ETTELEMENTSLISTA, eller en tom lista.
+        ///
+        /// <para><b>⚠️ En tom lista är ett riktigt svar, inte ett fel.</b> Den betyder "posten hör
+        /// inte till någon gren" — evenemang och banincheckningar — och ett grenfilter måste kunna
+        /// säga att sådana poster faller bort. Att i stället stoppa in ett platshållarvärde
+        /// ("Okänd") hade gjort dem filtrerbara på en gren som inte finns.</para>
+        ///
+        /// <para>Listan har i dag alltid noll eller ett element. Fältet är ändå en lista av samma
+        /// skäl som <c>WeaponGroups</c>: en Nationell helmatch är precision, snabbskytte och fält på
+        /// en gång, så flertalet är den rätta formen den dagen den ska uttryckas.</para>
+        /// </summary>
+        private static List<string> DisciplineList(string? raw)
+        {
+            var canonical = ActivityDiscipline.Canonical(raw);
+            return canonical.Length == 0 ? new List<string>() : new List<string> { canonical };
+        }
+
         private static string ResolveWeaponGroup(string? classOrGroup)
         {
             var raw = (classOrGroup ?? "").Trim();
@@ -496,6 +519,7 @@ namespace HpskSite.Services
                     SourceId = id,
                     SourceKind = MemberActivityEntry.SourceKindCompetition,
                     WeaponGroups = groups.OrderBy(g => g, StringComparer.Ordinal).ToList(),
+                    Disciplines = DisciplineList(comp.Discipline),
                     CountsAsActivity = !didNotStart,
                     NotCountedReason = didNotStart ? "Ej start (DNS) — anmäld men sköt inte" : null
                 });
@@ -701,7 +725,16 @@ namespace HpskSite.Services
                     {
                         Name = node.GetValue<string>("competitionName") ?? node.Name ?? $"Tävling #{node.Id}",
                         Date = node.GetValue<DateTime?>("competitionDate") ?? node.CreateDate,
-                        Venue = node.GetValue<string>("venue") ?? ""
+                        Venue = node.GetValue<string>("venue") ?? "",
+                        // ⚠️ Läs UNTYPED och normalisera. competitionType lagras som id på de
+                        // flesta noder men som visningsNAMN på några — mätt i prod 2026-09-02: två
+                        // tävlingar bär "Magnum Fält" i stället för "MagnumFalt". En literal
+                        // jämförelse tappar dem ur varje grenfilter, tyst.
+                        //
+                        // Untyped är dessutom nödvändigt av samma skäl som competitionScope läses
+                        // så: FlexibleDropdown-konverteraren kastar på ett rent strängvärde som
+                        // äldre kodvägar lagrat (se Models/Competition.cs).
+                        Discipline = ActivityDiscipline.Canonical(node.GetValue<string>("competitionType"))
                     };
                 }
             }
@@ -951,6 +984,9 @@ namespace HpskSite.Services
             public string Name { get; set; } = "";
             public DateTime Date { get; set; }
             public string Venue { get; set; } = "";
+
+            /// <summary>Kanoniskt disciplin-id, eller "" när tävlingen inte bär någon läsbar typ.</summary>
+            public string Discipline { get; set; } = "";
         }
     }
 }

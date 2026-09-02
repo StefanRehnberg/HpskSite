@@ -160,7 +160,8 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetActivitySummary(
-            int memberId, int? year = null, string? groups = null, int? clubId = null)
+            int memberId, int? year = null, string? groups = null, int? clubId = null,
+            string? disciplines = null)
         {
             try
             {
@@ -177,7 +178,13 @@ namespace HpskSite.Controllers
                 // ⚠️ Klubben skickas med: incheckning-som-aktivitet är den UTFÄRDANDE klubbens
                 // inställning, och bara dess länkade banor räknas. Utan clubId faller tjänsten
                 // tillbaka på medlemmens primära klubb, vilket är rätt för Min sida.
-                var summary = await _activitySummary.GetAsync(memberId, y, groupFilter, clubId);
+                // Grenfiltret är intygsutfärdarens verktyg: ett föreningsintyg gäller ett vapen för
+                // en bestämd verksamhet, så aktiviteten måste kunna läsas i just den grenen.
+                // Filtreras SERVERSIDE av samma skäl som vapengruppsfiltret.
+                var disciplineFilter = (disciplines ?? "")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var summary = await _activitySummary.GetAsync(
+                    memberId, y, groupFilter, clubId, disciplineFilter);
                 var years = await _activitySummary.GetYearsWithActivityAsync(memberId);
 
                 return Json(new
@@ -198,6 +205,13 @@ namespace HpskSite.Controllers
                         summary.WeaponGroupsAvailable,
                         summary.WeaponGroupFilter,
                         summary.ExcludedWithoutWeaponGroup,
+                        // Grenerna projiceras med sina VISNINGSNAMN vid sidan av id:t: klienten
+                        // skickar tillbaka id:t, men chippet ska stå "Fältskytte" och inte
+                        // "Faltskytte".
+                        disciplinesAvailable = summary.DisciplinesAvailable
+                            .Select(d => new { id = d, label = ActivityDiscipline.Label(d) }),
+                        summary.DisciplineFilter,
+                        summary.ExcludedWithoutDiscipline,
                         summary.Warnings,
                         // Ordbokarna projiceras med SVENSKA etiketter som nyckel, inte enum-namn:
                         // klienten ska aldrig behöva känna till enum-värdena för att skriva ut dem,
@@ -224,6 +238,8 @@ namespace HpskSite.Controllers
                             e.SameOccasionAs,
                             e.IsMandatoryEvent,
                             e.WeaponGroups,
+                            e.Disciplines,
+                            disciplineLabels = e.Disciplines.Select(ActivityDiscipline.Label),
                             e.SourceId,
                             // SourceKind följer med för att klienten ska kunna länka rätt — och för
                             // att en verifiering ska kunna se att id:t tolkas i rätt serie.

@@ -128,6 +128,52 @@ namespace HpskSite.Services.Notifications
             return await SendToSubscriptionsAsync(subs, title, body, url, tag);
         }
 
+        /// <summary>
+        /// Licenspaminnelse ("din licens forfaller om 90 dagar").
+        ///
+        /// <para><b>Opt-in-kolumnen defaultar till 1, tvartemot ScheduleRemindersEnabled</b> — och
+        /// det ar ett medvetet undantag (Stefans beslut 2026-09-02). Medlemmen har SJALV skrivit in
+        /// ett forfallodatum, och den handlingen AR opt-in:en; man skriver inte in datumet om man
+        /// inte vill bli pamind. Starttidspaminnelser ber ingen om, darav skillnaden.</para>
+        /// </summary>
+        public async Task<int> SendLicenseReminderAsync(int memberId, string title, string body, string url, string? tag = null)
+        {
+            List<WebPushSubscriptionRow> subs;
+            using (var scope = _scopeProvider.CreateScope())
+            {
+                subs = scope.Database.Fetch<WebPushSubscriptionRow>(
+                    "SELECT * FROM WebPushSubscription WHERE MemberId = @0 AND LicenseRemindersEnabled = 1", memberId);
+                scope.Complete();
+            }
+            return await SendToSubscriptionsAsync(subs, title, body, url, tag);
+        }
+
+        /// <summary>
+        /// Member ids reachable by a licence reminder.
+        ///
+        /// <para><b>⚠️ Anvands INTE for att avgora VILKA vapen som ska pminnas om.</b> Svepet
+        /// utgar fran forfallodatumen i Firearm-tabellen och kollar opt-in per medlem forst darefter
+        /// — motsatt ordning jamfort med schemasvepet, och med flit: en medlem utan push ska anda
+        /// fa paminnelsen i appen, sa svepet far inte hoppa over hens vapen.</para>
+        /// </summary>
+        public HashSet<int> GetLicenseReminderMemberIds()
+        {
+            try
+            {
+                using var scope = _scopeProvider.CreateScope();
+                var ids = scope.Database.Fetch<int>(
+                    "SELECT DISTINCT MemberId FROM WebPushSubscription WHERE LicenseRemindersEnabled = 1");
+                scope.Complete();
+                return ids.ToHashSet();
+            }
+            catch (Exception ex)
+            {
+                // Kolumnen saknas = migreringen inte kord an -> funktionen ar helt enkelt av.
+                _logger.LogDebug(ex, "WebPush: licence-reminder opt-in lookup failed (migration pending?)");
+                return new HashSet<int>();
+            }
+        }
+
         /// <summary>Member ids with at least one browser opted in to start-time reminders. The reminder
         /// sweep uses this to avoid building itineraries for members who'd get nothing anyway.</summary>
         public List<int> GetScheduleReminderMemberIds()

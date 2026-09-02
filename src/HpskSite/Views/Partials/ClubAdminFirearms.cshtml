@@ -1,0 +1,764 @@
+@*
+    Vapen & lånevapen — klubbens flik.
+
+    Fyra delar, i den ordningen: BEHÖRIGHETEN (vem får läsa medlemmarnas vapeninnehav),
+    INTYGSINKORGEN (medlemmarnas förfrågningar), BOKADE LÅNEVAPEN (utlämning och återlämning) och
+    KLUBBENS EGNA VAPEN.
+
+    Ordningen är avsiktlig: behörigheten är förutsättningen för de andra, en obehandlad förfrågan
+    och en väntande utlämning är arbete, och vapenlistan är uppslagsdata.
+
+    ⚠️ Behörighetsrutan ligger FÖRE allt annat med flit. Den är inte en inställning bland andra —
+    det är den enda platsen en klubb ger någon insyn i medlemmarnas skyddade uppgifter, och Stefan
+    bad uttryckligen om att den ska förklaras väl eftersom problemet uppstår när en styrelsemedlem
+    med behörigheten avgår.
+
+    Konstruktionen som texten beskriver: behörigheten är HÄRLEDD (gruppen Foreningsintygsansvarig_{id}
+    OCH ett aktivt styrelseuppdrag i samma klubb), så den upphör av sig själv vid en avgång. Det som
+    däremot INTE löser sig självt är att klubben då står utan läsare — därför varningarna.
+
+    ⚠️ Ingen användartext byggs in i ett onclick-attribut. Raderna bär data-member-id och en
+    delegerad lyssnare läser det. Samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt".
+*@
+@await Html.PartialAsync("_HtmlEscape")
+@{
+    // ⚠️ Klubb-id:t läses SERVERSIDE och bärs som ett data-attribut, inte via den globala
+    // JS-variabeln. Värdsidorna deklarerar `const clubId` (Club.cshtml:110, ClubHome.cshtml:182),
+    // och en top-level `const` blir ALDRIG en egenskap på window — `window.clubId` är undefined.
+    // Att i stället läsa den bara som `clubId` fungerar lexikalt, men binder partialen till exakt
+    // hur varje värdsida råkar deklarera sin variabel. Data-attributet gör den självständig, vilket
+    // är samma regel som gäller för _HtmlEscape-inkluderingen ovan.
+    var vapClubId = ViewBag.clubId as int? ?? 0;
+}
+
+<div id="vapPanel" data-club-id="@vapClubId">
+
+    @* ── Behörigheten ───────────────────────────────────────────────────────────────────────── *@
+    <div class="card mb-4" id="vapViewerCard">
+        <div class="card-body">
+            <h5 class="card-title d-flex align-items-center mb-3">
+                <i class="bi bi-shield-lock text-primary me-2"></i>
+                Vem får läsa medlemmarnas vapeninnehav?
+            </h5>
+
+            <div class="vap-explain small mb-3">
+                <p class="mb-2">
+                    Medlemmarnas vapenuppgifter är <strong>krypterade</strong>. Bara den
+                    styrelsemedlem klubben utser här kan läsa dem, och bara för att kunna skriva ett
+                    <strong>föreningsintyg</strong> vid ny licens eller förnyelse. Ingen annan i
+                    klubben och ingen annan medlem ser något av det.
+                </p>
+                <p class="mb-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Behörigheten kan <strong>bara ges till någon som sitter i klubbens styrelse</strong>,
+                    och den <strong>upphör automatiskt</strong> samma dag personen lämnar styrelsen.
+                    Ni behöver inte göra något då — men klubben står i det ögonblicket utan någon som
+                    kan skriva intyg, så <strong>utse en efterträdare i samma möte</strong>.
+                </p>
+                <p class="mb-0">
+                    <i class="bi bi-eye me-1"></i>
+                    Varje läsning loggas, och <strong>medlemmen ser själv vem som läst och när</strong>.
+                </p>
+            </div>
+
+            <div id="vapViewerBody">
+                <div class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Laddar…</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* ── Intygsinkorgen ─────────────────────────────────────────────────────────────────────── *@
+    @* Ligger FÖRE vapenlistan: en obehandlad förfrågan är arbete som väntar, en vapenlista är
+       uppslagsdata. *@
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title mb-3">
+                <i class="bi bi-inbox text-primary me-2"></i>Förfrågningar om föreningsintyg
+                <span class="badge bg-primary ms-1 d-none" id="vapReqBadge">0</span>
+            </h5>
+            <div id="vapReqBody">
+                <div class="text-muted small">Laddar…</div>
+            </div>
+        </div>
+    </div>
+
+    @* ── Lånevapensbokningar ────────────────────────────────────────────────────────────────── *@
+    @* Ligger före vapenlistan av samma skäl som inkorgen: en utlämning som väntar är arbete,
+       vapenlistan är uppslagsdata. *@
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title mb-3">
+                <i class="bi bi-calendar-check text-primary me-2"></i>Bokade lånevapen
+                <span class="badge bg-primary ms-1 d-none" id="vapBookBadge">0</span>
+            </h5>
+            <p class="text-muted small">
+                Utlämning och återlämning kan registreras av <strong>klubbadministratör eller
+                skjutledare</strong> — det är den som står på banan. Bokningen är ingen behörighet;
+                den fysiska överlämningen är det som gäller.
+            </p>
+            <div id="vapBookBody"><div class="text-muted small">Laddar…</div></div>
+        </div>
+    </div>
+
+    @* ── Klubbens vapen ─────────────────────────────────────────────────────────────────────── *@
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-safe text-primary me-2"></i>Klubbens vapen
+                </h5>
+                <button type="button" class="btn btn-sm btn-primary" data-vap-action="cf-add">
+                    <i class="bi bi-plus-circle me-1"></i>Lägg till vapen
+                </button>
+            </div>
+            <p class="text-muted small">
+                Klubbvapen är <strong>inte personuppgifter</strong> — de tillhör föreningen. Markera
+                ett vapen som <strong>lånebart</strong> och medlemmarna kan se och
+                <strong>boka</strong> det på
+                <a href="/lanevapen" target="_blank" rel="noopener">/lanevapen</a> — de ser nummer,
+                namn och om det är ledigt den tid de valt.
+                <br>
+                <i class="bi bi-info-circle me-1"></i>Sätter du status <strong>Service</strong> eller
+                <strong>Utgallrat</strong> går vapnet inte att boka, oavsett kalender.
+            </p>
+            <div id="vapClubBody">
+                <div class="text-muted small">Laddar…</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Klubbvapnets redigeringsdialog. Enkel med flit: klubbvapnets skyddade uppgifter (serienummer,
+   licens) hör till klubbens egen licensbokföring och skrivs inte här ännu. *@
+<div class="modal fade" id="vapCfModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="vapCfTitle">Lägg till klubbvapen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="vapCfError" class="alert alert-danger small d-none"></div>
+                <input type="hidden" id="vapCfId" value="0">
+
+                <div class="row g-3">
+                    <div class="col-4">
+                        <label class="form-label small" for="vapCfNumber">Vapennummer</label>
+                        <input type="number" min="1" class="form-control" id="vapCfNumber">
+                        <div class="form-text">Föreningens eget nummer, 1–N.</div>
+                    </div>
+                    <div class="col-8">
+                        <label class="form-label small" for="vapCfAlias">Namn *</label>
+                        <input type="text" class="form-control" id="vapCfAlias" maxlength="80"
+                               placeholder="t.ex. Klubbvapen C">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small" for="vapCfClass">Vapengrupp</label>
+                        <select class="form-select" id="vapCfClass"></select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small" for="vapCfType">Vapentyp</label>
+                        <select class="form-select" id="vapCfType"></select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small" for="vapCfStatus">Status</label>
+                        <select class="form-select" id="vapCfStatus"></select>
+                    </div>
+                    <div class="col-6 d-flex align-items-end">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="vapCfLoanable">
+                            <label class="form-check-label small" for="vapCfLoanable">
+                                Lånebart — syns för medlemmarna
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" data-vap-action="cf-save">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__vapPanelInit) return;
+    window.__vapPanelInit = true;
+
+    // ⚠️ CSS injiceras i runtime. Ett top-level <style> i en partial kan spräcka vyns
+    // runtime-kompilering (se razor-partial-styles).
+    var css = document.createElement('style');
+    css.textContent =
+        '.vap-explain{background:var(--bs-tertiary-bg);border-left:3px solid var(--bs-primary);' +
+        'padding:.75rem 1rem;border-radius:.25rem}' +
+        '.vap-row{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;' +
+        'border:1px solid var(--bs-border-color);border-radius:.375rem;margin-bottom:.5rem}' +
+        '.vap-row .vap-name{font-weight:600}' +
+        '.vap-count{font-size:1.75rem;font-weight:700;line-height:1}' +
+        '.vap-dormant{opacity:.65}';
+    document.head.appendChild(css);
+
+    function esc(s) { return (window.hpskEsc ? window.hpskEsc(s) : String(s == null ? '' : s)); }
+
+    // Klubb-id:t ur panelens egna data-attribut. Läses vid varje anrop och inte cachas i en
+    // variabel: panelen finns bara på en klubbsida, men ett cachat 0 från en tidig körning vore
+    // omöjligt att se skillnad på från "klubben har inget id".
+    function vapClubId() {
+        var el = document.getElementById('vapPanel');
+        return el ? (parseInt(el.getAttribute('data-club-id'), 10) || 0) : 0;
+    }
+
+    function token() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
+    function fmtDate(d) {
+        if (!d) return '';
+        var s = String(d);
+        return s.length >= 10 ? s.substring(0, 10) : s;
+    }
+
+    var state = null;
+
+    function render() {
+        var body = document.getElementById('vapViewerBody');
+        if (!body || !state) return;
+
+        var html = '';
+
+        // Antalet är klubbens förtroendeyta mot sina medlemmar — det ska stå framme som en siffra,
+        // inte vara något man raknar fram ur en lista.
+        html += '<div class="d-flex align-items-center gap-3 mb-3">' +
+                '<div class="vap-count ' + (state.activeCount === 0 ? 'text-warning' : 'text-primary') + '">' +
+                state.activeCount + '</div>' +
+                '<div class="small text-muted">' +
+                (state.activeCount === 1 ? 'person kan läsa medlemmarnas vapeninnehav'
+                                         : 'personer kan läsa medlemmarnas vapeninnehav') +
+                '</div></div>';
+
+        if (state.noBoardRegistered) {
+            // Ett annat problem än "obesatt", med en annan åtgärd. Att slå dem ihop skulle skicka
+            // klubbadmin till en väljare som inte kan innehålla något.
+            html += '<div class="alert alert-warning small mb-3">' +
+                    '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                    '<strong>Klubbens styrelse är inte registrerad på pistol.nu.</strong> ' +
+                    'Behörigheten kan bara ges till en styrelsemedlem, så lägg först in styrelsen ' +
+                    'under <a href="/styrelse?type=0&amp;id=' + encodeURIComponent(vapClubId()) +
+                    '">Styrelsearbete</a>.</div>';
+        } else if (state.unstaffed) {
+            html += '<div class="alert alert-warning small mb-3">' +
+                    '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                    '<strong>Ingen kan läsa medlemmarnas vapeninnehav just nu.</strong> ' +
+                    'Klubben kan därför inte fylla i vapenuppgifterna på ett föreningsintyg. ' +
+                    'Utse en styrelsemedlem nedan.</div>';
+        }
+
+        if (state.needsSiteAdminToAssign) {
+            // Svaret på "varför är knappen låst" ska stå på skärmen, inte kräva ett supportärende.
+            html += '<div class="alert alert-info small mb-3">' +
+                    '<i class="bi bi-info-circle me-1"></i>' +
+                    'Du kan se behörigheten men inte ändra den. Det krävs att man är ' +
+                    '<strong>både klubbadministratör och styrelsemedlem</strong> i klubben. ' +
+                    'Finns ingen sådan person kan pistol.nu:s administratör hjälpa till.</div>';
+        }
+
+        var viewers = state.viewers || [];
+        if (viewers.length === 0) {
+            html += '<p class="text-muted small mb-3">Ingen är utsedd.</p>';
+        } else {
+            viewers.forEach(function (v) {
+                var roles = (v.roleTitles || []).join(', ');
+                html += '<div class="vap-row' + (v.isDormant ? ' vap-dormant' : '') + '">' +
+                        '<i class="bi ' + (v.isDormant ? 'bi-slash-circle text-muted' : 'bi-shield-check text-success') + '"></i>' +
+                        '<div class="flex-grow-1">' +
+                        '<div class="vap-name">' + esc(v.name) + '</div>' +
+                        '<div class="small text-muted">';
+
+                if (v.isDormant) {
+                    // Gruppmedlemskapet tas inte bort vid en avgång — behörigheten är härledd och
+                    // därmed redan verkningslös. Men den som återväljs får tillbaka läsrätten
+                    // automatiskt, och det får inte hända osett.
+                    html += 'Sitter inte i styrelsen — <strong>behörigheten är vilande</strong>. ' +
+                            'Väljs personen in igen börjar den gälla på nytt.';
+                } else {
+                    html += esc(roles || 'Styrelsemedlem');
+                    if (v.termEndsDate) {
+                        html += ' · mandat t.o.m. ' + esc(fmtDate(v.termEndsDate));
+                        if (v.termExpired) {
+                            // Revoquerar ingenting: en styrelse sitter kvar till nästa årsmöte.
+                            html += ' <span class="badge bg-warning-subtle text-warning-emphasis">utgånget</span>';
+                        }
+                    }
+                }
+
+                html += '</div></div>';
+
+                if (state.canAssign) {
+                    html += '<button type="button" class="btn btn-sm btn-outline-danger" ' +
+                            'data-vap-action="remove" data-member-id="' + v.memberId + '">' +
+                            (v.isDormant ? 'Städa bort' : 'Ta bort') + '</button>';
+                }
+
+                html += '</div>';
+            });
+        }
+
+        // Väljaren erbjuder bara aktiva styrelsemedlemmar som inte redan har behörigheten — samma
+        // källa som listan ovan, så de två inte kan vara oense om vem som är valbar.
+        var free = (state.candidates || []).filter(function (c) { return !c.isViewer; });
+        if (state.canAssign && free.length > 0) {
+            html += '<div class="d-flex gap-2 align-items-center mt-3 flex-wrap">' +
+                    '<select class="form-select form-select-sm" id="vapAssignSelect" style="max-width:320px">' +
+                    '<option value="">Välj styrelsemedlem…</option>';
+            free.forEach(function (c) {
+                var label = c.name + ((c.roleTitles || []).length ? ' (' + c.roleTitles.join(', ') + ')' : '');
+                html += '<option value="' + c.memberId + '">' + esc(label) + '</option>';
+            });
+            html += '</select>' +
+                    '<button type="button" class="btn btn-sm btn-primary" data-vap-action="assign">' +
+                    '<i class="bi bi-plus-circle me-1"></i>Utse</button></div>';
+        }
+
+        body.innerHTML = html;
+
+        var railWarn = document.getElementById('firearmsRailWarning');
+        if (railWarn) railWarn.classList.toggle('d-none', !(state.unstaffed || state.noBoardRegistered));
+    }
+
+    async function load() {
+        var body = document.getElementById('vapViewerBody');
+        try {
+            var r = await fetch('/umbraco/surface/FirearmAdmin/GetViewerState?clubId=' +
+                                encodeURIComponent(vapClubId()), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) {
+                if (body) body.innerHTML = '<div class="alert alert-danger small mb-0">' +
+                                           esc(j.message || 'Kunde inte läsa behörighetsläget') + '</div>';
+                return;
+            }
+            state = j;
+            render();
+        } catch (e) {
+            if (body) body.innerHTML = '<div class="alert alert-danger small mb-0">' +
+                                       'Kunde inte läsa behörighetsläget.</div>';
+        }
+    }
+
+    async function post(url, memberId, fields) {
+        var fd = new FormData();
+        if (fields) {
+            Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+        } else {
+            fd.append('clubId', vapClubId());
+            fd.append('memberId', memberId);
+        }
+        fd.append('__RequestVerificationToken', token());
+
+        var r = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+        // ⚠️ Läs som TEXT först. Ett antiforgery-avslag är ett tomt 400 och r.json() kastar då ett
+        // SyntaxError som gömmer statuskoden — den fällan har redan kostat en runda i intygssviten.
+        var text = await r.text();
+        try { return JSON.parse(text); }
+        catch (e) { return { success: false, message: 'Oväntat svar från servern (' + r.status + ').' }; }
+    }
+
+    document.addEventListener('click', async function (ev) {
+        var btn = ev.target.closest('[data-vap-action]');
+        if (!btn) return;
+
+        var action = btn.getAttribute('data-vap-action');
+
+        if (action === 'assign') {
+            var sel = document.getElementById('vapAssignSelect');
+            var memberId = sel ? sel.value : '';
+            if (!memberId) { alert('Välj en styrelsemedlem först.'); return; }
+
+            btn.disabled = true;
+            var j = await post('/umbraco/surface/FirearmAdmin/AssignViewer', memberId);
+            btn.disabled = false;
+            if (!j.success) { alert(j.message || 'Kunde inte utse.'); return; }
+            await load();
+            return;
+        }
+
+        if (action === 'bk-handout') { await setBookingState(btn.getAttribute('data-booking-id'), 'handout'); return; }
+        if (action === 'bk-return')  { await setBookingState(btn.getAttribute('data-booking-id'), 'return'); return; }
+        if (action === 'bk-cancel')  { await setBookingState(btn.getAttribute('data-booking-id'), 'cancel'); return; }
+
+        if (action === 'cf-add') { openClubFirearm(0); return; }
+        if (action === 'cf-edit') { openClubFirearm(btn.getAttribute('data-firearm-id')); return; }
+        if (action === 'cf-save') { await saveClubFirearm(); return; }
+        if (action === 'cf-remove') {
+            var fid = btn.getAttribute('data-firearm-id');
+            var row = btn.closest('tr');
+            var nm = row ? row.children[1].textContent : 'vapnet';
+            if (!confirm('Ta bort ' + nm + ' ur klubbens lista?')) return;
+            var res = await post('/umbraco/surface/FirearmAdmin/RemoveClubFirearm', null,
+                { clubId: vapClubId(), firearmId: fid });
+            if (!res.success) { alert(res.message || 'Kunde inte ta bort.'); return; }
+            await loadClubFirearms();
+            return;
+        }
+        if (action === 'req-issue') {
+            await setRequestStatus(btn.getAttribute('data-request-id'), 'Utfardad');
+            return;
+        }
+        if (action === 'req-reject') {
+            await setRequestStatus(btn.getAttribute('data-request-id'), 'Avslagen');
+            return;
+        }
+
+        if (action === 'remove') {
+            var mid = btn.getAttribute('data-member-id');
+            var row = btn.closest('.vap-row');
+            var nameEl = row ? row.querySelector('.vap-name') : null;
+            var name = nameEl ? nameEl.textContent : 'personen';
+
+            // Dialogen namnger FÖLJDEN, inte bara handlingen — och varnar när klubben blir utan.
+            var msg = 'Ta bort behörigheten för ' + name + '?\n\n' +
+                      'Personen kan då inte längre läsa medlemmarnas vapenuppgifter.';
+            if (state && state.activeCount <= 1) {
+                msg += '\n\nOBS: klubben har då INGEN som kan läsa vapeninnehav, och kan inte fylla ' +
+                       'i vapenuppgifterna på ett föreningsintyg.';
+            }
+            if (!confirm(msg)) return;
+
+            btn.disabled = true;
+            var res = await post('/umbraco/surface/FirearmAdmin/RemoveViewer', mid);
+            btn.disabled = false;
+            if (!res.success) { alert(res.message || 'Kunde inte ta bort.'); return; }
+            await load();
+            return;
+        }
+    });
+
+    // ── Klubbens vapen ───────────────────────────────────────────────────────────────────────
+    var clubState = null;
+
+    async function loadClubFirearms() {
+        var body = document.getElementById('vapClubBody');
+        if (!body) return;
+        try {
+            var r = await fetch('/umbraco/surface/FirearmAdmin/GetClubFirearms?clubId=' +
+                                encodeURIComponent(vapClubId()), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) {
+                body.innerHTML = '<div class="alert alert-warning small mb-0">' +
+                    esc(j.message || 'Kunde inte l\u00e4sa klubbens vapen.') + '</div>';
+                return;
+            }
+            clubState = j;
+            renderClubFirearms();
+        } catch (e) {
+            body.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
+        }
+    }
+
+    function renderClubFirearms() {
+        var body = document.getElementById('vapClubBody');
+        var list = (clubState && clubState.firearms) || [];
+        if (list.length === 0) {
+            body.innerHTML = '<p class="text-muted small mb-0">Inga vapen inlagda \u00e4n.</p>';
+            return;
+        }
+        var html = '<div class="table-responsive"><table class="table table-sm align-middle">' +
+            '<thead><tr><th>Nr</th><th>Namn</th><th>Grupp</th><th>Typ</th><th>Status</th>' +
+            '<th>L\u00e5nebart</th><th class="text-end"></th></tr></thead><tbody>';
+        list.forEach(function (f) {
+            html += '<tr>' +
+                '<td class="fw-semibold">' + (f.number == null ? '\u2014' : f.number) + '</td>' +
+                '<td>' + esc(f.alias) + '</td>' +
+                '<td>' + esc(f.weaponClass || '\u2014') + '</td>' +
+                '<td>' + esc(f.vapentyp || '\u2014') + '</td>' +
+                '<td>' + esc(f.status) + '</td>' +
+                '<td>' + (f.isLoanable
+                    ? '<i class="bi bi-check-circle text-success" title="L\u00e5nebart"></i>'
+                    : '<span class="text-muted">\u2014</span>') + '</td>' +
+                '<td class="text-end">' +
+                '<button type="button" class="btn btn-sm btn-outline-primary me-1" ' +
+                'data-vap-action="cf-edit" data-firearm-id="' + f.id + '">\u00c4ndra</button>' +
+                '<button type="button" class="btn btn-sm btn-outline-danger" ' +
+                'data-vap-action="cf-remove" data-firearm-id="' + f.id + '">Ta bort</button>' +
+                '</td></tr>';
+        });
+        body.innerHTML = html + '</tbody></table></div>';
+    }
+
+    function openClubFirearm(id) {
+        var o = (clubState && clubState.options) || {};
+        var f = ((clubState && clubState.firearms) || [])
+            .find(function (x) { return String(x.id) === String(id); });
+
+        document.getElementById('vapCfError').classList.add('d-none');
+        document.getElementById('vapCfTitle').textContent =
+            f ? '\u00c4ndra klubbvapen' : 'L\u00e4gg till klubbvapen';
+
+        document.getElementById('vapCfClass').innerHTML = '<option value="">\u2014 v\u00e4lj \u2014</option>' +
+            (o.weaponClasses || []).map(function (c) {
+                return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('');
+        document.getElementById('vapCfType').innerHTML = '<option value="">\u2014 v\u00e4lj \u2014</option>' +
+            (o.vapentyper || []).map(function (t) {
+                return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('');
+        document.getElementById('vapCfStatus').innerHTML =
+            (o.statuses || []).map(function (st) {
+                return '<option value="' + esc(st) + '">' + esc(st) + '</option>'; }).join('');
+
+        document.getElementById('vapCfId').value = f ? f.id : 0;
+        document.getElementById('vapCfNumber').value = f && f.number != null ? f.number : '';
+        document.getElementById('vapCfAlias').value = f ? f.alias : '';
+        document.getElementById('vapCfClass').value = f ? (f.weaponClass || '') : '';
+        document.getElementById('vapCfType').value = f ? (f.vapentyp || '') : '';
+        document.getElementById('vapCfStatus').value = f ? f.status : (o.statuses || [''])[0];
+        document.getElementById('vapCfLoanable').checked = f ? !!f.isLoanable : true;
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('vapCfModal')).show();
+    }
+
+    async function saveClubFirearm() {
+        var alias = document.getElementById('vapCfAlias').value.trim();
+        var errBox = document.getElementById('vapCfError');
+        if (!alias) {
+            errBox.textContent = 'Vapnet m\u00e5ste ha ett namn.';
+            errBox.classList.remove('d-none');
+            return;
+        }
+        var j = await post('/umbraco/surface/FirearmAdmin/SaveClubFirearm', null, {
+            clubId: vapClubId(),
+            id: document.getElementById('vapCfId').value,
+            alias: alias,
+            weaponClass: document.getElementById('vapCfClass').value,
+            vapentyp: document.getElementById('vapCfType').value,
+            number: document.getElementById('vapCfNumber').value,
+            isLoanable: document.getElementById('vapCfLoanable').checked,
+            status: document.getElementById('vapCfStatus').value
+        });
+        if (!j.success) {
+            errBox.textContent = j.message || 'Kunde inte spara.';
+            errBox.classList.remove('d-none');
+            return;
+        }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('vapCfModal')).hide();
+        await loadClubFirearms();
+    }
+
+    // ── Intygsinkorgen ───────────────────────────────────────────────────────────────────────
+    var reqState = null;
+
+    async function loadRequests() {
+        var body = document.getElementById('vapReqBody');
+        if (!body) return;
+        try {
+            var r = await fetch('/umbraco/surface/FirearmAdmin/GetIntygRequests?clubId=' +
+                                encodeURIComponent(vapClubId()), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) {
+                body.innerHTML = '<div class="alert alert-warning small mb-0">' +
+                    esc(j.message || 'Kunde inte l\u00e4sa f\u00f6rfr\u00e5gningarna.') + '</div>';
+                return;
+            }
+            reqState = j;
+            renderRequests();
+        } catch (e) {
+            body.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
+        }
+    }
+
+    function renderRequests() {
+        var body = document.getElementById('vapReqBody');
+        var list = (reqState && reqState.requests) || [];
+        var open = list.filter(function (r) { return r.isOpen; });
+
+        var badge = document.getElementById('vapReqBadge');
+        if (badge) {
+            badge.textContent = open.length;
+            badge.classList.toggle('d-none', open.length === 0);
+        }
+
+        if (list.length === 0) {
+            body.innerHTML = '<p class="text-muted small mb-0">Inga f\u00f6rfr\u00e5gningar.</p>';
+            return;
+        }
+
+        // ⚠️ Namnge vem som kan läsa vapenuppgifterna. Kan den inloggade inte det ska det stå
+        // här i stället för att en knapp nekas längre fram.
+        var names = (reqState.viewerNames || []);
+        var html = names.length
+            ? '<p class="small text-muted"><i class="bi bi-shield-lock me-1"></i>Vapenuppgifterna kan ' +
+              'l\u00e4sas av <strong>' + esc(names.join(', ')) + '</strong>.</p>'
+            : '<div class="alert alert-warning small">Ingen \u00e4r utsedd till f\u00f6reningsintygsansvarig, ' +
+              's\u00e5 vapenuppgifterna kan inte l\u00e4sas. Utse n\u00e5gon i rutan ovan.</div>';
+
+        html += '<div class="table-responsive"><table class="table table-sm align-middle">' +
+            '<thead><tr><th>Inkom</th><th>Medlem</th><th>Vapen</th><th>Typ</th><th>F\u00f6rbund</th>' +
+            '<th>Status</th><th class="text-end"></th></tr></thead><tbody>';
+
+        list.forEach(function (r) {
+            html += '<tr' + (r.isOpen ? '' : ' class="opacity-75"') + '>' +
+                '<td class="small">' + esc(r.createdAt) + '</td>' +
+                '<td>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</td>' +
+                '<td>' + esc(r.firearmAlias) +
+                (r.firearmWeaponClass ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' +
+                    esc(r.firearmWeaponClass) + '</span>' : '') + '</td>' +
+                '<td class="small">' + esc(r.kindLabel) + '</td>' +
+                '<td class="small">' + esc(r.forbund) + '</td>' +
+                '<td><span class="badge ' + (r.isOpen ? 'bg-primary' : 'bg-secondary') + '">' +
+                esc(r.statusLabel) + '</span></td>' +
+                '<td class="text-end">';
+            if (r.isOpen) {
+                html += '<button type="button" class="btn btn-sm btn-outline-success me-1" ' +
+                    'data-vap-action="req-issue" data-request-id="' + r.id + '">Utf\u00e4rdad</button>' +
+                    '<button type="button" class="btn btn-sm btn-outline-danger" ' +
+                    'data-vap-action="req-reject" data-request-id="' + r.id + '">Avsl\u00e5</button>';
+            } else if (r.handlerNote) {
+                html += '<span class="small text-muted">' + esc(r.handlerNote) + '</span>';
+            }
+            html += '</td></tr>';
+            if (r.memberMessage)
+                html += '<tr' + (r.isOpen ? '' : ' class="opacity-75"') + '><td></td>' +
+                    '<td colspan="6" class="small text-muted fst-italic">' +
+                    esc(r.memberMessage) + '</td></tr>';
+        });
+
+        body.innerHTML = html + '</tbody></table></div>';
+    }
+
+    async function setRequestStatus(requestId, status) {
+        var note = null;
+        if (status === 'Avslagen') {
+            // ⚠️ Ett avslag KRÄVER ett skäl — servern vägrar utan. Ett avslag utan förklaring
+            // blir ett supportärende och medlemmen har ingen väg vidare.
+            note = prompt('Varf\u00f6r avsl\u00e5s f\u00f6rfr\u00e5gan? Medlemmen ser skälet.');
+            if (note === null) return;
+            if (!note.trim()) { alert('Ange ett sk\u00e4l.'); return; }
+        }
+        var j = await post('/umbraco/surface/FirearmAdmin/SetIntygRequestStatus', null, {
+            clubId: vapClubId(), requestId: requestId, status: status, note: note || ''
+        });
+        if (!j.success) { alert(j.message || 'Kunde inte \u00e4ndra status.'); return; }
+        await loadRequests();
+    }
+
+    // ── Lånevapensbokningar ──────────────────────────────────────────────────────────────────
+    var bookState = null;
+
+    async function loadBookings() {
+        var body = document.getElementById('vapBookBody');
+        if (!body) return;
+        try {
+            var r = await fetch('/umbraco/surface/FirearmAdmin/GetClubBookings?clubId=' +
+                                encodeURIComponent(vapClubId()), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) {
+                // ⚠️ Nekad åtkomst är inte ett fel här: en klubbadmin utan skjutledarroll ser
+                // ändå kortet. Säg vad som gäller i stället för att visa en röd ruta.
+                body.innerHTML = '<div class="alert alert-secondary small mb-0">' +
+                    esc(j.message || 'Kunde inte läsa bokningarna.') + '</div>';
+                return;
+            }
+            bookState = j;
+            renderBookings();
+        } catch (e) {
+            body.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
+        }
+    }
+
+    function renderBookings() {
+        var body = document.getElementById('vapBookBody');
+        var list = (bookState && bookState.bookings) || [];
+
+        var badge = document.getElementById('vapBookBadge');
+        if (badge) {
+            var n = (bookState && bookState.activeCount) || 0;
+            badge.textContent = n;
+            badge.classList.toggle('d-none', n === 0);
+        }
+
+        if (list.length === 0) {
+            body.innerHTML = '<p class="text-muted small mb-0">Inga bokningar.</p>';
+            return;
+        }
+
+        var html = '<div class="table-responsive"><table class="table table-sm align-middle">' +
+            '<thead><tr><th>Nr</th><th>Vapen</th><th>Medlem</th><th>När</th><th>Status</th>' +
+            '<th class="text-end"></th></tr></thead><tbody>';
+
+        list.forEach(function (b) {
+            html += '<tr' + (b.isActive ? '' : ' class="opacity-75"') + '>' +
+                '<td class="fw-semibold">' + (b.number == null ? '\u2014' : b.number) + '</td>' +
+                '<td>' + esc(b.firearmAlias) + '</td>' +
+                '<td>' + esc(b.memberName || ('Medlem ' + b.memberId)) + '</td>' +
+                '<td class="small">' + esc(b.from) + ' \u2013 ' + esc(String(b.to).slice(-5)) + '</td>' +
+                '<td><span class="badge ' + (b.isOut ? 'bg-warning text-dark' :
+                    b.isActive ? 'bg-primary' : 'bg-secondary') + '">' +
+                    esc(b.statusLabel) + '</span></td>' +
+                '<td class="text-end">';
+
+            // ⚠️ Knapparna följer TILLSTÅNDET, inte tillfället. En reserverad bokning kan lämnas ut
+            // eller avbokas; en utlämnad kan bara återlämnas — den får inte avbokas, för då tappas
+            // spåret till vem som har vapnet.
+            if (b.status === 'Reserverad') {
+                html += '<button type="button" class="btn btn-sm btn-outline-success me-1" ' +
+                    'data-vap-action="bk-handout" data-booking-id="' + b.id + '">L\u00e4mna ut</button>' +
+                    '<button type="button" class="btn btn-sm btn-outline-danger" ' +
+                    'data-vap-action="bk-cancel" data-booking-id="' + b.id + '">Avboka</button>';
+            } else if (b.status === 'Utlamnad') {
+                html += '<button type="button" class="btn btn-sm btn-success" ' +
+                    'data-vap-action="bk-return" data-booking-id="' + b.id + '">\u00c5terl\u00e4mnad</button>';
+            } else if (b.returnedAt) {
+                html += '<span class="small text-muted">' + esc(b.returnedAt) + '</span>';
+            }
+            html += '</td></tr>';
+
+            if (b.note)
+                html += '<tr' + (b.isActive ? '' : ' class="opacity-75"') + '><td></td>' +
+                    '<td colspan="5" class="small text-muted fst-italic">' + esc(b.note) + '</td></tr>';
+        });
+
+        body.innerHTML = html + '</tbody></table></div>';
+    }
+
+    async function setBookingState(bookingId, action) {
+        var reason = null;
+        if (action === 'cancel') {
+            reason = prompt('Varf\u00f6r avbokas bokningen? (syns f\u00f6r medlemmen)');
+            if (reason === null) return;
+        }
+        var j = await post('/umbraco/surface/FirearmAdmin/SetBookingState', null, {
+            clubId: vapClubId(), bookingId: bookingId, action: action, reason: reason || ''
+        });
+        if (!j.success) { alert(j.message || 'Kunde inte \u00e4ndra bokningen.'); return; }
+        await loadBookings();
+    }
+
+    // ⚠️ Hämtningen sker DIREKT, inte lazy på `shown.bs.tab` — och det är ett medvetet undantag
+    // från panelens vanliga mönster. Rälsens varningsmärke ("ingen kan läsa vapeninnehav") ska
+    // synas för en klubbadmin som ALDRIG öppnar fliken; det är hela dess syfte. En lazy laddning
+    // hade gjort varningen synlig först för den som redan hittat dit. Det är en fråga.
+    //
+    // `shown.bs.tab` används därefter bara som ett nytt försök om den första hämtningen fallerade
+    // — inte som en omladdning. Eventet fyrar varje gång man går tillbaka till fliken, och en
+    // omladdning då skulle slå ihjäl ett påbörjat val i väljaren.
+    var tabBtn = document.getElementById('firearms-tab');
+    if (tabBtn) {
+        tabBtn.addEventListener('shown.bs.tab', function () {
+            if (!state) load();
+        });
+    }
+
+    if (vapClubId() > 0) {
+        load();
+        loadClubFirearms();
+        loadRequests();
+        loadBookings();
+    }
+
+    window.hpskReloadFirearmViewers = load;
+})();
+</script>
