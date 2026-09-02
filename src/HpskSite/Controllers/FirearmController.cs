@@ -2,6 +2,7 @@ using HpskSite.Models;
 using HpskSite.Models.Firearms;
 using HpskSite.Services;
 using HpskSite.Services.Firearms;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -39,6 +40,17 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly ILogger<FirearmController> _logger;
 
+        /// <summary>
+        /// Skyddar vapenetikettens token.
+        ///
+        /// <para><b>⚠️ INTE tidsbegränsad, och det är ett val.</b> Etiketten sitter laminerad på
+        /// vapnet i valvet i åratal — en 30-minuterstoken som i Märken hade gjort den oanvändbar
+        /// vid första skanningen. Det är <em>bokningsfönstret</em> som gör kontrollen: ingen
+        /// bokning i dag, ingen utcheckning. Token bär bara vilket vapen etiketten sitter på, och
+        /// den ska inte gå att gissa fram för ett annat vapen.</para>
+        /// </summary>
+        private readonly IDataProtector _labelProtector;
+
         public FirearmController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -56,7 +68,8 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             MemberClubService memberClubs,
             ClubService clubService,
-            ILogger<FirearmController> logger)
+            ILogger<FirearmController> logger,
+            IDataProtectionProvider dataProtection)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _firearms = firearms;
@@ -70,6 +83,7 @@ namespace HpskSite.Controllers
             _memberClubs = memberClubs;
             _clubService = clubService;
             _logger = logger;
+            _labelProtector = dataProtection.CreateProtector("Firearm.LoanLabel.v1");
         }
 
         /// <summary>
@@ -369,18 +383,264 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> BookLoanWeapon(
-            int firearmId, string? occasionKind, int occasionId, string? from, string? to, string? note)
+            int firearmId, string? occasionKind, int occasionId, string? from, string? to, string? note,
+            int clubId = 0, string? weaponClass = null, string? occasionLabel = null,
+            int escortMemberId = 0)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var (bookingId, error) = _bookings.Create(
-                memberId, firearmId,
-                string.IsNullOrWhiteSpace(occasionKind) ? FirearmOccasionKind.Fritt : occasionKind,
-                occasionId, ParseWhen(from), ParseWhen(to), note);
+            // ⚠️ firearmId = 0 betyder "vilket vapen som helst", och då MÅSTE klubben skickas —
+            // det finns inget vapen att härleda den ur. Klienten kan aldrig påverka vilken klubb
+            // ett NAMNGIVET vapen tillhör; tjänsten tar den ur vapnet i så fall.
+            var (bookingId, error) = _bookings.Create(new FirearmBookingRequest
+            {
+                MemberId = memberId,
+                ClubId = clubId,
+                FirearmId = firearmId > 0 ? firearmId : null,
+                WeaponClass = weaponClass,
+                OccasionKind = string.IsNullOrWhiteSpace(occasionKind)
+                    ? FirearmOccasionKind.Fritt : occasionKind,
+                OccasionId = occasionId,
+                OccasionLabel = occasionLabel,
+                From = ParseWhen(from),
+                To = ParseWhen(to),
+                Note = note,
+                EscortMemberId = escortMemberId > 0 ? escortMemberId : null,
+                Source = FirearmBookingSource.Web,
+            });
 
+            if (error is not null) return Json(new { success = false, message = error });
+
+            var booking = _bookings.GetById(bookingId);
+
+            // ⚠️ Numret läses ur VAPNET, inte ur bokningen. GetById gör ingen join, så
+            // ClubWeaponNumber är null där — och då blev beskedet "ett vapen är reserverat" även
+            // för den som bad om nr 7. Det är exakt det löfte som avgör om hen kommer alls: ett
+            // besked hen kan resa på, inte ett kanske.
+            int? number = firearmId > 0 ? _firearms.GetById(firearmId)?.ClubWeaponNumber : null;
+
+            return Json(new
+            {
+                success = true,
+                bookingId,
+                number,
+                // För en platsbokning ska det INTE stå ett nummer — vilket vapen det blir avgörs
+                // i valvet, och ett nummer här vore ett löfte vi inte håller.
+                message = number.HasValue
+                    ? $"Klart — du får nr {number}."
+                    : "Klart — ett vapen är reserverat åt dig.",
+                awaitsEscort = booking?.AwaitsEscort == true,
+            });
+        }
+
+        /// <summary>
+        /// Vapnet medlemmen brukar få i en klubb, för förvalet <em>"nr 7, som förra gången"</em>.
+        ///
+        /// <para><b>Formuläret minns, så skytten aldrig behöver lära sig något.</b> Övergången
+        /// mellan "vilket som helst" och "just mitt vapen" sker utan att någon bestämmer den — hen
+        /// bara börjar bry sig — och en fråga om vilket läge man är i vore den obesvarbara frågan
+        /// igen, i nya kläder.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyUsualLoanWeapon(int clubId)
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var id = _bookings.UsualFirearmFor(memberId, clubId);
+            if (id is null) return Json(new { success = true, firearmId = 0 });
+
+            var f = _firearms.GetById(id.Value);
+            return Json(new
+            {
+                success = true,
+                firearmId = id.Value,
+                number = f?.ClubWeaponNumber,
+                alias = f?.Alias,
+                // Går det ens att låna just nu? Ett förval som pekar på ett servicevapen är
+                // sämre än inget förval.
+                stillLoanable = f is not null && f.IsLoanable && f.IsActive
+                                && f.Status is not (FirearmStatus.Service or FirearmStatus.Utgallrat),
+            });
+        }
+
+        // ── Skanningen ───────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Vad en skanning av en vapenetikett betyder för den inloggade — <b>utan att skriva
+        /// något</b>.
+        ///
+        /// <para><b>⚠️ Läsning och handling är SKILDA anrop, med flit.</b> En QR som öppnas av
+        /// misstag i en kameraförhandsvisning får inte lämna ut ett vapen. Den här svarar på vad
+        /// som är möjligt; sidan frågar, och först då skrivs något.</para>
+        ///
+        /// <para><b>⚠️ Skanningen är ingen grind.</b> Har medlemmen ingen bokning erbjuder svaret
+        /// att skapa lånet i stället för att neka — dyker någon upp på en träningskväll vill
+        /// vapenansvarig låna ut ändå, och en spärr här hade kringgåtts med ett register som
+        /// ljuger som följd.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetScanState(string? t)
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId <= 0)
+                return Json(new { success = false, requiresLogin = true, message = "Du måste vara inloggad." });
+
+            var firearmId = UnprotectLabel(t);
+            if (firearmId <= 0)
+                return Json(new { success = false, message = "Ogiltig kod. Skanna etiketten på vapnet igen." });
+
+            var scan = _bookings.ResolveScan(memberId, firearmId, DateTime.Now);
+            var f = scan.Firearm;
+
+            return Json(new
+            {
+                success = scan.Action != FirearmScanAction.Refused,
+                action = scan.Action.ToString(),
+                message = scan.Message,
+                firearmId = f?.Id ?? 0,
+                number = f?.ClubWeaponNumber,
+                alias = f?.Alias,
+                weaponClass = f?.WeaponClass,
+                clubId = scan.ClubId,
+                bookingId = scan.Booking?.Id ?? 0,
+
+                // ⚠️ HÄR LIGGER HALVA VÄRDET I SKANNINGEN: den vet två saker vapenansvarig inte
+                // vet. Att skytten önskade ett annat vapen — och att det skannade vapnet är bokat
+                // av någon ANNAN i kväll. Utan det andra tar den ena skytten den andres vapen, och
+                // den andre kommer till en tom hylla.
+                wishedNumber = scan.WishedFirearmId is int w
+                    ? _firearms.GetById(w)?.ClubWeaponNumber : null,
+                claimedByOther = scan.ClaimedByOther is not null,
+                claimedByName = scan.ClaimedByOther is null ? null : NameOf(scan.ClaimedByOther.MemberId),
+            });
+        }
+
+        /// <summary>
+        /// Registrerar utlämningen från en skanning — och skapar lånet först om det inte fanns.
+        ///
+        /// <para><b>⚠️ Utlämningen registreras med medlemmen som aktör</b>, vilket gör
+        /// <c>HandedOutBySelf</c> sant av sig själv. En skanning är svagare bevis än en
+        /// funktionärs tryck, och de två måste gå att skilja åt i efterhand.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ScanHandOut(string? t, bool accepted = false)
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var firearmId = UnprotectLabel(t);
+            if (firearmId <= 0) return Json(new { success = false, message = "Ogiltig kod." });
+
+            var scan = _bookings.ResolveScan(memberId, firearmId, DateTime.Now);
+
+            if (scan.Action == FirearmScanAction.Refused)
+                return Json(new { success = false, message = scan.Message });
+
+            if (scan.Action == FirearmScanAction.Return)
+                return Json(new { success = false, message = "Vapnet är redan utlämnat till dig." });
+
+            // ⚠️ Krockvarningen kräver ett medvetet ja. Utan det tar den som skannar först den
+            // andres vapen med ett enda svep, och varningen hade varit dekoration.
+            if (scan.ClaimedByOther is not null && !accepted)
+                return Json(new { success = false, needsConfirm = true, message = "Bekräfta att du tar vapnet ändå." });
+
+            var bookingId = scan.Booking?.Id ?? 0;
+
+            if (scan.Action == FirearmScanAction.Offer)
+            {
+                var (newId, createError) = _bookings.Create(new FirearmBookingRequest
+                {
+                    MemberId = memberId,
+                    ClubId = scan.ClubId,
+                    FirearmId = firearmId,
+                    OccasionKind = FirearmOccasionKind.Fritt,
+                    From = DateTime.Now.Date,
+                    To = DateTime.Now.Date.AddDays(1).AddSeconds(-1),
+                    Source = FirearmBookingSource.Skanning,
+                });
+                if (createError is not null) return Json(new { success = false, message = createError });
+                bookingId = newId;
+            }
+
+            var error = _bookings.MarkHandedOut(bookingId, memberId, firearmId);
+            if (error is not null) return Json(new { success = false, message = error });
+
+            var f = scan.Firearm;
+            return Json(new
+            {
+                success = true,
+                bookingId,
+                message = f?.ClubWeaponNumber is int nr
+                    ? $"Nr {nr} är utcheckat till dig."
+                    : "Vapnet är utcheckat till dig.",
+            });
+        }
+
+        /// <summary>Registrerar återlämningen från en skanning.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ScanReturn(string? t)
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var firearmId = UnprotectLabel(t);
+            if (firearmId <= 0) return Json(new { success = false, message = "Ogiltig kod." });
+
+            var scan = _bookings.ResolveScan(memberId, firearmId, DateTime.Now);
+            if (scan.Action != FirearmScanAction.Return)
+                return Json(new { success = false, message = "Vapnet är inte utlämnat till dig." });
+
+            var error = _bookings.MarkReturned(scan.Booking!.Id, memberId);
             return error is null
-                ? Json(new { success = true, bookingId, message = "Vapnet är bokat." })
+                ? Json(new { success = true, message = "Tack — återlämningen är registrerad." })
+                : Json(new { success = false, message = error });
+        }
+
+        /// <summary>
+        /// Vapen-id ur etikettens token, eller 0.
+        ///
+        /// <para>Ett ogiltigt eller manipulerat värde ger 0 i stället för ett undantag — en trasig
+        /// QR ska ge ett läsbart besked, inte en femhundra.</para>
+        /// </summary>
+        private int UnprotectLabel(string? token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return 0;
+            try
+            {
+                var raw = _labelProtector.Unprotect(token.Trim());
+                return raw.StartsWith("firearm:", StringComparison.Ordinal)
+                       && int.TryParse(raw["firearm:".Length..], out var id)
+                    ? id : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private string? NameOf(int memberId)
+        {
+            var m = _memberService.GetById(memberId);
+            if (m is null) return null;
+            var n = $"{m.GetValue<string>("firstName")} {m.GetValue<string>("lastName")}".Trim();
+            return string.IsNullOrWhiteSpace(n) ? m.Name : n;
+        }
+
+        /// <summary>Den medföljande accepterar ansvaret för ett externt lån.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AcceptLoanEscort(int bookingId)
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var error = _bookings.AcceptEscort(bookingId, memberId);
+            return error is null
+                ? Json(new { success = true, message = "Du har accepterat ansvaret för vapnet." })
                 : Json(new { success = false, message = error });
         }
 
@@ -417,7 +677,7 @@ namespace HpskSite.Controllers
                     from = b.FromTime.ToString("yyyy-MM-dd HH:mm"),
                     to = b.ToTime.ToString("yyyy-MM-dd HH:mm"),
                     status = b.Status, statusLabel = b.StatusLabel,
-                    occasion = b.OccasionLabel, b.Note, b.IsActive, b.IsOut,
+                    occasion = b.OccasionDisplay, b.Note, b.IsActive, b.IsOut,
                 }),
             });
         }

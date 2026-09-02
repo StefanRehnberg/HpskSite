@@ -62,6 +62,75 @@
             try { return JSON.parse(text); } catch { return { success: false, message: 'Oväntat svar från servern.' }; }
         }
 
+        // ── Lånevapen ────────────────────────────────────────────────────────────────────────
+        //
+        // ⚠️ EN KRYSSRUTA PÅ ETT FORMULÄR SOM REDAN FYLLS I. För nybörjaren är anmälan och lånet
+        // samma handling — skiljer vi dem åt får vi personer som är anmälda utan vapen och vapen
+        // bokade av folk som inte kommer, vilket är precis det vapenansvarig inte kan lösa i valvet.
+        //
+        // ⚠️ FORMULÄRET MINNS. Har skytten lånat förut står hens vanliga nummer som förval. Den som
+        // skjutit in nr 7 mot sig själv kommer inte om hen inte får just det — och övergången från
+        // "vilket som helst" till "just mitt vapen" sker utan att någon bestämmer den, så en fråga
+        // om vilket läge man är i vore den obesvarbara frågan igen i nya kläder.
+        function loanWeaponBlock(d) {
+            const lw = d.loanWeapons;
+            if (!lw || !lw.offered) return '';
+
+            const kvar = Math.max(0, lw.loanable - lw.occupied);
+            let h = '<div class="border rounded p-2 mb-2">';
+            h += '<div class="form-check mb-1">'
+              +  '<input class="form-check-input" type="checkbox" id="ces-loan"'
+              +  (kvar === 0 ? ' disabled' : '') + '>'
+              +  '<label class="form-check-label fw-semibold" for="ces-loan">'
+              +  'Jag behöver låna klubbvapen</label></div>';
+
+            // Antalet i klartext, så nybörjaren vet om det finns plats och klubben slipper frågan.
+            h += '<div class="small text-muted">'
+              +  (kvar === 0
+                    ? `Alla ${lw.loanable} lånevapen är bokade den här dagen.`
+                    : `Klubben har ${lw.loanable} lånevapen · ${kvar} lediga den här dagen.`)
+              +  '</div>';
+
+            if (kvar > 0) {
+                h += '<div class="mt-2 d-none" id="ces-loan-pick">';
+                h += '<label class="form-label small mb-1" for="ces-loan-firearm">Vilket vapen?</label>';
+                h += '<select class="form-select form-select-sm" id="ces-loan-firearm">';
+                // ⚠️ "Vilket som helst" FÖRST och som förval för den som aldrig lånat — en
+                // nybörjare kan inte svara på frågan, och att kräva ett svar är en tröskel.
+                h += '<option value="0">Vilket som helst</option>';
+                (lw.weapons || []).forEach(w => {
+                    const sel = lw.usualFirearmId && w.id === lw.usualFirearmId ? ' selected' : '';
+                    const label = w.number ? `nr ${w.number}` : esc(w.alias);
+                    const suffix = lw.usualFirearmId && w.id === lw.usualFirearmId
+                        ? ' — som förra gången' : '';
+                    h += `<option value="${w.id}"${sel}>${label}${suffix}</option>`;
+                });
+                h += '</select>';
+
+                // ⚠️ Är det vanliga vapnet taget sägs det HÄR, vid bokningen — inte i valvet.
+                // Det är nu skytten bestämmer om det är värt att komma.
+                if (lw.usualNumber && lw.usualTaken) {
+                    h += `<div class="small text-warning-emphasis mt-1">`
+                      +  `<i class="bi bi-exclamation-triangle me-1"></i>`
+                      +  `Nr ${lw.usualNumber}, som du brukar få, är bokat den här dagen.</div>`;
+                }
+                h += '</div>';
+            }
+
+            h += '</div>';
+            return h;
+        }
+
+        function myLoanLine(d) {
+            const lw = d.loanWeapons;
+            if (!lw || !lw.offered || !lw.myBookingId) return '';
+            const nr = lw.myNumber || lw.myWishNumber;
+            return '<div class="small mb-2"><i class="bi bi-safe2 text-primary me-1"></i>'
+                 + (nr ? `Lånevapen <strong>nr ${nr}</strong> är reserverat åt dig.`
+                       : 'Ett <strong>lånevapen</strong> är reserverat åt dig.')
+                 + '</div>';
+        }
+
         function render(d) {
             // The card only exists for events that actually take sign-ups. An event with an
             // external registration link keeps that link (the page renders it separately) — we must
@@ -114,12 +183,14 @@
                             : '<i class="bi bi-check-circle me-1"></i>Du är <strong>anmäld</strong>.')
                      +  '</div>';
                 if (d.me.note) html += `<div class="small text-muted mb-2">Din notering: ${esc(d.me.note)}</div>`;
+                html += myLoanLine(d);
                 html += d.signupOpen
                     ? '<button type="button" class="btn btn-outline-danger w-100" id="ces-cancel">Avboka min anmälan</button>'
                     : '<div class="small text-muted">Anmälan är stängd — kontakta arrangören om du inte kan komma.</div>';
             } else if (!d.signupOpen) {
                 html += '<div class="alert alert-light border small mb-0">Anmälan är stängd.</div>';
             } else {
+                html += loanWeaponBlock(d);
                 html += '<div class="mb-2"><label for="ces-note" class="form-label small text-muted mb-1">Meddelande till arrangören (valfritt)</label>'
                      +  '<textarea class="form-control form-control-sm" id="ces-note" rows="2" maxlength="500"></textarea></div>';
                 const full = d.event.maxParticipants > 0 && c.seatsLeft === 0;
@@ -146,8 +217,21 @@
             body.innerHTML = html;
 
             const signupBtn = document.getElementById('ces-signup');
-            if (signupBtn) signupBtn.addEventListener('click', () => act(signupBtn, 'SignUp',
-                { eventId, note: document.getElementById('ces-note')?.value || '' }));
+            // Väljaren visas bara när krysset är satt — annars är den en fråga till någon som
+            // inte sagt att hen vill låna.
+            const loanChk = document.getElementById('ces-loan');
+            const loanPick = document.getElementById('ces-loan-pick');
+            if (loanChk && loanPick) {
+                loanChk.addEventListener('change',
+                    () => loanPick.classList.toggle('d-none', !loanChk.checked));
+            }
+
+            if (signupBtn) signupBtn.addEventListener('click', () => act(signupBtn, 'SignUp', {
+                eventId,
+                note: document.getElementById('ces-note')?.value || '',
+                loanWeapon: !!(loanChk && loanChk.checked),
+                loanFirearmId: parseInt(document.getElementById('ces-loan-firearm')?.value || '0', 10),
+            }));
 
             const cancelBtn = document.getElementById('ces-cancel');
             if (cancelBtn) cancelBtn.addEventListener('click', () => {
@@ -171,6 +255,16 @@
                 return;
             }
             await load();
+
+            // ⚠️ LÅNEMEDDELANDET MÅSTE ÖVERLEVA OMLADDNINGEN. Anmälan kan lyckas medan vapnet
+            // INTE gick att boka — och rullas anmälan inte tillbaka (den ska inte) är det här
+            // enda stället skytten får veta det. Utan raden tror hen att hon har ett vapen.
+            if (d.loanMessage) {
+                const bad = d.loanMessage.indexOf('\u26a0') === 0;
+                body.insertAdjacentHTML('afterbegin',
+                    `<div class="alert ${bad ? 'alert-warning' : 'alert-success'} py-2 px-3 small">`
+                    + esc(d.loanMessage) + '</div>');
+            }
         }
 
         async function load() {

@@ -99,6 +99,66 @@
             <div class="text-muted small">Laddar…</div>
         </div>
 
+        @* ── Mitt ansvar för någon annans lån ────────────────────────────────────────────
+
+           ⚠️ LIGGER FÖRST, före mina egna bokningar. Det är någon ANNANS resa som väntar på mitt
+           svar — hon kan inte åka utan mitt ja, och ett åtagande jag inte känner till är inget
+           åtagande. Mina egna bokningar kan vänta; det här kan inte.
+        *@
+        <div id="lvEscortBox" class="d-none">
+            <h2 class="h6 mt-4">Lån du ansvarar för</h2>
+            <div id="lvEscort"></div>
+        </div>
+
+        @* ── Låna till något utanför banan ───────────────────────────────────────────────────
+
+           ⚠️ DOLD TILLS KLUBBEN SAGT JA. Rutan renderas bara om klubben slagit på externa lån —
+           ett formulär vars sparning alltid nekas är sämre än ingen ruta, för medlemmen tror då
+           att hon gjort något fel.
+
+           ⚠️ MEDFÖLJANDE ÄR INTE ADMINISTRATION. En nybörjare får inte transportera eller inneha
+           klubbens vapen på egen hand. Fältet finns för att lånet annars vore olagligt, och det
+           står i klartext i hjälptexten — utan skälet ser kravet ut som byråkrati och kommer att
+           fyllas i på måfå.
+        *@
+        <div id="lvExtBox" class="d-none">
+            <h2 class="h6 mt-4">Låna till en tävling utanför banan</h2>
+            <div class="border rounded p-3 mb-2">
+                <div class="mb-2">
+                    <label class="form-label small mb-1" for="lvExtLabel">Vad ska du på?</label>
+                    <input type="text" class="form-control form-control-sm" id="lvExtLabel"
+                           maxlength="80" autocomplete="off" name="lvExtOccasion"
+                           placeholder="t.ex. Kretsmästerskap i Falkenberg">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1" for="lvExtEscort">
+                        Vem från klubben följer med och ansvarar för vapnet?
+                    </label>
+                    <select class="form-select form-select-sm" id="lvExtEscort">
+                        <option value="0">Välj person…</option>
+                    </select>
+                    <div class="form-text">
+                        Du får inte transportera eller inneha klubbens vapen på egen hand. Den du
+                        väljer <strong>måste själv godkänna</strong> att hen ansvarar för vapnet —
+                        prata med hen först, så vet hen vad frågan handlar om när den kommer.
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1" for="lvExtFirearm">Vilket vapen?</label>
+                    <select class="form-select form-select-sm" id="lvExtFirearm">
+                        <option value="0">Vilket som helst</option>
+                    </select>
+                </div>
+                <button type="button" class="btn btn-sm btn-primary" data-lv="book-ext">
+                    Boka för dagarna ovan
+                </button>
+                <div class="form-text">
+                    Datumet och tiderna längst upp på sidan gäller. Ska du vara borta flera dagar,
+                    sätt <em>Från</em> och <em>Till</em> där.
+                </div>
+            </div>
+        </div>
+
         <h2 class="h6 mt-4">Dina bokningar</h2>
         <div id="lvMine"><div class="text-muted small">Laddar…</div></div>
     }
@@ -173,7 +233,9 @@
                     esc(j.message || 'Kunde inte läsa listan.') + '</div>';
                 return;
             }
+            lastAvail = j;
             render(box, j);
+            fillExtFirearms();
         } catch (e) {
             box.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
         }
@@ -254,6 +316,92 @@
         }
     }
 
+    // ── Externt lån ──────────────────────────────────────────────────────────────────────
+    var extOpts = null;
+
+    async function loadExternal() {
+        var box = document.getElementById('lvExtBox');
+        if (!box) return;
+        try {
+            var j = await (await fetch('/umbraco/surface/LoanWeaponApi/GetExternalOptions?clubId=' +
+                encodeURIComponent(CLUB), { credentials: 'same-origin' })).json();
+            // ⚠️ Klubben har sagt nej ELLER egenskapen saknas — i båda fallen ska rutan vara borta.
+            // Skillnaden angår styrelsen, inte skytten som bara vill veta om hon kan låna.
+            if (!j.success || !j.allowExternal) { box.classList.add('d-none'); return; }
+
+            extOpts = j;
+            var sel = document.getElementById('lvExtEscort');
+            sel.innerHTML = '<option value="0">Välj person…</option>';
+            (j.candidates || []).forEach(function (c) {
+                var o = document.createElement('option');
+                o.value = c.memberId;
+                o.textContent = c.name;
+                sel.appendChild(o);
+            });
+            box.classList.remove('d-none');
+            fillExtFirearms();
+        } catch (e) {
+            box.classList.add('d-none');
+        }
+    }
+
+    // Vapenväljaren speglar tillgänglighetslistan för samma fönster — annars kan man välja ett
+    // vapen som listan ovanför just sagt är bokat.
+    var lastAvail = null;
+    function fillExtFirearms() {
+        var sel = document.getElementById('lvExtFirearm');
+        if (!sel) return;
+        sel.innerHTML = '<option value="0">Vilket som helst</option>';
+        ((lastAvail && lastAvail.weapons) || []).forEach(function (w) {
+            if (!w.isBookable) return;
+            var o = document.createElement('option');
+            o.value = w.id;
+            o.textContent = w.number == null ? w.alias : ('nr ' + w.number);
+            sel.appendChild(o);
+        });
+    }
+
+    async function loadEscort() {
+        var box = document.getElementById('lvEscortBox');
+        var body = document.getElementById('lvEscort');
+        if (!box || !body) return;
+        try {
+            var j = await (await fetch('/umbraco/surface/LoanWeaponApi/GetMyEscortRequests',
+                { credentials: 'same-origin' })).json();
+            var list = (j && j.requests) || [];
+            if (list.length === 0) { box.classList.add('d-none'); return; }
+
+            var html = '';
+            list.forEach(function (r) {
+                html += '<div class="border rounded p-2 mb-2">';
+                html += '<div><strong>' + esc(r.who) + '</strong> lånar ' +
+                        (r.number == null ? esc(r.alias || 'ett vapen') : 'nr ' + r.number) +
+                        ' till <strong>' + esc(r.occasion) + '</strong></div>';
+                html += '<div class="small text-muted">' + esc(r.from) + ' – ' +
+                        esc(String(r.to).slice(-5)) + '</div>';
+                if (r.accepted) {
+                    html += '<div class="small text-success mt-1">' +
+                            '<i class="bi bi-check-circle me-1"></i>Du har accepterat ansvaret ' +
+                            esc(r.acceptedAt) + '.</div>';
+                } else {
+                    // ⚠️ Vad man säger ja TILL står i knappens närhet, inte i en hjälptext längre
+                    // ner. Det här är ett ansvar för ett skjutvapen, inte en bekräftelse.
+                    html += '<div class="small mt-1 mb-2">Genom att godkänna åtar du dig att ' +
+                            '<strong>följa med och ansvara för vapnet</strong> under hela ' +
+                            'tiden ovan.</div>';
+                    html += '<button type="button" class="btn btn-sm btn-primary" ' +
+                            'data-lv="accept-escort" data-booking-id="' + r.id + '">' +
+                            'Jag följer med och ansvarar</button>';
+                }
+                html += '</div>';
+            });
+            body.innerHTML = html;
+            box.classList.remove('d-none');
+        } catch (e) {
+            box.classList.add('d-none');
+        }
+    }
+
     document.addEventListener('click', async function (ev) {
         var btn = ev.target.closest('[data-lv]');
         if (!btn) return;
@@ -276,6 +424,44 @@
             return;
         }
 
+        if (action === 'book-ext') {
+            var w2 = windowFields();
+            if (!w2) { alert('Välj ett datum först.'); return; }
+            var lbl = document.getElementById('lvExtLabel').value.trim();
+            var esc2 = parseInt(document.getElementById('lvExtEscort').value || '0', 10);
+            // Kontrollerna görs också på servern. De görs HÄR för att felet ska stå vid fältet
+            // i stället för i en alert efter ett anrop som ändå aldrig kunde lyckas.
+            if (!lbl) { alert('Skriv vad du ska på, så vapenansvarig vet var vapnet är.'); return; }
+            if (!esc2) { alert('Välj vem från klubben som följer med och ansvarar för vapnet.'); return; }
+
+            btn.disabled = true;
+            var je = await post('/umbraco/surface/Firearm/BookLoanWeapon', {
+                firearmId: parseInt(document.getElementById('lvExtFirearm').value || '0', 10),
+                clubId: CLUB,
+                occasionKind: 'Externt', occasionId: 0,
+                occasionLabel: lbl, escortMemberId: esc2,
+                from: w2.from, to: w2.to, note: ''
+            });
+            btn.disabled = false;
+            if (!je.success) { alert(je.message || 'Kunde inte boka.'); return; }
+            alert(je.message + (je.awaitsEscort
+                ? '\n\nLånet gäller när ' +
+                  (document.getElementById('lvExtEscort').selectedOptions[0].textContent) +
+                  ' har godkänt att hen följer med och ansvarar för vapnet.'
+                : ''));
+            document.getElementById('lvExtLabel').value = '';
+            await loadList(); await loadMine();
+            return;
+        }
+
+        if (action === 'accept-escort') {
+            var r2 = await post('/umbraco/surface/Firearm/AcceptLoanEscort',
+                                { bookingId: btn.getAttribute('data-booking-id') });
+            if (!r2.success) { alert(r2.message || 'Kunde inte godkänna.'); return; }
+            await loadEscort();
+            return;
+        }
+
         if (action === 'cancel') {
             if (!confirm('Avboka?')) return;
             var res = await post('/umbraco/surface/Firearm/CancelLoanBooking',
@@ -292,6 +478,8 @@
 
     loadList();
     loadMine();
+    loadExternal();
+    loadEscort();
 })();
 </script>
 </body>

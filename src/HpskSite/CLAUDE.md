@@ -5283,6 +5283,145 @@ med "inget publikt bokningssystem": klubbens egna vapen till klubbens egna medle
 Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod. Fildeploy av
 `KnowledgeBase/docs/vapenregister.md` och `vapen-klubbadmin.md`.
 
+
+## Lånevapen v2: praktisk hantering (2026-09-02)
+
+Punkt 6 gjorde det möjligt att boka. v2 handlar om **vad som faktiskt händer i valvet**, och hela
+ytan vilar på en enda insikt:
+
+### ⚠️ SYSTEMET SKA REGISTRERA, INTE GRINDA
+
+Varje grind som kan hindra en fysisk överlämning **kommer att kringgås** — vapenansvarig lämnar ut
+vapnet ändå, och då ljuger registret. Det är sämre än att inte ha något register. Därför:
+direktlån i valvet för den som inte bokat, skanning som SKAPAR lånet, och ingen automatik som
+gissar en återlämning.
+
+### ⚠️ ÖNSKAT ≠ TILLDELAT — den centrala modelländringen
+
+`FirearmBooking.FirearmId` är nu **nullable och betyder önskat**; `AssignedFirearmId` är det vapen
+som **faktiskt** gick ut. `COALESCE(AssignedFirearmId, FirearmId)` är det *effektiva* vapnet, och
+det är den formen krockkontrollen och valvlistan läser (`EffectiveFirearmId` i POCO:n).
+
+Frågan "pool eller bestämt vapen?" är **obesvarbar och ska inte ställas**. En nybörjare kan inte
+svara; en skytt som ställt in siktet på nr 7 kommer inte alls utan just nr 7 — och övergången
+mellan de två lägena sker utan att någon bestämmer den, hen börjar bara bry sig. Lösningen är att
+`FirearmId = NULL` är ett fullgott läge, att `UsualFirearmFor` minns förra vapnet som förval, och
+att en platsbokning **aldrig** tilldelas i förväg (valvet vet vem som klarar vad).
+
+⚠️ **Beskedet måste bära numret.** `GetById` gör ingen join, så `ClubWeaponNumber` är null där —
+numret läses ur VAPNET. "Ett vapen är reserverat" duger inte för den som bad om nr 7; det är det
+löftet som avgör om hen kommer alls. En PLATSbokning får omvänt **inte** utlova ett nummer.
+
+### Ytorna
+
+| Yta | Väg | Vem |
+|---|---|---|
+| Valvet — kvällens utlämning | `/valvet` | klubbadmin **eller** skjutledare |
+| QR-etiketter | `/valvet/etiketter` | klubbadmin |
+| Skanning | `/lanevapen/skanna?t=` | medlem (kräver inloggning) |
+| Klubbens regler + länkar | vapenfliken, kortet **Lånevapen** | klubbadmin |
+| Kryssruta i anmälan | `_ClubEventSignup.cshtml` | medlem |
+| Kurstilldelning | klubbpanelen → träningsgrupp | klubbadmin/skjutledare |
+| Externt lån + medföljande | `/lanevapen` | medlem |
+
+### ⚠️ Skanningen är en RIKTIGHETSvinst, inte en bekvämlighetsvinst
+
+En skanning kan inte ha fel om vilket vapen som gick ut. Det kan en människa med en penna.
+Etiketten sitter **på vapnet** (Stefans beslut): ett vapen kan läggas tillbaka på fel hyllplats, och
+då pekar en hylletikett på fel vapen.
+
+Token är `IDataProtector`-skyddad med purpose `"Firearm.LoanLabel.v1"`, **avsiktligt inte
+tidsbegränsad** — etiketten sitter på vapnet i åratal. `data-label-url` bärs osynligt i
+etikettarkets DOM (samma mönster som Fältskytte-affischen): det är enda sättet att felsöka en trasig
+QR, och enda sättet en svit kan följa skanningsvägen.
+
+`ResolveScan` läser läget utan att skriva och svarar `Refused` / `HandOut` / `Return` / `Offer`.
+Krockvarningen (`ClaimedByOther`) kräver ett medvetet `accepted=true` — utan det tar den som skannar
+först den andres vapen med ett enda svep, och varningen hade varit dekoration.
+
+### ⚠️ Återlämning: ett tryck, aldrig automatik
+
+`CloseVaultEvening` stänger allt på tillfället. Knappen knyts till **att låsa valvet** — en ritual
+vapenansvarig redan har och som är fysiskt sann just då. Ingen skannar när de ska hem, och sex tryck
+klockan nio är när registerföringen upphör. Ett falskt "återlämnat" är sämre än ett gammalt lån:
+det första säger att vapnet är i valvet när det inte är det. `keepIds` låter undantaget kosta ett
+tryck.
+
+### Klubbens regler — tre doctype-egenskaper
+
+`LoanWeaponClubRules`: `lanevapenAllowExternal` + `lanevapenHorizonDays` på klubben,
+`lanevapenOffered` på händelsen.
+
+⚠️ **`SetValue` på en saknad egenskap är en TYST no-op.** Skrivvägen måste därför **vägra och namnge
+egenskapen**, och läsvägen måste svara `propertyExists` — utan det kan gränssnittet inte skilja
+*"klubben har valt av"* från *"egenskapen finns inte"*, och switchen ser ut att spara medan varje
+sparning rinner ut i sanden. Saknad egenskap ger säker standard; undantag failar öppet.
+
+⚠️ **`lanevapenOffered` går genom `ApplyEventRegistrationFields` — EN skrivväg.** Fälten redigeras
+från TRE dialoger (klubbens panel, kretsens panel, händelsens egen sida), och en egenskap som bara
+skrivs i en av dem försvinner tyst vid nästa sparning från en annan.
+
+⚠️ **Horisonten hoppas över för `Source == Tilldelad`.** En kursomgång planeras månader i förväg;
+horisonten finns för att hindra ENSKILDA från att lägga beslag på vapen hela säsongen. Samma regel
+på båda hade gjort kursplanering omöjlig för att skydda mot något kursen inte gör.
+
+### Externt lån = en bokning av ett vapen OCH en person
+
+`FirearmOccasionKind.Externt` är det enda slaget där vapnet lämnar klubbens område, och därmed det
+enda som kräver en **namngiven medföljande som accepterat** (`EscortMemberId` +
+`EscortAcceptedAt`). Nybörjaren får inte transportera eller inneha vapnet själv — kravet är inte
+administration. `ReturnAllForOccasion` vägrar för `Externt`: vapnet är inte på banan att lämna
+tillbaka.
+
+Kandidatlistan är klubbens medlemmar, jag själv borträknad. **Det är den utseddes JA som är grinden**,
+inte urvalet i väljaren — systemet har inte uppgifterna för att avgöra vem som får hantera vapnet.
+
+### Kapacitet
+
+```sql
+SELECT COUNT(*) FROM FirearmBooking b WITH (UPDLOCK, HOLDLOCK)
+ WHERE b.ClubId=@0 AND b.Status IN (blocking)
+   AND NOT (b.ToTime<=@1 OR b.FromTime>=@2)
+   AND (b.FirearmId IS NULL AND b.AssignedFirearmId IS NULL
+        OR EXISTS (SELECT 1 FROM Firearm f
+                   WHERE f.Id=COALESCE(b.AssignedFirearmId,b.FirearmId) AND f.IsActive=1))
+```
+
+⚠️ **`f.IsActive=1` är inte städning.** Utan den räknade två gamla reservationer på utgallrade vapen
+bort en hel klubbs kapacitet. Överlapp och kapacitet är **två skilda block**: överlappet gäller bara
+namngivna önskemål, kapaciteten hela klubben. Inget unikt index kan uttrycka "överlappar i tiden".
+
+### Deploy
+
+`Migrations/alter-firearm-booking-wish-and-assign.sql` — **måste köras FÖRE deploy** (NPoco emitterar
+`SET … AssignedFirearmId` på varje insert). Resultat: 24 kolumner, 6 index. Ingen FK på
+`AssignedFirearmId`: SQL Server vägrar två cascade-vägar till `Firearm`.
+
+**Tre doctype-egenskaper måste läggas in i Umbraco** (annars degraderar ytorna med namngivna
+varningar, men funktionen är av): `lanevapenAllowExternal` (true/false) och `lanevapenHorizonDays`
+(numeric) på klubben, `lanevapenOffered` (true/false) på händelsen.
+
+Fildeploy av `KnowledgeBase/docs/vapenregister.md` och `vapen-klubbadmin.md`.
+
+### Verifiering
+
+**`hpsk-verify/lanevapen-verify.mjs` — 108/108 gröna** (2026-09-02). Täcker klubbens regler med
+`propertyExists`, etikettarket och QR-PNG:en, händelsens kryssruta hela vägen genom anmälan, valvet
+(utlämning → rätt vapen på raden → stängning), skanningen (`Offer` → lån → `Return` → fritt igen),
+det vanliga vapnet, namngiven bokning med numret i beskedet, horisonten, externa lån i fyra lägen,
+medföljandegrinden, kurstilldelningen — och **laddar vyerna**, eftersom Razor kompileras runtime och
+`dotnet build` inte säger någonting om en `.cshtml`.
+
+**A/B mot en byggd mutation:** `Source = Tilldelad` → `Web` fällde **6 påståenden**. Självfiltret
+`m.MemberId != memberId` borttaget fällde **0** — och det är ett fynd om sviten, inte om koden:
+kontot sviten kör som saknar rollen `Users` och kan därför aldrig komma med i kandidatkällan
+(`CompetitionTeamService.GetClubMembers`) oavsett vad filtret gör. **Påståendet stod grönt utan att
+mäta något.** Det är utbytt mot ett som kan falla (ingen kandidat utanför klubben) plus en utskriven
+notis om att självuteslutningen är OMÄTT av den här sviten. Att kontot syns i
+`ClubAdmin/GetClubMembers` räcker INTE som bevis — de två listorna har olika urval.
+
+Regression: `vapen-verify.mjs` 209/209, enhetstesten 879/899 (samma 16 sedan tidigare).
+
 ## Dubblettsammanslagning av medlemmar (2026-08-25)
 
 Klubbadmin → Medlemmar → Åtgärder → **Hitta dubbletter**. Efter en import finns samma person ofta

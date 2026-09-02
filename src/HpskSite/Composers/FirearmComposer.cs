@@ -43,6 +43,10 @@ namespace HpskSite.Composers
             // Kedjans punkt 6: bokning av lånevapen. Ett rent lager ovanpå registret.
             builder.Services.AddScoped<FirearmBookingService>();
 
+            // Klubbens lanevapenregler (horisont, externa lan, per-handelse-flaggan). Egen tjanst
+            // sa bokningen och granssnittet laser SAMMA svar -- tva raknande ytor glider isar.
+            builder.Services.AddScoped<LoanWeaponClubRules>();
+
             builder.Services.AddHostedService<FirearmKeyGuardHostedService>();
 
             // Licenspåminnelser: 90 / 30 / förfallen. Claim-then-send, se tjänsten.

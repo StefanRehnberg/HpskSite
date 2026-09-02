@@ -1,0 +1,339 @@
+@model HpskSite.Controllers.VaultPageModel
+@{
+    Layout = null;
+    var title = string.IsNullOrEmpty(Model.ClubName) ? "Valvet" : $"Valvet — {Model.ClubName}";
+}
+@*
+    /valvet — vapenansvarigs yta när hen står i valvet.
+
+    ⚠️ BYGGD FÖR EN TEKNIKRÄDD 74-ÅRING med sex nybörjare bakom sig. Stora bokstäver, INGENTING att
+    skriva, och allt går att backa. Rädslan för att inte kunna rätta är det som gör att man inte rör
+    knappen alls — så varje handling har en väg tillbaka.
+
+    ⚠️ SKÄRMEN ÄR INTE HUVUDVÄGEN. Skyttarna skannar sitt vapen och raderna blir gröna av sig
+    själva; den här ytan är förberedelselistan före kvällen, reserven för den som inte kan skanna,
+    och knappen vid stängning. Därför pollar den — annars visar den ett läge som är en sidladdning
+    gammalt medan skanningarna trillar in.
+
+    ⚠️ UTSKRIFTSLISTAN ÄR INTE EN BONUS. Många kommer att skriva ut den och registrera ingenting.
+    Det är godtagbart: reservationshalvan har ändå gjort sitt jobb. Bygger vi något som bara ger
+    värde när alla rader prickats av, får vi inget värde alls.
+
+    Chromeless (Layout = null) som de andra routade sidorna, så den inte behöver en Umbraco-nod.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>@title · pistol.nu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: var(--bs-body-bg); }
+        .vt-wrap { max-width: 44rem; margin: 1.5rem auto 5rem; padding: 0 1rem; }
+
+        /* Stora bokstäver är inte en stilfråga här — listan läses i dålig belysning av någon
+           som inte tar fram läsglasögonen i ett valv. */
+        .vt-head { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
+        .vt-row { display: flex; align-items: center; gap: .75rem; padding: .9rem .25rem;
+                  border-bottom: 1px solid var(--bs-border-color); flex-wrap: wrap; }
+        .vt-row:last-child { border-bottom: none; }
+        .vt-who { flex: 1 1 9rem; min-width: 0; }
+        .vt-name { font-size: 1.25rem; font-weight: 600; line-height: 1.25; }
+        .vt-sub { font-size: .8125rem; color: var(--bs-secondary-color); }
+        .vt-nr { font-size: 1.35rem; font-weight: 700; color: var(--bs-primary);
+                 font-variant-numeric: tabular-nums; }
+        .vt-btn { font-weight: 700; padding: .55rem 1rem; white-space: nowrap; }
+        .vt-done { opacity: .72; }
+        .vt-pick { display: flex; flex-wrap: wrap; gap: .5rem; width: 100%; margin-top: .5rem; }
+        .vt-pick .btn { font-size: 1.15rem; font-weight: 700; min-width: 4.5rem;
+                        font-variant-numeric: tabular-nums; }
+
+        @@media print {
+            .vt-noprint { display: none !important; }
+            .vt-row { break-inside: avoid; }
+            .vt-sign { display: inline-block; width: 8rem; border-bottom: 1px solid #000;
+                       height: 1.5rem; }
+        }
+        .vt-sign { display: none; }
+    </style>
+</head>
+<body>
+<div class="vt-wrap">
+
+    <h1 class="h4 mb-1 vt-noprint"><i class="bi bi-safe2 text-primary me-2"></i>Valvet</h1>
+    @if (!string.IsNullOrEmpty(Model.ClubName))
+    {
+        <p class="text-muted">@Model.ClubName · @Model.LoanableCount lånevapen</p>
+    }
+
+    @if (Model.RequiresLogin)
+    {
+        <div class="alert alert-info">
+            <p class="mb-2">Logga in för att se kvällens lånevapen.</p>
+            <a class="btn btn-primary" href="@Model.LoginUrl">Logga in</a>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <div class="alert alert-warning mb-0">@Model.Message</div>
+    }
+    else
+    {
+        @* Klubbväljaren visas bara när det finns något att välja mellan — en rullgardin med ett
+           alternativ är brus på en yta som ska vara tom. *@
+        @if (Model.Clubs.Count > 1)
+        {
+            <div class="mb-3 vt-noprint">
+                <label class="form-label small" for="vtClub">Klubb</label>
+                <select class="form-select" id="vtClub">
+                    @foreach (var c in Model.Clubs)
+                    {
+                        if (c.ClubId == Model.SelectedClubId)
+                        {
+                            <option value="@c.ClubId" selected>@c.Name</option>
+                        }
+                        else
+                        {
+                            <option value="@c.ClubId">@c.Name</option>
+                        }
+                    }
+                </select>
+            </div>
+        }
+
+        <div id="vtBoard" data-club="@Model.SelectedClubId" data-day="@Model.Day.ToString("yyyy-MM-dd")">
+            <div class="text-center py-5">
+                <div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div>
+            </div>
+        </div>
+    }
+</div>
+
+@* Antiforgery: sidan är fristående och behöver sitt eget dolda fält. *@
+<form id="vtToken" style="display:none">@Html.AntiForgeryToken()</form>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    var board = document.getElementById('vtBoard');
+    if (!board) return;
+
+    var clubId = parseInt(board.getAttribute('data-club'), 10) || 0;
+    var day = board.getAttribute('data-day');
+    var state = null;
+    var pollTimer = null;
+
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+    function token() {
+        var el = document.querySelector('#vtToken input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    async function post(url, fields) {
+        var fd = new FormData();
+        Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+        fd.append('__RequestVerificationToken', token());
+        var r = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+        // TEXT först: ett antiforgery-avslag är ett tomt 400 och r.json() kastar då ett
+        // SyntaxError som gömmer statuskoden.
+        var t = await r.text();
+        try { return JSON.parse(t); }
+        catch (e) { return { success: false, message: 'Oväntat svar från servern (' + r.status + ').' }; }
+    }
+
+    async function load() {
+        try {
+            var r = await fetch('/umbraco/surface/FirearmAdmin/GetVaultBoard?clubId=' + clubId +
+                                '&day=' + encodeURIComponent(day), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) {
+                board.innerHTML = '<div class="alert alert-warning mb-0">' +
+                    esc(j.message || 'Kunde inte läsa kvällens lån.') + '</div>';
+                return;
+            }
+            state = j;
+            render();
+        } catch (e) {
+            board.innerHTML = '<div class="alert alert-danger mb-0">Ett fel uppstod.</div>';
+        }
+    }
+
+    function render() {
+        var loans = state.loans || [];
+        var waiting = loans.filter(function (b) { return b.status === 'Reserverad'; });
+        var out = loans.filter(function (b) { return b.isOut; });
+
+        var html = '';
+
+        // Rubriken är det ENDA vapenansvarig behöver läsa för att veta vad han ska göra.
+        html += '<div class="mb-1 vt-head">' +
+            (waiting.length === 0
+                ? (out.length ? 'Allt är utlämnat' : 'Inga lån i dag')
+                : 'Ta ut ' + waiting.length + (waiting.length === 1 ? ' vapen' : ' vapen')) +
+            '</div>';
+        html += '<p class="text-muted mb-3">' + esc(dayLabel()) +
+            (out.length ? ' · ' + out.length + ' ute' : '') + '</p>';
+
+        if (loans.length === 0) {
+            html += '<div class="alert alert-secondary">Ingen har bokat lånevapen i dag. ' +
+                'Dyker någon upp ändå kan du lägga in lånet här när du lämnat ut vapnet.</div>';
+        }
+
+        loans.forEach(function (b) { html += row(b); });
+
+        html += '<div class="vt-noprint d-grid gap-2 mt-4">';
+        if (out.length || waiting.length) {
+            html += '<button type="button" class="btn btn-outline-dark btn-lg vt-btn" data-vt="close">' +
+                '<i class="bi bi-lock me-1"></i>Kvällen är klar — alla vapen tillbaka</button>';
+        }
+        html += '<button type="button" class="btn btn-outline-secondary" data-vt="print">' +
+            '<i class="bi bi-printer me-1"></i>Skriv ut listan</button>';
+        html += '</div>';
+
+        board.innerHTML = html;
+    }
+
+    function dayLabel() {
+        try {
+            return new Date(state.day + 'T00:00:00').toLocaleDateString('sv-SE',
+                { weekday: 'long', day: 'numeric', month: 'long' });
+        } catch (e) { return state.day; }
+    }
+
+    function row(b) {
+        var h = '<div class="vt-row' + (b.isActive ? '' : ' vt-done') + '">';
+        h += '<div class="vt-who"><div class="vt-name">' + esc(b.memberName || ('Medlem ' + b.memberId)) +
+             '</div><div class="vt-sub">' + esc(sub(b)) + '</div></div>';
+
+        // Numret är skyttens ord för vapnet ("jag har alltid nr 7"), så det ska vara stort och
+        // stå även när det bara är ett önskemål.
+        var nr = b.number || b.wishedNumber;
+        if (nr) h += '<div class="vt-nr">nr ' + nr + '</div>';
+
+        h += '<div class="vt-noprint">' + button(b) + '</div>';
+        h += '<span class="vt-sign"></span><span class="vt-sign"></span>';
+        h += '</div>';
+        return h;
+    }
+
+    function sub(b) {
+        if (b.isOut) {
+            var t = 'Utlämnat ' + (b.handedOutAt || '').slice(11);
+            if (b.handedOutBySelf) t += ' · skannade själv';
+            if (b.assignmentDiffersFromWish) t += ' · önskade nr ' + b.wishedNumber;
+            return t;
+        }
+        if (b.status !== 'Reserverad') return b.statusLabel;
+        if (b.wantsSpecificFirearm) return 'Vill ha sitt vapen';
+        return b.weaponClass ? 'Vilket som helst i grupp ' + b.weaponClass : 'Vilket vapen som helst';
+    }
+
+    function button(b) {
+        if (b.status === 'Reserverad')
+            return '<button type="button" class="btn btn-primary vt-btn" data-vt="handout" ' +
+                   'data-id="' + b.id + '">Lämna ut</button>';
+        if (b.isOut)
+            return '<button type="button" class="btn btn-success vt-btn" data-vt="return" ' +
+                   'data-id="' + b.id + '">Återlämna</button>';
+        // ⚠️ Ångra finns även på en avslutad rad. Rädslan för att inte kunna rätta är det som gör
+        // att man inte rör knappen alls.
+        return '<button type="button" class="btn btn-outline-secondary btn-sm" data-vt="undo" ' +
+               'data-id="' + b.id + '">Ångra</button>';
+    }
+
+    /// Vapenväljaren: de lediga numren som stora knappar. Ett tryck, inget skrivs.
+    function showPicker(bookingId, host) {
+        var free = state.free || [];
+        var b = (state.loans || []).find(function (x) { return x.id === bookingId; });
+        if (free.length === 0) {
+            host.innerHTML = '<div class="text-danger small">Inga lediga vapen just nu.</div>';
+            return;
+        }
+        // Önskat vapen först, om det är ledigt — annars är det första trycket nästan alltid fel.
+        var wished = b && b.wishedFirearmId;
+        var sorted = free.slice().sort(function (x, y) {
+            if (wished && x.id === wished) return -1;
+            if (wished && y.id === wished) return 1;
+            return (x.number || 999) - (y.number || 999);
+        });
+        host.innerHTML = '<div class="vt-pick">' + sorted.map(function (f) {
+            var isWish = wished && f.id === wished;
+            return '<button type="button" class="btn ' +
+                (isWish ? 'btn-primary' : 'btn-outline-primary') + '" ' +
+                'data-vt="pick" data-id="' + bookingId + '" data-firearm="' + f.id + '">' +
+                (f.number ? 'nr ' + f.number : esc(f.alias)) + (isWish ? ' ✓' : '') + '</button>';
+        }).join('') + '</div>';
+    }
+
+    document.addEventListener('click', async function (ev) {
+        var btn = ev.target.closest('[data-vt]');
+        if (!btn) return;
+        var action = btn.getAttribute('data-vt');
+        var id = parseInt(btn.getAttribute('data-id'), 10) || 0;
+
+        if (action === 'print') { window.print(); return; }
+
+        if (action === 'handout') {
+            showPicker(id, btn.parentNode);
+            return;
+        }
+
+        if (action === 'pick') {
+            var firearmId = parseInt(btn.getAttribute('data-firearm'), 10) || 0;
+            btn.disabled = true;
+            var j = await post('/umbraco/surface/FirearmAdmin/HandOutFromVault',
+                               { clubId: clubId, bookingId: id, firearmId: firearmId });
+            if (!j.success) { alert(j.message || 'Kunde inte lämna ut.'); btn.disabled = false; return; }
+            await load();
+            return;
+        }
+
+        if (action === 'return' || action === 'undo') {
+            btn.disabled = true;
+            var r = await post('/umbraco/surface/FirearmAdmin/SetBookingState',
+                               { clubId: clubId, bookingId: id, action: 'return', reason: '' });
+            if (!r.success) { alert(r.message || 'Kunde inte registrera.'); btn.disabled = false; return; }
+            await load();
+            return;
+        }
+
+        if (action === 'close') {
+            var n = (state.loans || []).filter(function (b) { return b.isActive; }).length;
+            if (!confirm('Registrera ' + n + (n === 1 ? ' vapen' : ' vapen') +
+                         ' som återlämnade?\n\nLigger något kvar återlämnar du det inte här.')) return;
+            btn.disabled = true;
+            var c = await post('/umbraco/surface/FirearmAdmin/CloseVaultEvening',
+                               { clubId: clubId, occasionKind: '', occasionId: 0, keepIds: '', day: day });
+            btn.disabled = false;
+            if (!c.success) { alert(c.message || 'Kunde inte stänga.'); return; }
+            await load();
+        }
+    });
+
+    var clubSel = document.getElementById('vtClub');
+    if (clubSel) {
+        clubSel.addEventListener('change', function () {
+            window.location = '/valvet?club=' + encodeURIComponent(clubSel.value);
+        });
+    }
+
+    // ⚠️ Pollar, så raderna blir gröna av sig själva när skyttarna skannar. Utan det visar
+    // skärmen ett läge som är en sidladdning gammalt — och då börjar vapenansvarig trycka på
+    // saker som redan är gjorda.
+    function startPoll() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(function () { if (!document.hidden) load(); }, 20000);
+    }
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
+
+    load();
+    startPoll();
+})();
+</script>
+</body>
+</html>

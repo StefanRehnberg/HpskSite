@@ -1,6 +1,7 @@
 using HpskSite.Services;
 using HpskSite.Models.Firearms;
 using HpskSite.Services.Firearms;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -34,6 +35,15 @@ namespace HpskSite.Controllers
         private readonly Umbraco.Cms.Core.Services.IMemberService _memberService;
         private readonly ILogger<FirearmAdminController> _logger;
 
+        /// <summary>
+        /// Samma purpose som <c>FirearmController</c> — etiketten skapas här och läses där, så de
+        /// MÅSTE vara samma sträng. Skiljer de sig blir varje utskriven etikett oläsbar, tyst.
+        /// </summary>
+        private readonly IDataProtector _labelProtector;
+        private readonly LoanWeaponClubRules _clubRules;
+        private readonly HpskSite.Services.TrainingGroupService _trainingGroups;
+        private readonly Umbraco.Cms.Core.Services.IContentService _contentService;
+
         public FirearmAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -49,7 +59,11 @@ namespace HpskSite.Controllers
             FirearmBookingService bookings,
             Umbraco.Cms.Core.Security.IMemberManager memberManager,
             Umbraco.Cms.Core.Services.IMemberService memberService,
-            ILogger<FirearmAdminController> logger)
+            ILogger<FirearmAdminController> logger,
+            IDataProtectionProvider dataProtection,
+            LoanWeaponClubRules clubRules,
+            HpskSite.Services.TrainingGroupService trainingGroups,
+            Umbraco.Cms.Core.Services.IContentService contentService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _firearmAuth = firearmAuth;
@@ -61,6 +75,10 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _memberService = memberService;
             _logger = logger;
+            _labelProtector = dataProtection.CreateProtector("Firearm.LoanLabel.v1");
+            _clubRules = clubRules;
+            _trainingGroups = trainingGroups;
+            _contentService = contentService;
         }
 
         /// <summary>
@@ -504,24 +522,15 @@ namespace HpskSite.Controllers
             {
                 success = true,
                 activeCount = _bookings.CountActiveForClub(clubId),
-                bookings = rows.Select(b => new
-                {
-                    b.Id, b.FirearmId, b.FirearmAlias, number = b.ClubWeaponNumber,
-                    b.MemberId, b.MemberName,
-                    from = b.FromTime.ToString("yyyy-MM-dd HH:mm"),
-                    to = b.ToTime.ToString("yyyy-MM-dd HH:mm"),
-                    status = b.Status, statusLabel = b.StatusLabel,
-                    occasion = b.OccasionLabel, b.Note, b.IsActive, b.IsOut,
-                    handedOutAt = b.HandedOutAt?.ToString("yyyy-MM-dd HH:mm"),
-                    returnedAt = b.ReturnedAt?.ToString("yyyy-MM-dd HH:mm"),
-                }),
+                bookings = rows.Select(Project),
             });
         }
 
         /// <summary>Registrerar utlämning eller återlämning, eller avbokar åt medlemmen.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SetBookingState(int clubId, int bookingId, string action, string? reason)
+        public async Task<IActionResult> SetBookingState(
+            int clubId, int bookingId, string action, string? reason, int firearmId = 0)
         {
             if (!await CanHandleBookingsAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
@@ -536,7 +545,11 @@ namespace HpskSite.Controllers
             var actor = await CurrentMemberIdAsync();
             var error = (action ?? "").Trim() switch
             {
-                "handout" => _bookings.MarkHandedOut(bookingId, actor),
+                // ⚠️ Utlämningen bär VILKET vapen som gick ut. Skickas inget faller vi tillbaka
+                // på önskemålet — men bara om det finns ett; en platsbokning utan vapen måste
+                // få ett angivet, annars vet registret inte vad som är ute.
+                "handout" => _bookings.MarkHandedOut(
+                    bookingId, actor, firearmId > 0 ? firearmId : (b.FirearmId ?? 0)),
                 "return" => _bookings.MarkReturned(bookingId, actor),
                 "cancel" => _bookings.Cancel(bookingId, actor, actorIsClubStaff: true, reason),
                 _ => "Okänd åtgärd.",
@@ -545,6 +558,462 @@ namespace HpskSite.Controllers
             return error is null
                 ? Json(new { success = true, activeCount = _bookings.CountActiveForClub(clubId) })
                 : Json(new { success = false, message = error });
+        }
+
+        // ── Valvet ───────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Kvällens lån för ett tillfälle, plus de vapen som är lediga då.
+        ///
+        /// <para><b>⚠️ Den här ytan är byggd för en teknikrädd 74-åring med sex nybörjare bakom
+        /// sig.</b> Den ska besvara en fråga — <em>hur många vapen tar jag ut, och till vem</em> —
+        /// och kräva noll inskrivning. Allt annat hör någon annanstans.</para>
+        ///
+        /// <para><b>⚠️ Utan tillfälle svarar den för DAGEN.</b> Vapenansvarig ska inte behöva välja
+        /// något för att se kvällen; ett tomt val vore en fråga till precis den person som helst
+        /// inte vill svara på frågor i en app.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetVaultBoard(
+            int clubId, string? occasionKind = null, int occasionId = 0, string? day = null)
+        {
+            if (!await CanHandleBookingsAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var date = DateTime.TryParse((day ?? "").Trim(), out var d) ? d.Date : DateTime.Now.Date;
+            var from = date;
+            var to = date.AddDays(1).AddSeconds(-1);
+
+            var loans = string.IsNullOrWhiteSpace(occasionKind)
+                ? _bookings.GetForClub(clubId)
+                    .Where(b => b.FromTime.Date <= date && b.ToTime.Date >= date)
+                    .ToList()
+                : _bookings.GetForOccasion(clubId, occasionKind, occasionId);
+
+            var free = _bookings.AvailableInWindow(clubId, from, to);
+            var loanable = _firearms.CountLoanable(clubId);
+
+            return Json(new
+            {
+                success = true,
+                day = date.ToString("yyyy-MM-dd"),
+                loanable,
+                // Antalet att ta ut ur valvet. Det är rubriken vapenansvarig läser, och den ska
+                // stå färdigräknad — inte som en lista han själv ska räkna.
+                toHandOut = loans.Count(b => b.Status == FirearmBookingStatus.Reserverad),
+                out_ = loans.Count(b => b.IsOut),
+                loans = loans.Select(Project),
+                free = free.Select(f => new { f.Id, f.Alias, number = f.ClubWeaponNumber, f.WeaponClass }),
+            });
+        }
+
+        /// <summary>
+        /// Lämnar ut ett vapen ur valvet. <paramref name="firearmId"/> är det vapen som FAKTISKT
+        /// går ut, oavsett vad medlemmen önskade.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> HandOutFromVault(int clubId, int bookingId, int firearmId)
+        {
+            if (!await CanHandleBookingsAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var b = _bookings.GetById(bookingId);
+            if (b is null) return Json(new { success = false, message = "Bokningen hittades inte" });
+            if (b.ClubId != clubId)
+                return Json(new { success = false, message = "Bokningen tillhör inte den här klubben" });
+
+            var actor = await CurrentMemberIdAsync();
+            var error = _bookings.MarkHandedOut(bookingId, actor, firearmId);
+            return error is null
+                ? Json(new { success = true, message = "Utlämnat." })
+                : Json(new { success = false, message = error });
+        }
+
+        /// <summary>
+        /// Stänger kvällen — allt aktivt på tillfället blir återlämnat i ett tryck.
+        ///
+        /// <para><b>⚠️ Det här är knappen som avgör om registret överlever.</b> Ingen skannar när
+        /// de ska hem, och sex tryck klockan nio är exakt när registerföringen upphör. Den knyts
+        /// till en ritual vapenansvarig redan har — att låsa valvet — och är fysiskt sann just då.</para>
+        ///
+        /// <para><paramml name="keepIds"/> är de lån som ligger kvar. Undantaget får kosta ett tryck.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CloseVaultEvening(
+            int clubId, string? occasionKind, int occasionId, string? keepIds, string? day = null)
+        {
+            if (!await CanHandleBookingsAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var actor = await CurrentMemberIdAsync();
+            var keep = (keepIds ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(v => int.TryParse(v, out var i) ? i : 0)
+                .Where(i => i > 0)
+                .ToHashSet();
+
+            // Utan tillfälle stänger vi dagens lån, ett i taget — samma regel, men urvalet kommer
+            // från dagen i stället för från en nod.
+            if (string.IsNullOrWhiteSpace(occasionKind))
+            {
+                var date = DateTime.TryParse((day ?? "").Trim(), out var dd) ? dd.Date : DateTime.Now.Date;
+                var rows = _bookings.GetForClub(clubId, activeOnly: true)
+                    .Where(b => b.FromTime.Date <= date && b.ToTime.Date >= date
+                                && !b.LeavesTheClub && !keep.Contains(b.Id))
+                    .ToList();
+
+                var n = 0;
+                foreach (var b in rows)
+                    if (_bookings.MarkReturned(b.Id, actor) is null) n++;
+
+                return Json(new { success = true, closed = n, message = Closed(n) });
+            }
+
+            var (closed, error) = _bookings.ReturnAllForOccasion(
+                clubId, occasionKind, occasionId, actor, keep);
+
+            return error is null
+                ? Json(new { success = true, closed, message = Closed(closed) })
+                : Json(new { success = false, message = error });
+        }
+
+        /// <summary>
+        /// EN projektion av ett lån, delad av klubbens lista och valvskärmen.
+        ///
+        /// <para><b>⚠️ Två handskrivna projektioner av samma rad glider isär</b> — det är samma
+        /// lärdom som tävlingslistan, som renderades på tre ytor tills de sa emot varandra. Lägg
+        /// till ett fält HÄR, inte på en yta.</para>
+        ///
+        /// <para><b>⚠️ Önskat och tilldelat är SKILDA fält i svaret.</b> Vapenansvarig måste kunna
+        /// se "önskade nr 7, fick nr 4" — och den som skjutit in nr 7 mot sig själv är precis den
+        /// som märker om vi tappar skillnaden.</para>
+        /// </summary>
+        private static object Project(FirearmBooking b) => new
+        {
+            b.Id,
+            b.MemberId, b.MemberName,
+
+            // Det som gäller nu: tilldelat om det finns, annars önskat.
+            firearmId = b.EffectiveFirearmId ?? 0,
+            b.FirearmAlias,
+            number = b.ClubWeaponNumber,
+
+            // Önskemålet, separat. null = medlemmen tog vilket som helst.
+            wishedFirearmId = b.FirearmId,
+            wishedNumber = b.WishedWeaponNumber,
+            b.WishedAlias,
+            b.WantsSpecificFirearm,
+            b.AssignmentDiffersFromWish,
+            weaponClass = b.WeaponClass,
+
+            from = b.FromTime.ToString("yyyy-MM-dd HH:mm"),
+            to = b.ToTime.ToString("yyyy-MM-dd HH:mm"),
+            status = b.Status, statusLabel = b.StatusLabel,
+            occasion = b.OccasionDisplay, occasionKind = b.OccasionKind, b.OccasionId,
+            b.Note, b.IsActive, b.IsOut,
+            source = b.Source, sourceLabel = FirearmBookingSource.Label(b.Source),
+            b.HandedOutBySelf,
+            b.LeavesTheClub, b.AwaitsEscort, b.EscortMemberId, b.EscortName,
+            handedOutAt = b.HandedOutAt?.ToString("yyyy-MM-dd HH:mm"),
+            returnedAt = b.ReturnedAt?.ToString("yyyy-MM-dd HH:mm"),
+        };
+
+        /// <summary>Tolkar en tidpunkt. Tomt eller obegripligt ger <c>default</c>, som
+        /// <c>FirearmBookingWindow</c> normaliserar till hela dagen.</summary>
+        private static DateTime ParseWhen(string? value) =>
+            DateTime.TryParse((value ?? "").Trim(), out var d) ? d : default;
+
+        private static string Closed(int n) => n switch
+        {
+            0 => "Inget att återlämna.",
+            1 => "Ett vapen är återlämnat.",
+            _ => $"{n} vapen är återlämnade.",
+        };
+
+        /// <summary>
+        /// Lägger in ett lån på plats, för den som dök upp utan att ha bokat.
+        ///
+        /// <para><b>⚠️ Det normala fallet på en träningskväll.</b> Nekar vi den som inte bokat har
+        /// vi byggt precis den grind som kommer att kringgås — vapenansvarig lämnar ut ändå, och då
+        /// ljuger registret. Lånet skapas och lämnas ut i samma handling.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> WalkInLoan(
+            int clubId, int memberId, int firearmId, string? occasionKind, int occasionId)
+        {
+            if (!await CanHandleBookingsAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            if (memberId <= 0) return Json(new { success = false, message = "Välj vem som lånar" });
+
+            var kind = string.IsNullOrWhiteSpace(occasionKind)
+                ? FirearmOccasionKind.Fritt : occasionKind!.Trim();
+
+            var (bookingId, error) = _bookings.Create(new FirearmBookingRequest
+            {
+                MemberId = memberId,
+                ClubId = clubId,
+                FirearmId = firearmId > 0 ? firearmId : null,
+                OccasionKind = kind,
+                OccasionId = FirearmOccasionKind.HasNodeId(kind) ? occasionId : 0,
+                From = DateTime.Now.Date,
+                To = DateTime.Now.Date.AddDays(1).AddSeconds(-1),
+                Source = FirearmBookingSource.Valv,
+            });
+            if (error is not null) return Json(new { success = false, message = error });
+
+            var actor = await CurrentMemberIdAsync();
+            var handoutError = _bookings.MarkHandedOut(bookingId, actor, firearmId);
+
+            // ⚠️ Lånet FINNS även om utlämningen inte gick igenom. Att rapportera det som ett
+            // misslyckande skulle få vapenansvarig att göra om det och skapa ett andra lån.
+            return Json(new
+            {
+                success = true,
+                bookingId,
+                message = handoutError is null
+                    ? "Utlämnat."
+                    : "Lånet är inlagt, men utlämningen kunde inte registreras: " + handoutError,
+            });
+        }
+
+        /// <summary>
+        /// Tilldelar hela träningsgruppen lånevapen för ett tillfälle — kurstilldelning.
+        ///
+        /// <para><b>⚠️ INSTRUKTÖREN BOKAR, INTE NYBÖRJAREN.</b> En kurs med tio deltagare är
+        /// inte tio personer som råkade vilja låna samma kväll: klubben har redan bestämt att de
+        /// ska skjuta, och att kräva att var och en själv hittar bokningssidan är att flytta ett
+        /// arbete instruktören gör en gång till tio personer som gör det fel. De som inte bokar
+        /// dyker upp ändå, och då står vapnen reserverade för fel personer.</para>
+        ///
+        /// <para><b>⚠️ Tilldelningen går FÖRBI klubbens horisont.</b> Källan
+        /// <c>Tilldelad</c> undantas i <c>FirearmBookingService.Create</c>, av det enkla skälet
+        /// att en kursomgång planeras månader i förväg medan horisonten finns för att hindra
+        /// enskilda från att lägga beslag på vapen hela säsongen. Samma regel på båda vore att
+        /// göra kursplanering omöjlig för att skydda mot något kursen inte gör.</para>
+        ///
+        /// <para><b>⚠️ PLATSBOKNINGAR, inga namngivna vapen.</b> Vilket vapen var och en får
+        /// avgörs i valvet av den som lämnar ut — det är där kunskapen finns om vem som är stor
+        /// nog för vad. En förhandstilldelning av nummer hade bara blivit något att göra om.</para>
+        ///
+        /// <para>Svaret säger per person vad som hände. En sammanräkning duger inte: instruktören
+        /// måste veta VEM som blev utan vapen, för det är den personen han behöver prata med.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AssignLoanWeaponsToGroup(
+            int clubId, int trainingGroupId, string? occasionKind, int occasionId,
+            string? occasionLabel, string? from, string? to)
+        {
+            if (!await CanHandleBookingsAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var group = _trainingGroups.GetTrainingGroup(trainingGroupId);
+            if (group is null)
+                return Json(new { success = false, message = "Träningsgruppen hittades inte" });
+
+            // ⚠️ Gruppen måste tillhöra den klubb behörigheten gäller för. Utan kontrollen kunde en
+            // klubbadmin tilldela en ANNAN klubbs grupp sina egna vapen — och lånen hade hamnat på
+            // personer hen inte har med att göra.
+            if (_trainingGroups.GetTrainingGroupClubId(trainingGroupId) != clubId)
+                return Json(new { success = false, message = "Gruppen tillhör inte den här klubben" });
+
+            var kind = string.IsNullOrWhiteSpace(occasionKind)
+                ? FirearmOccasionKind.Fritt : occasionKind!.Trim();
+
+            var memberIds = _trainingGroups.GetGroupMemberIds(trainingGroupId);
+            if (memberIds.Count == 0)
+                return Json(new { success = false, message = "Gruppen har inga medlemmar" });
+
+            var names = new Dictionary<int, string>();
+            foreach (var id in memberIds)
+            {
+                var m = _memberService.GetById(id);
+                names[id] = m is null
+                    ? $"Medlem {id}"
+                    : $"{m.GetValue<string>("firstName")} {m.GetValue<string>("lastName")}".Trim();
+            }
+
+            var results = new List<object>();
+            int created = 0, skipped = 0;
+
+            foreach (var memberId in memberIds)
+            {
+                var (bookingId, error) = _bookings.Create(new FirearmBookingRequest
+                {
+                    MemberId = memberId,
+                    ClubId = clubId,
+                    FirearmId = null,               // platsbokning — valvet avgör vilket vapen
+                    OccasionKind = kind,
+                    OccasionId = FirearmOccasionKind.HasNodeId(kind) ? occasionId : 0,
+                    OccasionLabel = string.IsNullOrWhiteSpace(occasionLabel)
+                        ? group.Name : occasionLabel,
+                    From = ParseWhen(from),
+                    To = ParseWhen(to),
+                    Source = FirearmBookingSource.Tilldelad,
+                });
+
+                if (error is null) created++; else skipped++;
+                results.Add(new
+                {
+                    memberId,
+                    name = names.TryGetValue(memberId, out var n) ? n : $"Medlem {memberId}",
+                    ok = error is null,
+                    bookingId,
+                    message = error,
+                });
+            }
+
+            return Json(new
+            {
+                success = created > 0,
+                created,
+                skipped,
+                message = created == 0
+                    ? "Ingen kunde tilldelas ett vapen."
+                    : skipped == 0
+                        ? (created == 1 ? "En person har fått ett lånevapen." : $"{created} personer har fått lånevapen.")
+                        : $"{created} fick lånevapen, {skipped} kunde inte tilldelas.",
+                results,
+            });
+        }
+
+        // ── Klubbens lånevapeninställningar ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Klubbens regler för lånevapen, plus om egenskaperna alls finns på doctypen.
+        ///
+        /// <para><c>propertyExists</c> är inte en detalj: utan den kan gränssnittet inte skilja
+        /// <em>"klubben har valt av"</em> från <em>"egenskapen finns inte"</em>, och switchen skulle
+        /// se ut att fungera medan varje sparning tyst rann ut i sanden.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetLoanWeaponSettings(int clubId)
+        {
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var r = _clubRules.For(clubId);
+            return Json(new
+            {
+                success = true,
+                allowExternal = r.AllowExternal,
+                horizonDays = r.HorizonDays,
+                allowExternalPropertyExists = r.AllowExternalPropertyExists,
+                horizonPropertyExists = r.HorizonPropertyExists,
+                allowExternalProperty = LoanWeaponClubRules.AllowExternalProperty,
+                horizonProperty = LoanWeaponClubRules.HorizonProperty,
+                loanable = _firearms.CountLoanable(clubId),
+            });
+        }
+
+        /// <summary>
+        /// Sparar klubbens regler.
+        ///
+        /// <para><b>⚠️ VÄGRAR när egenskapen saknas, i stället för att no-op:a.</b>
+        /// <c>SetValue</c> på en saknad egenskap är tyst ignorerad — switchen hade sett ut att
+        /// spara och återgått vid nästa laddning, vilket är den värsta sortens fel: ett som ser ut
+        /// som att det fungerade. Meddelandet namnger egenskapen så en administratör vet vad hen
+        /// ska lägga till.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveLoanWeaponSettings(
+            int clubId, bool allowExternal, int horizonDays)
+        {
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var club = _contentService.GetById(clubId);
+            if (club is null) return Json(new { success = false, message = "Klubben hittades inte" });
+
+            var missing = new List<string>();
+            if (!club.HasProperty(LoanWeaponClubRules.AllowExternalProperty))
+                missing.Add(LoanWeaponClubRules.AllowExternalProperty);
+            if (!club.HasProperty(LoanWeaponClubRules.HorizonProperty))
+                missing.Add(LoanWeaponClubRules.HorizonProperty);
+
+            if (missing.Count > 0)
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = "Egenskaperna " + string.Join(" och ", missing.Select(m => $"'{m}'")) +
+                              " saknas på klubbtypen i Umbraco. Be en administratör lägga till dem, " +
+                              "annars kan inställningen inte sparas.",
+                });
+            }
+
+            club.SetValue(LoanWeaponClubRules.AllowExternalProperty, allowExternal);
+            club.SetValue(LoanWeaponClubRules.HorizonProperty, Math.Clamp(horizonDays, 0, 365));
+            _contentService.Save(club);
+
+            _logger.LogInformation(
+                "Lånevapenregler sparade för klubb {ClubId}: extern {Ext}, horisont {Days} dagar.",
+                clubId, allowExternal, horizonDays);
+
+            return Json(new { success = true, message = "Inställningarna är sparade." });
+        }
+
+        // ── Vapenetiketterna ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// QR-koden för ETT vapens etikett, som PNG.
+        ///
+        /// <para><b>⚠️ Etiketten sitter på VAPNET, inte på hyllplatsen</b> (Stefans beslut
+        /// 2026-09-02, och han har rätt): ett vapen som läggs tillbaka på fel plats gör en
+        /// hylletikett direkt felaktig, medan vapnet är identiteten. Hyllplatsen är föränderligt
+        /// tillstånd som ingen underhåller.</para>
+        ///
+        /// <para><b>⚠️ Token är INTE tidsbegränsad.</b> Etiketten är laminerad och sitter kvar i
+        /// åratal — en kortlivad token hade gjort den obrukbar vid första skanningen. Kontrollen
+        /// görs av bokningsfönstret: ingen bokning i dag, ingen utcheckning.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetFirearmLabelQr(int clubId, int firearmId, int size = 10)
+        {
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Content("Åtkomst nekad");
+
+            var f = _firearms.GetById(firearmId);
+            if (f is null || f.Scope != FirearmScope.Club(clubId))
+                return Content("Vapnet hittades inte");
+
+            var url = LabelUrl(firearmId);
+            var png = QrPng(url, Math.Clamp(size, 4, 20));
+            return png is null ? Content("Kunde inte skapa QR-kod") : File(png, "image/png");
+        }
+
+        /// <summary>Etikettens adress. Absolut, för den ska skannas från papper.</summary>
+        private string LabelUrl(int firearmId)
+        {
+            var token = _labelProtector.Protect($"firearm:{firearmId}");
+            var req = HttpContext.Request;
+            return $"{req.Scheme}://{req.Host}/lanevapen/skanna?t={Uri.EscapeDataString(token)}";
+        }
+
+        private static byte[]? QrPng(string url, int pixelsPerModule)
+        {
+            try
+            {
+                var gen = new QRCoder.QRCodeGenerator();
+                using var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.Q);
+                var qr = new QRCoder.QRCode(data);
+                using var img = qr.GetGraphic(
+                    pixelsPerModule: pixelsPerModule,
+                    darkColor: SixLabors.ImageSharp.Color.Black,
+                    lightColor: SixLabors.ImageSharp.Color.White,
+                    drawQuietZones: true);
+                using var ms = new System.IO.MemoryStream();
+                img.Save(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                return ms.ToArray();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private async Task<int> CurrentMemberIdAsync()

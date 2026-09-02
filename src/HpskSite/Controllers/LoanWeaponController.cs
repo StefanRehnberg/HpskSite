@@ -104,6 +104,35 @@ namespace HpskSite.Controllers
             // vilket är den enda formen av svar som är säkert fel.
             return View("LoanWeapons", model);
         }
+
+        /// <summary>
+        /// <c>/lanevapen/skanna?t=</c> — skytten skannar etiketten på vapnet.
+        ///
+        /// <para><b>Renderar bara skalet.</b> Inloggningskravet, vapnet och vad som är möjligt
+        /// avgörs av <c>Firearm/GetScanState</c>, så sidan kan visas även för den som inte är
+        /// inloggad och då erbjuda inloggning med rätt returnUrl.</para>
+        /// </summary>
+        [HttpGet("skanna")]
+        public IActionResult Scan(string? t)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+
+            return View("LoanWeaponScan", new LoanScanPageModel { Token = t });
+        }
+    }
+
+    public class LoanScanPageModel
+    {
+        /// <summary>
+        /// Etikettens token, oöppnad.
+        ///
+        /// <para><b>⚠️ Sidan tolkar den INTE serverside.</b> Den skickas vidare till
+        /// <c>Firearm/GetScanState</c>, som svarar utan att skriva något. En QR som öppnas av
+        /// misstag i en kameraförhandsvisning får inte lämna ut ett vapen — och hade sidan löst
+        /// upp token och registrerat något vid rendering vore just det vad som hände.</para>
+        /// </summary>
+        public string? Token { get; set; }
     }
 
     public class LoanWeaponPageModel

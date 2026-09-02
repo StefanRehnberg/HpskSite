@@ -11,7 +11,8 @@
       Prefix (string, obligatorisk)  id-prefix för fälten, t.ex. "edit" -> editRegistrationRequired
 
     Fältens id följer konventionen prefix + fältnamn, så mappningen är härledbar:
-      {prefix}RegistrationRequired / {prefix}RegistrationUrl / {prefix}MaxParticipants / {prefix}IsMandatory
+      {prefix}RegistrationRequired / {prefix}RegistrationUrl / {prefix}MaxParticipants /
+      {prefix}IsMandatory / {prefix}LanevapenOffered
 
     Skriptet definieras EN gång oavsett hur många gånger partialen renderas, och tar prefixet som
     argument. Anropa hpskEventRegToggle(prefix) från kryssrutans onchange.
@@ -37,6 +38,14 @@
         <label class="form-check-label" for="@(regPrefix)IsMandatory">Obligatoriskt deltagande</label>
         <div class="form-text" id="@(regPrefix)IsMandatoryHelp">
             Närvaron prickas av på plats och blir underlag för klubbens beslut om Föreningsintyg.
+        </div>
+    </div>
+    <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" id="@(regPrefix)LanevapenOffered">
+        <label class="form-check-label" for="@(regPrefix)LanevapenOffered">Erbjud lånevapen</label>
+        <div class="form-text" id="@(regPrefix)LanevapenOfferedHelp">
+            Medlemmarna får en kryssruta i anmälan: <em>"Jag behöver låna klubbvapen"</em>. Kryssa
+            bara på tillfällen där det skjuts — inte på möten och städdagar.
         </div>
     </div>
     <div class="mb-3">
@@ -66,6 +75,7 @@
                 // kryssar i rutan.
                 var max = el(prefix, 'MaxParticipants'); if (max) max.value = '';
                 var man = el(prefix, 'IsMandatory'); if (man) man.checked = false;
+                var lw = el(prefix, 'LanevapenOffered'); if (lw) lw.checked = false;
                 var url = el(prefix, 'RegistrationUrl'); if (url) url.value = '';
             }
         };
@@ -89,6 +99,15 @@
                 if (help) help.innerHTML = '<span class="text-warning">Egenskapen \'isMandatory\' saknas på händelsetypen i Umbraco — kontakta en administratör innan den kan användas.</span>';
             }
 
+            // Lånevapen: samma mönster som isMandatory ovan, av samma skäl.
+            var lw = el(prefix, 'LanevapenOffered');
+            if (lw) lw.checked = !!d.lanevapenOffered;
+            if (d.lanevapenPropertyExists === false && lw) {
+                lw.disabled = true;
+                var lwHelp = el(prefix, 'LanevapenOfferedHelp');
+                if (lwHelp) lwHelp.innerHTML = '<span class="text-warning">Egenskapen \'lanevapenOffered\' saknas på händelsetypen i Umbraco — kontakta en administratör innan den kan användas.</span>';
+            }
+
             window.hpskEventRegToggle(prefix);
         };
 
@@ -106,6 +125,8 @@
             formData.append('maxParticipants', max ? (parseInt(max.value, 10) || 0) : 0);
             formData.append('isMandatory', man ? man.checked : false);
             formData.append('registrationUrl', url ? url.value : '');
+            var lw = el(prefix, 'LanevapenOffered');
+            formData.append('lanevapenOffered', lw ? lw.checked : false);
             return formData;
         };
 
@@ -118,7 +139,9 @@
             return '&registrationRequired=' + (req && req.checked ? 'true' : 'false')
                  + '&maxParticipants=' + (max ? (parseInt(max.value, 10) || 0) : 0)
                  + '&isMandatory=' + (man && man.checked ? 'true' : 'false')
-                 + '&registrationUrl=' + encodeURIComponent(url ? url.value : '');
+                 + '&registrationUrl=' + encodeURIComponent(url ? url.value : '')
+                 + '&lanevapenOffered=' + (el(prefix, 'LanevapenOffered')
+                        && el(prefix, 'LanevapenOffered').checked ? 'true' : 'false');
         };
     })();
     </script>

@@ -460,7 +460,7 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
         {
             try
             {
@@ -504,7 +504,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
+                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     newEvent.SetValue("eventDate", parsedEventDate);
@@ -614,6 +614,9 @@ namespace HpskSite.Controllers
                             registrationUrl = evt.Value<string>("registrationUrl") ?? "",
                             maxParticipants = evt.Value<int>("maxParticipants"),
                             isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                            lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
+                                && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
+                            lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                             mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty)
                         });
                     }
@@ -745,7 +748,7 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
         {
             try
             {
@@ -779,7 +782,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
+                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     eventContent.SetValue("eventDate", parsedEventDate);
@@ -2022,6 +2025,9 @@ namespace HpskSite.Controllers
                             registrationUrl = evt.Value<string>("registrationUrl") ?? "",
                             maxParticipants = evt.Value<int>("maxParticipants"),
                             isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                            lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
+                                && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
+                            lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                             mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty)
                         });
                     }
@@ -2048,7 +2054,7 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
         {
             try
             {
@@ -2088,7 +2094,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
+                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     newEvent.SetValue("eventDate", parsedEventDate);
@@ -2139,7 +2145,7 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "")
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
         {
             try
             {
@@ -2184,7 +2190,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
+                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     eventContent.SetValue("eventDate", parsedEventDate);
@@ -2377,19 +2383,34 @@ namespace HpskSite.Controllers
         /// </summary>
         private static string? ApplyEventRegistrationFields(
             Umbraco.Cms.Core.Models.IContent eventContent,
-            bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl)
+            bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl,
+            bool lanevapenOffered = false)
         {
             eventContent.SetValue("registrationRequired", registrationRequired);
             eventContent.SetValue("registrationUrl", registrationUrl ?? "");
             eventContent.SetValue("maxParticipants", maxParticipants > 0 ? maxParticipants : 0);
 
-            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty))
-            {
-                eventContent.SetValue(HpskSite.Models.ClubEvents.MandatoryProperty, isMandatory);
-                return null;
-            }
+            // ⚠️ EN skrivväg för alla anmälningsfält, och det är inte städning. Fälten redigeras
+            // från TRE dialoger (klubbens panel, kretsens panel, händelsens egen sida), och en
+            // egenskap som bara skrivs i en av dem försvinner tyst vid nästa sparning från en
+            // annan. Lägg aldrig ett anmälningsfält i bara en dialog igen.
+            var missing = new List<string>();
 
-            return isMandatory ? HpskSite.Models.ClubEvents.MandatoryProperty : null;
+            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty))
+                eventContent.SetValue(HpskSite.Models.ClubEvents.MandatoryProperty, isMandatory);
+            else if (isMandatory)
+                missing.Add(HpskSite.Models.ClubEvents.MandatoryProperty);
+
+            // ⚠️ Saknas egenskapen rapporteras det bara när någon FÖRSÖKTE slå på den. Att larma
+            // om ett avslaget val ingen gjort vore brus — och `SetValue` på en saknad egenskap är
+            // en tyst no-op, så utan raden hade switchen sett ut att spara och återgått.
+            if (eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty))
+                eventContent.SetValue(
+                    HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty, lanevapenOffered);
+            else if (lanevapenOffered)
+                missing.Add(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty);
+
+            return missing.Count == 0 ? null : string.Join("' och '", missing);
         }
 
         /// <summary>

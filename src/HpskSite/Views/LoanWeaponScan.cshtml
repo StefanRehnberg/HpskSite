@@ -1,0 +1,184 @@
+@model HpskSite.Controllers.LoanScanPageModel
+@{
+    Layout = null;
+}
+@*
+    /lanevapen/skanna?t= — skytten skannar etiketten på vapnet.
+
+    ⚠️ SKANNINGEN ÄR MEKANISMEN, inte en bekvämlighet. Skälet är riktighet och inte komfort: en
+    skanning av den fysiska taggen KAN INTE HA FEL om vilket vapen det är, medan vapenansvarig som
+    väljer ett nummer ur en lista kan välja fel — och då är registret fel hela kvällen.
+
+    ⚠️ Den flyttar också tekniken till den som är minst rädd för den. Nybörjaren har telefonen i
+    handen; vapenansvarig håller fram etiketten och tittar på.
+
+    ⚠️ SIDAN SKRIVER INGENTING VID INLÄSNING. En QR som öppnas av misstag i en
+    kameraförhandsvisning får inte lämna ut ett vapen — därför är läsning och handling skilda anrop,
+    och sidan frågar alltid först.
+
+    ⚠️ INGEN BOKNING ÄR INGEN GRIND. Dyker någon upp utan att ha bokat erbjuder sidan att skapa
+    lånet. Nekar vi bygger vi precis den spärr som kringgås, och då ljuger registret.
+
+    Chromeless (Layout = null), ingen Umbraco-nod. Stora knappar: den används i ett valv, ofta med
+    en kö bakom.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lånevapen · pistol.nu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: var(--bs-body-bg); }
+        .sc-wrap { max-width: 30rem; margin: 2rem auto; padding: 0 1rem; }
+        .sc-nr { font-size: 3.25rem; font-weight: 800; line-height: 1;
+                 color: var(--bs-primary); font-variant-numeric: tabular-nums; }
+        .sc-alias { font-size: 1.1rem; color: var(--bs-secondary-color); }
+        .sc-act { font-size: 1.2rem; font-weight: 700; padding: .9rem 1rem; }
+    </style>
+</head>
+<body>
+<div class="sc-wrap">
+    <div id="scBody" data-token="@(Model.Token ?? "")">
+        <div class="text-center py-5">
+            <div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div>
+        </div>
+    </div>
+</div>
+
+<form id="scToken" style="display:none">@Html.AntiForgeryToken()</form>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    var body = document.getElementById('scBody');
+    if (!body) return;
+    var t = body.getAttribute('data-token') || '';
+    var state = null;
+
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+    function token() {
+        var el = document.querySelector('#scToken input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    async function post(url, fields) {
+        var fd = new FormData();
+        Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+        fd.append('__RequestVerificationToken', token());
+        var r = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+        var txt = await r.text();
+        try { return JSON.parse(txt); }
+        catch (e) { return { success: false, message: 'Oväntat svar från servern (' + r.status + ').' }; }
+    }
+
+    function weapon() {
+        var h = '';
+        if (state.number) h += '<div class="sc-nr">nr ' + state.number + '</div>';
+        if (state.alias) h += '<div class="sc-alias mb-3">' + esc(state.alias) + '</div>';
+        return h;
+    }
+
+    async function load() {
+        try {
+            var r = await fetch('/umbraco/surface/Firearm/GetScanState?t=' + encodeURIComponent(t),
+                                { credentials: 'same-origin' });
+            state = await r.json();
+        } catch (e) {
+            body.innerHTML = '<div class="alert alert-danger mb-0">Ett fel uppstod.</div>';
+            return;
+        }
+
+        if (state.requiresLogin) {
+            // ⚠️ Hela målet URL-kodas så adressen får ett enda '?' — en dubbel-?-URL 404:ar på
+            // prods IIS även om Kestrel tolererar den.
+            var back = encodeURIComponent('/lanevapen/skanna?t=' + t);
+            body.innerHTML = '<div class="alert alert-info"><p class="mb-2">Logga in så registreras ' +
+                'lånet på dig.</p><a class="btn btn-primary btn-lg" href="/login-register/?tab=login' +
+                '&returnUrl=' + back + '">Logga in</a></div>';
+            return;
+        }
+
+        if (!state.success) {
+            body.innerHTML = '<div class="alert alert-warning">' + weapon() +
+                '<p class="mb-0">' + esc(state.message || 'Det går inte just nu.') + '</p></div>';
+            return;
+        }
+
+        if (state.action === 'Return') {
+            body.innerHTML = '<div class="text-center">' + weapon() +
+                '<p class="text-muted">Vapnet är utlämnat till dig.</p>' +
+                '<button type="button" class="btn btn-success btn-lg w-100 sc-act" data-sc="return">' +
+                'Lämna tillbaka</button></div>';
+            return;
+        }
+
+        var h = '<div class="text-center">' + weapon() + '</div>';
+
+        // ⚠️ TVÅ VARNINGAR, och den andra är den viktiga: vapenansvarig skulle inte heller ha
+        // vetat att vapnet är bokat av någon annan.
+        if (state.wishedNumber) {
+            h += '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                 'Du har bokat <strong>nr ' + state.wishedNumber + '</strong>, inte det här. ' +
+                 'Tar du det här i stället blir nr ' + state.wishedNumber + ' ledigt.</div>';
+        }
+        if (state.claimedByOther) {
+            h += '<div class="alert alert-danger"><i class="bi bi-person-exclamation me-1"></i>' +
+                 '<strong>Det här vapnet är bokat av ' +
+                 esc(state.claimedByName || 'någon annan') + '</strong> i dag. ' +
+                 'Ta ett annat om du kan — annars står hen utan.</div>';
+        }
+        if (state.action === 'Offer') {
+            h += '<div class="alert alert-secondary">Du har ingen bokning i dag. ' +
+                 'Trycker du nedan registreras lånet på dig.</div>';
+        }
+
+        h += '<button type="button" class="btn btn-primary btn-lg w-100 sc-act" data-sc="handout">' +
+             (state.action === 'Offer' ? 'Låna det här vapnet' : 'Checka ut vapnet') + '</button>';
+
+        body.innerHTML = h;
+    }
+
+    document.addEventListener('click', async function (ev) {
+        var btn = ev.target.closest('[data-sc]');
+        if (!btn) return;
+        var action = btn.getAttribute('data-sc');
+        btn.disabled = true;
+
+        if (action === 'handout') {
+            // Krocken kräver ett medvetet ja — annars är varningen dekoration.
+            var accepted = false;
+            if (state.claimedByOther) {
+                accepted = confirm('Vapnet är bokat av ' + (state.claimedByName || 'någon annan') +
+                                   ' i dag.\n\nTa det ändå?');
+                if (!accepted) { btn.disabled = false; return; }
+            }
+            var j = await post('/umbraco/surface/Firearm/ScanHandOut',
+                               { t: t, accepted: accepted ? 'true' : 'false' });
+            body.innerHTML = j.success
+                ? '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>' +
+                  esc(j.message) + '<p class="small mb-0 mt-2">Skanna samma etikett när du lämnar ' +
+                  'tillbaka vapnet.</p></div>'
+                : '<div class="alert alert-warning">' + esc(j.message || 'Det gick inte.') + '</div>';
+            return;
+        }
+
+        if (action === 'return') {
+            var r = await post('/umbraco/surface/Firearm/ScanReturn', { t: t });
+            body.innerHTML = r.success
+                ? '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>' +
+                  esc(r.message) + '</div>'
+                : '<div class="alert alert-warning">' + esc(r.message || 'Det gick inte.') + '</div>';
+        }
+    });
+
+    load();
+})();
+</script>
+</body>
+</html>

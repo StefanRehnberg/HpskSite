@@ -29,6 +29,8 @@ namespace HpskSite.Controllers
         private readonly FirearmService _firearms;
         private readonly FirearmBookingService _bookings;
         private readonly MemberClubService _memberClubs;
+        private readonly LoanWeaponClubRules _clubRules;
+        private readonly CompetitionTeamService _teams;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ILogger<LoanWeaponApiController> _logger;
@@ -43,6 +45,8 @@ namespace HpskSite.Controllers
             FirearmService firearms,
             FirearmBookingService bookings,
             MemberClubService memberClubs,
+            LoanWeaponClubRules clubRules,
+            CompetitionTeamService teams,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<LoanWeaponApiController> logger)
@@ -51,6 +55,8 @@ namespace HpskSite.Controllers
             _firearms = firearms;
             _bookings = bookings;
             _memberClubs = memberClubs;
+            _clubRules = clubRules;
+            _teams = teams;
             _memberManager = memberManager;
             _memberService = memberService;
             _logger = logger;
@@ -121,6 +127,92 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "GetAvailability failed for club {ClubId}", clubId);
                 return Json(new { success = false, message = "Kunde inte läsa tillgängligheten." });
             }
+        }
+
+        /// <summary>
+        /// Vad som gäller för lån <em>utanför banan</em> i klubben, och vilka som kan följa med.
+        ///
+        /// <para><b>⚠️ Medlemsvänd, alltså en egen endpoint.</b>
+        /// <c>FirearmAdmin/GetLoanWeaponSettings</c> kräver klubbadmin och kan inte användas här —
+        /// och utan svaret vet sidan inte om den ska visa formuläret alls, så den hade antingen
+        /// visat ett formulär vars sparning nekas eller gömt en funktion klubben slagit på.</para>
+        ///
+        /// <para>Kandidaterna är klubbens medlemmar, jag själv borträknad. Nybörjaren kan inte veta
+        /// vem som har rätt att hantera vapnet, och en filtrerad lista skulle behöva svara på en
+        /// fråga systemet inte har uppgifterna för — <b>det är den utseddes JA som är grinden</b>,
+        /// inte urvalet i väljaren. Väljer hen fel händer ingenting: lånet gäller inte.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetExternalOptions(int clubId)
+        {
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current?.Email is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var member = _memberService.GetByEmail(current.Email);
+            var memberId = member?.Id ?? 0;
+            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+            if (!_memberClubs.GetAllClubIds(member).Contains(clubId))
+                return Json(new { success = false, message = "Du är inte medlem i den klubben." });
+
+            var rules = _clubRules.For(clubId);
+
+            // ⚠️ Kandidaterna hämtas BARA när klubben tillåter externa lån. Uppslagningen går över
+            // klubbens medlemmar, och att göra den för en klubb som sagt nej är arbete vars svar
+            // ingen får se.
+            var candidates = rules.AllowExternal
+                ? _teams.GetClubMembers(clubId)
+                    .Where(m => m.MemberId != memberId && !string.IsNullOrWhiteSpace(m.Name))
+                    .OrderBy(m => m.Name, StringComparer.Create(
+                        new System.Globalization.CultureInfo("sv-SE"), true))
+                    .Select(m => new { memberId = m.MemberId, name = m.Name })
+                    .ToList()
+                : new();
+
+            return Json(new
+            {
+                success = true,
+                allowExternal = rules.AllowExternal,
+                horizonDays = rules.HorizonDays,
+                candidates,
+            });
+        }
+
+        /// <summary>
+        /// Lånen jag är utsedd att ansvara för — och som väntar på mitt ja.
+        ///
+        /// <para><b>Den som blivit utsedd måste kunna se det utan att någon ringer.</b> Annars är
+        /// ansvaret bara ett medlems-id i en kolumn.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyEscortRequests()
+        {
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current?.Email is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var member = _memberService.GetByEmail(current.Email);
+            var memberId = member?.Id ?? 0;
+            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var rows = _bookings.GetForEscort(memberId);
+            return Json(new
+            {
+                success = true,
+                requests = rows.Select(b => new
+                {
+                    b.Id,
+                    who = b.MemberName,
+                    number = b.ClubWeaponNumber ?? b.WishedWeaponNumber,
+                    alias = b.FirearmAlias ?? b.WishedAlias,
+                    occasion = b.OccasionDisplay,
+                    from = b.FromTime.ToString("yyyy-MM-dd HH:mm"),
+                    to = b.ToTime.ToString("yyyy-MM-dd HH:mm"),
+                    accepted = b.EscortAcceptedAt.HasValue,
+                    acceptedAt = b.EscortAcceptedAt?.ToString("yyyy-MM-dd HH:mm"),
+                    statusLabel = b.StatusLabel,
+                }),
+            });
         }
 
         /// <summary>

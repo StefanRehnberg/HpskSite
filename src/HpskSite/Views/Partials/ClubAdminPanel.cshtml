@@ -1703,6 +1703,66 @@
     </div>
 </div>
 
+<!-- Tilldela lånevapen till hela träningsgruppen -->
+@*
+    ⚠️ ETT DATUM OCH EN KNAPP. Instruktören som håller nybörjarkursen är ofta klubbens äldsta
+    medlem och har inget intresse av ett bokningssystem. Varje fält utöver dagen är ett fält han
+    kan fylla i fel — och gör han det fel en gång lämnar han ut vapnen utan att registrera något
+    nästa gång, vilket är exakt det utfall hela ytan finns för att undvika.
+
+    ⚠️ INGEN VAPENVÄLJARE. Vilket vapen var och en får avgörs i valvet av den som lämnar ut; det
+    är där kunskapen finns om vem som klarar vad. En förhandstilldelning av nummer hade bara
+    blivit något att göra om.
+*@
+<div class="modal fade" id="tgLoanWeaponModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-safe2 me-2"></i>Tilldela lånevapen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3">
+                    Alla i <strong id="tgLoanGroupName"></strong> får ett lånevapen reserverat.
+                    <span class="text-muted">Vilket vapen var och en får bestäms i valvet när
+                    de hämtas ut.</span>
+                </p>
+                <div class="mb-3">
+                    <label class="form-label" for="tgLoanDate">Vilken dag skjuter kursen? *</label>
+                    <input type="text" class="form-control" id="tgLoanDate">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small" for="tgLoanFrom">Från</label>
+                        <input type="text" class="form-control form-control-sm" id="tgLoanFrom"
+                               placeholder="hela dagen">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small" for="tgLoanTo">Till</label>
+                        <input type="text" class="form-control form-control-sm" id="tgLoanTo"
+                               placeholder="hela dagen">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small" for="tgLoanLabel">Vad står det i valvet?</label>
+                    <input type="text" class="form-control form-control-sm" id="tgLoanLabel"
+                           maxlength="80" autocomplete="off" name="tgKursTillfalle">
+                    <div class="form-text">
+                        Texten vapenansvarig ser i listan. Gruppens namn är förifyllt.
+                    </div>
+                </div>
+                <div id="tgLoanResult"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-primary" onclick="submitTgLoanWeapons(this)">
+                    <i class="bi bi-check2-circle me-2"></i>Tilldela
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Add Member to Training Group Modal -->
 <div class="modal fade" id="clubTgAddMemberModal" tabindex="-1">
     <div class="modal-dialog">
@@ -3424,6 +3484,15 @@ document.addEventListener('DOMContentLoaded', function() {
         dateFormat: 'Y-m-d',
         defaultDate: 'today'
     });
+
+    // Kurstilldelning. ⚠️ INGEN minDate: en kursomgång kan behöva tilldelas i efterhand när
+    // instruktören registrerar en kväll som redan varit, och en spärr där hade tvingat honom att
+    // hoppa över registreringen helt.
+    flatpickr('#tgLoanDate', { locale: 'sv', dateFormat: 'Y-m-d', defaultDate: 'today' });
+    flatpickr('#tgLoanFrom', { locale: 'sv', enableTime: true, noCalendar: true,
+                               dateFormat: 'H:i', time_24hr: true });
+    flatpickr('#tgLoanTo', { locale: 'sv', enableTime: true, noCalendar: true,
+                             dateFormat: 'H:i', time_24hr: true });
 
     // Club-wide keys/codes register — issued/returned date pickers
     flatpickr('#ckIssued', { locale: 'sv', dateFormat: 'Y-m-d' });
@@ -5321,9 +5390,14 @@ async function loadClubTrainingGroupMembers(groupId) {
         let html = `
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <strong>Medlemmar (${members.length})</strong>
-                <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); showAddClubTgMemberModal(${groupId})">
-                    <i class="bi bi-person-plus me-1"></i>Lägg till medlem
-                </button>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showTgLoanWeaponModal(${groupId})">
+                        <i class="bi bi-safe2 me-1"></i>Tilldela lånevapen
+                    </button>
+                    <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); showAddClubTgMemberModal(${groupId})">
+                        <i class="bi bi-person-plus me-1"></i>Lägg till medlem
+                    </button>
+                </div>
             </div>`;
 
         if (members.length === 0) {
@@ -5367,6 +5441,86 @@ async function loadClubTrainingGroupMembers(groupId) {
         console.error('Error loading training group members:', error);
         container.innerHTML = '<div class="alert alert-danger">Fel vid laddning</div>';
     }
+}
+
+// ── Kurstilldelning av lånevapen ─────────────────────────────────────────────────────────────
+//
+// ⚠️ INSTRUKTÖREN BOKAR, INTE NYBÖRJAREN. En kursomgång är inte tio personer som råkade vilja
+// låna samma kväll — klubben har redan bestämt att de ska skjuta. Att kräva att var och en själv
+// hittar bokningssidan flyttar ett arbete instruktören gör EN gång till tio personer som gör det
+// fel, och de som inte bokar dyker upp ändå. Då står vapnen reserverade för fel personer.
+//
+// ⚠️ SVARET RÄKNAS INTE BARA. Instruktören måste veta VEM som blev utan vapen — det är den
+// personen han behöver prata med, och en siffra ("7 av 10") är oanvändbar för det.
+let tgLoanGroupId = 0;
+
+function showTgLoanWeaponModal(groupId) {
+    tgLoanGroupId = groupId;
+    const group = clubTrainingGroups.find(g => g.id === groupId);
+    document.getElementById('tgLoanGroupName').textContent = group ? group.name : '';
+    document.getElementById('tgLoanResult').innerHTML = '';
+    document.getElementById('tgLoanLabel').value = group ? group.name : '';
+
+    const fp = document.getElementById('tgLoanDate')._flatpickr;
+    if (fp) fp.setDate(new Date());
+    else document.getElementById('tgLoanDate').value = new Date().toISOString().slice(0, 10);
+
+    new bootstrap.Modal(document.getElementById('tgLoanWeaponModal')).show();
+}
+
+async function submitTgLoanWeapons(btn) {
+    const date = document.getElementById('tgLoanDate').value.trim();
+    if (!date) { alert('Välj vilken dag kursen skjuter.'); return; }
+
+    const fromT = document.getElementById('tgLoanFrom').value.trim();
+    const toT = document.getElementById('tgLoanTo').value.trim();
+    // Tomma tider = hela dagen. Servern äger regeln; vi skickar bara datumet.
+    const from = fromT ? `${date} ${fromT}` : date;
+    const to = (fromT && toT) ? `${date} ${toT}` : '';
+
+    const box = document.getElementById('tgLoanResult');
+    btn.disabled = true;
+    box.innerHTML = '<div class="text-muted small">Tilldelar…</div>';
+
+    const fd = new FormData();
+    fd.append('clubId', clubId);
+    fd.append('trainingGroupId', tgLoanGroupId);
+    // Slaget maste vara ett av FirearmOccasionKind.All. 'Traning' finns INTE dar, och en
+    // kurstilldelning ar inte knuten till en handelse-nod - det ar en tid pa banan, alltsa
+    // 'Fritt', med kursens namn i OccasionLabel. Fel strang hade nekat alla tio raderna.
+    fd.append('occasionKind', 'Fritt');
+    fd.append('occasionId', 0);
+    fd.append('occasionLabel', document.getElementById('tgLoanLabel').value.trim());
+    fd.append('from', from);
+    fd.append('to', to);
+    const tokEl = document.querySelector('input[name="__RequestVerificationToken"]');
+    fd.append('__RequestVerificationToken', tokEl ? tokEl.value : '');
+
+    let j;
+    try {
+        const r = await fetch('/umbraco/surface/FirearmAdmin/AssignLoanWeaponsToGroup',
+                              { method: 'POST', body: fd, credentials: 'same-origin' });
+        // ⚠️ TEXT först: ett antiforgery-avslag är ett tomt 400 och r.json() kastar då ett
+        // SyntaxError som gömmer statuskoden.
+        const t = await r.text();
+        try { j = JSON.parse(t); }
+        catch (e) { j = { success: false, message: `Oväntat svar från servern (${r.status}).` }; }
+    } catch (e) {
+        j = { success: false, message: 'Ett fel uppstod.' };
+    }
+    btn.disabled = false;
+
+    let h = `<div class="alert ${j.success ? 'alert-success' : 'alert-warning'} py-2 px-3 small mb-2">`
+          + (j.message || '') + '</div>';
+    (j.results || []).forEach(r => {
+        h += '<div class="small d-flex justify-content-between border-bottom py-1">'
+          +  `<span>${r.name}</span>`
+          +  (r.ok
+                ? '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Lånevapen</span>'
+                : `<span class="text-warning-emphasis">${r.message || 'Kunde inte tilldelas'}</span>`)
+          +  '</div>';
+    });
+    box.innerHTML = h;
 }
 
 function showCreateClubTrainingGroupModal() {

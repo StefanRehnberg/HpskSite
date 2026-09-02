@@ -325,6 +325,34 @@ namespace HpskSite.Services.Firearms
                 FirearmAcquisitionStatus.Innehas, forbund.Trim(), excludeFirearmId);
         }
 
+        /// <summary>
+        /// Hur många lånevapen klubben har att fördela.
+        ///
+        /// <para><b>⚠️ Service och utgallrat räknas INTE med.</b> De kan inte lånas ut oavsett
+        /// kalender, så att räkna dem vore att lova en kapacitet som inte finns — och det löftet
+        /// skulle brytas i valvet, framför en nybörjare.</para>
+        /// </summary>
+        public int CountLoanable(int clubId)
+        {
+            if (clubId <= 0) return 0;
+            try
+            {
+                using var uow = _scopeProvider.CreateScope(autoComplete: true);
+                return uow.Database.ExecuteScalar<int>(
+                    @"SELECT COUNT(*) FROM Firearm
+                       WHERE ScopeKind = @0 AND ScopeId = @1
+                         AND IsActive = 1 AND IsLoanable = 1
+                         AND (Status IS NULL OR Status NOT IN (@2, @3))",
+                    FirearmOwnerKind.Club.ToString(), clubId,
+                    FirearmStatus.Service, FirearmStatus.Utgallrat);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Kunde inte räkna lånevapen i klubb {ClubId}.", clubId);
+                return 0;
+            }
+        }
+
         // ── Internt ──────────────────────────────────────────────────────────────────────────────
 
         private string? ProtectInto(FirearmScope scope, int firearmId, FirearmDetails? details)

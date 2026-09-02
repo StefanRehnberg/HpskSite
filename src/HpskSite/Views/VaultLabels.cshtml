@@ -1,0 +1,83 @@
+@model HpskSite.Controllers.VaultLabelsModel
+@{
+    Layout = null;
+}
+@*
+    /valvet/etiketter — ett ark med en QR-etikett per lånevapen, att laminera och sätta på vapnen.
+
+    ⚠️ PÅ VAPNET, INTE PÅ HYLLPLATSEN (Stefans beslut 2026-09-02). Ett vapen som läggs tillbaka på
+    fel plats gör en hylletikett direkt felaktig — hyllplatsen är föränderligt tillstånd som ingen
+    underhåller, vapnet är identiteten.
+
+    ⚠️ NUMRET TRYCKS STORT intill koden. Numret är skyttens ord för vapnet ("jag har alltid nr 7"),
+    och etiketten ska gå att läsa även av den som inte skannar.
+
+    Etiketterna är avsiktligt ENKLA att skriva ut på vanligt papper och klippa — inte beroende av
+    ett etikettark med en bestämd layout, som ingen klubb har.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vapenetiketter — @Model.ClubName</title>
+    <style>
+        :root { color-scheme: light; }
+        body { font-family: "Segoe UI", system-ui, sans-serif; color: #111; background: #fff;
+               margin: 0; padding: 1.5rem; }
+        h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+        .lead { color: #555; font-size: .875rem; margin: 0 0 1.25rem; max-width: 40rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+                gap: .75rem; }
+        .lab { border: 1px dashed #999; border-radius: .25rem; padding: .6rem .75rem;
+               display: flex; align-items: center; gap: .75rem; break-inside: avoid; }
+        .lab img { width: 5.5rem; height: 5.5rem; }
+        .nr { font-size: 2.1rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+        .alias { font-size: .8125rem; color: #444; }
+        .brand { font-size: .625rem; color: #777; letter-spacing: .04em; text-transform: uppercase; }
+        .empty { border: 1px solid #ddd; padding: 1rem; border-radius: .25rem; color: #555; }
+        .noprint button { font-size: 1rem; padding: .5rem 1rem; }
+        @@media print { .noprint { display: none !important; } body { padding: .5rem; } }
+    </style>
+</head>
+<body>
+    <h1>Vapenetiketter — @Model.ClubName</h1>
+    <p class="lead">
+        Klipp ut, laminera och sätt <strong>en etikett på varje vapen</strong>. Skytten skannar sin
+        etikett när hen hämtar vapnet, och en gång till när hen lämnar tillbaka det.
+        Etiketterna slutar aldrig gälla, så de behöver bara skrivas ut en gång.
+    </p>
+
+    <p class="noprint"><button type="button" onclick="window.print()">Skriv ut</button></p>
+
+    @if (Model.Firearms.Count == 0)
+    {
+        <div class="empty">
+            Klubben har inga vapen markerade som <strong>lånebara</strong>. Markera dem under
+            Klubbadministration → Vapen &amp; lånevapen, så kommer etiketterna hit.
+        </div>
+    }
+    else
+    {
+        <div class="grid">
+            @foreach (var f in Model.Firearms)
+            {
+                <div class="lab" data-label-url="@f.Url" data-firearm-id="@f.FirearmId">
+                    @* Bilden hämtas per vapen. Går den inte att skapa försvinner den i stället för
+                       att lämna en trasig bildikon på ett ark som ska lamineras. *@
+                    <img src="/umbraco/surface/FirearmAdmin/GetFirearmLabelQr?clubId=@Model.ClubId&firearmId=@f.FirearmId&size=6"
+                         alt="" onerror="this.remove()">
+                    <div>
+                        <div class="nr">@(f.Number.HasValue ? $"nr {f.Number}" : f.Alias)</div>
+                        @if (f.Number.HasValue)
+                        {
+                            <div class="alias">@f.Alias@(string.IsNullOrEmpty(f.WeaponClass) ? "" : $" · {f.WeaponClass}")</div>
+                        }
+                        <div class="brand">pistol.nu · lånevapen</div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</body>
+</html>

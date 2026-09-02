@@ -26,6 +26,9 @@ namespace HpskSite.Controllers
     {
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
+        private readonly HpskSite.Services.Firearms.FirearmBookingService _bookings;
+        private readonly HpskSite.Services.Firearms.FirearmService _firearms;
+        private readonly HpskSite.Services.Firearms.LoanWeaponClubRules _loanRules;
         private readonly ClubEventParticipationService _participation;
         private readonly MemberClubService _memberClubs;
         private readonly ILogger<ClubEventController> _logger;
@@ -40,6 +43,9 @@ namespace HpskSite.Controllers
             IPublishedUrlProvider publishedUrlProvider,
             IMemberManager memberManager,
             IMemberService memberService,
+            HpskSite.Services.Firearms.FirearmBookingService bookings,
+            HpskSite.Services.Firearms.FirearmService firearms,
+            HpskSite.Services.Firearms.LoanWeaponClubRules loanRules,
             ClubEventParticipationService participation,
             MemberClubService memberClubs,
             ILogger<ClubEventController> logger,
@@ -48,6 +54,9 @@ namespace HpskSite.Controllers
         {
             _memberManager = memberManager;
             _memberService = memberService;
+            _bookings = bookings;
+            _firearms = firearms;
+            _loanRules = loanRules;
             _participation = participation;
             _memberClubs = memberClubs;
             _logger = logger;
@@ -130,13 +139,74 @@ namespace HpskSite.Controllers
                         isReserve = r.IsReserve,
                         signedUpAt = r.SignedUpAt?.ToString("yyyy-MM-dd HH:mm")
                     })
-                    : null
+                    : null,
+                loanWeapons = BuildLoanWeaponState(ctx, me),
             });
         }
 
         /// <summary>POST /umbraco/surface/ClubEvent/SignUp</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
+        /// <summary>
+        /// Lånevapenläget för ett tillfälle: erbjuds de, hur många är kvar, och vad brukar just
+        /// den här medlemmen få.
+        ///
+        /// <para><b>⚠️ Bara KLUBBENS händelser.</b> Lånevapnen tillhör en klubb; en krets har inga.
+        /// Ett kretsevenemang på någon annans bana är i praktiken ett lån utanför klubben, med
+        /// egna regler — inte något den här kryssrutan ska försöka lösa.</para>
+        ///
+        /// <para><b>⚠️ <c>usualNumber</c> är vad som gör att skytten aldrig behöver lära sig
+        /// något.</b> Övergången från "vilket som helst" till "just mitt vapen" sker utan att någon
+        /// bestämmer den — hen börjar bara bry sig — så formuläret minns i stället för att fråga
+        /// vilket läge man är i.</para>
+        /// </summary>
+        private object? BuildLoanWeaponState(ClubEventContext ctx, int memberId)
+        {
+            if (ctx.IsRegionOwned) return null;
+
+            var clubId = ctx.OwnerId;
+            if (clubId <= 0) return null;
+
+            var (offered, propertyExists) = _loanRules.EventOffersLoanWeapons(ctx.EventId);
+            var loanable = _firearms.CountLoanable(clubId);
+
+            // Erbjuds de inte, eller har klubben inga vapen, finns inget att visa. En kryssruta
+            // utan vapen bakom är en fråga utan svarsalternativ.
+            if (!offered || loanable == 0)
+                return new { offered = false, propertyExists, loanable };
+
+            var day = (ctx.EventDate ?? DateTime.Now).Date;
+            var from = day;
+            var to = day.AddDays(1).AddSeconds(-1);
+
+            var mine = memberId > 0
+                ? _bookings.GetForOccasion(clubId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
+                    .FirstOrDefault(b => b.MemberId == memberId && b.IsActive)
+                : null;
+
+            var taken = _bookings.BookedFirearmIds(clubId, from, to);
+            var usual = memberId > 0 ? _bookings.UsualFirearmFor(memberId, clubId) : null;
+
+            return new
+            {
+                offered = true,
+                propertyExists,
+                loanable,
+                occupied = _bookings.CountOccupiedInWindow(clubId, from, to),
+                clubId,
+                myBookingId = mine?.Id ?? 0,
+                myNumber = mine?.ClubWeaponNumber,
+                myWishNumber = mine?.WishedWeaponNumber,
+                usualFirearmId = usual ?? 0,
+                usualNumber = usual is int u ? _firearms.GetById(u)?.ClubWeaponNumber : null,
+                // ⚠️ Är det vanliga vapnet redan taget den kvällen ska det sägas VID BOKNINGEN,
+                // inte i valvet — det är då skytten bestämmer om hen ska komma.
+                usualTaken = usual is int u2 && taken.Contains(u2),
+                weapons = _bookings.AvailableInWindow(clubId, from, to)
+                    .Select(f => new { f.Id, number = f.ClubWeaponNumber, f.Alias, f.WeaponClass }),
+            };
+        }
+
         public async Task<IActionResult> SignUp([FromBody] SignUpRequest request)
         {
             int me = await CurrentMemberIdAsync();
@@ -160,10 +230,41 @@ namespace HpskSite.Controllers
             var (ok, msg, isReserve) = await _participation.SignUpAsync(ctx, me, request?.Note, me);
             if (!ok) return Json(new { success = false, message = msg });
 
+            // ── Lånevapnet, som en del av SAMMA handling ──────────────────────────────────────
+            // ⚠️ Anmälan och lånet är en handling för nybörjaren. Skiljer vi dem åt får vi personer
+            // som är anmälda utan vapen och vapen bokade av folk som inte kommer — precis det
+            // vapenansvarig inte kan lösa i valvet.
+            string? loanMessage = null;
+            if (request?.LoanWeapon == true && !ctx.IsRegionOwned && ctx.OwnerId > 0)
+            {
+                var day = (ctx.EventDate ?? DateTime.Now).Date;
+                var (_, loanError) = _bookings.Create(new HpskSite.Services.Firearms.FirearmBookingRequest
+                {
+                    MemberId = me,
+                    ClubId = ctx.OwnerId,
+                    FirearmId = request.LoanFirearmId > 0 ? request.LoanFirearmId : null,
+                    OccasionKind = HpskSite.Services.Firearms.FirearmOccasionKind.Event,
+                    OccasionId = ctx.EventId,
+                    From = day,
+                    To = day.AddDays(1).AddSeconds(-1),
+                    Source = HpskSite.Services.Firearms.FirearmBookingSource.Web,
+                });
+
+                // ⚠️ ANMÄLAN RULLAS INTE TILLBAKA om vapnet inte gick att boka. Att vara anmäld
+                // utan vapen är bättre än att inte vara anmäld — och skytten måste få veta vilket
+                // av de två som blev av, inte ett samlat "det gick inte".
+                loanMessage = loanError is null
+                    ? (request.LoanFirearmId > 0
+                        ? "Vapnet är reserverat."
+                        : "Ett vapen är reserverat åt dig.")
+                    : "⚠️ Du är anmäld, men vapnet kunde inte bokas: " + loanError;
+            }
+
             return Json(new
             {
                 success = true,
                 isReserve,
+                loanMessage,
                 message = isReserve
                     ? "Du står som reserv — vi hör av oss om en plats blir ledig."
                     : "Du är anmäld."
@@ -542,6 +643,13 @@ namespace HpskSite.Controllers
         public class SignUpRequest
         {
             public int EventId { get; set; }
+
+            /// <summary>Kryssade medlemmen "jag behöver låna klubbvapen"?</summary>
+            public bool LoanWeapon { get; set; }
+
+            /// <summary>Önskat vapen. <b>0 = vilket som helst</b> — nybörjarens svar.</summary>
+            public int LoanFirearmId { get; set; }
+
             /// <summary>Only honoured for a functionary cancelling on someone's behalf.</summary>
             public int MemberId { get; set; }
             public string? Note { get; set; }

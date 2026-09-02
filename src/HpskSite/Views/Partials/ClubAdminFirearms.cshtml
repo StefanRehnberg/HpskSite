@@ -87,6 +87,45 @@
     </div>
 
     @* ── Lånevapensbokningar ────────────────────────────────────────────────────────────────── *@
+    @* ── Lånevapen: reglerna och vägen till valvet ──────────────────────────────────────────
+
+       ⚠️ VALVLÄNKEN LIGGER FÖRST OCH ÄR STOR med flit. Det är den enda knapp vapenansvarig
+       behöver, och han står i valvet med en telefon i handen och nybörjare som vill igång.
+       En länk begravd under två inställningar är en länk han aldrig hittar — och då lämnar han
+       ut vapnen utan att registrera något, vilket är exakt det utfall hela ytan finns för att
+       undvika. Inställningarna under är styrelsens engångsval; de får se ut som administration.
+    *@
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title mb-3">
+                <i class="bi bi-safe2 text-primary me-2"></i>Lånevapen
+            </h5>
+
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <a class="btn btn-primary" id="vapVaultLink" href="/valvet" target="_blank" rel="noopener">
+                    <i class="bi bi-box-arrow-right me-1"></i>Öppna valvet
+                </a>
+                <a class="btn btn-outline-secondary" id="vapLabelLink" href="/valvet/etiketter"
+                   target="_blank" rel="noopener">
+                    <i class="bi bi-qr-code me-1"></i>Skriv ut etiketter
+                </a>
+            </div>
+            <p class="text-muted small">
+                <strong>Valvet</strong> visar vilka vapen som ska ut i kväll och till vem, med en
+                knapp per vapen och en knapp som stänger kvällen när du låser. Det fungerar på
+                telefonen där du står.
+                <br>
+                <strong>Etiketterna</strong> sätts <em>på vapnen</em> — en QR-kod per vapen. Den som
+                lånar skannar med telefonens kamera, och då blir lånet registrerat på rätt vapen
+                utan att du behöver skriva någonting.
+            </p>
+
+            <hr class="my-3">
+
+            <div id="vapLwBody"><div class="text-muted small">Laddar…</div></div>
+        </div>
+    </div>
+
     @* Ligger före vapenlistan av samma skäl som inkorgen: en utlämning som väntar är arbete,
        vapenlistan är uppslagsdata. *@
     <div class="card mb-4">
@@ -506,6 +545,8 @@
         if (action === 'bk-return')  { await setBookingState(btn.getAttribute('data-booking-id'), 'return'); return; }
         if (action === 'bk-cancel')  { await setBookingState(btn.getAttribute('data-booking-id'), 'cancel'); return; }
 
+        if (action === 'lw-save') { await saveLoanSettings(btn); return; }
+
         if (action === 'cf-add') { openClubFirearm(0); return; }
         if (action === 'cf-edit') { openClubFirearm(btn.getAttribute('data-firearm-id')); return; }
         if (action === 'cf-save') { await saveClubFirearm(); return; }
@@ -908,6 +949,116 @@
         await loadRequests();
     }
 
+    // ── Klubbens lånevapenregler ─────────────────────────────────────────────────────────────
+    //
+    // ⚠️ `propertyExists` ÄR INTE EN DETALJ. Saknas doctype-egenskapen är `SetValue` en tyst
+    // no-op: switchen hade sett ut att spara, sidan hade laddat om, och värdet hade återgått —
+    // utan ett enda felmeddelande. Därför visas ett namngivet varningsmeddelande i stället för
+    // en switch som inte fungerar, och namnet står i klartext så en administratör kan agera.
+    var lwState = null;
+
+    async function loadLoanSettings() {
+        var body = document.getElementById('vapLwBody');
+        if (!body) return;
+        try {
+            var r = await fetch('/umbraco/surface/FirearmAdmin/GetLoanWeaponSettings?clubId=' +
+                                encodeURIComponent(vapClubId()), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) {
+                body.innerHTML = '<div class="alert alert-secondary small mb-0">' +
+                    esc(j.message || 'Kunde inte läsa inställningarna.') + '</div>';
+                return;
+            }
+            lwState = j;
+            renderLoanSettings();
+        } catch (e) {
+            body.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';
+        }
+    }
+
+    function lwMissing(name) {
+        return '<div class="alert alert-warning small mb-2 py-2">' +
+            '<i class="bi bi-exclamation-triangle me-1"></i>Egenskapen <code>' + esc(name) +
+            '</code> saknas på klubbens innehållstyp i Umbraco. Inställningen kan inte sparas ' +
+            'förrän en administratör lagt in den.</div>';
+    }
+
+    function renderLoanSettings() {
+        var body = document.getElementById('vapLwBody');
+        var j = lwState;
+        if (!body || !j) return;
+
+        var h = '';
+        h += '<div class="text-muted small mb-3">Klubben har <strong>' + (j.loanable || 0) +
+             '</strong> lånebara vapen.</div>';
+
+        // Horisonten. Sätts i dagar, och 0 betyder ingen gräns — sagt i klartext, för "0" som
+        // "obegränsat" är inte självklart för någon.
+        if (!j.horizonPropertyExists) {
+            h += lwMissing(j.horizonProperty);
+        } else {
+            h += '<div class="mb-3">';
+            h += '<label class="form-label small fw-semibold mb-1" for="vapLwHorizon">' +
+                 'Hur långt fram får medlemmar boka?</label>';
+            h += '<div class="input-group input-group-sm" style="max-width:16rem">';
+            h += '<input type="number" class="form-control" id="vapLwHorizon" min="0" max="365" ' +
+                 'value="' + (j.horizonDays || 0) + '">';
+            h += '<span class="input-group-text">dagar</span></div>';
+            h += '<div class="form-text">' +
+                 '<strong>0 = ingen gräns.</strong> En gräns hindrar att någon bokar upp hela ' +
+                 'säsongen i förväg och sedan inte kommer — vapnet står då reserverat för en ' +
+                 'nybörjare som hade velat ha det.</div>';
+            h += '</div>';
+        }
+
+        // Externa lån.
+        if (!j.allowExternalPropertyExists) {
+            h += lwMissing(j.allowExternalProperty);
+        } else {
+            h += '<div class="form-check mb-2">';
+            h += '<input class="form-check-input" type="checkbox" id="vapLwExternal"' +
+                 (j.allowExternal ? ' checked' : '') + '>';
+            h += '<label class="form-check-label fw-semibold" for="vapLwExternal">' +
+                 'Tillåt att lånevapen tas med utanför banan</label>';
+            h += '<div class="form-text">' +
+                 'För externa tävlingar. Den som lånar måste ange <strong>vem från klubben som ' +
+                 'följer med och ansvarar för vapnet</strong> — en nybörjare får inte transportera ' +
+                 'eller inneha vapnet på egen hand, och den personen måste själv godkänna sitt ' +
+                 'ansvar innan lånet gäller.</div>';
+            h += '</div>';
+        }
+
+        if (j.horizonPropertyExists || j.allowExternalPropertyExists) {
+            h += '<button type="button" class="btn btn-sm btn-primary" data-vap-action="lw-save">' +
+                 'Spara reglerna</button> <span class="small ms-2" id="vapLwSaved"></span>';
+        }
+
+        body.innerHTML = h;
+    }
+
+    async function saveLoanSettings(btn) {
+        var hz = document.getElementById('vapLwHorizon');
+        var ex = document.getElementById('vapLwExternal');
+        btn.disabled = true;
+        var j = await post('/umbraco/surface/FirearmAdmin/SaveLoanWeaponSettings', null, {
+            clubId: vapClubId(),
+            // ⚠️ 'true'/'false' som STRÄNG. `bool` i ASP.NET Core binder inte "1" — den fällan
+            // gjorde att klubbvapnens skyddade uppgifter aldrig skrevs medan svaret sa success.
+            allowExternal: ex ? (ex.checked ? 'true' : 'false') : 'false',
+            horizonDays: hz ? (parseInt(hz.value, 10) || 0) : 0
+        });
+        btn.disabled = false;
+        if (!j.success) { alert(j.message || 'Kunde inte spara.'); return; }
+
+        var mark = document.getElementById('vapLwSaved');
+        if (mark) {
+            mark.className = 'small ms-2 text-success';
+            mark.textContent = 'Sparat.';
+        }
+        await loadLoanSettings();
+        await loadBookings();
+    }
+
     // ── Lånevapensbokningar ──────────────────────────────────────────────────────────────────
     var bookState = null;
 
@@ -1016,10 +1167,19 @@
     }
 
     if (vapClubId() > 0) {
+        // ⚠️ Länkarna måste bära klubb-id. Utan det landar en admin i flera klubbar i valvet för
+        // fel klubb — och ser en tom lista i stället för kvällens vapen, vilket ser ut som att
+        // ingen har bokat.
+        var vl = document.getElementById('vapVaultLink');
+        if (vl) vl.href = '/valvet?clubId=' + vapClubId();
+        var ll = document.getElementById('vapLabelLink');
+        if (ll) ll.href = '/valvet/etiketter?clubId=' + vapClubId();
+
         load();
         loadClubFirearms();
         loadRequests();
         loadBookings();
+        loadLoanSettings();
     }
 
     window.hpskReloadFirearmViewers = load;
