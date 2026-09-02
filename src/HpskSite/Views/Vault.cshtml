@@ -26,6 +26,29 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    @* ── Sajtens tema, även här ──────────────────────────────────────────────────────────────
+
+       Sidan är chromeless (ingen Master.cshtml) och hade därför ingen temaväxling — den var
+       alltid ljus, oavsett vad användaren valt. Skriptet läser samma nyckel som Master använder
+       (`hpsk-theme` i localStorage) och sätter samma attribut, så Bootstraps variabler löser ut
+       rätt. Ingen egen växlare här: valet hör till sajten, inte till den här sidan.
+
+       ⚠️ INLINE OCH FÖRE CSS:EN, med flit. Sätts attributet efter att stilarna målat får man en
+       vit blink innan sidan blir mörk — och den blinken är värst just på den yta som används i
+       ett svagt upplyst valv, mitt i en rörelse där man tittar bort och tillbaka.
+
+       ⚠️ localStorage kan KASTA (privat läge, blockerade webbplatsdata). En sida som vitnar helt
+       för att temaläsningen kraschade vore ett mycket sämre fel än ett felaktigt tema, så
+       läsningen ligger i try/catch och faller tillbaka på ljust.
+    *@
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('hpsk-theme');
+                document.documentElement.setAttribute('data-bs-theme', t === 'dark' ? 'dark' : 'light');
+            } catch (e) { /* Lämna standard. */ }
+        })();
+    </script>
     <title>@title · pistol.nu</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
@@ -46,6 +69,21 @@
                  font-variant-numeric: tabular-nums; }
         .vt-btn { font-weight: 700; padding: .55rem 1rem; white-space: nowrap; }
         .vt-done { opacity: .72; }
+        /* ⚠️ KVÄLLENS VIKTIGASTE KNAPP MÅSTE SYNAS I BÅDA TEMAN. Den var `btn-dark`, vilket
+           försvann helt mot mörk bakgrund när sidan började följa sajtens tema — nästan
+           osynlig, på just det tryck som avgör om registret överlever kvällen. Färgerna sätts
+           därför explicit per tema i stället för att lita på en Bootstrap-klass som bara är
+           tänkt för ett av dem. */
+        .vt-close { background: #212529; border-color: #212529; color: #fff; }
+        .vt-close:hover, .vt-close:focus { background: #000; border-color: #000; color: #fff; }
+        [data-bs-theme="dark"] .vt-close {
+            background: #f8f9fa; border-color: #f8f9fa; color: #212529;
+        }
+        [data-bs-theme="dark"] .vt-close:hover,
+        [data-bs-theme="dark"] .vt-close:focus {
+            background: #fff; border-color: #fff; color: #000;
+        }
+
         .vt-sec { font-size: .8125rem; font-weight: 700; letter-spacing: .06em;
                   text-transform: uppercase; color: var(--bs-secondary-color);
                   margin: 1.5rem 0 .25rem; }
@@ -218,9 +256,14 @@
         // ⚠️ Stängningsknappen bara när det FINNS något ute. En knapp som säger "alla vapen
         // tillbaka" när inget är ute är en knapp man trycker på i onödan och sedan misstror.
         if (out.length) {
-            html += '<button type="button" class="btn btn-dark btn-lg vt-btn" data-vt="close">' +
-                '<i class="bi bi-lock me-1"></i>Kvällen är klar — alla ' + out.length +
-                ' tillbaka</button>';
+            // ⚠️ Räkneordet måste böjas. "alla 1 tillbaka" stod på den knapp som avgör om
+            // registret överlever, och en text som ser slarvig ut på den knappen minskar
+            // förtroendet för precis det tryck vi behöver att någon gör varje kväll.
+            var backTxt = out.length === 1
+                ? 'Kvällen är klar — vapnet tillbaka'
+                : 'Kvällen är klar — alla ' + out.length + ' tillbaka';
+            html += '<button type="button" class="btn btn-lg vt-btn vt-close" data-vt="close">' +
+                '<i class="bi bi-lock me-1"></i>' + backTxt + '</button>';
         }
         html += '<button type="button" class="btn btn-outline-secondary" data-vt="print">' +
             '<i class="bi bi-printer me-1"></i>Skriv ut listan</button>';
@@ -244,7 +287,9 @@
 
     function headline(waiting, out) {
         if (waiting.length) return 'Ta ut ' + waiting.length + ' vapen';
-        if (out.length) return out.length + (out.length === 1 ? ' vapen är ute' : ' vapen är ute');
+        // "vapen" är oböjt i plural, så samma sträng duger för båda — den upprepade ternären
+        // härifrån var vilseledande och antydde en skillnad som inte finns.
+        if (out.length) return out.length + ' vapen är ute';
         return 'Inga lån i dag';
     }
 
@@ -362,8 +407,10 @@
 
         if (action === 'close') {
             var n = (state.loans || []).filter(function (b) { return b.isActive; }).length;
-            if (!confirm('Registrera ' + n + (n === 1 ? ' vapen' : ' vapen') +
-                         ' som återlämnade?\n\nLigger något kvar återlämnar du det inte här.')) return;
+            if (!confirm(n === 1
+                    ? 'Registrera vapnet som återlämnat?'
+                    : 'Registrera alla ' + n + ' vapen som återlämnade?'
+                      + '\n\nLigger något kvar återlämnar du det inte här.')) return;
             btn.disabled = true;
             var c = await post('/umbraco/surface/FirearmAdmin/CloseVaultEvening',
                                { clubId: clubId, occasionKind: '', occasionId: 0, keepIds: '', day: day });
