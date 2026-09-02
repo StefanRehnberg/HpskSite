@@ -4840,6 +4840,258 @@ A/B: utan den normaliserade jämförelsen faller 5 av 27 test, inklusive prod-da
 - **`window.clubId` är undefined** — värdsidorna deklarerar `const clubId`, som inte hamnar på
   window. Partialerna läser klubb-id ur ett data-attribut renderat serverside.
 
+### Taggningsytan och intygsvägen (2026-09-02, efter prodtest)
+
+Två luckor som bara skarp användning avslöjade, plus steg 7 som var **rapporterat klart men inte
+byggt** — `SetUsage`/`GetMyUsage` anropades från INGEN vy, så en medlem kunde inte ange ett vapen
+alls.
+
+**⚠️ INTYGSVÄGEN LÅG BARA PÅ ETT VAPENKORT, och det gjorde den onåbar för den som behöver den.**
+Ett föreningsintyg gäller oftast ett vapen medlemmen **ännu inte äger** — man söker licens före
+köpet — så förstagångssökaren har per definition en tom vapengarderob. Knappen satt på ett kort som
+inte fanns. `data-fw="intyg"` ligger nu på toppnivå i BÅDA lägena (rubrikraden och det tomma läget),
+och öppnar en fråga i medlemmens språk: *nytt vapen* eller *ett i min garderob*.
+- **Nytt vapen → samma redigeringsmodal som annars**, i `Planerat`-läge, med en "steg 1 av 2"-ruta
+  som förklarar varför vapnet läggs in först. **Ingen andra kopia av vapenformuläret** — det bär
+  åtta fält varav fem krypteras, och en kopia hade glidit isär från originalet.
+- **Kedjan går via `_intygAfterSave`, och flaggan nollställs vid VARJE öppning** av modalen. Annars
+  släpade den och nästa helt vanliga "Lägg till vapen" hade avslutats med en intygsdialog ingen bett
+  om. `openRequest` anropas **efter `load()`** — väljaren byggs ur `state`, och det nya vapnet finns
+  inte där förrän listan hämtats om.
+- **Begär-modalen bär nu en VÄLJARE i stället för ett dolt `firearmId`.** En kodväg för båda
+  ingångarna, och en felklickad rad går att rätta utan att stänga dialogen. `syncReqFirearm` speglar
+  det valda vapnet i vapengrupp och förnyelse-grinden — körs vid öppning OCH vid byte, annars bär
+  formuläret förra vapnets vapengrupp.
+
+**Förklaringsrutan på Min sida.** Klubbens vapenflik bar redan förklaringen åt sitt håll;
+medlemssidan sa bara VEM som kan läsa. `#fwExplain` är sex punkter: att bara medlemmen ser sin
+lista, att klubben läser uppgifterna när ett intyg ska skrivas, att varje uppslagning loggas och var
+loggen finns, att de känsligaste uppgifterna dessutom krypteras, att behörigheten upphör av sig själv
+vid avgång, och att medlemmen bestämmer själv över fälten.
+
+**⚠️⚠️ FÖRSTA UTSÅGAN AV DEN TEXTEN VAR FEL PÅ TRE STÄLLEN, och alla tre var samma misstag: intern
+vokabulär rakt in i text som en medlem läser.** Underkänd av Stefan 2026-09-02. Läs det här innan du
+skriver om något av löftena.
+
+1. **"Vapnets namn, vapengrupp, gren och förfallodatum ligger öppet"** — LAGRINGSformen beskriven
+   som en ÅTKOMSTform. "Öppet" läses som *öppet för vem som helst*. De fälten är okrypterade i
+   databasen men läses av **exakt samma två personer** som resten. Formuleringen är nu "extra skydd
+   på de känsligaste" + varför de andra inte kan krypteras (påminnelsesvepet måste kunna läsa
+   förfallodatumet, intyget måste kunna räkna vapen per förbund) + **"de är lika hemliga ändå"**.
+2. **"När någon lämnar ut dina uppgifter i klartext skrivs en rad i loggen"** — *lämna ut klartext*
+   är krypteringsdesignens ord för "avkryptera och visa". För en medlem betyder *lämna ut* att
+   uppgifterna ges bort till någon tredje part. Loggen handlar om en **uppslagning**, och den som
+   slår upp gör det **för att skriva ett intyg**.
+3. **"Förvaringssätt lagras inte alls"** — svarade på en fråga ingen ställt och drog in inbrottsrisk
+   i en ruta som finns för att minska oro. Borttagen. (Att fältet inte lagras är fortfarande sant
+   och står kvar i det tekniska avsnittet ovan — det hör där, inte hos medlemmen.)
+
+**⚠️ ALLA uppgifter i registret är hemliga.** Kryptering är HUR de känsligaste skyddas, aldrig en
+gräns för vilka som är privata. Skriv aldrig någon av dessa ytor i termer av "öppet" eller "synligt".
+Samma rättelse gjordes i `KnowledgeBase/docs/vapenregister.md` — och i dess FAQ, som påstod att "en
+läckt databas ger ingenting" och därmed motsade avsnittet om de okrypterade fälten. **En inre
+motsägelse i ett integritetslöfte gör att hela löftet slutar gå att lita på.**
+
+**⚠️ Redigeringsmodalens tvådelning hette "Synligt / Krypterat" med underrubriken "Det här kan visas
+på dina resultat och i klubbens listor".** Den var både **falsk** — ingen klubblista bär en medlems
+egna vapen; `/lanevapen` visar KLUBBENS vapen — och motsägelsefull mot löftet två rader ovanför.
+Nu **"Grunduppgifter / Krypterat"**, med Stefans egen formulering *"Det här är vad du ser om du vill
+koppla ett vapen till ett resultat på Min sida"*, och löftet **"Ingen annan medlem ser dina vapen"**
+en gång ovanför båda rutorna. Krypterat-rutans ingress säger bara det som är specifikt för den
+rutan — stod "bara du och klubbens föreningsintygsansvarige kan läsa dem" där antyddes att den övre
+rutan var mindre skyddad.
+
+**⚠️ Förtroenderadens ingress är "Bara du ser dina vapen", inte "Krypterat".** Kryptering är HUR vi
+skyddar; frågan medlemmen faktiskt ställer är VEM som ser. Sviten väntar på den strängen för att
+avgöra att fliken renderat — byt den och sviten hänger i 15 s och rapporterar att fliken inte
+fungerar.
+
+**Verifierat i koden, inte antaget:** `GetMyFirearms` tar ägaren ur den inloggade medlemmen och det
+finns **ingen endpoint som listar en annan medlems vapen** — den föreningsintygsansvarige kommer bara
+åt ett bestämt vapens uppgifter via `RevealDetailsAsync`, grindat och loggat. Varje annan
+`GetForScope` i controllerlagret är `FirearmScope.Club`, alltså klubbens egna vapen. Det är därför
+"bara du ser din lista" får skrivas som ett löfte.
+
+- **⚠️ Öppen när registret är TOMT, kollapsad därefter.** Första besöket är när frågan "vem kan se
+  det här?" avgör om medlemmen skriver in något alls; vid det femtionde är samma text i vägen för
+  vapnen. Rubriken står alltid kvar — göms aldrig.
+- **⚠️ En kollapsad `<details>` renderar inte sitt innehåll**, så `innerText` ger bara rubriken.
+  Fyra påståenden föll på en fullt fungerande ruta innan sviten började klicka upp den. Läs den
+  öppnad — då prövas dessutom att den GÅR att öppna.
+- **Sviten bär tre FRÅNVAROpåståenden** på de underkända formuleringarna ("ligger öppet", "lämnar
+  ut", "förvaringssätt"), tillsammans med två närvaropåståenden på de nya. Ett frånvaropåstående
+  utan ett närvaropåstående på samma text är vakuöst — utan paret vore de gröna på en tom ruta.
+
+**Steg 7: `_FirearmUsageTagger.cshtml`** är taggningsytan, delad av träningsmodalens vapenrad och
+Vapen-kolumnen på Resultat-fliken. Partialen inkluderar `_ShootingClassesBootstrap` och `_HtmlEscape`
+SJÄLV (samma regel som `_HtmlEscape` alltid följt), båda dubbelinkluderingsguardade —
+`_ShootingClassesBootstrap` fick sin guard i den här omgången.
+- **⚠️ Två steg vid sparning av ett träningspass, med nödvändighet.** `FirearmUsage` nycklas på
+  träningsradens id, som inte finns förrän raden är skriven, så taggningen kan inte åka med i
+  sparningen. `RecordTrainingScore` returnerar därför nu `trainingScoreId`. **En misslyckad taggning
+  rapporteras ALDRIG som en misslyckad sparning** — passet ÄR i loggen, och ett felmeddelande som
+  antyder motsatsen får skytten att mata in det en andra gång.
+- **Vapnet är FRIVILLIGT** och raden göms helt när registret saknar vapen. En rullgardin med noll
+  alternativ läser som ett trasigt fält.
+- Fältet ligger **inte** i `TRAINING_DRAFT_FIELDS`: utkastet beskriver ett pass som ännu inte finns,
+  och taggningen hänger på en rad. Väljaren fylls därför EFTER `applyTrainingDraft`.
+
+**⚠️⚠️ NYCKELN FICK EN TREDJE DEL: `FirearmUsage.SourceClass`.** Resultatlistan grupperar en
+officiell tävling per **(tävling, VAPENKLASS)**, så en skytt anmäld i både A1 och C1 har två rader
+med SAMMA tävlings-id. På `(MemberId, SourceKind, SourceId)` skrev en taggning av A-vapnet **tyst
+över** C-vapnets, och skytten kunde aldrig ange mer än ett vapen per tävlingsdag. 19 skyttar på
+dev-tävling 2586 är anmälda i två klasser — inget kantfall. Det är också kodbasens egen etablerade
+nyckelform (*en start är per (skytt, klass)*); `FirearmUsage` var den enda ytan som motsade den.
+- **NULL för en träningsrad**, med flit: `TrainingScores.Id` är redan ett tillfälle. SQL Server
+  behandlar NULL som LIKA i ett unikt index, så spärren håller ändå och inget filtrerat index behövs.
+  `NormaliseClass` **tvingar** null för `training` oavsett vad anroparen skickar — annars kunde samma
+  pass få två rader (en med klass, en utan) beroende på vilken yta som taggade det.
+- **⚠️ Klassen måste ligga i WHERE i BÅDA riktningarna.** Utan den i DELETE:n raderar en omtaggning
+  av A-vapnet också C-vapnets rad. Och NULL-fallet måste skrivas ut — `SourceClass = NULL` matchar
+  ingenting, så en träningsrad hade aldrig gått att tagga om.
+- **Lagras som visningsNAMNET** (`ShootingClasses.ToCanonicalName`), samma konvention som
+  resultatraderna. **`Key()` gemenar och foldar** i stället; klienten speglar den via
+  `window.getShootingClassName(...).toLowerCase()`. Håll de två i takt.
+- **⚠️ Id-vs-Namn-fällan gäller här också.** `C_Vet_Y` och `C Vet Y` är IDENTISKA för C1/A1 och
+  olika för varje klass med ändelse, så en rak jämförelse ser korrekt ut i all testning och delar
+  just veteran-, dam-, junior- och optikklasserna i två tillfällen.
+
+**`GetMyUsage` bär numera BÅDE de valbara vapnen och de gjorda taggningarna** — de behövs alltid
+tillsammans, och en väljare utan de gjorda valen visar tomt på rader som redan är taggade. Listan
+bär bara id, alias och vapengrupp: **ingen avkryptering, ingen loggrad.** Sviten har ett
+kontrollprov på just det.
+
+**Operatörssteg:** `Migrations/add-sourceclass-to-firearm-usage.sql` — **körd i dev OCH i prod
+2026-09-02.** ⚠️ Måste köras FÖRE deployen: NPoco genererar `SET … SourceClass` för varje
+insert, så utan kolumnen renderas taggningsytan men varje sparning faller.
+Följdmigrering — `create-firearm-usage-table.sql` måste vara körd först.
+
+### Fas 3: föreningsintyget hämtar vapenuppgifterna (2026-09-02)
+
+Registret kunde svara på fabrikat/modell/kaliber/piplängd och på "antal vapen sedan tidigare" per
+förbund, men utfärdandeformuläret hämtade det inte — utfärdaren skrev av uppgifterna för hand ur ett
+register som redan hade dem.
+
+**TVÅ endpoints, och delningen är hela poängen.**
+`Foreningsintyg/GetIntygFirearmRequests` säger bara att en förfrågan finns (vapen-id, alias, förbund)
+och skriver **ingen loggrad**. `Foreningsintyg/FetchIntygFirearmData` hämtar klartexten och **loggas**.
+Bakades uppgifterna in i det första skulle medlemmens läslogg fyllas av rader från varje öppnat
+formulär — och en loggrad ska betyda att någon faktiskt tittade. Därför är hämtningen ett klick, inte
+en sidoeffekt av att formuläret renderas.
+
+**⚠️ TVÅ GRINDAR, OCH DEN ANDRA ÄR DEN SOM GÄLLER.** `DenyIfCannotReadMemberAsync` släpper in
+medlemmen själv, klubbadmin och sajtadmin — den är grinden för intygsUNDERLAGET. Vapenuppgifterna
+kräver mer: `FirearmService.RevealDetailsAsync` kräver gruppen `Foreningsintygsansvarig_{klubb}` OCH
+ett aktivt styrelseuppdrag i samma klubb. **En klubbadmin som inte är utsedd passerar den första och
+nekas av den andra — avsiktligt.** Ersätt aldrig det andra anropet med en egen kontroll.
+
+**⚠️ INGEN LISTNING AV EN MEDLEMS VAPEN FINNS, med flit.** Utfärdaren kommer bara åt det vapen en
+förfrågan pekar på. Löftet på Min sida är *"bara du ser din lista"*, och en endpoint som räknade upp
+innehavet hade gjort det löftet falskt. Det är också verifierat i koden: `GetMyFirearms` tar ägaren ur
+den inloggade medlemmen, och varje annan `GetForScope` i controllerlagret är `FirearmScope.Club`.
+
+**⚠️ `excludeFirearmId` är inte en optimering.** Blankettens rad är "sökanden har **sedan tidigare**
+___ st skjutvapen", så vapnet intyget gäller får inte räknas. Det spelar roll vid varje FÖRNYELSE,
+där vapnet redan innehas och annars hade räknats som ett av de tidigare.
+
+**⚠️ FÖRBUNDSFÄLTET SAKNADE INPUT HELT** fram till nu, trots att `Forbund` är postbart med SPSF som
+default. Formuläret kunde alltså aldrig intyga för en annan gren — och allvarligare: antalet ovan är
+**förbundsskopat**, så utan väljaren kunde antalet vara räknat i ett förbund dokumentet inte namnger.
+En motsägelse på en handling till en myndighet. `ForeningsintygDocument.ForbundAnnat` är nu en
+namngiven konstant, så ingen yta behöver läsa "Annat förbund" som *sista posten i `AllaForbund`* —
+en ordningsberoende uppslagning som slutar stämma tyst den dag listan sorteras.
+
+**⚠️ `selected="@(bool)"` undveks medvetet** i förbundsväljaren, till förmån för två explicita grenar.
+Razors hantering av booleska attribut är lätt att minnas fel, och renderas `False` som ett närvarande
+attribut markeras VARJE option och den sista vinner — alltså tyst fel förbund.
+
+Hämtningen fyller de fyra vapenfälten rakt av, men **förbund, vapengrupp och antal bara när de är
+tomma respektive alltid för förbundet** (se kommentaren i vyn) — utfärdaren kan ha rättat för hand,
+och fälten förblir INTYGSFÄLT som hen skriver under. Registret är inte en myndighetskälla.
+
+### Klubbvapnens egna licensuppgifter (2026-09-02)
+
+**Klubbvapen är licensbelagda precis som medlemmarnas och kan behöva nya licenser sökta**, men
+formuläret bar bara nummer, namn, vapengrupp, typ, status och lånebart. Rapporterat från prod.
+Klubbformuläret har nu **samma fältuppsättning som medlemmens**, med samma tvådelning och samma
+"hämta för att ändra"-mönster.
+
+- **Skillnaden mot medlemsvapen är VEM som får läsa, inte vad som lagras.**
+  `ResolveClubWeaponAccessAsync` = klubbadmin för vapnets klubb. Klubbvapen är föreningens egendom,
+  inte personuppgifter, så ingen föreningsintygsansvarig behövs. Läsningen loggas ändå.
+- `FirearmAdmin/RevealClubFirearmDetails` går genom `RevealDetailsAsync` — grinden OCH loggen i samma
+  metod. **⚠️ Ägandet prövas mot RADEN**: utan det kunde en klubbadmin läsa en annan klubbs vapen,
+  eller ett MEDLEMSvapen, genom att posta sitt eget `clubId` och ett främmande `firearmId`.
+- **Förfallodatumet står i LISTAN**, inte bara i formuläret, med samma trösklar som medlemskorten
+  (90/30/förfallen) och en sammanfattande varning ovanför tabellen. Ingen enskild person får en
+  påminnelse för föreningens vapen, så synligheten här ÄR varningen. Push för klubbvapen är
+  medvetet inte byggt — se backloggen.
+
+**⚠️⚠️ `writeDetails` MÅSTE VARA EN STRÄNG, ALDRIG EN `bool` — och felet var TYST.** ASP.NET Cores
+bool-bindning godtar bara `"true"`/`"false"`; **`"1"` konverteras INTE utan faller tillbaka på
+default**. Klubbformuläret skickade `"1"` (samma form som medlemsformuläret, vars DTO deklarerar
+`string? WriteDetails` och jämför med `"1"`), parametern var deklarerad `bool`, och följden var att
+de krypterade uppgifterna **aldrig skrevs medan sparningen rapporterade `success: true`**. Hittat av
+sviten, inte av kompilatorn. `IsTrue` godtar nu `"1"`, `"true"` och `"on"` så ingen framtida anropare
+fastnar från något av hållen.
+
+**⚠️ RELATIONERNA SKRIVS ALLTID OM HELT.** `FirearmService.Update` gör `DELETE` + `WriteRelations`,
+och `WriteRelations` behandlar `null` som en tom lista — så **`null` betyder RENSA, aldrig "rör
+inte"**. Det är motsatsen till hur `Details` fungerar, och skillnaden är lätt att läsa fel. Följden:
+klubbformuläret måste skicka BÅDA listorna vid varje sparning, även tomma, annars tappar vapnet sina
+förbund och grenar vid nästa statusändring — och förbundet är vad blankettens "antal vapen sedan
+tidigare" räknas i. Sviten assertar både att de överlever en statusändring och att ett tomt fält
+verkligen rensar (kontrollprov i andra riktningen).
+
+### ⚠️ Vapengruppväljaren måste bära magnumKLASSERNA (2026-09-02)
+
+Rapporterat från prodtest: väljarna innehöll bara `Enum.GetNames<WeaponClass>()`, alltså
+gruppkoderna A, A_Opt, A_M, A_P, A_G, B, C, R, M, L.
+
+**⚠️ MAGNUM ÄR INTE SOM DE ANDRA GRUPPERNA, och det är hela poängen.** För A/B/C/R/L beskriver
+gruppkoden vapnet fullständigt (C = kal .22) och siffran efteråt är **skyttens kompetensnivå** —
+C1/C2/C3 är samma pistol, olika skytt. Men M1–M9 är **olika vapen**: SA respektive DA revolver
+41-44, SA/DA 357, fri 9mm-455, pistol 9mm-455, revolver 357-44, revolver 38-45. Gruppkoden `M`
+identifierar därför **ingenting** — en magnumlicens gäller en bestämd revolver, och M1 och M2 är två
+skilda vapen. Utan klasserna i väljaren kunde ett magnumvapen inte beskrivas alls.
+
+**`Models/Firearms/FirearmWeaponGroups` är den ENDA källan** till vad fältet får bära. Listan låg i
+tre kopior (medlemscontrollern, klubbcontrollern, validatorn i `FirearmService`), och validatorn
+använde `Enum.TryParse<WeaponClass>` — som **avvisar `"M2"`**. Hade jag bara utökat väljarna hade de
+erbjudit ett värde som inte kunde sparas.
+- **Magnumklasserna hämtas ur `ShootingClasses`**, aldrig en handskriven M1..M9-lista. Läggs en
+  magnumklass till i registret dyker den upp av sig själv; ett strukturellt test svepar registret
+  och faller om den inte gör det.
+- **Alternativen är `{Value, Label}`.** Magnumraderna bär sin beskrivning ("M2 — DA Revolver 41-44
+  Magnum") eftersom koden ensam inte säger vilket vapen det är. Gruppkoderna har koden som etikett —
+  en påhittad beskrivning på "C" vore fel, och det finns ett kontrollprov på det.
+- **⚠️ En kompetensnivå AVVISAS medvetet.** `IsValid("C1")` är `false`: nivån ändras när skytten
+  avancerar, vapnet gör det inte. Att släppa in den i ett VAPENfält vore ett kategorifel. Magnum är
+  undantaget just för att M1/M2 verkligen är skilda vapen.
+
+**⚠️ GRUPPEN HÄRLEDS, LAGRAS INTE TVÅ GÅNGER.** `FirearmWeaponGroups.GroupCodeOf` svarar `"M"` för
+`"M2"` och `"C"` för `"C"`. Det är vad som håller kopplingen till `MemberActivityEntry.WeaponGroups`
+hel — **jämför aldrig `Firearm.WeaponClass` literalt mot en gruppkod**, för då slutar magnumvapnen
+matcha tyst. (Gruppkoden kontrolleras FÖRST i metoden: `ShootingClasses.GetWeaponClassCode` svarar
+tomt på en ren gruppkod, eftersom den slår upp klasser och inte grupper.)
+
+Nuvarande läsare av fältet är display och förifyllnad — ingen jämför literalt, kontrollerat 2026-09-02.
+Intygsförfrågans `vapengrupp` blir dessutom bättre av ändringen: "M2" säger vad "M" inte kan.
+
+**33 enhetstest** i `FirearmWeaponGroupsTests`. **A/B: 8 av 33 faller** när magnumklasserna tas ur
+listan.
+
+### ⚠️ Webbläsaren fyllde i medlemmens e-postadress i "Namn" (2026-09-02)
+
+Rapporterat på klubbvapenmodalen. Ingen av de två vapenvyerna hade ett enda `autocomplete`-attribut,
+och Chrome läser etiketten **"Namn"** som ett profilfält och erbjuder adressuppgifter — e-post
+inkluderat. Värre vore autofyll i tillverknings- eller licensnummer.
+
+Varje fritextfält i båda modalerna bär nu `autocomplete="off"` **och ett eget `name`**.
+**⚠️ `autocomplete="off"` är en stark uppmaning, inte en garanti** — heuristiken matchar på
+`name`/`id`/`placeholder`/etikett, så det egna namnet är den andra halvan av fixen. Sviten assertar
+attributet på både namn- och licensnummerfältet, plus att namnfältet är tomt i ett nytt formulär.
+
 ### Fixat på vägen (orelaterat, men i kod jag ändrade)
 
 **⚠️ `Styrelse.cshtml` byggde `removeRole(id, 'namn', 'titel')` som JS-literaler i ett onclick**,
@@ -4854,7 +5106,11 @@ heltal och slår upp resten ur `SV_ROLE_BY_ID`.
 Fyra migreringar, **i den ordningen** (de tre senare har FK mot `Firearm`):
 `create-firearm-key-vault-table.sql` → `create-firearm-tables.sql` →
 `create-firearm-reminder-table.sql` → `create-foreningsintyg-request-table.sql` →
-`create-firearm-usage-table.sql`.
+`create-firearm-usage-table.sql` → `add-sourceclass-to-firearm-usage.sql`.
+
+**Fas 3 och klubbvapnens licensuppgifter kräver INGEN ny migrering** — kolumnerna
+(`LicenseExpiresOn`, `FirearmFederation`, `FirearmDiscipline`) och klubbvalvet fanns redan; det var
+formuläret och sparvägen som saknades.
 
 Plus `Firearm:MasterKeys` i `appsettings.Production.json` **med dokumenterad backup**. Adds C# →
 full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod. Fildeploy av
@@ -4863,11 +5119,24 @@ full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod. Fildeploy av
 
 ### Verifiering
 
-**87 enhetstest**: `FirearmCryptoTests` 35 · `FirearmAccessRulesTests` 25 · `ActivityDisciplineTests`
-27. Tre A/B-mutationer, alla med rätt utfall: AAD borttagen → 4 röda · kryptering avstängd → 4 röda ·
-båda behörighetskonjunktionerna borttagna → 4 röda · disciplinnormaliseringen borttagen → 5 röda.
+**153 enhetstest**: `FirearmCryptoTests` 35 · `FirearmAccessRulesTests` 25 ·
+`ActivityDisciplineTests` 27 · `FirearmUsageKeyTests` 13 · `FirearmBookingWindowTests` 20 ·
+`FirearmWeaponGroupsTests` 33.
+A/B-mutationer, alla med rätt utfall: AAD borttagen → 4 röda · kryptering avstängd → 4 röda · båda
+behörighetskonjunktionerna borttagna → 4 röda · disciplinnormaliseringen borttagen → 5 röda ·
+klassen ur taggningsnyckeln → 4 röda · Id/Namn-foldningen ersatt av rak jämförelse → 4 röda ·
+kant-i-kant förbjudet → 1 röd · bakvänt fönster tystat till hela dagen → 2 röda.
 
-**`hpsk-verify/vapen-verify.mjs` — 44/44 gröna** (kört 2026-09-02), täcker steg 4–8 end-to-end.
+**`hpsk-verify/vapen-verify.mjs` — 209/209 gröna** (kört 2026-09-02, två körningar i rad), täcker
+steg 4–8, punkt 6, fas 3 och klubbvapnens licensuppgifter end-to-end — inklusive taggningsytan hela
+vägen ner i databasen, förklaringsrutan på Min sida, och klubbvapenformuläret i DOM:en (vyerna är
+runtime-kompilerade, så det ÄR kompileringskontrollen för klubbadminsidan).
+**A/B mot en byggd mutation: 6 av 123 föll** (klassen ur taggningsnyckeln + fönsterdivergensen).
+**Och sviten fann ett riktigt fel den inte var skriven för:** `writeDetails` som `bool` skrev aldrig
+klubbvapnets krypterade uppgifter medan sparningen rapporterade lyckat — 6 påståenden röda på den
+koden.
+⚠️ Sviten lämnar **noll** rader i `FirearmUsage` — taggningarna städas explicit, eftersom
+`RemoveFirearm` GÖMMER (`IsActive=0`) och CASCADE därför aldrig fyrar.
 **`vapen-rawdb.sql`** bär rå-DB-påståendet och gick igenom mot svitens egen fixtur: alla tio nålar
 0 i klartext, `ControlProbeFound = 1`, blob 236 byte.
 
@@ -4910,6 +5179,28 @@ Kedjans spec sa `FromUtc`/`ToUtc`. Det är **rättat**: hela kodbasen arbetar i 
 (`DateTime.Now`, `competitionDate`, skjutlagens `"HH:mm"`). UTC just i den här tabellen hade gett fel
 svar vid varje jämförelse mot ett tävlingsdatum — och felet hade varit en timme, alltså precis stort
 nog att missas.
+
+### ⚠️ Fönsterregeln bor i `FirearmBookingWindow` — INTE i två kopior (utbrutet 2026-09-02)
+
+Regeln "tom sluttid = hela dagen" låg i två handskrivna kopior — `FirearmBookingService.NormaliseWindow`
+och `LoanWeaponApiController.TryWindow` — och de **hade redan glidit isär**. På ett BAKVÄNT fönster
+(`14:00–10:00`) tolkade tillgänglighetslistan det som hela dagen och visade vapnet som **ledigt**,
+medan bokningen vägrade samma fönster med *"Bokningen måste sluta efter att den börjar"*. Alltså en
+rad som ser bokbar ut och nekas i nästa klick.
+
+`Models/Firearms/FirearmBookingWindow` äger nu `TryNormalise`, `Label`, `Overlaps` och båda taken
+(365 dagar framåt, 14 dagars längsta bokning). Rena predikat utan databas, av samma skäl som
+`FirearmAccessRules`: annars är den enda regel hela funktionen vilar på den enda som inte går att
+testa. `now` är injicerbart så gränserna går att pröva utan att flytta systemklockan.
+- **En sluttid FÖRE starttiden är ett FEL, inte hela dagen.** Att tysta det vore generöst mot en
+  felskrivning och samtidigt en tystnad om något medlemmen faktiskt menade — hen skrev två klockslag.
+- **`TryWindow` returnerar nu SKÄLET i `label`**, så listan kan säga varför i stället för ett
+  generellt "ange ett giltigt datum". Sviten assertar att båda ytorna ger **samma** avslagsskäl.
+- **⚠️ `Overlaps` finns i BÅDE C# och SQL, och det är avsiktligt** — inget unikt index kan uttrycka
+  "överlappar i tid", så spärren är en läsning inne i transaktionen. SQL-satserna i `Conflicts`,
+  `Create` och `BookedFirearmIds` måste spegla funktionen exakt (`NOT (ToTime <= @from OR FromTime >= @to)`).
+  Ändra aldrig den ena utan den andra. `LoanWeaponApiController`s C#-filter för "bokat av dig" gick
+  också på en egen kopia och anropar nu funktionen.
 
 ### ⚠️ Krockkontrollen läser INNE i transaktionen, med UPDLOCK/HOLDLOCK
 
@@ -4979,8 +5270,9 @@ med "inget publikt bokningssystem": klubbens egna vapen till klubbens egna medle
 - **`Service` och `Utgallrat` blockerar ny bokning** oavsett kalender — det är ett fysiskt läge.
   `Utlanat` gör det inte: det är en grov administrativ flagga, och den verkliga tillgängligheten är
   bokningskalendern.
-- **Tak:** 365 dagar framåt, högst 14 dagar per bokning. Utan det senare kan ett lånevapen beläggas
-  en hel månad av en person.
+- **Tak:** 365 dagar framåt, högst 14 dagar per bokning — konstanterna bor i
+  `FirearmBookingWindow`, inte i tjänsten. Utan det senare kan ett lånevapen beläggas en hel månad
+  av en person.
 - **Krockmeddelandet namnger tiden.** "Vapnet är bokat" utan tid lämnar medlemmen utan nästa steg.
 - **Individmodell, ingen pool** (Stefans beslut). Poolvyn "2 av 5 lediga" byggs genom att gruppera i
   gränssnittet — utlämning av ETT bestämt vapen är omöjlig i en poolmodell.

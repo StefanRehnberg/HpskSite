@@ -9,7 +9,9 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.Models.Firearms;
 using HpskSite.Services;
+using HpskSite.Services.Firearms;
 
 namespace HpskSite.Controllers
 {
@@ -23,6 +25,8 @@ namespace HpskSite.Controllers
         private readonly ForeningsintygDocumentService _intygDocuments;
         private readonly MemberClubService _memberClubs;
         private readonly MemberActivitySummaryService _activitySummary;
+        private readonly FirearmService _firearms;
+        private readonly ForeningsintygRequestService _firearmRequests;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
@@ -39,6 +43,8 @@ namespace HpskSite.Controllers
             ForeningsintygDocumentService intygDocuments,
             MemberClubService memberClubs,
             MemberActivitySummaryService activitySummary,
+            FirearmService firearms,
+            ForeningsintygRequestService firearmRequests,
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
             IMemberManager memberManager,
@@ -49,6 +55,8 @@ namespace HpskSite.Controllers
             _intygDocuments = intygDocuments;
             _memberClubs = memberClubs;
             _activitySummary = activitySummary;
+            _firearms = firearms;
+            _firearmRequests = firearmRequests;
             _authorizationService = authorizationService;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -531,6 +539,121 @@ namespace HpskSite.Controllers
             // ⚠️ primaryClubId är en STRÄNG-egenskap. GetValue<int> konverterar inte och ger tyst 0.
             int.TryParse(member.GetValue<string>("primaryClubId") ?? "", out int clubId);
             return clubId;
+        }
+
+        // ── Fas 3: vapenuppgifterna in på blanketten ─────────────────────────────────────────
+
+        /// <summary>
+        /// Öppna intygsförfrågningar för en medlem, som utfärdaren kan hämta vapenuppgifter ur.
+        ///
+        /// <para><b>⚠️ BÄR INGA VAPENUPPGIFTER — bara att förfrågan finns.</b> Raden säger vilket
+        /// vapen den pekar på (id + alias) och vilket förbund den gäller. Klartexten kräver ett
+        /// eget, loggat anrop till <see cref="FetchIntygFirearmData"/>. Vore uppgifterna med här
+        /// skulle en läsning ske varje gång formuläret öppnades, utan att någon bett om den, och
+        /// medlemmens läslogg skulle fyllas av rader som inte var riktiga uppslagningar.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetIntygFirearmRequests(int memberId)
+        {
+            var denied = await DenyIfCannotReadMemberAsync(memberId);
+            if (denied != null) return denied;
+
+            try
+            {
+                var open = _firearmRequests.GetForMember(memberId)
+                    .Where(r => r.IsOpen)
+                    .OrderByDescending(r => r.CreatedAt)
+                    .Select(r => new
+                    {
+                        r.Id,
+                        r.FirearmId,
+                        r.FirearmAlias,
+                        kind = ForeningsintygRequestKind.Label(r.Kind),
+                        r.Forbund,
+                        r.VapengruppSkytteform,
+                        createdAt = r.CreatedAt.ToString("yyyy-MM-dd"),
+                    })
+                    .ToList();
+
+                return Json(new { success = true, requests = open });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetIntygFirearmRequests failed for member {MemberId}", memberId);
+                return Json(new { success = false, message = "Kunde inte läsa förfrågningarna." });
+            }
+        }
+
+        /// <summary>
+        /// Hämtar ett vapens uppgifter till utfärdandeformuläret, ur medlemmens krypterade register.
+        ///
+        /// <para><b>⚠️ TVÅ GRINDAR, OCH DEN ANDRA ÄR DEN SOM GÄLLER.</b>
+        /// <see cref="DenyIfCannotReadMemberAsync"/> släpper in medlemmen själv, klubbadmin och
+        /// sajtadmin — den är grinden för att se INTYGSUNDERLAGET. Vapenuppgifterna kräver mer:
+        /// <see cref="FirearmService.RevealDetailsAsync"/> kräver gruppen
+        /// <c>Foreningsintygsansvarig_{klubb}</c> OCH ett aktivt styrelseuppdrag i samma klubb.
+        /// En klubbadmin som inte är utsedd passerar alltså den första grinden och nekas av den
+        /// andra — <b>det är avsiktligt</b>. Att administrera behörigheten är inte samma sak som att
+        /// läsa. Ersätt aldrig det andra anropet med en egen kontroll.</para>
+        ///
+        /// <para><b>⚠️ Uppslagningen LOGGAS</b>, i samma metod som lämnar ut klartexten. Därför är
+        /// det här en handling utfärdaren utför med ett klick, inte något som sker när formuläret
+        /// öppnas: en loggrad ska betyda att någon faktiskt tittade.</para>
+        ///
+        /// <para><b>⚠️ Ingen listning av en medlems vapen finns, med flit.</b> Utfärdaren kommer
+        /// bara åt det vapen en förfrågan pekar på. Löftet på medlemmens sida är "bara du ser din
+        /// lista", och en endpoint som räknade upp innehavet hade gjort det löftet falskt.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> FetchIntygFirearmData(int memberId, int requestId)
+        {
+            var denied = await DenyIfCannotReadMemberAsync(memberId);
+            if (denied != null) return denied;
+
+            var request = _firearmRequests.GetById(requestId);
+            if (request == null)
+                return Json(new { success = false, message = "Förfrågan hittades inte." });
+
+            // ⚠️ Förfrågan måste tillhöra den medlem formuläret står på. Utan kontrollen kunde en
+            // klubbadmin skicka ett godtyckligt requestId och dra ut en annan medlems vapen.
+            if (request.MemberId != memberId)
+                return Json(new { success = false, message = "Förfrågan gäller en annan medlem." });
+
+            var firearm = _firearms.GetById(request.FirearmId);
+            if (firearm == null)
+                return Json(new { success = false, message = "Vapnet finns inte längre i registret." });
+
+            var note = $"Föreningsintyg, förfrågan {request.Id}";
+            var (details, error) = await _firearms.RevealDetailsAsync(request.FirearmId, note);
+            if (error != null) return Json(new { success = false, message = error });
+
+            // "Sökanden har sedan tidigare ___ st skjutvapen ... i den verksamhet som bedrivs av det
+            // förbund som anges ovan." FÖRBUNDSSKOPAT, och ⚠️ SEDAN TIDIGARE: vapnet intyget gäller
+            // räknas inte med. Det spelar roll vid en FÖRNYELSE, där vapnet redan innehas och annars
+            // hade räknats som ett av de tidigare.
+            var antalSedanTidigare = _firearms.CountHeldInFederation(
+                memberId, request.Forbund, excludeFirearmId: request.FirearmId);
+
+            return Json(new
+            {
+                success = true,
+                forbund = request.Forbund,
+                vapengrupp = string.IsNullOrWhiteSpace(request.VapengruppSkytteform)
+                    ? firearm.WeaponClass
+                    : request.VapengruppSkytteform,
+                vapentyp = firearm.Vapentyp ?? "",
+                annanVapentyp = firearm.AnnanVapentyp ?? "",
+                fabrikat = details?.Fabrikat ?? "",
+                modell = details?.Modell ?? "",
+                kaliber = details?.Kaliber ?? "",
+                piplangd = details?.Piplangd ?? "",
+                antalSedanTidigare,
+                // Så gränssnittet kan säga att uppslagningen syns för medlemmen — utfärdaren ska
+                // inte behöva gissa att handlingen är spårad.
+                message = "Uppgifterna är hämtade ur medlemmens register. Uppslagningen syns i "
+                          + "medlemmens läslogg.",
+            });
         }
 
         /// <summary>

@@ -72,7 +72,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Du kan bara se lånevapen i en klubb du är medlem i." });
 
             if (!TryWindow(from, to, out var winFrom, out var winTo, out var label))
-                return Json(new { success = false, message = "Ange ett giltigt datum." });
+                return Json(new { success = false, message = label });
 
             try
             {
@@ -88,7 +88,8 @@ namespace HpskSite.Controllers
                 // Vem som bokat spelar roll för TEXTEN: "bokat av dig" är ett annat svar än "bokat",
                 // och utan skillnaden ser medlemmen sin egen bokning som ett hinder.
                 var mine = _bookings.GetForMember(memberId)
-                    .Where(b => b.IsActive && !(b.ToTime <= winFrom || b.FromTime >= winTo))
+                    .Where(b => b.IsActive &&
+                                FirearmBookingWindow.Overlaps(b.FromTime, b.ToTime, winFrom, winTo))
                     .Select(b => b.FirearmId)
                     .ToHashSet();
 
@@ -130,23 +131,42 @@ namespace HpskSite.Controllers
         /// hade listan visat tillgänglighet för ett annat fönster än bokningen sedan tar, skulle en
         /// "ledig" rad kunna nekas i nästa klick.</para>
         /// </summary>
-        private static bool TryWindow(string? from, string? to, out DateTime f, out DateTime t, out string label)
+        /// <summary>
+        /// Tolkar fönstret som listan ska svara för.
+        ///
+        /// <para><b>⚠️ Delar regeln med bokningen</b> via
+        /// <see cref="FirearmBookingWindow.TryNormalise"/>. Metoden bär tidigare en egen kopia som
+        /// tolkade ett bakvänt fönster (14:00–10:00) som "hela dagen" medan bokningen vägrade det —
+        /// alltsa ett vapen som visades ledigt och nekades i nästa klick. Listan får aldrig svara
+        /// för ett annat fönster än det bokningen sedan prövar.</para>
+        ///
+        /// <para>Ett ogiltigt fönster ger <c>false</c> och ett meddelande i <paramref name="label"/>,
+        /// så anroparen kan säga VARFÖR i stället för ett generellt "ange ett giltigt datum".</para>
+        /// </summary>
+        private static bool TryWindow(
+            string? from, string? to, out DateTime f, out DateTime t, out string label)
         {
             f = default; t = default; label = "";
-            if (!DateTime.TryParse((from ?? "").Trim(), out f)) return false;
 
-            if (!DateTime.TryParse((to ?? "").Trim(), out t) || t <= f)
+            if (!DateTime.TryParse((from ?? "").Trim(), out var rawFrom))
             {
-                f = f.Date;
-                t = f.AddDays(1).AddSeconds(-1);
-                label = $"{f:yyyy-MM-dd} (hela dagen)";
-                return true;
+                label = "Ange ett giltigt datum.";
+                return false;
             }
 
-            label = f.Date == t.Date
-                ? $"{f:yyyy-MM-dd} {f:HH\\:mm}–{t:HH\\:mm}"
-                : $"{f:yyyy-MM-dd HH\\:mm} – {t:yyyy-MM-dd HH\\:mm}";
+            // En otolkbar sluttid är inte ett fel — fältet är frivilligt och betyder "hela dagen".
+            DateTime.TryParse((to ?? "").Trim(), out var rawTo);
+
+            if (!FirearmBookingWindow.TryNormalise(
+                    rawFrom, rawTo, DateTime.Now, out f, out t, out var error))
+            {
+                label = error ?? "Ange ett giltigt datum.";
+                return false;
+            }
+
+            label = FirearmBookingWindow.Label(f, t);
             return true;
         }
+
     }
 }

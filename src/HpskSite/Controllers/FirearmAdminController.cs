@@ -207,16 +207,34 @@ namespace HpskSite.Controllers
                     success = true,
                     options = new
                     {
-                        weaponClasses = Enum.GetNames<HpskSite.Models.WeaponClass>(),
+                        // ⚠️ Samma källa som medlemsformuläret. Två handskrivna listor hade
+                        // glidit isär, och klubbvapnen är licensbelagda på samma sätt.
+                        weaponClasses = FirearmWeaponGroups.Options
+                            .Select(o => new { id = o.Value, label = o.Label }),
                         vapentyper = HpskSite.Models.ForeningsintygDocument.AllaVapentyper,
                         statuses = FirearmStatus.All,
+                        // ⚠️ Ur konstanterna, aldrig ur en lista i vyn — samma regel som
+                        // medlemsformuläret. Annars kan klubbformuläret erbjuda ett förbund som
+                        // intygets ruta inte känner igen.
+                        forbund = HpskSite.Models.ForeningsintygDocument.AllaForbund,
+                        disciplines = HpskSite.Models.ActivityDiscipline.All
+                            .Select(d => new { id = d, label = HpskSite.Models.ActivityDiscipline.Label(d) }),
                     },
                     firearms = rows.Select(f => new
                     {
-                        f.Id, f.Alias, f.WeaponClass, f.Vapentyp,
+                        f.Id, f.Alias, f.WeaponClass, f.Vapentyp, f.AnnanVapentyp,
                         number = f.ClubWeaponNumber, f.IsLoanable,
                         status = string.IsNullOrWhiteSpace(f.Status) ? FirearmStatus.Tillgangligt : f.Status,
                         hasDetails = f.HasProtectedDetails,
+                        // Klubbvapen är licensbelagda precis som medlemmarnas, och en licens som
+                        // förfaller obemärkt tar vapnet ur bruk. Klartext, så listan kan färga
+                        // raden utan att avkryptera något.
+                        licenseExpiresOn = f.LicenseExpiresOn?.ToString("yyyy-MM-dd"),
+                        daysUntilExpiry = f.LicenseExpiresOn.HasValue
+                            ? (int?)(f.LicenseExpiresOn.Value.Date - DateTime.Now.Date).TotalDays
+                            : null,
+                        federations = f.Federations,
+                        disciplines = f.Disciplines,
                     }),
                 });
             }
@@ -232,7 +250,12 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveClubFirearm(
             int clubId, int id, string? alias, string? weaponClass, string? vapentyp,
-            int? number, bool isLoanable, string? status)
+            int? number, bool isLoanable, string? status,
+            string? annanVapentyp, string? licenseExpiresOn, string? federations, string? disciplines,
+            string? writeDetails = null,
+            string? fabrikat = null, string? modell = null, string? kaliber = null,
+            string? piplangd = null, string? tillverkningsnummer = null,
+            string? licensnummer = null, string? licensdatum = null, string? anteckning = null)
         {
             if (clubId <= 0) return Json(new { success = false, message = "Ogiltig klubb" });
             if (!await _adminAuth.IsClubAdminForClub(clubId))
@@ -244,13 +267,32 @@ namespace HpskSite.Controllers
                 Alias = alias,
                 WeaponClass = weaponClass,
                 Vapentyp = vapentyp,
+                AnnanVapentyp = annanVapentyp,
                 AcquisitionStatus = FirearmAcquisitionStatus.Innehas,
+                LicenseExpiresOn = ParseDate(licenseExpiresOn),
                 ClubWeaponNumber = number,
                 IsLoanable = isLoanable,
                 Status = status,
-                // ⚠️ Null = rör inte de skyddade uppgifterna. Klubbytan skriver dem inte i det här
-                // steget — de är till för klubbens egen licensbokföring och kommer senare.
-                Details = null,
+                Federations = SplitList(federations),
+                Disciplines = SplitList(disciplines),
+
+                // ⚠️ NULL = "rör inte de skyddade uppgifterna", och det är inte samma sak som att
+                // spara dem tomma. Formuläret hämtar dem inte automatiskt (en avkryptering ska vara
+                // en handling, och den loggas), så en sparning utan hämtning måste lämna dem i fred
+                // — annars raderar varje statusändring klubbens licensuppgifter.
+                Details = IsTrue(writeDetails)
+                    ? new FirearmDetails
+                    {
+                        Fabrikat = (fabrikat ?? "").Trim(),
+                        Modell = (modell ?? "").Trim(),
+                        Kaliber = (kaliber ?? "").Trim(),
+                        Piplangd = (piplangd ?? "").Trim(),
+                        Tillverkningsnummer = (tillverkningsnummer ?? "").Trim(),
+                        Licensnummer = (licensnummer ?? "").Trim(),
+                        Licensdatum = (licensdatum ?? "").Trim(),
+                        Anteckning = (anteckning ?? "").Trim(),
+                    }
+                    : null,
             };
 
             if (id > 0)
@@ -273,6 +315,96 @@ namespace HpskSite.Controllers
                 ? Json(new { success = createError is null, firearmId = newId, message = createError ?? "Vapnet är sparat." })
                 : Json(new { success = false, message = createError ?? "Kunde inte spara." });
         }
+
+        /// <summary>
+        /// Lämnar ut ett KLUBBVAPENS skyddade uppgifter till klubbens formulär.
+        ///
+        /// <para><b>⚠️ Går genom <see cref="FirearmService.RevealDetailsAsync"/>, inte förbi den.</b>
+        /// Där sitter grinden (<c>ResolveClubWeaponAccessAsync</c> = klubbadmin för vapnets klubb)
+        /// OCH loggskrivningen, i samma metod. En controller som avkrypterade själv skulle kringgå
+        /// båda.</para>
+        ///
+        /// <para><b>Klubbvapen kräver ingen särskild behörighet utöver klubbadmin</b> — de är
+        /// föreningens egendom, inte personuppgifter. Det är därför den här grinden är bredare än
+        /// medlemsvapnens, som kräver föreningsintygsansvarig med aktivt styrelseuppdrag.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RevealClubFirearmDetails(int clubId, int firearmId)
+        {
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltig klubb" });
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var row = _firearms.GetById(firearmId);
+            if (row is null) return Json(new { success = false, message = "Vapnet hittades inte" });
+
+            // ⚠️ Prövas mot RADEN. Utan det kunde en klubbadmin läsa en annan klubbs vapen — eller
+            // en MEDLEMS vapen — genom att posta sitt eget clubId och ett främmande firearmId.
+            if (row.Scope != FirearmScope.Club(clubId))
+                return Json(new { success = false, message = "Vapnet tillhör inte den här klubben" });
+
+            var (details, error) = await _firearms.RevealDetailsAsync(firearmId, "Klubbens vapenregister");
+            if (error != null) return Json(new { success = false, message = error });
+
+            return Json(new
+            {
+                success = true,
+                details = new
+                {
+                    fabrikat = details?.Fabrikat ?? "",
+                    modell = details?.Modell ?? "",
+                    kaliber = details?.Kaliber ?? "",
+                    piplangd = details?.Piplangd ?? "",
+                    tillverkningsnummer = details?.Tillverkningsnummer ?? "",
+                    licensnummer = details?.Licensnummer ?? "",
+                    licensdatum = details?.Licensdatum ?? "",
+                    anteckning = details?.Anteckning ?? "",
+                },
+            });
+        }
+
+        private static DateTime? ParseDate(string? v) =>
+            DateTime.TryParse((v ?? "").Trim(), out var d) ? d.Date : null;
+
+        /// <summary>
+        /// Sanningsvärdet för <c>writeDetails</c>.
+        ///
+        /// <para><b>⚠️ PARAMETERN ÄR EN STRÄNG, INTE EN <c>bool</c>, och det är inte slarv.</b>
+        /// ASP.NET Cores bool-bindning godtar bara <c>"true"</c>/<c>"false"</c> — <c>"1"</c>
+        /// konverteras INTE, utan faller tyst tillbaka på default. Klubbformuläret skickade
+        /// <c>"1"</c> (samma form som medlemsformuläret), parametern var deklarerad <c>bool</c>,
+        /// och följden var att de krypterade uppgifterna aldrig skrevs medan sparningen
+        /// rapporterade <c>success: true</c>. Hittat av sviten 2026-09-02.</para>
+        ///
+        /// <para>Godtar <c>"1"</c>, <c>"true"</c> och <c>"on"</c> så ingen framtida anropare fastnar
+        /// i fällan från något av hållen.</para>
+        /// </summary>
+        private static bool IsTrue(string? v)
+        {
+            var t = (v ?? "").Trim();
+            return t == "1"
+                || t.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || t.Equals("on", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Kommaseparerad lista → <c>List</c>.
+        ///
+        /// <para><b>⚠️ RELATIONERNA SKRIVS ALLTID OM HELT.</b> <c>FirearmService.Update</c> gör
+        /// <c>DELETE</c> + <c>WriteRelations</c>, och <c>WriteRelations</c> behandlar <c>null</c>
+        /// som en tom lista — så <c>null</c> betyder <b>RENSA</b>, aldrig "rör inte". Det är
+        /// motsatsen till hur <c>Details</c> fungerar, och skillnaden är lätt att läsa fel.</para>
+        ///
+        /// <para>Följden: <b>klubbformuläret måste skicka BÅDA fälten vid varje sparning</b>, även
+        /// när inget är valt. Gör det inte det tappar vapnet sina förbund och grenar vid nästa
+        /// statusändring — och förbundet är vad blankettens "antal vapen sedan tidigare" räknas i.
+        /// (Fram till 2026-09-02 skickade klubbytan dem aldrig, vilket inte märktes eftersom den
+        /// heller aldrig kunde sätta dem.)</para>
+        /// </summary>
+        private static List<string> SplitList(string? csv) =>
+            (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                       .ToList();
 
         /// <summary>Gömmer ett klubbvapen. Raderar aldrig.</summary>
         [HttpPost]

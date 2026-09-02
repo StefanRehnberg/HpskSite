@@ -16,8 +16,18 @@
 *@
 @await Html.PartialAsync("_HtmlEscape")
 
+@*
+    ⚠️ autocomplete="off" + eget name PÅ VARJE FRITEXTFÄLT nedan. Webbläsaren fyllde i användarens
+    E-POSTADRESS i "Namn" (rapporterat på klubbmodalen 2026-09-02, samma orsak här): Chrome läser
+    etiketten "Namn" som ett profilfält och erbjuder adressuppgifter. Värre vore autofyll i
+    tillverknings- eller licensnummer.
+
+    NB autocomplete="off" är en stark uppmaning, inte en garanti — därför bär fälten dessutom namn
+    som ingen autofyll-heuristik känner igen.
+*@
 <div id="fwPanel">
     <div id="fwTrust" class="mb-3"></div>
+    <div id="fwExplain" class="mb-3"></div>
     <div id="fwBody">
         <div class="text-center py-4">
             <div class="spinner-border spinner-border-sm" role="status">
@@ -27,8 +37,15 @@
     </div>
 </div>
 
-@* Redigeringsmodalen. Tvådelningen Synligt / Krypterat är BOKSTAVLIG och inramad — det är i den
-   rutan medlemmen bestämmer om hen litar på oss, och den ska inte se ut som ett vanligt formulär. *@
+@* Redigeringsmodalen. Tvådelningen Grunduppgifter / Krypterat är BOKSTAVLIG och inramad — det är i
+   den rutan medlemmen bestämmer om hen litar på oss, och den ska inte se ut som ett vanligt formulär.
+
+   ⚠️ DELNINGEN ÄR EN LAGRINGSFRÅGA, ALDRIG EN ÅTKOMSTFRÅGA. Båda rutorna läses av exakt samma två
+   personer — medlemmen och klubbens föreningsintygsansvarige. Den övre rutan hette tidigare
+   "Synligt" med underrubriken "Det här kan visas på dina resultat och i klubbens listor", vilket
+   var både FALSKT (ingen klubblista bär en medlems egna vapen — /lanevapen visar KLUBBENS vapen)
+   och motsägelsefullt mot löftet två rader ovanför. Skriv aldrig om den här delningen i termer av
+   vem som ser vad. *@
 <div class="modal fade" id="fwEditModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -38,22 +55,39 @@
             </div>
             <div class="modal-body">
                 <div id="fwEditError" class="alert alert-danger small d-none"></div>
+                @* Renderas bara nar vagen hit gick via "Begar foreningsintyg". Utan forklaringen ser
+                   steget ut som en omvag: medlemmen bad om ett intyg och fick ett vapenformular. *@
+                <div id="fwEditIntygNote" class="alert alert-primary small d-none">
+                    <i class="bi bi-1-circle me-1"></i>
+                    <strong>Steg 1 av 2 — lägg in vapnet.</strong>
+                    Klubben kan inte skriva ett intyg utan vapnets uppgifter. När du sparat
+                    skickas förfrågan i nästa steg.
+                </div>
                 <input type="hidden" id="fwId" value="0">
 
+                @* Löftet står FÖRE rutorna, en gång. Utan det läses rubrikerna nedan som en
+                   åtkomstindelning — vilket var precis felet i den förra texten. *@
+                <p class="small mb-3">
+                    <i class="bi bi-shield-lock text-primary me-1"></i>
+                    <strong>Ingen annan medlem ser dina vapen.</strong>
+                    Uppgifterna används av din klubb bara när ett föreningsintyg ska skrivas.
+                </p>
+
                 <fieldset class="fw-box fw-box-open mb-3">
-                    <legend class="fw-legend"><i class="bi bi-tag me-1"></i>Synligt</legend>
+                    <legend class="fw-legend"><i class="bi bi-tag me-1"></i>Grunduppgifter</legend>
                     <p class="small text-muted mb-3">
-                        Det här kan visas på dina resultat och i klubbens listor.
+                        Det här är vad du ser om du vill koppla ett vapen till ett resultat på
+                        Min sida.
                     </p>
 
                     <div class="mb-3">
                         <label class="form-label small fw-semibold" for="fwAlias">Namn på vapnet *</label>
-                        <input type="text" class="form-control" id="fwAlias" maxlength="80"
+                        <input type="text" class="form-control" id="fwAlias" name="fwAlias" autocomplete="off" maxlength="80"
                                placeholder="t.ex. Match .22">
                         <div class="form-text">
                             <i class="bi bi-exclamation-triangle text-warning me-1"></i>
-                            <strong>Skriv inte licensnummer eller tillverkningsnummer här</strong> — det
-                            här namnet är inte skyddat. Använd något du känner igen vapnet på.
+                            <strong>Skriv inte licensnummer eller tillverkningsnummer här</strong> — de
+                            hör i den nedre rutan, som krypteras. Använd något du känner igen vapnet på.
                         </div>
                     </div>
 
@@ -74,12 +108,12 @@
 
                     <div class="mb-3 mt-3 d-none" id="fwAnnanTypWrap">
                         <label class="form-label small" for="fwAnnanVapentyp">Vilken typ?</label>
-                        <input type="text" class="form-control" id="fwAnnanVapentyp" maxlength="60">
+                        <input type="text" class="form-control" id="fwAnnanVapentyp" name="fwAnnanVapentyp" autocomplete="off" maxlength="60">
                     </div>
 
                     <div class="mt-3">
                         <label class="form-label small" for="fwExpires">Licensen förfaller</label>
-                        <input type="text" class="form-control" id="fwExpires" placeholder="ÅÅÅÅ-MM-DD">
+                        <input type="text" class="form-control" id="fwExpires" name="fwExpires" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD">
                         <div class="form-text">
                             Alla vapen har inte ett förfallodatum. Fyller du i det påminner vi dig
                             <strong>tre månader innan</strong>, så du hinner söka om i tid.
@@ -112,36 +146,36 @@
                     <div class="row g-3">
                         <div class="col-sm-6">
                             <label class="form-label small" for="fwFabrikat">Fabrikat</label>
-                            <input type="text" class="form-control" id="fwFabrikat" maxlength="80">
+                            <input type="text" class="form-control" id="fwFabrikat" name="fwFabrikat" autocomplete="off" maxlength="80">
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label small" for="fwModell">Modell</label>
-                            <input type="text" class="form-control" id="fwModell" maxlength="80">
+                            <input type="text" class="form-control" id="fwModell" name="fwModell" autocomplete="off" maxlength="80">
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label small" for="fwKaliber">Kaliber / patronbeteckning</label>
-                            <input type="text" class="form-control" id="fwKaliber" maxlength="60">
+                            <input type="text" class="form-control" id="fwKaliber" name="fwKaliber" autocomplete="off" maxlength="60">
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label small" for="fwPiplangd">Piplängd</label>
-                            <input type="text" class="form-control" id="fwPiplangd" maxlength="30"
+                            <input type="text" class="form-control" id="fwPiplangd" name="fwPiplangd" autocomplete="off" maxlength="30"
                                    placeholder="anges i cm">
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label small" for="fwTillverkningsnummer">Tillverkningsnummer</label>
-                            <input type="text" class="form-control" id="fwTillverkningsnummer" maxlength="60">
+                            <input type="text" class="form-control" id="fwTillverkningsnummer" name="fwTillverkningsnummer" autocomplete="off" maxlength="60">
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label small" for="fwLicensnummer">Licensnummer</label>
-                            <input type="text" class="form-control" id="fwLicensnummer" maxlength="60">
+                            <input type="text" class="form-control" id="fwLicensnummer" name="fwLicensnummer" autocomplete="off" maxlength="60">
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label small" for="fwLicensdatum">Licensdatum</label>
-                            <input type="text" class="form-control" id="fwLicensdatum" placeholder="ÅÅÅÅ-MM-DD">
+                            <input type="text" class="form-control" id="fwLicensdatum" name="fwLicensdatum" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD">
                         </div>
                         <div class="col-12">
                             <label class="form-label small" for="fwAnteckning">Egen anteckning</label>
-                            <textarea class="form-control" id="fwAnteckning" rows="2" maxlength="500"></textarea>
+                            <textarea class="form-control" id="fwAnteckning" name="fwAnteckning" autocomplete="off" rows="2" maxlength="500"></textarea>
                         </div>
                     </div>
                 </fieldset>
@@ -149,6 +183,49 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" id="fwSaveBtn">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@*
+    Ingangen till intygsforfragan.
+
+    ⚠️ DEN MÅSTE FUNGERA MED ETT TOMT REGISTER. Ett föreningsintyg gäller oftast ett vapen
+    medlemmen ännu inte äger — man söker licens före köpet — så förstagångssökaren har per
+    definition en tom garderob. Låg knappen bara på ett befintligt vapenkort fanns ingen väg in
+    alls för just den som behöver den mest. Rapporterat från prod 2026-09-02.
+
+    Frågan ställs i medlemmens språk ("nytt vapen" / "ett jag redan har"), inte i vårt
+    ("registrera vapen först"). Det nya vapnet läggs in som steg 1 av 2 — samma redigeringsmodal
+    som annars, inte en andra kopia av vapenformuläret.
+*@
+<div class="modal fade" id="fwIntygStartModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Begär föreningsintyg</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    Klubben skriver intyget som Polisen begär vid en licensansökan. Välj vad det gäller.
+                </p>
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-outline-primary text-start" data-fw="intyg-new">
+                        <div class="fw-semibold"><i class="bi bi-plus-circle me-1"></i>Ett nytt vapen</div>
+                        <div class="small text-muted">
+                            Jag ska söka licens. Vapnet läggs in som <em>planerat</em> först — klubben
+                            behöver dess uppgifter för att kunna intyga.
+                        </div>
+                    </button>
+                    <button type="button" class="btn btn-outline-primary text-start" data-fw="intyg-existing">
+                        <div class="fw-semibold"><i class="bi bi-safe me-1"></i>Ett vapen i min vapengarderob</div>
+                        <div class="small text-muted" id="fwIntygExistingHint">
+                            Förnyelse av en licens, eller ett planerat vapen jag redan lagt in.
+                        </div>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -164,12 +241,18 @@
             </div>
             <div class="modal-body">
                 <div id="fwReqError" class="alert alert-danger small d-none"></div>
-                <input type="hidden" id="fwReqFirearmId" value="0">
-
                 <p class="small text-muted">
                     Klubben får en förfrågan och kan läsa vapnets uppgifter för att fylla i intyget.
-                    <strong id="fwReqAlias"></strong>
+                    Läsningen loggas, och du ser den i din läslogg.
                 </p>
+
+                @* ⚠️ Vapnet är en VALJARE, inte ett dolt falt. Modalen öppnas både från ett kort och
+                   från toppknappen, och i det andra fallet är vapnet inte valt än. En kodväg, och en
+                   felklickad rad går att rätta utan att stänga dialogen. *@
+                <div class="mb-3">
+                    <label class="form-label small" for="fwReqFirearm">Vilket vapen gäller det?</label>
+                    <select class="form-select" id="fwReqFirearm"></select>
+                </div>
 
                 <div class="mb-3">
                     <label class="form-label small" for="fwReqClub">Klubb</label>
@@ -202,13 +285,13 @@
 
                 <div class="mb-3">
                     <label class="form-label small" for="fwReqVapengrupp">Vapengrupp / skytteform</label>
-                    <input type="text" class="form-control" id="fwReqVapengrupp" maxlength="200"
+                    <input type="text" class="form-control" id="fwReqVapengrupp" name="fwReqVapengrupp" autocomplete="off" maxlength="200"
                            placeholder="t.ex. Precision C">
                 </div>
 
                 <div>
                     <label class="form-label small" for="fwReqMessage">Meddelande till klubben</label>
-                    <textarea class="form-control" id="fwReqMessage" rows="2" maxlength="1000"></textarea>
+                    <textarea class="form-control" id="fwReqMessage" name="fwReqMessage" autocomplete="off" rows="2" maxlength="1000"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
@@ -279,20 +362,107 @@
         if (!el || !state) return;
 
         var names = (state.viewers || []).map(function (v) { return v.name; });
+        // ⚠️ Ingressen är "Bara du ser dina vapen", inte "Krypterat". Kryptering är HUR vi skyddar
+        // dem; frågan medlemmen faktiskt ställer är VEM som ser dem. Och den som kan läsa gör det
+        // för att SKRIVA ETT INTYG — formuleringen får inte antyda ett utlämnande.
         var who = names.length === 0
-            ? '<strong>Ingen i din klubb kan läsa det här just nu.</strong>'
-            : 'Läsbart för dig och för <strong>' + esc(names.join(', ')) + '</strong> ' +
-              '(föreningsintygsansvarig i din klubb).';
+            ? 'Din klubb har inte utsett n\u00e5gon f\u00f6reningsintygsansvarig, s\u00e5 <strong>ingen ' +
+              'annan kan l\u00e4sa dem alls</strong> just nu.'
+            : 'N\u00e4r ett f\u00f6reningsintyg ska skrivas kan <strong>' + esc(names.join(', ')) +
+              '</strong> (f\u00f6reningsintygsansvarig i din klubb) l\u00e4sa uppgifterna f\u00f6r att fylla i ' +
+              'blanketten.';
 
         el.innerHTML =
             '<div class="fw-trust small">' +
-            '<div class="mb-1"><i class="bi bi-lock-fill text-primary me-1"></i>' +
-            '<strong>Krypterat.</strong> ' + who + '</div>' +
+            '<div class="mb-1"><i class="bi bi-shield-lock text-primary me-1"></i>' +
+            '<strong>Bara du ser dina vapen.</strong> ' + who + '</div>' +
             '<div class="d-flex flex-wrap align-items-center gap-2">' +
-            '<span class="text-muted">Senast läst av någon annan: ' +
+            '<span class="text-muted">Senast l\u00e4st av n\u00e5gon annan: ' +
             (state.lastForeignRead ? esc(state.lastForeignRead) : 'aldrig') + '.</span>' +
             '<button type="button" class="btn btn-sm btn-outline-secondary" data-fw="log">' +
             'Visa läslogg</button></div></div>';
+    }
+
+    // ── Förklaringen ─────────────────────────────────────────────────────────────────────────────
+    // Klubbens vapenflik bär samma förklaring åt sitt håll ("vem får läsa medlemmarnas innehav").
+    // Medlemssidan sa bara VEM som kan läsa, aldrig hur skyddet fungerar eller vad hen kan göra
+    // åt det — och en ensam mening om kryptering läses som en plöjd fras.
+    //
+    // ⚠️⚠️ TRE FEL I FÖRSTA UTSÅGAN, alla samma sort: intern vokabulär rakt in i medlemstext.
+    //   1. "Vapnets namn, vapengrupp, gren och förfallodatum ligger öppet" — LAGRINGSformen
+    //      beskriven som en ÅTKOMSTform. "Öppet" läses som "öppet för vem som helst". De fälten
+    //      är okrypterade i databasen men läses av exakt samma två personer som resten.
+    //   2. "När någon lämnar ut dina uppgifter i klartext skrivs en rad i loggen" — "lämna ut" är
+    //      vår krypteringsdesigns ord för "avkryptera och visa". För en medlem betyder det att
+    //      uppgifterna GES BORT till någon tredje. Loggen handlar om en UPPSLAGNING, inte ett
+    //      utlämnande, och den som slår upp gör det för att skriva ett intyg.
+    //   3. "Förvaringssätt lagras inte alls" — svarade på en fråga ingen ställt och drog in
+    //      inbrottsrisk i en ruta som ska minska oro. Borttagen.
+    //
+    // ⚠️ ALLA uppgifter i registret är hemliga. Kryptering är HUR de känsligaste skyddas, aldrig
+    // en gräns för vilka som är privata. Skriv aldrig om den här rutan i termer av "öppet".
+    //
+    // ⚠️ ÖPPEN NÄR REGISTRET ÄR TOMT, kollapsad därefter. Första besöket är när frågan "vem kan
+    // se det här?" avgör om medlemmen skriver in något alls; vid det femtionde är samma text i
+    // vägen för vapnen. Göms den ALDRIG — rubriken står kvar (sortera, göm inte).
+    function renderExplain() {
+        var el = document.getElementById('fwExplain');
+        if (!el || !state) return;
+
+        var empty = (state.firearms || []).length === 0;
+        var viewers = (state.viewers || []).length;
+
+        el.innerHTML =
+            '<details class="fw-box fw-box-locked small"' + (empty ? ' open' : '') + '>' +
+            '<summary class="fw-semibold" style="cursor:pointer">' +
+            '<i class="bi bi-shield-lock text-primary me-1"></i>' +
+            'S\u00e5 fungerar skyddet \u2014 vem kan se dina vapenuppgifter?' +
+            '</summary>' +
+            '<div class="mt-3">' +
+            point('bi-person-lock',
+                  'Bara du ser din lista',
+                  'Ingen annan medlem, ingen annan klubb och ingen annan i din egen klubbs ' +
+                  'styrelse kommer \u00e5t den. <strong>Alla uppgifter du l\u00e4gger in h\u00e4r \u00e4r ' +
+                  'hemliga</strong> \u2014 b\u00e5de vapnets namn och dess licensnummer.') +
+            point('bi-file-earmark-text',
+                  'Klubben l\u00e4ser dem n\u00e4r ett intyg ska skrivas',
+                  'Beh\u00f6ver du ett f\u00f6reningsintyg m\u00e5ste n\u00e5gon fylla i vapnets uppgifter p\u00e5 ' +
+                  'blanketten. Den enda som kan sl\u00e5 upp dem \u00e4r den i din klubbs styrelse som ' +
+                  'klubben utsett till <em>f\u00f6reningsintygsansvarig</em>, och bara f\u00f6r det \u00e4ndam\u00e5let. ' +
+                  'Uppgifterna skickas inte vidare n\u00e5gon annanstans.' +
+                  (viewers === 0
+                      ? ' <span class="text-warning-emphasis">Din klubb har inte utsett n\u00e5gon \u00e4n, ' +
+                        's\u00e5 <strong>ingen utom du kan l\u00e4sa dem alls</strong> just nu.</span>'
+                      : '')) +
+            point('bi-clock-history',
+                  'Varje uppslagning loggas, och du ser den',
+                  'Sl\u00e5r n\u00e5gon upp dina uppgifter skrivs en rad: n\u00e4r, vem och varf\u00f6r. Du l\u00e4ser den ' +
+                  'sj\u00e4lv under <strong>Visa l\u00e4slogg</strong> h\u00f6gst upp. Att bara se listan h\u00e4r skapar ' +
+                  'ingen rad \u2014 bara en riktig uppslagning g\u00f6r det.') +
+            point('bi-lock-fill',
+                  'Extra skydd p\u00e5 de k\u00e4nsligaste',
+                  'Fabrikat, modell, kaliber, pipl\u00e4ngd samt tillverknings- och licensnummer ' +
+                  '<strong>krypteras</strong> innan de lagras, s\u00e5 de inte g\u00e5r att l\u00e4sa ens f\u00f6r den ' +
+                  'som skulle komma \u00e5t sj\u00e4lva databasen. Vapnets namn, vapengrupp, gren och ' +
+                  'f\u00f6rfallodatum m\u00e5ste vi kunna r\u00e4kna p\u00e5 \u2014 f\u00f6r att kunna p\u00e5minna dig i tid och ' +
+                  'f\u00f6r att kunna ange antal vapen i ett intyg \u2014 s\u00e5 de krypteras inte. ' +
+                  '<strong>De \u00e4r lika hemliga \u00e4nd\u00e5</strong> och n\u00e5s av exakt samma personer.') +
+            point('bi-box-arrow-right',
+                  'Beh\u00f6righeten upph\u00f6r av sig sj\u00e4lv',
+                  'Den h\u00e4nger p\u00e5 ett aktivt styrelseuppdrag. L\u00e4mnar personen styrelsen upph\u00f6r ' +
+                  'l\u00e4sr\u00e4tten samma sekund, utan att n\u00e5gon beh\u00f6ver g\u00f6ra n\u00e5got.') +
+            point('bi-sliders',
+                  'Du best\u00e4mmer sj\u00e4lv',
+                  'F\u00e4lten \u00e4r frivilliga och du kan ta bort ett vapen ur listan n\u00e4r du vill. ' +
+                  'Vill du h\u00e5lla reda p\u00e5 vilket vapen du sk\u00f6t med kan du koppla ett vapen till ett ' +
+                  'resultat under <strong>Resultat</strong> \u2014 ocks\u00e5 det bara f\u00f6r dina egna \u00f6gon.') +
+            '</div></details>';
+    }
+    function point(icon, title, text) {
+        return '<div class="d-flex gap-2 mb-3">' +
+            '<i class="bi ' + icon + ' text-primary mt-1"></i><div>' +
+            '<div class="fw-semibold">' + title + '</div>' +
+            '<div class="text-muted">' + text + '</div></div></div>';
     }
 
     // ── Tomt läge ────────────────────────────────────────────────────────────────────────────────
@@ -310,8 +480,15 @@
             step('bi-file-earmark-text', 'Vad du får',
                  'Påminnelse innan licensen förfaller, och underlag när klubben skriver ett föreningsintyg.') +
             '</div>' +
+            '<div class="d-flex flex-wrap gap-2 justify-content-center">' +
             '<button type="button" class="btn btn-primary" data-fw="add">' +
-            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button></div>';
+            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button>' +
+            // ⚠️ Intygsvägen MÅSTE finnas här. Förstagångssökaren har en tom garderob, och det är
+            // hen som behöver ett intyg — en knapp som bara sitter på ett vapenkort är onåbar
+            // för precis den användaren.
+            '<button type="button" class="btn btn-outline-primary" data-fw="intyg">' +
+            '<i class="bi bi-file-earmark-text me-1"></i>Begär föreningsintyg</button>' +
+            '</div></div>';
     }
     function step(icon, title, text) {
         return '<div class="col-md-4"><div class="d-flex gap-2">' +
@@ -331,8 +508,11 @@
         var html = '<div class="d-flex justify-content-between align-items-center mb-3">' +
             '<span class="text-muted small">' + list.length +
             (list.length === 1 ? ' vapen' : ' vapen') + '</span>' +
+            '<div class="d-flex flex-wrap gap-2">' +
+            '<button type="button" class="btn btn-sm btn-outline-primary" data-fw="intyg">' +
+            '<i class="bi bi-file-earmark-text me-1"></i>Begär föreningsintyg</button>' +
             '<button type="button" class="btn btn-sm btn-primary" data-fw="add">' +
-            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button></div>' +
+            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button></div></div>' +
             '<div class="row g-3">';
 
         list.forEach(function (f) {
@@ -457,10 +637,13 @@
     // ── Modalen ──────────────────────────────────────────────────────────────────────────────────
     function fillOptions() {
         var o = state.options || {};
+        // ⚠️ Alternativen är {id,label}, inte strängar. Magnumklasserna M1–M9 bär sin beskrivning
+        // ("M2 — DA Revolver 41-44 Magnum") eftersom koden ensam inte säger vilket vapen det är —
+        // och det är hela skälet de finns i listan. Gruppkoden "M" identifierar inget magnumvapen.
         var wc = document.getElementById('fwWeaponClass');
         wc.innerHTML = '<option value="">— välj —</option>' +
             (o.weaponClasses || []).map(function (c) {
-                return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+                return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>';
             }).join('');
 
         var vt = document.getElementById('fwVapentyp');
@@ -500,8 +683,15 @@
 
     function val(id, v) { var el = document.getElementById(id); if (el) el.value = v == null ? '' : v; }
 
-    async function openEdit(id) {
+    // Sätts när vapnet läggs in som steg 1 i intygsflödet, så sparningen kan fortsätta till steg 2.
+    // Nollställs vid VARJE öppning av modalen — annars släpade flaggan och nästa helt vanliga
+    // "Lägg till vapen" hade avslutats med en intygsdialog ingen bett om.
+    var _intygAfterSave = false;
+
+    async function openEdit(id, forIntyg) {
         fillOptions();
+        _intygAfterSave = !!forIntyg;
+        document.getElementById('fwEditIntygNote').classList.toggle('d-none', !forIntyg);
         document.getElementById('fwEditError').classList.add('d-none');
         var f = (state.firearms || []).find(function (x) { return String(x.id) === String(id); });
 
@@ -511,7 +701,9 @@
         val('fwWeaponClass', f ? (f.weaponClass || '') : '');
         val('fwVapentyp', f ? (f.vapentyp || '') : '');
         val('fwAnnanVapentyp', f ? (f.annanVapentyp || '') : '');
-        val('fwStatus', f ? f.acquisitionStatus : 'Innehas');
+        // Ett vapen man söker licens för ägs ännu inte — förvalet följer därför frågan
+        // medlemmen just svarade på, i stället för att tvinga hen att rätta det själv.
+        val('fwStatus', f ? f.acquisitionStatus : (forIntyg ? 'Planerat' : 'Innehas'));
         val('fwExpires', f ? (f.licenseExpiresOn || '') : '');
         setChecks('fwForbund', f ? f.federations : []);
         setChecks('fwDisciplines', f ? f.disciplines : []);
@@ -529,8 +721,12 @@
                 '<button type="button" class="btn btn-sm btn-outline-primary ms-1" data-fw="load-details">' +
                 '<i class="bi bi-eye me-1"></i>Hämta för att ändra</button>';
         } else {
-            intro.textContent = 'Krypteras innan de lagras. Bara du och klubbens ' +
-                'föreningsintygsansvarige kan läsa dem.';
+            // ⚠️ Bara det som är SPECIFIKT för den här rutan. "Bara du och klubbens
+            // föreningsintygsansvarige kan läsa dem" stod här förut — sant, men det gäller BÅDA
+            // rutorna, och att säga det vid den ena antyder att den andra är mindre skyddad.
+            // Löftet står en gång, ovanför båda.
+            intro.textContent = 'Krypteras innan de lagras \u2014 ol\u00e4sbara \u00e4ven f\u00f6r den som ' +
+                'skulle komma \u00e5t sj\u00e4lva databasen.';
         }
         _detailsLoaded = !(f && f.hasDetails);
 
@@ -596,19 +792,33 @@
         btn.disabled = false;
 
         if (!j.success) { showError(j.message); return; }
+
+        var chain = _intygAfterSave && j.firearmId > 0;
+        _intygAfterSave = false;
         bootstrap.Modal.getOrCreateInstance(document.getElementById('fwEditModal')).hide();
         await load();
+
+        // ⚠️ Efter load(), aldrig före: openRequest bygger sin vapenväljare ur `state`, och det
+        // nya vapnet finns inte där förrän listan hämtats om. Utan det ställs frågan om ett vapen
+        // som inte går att välja.
+        if (chain) openRequest(j.firearmId);
     }
 
     function openRequest(id) {
-        var f = (state.firearms || []).find(function (x) { return String(x.id) === String(id); });
-        if (!f) return;
+        var list = state.firearms || [];
+        if (list.length === 0) return;
 
         document.getElementById('fwReqError').classList.add('d-none');
-        document.getElementById('fwReqFirearmId').value = id;
-        document.getElementById('fwReqAlias').textContent = f.alias;
-        document.getElementById('fwReqVapengrupp').value = f.weaponClass || '';
         document.getElementById('fwReqMessage').value = '';
+
+        var fsel = document.getElementById('fwReqFirearm');
+        fsel.innerHTML = list.map(function (x) {
+            var extra = x.acquisitionStatus === 'Planerat' ? ' — planerat' : '';
+            return '<option value="' + x.id + '"' + (String(x.id) === String(id) ? ' selected' : '') +
+                '>' + esc(x.alias) + (x.weaponClass ? ' (' + esc(x.weaponClass) + ')' : '') +
+                extra + '</option>';
+        }).join('');
+        if (!fsel.value) fsel.selectedIndex = 0;
 
         // Klubbvaljaren: bara de klubbar medlemmen tillhor. Servern kontrollerar det anda.
         var clubs = {};
@@ -634,14 +844,43 @@
                 (x.indexOf('Pistolskytte') >= 0 ? ' selected' : '') + '>' + esc(x) + '</option>';
         }).join('');
 
-        // En fornyelse galler per definition ett vapen man INNEHAR. Att erbjuda valet pa ett
-        // planerat vapen skulle ge klubben en motsagelse att tolka; servern vagrar det ocksa.
+        syncReqFirearm();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwReqModal')).show();
+    }
+
+    /// Speglar det VALDA vapnet i de fält som beror på det. Körs vid öppning OCH vid byte — annars
+    /// bär formuläret förra vapnets vapengrupp och kan erbjuda en förnyelse av ett planerat vapen.
+    function syncReqFirearm() {
+        var id = document.getElementById('fwReqFirearm').value;
+        var f = (state.firearms || []).find(function (x) { return String(x.id) === String(id); });
+        if (!f) return;
+
+        document.getElementById('fwReqVapengrupp').value = f.weaponClass || '';
+
+        // En förnyelse gäller per definition ett vapen man INNEHAR. Att erbjuda valet på ett
+        // planerat vapen skulle ge klubben en motsägelse att tolka; servern vägrar det också.
         var fornyBtn = document.getElementById('fwReqForny');
         var held = f.acquisitionStatus === 'Innehas';
         fornyBtn.disabled = !held;
         if (!held) document.getElementById('fwReqNy').checked = true;
 
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwReqModal')).show();
+        var lbl = document.querySelector('label[for=fwReqForny]');
+        if (lbl) lbl.classList.toggle('text-muted', !held);
+    }
+
+    /// Ingången till intygsflödet. Den andra vägen är avstängd med en förklaring när garderoben
+    /// är tom — en klickbar knapp mot en tom väljare säger inte varför den inte fungerar.
+    function openIntygStart() {
+        var has = (state && (state.firearms || []).length > 0);
+        var btn = document.querySelector('[data-fw="intyg-existing"]');
+        var hint = document.getElementById('fwIntygExistingHint');
+        if (btn) btn.disabled = !has;
+        if (hint) {
+            hint.innerHTML = has
+                ? 'Förnyelse av en licens, eller ett planerat vapen jag redan lagt in.'
+                : 'Din vapengarderob är tom — välj alternativet ovan.';
+        }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwIntygStartModal')).show();
     }
 
     function showReqError(msg) {
@@ -659,7 +898,7 @@
         btn.disabled = true;
         var j = await post('/umbraco/surface/Firearm/RequestIntyg', {
             clubId: clubSel.value,
-            firearmId: document.getElementById('fwReqFirearmId').value,
+            firearmId: document.getElementById('fwReqFirearm').value,
             kind: kind,
             forbund: document.getElementById('fwReqForbund').value,
             vapengrupp: document.getElementById('fwReqVapengrupp').value,
@@ -673,6 +912,9 @@
 
     document.addEventListener('click', function (ev) {
         if (ev.target && ev.target.id === 'fwReqSend') sendRequest();
+    });
+    document.addEventListener('change', function (ev) {
+        if (ev.target && ev.target.id === 'fwReqFirearm') syncReqFirearm();
     });
 
     async function showLog() {
@@ -713,8 +955,20 @@
         var action = btn.getAttribute('data-fw');
         var id = btn.getAttribute('data-firearm-id');
 
-        if (action === 'add') { await openEdit(0); return; }
-        if (action === 'edit') { await openEdit(id); return; }
+        if (action === 'add') { await openEdit(0, false); return; }
+        if (action === 'edit') { await openEdit(id, false); return; }
+
+        if (action === 'intyg') { openIntygStart(); return; }
+        if (action === 'intyg-new') {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('fwIntygStartModal')).hide();
+            await openEdit(0, true);
+            return;
+        }
+        if (action === 'intyg-existing') {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('fwIntygStartModal')).hide();
+            openRequest(0);
+            return;
+        }
         if (action === 'reveal') { await reveal(id); return; }
         if (action === 'hide') { remask(id); return; }
         if (action === 'log') { await showLog(); return; }
@@ -751,6 +1005,7 @@
             }
             state = j;
             renderTrust();
+            renderExplain();
             renderCards();
         } catch (e) {
             body.innerHTML = '<div class="alert alert-danger small mb-0">Ett fel uppstod.</div>';

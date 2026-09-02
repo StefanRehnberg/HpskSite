@@ -119,11 +119,9 @@ namespace HpskSite.Services.Firearms
     /// </summary>
     public class FirearmBookingService
     {
-        /// <summary>Hur långt fram en medlem får boka. Ett år är gott och väl mer än en säsong.</summary>
-        private const int MaxDaysAhead = 365;
-
-        /// <summary>Längsta enskilda bokning. Ett lånevapen ska inte kunna beläggas i en månad.</summary>
-        private const int MaxDurationDays = 14;
+        // ⚠️ Taken (365 dagar framåt, 14 dagars längsta bokning) bor i FirearmBookingWindow
+        // tillsammans med fönstertolkningen, så tillgänglighetslistan och bokningen inte kan vara
+        // oense om vad som är bokbart. Lägg dem inte tillbaka här som ett andra exemplar.
 
         private readonly IScopeProvider _scopeProvider;
         private readonly IMemberService _memberService;
@@ -304,34 +302,20 @@ namespace HpskSite.Services.Firearms
         /// <summary>
         /// Normaliserar fönstret och vägrar det orimliga.
         ///
-        /// <para><b>Bara ett datum (midnatt–midnatt) blir 00:00–23:59 samma dag.</b> Det är vad en
-        /// medlem menar med "jag vill låna det på lördag", och utan normaliseringen blir fönstret
-        /// noll sekunder långt och krockar med ingenting — alltså en bokning som inte bokar.</para>
+        /// <para><b>⚠️ Regeln ägs av <see cref="FirearmBookingWindow.TryNormalise"/>, inte av den
+        /// här metoden.</b> Den låg tidigare i två handskrivna kopior — här och i
+        /// <c>LoanWeaponApiController.TryWindow</c> — som hade glidit isär om ett bakvänt fönster:
+        /// listan visade vapnet som ledigt hela dagen medan bokningen vägrade samma fönster. En
+        /// rad som ser bokbar ut och nekas i nästa klick.</para>
         /// </summary>
         private static string? NormaliseWindow(ref DateTime from, ref DateTime to)
         {
-            if (from == default) return "Ange när bokningen börjar.";
+            var ok = FirearmBookingWindow.TryNormalise(
+                from, to, DateTime.Now, out var f, out var t, out var error);
+            if (!ok) return error ?? "Ogiltigt bokningsfönster.";
 
-            if (to == default || to <= from)
-            {
-                if (to == default || (from.TimeOfDay == TimeSpan.Zero && to.Date == from.Date))
-                {
-                    from = from.Date;
-                    to = from.Date.AddDays(1).AddSeconds(-1);
-                }
-                else
-                {
-                    return "Bokningen måste sluta efter att den börjar.";
-                }
-            }
-
-            if (from < DateTime.Now.Date)
-                return "Du kan inte boka bakåt i tiden.";
-            if (from > DateTime.Now.Date.AddDays(MaxDaysAhead))
-                return $"Du kan boka högst {MaxDaysAhead} dagar framåt.";
-            if ((to - from).TotalDays > MaxDurationDays)
-                return $"En bokning kan vara högst {MaxDurationDays} dagar.";
-
+            from = f;
+            to = t;
             return null;
         }
 

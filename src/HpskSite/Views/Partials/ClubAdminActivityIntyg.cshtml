@@ -171,7 +171,89 @@
                         </div>
                     </div>
 
+                    @*
+                        ⚠️ FÖRBUNDET SAKNADE INPUT HELT fram till 2026-09-02, trots att fältet är
+                        postbart och har SPSF som default. Formuläret kunde alltså aldrig intyga för
+                        någon annan gren, och — allvarligare — blankettens rad "sökanden har sedan
+                        tidigare ___ st vapen i den verksamhet som bedrivs av det förbund som anges
+                        ovan" är FÖRBUNDSSKOPAD. Fas 3 räknar antalet per förbund, så utan den här
+                        väljaren kunde antalet vara scopat till ett förbund dokumentet inte namnger.
+                        Det är en motsägelse på en handling till en myndighet.
+                    *@
+                    <h6 class="small fw-bold text-uppercase text-muted mt-4">Förbund</h6>
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0" for="fiForbund">
+                                Förbund vars gren vapnet ska användas i
+                            </label>
+                            <select id="fiForbund" class="form-select form-select-sm">
+@foreach (var f in HpskSite.Models.ForeningsintygDocument.AllaForbund)
+{
+    @* ⚠️ Två GRENAR i stället för selected="@(bool)". Razors hantering av booleska attribut är
+       lätt att minnas fel, och blir "False" renderat som ett närvarande attribut markeras VARJE
+       option och den sista vinner — alltså tyst fel förbund på ett dokument till en myndighet.
+       Två explicita grenar kan inte bli fel. *@
+    if (f == HpskSite.Models.ForeningsintygDocument.ForbundSpsf)
+    {
+        <option value="@f" selected>@f</option>
+    }
+    else
+    {
+        <option value="@f">@f</option>
+    }
+}
+                            </select>
+                            <div class="form-text">
+                                Blanketten tillåter <strong>endast ett</strong>. Antalet vapen
+                                &quot;sedan tidigare&quot; räknas i just det förbundets verksamhet.
+                            </div>
+                        </div>
+                        <div class="col-md-6" id="fiAnnatForbundWrap" style="display:none">
+                            <label class="form-label small mb-0" for="fiAnnatForbund">Vilket förbund?</label>
+                            <input id="fiAnnatForbund" class="form-control form-control-sm">
+                        </div>
+                    </div>
+
                     <h6 class="small fw-bold text-uppercase text-muted mt-4">Vapnet intyget gäller</h6>
+
+                    @*
+                        Fas 3: uppgifterna hämtas ur medlemmens krypterade register i stället för att
+                        skrivas av för hand.
+
+                        ⚠️ EN HANDLING MED ETT KLICK, aldrig en automatisk ifyllnad när formuläret
+                        öppnas. Uppslagningen LOGGAS och medlemmen läser loggen, så en rad där måste
+                        betyda att någon faktiskt tittade. Fyllde vi i automatiskt skulle loggen växa
+                        av varje öppnat formulär och sluta betyda något.
+
+                        ⚠️ Fälten är fortsatt REDIGERBARA och förblir intygsfält. Utfärdaren skriver
+                        under, och det som står på blanketten måste vara hens uppgift — medlemmen kan
+                        ha skrivit fel, och registret är inte en myndighetskälla.
+
+                        ⚠️ Rutan renderas bara när medlemmen har en ÖPPEN förfrågan. Det finns
+                        medvetet ingen väg att lista en medlems vapen: löftet på Min sida är "bara du
+                        ser din lista", och utfärdaren kommer bara åt det vapen en förfrågan pekar på.
+                    *@
+                    <div id="fiFirearmFetch" class="d-none alert alert-primary py-2 px-3 small mb-2">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <div class="flex-grow-1">
+                                <i class="bi bi-shield-lock me-1"></i>
+                                <strong>Hämta ur medlemmens vapenregister</strong>
+                                <span id="fiFirearmFetchWhat" class="text-muted"></span>
+                            </div>
+                            <select id="fiFirearmRequest" class="form-select form-select-sm"
+                                    style="max-width:22rem"></select>
+                            <button type="button" class="btn btn-sm btn-primary" id="fiFirearmFetchBtn">
+                                <i class="bi bi-download me-1"></i>Hämta
+                            </button>
+                        </div>
+                        <div class="mt-1 text-muted">
+                            Uppgifterna är krypterade. En hämtning är en uppslagning som
+                            <strong>syns i medlemmens läslogg</strong> — gör den när du ska fylla i
+                            blanketten, inte för att titta.
+                        </div>
+                        <div id="fiFirearmFetchMsg" class="mt-1"></div>
+                    </div>
+
                     <div class="row g-2">
                         <div class="col-md-3">
                             <label class="form-label small mb-0" for="fiVapentyp">Typ</label>
@@ -602,6 +684,8 @@
     };
 
     var ISSUE_TEXTS = {
+        fiForbund:         'Forbund',
+        fiAnnatForbund:    'AnnatForbund',
         fiVapentyp:        'Vapentyp',
         fiFabrikat:        'Fabrikat',
         fiKaliber:         'KaliberPatronbeteckning',
@@ -613,6 +697,24 @@
         fiSkjutAnnatText:  'SkjutskicklighetAnnatText',
         fiOrt:             'UnderskriftOrt'
     };
+
+    // Serverns konstanter, en gång var. Att hårdkoda strängarna här vore ett andra exemplar som är
+    // fritt att glida från modellen.
+    var FORBUND_DEFAULT = '@HpskSite.Models.ForeningsintygDocument.ForbundSpsf';
+    var FORBUND_ANNAT = '@HpskSite.Models.ForeningsintygDocument.ForbundAnnat';
+
+    /// Fritextfältet gäller bara "Annat förbund". Ett dolt men ifyllt fält skulle annars posta
+    /// ett förbundsnamn som motsäger valet i rullgardinen.
+    function syncAnnatForbund() {
+        var wrap = document.getElementById('fiAnnatForbundWrap');
+        if (!wrap) return;
+        var isOther = getVal('fiForbund') === FORBUND_ANNAT;
+        wrap.style.display = isOther ? '' : 'none';
+        if (!isOther) setVal('fiAnnatForbund', '');
+    }
+    document.addEventListener('change', function (ev) {
+        if (ev.target && ev.target.id === 'fiForbund') syncAnnatForbund();
+    });
 
     function setVal(id, v) { var el = document.getElementById(id); if (el) el.value = v == null ? '' : v; }
     function setChk(id, v) { var el = document.getElementById(id); if (el) el.checked = !!v; }
@@ -626,6 +728,12 @@
         Object.keys(ISSUE_CHECKS).forEach(function (id) { setChk(id, false); });
         Object.keys(ISSUE_TEXTS).forEach(function (id) { setVal(id, ''); });
         setVal('fiAntalVapen', '');
+        // ⚠️ Förbundet nollställs till SPSF, inte till tomt. Modellens default är SPSF, och ett
+        // tomt val hade postat en tom sträng — vilket lämnar blankettens enda tillåtna markering
+        // omarkerad.
+        setVal('fiForbund', FORBUND_DEFAULT);
+        setVal('fiAnnatForbund', '');
+        syncAnnatForbund();
         setVal('fiPurpose', 'Vapenlicens');
         setVal('fiNotes', '');
 
@@ -635,6 +743,13 @@
         renderSkjutprovHint(null);
         var guldReset = document.getElementById('aiGuldHint');
         if (guldReset && !draft) guldReset.innerHTML = '';
+
+        // ⚠️ Göm hämtarutan här, inte bara i select(). resetIssueForm körs också efter en lyckad
+        // utfärdning, och en kvarstående ruta pekar då på en förfrågan som nyss stängdes.
+        var fetchBox = document.getElementById('fiFirearmFetch');
+        if (fetchBox) fetchBox.classList.add('d-none');
+        var fetchMsg = document.getElementById('fiFirearmFetchMsg');
+        if (fetchMsg) fetchMsg.innerHTML = '';
 
         if (!draft) return;
         setVal('fiOrt', draft.underskriftOrt);
@@ -743,6 +858,12 @@
             resetIssueForm(null);
         }
     }
+
+    document.addEventListener('click', function (ev) {
+        if (ev.target && ev.target.closest && ev.target.closest('#fiFirearmFetchBtn')) {
+            fetchFirearmData();
+        }
+    });
 
     function collectIssuePayload() {
         var fd = new FormData();
@@ -865,6 +986,109 @@
         // och ort kvar i formuläret, och nästa utfärdande skulle bära dem — på ett dokument som är
         // en handling till en myndighet.
         loadDraft(memberId, null);
+        loadFirearmRequests(memberId);
+    }
+
+    // ── Fas 3: vapenuppgifterna ur medlemmens register ───────────────────────────────────────
+    //
+    // ⚠️ TVÅ ANROP, med flit. Det första säger BARA att en förfrågan finns (vapen-id, alias,
+    // förbund) och skriver ingen loggrad. Det andra hämtar klartexten och LOGGAS. Bakade vi in
+    // uppgifterna i det första skulle medlemmens läslogg fyllas av rader från varje öppnat
+    // formulär, och en loggrad ska betyda att någon faktiskt tittade.
+    async function loadFirearmRequests(memberId) {
+        var box = document.getElementById('fiFirearmFetch');
+        var sel = document.getElementById('fiFirearmRequest');
+        var what = document.getElementById('fiFirearmFetchWhat');
+        if (!box || !sel) return;
+
+        box.classList.add('d-none');
+        sel.innerHTML = '';
+
+        try {
+            var r = await fetch('/umbraco/surface/Foreningsintyg/GetIntygFirearmRequests?memberId=' +
+                                encodeURIComponent(memberId), { credentials: 'same-origin' });
+            var j = await r.json();
+            // Ingen öppen förfrågan → ingen ruta. En hämtaknapp utan något att hämta är en
+            // kontroll som inte gör något, vilket är sämre än ingen kontroll.
+            if (!j.success || !(j.requests || []).length) return;
+
+            sel.innerHTML = j.requests.map(function (q) {
+                var bits = [q.firearmAlias || ('Vapen ' + q.firearmId), q.kind];
+                if (q.forbund) bits.push(q.forbund);
+                return '<option value="' + q.id + '">' + hpskEsc(bits.join(' \u00b7 ')) + '</option>';
+            }).join('');
+
+            what.textContent = j.requests.length === 1
+                ? ''
+                : '(' + j.requests.length + ' f\u00f6rfr\u00e5gningar)';
+            box.classList.remove('d-none');
+        } catch (e) {
+            // Tyst. Rutan är en genväg; utfärdaren kan alltid skriva in uppgifterna för hand.
+        }
+    }
+
+    async function fetchFirearmData() {
+        var sel = document.getElementById('fiFirearmRequest');
+        var btn = document.getElementById('fiFirearmFetchBtn');
+        var msg = document.getElementById('fiFirearmFetchMsg');
+        if (!sel || !sel.value) return;
+
+        btn.disabled = true;
+        msg.innerHTML = '<span class="text-muted">H\u00e4mtar\u2026</span>';
+
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', meToken());
+        fd.append('memberId', window._activityMemberId);
+        fd.append('requestId', sel.value);
+
+        var j = null;
+        try {
+            var r = await fetch('/umbraco/surface/Foreningsintyg/FetchIntygFirearmData',
+                                { method: 'POST', body: fd, credentials: 'same-origin' });
+            // TEXT först: ett antiforgery-avslag är ett tomt 400 och r.json() kastar då ett
+            // SyntaxError som gömmer statuskoden.
+            var t = await r.text();
+            try { j = JSON.parse(t); } catch (e) { j = null; }
+            if (!j) j = { success: false, message: 'Ov\u00e4ntat svar fr\u00e5n servern (' + r.status + ').' };
+        } catch (e) {
+            j = { success: false, message: 'Kunde inte h\u00e4mta uppgifterna.' };
+        }
+        btn.disabled = false;
+
+        if (!j.success) {
+            // ⚠️ Avslaget måste stå kvar och namnge skälet. Den vanligaste orsaken är att den
+            // inloggade är klubbadmin men INTE utsedd föreningsintygsansvarig — då är svaret ett
+            // behörighetsbesked, inte ett fel, och utfärdaren ska förstå vem som kan göra det.
+            msg.innerHTML = '<span class="text-danger">' + hpskEsc(j.message || 'Kunde inte h\u00e4mta.') +
+                '</span>';
+            return;
+        }
+
+        setVal('fiVapentyp', j.vapentyp || '');
+        setVal('fiFabrikat', j.fabrikat || '');
+        setVal('fiModell', j.modell || '');
+        setVal('fiKaliber', j.kaliber || '');
+        setVal('fiPiplangd', j.piplangd || '');
+
+        // ⚠️ Fyll bara TOMMA fält här. Förbund, vapengrupp och antalet kan utfärdaren redan ha
+        // rättat för hand, och en hämtning av vapnets uppgifter får inte skriva över det.
+        if (!getVal('fiVapengrupp')) setVal('fiVapengrupp', j.vapengrupp || '');
+
+        // ⚠️ Förbundet SÄTTS, inte bara fylls om tomt: väljaren står alltid på SPSF som default, så
+        // "tomt" inträffar aldrig, och antalet nedan är räknat i förfrågans förbund. Stod de två
+        // isär skulle dokumentet namnge ett förbund och räkna vapen i ett annat.
+        if (j.forbund) {
+            setVal('fiForbund', j.forbund);
+            syncAnnatForbund();
+        }
+        if (typeof j.antalSedanTidigare === 'number') {
+            setVal('fiAntalVapen', j.antalSedanTidigare);
+        }
+
+        msg.innerHTML = '<i class="bi bi-check-circle text-success me-1"></i>' +
+            hpskEsc(j.message || 'H\u00e4mtat.') +
+            ' <span class="text-muted">Kontrollera och r\u00e4tta vid behov \u2014 det \u00e4r du som ' +
+            'skriver under.</span>';
     }
 
     async function load() {

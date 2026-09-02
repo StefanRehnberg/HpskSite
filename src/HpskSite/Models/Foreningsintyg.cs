@@ -354,6 +354,15 @@ namespace HpskSite.Models
 
         public const string ForbundSpsf = "Svenska Pistolskytteförbundet";
 
+        /// <summary>
+        /// Det enda värdet som gör <see cref="AnnatForbund"/> meningsfullt.
+        ///
+        /// <para>Namngivet, så ingen yta behöver läsa det som "sista posten i
+        /// <see cref="AllaForbund"/>" — en ordningsberoende uppslagning som slutar stämma tyst den
+        /// dag listan sorteras eller utökas.</para>
+        /// </summary>
+        public const string ForbundAnnat = "Annat förbund";
+
         public static readonly string[] AllaForbund =
         {
             "Jägarnas riksförbund/Landsbygdens jägare",
@@ -367,7 +376,7 @@ namespace HpskSite.Models
             "Svenska Skyttesportförbundet",
             "Svenska Svartkruts SkytteFederationen",
             "Svenska Westernskytteförbundet",
-            "Annat förbund"
+            ForbundAnnat
         };
 
         /// <summary>Fritext när <see cref="Forbund"/> är "Annat förbund".</summary>

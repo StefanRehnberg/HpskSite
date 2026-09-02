@@ -5,6 +5,10 @@
     // paborjade pass.
     var draftMemberKey = (await MemberManager.GetCurrentMemberAsync())?.Id ?? "anon";
 }
+@* Vapenvaljaren nedan behover hpskFirearmTagLoad + hpskEsc. Partialen inkluderar dem SJALV, samma
+   regel som _HtmlEscape: helparen ska folja med koden som behover den och inte kunna glommas nar
+   partialen monteras pa en ny yta. Bada ar dubbelinkluderingsguardade. *@
+@await Html.PartialAsync("_FirearmUsageTagger")
 @*
     Training Score Entry Modal
     Modal form for members to log their training scores with button grid interface
@@ -78,6 +82,38 @@
                                 <option value="Standardpistol">Standardpistol</option>
                                 <option value="Sportpistol">Sportpistol</option>
                             </select>
+                        </div>
+                    </div>
+
+                    @*
+                        Vilket av MINA vapen jag sköt med.
+
+                        ⚠️ FRIVILLIGT, och det är hela poängen. Fältet är skyttens egen anteckning
+                        ("vad fungerar för mig") och intygar ingenting — kravet "tränat minst två
+                        gånger med vapnet" är struket, eftersom en förstagångssökande tränat med
+                        lånevapen och den historiken aldrig kan finnas. Ett obligatoriskt fält här
+                        hade lagt en fråga till i vägen för det passet som ska loggas.
+
+                        ⚠️ Väljaren renderas TOM och göms när registret saknar vapen. En rullgardin
+                        med noll alternativ läser som ett trasigt fält; en rad som inte finns
+                        läser som att funktionen inte gäller mig än.
+
+                        ⚠️ Taggningen kan inte skickas med sparningen: FirearmUsage hänger på
+                        träningsradens id, som inte finns förrän raden är skriven. Den skickas
+                        därför direkt EFTER en lyckad sparning, av `tagSavedTrainingScore`.
+                    *@
+                    <div class="row mb-3 d-none" id="trainingFirearmRow">
+                        <div class="col-md-8">
+                            <label for="trainingFirearmId" class="form-label">
+                                Vapen <span class="text-muted small fw-normal">(frivilligt)</span>
+                            </label>
+                            <select class="form-select" id="trainingFirearmId" name="trainingFirearmId">
+                                <option value="0">— inget angivet —</option>
+                            </select>
+                            <div class="form-text">
+                                Din egen anteckning. Klubben ser den inte, och den intygar ingenting —
+                                den finns för att du själv ska kunna se vad som fungerar.
+                            </div>
                         </div>
                     </div>
 
@@ -1112,11 +1148,21 @@ function submitTrainingScore() {
         });
     })
     .then(response => response.json())
-    .then(result => {
+    .then(async result => {
         if (result.success) {
             // Först nu är passet ur telefonen och nere i loggen.
             clearTrainingDraft();
-            alert('Resultatet har sparats!');
+
+            // Vapentaggningen är steg 2 och står UTANFÖR sparningens utfall — se kommentaren vid
+            // tagSavedTrainingScore. Meddelandet skiljer därför på "sparat" och "sparat, men
+            // vapnet fastnade inte".
+            const tagProblem = await tagSavedTrainingScore(
+                result.trainingScoreId, document.getElementById('trainingDate').value);
+
+            alert(tagProblem
+                ? 'Resultatet har sparats!\n\n' + tagProblem +
+                  '\nDu kan ange vapnet efteråt i Vapen-kolumnen på Resultat-fliken.'
+                : 'Resultatet har sparats!');
 
             // Close modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('addTrainingScoreModal'));
@@ -1137,6 +1183,77 @@ function submitTrainingScore() {
     .finally(() => {
         trainingSubmitEnd();
     });
+}
+
+
+// ── Vapentaggning: vilket av MINA vapen jag sköt med ──────────────────────────────
+//
+// ⚠️ Två steg, med nödvändighet. FirearmUsage nycklas på träningsradens id, och det id:t finns
+// inte förrän raden är skriven — så taggningen kan inte åka med i sparningen utan skickas direkt
+// efter den. Samma tvåstegsform som krypteringen av vapnets uppgifter, av samma skäl.
+//
+// ⚠️ En misslyckad taggning får ALDRIG rapporteras som en misslyckad sparning. Passet ÄR i
+// loggen, och ett felmeddelande som antyder motsatsen får skytten att mata in det en andra gång.
+// Den nämns i stället som en anteckning som inte fastnade, med vägen att göra om den.
+
+async function fillTrainingFirearmSelect() {
+    const row = document.getElementById('trainingFirearmRow');
+    const sel = document.getElementById('trainingFirearmId');
+    if (!row || !sel) return;
+
+    sel.value = '0';
+    if (!window.hpskFirearmTagLoad) { row.classList.add('d-none'); return; }
+
+    const st = await window.hpskFirearmTagLoad().catch(() => null);
+    const list = (st && st.firearms) || [];
+
+    // Inga vapen i registret → ingen rad. Ett tomt fält är en fråga utan svarsalternativ.
+    if (list.length === 0) { row.classList.add('d-none'); return; }
+
+    sel.innerHTML = '<option value="0">— inget angivet —</option>' +
+        list.map(f => `<option value="${f.id}">${escapeHtmlTrainingTag(f.alias)}` +
+            `${f.weaponClass ? ' (' + escapeHtmlTrainingTag(f.weaponClass) + ')' : ''}</option>`).join('');
+    row.classList.remove('d-none');
+}
+
+function escapeHtmlTrainingTag(v) {
+    return window.hpskEsc ? window.hpskEsc(v) : String(v == null ? '' : v);
+}
+
+/// Taggar den just sparade raden. Returnerar en text att visa när något gick fel, annars null.
+async function tagSavedTrainingScore(trainingScoreId, trainingDate) {
+    const sel = document.getElementById('trainingFirearmId');
+    const firearmId = sel ? (parseInt(sel.value, 10) || 0) : 0;
+    if (!firearmId) return null;
+
+    // ⚠️ Utan ett id finns inget tillfälle att hänga taggningen på. Att posta 0 hade tolkats som
+    // "ta bort taggningen" på en rad som inte existerar — tyst verkningslöst.
+    if (!trainingScoreId) return 'Vapnet kunde inte kopplas till passet (raden saknar id).';
+
+    const tokenEl = document.querySelector('input[name="__RequestVerificationToken"]');
+    const fd = new FormData();
+    fd.append('sourceKind', 'training');
+    fd.append('sourceId', trainingScoreId);
+    fd.append('firearmId', firearmId);
+    fd.append('sourceClass', '');
+    fd.append('occurredOn', trainingDate || '');
+    fd.append('__RequestVerificationToken', tokenEl ? tokenEl.value : '');
+
+    try {
+        const r = await fetch('/umbraco/surface/Firearm/SetUsage',
+            { method: 'POST', body: fd, credentials: 'same-origin' });
+        const t = await r.text();
+        let j = null;
+        try { j = JSON.parse(t); } catch (e) { j = null; }
+        if (j && j.success) {
+            // Håll det lokala tillståndet i takt så Resultat-fliken visar valet utan omladdning.
+            if (window.hpskFirearmTagRefresh) await window.hpskFirearmTagRefresh();
+            return null;
+        }
+        return (j && j.message) || 'Vapnet kunde inte sparas på passet.';
+    } catch (e) {
+        return 'Vapnet kunde inte sparas på passet.';
+    }
 }
 
 
@@ -1453,6 +1570,11 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('trainingDraftBanner')?.classList.add('d-none');
             trainingDraftSuspended = false;
             applyTrainingDraft(pendingDraft);
+
+            // ⚠️ Vapenvaljaren fylls EFTER applyTrainingDraft. Utkastet bär inget vapen (fältet
+            // ligger inte i TRAINING_DRAFT_FIELDS, eftersom taggningen är knuten till en rad som
+            // ännu inte finns), och en fyllning före återställningen hade nollställts av den.
+            fillTrainingFirearmSelect();
         });
 
         // Fritextfält, listor och metodvalet — knapparna täcks av updaterarna ovan.

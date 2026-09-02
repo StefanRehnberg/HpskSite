@@ -249,6 +249,10 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     message = entry.IsCompetition ? "Competition result recorded successfully" : "Training score recorded successfully",
+                    // ⚠️ Raden id:t identifierar är tillfället vapentaggningen hänger på
+                    // (FirearmUsage, SourceKind "training"). Utan det kan klienten inte tagga det
+                    // pass den just sparade och taggningen skulle behöva göras om i efterhand.
+                    trainingScoreId = newTrainingScoreId,
                     entry = new
                     {
                         entry.MemberName,

@@ -394,8 +394,10 @@ namespace HpskSite.Services.Firearms
             if (string.IsNullOrWhiteSpace(request.Alias)) return "Vapnet måste ha ett namn (alias).";
             if (request.Alias.Trim().Length > 80) return "Namnet är för långt (högst 80 tecken).";
 
-            if (!string.IsNullOrWhiteSpace(request.WeaponClass)
-                && !Enum.TryParse<WeaponClass>(request.WeaponClass.Trim(), out _))
+            // ⚠️ Går via FirearmWeaponGroups, inte Enum.TryParse<WeaponClass>. Den senare avvisar
+            // "M2" — och magnumklasserna M1–M9 är olika VAPEN (SA/DA revolver 41-44, 357, fri 9mm),
+            // inte kompetensnivåer, så gruppkoden "M" identifierar inget magnumvapen.
+            if (!FirearmWeaponGroups.IsValid(request.WeaponClass))
                 return $"Okänd vapengrupp '{request.WeaponClass}'.";
 
             if (!string.IsNullOrWhiteSpace(request.Vapentyp)

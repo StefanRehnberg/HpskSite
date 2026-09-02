@@ -1,5 +1,14 @@
 @using HpskSite.Models
 @{
+    // ⚠️ Dubbelinkluderingsguard. Partialen inkluderas numera av partialer som SJÄLVA kan hamna
+    // på samma sida (_FirearmUsageTagger + TrainingScoreEntry på Min sida). Skripten är
+    // idempotenta, men klassregistret är en JSON-blob som inte ska skickas två gånger.
+    if (ViewContext.HttpContext.Items.ContainsKey("hpskShootingClassesBootstrapRendered"))
+    {
+        return;
+    }
+    ViewContext.HttpContext.Items["hpskShootingClassesBootstrapRendered"] = true;
+
     // Emits a site-wide JS mapping of shooting class ID → weapon class code so that
     // front-end code can replace .charAt(0) / .substring(0,1) with window.getWeaponClassCode(id).
     // Critical for A_opt_1 / A_opt_2 / A_opt_3 which would otherwise be misclassified as plain "A".

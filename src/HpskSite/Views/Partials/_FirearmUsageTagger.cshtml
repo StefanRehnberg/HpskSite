@@ -1,0 +1,172 @@
+@*
+    Taggning av vilket vapen som användes vid ett tillfälle — kedjans punkt 5, steg 7.
+
+    ⚠️ SYFTET ÄR SKYTTENS EGET, inte ett intygspåstående. Kravet "tränat minst två gånger med
+    vapnet" är struket (Stefans beslut 2026-09-02): en förstagångssökande tränade med LÅNEVAPEN, så
+    per-vapen-historik för det sökta vapnet kan aldrig finnas. Den här ytan svarar på skyttens egen
+    fråga — "vad fungerar för mig" — och kryssen på föreningsintyget förblir utfärdarens.
+
+    ⚠️ TAGGNINGEN SKER ALDRIG I FUNKTIONÄRENS SIFFERPANEL. Tävlingsresultat matas in av funktionärer,
+    som inte vet vilket vapen skytten använde. Därför är tävlingstaggningen en EFTERHANDSÅTGÄRD på
+    medlemmens egen sida, och den delade .sp-*-komponenten behöver inte öppnas.
+
+    ⚠️ NYCKELN ÄR (kind, id, KLASS) och klassdelen är inte pynt. En officiell tävling grupperas per
+    (tävling, vapenklass), så en skytt anmäld i både A1 och C1 har två rader med samma tävlings-id.
+    Utan klassen skriver en taggning av A-vapnet tyst över C-vapnets. Klassen normaliseras via
+    window.getShootingClassName — id-formen ("C_Vet_Y") och namnformen ("C Vet Y") är IDENTISKA för
+    C1/C2/A1 och olika för varje klass med ändelse, så en rak jämförelse ser ut att fungera i all
+    testning och delar just veteran-, dam-, junior- och optikklasserna i två tillfällen.
+
+    Exporteras med window.x = x — en `async function` i ett block läcker INTE till global scope.
+*@
+@await Html.PartialAsync("_ShootingClassesBootstrap")
+@await Html.PartialAsync("_HtmlEscape")
+
+<script>
+(function () {
+    if (window.__fwTagInit) return;
+    window.__fwTagInit = true;
+
+    var css = document.createElement('style');
+    css.textContent =
+        '.fwtag-sel{min-width:9rem;max-width:14rem}' +
+        '.fwtag-none{color:var(--bs-secondary-color)}';
+    document.head.appendChild(css);
+
+    function esc(s) { return window.hpskEsc ? window.hpskEsc(s) : String(s == null ? '' : s); }
+
+    // Taggningstillståndet, hämtat EN gång per sidvisning och sedan uppdaterat lokalt. En
+    // omhämtning per rad hade gett ett anrop per resultat i listan.
+    var _state = null;          // { firearms:[{id,alias,weaponClass}], usage:{key:firearmId} }
+    var _loading = null;
+
+    /// Den sammansatta nyckeln. ⚠️ Speglar FirearmUsageService.Key i C# — klassdelen är gemen och
+    /// Id/Namn-foldad. Håll de två i takt, annars hittar listan aldrig sin egen taggning för de
+    /// klasser där formerna skiljer sig.
+    function tagKey(kind, id, cls) {
+        var head = kind + ':' + id;
+        var name = (window.getShootingClassName ? window.getShootingClassName(cls) : (cls || '')) || '';
+        return name ? head + ':' + name.toLowerCase() : head;
+    }
+
+    /// Läser in vapen + gjorda taggningar. Samma utestående anrop delas av alla anropare, så en
+    /// tabell som ritar trettio rader inte startar trettio hämtningar.
+    async function ensureLoaded(force) {
+        if (_state && !force) return _state;
+        if (_loading && !force) return _loading;
+
+        _loading = (async function () {
+            try {
+                var r = await fetch('/umbraco/surface/Firearm/GetMyUsage', { credentials: 'same-origin' });
+                var j = await r.json();
+                // ⚠️ Ett misslyckande får INTE bli ett tomt tillstånd som cachas. Då hade
+                // taggningen försvunnit ur listan resten av sidvisningen, vilket läser som att
+                // valen inte sparades.
+                if (!j || !j.success) { _state = null; return null; }
+                _state = { firearms: j.firearms || [], usage: j.usage || {} };
+                return _state;
+            } catch (e) {
+                _state = null;
+                return null;
+            } finally {
+                _loading = null;
+            }
+        })();
+        return _loading;
+    }
+
+    /// Väljaren för EN rad. Renderas tom när registret inte bär något vapen — då är en
+    /// rullgardin utan alternativ sämre än en mening som säger vad man ska göra.
+    ///
+    /// ⚠️ Ingen användartext i något attribut: raden bär kind/id/klass i data-attribut och en
+    /// delegerad lyssnare läser dem. Ett alias byggt som JS-literal i ett onchange är samma lucka
+    /// som gav kodexekvering i Fältskyttes "lägg till skytt", och aliaset skriver medlemmen själv.
+    function cell(kind, id, cls, occurredOn) {
+        if (!_state) return '<span class="small fwtag-none">–</span>';
+
+        var list = _state.firearms || [];
+        if (list.length === 0) {
+            return '<a class="small" href="#" data-fwtag="goto">Lägg till vapen</a>';
+        }
+
+        var current = _state.usage[tagKey(kind, id, cls)] || 0;
+        var opts = '<option value="0">— inget angivet —</option>' +
+            list.map(function (f) {
+                return '<option value="' + f.id + '"' + (String(f.id) === String(current) ? ' selected' : '') +
+                    '>' + esc(f.alias) + (f.weaponClass ? ' (' + esc(f.weaponClass) + ')' : '') + '</option>';
+            }).join('');
+
+        return '<select class="form-select form-select-sm fwtag-sel" data-fwtag="set" ' +
+            'data-kind="' + esc(kind) + '" data-id="' + esc(id) + '" ' +
+            'data-cls="' + esc(cls || '') + '" data-on="' + esc(occurredOn || '') + '">' +
+            opts + '</select>';
+    }
+
+    /// Sparar ett val. Optimistisk uppdatering av det lokala tillståndet, återställd vid avslag —
+    /// annars visar väljaren ett vapen servern nekade.
+    async function setUsage(sel) {
+        var kind = sel.getAttribute('data-kind');
+        var id = sel.getAttribute('data-id');
+        var cls = sel.getAttribute('data-cls');
+        var key = tagKey(kind, id, cls);
+        var before = _state ? (_state.usage[key] || 0) : 0;
+        var next = parseInt(sel.value, 10) || 0;
+
+        sel.disabled = true;
+        var fd = new FormData();
+        fd.append('sourceKind', kind);
+        fd.append('sourceId', id);
+        fd.append('firearmId', next);
+        fd.append('sourceClass', cls || '');
+        fd.append('occurredOn', sel.getAttribute('data-on') || '');
+        var tok = document.querySelector('input[name="__RequestVerificationToken"]');
+        fd.append('__RequestVerificationToken', tok ? tok.value : '');
+
+        var ok = false, msg = '';
+        try {
+            var r = await fetch('/umbraco/surface/Firearm/SetUsage',
+                { method: 'POST', body: fd, credentials: 'same-origin' });
+            // TEXT först: ett antiforgery-avslag är ett tomt 400 och r.json() kastar då ett
+            // SyntaxError som gömmer statuskoden.
+            var t = await r.text();
+            var j = null;
+            try { j = JSON.parse(t); } catch (e) { j = null; }
+            ok = !!(j && j.success);
+            msg = (j && j.message) || ('Oväntat svar från servern (' + r.status + ').');
+        } catch (e) {
+            msg = 'Kunde inte spara valet.';
+        }
+        sel.disabled = false;
+
+        if (!_state) return;
+        if (ok) {
+            if (next > 0) _state.usage[key] = next; else delete _state.usage[key];
+        } else {
+            sel.value = String(before);
+            alert(msg);
+        }
+    }
+
+    document.addEventListener('change', function (ev) {
+        var sel = ev.target && ev.target.closest ? ev.target.closest('[data-fwtag="set"]') : null;
+        if (sel) setUsage(sel);
+    });
+    document.addEventListener('click', function (ev) {
+        var a = ev.target && ev.target.closest ? ev.target.closest('[data-fwtag="goto"]') : null;
+        if (!a) return;
+        ev.preventDefault();
+        var tab = document.getElementById('firearms-member-tab');
+        if (tab) tab.click();
+    });
+
+    window.hpskFirearmTagLoad = ensureLoaded;
+    window.hpskFirearmTagCell = cell;
+    window.hpskFirearmTagKey = tagKey;
+    window.hpskFirearmTagHasWeapons = function () {
+        return !!(_state && (_state.firearms || []).length > 0);
+    };
+    /// Anropas efter att ett nytt tillfälle skapats (t.ex. ett just sparat träningspass) så nästa
+    /// rendering ser det. Tvingar en omhämtning — det lokala tillståndet känner inte till raden.
+    window.hpskFirearmTagRefresh = function () { return ensureLoaded(true); };
+})();
+</script>

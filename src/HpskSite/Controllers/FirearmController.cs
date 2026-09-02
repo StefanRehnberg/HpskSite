@@ -110,13 +110,20 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     canWrite = true,
+                    // Ägarens EGET id, på ägarens egen endpoint. Ingen exponering — och det är
+                    // vad som gör att en yta kan referera till sig själv (t.ex. hämta sina egna
+                    // intygsförfrågningar) utan att först behöva slå upp vem den inloggade är.
+                    memberId,
                     viewers,
                     lastForeignRead = _accessLog.LastForeignReadFor(memberId)?.ToString("yyyy-MM-dd HH:mm"),
                     // Valmängderna kommer ur konstanterna, aldrig ur en lista i vyn — annars kan
                     // formuläret erbjuda ett förbund intygets ruta inte känner igen.
                     options = new
                     {
-                        weaponClasses = Enum.GetNames<WeaponClass>(),
+                        // ⚠️ FirearmWeaponGroups, inte Enum.GetNames<WeaponClass>() — annars
+                        // erbjuds bara gruppkoden "M" och ett magnumvapen går inte att beskriva.
+                        weaponClasses = FirearmWeaponGroups.Options
+                            .Select(o => new { id = o.Value, label = o.Label }),
                         vapentyper = ForeningsintygDocument.AllaVapentyper,
                         forbund = ForeningsintygDocument.AllaForbund,
                         statuses = FirearmAcquisitionStatus.All
@@ -258,27 +265,47 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SetUsage(string sourceKind, int sourceId, int firearmId, string? occurredOn)
+        public async Task<IActionResult> SetUsage(
+            string sourceKind, int sourceId, int firearmId, string? occurredOn, string? sourceClass)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
             var when = DateTime.TryParse((occurredOn ?? "").Trim(), out var d) ? d : DateTime.Today;
-            var error = _usage.SetUsage(memberId, sourceKind, sourceId, firearmId, when);
+            var error = _usage.SetUsage(memberId, sourceKind, sourceId, firearmId, when, sourceClass);
 
             return error is null
                 ? Json(new { success = true, message = firearmId > 0 ? "Vapnet är angivet." : "Vapnet är borttaget." })
                 : Json(new { success = false, message = error });
         }
 
-        /// <summary>Medlemmens taggningar per tillfälle — så resultatlistan kan visa vad som valts.</summary>
+        /// <summary>
+        /// Taggningsytans enda läsning: vilka vapen medlemmen kan välja, och vad som redan är valt.
+        ///
+        /// <para>Båda i ETT svar, för att de alltid behövs tillsammans — en väljare utan de gjorda
+        /// valen visar tomt på rader som redan är taggade, och tvärtom.</para>
+        ///
+        /// <para><b>⚠️ Bär inga vapenuppgifter.</b> Bara id, namn och vapengrupp — alltså klartexten
+        /// som redan står på medlemmens egna kort. Ingen avkryptering, ingen loggrad.</para>
+        /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetMyUsage()
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            return Json(new { success = true, usage = _usage.UsageBySourceForMember(memberId) });
+            // Bara vapen som går att välja: aktiva, och inte utgallrade ur registret.
+            var mine = _firearms.GetForScope(FirearmScope.Member(memberId))
+                .Where(f => f.AcquisitionStatus != FirearmAcquisitionStatus.Avvecklat)
+                .Select(f => new { f.Id, f.Alias, f.WeaponClass })
+                .ToList();
+
+            return Json(new
+            {
+                success = true,
+                firearms = mine,
+                usage = _usage.UsageBySourceForMember(memberId),
+            });
         }
 
         /// <summary>

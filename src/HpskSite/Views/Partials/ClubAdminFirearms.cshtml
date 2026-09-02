@@ -134,8 +134,26 @@
 
 @* Klubbvapnets redigeringsdialog. Enkel med flit: klubbvapnets skyddade uppgifter (serienummer,
    licens) hör till klubbens egen licensbokföring och skrivs inte här ännu. *@
+@*
+    Klubbvapnets formulär.
+
+    ⚠️ KLUBBVAPEN ÄR LICENSBELAGDA precis som medlemmarnas, och kan behöva nya licenser sökta.
+    Formuläret bar tidigare bara nummer, namn, vapengrupp, typ, status och lånebart — alltså inte
+    de uppgifter en licensansökan kräver. Rapporterat från prod 2026-09-02.
+
+    ⚠️ SAMMA TVÅDELNING SOM MEDLEMSFORMULÄRET, av samma skäl: de känsligaste uppgifterna krypteras,
+    och delningen är en LAGRINGSfråga och inte en åtkomstfråga. Skillnaden mot medlemsvapen är VEM
+    som får läsa — klubbvapen är föreningens egendom, inte personuppgifter, så klubbadmin räcker
+    (ingen föreningsintygsansvarig behövs). Varje avmaskering loggas ändå.
+
+    ⚠️ autocomplete="off" + eget name PÅ VARJE FRITEXTFÄLT. Webbläsaren fyllde i användarens
+    E-POSTADRESS i "Namn" (rapporterat 2026-09-02): Chrome läser etiketten "Namn" som ett
+    profilfält och erbjuder adressuppgifter. Värre vore autofyll i tillverknings- eller
+    licensnummer. NB autocomplete="off" är en stark uppmaning, inte en garanti — därför bär fälten
+    dessutom namn som ingen autofyll-heuristik känner igen.
+*@
 <div class="modal fade" id="vapCfModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="vapCfTitle">Lägg till klubbvapen</h5>
@@ -145,38 +163,125 @@
                 <div id="vapCfError" class="alert alert-danger small d-none"></div>
                 <input type="hidden" id="vapCfId" value="0">
 
-                <div class="row g-3">
-                    <div class="col-4">
-                        <label class="form-label small" for="vapCfNumber">Vapennummer</label>
-                        <input type="number" min="1" class="form-control" id="vapCfNumber">
-                        <div class="form-text">Föreningens eget nummer, 1–N.</div>
-                    </div>
-                    <div class="col-8">
-                        <label class="form-label small" for="vapCfAlias">Namn *</label>
-                        <input type="text" class="form-control" id="vapCfAlias" maxlength="80"
-                               placeholder="t.ex. Klubbvapen C">
-                    </div>
-                    <div class="col-6">
-                        <label class="form-label small" for="vapCfClass">Vapengrupp</label>
-                        <select class="form-select" id="vapCfClass"></select>
-                    </div>
-                    <div class="col-6">
-                        <label class="form-label small" for="vapCfType">Vapentyp</label>
-                        <select class="form-select" id="vapCfType"></select>
-                    </div>
-                    <div class="col-6">
-                        <label class="form-label small" for="vapCfStatus">Status</label>
-                        <select class="form-select" id="vapCfStatus"></select>
-                    </div>
-                    <div class="col-6 d-flex align-items-end">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="vapCfLoanable">
-                            <label class="form-check-label small" for="vapCfLoanable">
-                                Lånebart — syns för medlemmarna
+                <p class="small mb-3">
+                    <i class="bi bi-bank text-primary me-1"></i>
+                    <strong>Föreningens eget vapen.</strong>
+                    Uppgifterna är klubbens, inte en medlems — alla klubbens administratörer kan
+                    läsa dem. Medlemmarna ser bara nummer, namn och om vapnet är ledigt.
+                </p>
+
+                <fieldset class="vap-box vap-box-open mb-3">
+                    <legend class="vap-legend"><i class="bi bi-tag me-1"></i>Grunduppgifter</legend>
+                    <div class="row g-3">
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="vapCfNumber">Vapennummer</label>
+                            <input type="number" min="1" class="form-control" id="vapCfNumber"
+                                   name="vapCfNumber" autocomplete="off">
+                            <div class="form-text">Föreningens eget nummer, 1–N.</div>
+                        </div>
+                        <div class="col-sm-8">
+                            <label class="form-label small" for="vapCfAlias">Namn *</label>
+                            <input type="text" class="form-control" id="vapCfAlias" name="vapCfAlias"
+                                   maxlength="80" autocomplete="off" placeholder="t.ex. Klubbvapen C">
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="vapCfClass">Vapengrupp</label>
+                            <select class="form-select" id="vapCfClass"></select>
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="vapCfType">Vapentyp</label>
+                            <select class="form-select" id="vapCfType"></select>
+                        </div>
+                        <div class="col-sm-4 d-none" id="vapCfAnnanTypWrap">
+                            <label class="form-label small" for="vapCfAnnanTyp">Vilken typ?</label>
+                            <input type="text" class="form-control" id="vapCfAnnanTyp"
+                                   name="vapCfAnnanTyp" maxlength="60" autocomplete="off">
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="vapCfStatus">Status</label>
+                            <select class="form-select" id="vapCfStatus"></select>
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small" for="vapCfExpires">
+                                Licensen förfaller
                             </label>
+                            <input type="text" class="form-control" id="vapCfExpires"
+                                   name="vapCfExpires" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD">
+                            <div class="form-text">Listan varnar i tid. Lämna tomt om licensen inte
+                                har något förfallodatum.</div>
+                        </div>
+                        <div class="col-sm-4 d-flex align-items-end">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="vapCfLoanable">
+                                <label class="form-check-label small" for="vapCfLoanable">
+                                    Lånebart — syns för medlemmarna
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-sm-6">
+                            <label class="form-label small d-block">Förbund</label>
+                            <div id="vapCfForbund" class="vap-checks"></div>
+                            <div class="form-text">
+                                Vilka förbunds verksamhet vapnet används i. Styr &quot;antal vapen&quot;
+                                på ett föreningsintyg.
+                            </div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small d-block">Grenar</label>
+                            <div id="vapCfDisciplines" class="vap-checks"></div>
                         </div>
                     </div>
-                </div>
+                </fieldset>
+
+                <fieldset class="vap-box vap-box-locked">
+                    <legend class="vap-legend"><i class="bi bi-lock-fill me-1"></i>Krypterat</legend>
+                    <p class="small text-muted mb-3" id="vapCfLockedIntro"></p>
+
+                    <div class="row g-3">
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="vapCfFabrikat">Fabrikat</label>
+                            <input type="text" class="form-control" id="vapCfFabrikat"
+                                   name="vapCfFabrikat" maxlength="80" autocomplete="off">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="vapCfModell">Modell</label>
+                            <input type="text" class="form-control" id="vapCfModell"
+                                   name="vapCfModell" maxlength="80" autocomplete="off">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="vapCfKaliber">Kaliber / patronbeteckning</label>
+                            <input type="text" class="form-control" id="vapCfKaliber"
+                                   name="vapCfKaliber" maxlength="60" autocomplete="off">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="vapCfPiplangd">Piplängd</label>
+                            <input type="text" class="form-control" id="vapCfPiplangd"
+                                   name="vapCfPiplangd" maxlength="30" autocomplete="off"
+                                   placeholder="anges i cm">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="vapCfTillverkningsnummer">Tillverkningsnummer</label>
+                            <input type="text" class="form-control" id="vapCfTillverkningsnummer"
+                                   name="vapCfTillverkningsnummer" maxlength="60" autocomplete="off">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="vapCfLicensnummer">Licensnummer</label>
+                            <input type="text" class="form-control" id="vapCfLicensnummer"
+                                   name="vapCfLicensnummer" maxlength="60" autocomplete="off">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="vapCfLicensdatum">Licensdatum</label>
+                            <input type="text" class="form-control" id="vapCfLicensdatum"
+                                   name="vapCfLicensdatum" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small" for="vapCfAnteckning">Anteckning</label>
+                            <textarea class="form-control" id="vapCfAnteckning" name="vapCfAnteckning"
+                                      rows="2" maxlength="500" autocomplete="off"></textarea>
+                        </div>
+                    </div>
+                </fieldset>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -201,7 +306,16 @@
         'border:1px solid var(--bs-border-color);border-radius:.375rem;margin-bottom:.5rem}' +
         '.vap-row .vap-name{font-weight:600}' +
         '.vap-count{font-size:1.75rem;font-weight:700;line-height:1}' +
-        '.vap-dormant{opacity:.65}';
+        '.vap-dormant{opacity:.65}' +
+        '.vap-box{border:1px solid var(--bs-border-color);border-radius:.5rem;padding:1rem 1.25rem}' +
+        '.vap-box-open{border-left:4px solid var(--bs-secondary)}' +
+        '.vap-box-locked{border-left:4px solid var(--bs-primary);background:var(--bs-tertiary-bg)}' +
+        '.vap-legend{float:none;width:auto;font-size:.8rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:.04em;padding:0 .4rem;margin-bottom:0}' +
+        '.vap-checks{max-height:9rem;overflow:auto;border:1px solid var(--bs-border-color);' +
+        'border-radius:.375rem;padding:.5rem .75rem}' +
+        '.vap-expiry-soon{color:var(--bs-warning-text-emphasis)}' +
+        '.vap-expiry-past{color:var(--bs-danger);font-weight:600}';
     document.head.appendChild(css);
 
     function esc(s) { return (window.hpskEsc ? window.hpskEsc(s) : String(s == null ? '' : s)); }
@@ -395,6 +509,7 @@
         if (action === 'cf-add') { openClubFirearm(0); return; }
         if (action === 'cf-edit') { openClubFirearm(btn.getAttribute('data-firearm-id')); return; }
         if (action === 'cf-save') { await saveClubFirearm(); return; }
+        if (action === 'cf-load-details') { await cfLoadDetails(); return; }
         if (action === 'cf-remove') {
             var fid = btn.getAttribute('data-firearm-id');
             var row = btn.closest('tr');
@@ -468,16 +583,47 @@
             body.innerHTML = '<p class="text-muted small mb-0">Inga vapen inlagda \u00e4n.</p>';
             return;
         }
-        var html = '<div class="table-responsive"><table class="table table-sm align-middle">' +
+        // ⚠️ Förfallodatumet är med i LISTAN, inte bara i formuläret. Ett klubbvapen vars licens
+        // går ut obemärkt tas ur bruk, och ingen enskild person får en påminnelse för föreningens
+        // vapen — så synligheten här är hela varningen. Samma trösklar som medlemskorten (90/30).
+        var expired = list.filter(function (f) {
+            return f.daysUntilExpiry != null && f.daysUntilExpiry < 0; }).length;
+        var soon = list.filter(function (f) {
+            return f.daysUntilExpiry != null && f.daysUntilExpiry >= 0 && f.daysUntilExpiry <= 90;
+        }).length;
+
+        var html = '';
+        if (expired || soon) {
+            html += '<div class="alert alert-warning small py-2 px-3">' +
+                '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                (expired ? '<strong>' + expired + ' vapen har en licens som f\u00f6rfallit.</strong> ' : '') +
+                (soon ? soon + ' f\u00f6rfaller inom tre m\u00e5nader. ' : '') +
+                'Klubben f\u00e5r ingen automatisk p\u00e5minnelse f\u00f6r sina egna vapen \u2014 den h\u00e4r listan \u00e4r ' +
+                'varningen.</div>';
+        }
+
+        html += '<div class="table-responsive"><table class="table table-sm align-middle">' +
             '<thead><tr><th>Nr</th><th>Namn</th><th>Grupp</th><th>Typ</th><th>Status</th>' +
-            '<th>L\u00e5nebart</th><th class="text-end"></th></tr></thead><tbody>';
+            '<th>Licens t.o.m.</th><th>L\u00e5nebart</th><th class="text-end"></th></tr></thead><tbody>';
         list.forEach(function (f) {
+            var expCls = f.daysUntilExpiry == null ? 'text-muted'
+                       : f.daysUntilExpiry < 0 ? 'vap-expiry-past'
+                       : f.daysUntilExpiry <= 90 ? 'vap-expiry-soon' : '';
+            var expTxt = !f.licenseExpiresOn ? '\u2014'
+                       : esc(f.licenseExpiresOn) +
+                         (f.daysUntilExpiry < 0 ? ' (f\u00f6rfallen)'
+                          : f.daysUntilExpiry <= 90 ? ' (' + f.daysUntilExpiry + ' dagar)' : '');
+
             html += '<tr>' +
                 '<td class="fw-semibold">' + (f.number == null ? '\u2014' : f.number) + '</td>' +
-                '<td>' + esc(f.alias) + '</td>' +
+                '<td>' + esc(f.alias) +
+                (f.hasDetails
+                    ? ' <i class="bi bi-lock-fill text-primary small" title="Licensuppgifter sparade"></i>'
+                    : '') + '</td>' +
                 '<td>' + esc(f.weaponClass || '\u2014') + '</td>' +
                 '<td>' + esc(f.vapentyp || '\u2014') + '</td>' +
                 '<td>' + esc(f.status) + '</td>' +
+                '<td class="' + expCls + '">' + expTxt + '</td>' +
                 '<td>' + (f.isLoanable
                     ? '<i class="bi bi-check-circle text-success" title="L\u00e5nebart"></i>'
                     : '<span class="text-muted">\u2014</span>') + '</td>' +
@@ -500,9 +646,11 @@
         document.getElementById('vapCfTitle').textContent =
             f ? '\u00c4ndra klubbvapen' : 'L\u00e4gg till klubbvapen';
 
+        // ⚠️ {id,label}, inte strängar — se kommentaren i _MemberFirearms. Magnumklasserna bär
+        // sin beskrivning, eftersom M1 och M2 är två skilda vapen och inte två nivåer.
         document.getElementById('vapCfClass').innerHTML = '<option value="">\u2014 v\u00e4lj \u2014</option>' +
             (o.weaponClasses || []).map(function (c) {
-                return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('');
+                return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>'; }).join('');
         document.getElementById('vapCfType').innerHTML = '<option value="">\u2014 v\u00e4lj \u2014</option>' +
             (o.vapentyper || []).map(function (t) {
                 return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('');
@@ -510,15 +658,113 @@
             (o.statuses || []).map(function (st) {
                 return '<option value="' + esc(st) + '">' + esc(st) + '</option>'; }).join('');
 
+        // Kryssrutorna byggs ur SERVERNS konstanter, aldrig ur en lista i vyn — annars kan
+        // formuläret erbjuda ett förbund intygets ruta inte känner igen.
+        document.getElementById('vapCfForbund').innerHTML =
+            (o.forbund || []).map(function (fb, i) {
+                return '<div class="form-check"><input class="form-check-input" type="checkbox" ' +
+                    'id="vapCfFb' + i + '" value="' + esc(fb) + '">' +
+                    '<label class="form-check-label small" for="vapCfFb' + i + '">' +
+                    esc(fb) + '</label></div>'; }).join('');
+        document.getElementById('vapCfDisciplines').innerHTML =
+            (o.disciplines || []).map(function (d, i) {
+                return '<div class="form-check"><input class="form-check-input" type="checkbox" ' +
+                    'id="vapCfDs' + i + '" value="' + esc(d.id) + '">' +
+                    '<label class="form-check-label small" for="vapCfDs' + i + '">' +
+                    esc(d.label) + '</label></div>'; }).join('');
+
         document.getElementById('vapCfId').value = f ? f.id : 0;
         document.getElementById('vapCfNumber').value = f && f.number != null ? f.number : '';
         document.getElementById('vapCfAlias').value = f ? f.alias : '';
         document.getElementById('vapCfClass').value = f ? (f.weaponClass || '') : '';
         document.getElementById('vapCfType').value = f ? (f.vapentyp || '') : '';
+        document.getElementById('vapCfAnnanTyp').value = f ? (f.annanVapentyp || '') : '';
         document.getElementById('vapCfStatus').value = f ? f.status : (o.statuses || [''])[0];
         document.getElementById('vapCfLoanable').checked = f ? !!f.isLoanable : true;
+        document.getElementById('vapCfExpires').value = f ? (f.licenseExpiresOn || '') : '';
+        cfSetChecks('vapCfForbund', f ? f.federations : []);
+        cfSetChecks('vapCfDisciplines', f ? f.disciplines : []);
+        cfSyncAnnanTyp();
+
+        // ⚠️ De skyddade fälten fylls INTE i automatiskt. Att göra det vore en avmaskering ingen
+        // bett om, och den loggas. Sparas de utan att ha hämtats skickas writeDetails=0, alltså
+        // "rör dem inte" — annars raderar en statusändring klubbens licensuppgifter.
+        ['vapCfFabrikat','vapCfModell','vapCfKaliber','vapCfPiplangd','vapCfTillverkningsnummer',
+         'vapCfLicensnummer','vapCfLicensdatum','vapCfAnteckning']
+            .forEach(function (k) { var el = document.getElementById(k); if (el) el.value = ''; });
+
+        var intro = document.getElementById('vapCfLockedIntro');
+        if (f && f.hasDetails) {
+            intro.innerHTML = 'Uppgifterna finns sparade och visas inte automatiskt. ' +
+                '<button type="button" class="btn btn-sm btn-outline-primary ms-1" ' +
+                'data-vap-action="cf-load-details"><i class="bi bi-eye me-1"></i>' +
+                'H\u00e4mta f\u00f6r att \u00e4ndra</button>';
+        } else {
+            intro.textContent = 'Krypteras innan de lagras \u2014 ol\u00e4sbara \u00e4ven f\u00f6r den som ' +
+                'skulle komma \u00e5t sj\u00e4lva databasen.';
+        }
+        _cfDetailsLoaded = !(f && f.hasDetails);
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('vapCfModal')).show();
+        cfInitDatePickers();
+    }
+
+    var _cfDetailsLoaded = true;
+
+    function cfSetChecks(containerId, values) {
+        var set = (values || []).map(function (v) { return String(v).toLowerCase(); });
+        document.getElementById(containerId).querySelectorAll('input[type=checkbox]')
+            .forEach(function (cb) { cb.checked = set.indexOf(String(cb.value).toLowerCase()) >= 0; });
+    }
+    function cfGetChecks(containerId) {
+        return [...document.getElementById(containerId)
+                 .querySelectorAll('input[type=checkbox]:checked')]
+               .map(function (cb) { return cb.value; });
+    }
+
+    function cfSyncAnnanTyp() {
+        var wrap = document.getElementById('vapCfAnnanTypWrap');
+        var isOther = document.getElementById('vapCfType').value === 'Annat';
+        wrap.classList.toggle('d-none', !isOther);
+        if (!isOther) document.getElementById('vapCfAnnanTyp').value = '';
+    }
+    document.addEventListener('change', function (ev) {
+        if (ev.target && ev.target.id === 'vapCfType') cfSyncAnnanTyp();
+    });
+
+    function cfInitDatePickers() {
+        if (typeof flatpickr !== 'function') return;   // degraderar till textfält
+        ['#vapCfExpires', '#vapCfLicensdatum'].forEach(function (sel) {
+            var el = document.querySelector(sel);
+            if (el && !el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d' });
+        });
+    }
+
+    /// Hämtar de skyddade uppgifterna på begäran. Uppslagningen loggas i samma metod som lämnar ut
+    /// klartexten, serversidan — därför är det ett klick och inte en sidoeffekt av att öppna.
+    async function cfLoadDetails() {
+        var id = document.getElementById('vapCfId').value;
+        var j = await post('/umbraco/surface/FirearmAdmin/RevealClubFirearmDetails', null,
+                           { clubId: vapClubId(), firearmId: id });
+        var errBox = document.getElementById('vapCfError');
+        if (!j.success) {
+            errBox.textContent = j.message || 'Kunde inte h\u00e4mta uppgifterna.';
+            errBox.classList.remove('d-none');
+            return;
+        }
+        var d = j.details || {};
+        document.getElementById('vapCfFabrikat').value = d.fabrikat || '';
+        document.getElementById('vapCfModell').value = d.modell || '';
+        document.getElementById('vapCfKaliber').value = d.kaliber || '';
+        document.getElementById('vapCfPiplangd').value = d.piplangd || '';
+        document.getElementById('vapCfTillverkningsnummer').value = d.tillverkningsnummer || '';
+        document.getElementById('vapCfLicensnummer').value = d.licensnummer || '';
+        document.getElementById('vapCfLicensdatum').value = d.licensdatum || '';
+        document.getElementById('vapCfAnteckning').value = d.anteckning || '';
+        _cfDetailsLoaded = true;
+        document.getElementById('vapCfLockedIntro').textContent =
+            '\u00c4ndringar sparas krypterat.';
+        cfInitDatePickers();
     }
 
     async function saveClubFirearm() {
@@ -535,9 +781,26 @@
             alias: alias,
             weaponClass: document.getElementById('vapCfClass').value,
             vapentyp: document.getElementById('vapCfType').value,
+            annanVapentyp: document.getElementById('vapCfAnnanTyp').value,
             number: document.getElementById('vapCfNumber').value,
             isLoanable: document.getElementById('vapCfLoanable').checked,
-            status: document.getElementById('vapCfStatus').value
+            status: document.getElementById('vapCfStatus').value,
+            licenseExpiresOn: document.getElementById('vapCfExpires').value,
+            // ⚠️ BÅDA listorna skickas alltid, även tomma. Servern skriver om relationerna helt
+            // vid varje sparning, så ett utelämnat fält RENSAR dem — och förbundet är vad
+            // blankettens "antal vapen sedan tidigare" räknas i.
+            federations: cfGetChecks('vapCfForbund').join(','),
+            disciplines: cfGetChecks('vapCfDisciplines').join(','),
+            // 0 = rör inte de krypterade uppgifterna (de hämtades aldrig i den här dialogen).
+            writeDetails: _cfDetailsLoaded ? '1' : '0',
+            fabrikat: document.getElementById('vapCfFabrikat').value,
+            modell: document.getElementById('vapCfModell').value,
+            kaliber: document.getElementById('vapCfKaliber').value,
+            piplangd: document.getElementById('vapCfPiplangd').value,
+            tillverkningsnummer: document.getElementById('vapCfTillverkningsnummer').value,
+            licensnummer: document.getElementById('vapCfLicensnummer').value,
+            licensdatum: document.getElementById('vapCfLicensdatum').value,
+            anteckning: document.getElementById('vapCfAnteckning').value
         });
         if (!j.success) {
             errBox.textContent = j.message || 'Kunde inte spara.';

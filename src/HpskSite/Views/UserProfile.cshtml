@@ -1016,6 +1016,7 @@
 </div>
 
 @* Include Training Score Modals *@
+@await Html.PartialAsync("~/Views/Partials/_FirearmUsageTagger.cshtml")
 @await Html.PartialAsync("~/Views/Partials/TrainingScoreEntry.cshtml")
 @await Html.PartialAsync("~/Views/Partials/TrainingScoreDetail.cshtml")
 @await Html.PartialAsync("~/Views/Partials/FaltskytteScoreEntry.cshtml")
@@ -4279,9 +4280,19 @@ function loadResults() {
 
     // (Standardmedaljer + Märken moved to the "Medaljer & Märken" tab — loaded by loadMarkenTab.)
 
-    fetch(`/umbraco/surface/Member/GetMemberResults?competitionType=${competitionType}&year=${year}&weaponClass=${weaponClass}`)
-        .then(response => response.json())
-        .then(data => {
+    // ⚠️ Vapentaggningen måste vara inläst FÖRE renderingen, annars ritas kolumnen tom på rader
+    // som redan är taggade och medlemmen ser sina egna val försvinna. Ett misslyckande här får
+    // aldrig fälla resultatlistan — kolumnen degraderar till ett streck.
+    const fwTagReady = window.hpskFirearmTagLoad
+        ? window.hpskFirearmTagLoad().catch(() => null)
+        : Promise.resolve(null);
+
+    Promise.all([
+        fetch(`/umbraco/surface/Member/GetMemberResults?competitionType=${competitionType}&year=${year}&weaponClass=${weaponClass}`)
+            .then(response => response.json()),
+        fwTagReady
+    ])
+        .then(([data]) => {
             if (data.success) {
                 if (competitionType === 'Faltskytte') {
                     renderFaltskytteResultsTable(data.results || []);
@@ -4329,6 +4340,27 @@ function renderStmCell(r) {
     return badge + cue;
 }
 
+// Vapenkolumnen: skyttens EGEN anteckning om vilket vapen tillfället gällde (punkt 5, steg 7).
+//
+// ⚠️ TVÅ OBEROENDE IDENTITETSSERIER. En självrapporterad rad bär TrainingScores-id ("training"),
+// en av våra egna officiella tävlingar bär TÄVLINGSNODENS id ("comp") — samma heltal betyder
+// olika saker. Nyckeln måste därför bära källan, och för en tävling även KLASSEN: resultatlistan
+// grupperar per (tävling, vapenklass), så en skytt anmäld i A1 och C1 har två rader med samma
+// tävlings-id och ska kunna ange två olika vapen.
+function renderFirearmTagCell(r) {
+    if (!window.hpskFirearmTagCell) return '<span class="small text-muted">–</span>';
+
+    if (r.trainingScoreId) {
+        return window.hpskFirearmTagCell('training', r.trainingScoreId, '', r.date);
+    }
+    if (r.competitionId) {
+        return window.hpskFirearmTagCell('comp', r.competitionId, r.shootingClass || r.weaponClass || '', r.date);
+    }
+    // Varken en träningsrad eller en tävling vi känner igen — ingen nyckel att hänga taggningen
+    // på. Ett streck, aldrig en väljare som tyst skriver på fel tillfälle.
+    return '<span class="small text-muted">–</span>';
+}
+
 function renderResultsTable(results) {
     const content = document.getElementById('resultsContent');
 
@@ -4354,6 +4386,8 @@ function renderResultsTable(results) {
             <i class="bi bi-hourglass-split text-warning"></i> = väntar på godkännande,
             <i class="bi bi-exclamation-triangle-fill text-warning"></i> = saknar bevis (öppna resultatet och ladda upp),
             <i class="bi bi-x-circle-fill text-danger"></i> = avvisad.</span>
+            <span class="ms-2">Vapen: din egen anteckning om vilket vapen du sköt med —
+            klubben ser den inte, och den intygar ingenting.</span>
         </p>
         <div class="table-responsive">
             <table class="table table-striped table-hover">
@@ -4365,6 +4399,7 @@ function renderResultsTable(results) {
                         <th>Klass</th>
                         <th>Totalt</th>
                         <th title="Standardmedalj">StM</th>
+                        <th class="d-none d-lg-table-cell" title="Vilket av dina vapen du använde">Vapen</th>
                         <th>Åtgärder</th>
                     </tr>
                 </thead>
@@ -4384,6 +4419,7 @@ function renderResultsTable(results) {
                             <td><span class="badge bg-secondary">${r.weaponClass}</span></td>
                             <td>${r.totalScore} <small class="text-muted">(${r.seriesCount} serier)</small></td>
                             <td>${renderStmCell(r)}</td>
+                            <td class="d-none d-lg-table-cell">${renderFirearmTagCell(r)}</td>
                             <td>
                                 <button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="viewResultDetails('${r.type}', ${r.trainingScoreId || 'null'}, ${r.competitionId || 'null'}, '${r.shootingClass || ''}')" title="Visa">
                                     <i class="bi bi-eye"></i>
