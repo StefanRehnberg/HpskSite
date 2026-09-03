@@ -14,6 +14,26 @@
 
     Etiketterna är avsiktligt ENKLA att skriva ut på vanligt papper och klippa — inte beroende av
     ett etikettark med en bestämd layout, som ingen klubb har.
+
+    ⚠️⚠️ MÅTTEN ÄR I MILLIMETER, OCH DET ÄR FUNKTIONEN — INTE FORMGIVNING. En etikett ska få plats
+    på ett vapen: på lådans sida, på kolven, i en kolvkåpa. Sätts QR-koden i rem eller px avgör
+    webbläsarens px-till-mm-omräkning hur stor den blir på papperet, och den varierar mellan
+    skrivare och zoomnivå — alltså blir den fysiska modulstorleken en slump. I mm är den mätbar:
+    29 moduler + 8 modulers tyst zon över 18 mm ger ~0,49 mm per modul, precis över vad en
+    mobilkamera läser pålitligt.
+
+    ⚠️ KRYMP INTE .lab img UNDER 15 mm. Under det går modulen under 0,4 mm och koden blir en kod
+    som läses i bra ljus av en ny telefon — alltså en som fallerar i ett valv, i mörker, för den
+    som redan är osäker på tekniken. Behöver etiketten bli mindre än så är rätt åtgärd en kortare
+    adress, inte en mindre kod.
+
+    ⚠️ KODEN ÄR SVG, inte PNG. En rastrerad QR skalas ner av skrivaren och varje modulkant blir en
+    gråskala — vid 18 mm är det skillnaden mellan en kod som läses direkt och en som kräver tre
+    försök. Vektorn tar skrivarens egen upplösning.
+
+    ⚠️ ADRESSEN TRYCKS ALDRIG SYNLIGT. Den bärs i data-label-url för felsökning och verifiering.
+    Koden i den är hemligheten som gör att man måste stå framför vapnet för att kunna checka ut
+    det — läsbar på ett foto av valvet vore den ingen hemlighet alls.
 *@
 <!DOCTYPE html>
 <html lang="sv">
@@ -27,14 +47,17 @@
                margin: 0; padding: 1.5rem; }
         h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
         .lead { color: #555; font-size: .875rem; margin: 0 0 1.25rem; max-width: 40rem; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-                gap: .75rem; }
-        .lab { border: 1px dashed #999; border-radius: .25rem; padding: .6rem .75rem;
-               display: flex; align-items: center; gap: .75rem; break-inside: avoid; }
-        .lab img { width: 5.5rem; height: 5.5rem; }
-        .nr { font-size: 2.1rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-        .alias { font-size: .8125rem; color: #444; }
-        .brand { font-size: .625rem; color: #777; letter-spacing: .04em; text-transform: uppercase; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, 46mm); gap: 3mm; }
+        .lab { border: 1px dashed #999; border-radius: 1mm; padding: 2mm;
+               display: flex; align-items: center; gap: 2mm; break-inside: avoid;
+               width: 46mm; box-sizing: border-box; }
+        .lab img { width: 18mm; height: 18mm; flex: 0 0 18mm; }
+        .lab-text { min-width: 0; }
+        .nr { font-size: 6mm; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+        .alias { font-size: 2.6mm; color: #444; line-height: 1.2;
+                 overflow: hidden; text-overflow: ellipsis; }
+        .brand { font-size: 2.1mm; color: #777; letter-spacing: .04em; text-transform: uppercase;
+                 margin-top: .8mm; }
         .empty { border: 1px solid #ddd; padding: 1rem; border-radius: .25rem; color: #555; }
         .noprint button { font-size: 1rem; padding: .5rem 1rem; }
         @@media print { .noprint { display: none !important; } body { padding: .5rem; } }
@@ -111,11 +134,11 @@
             @foreach (var f in Model.Firearms)
             {
                 <div class="lab" data-label-url="@f.Url" data-firearm-id="@f.FirearmId">
-                    @* Bilden hämtas per vapen. Går den inte att skapa försvinner den i stället för
-                       att lämna en trasig bildikon på ett ark som ska lamineras. *@
-                    <img src="/umbraco/surface/FirearmAdmin/GetFirearmLabelQr?clubId=@Model.ClubId&firearmId=@f.FirearmId&size=6"
+                    @* Bilden hämtas per vapen, som SVG. Går den inte att skapa försvinner den i
+                       stället för att lämna en trasig bildikon på ett ark som ska lamineras. *@
+                    <img src="/umbraco/surface/FirearmAdmin/GetFirearmLabelQr?clubId=@Model.ClubId&firearmId=@f.FirearmId"
                          alt="" onerror="this.remove()">
-                    <div>
+                    <div class="lab-text">
                         <div class="nr">@(f.Number.HasValue ? $"nr {f.Number}" : f.Alias)</div>
                         @if (f.Number.HasValue)
                         {

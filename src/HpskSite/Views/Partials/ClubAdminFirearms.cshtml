@@ -107,7 +107,14 @@
 <div class="tab-pane fade" id="clubFirearmsTab">
 <div id="vapPanel" data-club-id="@vapClubId">
 
-    @* ── Lånevapen: EN rad, och resten bakom Åtgärder ───────────────────────────────────────
+    @* ── ETT kort: klubbens vapen, med allt annat bakom Åtgärder ────────────────────────────
+
+       ⚠️ SLAGET IHOP 2026-09-03 (Stefans begäran, och han har rätt). Sidan bar två kort —
+       "Lånevapen" med en siffra och "Klubbens vapen" med en lista över samma vapen. Grupperingen
+       bar ingen information: båda svarade på samma fråga, och två rubriker över samma sak lämnar
+       "vilket av dem gäller?" obesvarad. Det är samma fel som kritiken i kommentaren nedan
+       beskriver, en nivå upp — den handlade om två YTOR som gör samma sak, den här om två
+       SEKTIONER om samma sak.
 
        ⚠️ OMGJORD 2026-09-02 efter prodtest. Första versionen la ett helt kort med inställningar
        MITT PÅ SIDAN och ett andra kort med varje bokning som någonsin gjorts. Två fel i ett:
@@ -118,14 +125,24 @@
        är byggt för en telefon i handen. Panelen visar EN siffra och en väg dit — två ytor som gör
        samma sak lämnar frågan "vilken av dem gäller?" obesvarad, och den frågan är värre än att
        behöva byta sida.
+
+       ⚠️ "ÖPPNA VALVET" STÅR KVAR UTANFÖR MENYN, och det är det enda som gör det. Valvet är
+       kvällens arbete; listan är uppslagsdata. Allt annat här görs en gång — ett vapen läggs in
+       när klubben köper ett, etiketten skrivs ut en gång och gäller för alltid, reglerna rör
+       styrelsen en gång om året — och hör därför i menyn. Samma resonemang som klubbens
+       Medlemmar-flik, där "Lägg till klubbmedlem" är ett menyval eftersom medlemmar registrerar
+       sig själva.
     *@
-    <div class="card mb-4">
+    <div class="card">
         <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
                 <div>
                     <h5 class="card-title mb-1">
-                        <i class="bi bi-safe2 text-primary me-2"></i>Lånevapen
+                        <i class="bi bi-safe text-primary me-2"></i>Klubbens vapen
                     </h5>
+                    @* Siffran om utlånade vapen är sidans undertext nu, inte ett eget korts
+                       rubrikrad. Den svarar på "vad är läget just nu" om exakt de vapen listan
+                       under visar. *@
                     <div id="vapLwSummary" class="text-muted small">Laddar…</div>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
@@ -137,7 +154,17 @@
                                 data-bs-toggle="dropdown" aria-expanded="false">
                             Åtgärder
                         </button>
-                        <ul class="dropdown-menu dropdown-menu-end">
+                        @* Grupperade rubriker, eftersom de sex posterna gör tre olika saker. En
+                           odelad lista på sex rader tvingar läsaren att läsa alla för att hitta en. *@
+                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:16rem">
+                            <li><h6 class="dropdown-header">Registret</h6></li>
+                            <li>
+                                <button class="dropdown-item" type="button" data-vap-action="cf-add">
+                                    <i class="bi bi-plus-circle me-2"></i>Lägg till vapen
+                                </button>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">Skriv ut och sätt upp</h6></li>
                             <li>
                                 <a class="dropdown-item" id="vapPosterLink" href="/valvet/affisch"
                                    target="_blank" rel="noopener">
@@ -151,6 +178,7 @@
                                 </a>
                             </li>
                             <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">Lånevapen</h6></li>
                             <li>
                                 <button class="dropdown-item" type="button" data-vap-action="lw-settings">
                                     <i class="bi bi-sliders me-2"></i>Regler för lånevapen
@@ -169,27 +197,19 @@
             @* ⚠️ AFFISCHEN ÄR INTE EN KURIOSITET — den är hur vapenansvarig hittar valvet alls.
                Gunnar är skjutledare, inte klubbadministratör, och är aldrig inne på den här sidan.
                Därför står uppmaningen i klartext här, riktad till DIG som läser: skriv ut den och
-               sätt upp den, annars finns funktionen bara för dig. *@
-            <div class="alert alert-light border small mt-3 mb-0" id="vapPosterNudge">
+               sätt upp den, annars finns funktionen bara för dig.
+
+               ⚠️ Den överlevde ihopslagningen med flit. Nu när utskrifterna ligger i en meny är
+               det den enda platsen på sidan som säger att affischen finns — en uppmaning som
+               göms bakom samma meny som saken den uppmanar till hade varit meningslös. *@
+            <div class="alert alert-light border small mb-3" id="vapPosterNudge">
                 <i class="bi bi-pin-angle me-1"></i>
                 <strong>Skriv ut affischen och sätt upp den i vapenvalvet.</strong>
                 Den som lämnar ut vapnen är oftast skjutledare och kommer aldrig hit — hen riktar
                 kameran mot väggen i stället, och behöver då ingen adress och ingen meny.
+                Du hittar den under <strong>Åtgärder</strong>.
             </div>
-        </div>
-    </div>
 
-    @* ── Klubbens vapen ─────────────────────────────────────────────────────────────────────── *@
-    <div class="card">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-safe text-primary me-2"></i>Klubbens vapen
-                </h5>
-                <button type="button" class="btn btn-sm btn-primary" data-vap-action="cf-add">
-                    <i class="bi bi-plus-circle me-1"></i>Lägg till vapen
-                </button>
-            </div>
             <p class="text-muted small">
                 Klubbvapen är <strong>inte personuppgifter</strong> — de tillhör föreningen. Markera
                 ett vapen som <strong>lånebart</strong> och medlemmarna kan se och
@@ -719,6 +739,55 @@
         }
     }
 
+    /*
+        Vem som har vapnet just nu.
+
+        ⚠️ HÄRLETT UR BOKNINGARNA, aldrig ur `f.status`. Statusfältet är en manuell flagga någon
+        sätter för hand och glömmer; bokningarna är det som gäller. Därför flaggas det också när
+        de två säger emot varandra — två celler på samma rad som påstår olika saker är hur en
+        lista slutar gå att lita på, och operatören ska då veta VILKEN som är sann.
+
+        ⚠️ TVÅ LÄGEN, och de betyder olika saker. "Ute" = vapnet är fysiskt hos någon (utlämnat).
+        "Bokat nu" = ingen har hämtat det, men någon har rätt till det just nu — den raden finns
+        för att en klubbadmin annars läser "—" som ledigt och lånar ut samma vapen igen.
+    */
+    function loanCell(f) {
+        var l = f.loan;
+        // ⚠️ Statusens värde är en KONSTANT i C# (FirearmStatus.Utlanat = "Utlånat"). Ändras
+        // strängen där måste den ändras här, annars slutar motsägelsevarningen nedan slå till —
+        // tyst, eftersom en jämförelse som aldrig är sann ser ut som "inga motsägelser finns".
+        var statusSaysOut = f.status === 'Utlånat';
+
+        if (!l) {
+            // ⚠️ Motsägelsen SÄGS, den tystas inte. Ett vapen märkt "Utlånat" utan en utlämnad
+            // bokning är en kvarglömd flagga — och det är den enda tolkningen som är hjälpsam,
+            // eftersom det som verkligen skulle vara ute alltid har en bokning.
+            return statusSaysOut
+                ? '<span class="text-muted">—</span> ' +
+                  '<i class="bi bi-exclamation-triangle text-warning small" title="Statusfältet ' +
+                  'säger Utlånat, men inget lån är utlämnat. Statusen sätts ' +
+                  'för hand — bokningarna är det som gäller."></i>'
+                : '<span class="text-muted">—</span>';
+        }
+
+        var who = esc(l.memberName || 'Okänd medlem');
+        var title = esc((l.occasion ? l.occasion + ' · ' : '') + l.since + ' – ' + l.until);
+
+        if (l.isOut) {
+            return '<span class="badge bg-warning text-dark" title="' + title + '">Ute</span> ' +
+                who +
+                // Ett lån som lämnar klubben är ett annat åtagande än ett på banan, och det syns
+                // ingen annanstans i listan.
+                (l.leavesTheClub
+                    ? ' <i class="bi bi-box-arrow-up-right text-secondary small" ' +
+                      'title="Lånet lämnar klubbens område"></i>'
+                    : '');
+        }
+
+        return '<span class="text-muted small" title="' + title +
+               '">Bokat nu · ' + who + '</span>';
+    }
+
     function renderClubFirearms() {
         var body = document.getElementById('vapClubBody');
         var list = (clubState && clubState.firearms) || [];
@@ -746,7 +815,8 @@
         }
 
         html += '<div class="table-responsive"><table class="table table-sm align-middle">' +
-            '<thead><tr><th>Nr</th><th>Namn</th><th>Grupp</th><th>Typ</th><th>Status</th>' +
+            '<thead><tr><th>Nr</th><th>Namn</th><th>Grupp</th><th>Typ</th>' +
+            '<th>Utl\u00e5nat till</th><th>Status</th>' +
             '<th>Licens t.o.m.</th><th>L\u00e5nebart</th><th class="text-end"></th></tr></thead><tbody>';
         list.forEach(function (f) {
             var expCls = f.daysUntilExpiry == null ? 'text-muted'
@@ -765,6 +835,7 @@
                     : '') + '</td>' +
                 '<td>' + esc(f.weaponClass || '\u2014') + '</td>' +
                 '<td>' + esc(f.vapentyp || '\u2014') + '</td>' +
+                '<td>' + loanCell(f) + '</td>' +
                 '<td>' + esc(f.status) + '</td>' +
                 '<td class="' + expCls + '">' + expTxt + '</td>' +
                 '<td>' + (f.isLoanable

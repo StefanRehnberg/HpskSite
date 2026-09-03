@@ -1001,7 +1001,18 @@ const main = async () => {
 
           // Öppna formuläret och kontrollera att HELA fältuppsättningen finns. Det är hela
           // rapporten: klubbvapen är licensbelagda och formuläret bar inte licensuppgifterna.
-          await page.locator('[data-vap-action="cf-add"]').first().click();
+          //
+          // ⚠️ "Lägg till vapen" LIGGER I ÅTGÄRDER-MENYN sedan de två korten slogs ihop
+          // 2026-09-03. Menyn måste öppnas först — en direktklickning på ett menyval i en stängd
+          // dropdown tidsgränsar på "element is not visible", vilket läser som att formuläret
+          // är trasigt. Att i stället klicka med `force: true` hade fungerat och samtidigt slutat
+          // mäta att knappen går att NÅ, alltså gömt exakt det fel som just uppstod här.
+          const cfAdd = page.locator('#vapPanel [data-vap-action="cf-add"]').first();
+          if (!(await cfAdd.isVisible().catch(() => false))) {
+            await page.locator('#vapPanel .dropdown-toggle').first().click();
+            await cfAdd.waitFor({ state: 'visible', timeout: 5000 });
+          }
+          await cfAdd.click();
           let cfOpen = true;
           try {
             await page.waitForFunction(

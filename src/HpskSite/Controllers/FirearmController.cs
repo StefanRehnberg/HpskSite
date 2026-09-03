@@ -2,7 +2,6 @@ using HpskSite.Models;
 using HpskSite.Models.Firearms;
 using HpskSite.Services;
 using HpskSite.Services.Firearms;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -40,16 +39,15 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly ILogger<FirearmController> _logger;
 
-        /// <summary>
-        /// Skyddar vapenetikettens token.
-        ///
-        /// <para><b>⚠️ INTE tidsbegränsad, och det är ett val.</b> Etiketten sitter laminerad på
-        /// vapnet i valvet i åratal — en 30-minuterstoken som i Märken hade gjort den oanvändbar
-        /// vid första skanningen. Det är <em>bokningsfönstret</em> som gör kontrollen: ingen
-        /// bokning i dag, ingen utcheckning. Token bär bara vilket vapen etiketten sitter på, och
-        /// den ska inte gå att gissa fram för ett annat vapen.</para>
-        /// </summary>
-        private readonly IDataProtector _labelProtector;
+        // ⚠️ HÄR LÅG EN IDataProtector SOM SKYDDADE ETIKETTENS TOKEN, och den är borta med flit.
+        //
+        // Den skyddade token var ~110 tecken base64 för nyttolasten "firearm:123". Hela adressen
+        // blev ~150 tecken i QR:ens byte-läge, alltså en kod på 53×53 moduler — som utskriven i en
+        // storlek som får plats på en kolv gav moduler under 0,4 mm, vilket en mobilkamera inte
+        // läser pålitligt. Kryptot var alltså inte fel, det var bara FEL VERKTYG: en opak, slumpad
+        // kod i databasen (`Firearm.LabelCode`) ger samma ogissningsbarhet på tio tecken.
+        //
+        // ⚠️ Återinför den inte "för att slippa en kolumn". Etikettens storlek är dess funktion.
 
         public FirearmController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -68,8 +66,7 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             MemberClubService memberClubs,
             ClubService clubService,
-            ILogger<FirearmController> logger,
-            IDataProtectionProvider dataProtection)
+            ILogger<FirearmController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _firearms = firearms;
@@ -83,7 +80,6 @@ namespace HpskSite.Controllers
             _memberClubs = memberClubs;
             _clubService = clubService;
             _logger = logger;
-            _labelProtector = dataProtection.CreateProtector("Firearm.LoanLabel.v1");
         }
 
         /// <summary>
@@ -481,13 +477,13 @@ namespace HpskSite.Controllers
         /// ljuger som följd.</para>
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetScanState(string? t)
+        public async Task<IActionResult> GetScanState(string? code)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId <= 0)
                 return Json(new { success = false, requiresLogin = true, message = "Du måste vara inloggad." });
 
-            var firearmId = UnprotectLabel(t);
+            var firearmId = _firearms.FindIdByLabelCode(code);
             if (firearmId <= 0)
                 return Json(new { success = false, message = "Ogiltig kod. Skanna etiketten på vapnet igen." });
 
@@ -530,12 +526,12 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ScanHandOut(string? t, bool accepted = false)
+        public async Task<IActionResult> ScanHandOut(string? code, bool accepted = false)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var firearmId = UnprotectLabel(t);
+            var firearmId = _firearms.FindIdByLabelCode(code);
             if (firearmId <= 0) return Json(new { success = false, message = "Ogiltig kod." });
 
             var scan = _bookings.ResolveScan(memberId, firearmId, DateTime.Now);
@@ -602,28 +598,6 @@ namespace HpskSite.Controllers
         // ⚠️ ÅTERSKAPA DEN INTE. Behövs ett sätt för skytten att SÄGA att vapnet är lämnat (t.ex.
         // när vapenansvarig gått hem) ska det vara ett eget tillstånd som fortsätter blockera
         // vapnet till någon bekräftar — aldrig en stängning.
-
-        /// <summary>
-        /// Vapen-id ur etikettens token, eller 0.
-        ///
-        /// <para>Ett ogiltigt eller manipulerat värde ger 0 i stället för ett undantag — en trasig
-        /// QR ska ge ett läsbart besked, inte en femhundra.</para>
-        /// </summary>
-        private int UnprotectLabel(string? token)
-        {
-            if (string.IsNullOrWhiteSpace(token)) return 0;
-            try
-            {
-                var raw = _labelProtector.Unprotect(token.Trim());
-                return raw.StartsWith("firearm:", StringComparison.Ordinal)
-                       && int.TryParse(raw["firearm:".Length..], out var id)
-                    ? id : 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
 
         private string? NameOf(int memberId)
         {

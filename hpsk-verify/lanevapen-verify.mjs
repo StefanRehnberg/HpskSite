@@ -170,15 +170,36 @@ const main = async () => {
     // ── Etiketten och QR-koden ─────────────────────────────────────────────────────────────────
     section('Etiketterna i valvet');
     const qr = await page.evaluate(async ([b, c, f]) => {
-      const r = await fetch(`${b}/umbraco/surface/FirearmAdmin/GetFirearmLabelQr?clubId=${c}&firearmId=${f}`,
+      const r = await fetch(`${b}/umbraco/surface/FirearmAdmin/GetFirearmLabelQr?clubId=${c}&firearmId=${f}&size=4`,
         { credentials: 'same-origin' });
-      const buf = await r.arrayBuffer();
-      return { status: r.status, type: r.headers.get('content-type'), bytes: buf.byteLength };
+      const txt = await r.text();
+      // ⚠️ size=4 är inte godtyckligt: det är endpointens lägsta tillåtna
+      // pixelsPerModule (Math.Clamp(size, 4, 20)), så viewBox blir exakt moduler × 4 och
+      // modulantalet går att räkna fram utan att gissa vilken skala servern valde.
+      const vb = /viewBox=["']0 0 (\d+)/.exec(txt);
+      return {
+        status: r.status,
+        type: r.headers.get('content-type'),
+        bytes: txt.length,
+        modules: vb ? Math.round(parseInt(vb[1], 10) / 4) : 0,
+      };
     }, [BASE, CLUB_ID, wA.id]);
     eq('QR-bilden svarar 200', qr.status, 200);
-    ok('QR-bilden är en PNG', (qr.type || '').includes('image/png'), qr.type);
+    // ⚠️ SVG, inte PNG. En rastrerad kod skalas ner av skrivaren vid 18 mm och varje
+    // modulkant blir en gråskala — det är halva skälet etiketten gick att krympa alls.
+    ok('QR-bilden är en SVG', (qr.type || '').includes('image/svg'), qr.type);
     // ⚠️ En tom bild är också 200. Storleken är det enda som skiljer en QR från ingenting.
     ok('QR-bilden har innehåll', qr.bytes > 500, `${qr.bytes} byte`);
+    // ⚠️⚠️ DET HÄR ÄR PÅSTÅENDET SOM MÄTER KRYMPNINGEN, och det måste vara på MODULER
+    // — inte på bildens bytestorlek, som säger ingenting om hur stor koden blir på papperet.
+    // SVG:ens viewBox är moduler × pixelsPerModule. Med den gamla skyddade token blev det
+    // 53×53 moduler (61 med tyst zon); den korta adressen ger version 3, alltså 29×29 (37).
+    // Passeras 45 är vi tillbaka i en kod som inte går att trycka på ett vapen.
+    // ⚠️ Modulantalet skrivs ut ÄVEN när påståendet går igenom. `ok` visar annars bara detaljen
+    // vid fel, och då kan ingen se att koden krupit från 37 mot taket 45 förrän den passerat det
+    // — alltså först när etiketten redan slutat gå att skriva ut liten.
+    ok(`QR-koden är liten nog att tryckas på ett vapen (${qr.modules} moduler inkl. tyst zon)`,
+       qr.modules > 0 && qr.modules <= 45, `${qr.modules} moduler`);
 
     await page.goto(`${BASE}/valvet/etiketter?clubId=${CLUB_ID}`, { waitUntil: 'domcontentloaded' });
     const labels = await page.evaluate(() =>
@@ -190,17 +211,35 @@ const main = async () => {
     const labA = labels.find(l => l.firearmId === wA.id);
     const labB = labels.find(l => l.firearmId === wB.id);
     ok('etiketten för nr ' + NR_A + ' finns', !!labA);
-    // ⚠️ Token BÄRS osynligt i DOM:en av ett skäl: utan den går en trasig QR inte att felsöka,
+    // ⚠️ Koden BÄRS osynligt i DOM:en av ett skäl: utan den går en trasig QR inte att felsöka,
     // och ingen svit kan följa skanningsvägen. Faller det här påståendet är hela avsnittet
     // nedan overifierbart — inte grönt.
-    ok('etiketten bär en skanningsadress', !!(labA && labA.url && labA.url.includes('t=')),
+    ok('etiketten bär en skanningsadress', !!(labA && labA.url && /\/V\/[0-9A-Z]{10}$/.test(labA.url)),
        labA && labA.url);
-    const tokenOf = url => decodeURIComponent(new URL(url).searchParams.get('t') || '');
-    const tokA = labA ? tokenOf(labA.url) : '';
-    const tokB = labB ? tokenOf(labB.url) : '';
-    ok('token är skyddad, inte ett vapen-id i klartext',
-       tokA.length > 20 && !tokA.includes(String(wA.id)), tokA.slice(0, 24));
-    ok('varje vapen har sin egen token', tokA !== tokB);
+    // ⚠️ VERSAL I SIN HELHET är inte kosmetik: en enda gemen bokstav kastar koden ur QR:ens
+    // alfanumeriska läge och in i byte-läge, vilket lägger på flera versioner — alltså
+    // millimetrar på en etikett som ska sitta på ett vapen. Modulpåståendet ovan fångar
+    // följden; det här fångar ORSAKEN, som annars bara syns som "koden blev större igen".
+    ok('etikettadressen är versal i sin helhet',
+       !!(labA && labA.url && labA.url === labA.url.toUpperCase()), labA && labA.url);
+    const codeOf = url => (url || '').split('/').pop();
+    const tokA = labA ? codeOf(labA.url) : '';
+    const tokB = labB ? codeOf(labB.url) : '';
+    // ⚠️ Två vapen får ALDRIG dela kod — det betyder att en skanning lämnar ut fel vapen,
+    // vilket är det enda felet skanningen finns till för att omöjliggöra.
+    ok('varje vapen har sin egen kod', !!tokA && !!tokB && tokA !== tokB, `${tokA} / ${tokB}`);
+    // ⚠️ OPAK, inte vapnets id. En uppräkningsbar etikettadress hade låtit vilken inloggad
+    // medlem som helst checka ut vilket vapen som helst utan att stå framför det — och hela
+    // riktighetsvinsten i skanningen är att den inte kan ha fel om VILKET vapen det är.
+    // Längden mäts EXAKT: tio tecken ur ett 32-teckens alfabet är ~50 bitar, och en kortare kod
+    // hade tyst gjort den gissningsbar utan att någon annan yta ändrat utseende.
+    ok('koden är opak, inte ett vapen-id i klartext',
+       tokA.length === 10 && !tokA.includes(String(wA.id)), tokA);
+    // ⚠️ Alfabetet saknar I, L, O och U — de förväxlas med 1, 1, 0 och V av den som läser koden
+    // med ögat. Dyker de upp har generatorns alfabet ändrats, och Normalize() slutar då vara
+    // förlustfri: en giltig kod kan mappas till en ANNAN giltig kod, alltså fel vapen.
+    ok('koden håller sig till det förväxlingssäkra alfabetet',
+       /^[0-9A-HJKMNP-TV-Z]{10}$/.test(tokA), tokA);
     await backToTokenPage();
 
     // ── Händelsen med lånevapen ────────────────────────────────────────────────────────────────
@@ -274,6 +313,35 @@ const main = async () => {
     eq('raden pekar på det vapen som gick ut', outRow && outRow.firearmId, wB.id);
     eq('raden visar numret som lämnades ut', outRow && outRow.number, NR_B);
 
+    // ── Vapenlistan säger VEM som har vapnet ──────────────────────────────────────────────────
+    //
+    // ⚠️ MÄTS MEDAN VAPNET FAKTISKT ÄR UTE. Kvällen stängs några rader ner, och efter det är
+    // varje "ingen har vapnet"-påstående sant av sig själv — alltså grönt utan att mäta något.
+    // Ordningen här är därför inte kosmetisk.
+    //
+    // ⚠️ Kolumnen är HÄRLEDD ur bokningarna, aldrig ur `Firearm.Status`. Statusfältet är en
+    // manuell flagga någon sätter för hand och glömmer, och att visa den som om den vore ett
+    // svar är hur en lista slutar gå att lita på. Påståendena nedan skulle inte kunna passera
+    // på en implementation som läste statusen: det utlämnade vapnet har status "Tillgängligt".
+    const cl2 = await api(`/umbraco/surface/FirearmAdmin/GetClubFirearms?clubId=${CLUB_ID}`);
+    const outFirearm = (cl2.firearms || []).find(x => x.id === wB.id);
+    const freeFirearm = (cl2.firearms || []).find(x => x.id === wA.id);
+    ok('vapnet som är ute bär ett lån i listan', !!(outFirearm && outFirearm.loan),
+       outFirearm && JSON.stringify(outFirearm.loan));
+    eq('lånet är utlämnat, inte bara bokat', outFirearm && outFirearm.loan && outFirearm.loan.isOut, true);
+    ok('lånet namnger vem som har vapnet',
+       !!(outFirearm && outFirearm.loan && outFirearm.loan.memberName),
+       outFirearm && outFirearm.loan && outFirearm.loan.memberName);
+    // ⚠️ KONTROLLPROVET. Utan det är påståendena ovan gröna även på en implementation som
+    // stämplar VARJE rad som utlånad — och en lista där allt ser utlånat ut är lika oanvändbar
+    // som en där inget gör det.
+    eq('ett vapen som står i skåpet bär inget lån', freeFirearm && freeFirearm.loan, null);
+    // ⚠️ Statusfältet på det utlämnade vapnet är fortfarande "Tillgängligt". Det är BEVISET att
+    // kolumnen inte läser statusen — faller det här har någon börjat spegla lånet dit, och då
+    // har vi två källor som är fria att säga emot varandra.
+    ok('kolumnen läser bokningen, inte det manuella statusfältet',
+       outFirearm && outFirearm.status !== 'Utlånat', outFirearm && outFirearm.status);
+
     // Kvällen stängs i ett tryck — knuten till att låsa valvet, inte till att någon minns.
     const close = await api('/umbraco/surface/FirearmAdmin/CloseVaultEvening',
       { clubId: CLUB_ID, occasionKind: 'Event', occasionId: evId, keepIds: '' });
@@ -303,7 +371,7 @@ const main = async () => {
     // ── Skanningen ─────────────────────────────────────────────────────────────────────────────
     section('Skanningen');
     // Läget läses UTAN att skriva — sidan får inte skapa ett lån bara av att någon tittar.
-    let scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokA)}`);
+    let scan = await api(`/umbraco/surface/Firearm/GetScanState?code=${encodeURIComponent(tokA)}`);
     ok('skanningsläget läses', typeof scan.action === 'string', JSON.stringify(scan).slice(0, 160));
     // Nr 71 är utlånat till någon ANNAN sedan direktlånet ovan.
     ok('krocken syns: vapnet är taget av någon annan',
@@ -311,14 +379,14 @@ const main = async () => {
        `action=${scan.action}`);
 
     // Nr 72 är fritt igen efter stängningen — skanningen ska ERBJUDA att skapa lånet.
-    scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokB)}`);
+    scan = await api(`/umbraco/surface/Firearm/GetScanState?code=${encodeURIComponent(tokB)}`);
     eq('ett fritt vapen erbjuder lån', scan.action, 'Offer');
     eq('skanningen vet vilket nummer det är', scan.number, NR_B);
 
-    const scanOut = await api('/umbraco/surface/Firearm/ScanHandOut', { t: tokB });
+    const scanOut = await api('/umbraco/surface/Firearm/ScanHandOut', { code: tokB });
     ok('skanningen skapar lånet', scanOut.success, scanOut.message);
 
-    scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokB)}`);
+    scan = await api(`/umbraco/surface/Firearm/GetScanState?code=${encodeURIComponent(tokB)}`);
     eq('nästa skanning säger att vapnet står på mig', scan.action, 'OutToYou');
     // ⚠️ Skanningen kan inte ha fel om VILKET vapen. Det är hela vinsten, och den är en
     // riktighetsvinst — inte en bekvämlighetsvinst.
@@ -336,23 +404,23 @@ const main = async () => {
     // Regeln: EN SKANNING FÅR BARA ÖKA DET MAN SVARAR FÖR, ALDRIG MINSKA DET. Utlämning via egen
     // skanning består (den lägger ansvar PÅ skytten); återlämningen registreras av den som TAR
     // EMOT vapnet.
-    const gone = await api('/umbraco/surface/Firearm/ScanReturn', { t: tokB });
+    const gone = await api('/umbraco/surface/Firearm/ScanReturn', { code: tokB });
     ok('det finns ingen väg för skytten att stänga sitt lån',
        gone.success === false, JSON.stringify(gone).slice(0, 160));
     // ⚠️ Och lånet ska fortfarande vara ÖPPET efteråt. Ett avslag som ändå hunnit skriva vore
     // värre än ingen kontroll alls.
-    scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokB)}`);
+    scan = await api(`/umbraco/surface/Firearm/GetScanState?code=${encodeURIComponent(tokB)}`);
     eq('lånet står kvar öppet efter försöket', scan.action, 'OutToYou');
 
     // Den som TAR EMOT vapnet stänger det, och då blir vapnet ledigt igen.
     const staffReturn = await api('/umbraco/surface/FirearmAdmin/SetBookingState',
       { clubId: CLUB_ID, bookingId: scan.bookingId, action: 'return', reason: '' });
     ok('vapenansvarig kan registrera återlämningen', staffReturn.success, staffReturn.message);
-    scan = await api(`/umbraco/surface/Firearm/GetScanState?t=${encodeURIComponent(tokB)}`);
+    scan = await api(`/umbraco/surface/Firearm/GetScanState?code=${encodeURIComponent(tokB)}`);
     eq('vapnet är fritt igen', scan.action, 'Offer');
 
     // En påhittad token får aldrig bli ett lån.
-    const badScan = await api('/umbraco/surface/Firearm/GetScanState?t=nonsens-token');
+    const badScan = await api('/umbraco/surface/Firearm/GetScanState?code=nonsens-token');
     ok('en påhittad kod avvisas', badScan.success === false, badScan.message);
 
     // ── Vapnet man brukar få ───────────────────────────────────────────────────────────────────
@@ -595,6 +663,47 @@ const main = async () => {
 
     ok('kurstilldelningsdialogen finns i DOM:en',
        await page.locator('#tgLoanWeaponModal #tgLoanDate').count() > 0);
+
+    // ── ETT kort, inte två ────────────────────────────────────────────────────────────────────
+    //
+    // Slaget ihop 2026-09-03: panelen bar "Lånevapen" och "Klubbens vapen" som skilda kort över
+    // samma vapen. ⚠️ Påståendet mäter KORTEN i panelen, inte att en rubrik försvunnit — en
+    // textmatchning hade förblivit grön om någon delade upp dem igen under nya rubriker.
+    // ⚠️ `#vapPanel` ligger MELLAN panelen och kortet — det är elementet som bär klubb-id:t, och
+    // `#clubFirearmsTab > .card` matchar därför ingenting. Ett direkt barn-selektor som pekar en
+    // nivå fel svarar 0, vilket i sin negerade form hade varit evigt grönt.
+    eq('Klubbvapen-panelen bär ETT kort',
+       await page.locator('#clubFirearmsTab #vapPanel > .card').count(), 1);
+    // ⚠️ Och de två delarna måste ligga i SAMMA kort. Utan det här är påståendet ovan grönt även
+    // om vapenlistan råkat hamna utanför kortet helt.
+    eq('siffran och listan ligger i samma kort',
+       await page.locator('#vapPanel > .card #vapLwSummary').count()
+       + await page.locator('#vapPanel > .card #vapClubBody').count(), 2);
+    // "Lägg till vapen" är ett MENYVAL nu — ett vapen läggs in när klubben köper ett, alltså
+    // sällan, och konkurrerar inte om plats med listan.
+    const addBtn = page.locator('#clubFirearmsTab [data-vap-action="cf-add"]');
+    eq('det finns exakt en väg till Lägg till vapen', await addBtn.count(), 1);
+    ok('Lägg till vapen ligger i Åtgärder-menyn',
+       await addBtn.evaluate(el => el.classList.contains('dropdown-item')
+                                   && !!el.closest('.dropdown-menu')));
+    // ⚠️ Öppna valvet står KVAR utanför menyn — det är kvällens arbete. Ligger den i menyn är
+    // det inte längre den primära åtgärden, och då är hela uppdelningen godtycklig.
+    ok('Öppna valvet ligger utanför menyn',
+       await page.locator('#vapVaultLink').evaluate(el => !el.closest('.dropdown-menu')));
+    // Affischuppmaningen är hur skjutledaren hittar valvet alls. Nu när utskrifterna ligger i en
+    // meny är den enda platsen på sidan som säger att affischen finns.
+    ok('affischuppmaningen står kvar i klartext',
+       await page.locator('#vapPosterNudge').count() > 0);
+
+    // ⚠️ Kolumnen mäts i DOM:en, inte bara i payloaden. Fältet `loan` kan finnas på varje rad
+    // medan renderaren aldrig skriver ut det — och då är hela ändringen osynlig för användaren
+    // trots att API-påståendena ovan är gröna. Cellernas INNEHÅLL kan inte mätas här: kvällen
+    // är stängd vid det här laget, så det finns inget lån att visa (se avsnittet ovan, som
+    // mäter innehållet medan vapnet faktiskt är ute).
+    const headers = await page.locator('#clubFirearmsTab #vapClubBody thead th')
+      .allTextContents().catch(() => []);
+    ok('vapenlistan har en kolumn för vem som har vapnet',
+       headers.some(h => (h || '').includes('Utlånat')), headers.join(' | '));
 
     // ── De två rälsposterna ───────────────────────────────────────────────────────────────────
     //

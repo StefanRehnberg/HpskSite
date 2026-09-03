@@ -5318,7 +5318,7 @@ löftet som avgör om hen kommer alls. En PLATSbokning får omvänt **inte** utl
 |---|---|---|
 | Valvet — kvällens utlämning | `/valvet` | klubbadmin **eller** skjutledare |
 | QR-etiketter | `/valvet/etiketter` | klubbadmin |
-| Skanning | `/lanevapen/skanna?t=` | medlem (kräver inloggning) |
+| Skanning | `/v/{kod}` | medlem (kräver inloggning) |
 | Klubbens regler + länkar | vapenfliken, kortet **Lånevapen** | klubbadmin |
 | Kryssruta i anmälan | `_ClubEventSignup.cshtml` | medlem |
 | Kurstilldelning | klubbpanelen → träningsgrupp | klubbadmin/skjutledare |
@@ -5357,10 +5357,67 @@ En skanning kan inte ha fel om vilket vapen som gick ut. Det kan en människa me
 Etiketten sitter **på vapnet** (Stefans beslut): ett vapen kan läggas tillbaka på fel hyllplats, och
 då pekar en hylletikett på fel vapen.
 
-Token är `IDataProtector`-skyddad med purpose `"Firearm.LoanLabel.v1"`, **avsiktligt inte
-tidsbegränsad** — etiketten sitter på vapnet i åratal. `data-label-url` bärs osynligt i
-etikettarkets DOM (samma mönster som Fältskytte-affischen): det är enda sättet att felsöka en trasig
-QR, och enda sättet en svit kan följa skanningsvägen.
+Koden är **avsiktligt inte tidsbegränsad** — etiketten lamineras och sitter på vapnet i åratal.
+`data-label-url` bärs osynligt i etikettarkets DOM (samma mönster som Fältskytte-affischen): det är
+enda sättet att felsöka en trasig QR, och enda sättet en svit kan följa skanningsvägen. **Den får
+aldrig tryckas synligt** — koden är hemligheten som gör att man måste stå framför vapnet.
+
+### ⚠️⚠️ ETIKETTENS STORLEK ÄR DESS FUNKTION (omgjort 2026-09-03)
+
+Etiketten gick inte att sätta på ett vapen. Orsaken var inte hur mycket koden sade utan **hur
+referensen var formulerad**: adressen var `/lanevapen/skanna?t=<IDataProtector-token>`, och den
+token är ~110 tecken base64 för nyttolasten `"firearm:123"`. Hela adressen blev ~150 tecken i QR:ens
+**byte-läge**, alltså en kod på **53×53 moduler**. Utskriven i en storlek som får plats på en kolv
+blev varje modul ~0,38 mm — under vad en mobilkamera läser pålitligt. Kryptot var inte fel, det var
+**fel verktyg**.
+
+**Fyra ändringar, i fallande effekt. Ta inte tillbaka någon av dem:**
+
+1. **`Firearm.LabelCode`** — tio tecken ur `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (Crockford-base32,
+   utan I/L/O/U). ~50 bitar, alltså lika ogissningsbart som token var, på en tiondel av tecknen.
+   **Opak, aldrig vapnets id:** `/v/123` hade gått att räkna upp, och en inloggad medlem kunde då
+   checka ut vilket vapen som helst i vilken klubb som helst utan att stå framför det — vilket är
+   precis den riktighetsvinst skanningen finns för.
+2. **`/v/{kod}` i stället för `/lanevapen/skanna?t=`.** Varje tecken i sökvägen är tecken i koden.
+   **Gör den aldrig till en frågesträng igen.**
+3. **Versal i sin helhet** (`FirearmLabelCode.Url`, den ENDA plats adressen byggs). QR:ens
+   *alfanumeriska* läge packar två tecken per elva bitar men bara för `0-9 A-Z` och
+   `SPACE $ % * + - . / :` — **en enda gemen bokstav** kastar hela koden till byte-läge med åtta
+   bitar per tecken och lägger på flera versioner. Schema och värdnamn är skiftlägesokänsliga per
+   RFC 3986 och ASP.NET-routing matchar sökvägen skiftlägesokänsligt, så versalerna kostar noll.
+4. **SVG, inte PNG.** Vid 18 mm skalas en rastrerad kod ner av skrivaren och varje modulkant blir en
+   gråskala. Vektorn tar skrivarens egen upplösning.
+
+Resultat: **53×53 → 29×29 moduler** (61 → 37 med tyst zon), och etiketten trycks i **millimeter**
+(`VaultLabels.cshtml`), inte i rem — annars avgör webbläsarens px-till-mm-omräkning den fysiska
+modulstorleken, som då varierar med skrivare och zoom. 18 mm över 37 moduler ger ~0,49 mm/modul,
+precis över den praktiska gränsen. **Krymp inte `.lab img` under 15 mm** — behöver etiketten bli
+mindre är rätt åtgärd en kortare adress, inte en mindre kod.
+
+**⚠️ Koden är EVIG och får aldrig roteras.** Byts den blir varje redan utskriven etikett tyst
+obrukbar, och det visar sig först när någon står i valvet med en telefon. Behöver ett vapen en ny
+kod är rätt åtgärd en ny etikett. Den myntas **lat** av `FirearmService.EnsureLabelCode` första
+gången en etikett begärs, med `WHERE LabelCode IS NULL` som spärr — två samtidiga utskrifter får
+inte ge två koder, för då är den etikett som redan hunnit ut ur skrivaren död.
+
+**⚠️ Unikheten ligger i DATABASEN** (`UX_Firearm_LabelCode`, unikt och filtrerat). En dubblett
+betyder att två vapen delar etikett, alltså att en skanning lämnar ut fel vapen — det enda felet
+skanningen finns till för att omöjliggöra. Filtrerat eftersom de flesta rader är NULL och ett vanligt
+unikt index bara tillåter EN NULL; **`Firearm` bar redan ett filtrerat index**, så kravet att varje
+sqlcmd-skript mot tabellen sätter `QUOTED_IDENTIFIER ON` själv är inte nytt.
+
+**Ingen bakåtkompatibilitet, med flit** (Stefans beslut 2026-09-03): funktionen var nyss lanserad och
+ingen klubb hade börjat använda den, så `?t=`-vägen är **borttagen** i stället för att lämnas kvar
+som en andra kodväg att hålla i takt. `IDataProtector` är ute ur `FirearmController`,
+`FirearmAdminController` och `VaultController`.
+
+**Operatörssteg:** `Migrations/add-labelcode-to-firearm.sql` — **körd i dev och i PROD 2026-09-03**,
+före deployen. Ordningen är inte valfri: NPoco genererar `SET … LabelCode` på varje `db.Update()`
+mot `Firearm` så snart modellen bär egenskapen, så utan kolumnen faller **varje** vapensparning —
+inte bara etiketterna. Samma fälla som `FaltskyttePatrol.DepartedAt` och
+`BoardMeetingAgendaItem.AwardsData`.
+
+Adds C# → **full ombyggnad**. Ingen doctype-egenskap, ingen Umbraco-nod.
 
 `ResolveScan` läser läget utan att skriva och svarar `Refused` / `HandOut` / `Return` / `Offer`.
 Krockvarningen (`ClaimedByOther`) kräver ett medvetet `accepted=true` — utan det tar den som skannar
@@ -5458,6 +5515,60 @@ Affischens QR bär **bara ett klubb-id**, ingen `IDataProtector`-token: adressen
 och `/valvet` grindar ändå på inloggning + klubbadmin/skjutledare. En token hade dessutom gjort
 affischen omöjlig att felsöka och känslig för nyckelbyte.
 
+### Klubbvapen: ETT kort, och listan säger vem som har vapnet (2026-09-03)
+
+**Två kort över samma vapen är ingen gruppering, det är en fråga.** Panelen bar "Lånevapen" (en
+siffra) och "Klubbens vapen" (en lista över samma vapen) som skilda sektioner. Stefan påpekade det,
+och det är samma kritik som redan står i filens egna kommentarer en nivå ned — den handlade om två
+YTOR som gör samma sak, den här om två SEKTIONER om samma sak. Slaget ihop till ett kort med
+vapenlistan som huvudinnehåll.
+
+- **`Lägg till vapen` är ett MENYVAL**, inte en knapp. Ett vapen läggs in när klubben köper ett;
+  etiketten skrivs ut en gång och gäller för alltid; reglerna rör styrelsen en gång om året. Samma
+  resonemang som klubbens Medlemmar-flik, där *Lägg till klubbmedlem* är ett menyval eftersom
+  medlemmar registrerar sig själva.
+- **`Öppna valvet` står kvar utanför menyn** — och är det enda som gör det. Valvet är kvällens
+  arbete; allt annat på sidan görs en gång.
+- **Affischuppmaningen överlevde med flit.** Nu när utskrifterna ligger i en meny är den enda
+  platsen på sidan som säger att affischen finns, och den är hur skjutledaren hittar valvet alls.
+  En uppmaning gömd bakom samma meny som saken den uppmanar till hade varit meningslös.
+- ⚠️ **`#vapPanel` ligger MELLAN panelen och kortet** (det bär klubb-id:t), så
+  `#clubFirearmsTab > .card` matchar ingenting. En direkt barn-selektor en nivå fel svarar 0 —
+  vilket i sin negerade form är evigt grönt.
+
+**Vapenlistan bär en kolumn "Utlånat till"** — vem som har vapnet just nu, och vem som har rätt till
+det i dag. Stefans begäran samma dag.
+
+- **⚠️⚠️ HÄRLETT UR BOKNINGARNA, ALDRIG UR `Firearm.Status`.** Statusfältet har värdet `Utlånat`
+  och ser ut att vara svaret, men det är en grov manuell flagga någon sätter för hand och glömmer
+  — CLAUDE.md sa redan att "den verkliga tillgängligheten är bokningskalendern". Att visa flaggan
+  som om den vore ett svar är precis hur en lista slutar gå att lita på. Sviten mäter just det: det
+  utlämnade vapnet har status `Tillgängligt`, så påståendena kan inte passera på en implementation
+  som läste statusen.
+- **⚠️ Motsägelsen SÄGS.** Ett vapen märkt `Utlånat` utan en utlämnad bokning får en varningstriangel
+  som namnger vilken av de två som gäller. Två celler på samma rad som påstår olika saker, utan att
+  något säger vilken som är sann, är sämre än en cell.
+- **⚠️ TVÅ blockerande lägen, och de betyder olika saker.** `Utlämnad` = vapnet är fysiskt ute,
+  oavsett om fönstret hunnit passera (därför inget tidsvillkor på den grenen). `Reserverad` tas bara
+  med när fönstret täcker **nu** — en bokning nästa månad gör inte vapnet upptaget i dag, och att
+  visa den hade fått hela listan att se utlånad ut. Utlämning slår reservation: den är sann om var
+  vapnet ÄR. Reservationen renderas ändå, dämpat ("Bokat nu · NN"), eftersom en klubbadmin annars
+  läser "—" som ledigt och lånar ut samma vapen igen.
+- **`FirearmBookingService.ActiveClaimsForClub(clubId, now)` är ETT anrop för hela klubben.**
+  `ActiveLoanFor` per rad hade blivit femtio frågor på en flik som redan hämtar vapen, relationer
+  och behörigheter. Fel ger **tom karta**, inte undantag: en vapenlista utan lånekolumn är
+  användbar, en flik som inte renderar alls är den inte.
+- **⚠️ Namnet får INTE följa med till en medlemsnära yta.** Klubbvapen är föreningens egendom och
+  den som ser listan är redan klubbadmin, men `/lanevapen` visar med flit bara nummer, namn på
+  vapnet och om det är ledigt — **aldrig vem som bokat**.
+
+⚠️ **`vapen-verify.mjs` klickade `[data-vap-action="cf-add"]` direkt** och tidsgränsade på "element
+is not visible" när knappen blev ett menyval. Sviten öppnar nu menyn först — `force: true` hade
+fungerat och samtidigt slutat mäta att knappen går att NÅ, alltså gömt exakt det fel som uppstod.
+
+Endast vy + en tjänstemetod och ett fält i en befintlig endpoint → **full ombyggnad** (C# tillkom).
+Ingen SQL, ingen doctype-egenskap.
+
 ### Menyerna: två rälsposter ur EN partial
 
 Uppdelat 2026-09-02 på Stefans begäran: *Vapen & lånevapen* blev **Klubbvapen** (sektionen
@@ -5491,7 +5602,8 @@ Fildeploy av `KnowledgeBase/docs/vapenregister.md` och `vapen-klubbadmin.md`.
 
 ### Verifiering
 
-**`hpsk-verify/lanevapen-verify.mjs` — 147/147 gröna** (2026-09-02). Täcker klubbens regler med
+**`hpsk-verify/lanevapen-verify.mjs` — 162/162 gröna** (2026-09-03; 147 vid punkt 6:s leverans,
++3 för den korta etikettkoden, +12 för ihopslagningen och lånekolumnen). Täcker klubbens regler med
 `propertyExists`, etikettarket och QR-PNG:en, händelsens kryssruta hela vägen genom anmälan, valvet
 (utlämning → rätt vapen på raden → stängning), skanningen (`Offer` → lån → `Return` → fritt igen),
 det vanliga vapnet, namngiven bokning med numret i beskedet, horisonten, externa lån i fyra lägen,

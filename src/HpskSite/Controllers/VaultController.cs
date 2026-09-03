@@ -1,6 +1,5 @@
 using HpskSite.Services;
 using HpskSite.Services.Firearms;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -39,7 +38,6 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly MemberClubService _memberClubs;
         private readonly FirearmService _firearms;
-        private readonly IDataProtector _labelProtector;
 
         public VaultController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -48,8 +46,7 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             IMemberService memberService,
             MemberClubService memberClubs,
-            FirearmService firearms,
-            IDataProtectionProvider dataProtection)
+            FirearmService firearms)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _clubService = clubService;
@@ -58,7 +55,6 @@ namespace HpskSite.Controllers
             _memberService = memberService;
             _memberClubs = memberClubs;
             _firearms = firearms;
-            _labelProtector = dataProtection.CreateProtector("Firearm.LoanLabel.v1");
         }
 
         [HttpGet("")]
@@ -156,15 +152,19 @@ namespace HpskSite.Controllers
         /// (<em>"jag har alltid nr 7"</em>) och etiketten också ska gå att läsa utan telefon.</para>
         /// </summary>
         /// <summary>
-        /// Etikettens adress. <b>⚠️ SAMMA protector-purpose</b> som <c>FirearmController</c> och
-        /// <c>FirearmAdminController</c> — skiljer strängarna sig blir varje utskriven etikett
-        /// oläsbar, tyst.
+        /// Etikettens adress. Tom sträng om vapnet inte kunde få en kod.
+        ///
+        /// <para><b>⚠️ Adressen byggs på ETT ställe</b>, <see cref="FirearmLabelCode.Url"/>. Den är
+        /// versal i sin helhet för att falla inom QR:ens alfanumeriska läge, och en avvikande
+        /// stavning här hade gett en större kod på just den utskrift som ska bli mindre.</para>
         /// </summary>
         private string LabelUrl(int firearmId)
         {
-            var token = _labelProtector.Protect($"firearm:{firearmId}");
+            var code = _firearms.EnsureLabelCode(firearmId);
+            if (string.IsNullOrWhiteSpace(code)) return "";
+
             var req = HttpContext.Request;
-            return $"{req.Scheme}://{req.Host}/lanevapen/skanna?t={Uri.EscapeDataString(token)}";
+            return FirearmLabelCode.Url(req.Scheme, req.Host.Value ?? "", code);
         }
 
         [HttpGet("etiketter")]
@@ -226,7 +226,11 @@ namespace HpskSite.Controllers
                         // ⚠️ Adressen bärs som text vid sidan av bilden, osynlig i utskriften —
                         // samma mönster som Fältskyttes stationsaffisch. Det är enda sättet att
                         // felsöka en QR som inte fungerar, och det enda sättet en verifiering kan
-                        // följa hela skanningsvägen (token finns annars bara inne i PNG:en).
+                        // följa hela skanningsvägen (koden finns annars bara inne i bilden).
+                        //
+                        // ⚠️ Den får INTE tryckas synligt på etiketten. Koden är hemligheten som
+                        // gör att man måste stå framför vapnet för att kunna checka ut det — läsbar
+                        // på ett fotografi av valvet vore den ingen hemlighet alls.
                         Url = LabelUrl(f.Id),
                     })
                     .ToList(),

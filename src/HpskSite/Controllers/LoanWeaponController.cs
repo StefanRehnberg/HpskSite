@@ -106,33 +106,44 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// <c>/lanevapen/skanna?t=</c> — skytten skannar etiketten på vapnet.
+        /// <c>/v/{code}</c> — skytten skannar etiketten på vapnet.
+        ///
+        /// <para><b>⚠️ ADRESSEN ÄR KORT FÖR ATT ETIKETTEN SKA BLI LITEN.</b> Varje tecken i den
+        /// här sökvägen är tecken som ska rymmas i en QR-kod på ett vapen. Föregångaren
+        /// <c>/lanevapen/skanna?t=&lt;skyddad token&gt;</c> var ~150 tecken och gav en kod på 53×53
+        /// moduler, alltså en etikett som inte fick plats någonstans på ett vapen utan att bli
+        /// oläsbar. <b>Förläng den inte, och gör den aldrig till en frågesträng igen</b> — det
+        /// vore att ta tillbaka hela krympningen utan att någon märker det förrän en klubb har
+        /// laminerat femtio etiketter.</para>
+        ///
+        /// <para><b>⚠️ <c>~/</c> bryter medvetet ur controllerns <c>[Route("lanevapen")]</c>.</b>
+        /// Sidan hör hemma i lånevapenflödet men får inte bära dess prefix i adressen.</para>
         ///
         /// <para><b>Renderar bara skalet.</b> Inloggningskravet, vapnet och vad som är möjligt
         /// avgörs av <c>Firearm/GetScanState</c>, så sidan kan visas även för den som inte är
         /// inloggad och då erbjuda inloggning med rätt returnUrl.</para>
         /// </summary>
-        [HttpGet("skanna")]
-        public IActionResult Scan(string? t)
+        [HttpGet("~/v/{code?}")]
+        public IActionResult Scan(string? code)
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return StatusCode(500, "Umbraco-kontext saknas.");
 
-            return View("LoanWeaponScan", new LoanScanPageModel { Token = t });
+            return View("LoanWeaponScan", new LoanScanPageModel { Code = code });
         }
     }
 
     public class LoanScanPageModel
     {
         /// <summary>
-        /// Etikettens token, oöppnad.
+        /// Etikettens kod, oslagen.
         ///
-        /// <para><b>⚠️ Sidan tolkar den INTE serverside.</b> Den skickas vidare till
+        /// <para><b>⚠️ Sidan slår INTE upp den serverside.</b> Den skickas vidare till
         /// <c>Firearm/GetScanState</c>, som svarar utan att skriva något. En QR som öppnas av
-        /// misstag i en kameraförhandsvisning får inte lämna ut ett vapen — och hade sidan löst
-        /// upp token och registrerat något vid rendering vore just det vad som hände.</para>
+        /// misstag i en kameraförhandsvisning får inte lämna ut ett vapen — och hade sidan slagit
+        /// upp koden och registrerat något vid rendering vore just det vad som hände.</para>
         /// </summary>
-        public string? Token { get; set; }
+        public string? Code { get; set; }
     }
 
     public class LoanWeaponPageModel

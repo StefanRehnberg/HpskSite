@@ -832,6 +832,73 @@ namespace HpskSite.Services.Firearms
         }
 
         /// <summary>
+        /// Vem som håller klubbens vapen just nu — <b>ett anrop för hela klubben</b>, nycklat på
+        /// det EFFEKTIVA vapnet.
+        ///
+        /// <para><b>⚠️ Ett uppslag, inte ett per rad.</b> Klubbvapenlistan renderar femtio rader,
+        /// och <see cref="ActiveLoanFor"/> per rad hade blivit femtio frågor på en flik som redan
+        /// hämtar vapen, relationer och behörigheter. Samma skäl som relationerna i
+        /// <c>FirearmService.GetForScope</c> hämtas i två frågor för hela listan.</para>
+        ///
+        /// <para><b>⚠️ Läs ALDRIG <c>Firearm.Status</c> för att svara på den här frågan.</b> Den
+        /// är en grov manuell flagga som någon sätter för hand och glömmer; bokningarna är det som
+        /// gäller. Att visa flaggan som om den vore ett svar är precis hur en lista slutar gå att
+        /// lita på.</para>
+        ///
+        /// <para><b>⚠️ De två blockerande lägena betyder OLIKA saker och båda behövs.</b>
+        /// <c>Utlämnad</c> = vapnet är fysiskt ute, oavsett om fönstret hunnit passera — därför
+        /// finns ingen tidsvillkor på den grenen. <c>Reserverad</c> tas bara med när fönstret
+        /// täcker <paramref name="now"/>: en bokning nästa månad gör inte vapnet upptaget i dag,
+        /// och att visa den hade fått hela listan att se utlånad ut. Är ett vapen både utlämnat
+        /// och reserverat vinner utlämningen — det är den som är sann om var vapnet ÄR.</para>
+        /// </summary>
+        public Dictionary<int, FirearmBooking> ActiveClaimsForClub(int clubId, DateTime now)
+        {
+            var result = new Dictionary<int, FirearmBooking>();
+            if (clubId <= 0) return result;
+
+            try
+            {
+                using var uow = _scopeProvider.CreateScope(autoComplete: true);
+                var rows = uow.Database.Fetch<FirearmBooking>(
+                    @"SELECT b.* FROM FirearmBooking b
+                       WHERE b.ClubId = @0
+                         AND b.Status IN (@1, @2)
+                         AND COALESCE(b.AssignedFirearmId, b.FirearmId) IS NOT NULL
+                         AND (b.Status = @1 OR (b.FromTime <= @3 AND b.ToTime >= @3))",
+                    clubId, FirearmBookingStatus.Utlamnad, FirearmBookingStatus.Reserverad, now);
+
+                if (rows.Count == 0) return result;
+                ResolveNames(rows);
+
+                foreach (var b in rows)
+                {
+                    var id = b.EffectiveFirearmId;
+                    if (id is null or <= 0) continue;
+
+                    if (!result.TryGetValue(id.Value, out var held)) { result[id.Value] = b; continue; }
+
+                    // Utlämnad slår reserverad; i övrigt den som börjat senast — det är den
+                    // pågående, inte en kvarglömd rad från i morse.
+                    var better =
+                        b.Status == FirearmBookingStatus.Utlamnad
+                        && held.Status != FirearmBookingStatus.Utlamnad
+                        || b.Status == held.Status && b.FromTime > held.FromTime;
+
+                    if (better) result[id.Value] = b;
+                }
+            }
+            catch (Exception ex)
+            {
+                // ⚠️ Tom karta, inte ett undantag. En vapenlista utan lånekolumn är användbar; en
+                // flik som inte renderar alls för att en kolumn inte gick att fylla är den inte.
+                _logger.LogWarning(ex, "Kunde inte läsa aktiva lån för klubb {ClubId}.", clubId);
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Den medföljande accepterar ansvaret för ett externt lån.
         ///
         /// <para><b>⚠️ Bara den utpekade personen själv.</b> Ett accepterande någon annan klickar

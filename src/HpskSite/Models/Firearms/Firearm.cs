@@ -143,6 +143,22 @@ namespace HpskSite.Models.Firearms
         public bool IsLoanable { get; set; }
         public string? Status { get; set; }
 
+        /// <summary>
+        /// Etikettens korta kod — det som står i QR-koden på vapnet. Null = vapnet har ännu ingen
+        /// etikett; koden myntas av <c>FirearmService.EnsureLabelCode</c> när en etikett begärs.
+        ///
+        /// <para><b>⚠️ Den är EVIG och får aldrig roteras.</b> Etiketten lamineras och sitter kvar
+        /// i åratal — byts koden blir varje redan utskriven etikett tyst obrukbar, och det visar
+        /// sig först när någon står i valvet med en telefon. Behöver ett vapen en ny kod är rätt
+        /// åtgärd en ny etikett.</para>
+        ///
+        /// <para><b>⚠️ Den är en hemlighet, inte en identifierare.</b> Skanningen kan skapa ett lån,
+        /// så den som kan gissa koden kan checka ut vapnet utan att stå framför det. Lägg den
+        /// därför aldrig i ett JSON-svar, en lista eller en logg som inte redan kräver
+        /// klubbadmin.</para>
+        /// </summary>
+        public string? LabelCode { get; set; }
+
         // ── Det skyddade ────────────────────────────────────────────────────────────────────────
         /// <summary>Null = inga skyddade uppgifter har någonsin skrivits.</summary>
         public byte[]? EncryptedDetails { get; set; }

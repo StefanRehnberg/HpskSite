@@ -325,6 +325,88 @@ namespace HpskSite.Services.Firearms
                 FirearmAcquisitionStatus.Innehas, forbund.Trim(), excludeFirearmId);
         }
 
+        // ── Etikettens kod ───────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Vapnets etikettkod, myntad om den saknas. Null bara om vapnet inte finns.
+        ///
+        /// <para><b>⚠️ LAT, inte satt vid skapandet.</b> Registret bar redan vapen när koden kom
+        /// till, och de får sin kod första gången någon begär en etikett. Ett vapen som ingen
+        /// skriver ut en etikett för behöver ingen kod — och en kod som aldrig tryckts är bara en
+        /// hemlighet till att låna ut ett vapen, utan nytta.</para>
+        ///
+        /// <para><b>⚠️ Koden skrivs EN gång och skrivs aldrig över.</b> <c>WHERE LabelCode IS
+        /// NULL</c> i uppdateringen är inte en optimering utan spärren: två samtidiga
+        /// etikettutskrifter för samma vapen får inte ge två koder, för då blir den etikett som
+        /// redan hunnit ut ur skrivaren tyst obrukbar. Vinner den andra tråden läses hennes kod i
+        /// stället.</para>
+        /// </summary>
+        public string? EnsureLabelCode(int firearmId)
+        {
+            if (firearmId <= 0) return null;
+
+            using var uow = _scopeProvider.CreateScope(autoComplete: true);
+            var db = uow.Database;
+
+            var current = db.FirstOrDefault<Firearm>("SELECT * FROM Firearm WHERE Id = @0", firearmId);
+            if (current is null) return null;
+            if (!string.IsNullOrWhiteSpace(current.LabelCode)) return current.LabelCode;
+
+            // Fyra försök. En krock i ett 32^10-rum är i praktiken omöjlig, så loopen finns för det
+            // unika indexet: skulle det ändå slå ska svaret bli en kod, inte ett undantag mitt i en
+            // utskrift.
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                var candidate = FirearmLabelCode.Next();
+                try
+                {
+                    var changed = db.Execute(
+                        "UPDATE Firearm SET LabelCode = @0, UpdatedAt = @1 WHERE Id = @2 AND LabelCode IS NULL",
+                        candidate, DateTime.Now, firearmId);
+
+                    if (changed > 0) return candidate;
+
+                    // Någon annan hann först — hennes kod är den som gäller.
+                    var settled = db.ExecuteScalar<string?>(
+                        "SELECT LabelCode FROM Firearm WHERE Id = @0", firearmId);
+                    if (!string.IsNullOrWhiteSpace(settled)) return settled;
+
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Etikettkoden för vapen {FirearmId} krockade (försök {Attempt}).",
+                        firearmId, attempt + 1);
+                }
+            }
+
+            _logger.LogError("Kunde inte mynta en etikettkod för vapen {FirearmId}.", firearmId);
+            return null;
+        }
+
+        /// <summary>
+        /// Vapnet bakom en skannad etikettkod, eller 0.
+        ///
+        /// <para><b>⚠️ Ingen behörighet prövas här</b> — metoden svarar bara på vilket vapen koden
+        /// pekar ut. Vem som får göra något med det avgörs av <c>FirearmBookingService.ResolveScan</c>,
+        /// och den kontrollen får aldrig flyttas hit: en kod som slås upp är inte en kod som ger
+        /// rätt till något.</para>
+        ///
+        /// <para>Ett vapen som är avaktiverat slås ändå upp, med flit. Skytten som står med
+        /// telefonen ska få veta att vapnet inte kan lånas — inte att koden är ogiltig, vilket hen
+        /// läser som att etiketten är trasig.</para>
+        /// </summary>
+        public int FindIdByLabelCode(string? code)
+        {
+            var normalized = FirearmLabelCode.Normalize(code);
+            if (normalized is null) return 0;
+
+            using var uow = _scopeProvider.CreateScope(autoComplete: true);
+            return uow.Database.ExecuteScalar<int?>(
+                "SELECT Id FROM Firearm WHERE LabelCode = @0", normalized) ?? 0;
+        }
+
         /// <summary>
         /// Hur många lånevapen klubben har att fördela.
         ///

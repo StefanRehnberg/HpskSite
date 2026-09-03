@@ -3,7 +3,7 @@
     Layout = null;
 }
 @*
-    /lanevapen/skanna?t= — skytten skannar etiketten på vapnet.
+    /v/{kod} — skytten skannar etiketten på vapnet.
 
     ⚠️ SKANNINGEN ÄR MEKANISMEN, inte en bekvämlighet. Skälet är riktighet och inte komfort: en
     skanning av den fysiska taggen KAN INTE HA FEL om vilket vapen det är, medan vapenansvarig som
@@ -64,7 +64,7 @@
 </head>
 <body>
 <div class="sc-wrap">
-    <div id="scBody" data-token="@(Model.Token ?? "")">
+    <div id="scBody" data-code="@(Model.Code ?? "")">
         <div class="text-center py-5">
             <div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div>
         </div>
@@ -78,7 +78,7 @@
 (function () {
     var body = document.getElementById('scBody');
     if (!body) return;
-    var t = body.getAttribute('data-token') || '';
+    var code = body.getAttribute('data-code') || '';
     var state = null;
 
     function esc(s) {
@@ -109,7 +109,7 @@
 
     async function load() {
         try {
-            var r = await fetch('/umbraco/surface/Firearm/GetScanState?t=' + encodeURIComponent(t),
+            var r = await fetch('/umbraco/surface/Firearm/GetScanState?code=' + encodeURIComponent(code),
                                 { credentials: 'same-origin' });
             state = await r.json();
         } catch (e) {
@@ -120,7 +120,7 @@
         if (state.requiresLogin) {
             // ⚠️ Hela målet URL-kodas så adressen får ett enda '?' — en dubbel-?-URL 404:ar på
             // prods IIS även om Kestrel tolererar den.
-            var back = encodeURIComponent('/lanevapen/skanna?t=' + t);
+            var back = encodeURIComponent('/v/' + code);
             body.innerHTML = '<div class="alert alert-info"><p class="mb-2">Logga in så registreras ' +
                 'lånet på dig.</p><a class="btn btn-primary btn-lg" href="/login-register/?tab=login' +
                 '&returnUrl=' + back + '">Logga in</a></div>';
@@ -194,7 +194,7 @@
                 if (!accepted) { btn.disabled = false; return; }
             }
             var j = await post('/umbraco/surface/Firearm/ScanHandOut',
-                               { t: t, accepted: accepted ? 'true' : 'false' });
+                               { code: code, accepted: accepted ? 'true' : 'false' });
             body.innerHTML = j.success
                 ? '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>' +
                   esc(j.message) + '<p class="small mb-0 mt-2">Lämna vapnet till vapenansvarig ' +

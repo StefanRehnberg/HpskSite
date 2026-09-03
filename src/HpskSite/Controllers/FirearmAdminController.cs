@@ -1,7 +1,6 @@
 using HpskSite.Services;
 using HpskSite.Models.Firearms;
 using HpskSite.Services.Firearms;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -35,11 +34,6 @@ namespace HpskSite.Controllers
         private readonly Umbraco.Cms.Core.Services.IMemberService _memberService;
         private readonly ILogger<FirearmAdminController> _logger;
 
-        /// <summary>
-        /// Samma purpose som <c>FirearmController</c> — etiketten skapas här och läses där, så de
-        /// MÅSTE vara samma sträng. Skiljer de sig blir varje utskriven etikett oläsbar, tyst.
-        /// </summary>
-        private readonly IDataProtector _labelProtector;
         private readonly LoanWeaponClubRules _clubRules;
         private readonly HpskSite.Services.TrainingGroupService _trainingGroups;
         private readonly Umbraco.Cms.Core.Services.IContentService _contentService;
@@ -60,7 +54,6 @@ namespace HpskSite.Controllers
             Umbraco.Cms.Core.Security.IMemberManager memberManager,
             Umbraco.Cms.Core.Services.IMemberService memberService,
             ILogger<FirearmAdminController> logger,
-            IDataProtectionProvider dataProtection,
             LoanWeaponClubRules clubRules,
             HpskSite.Services.TrainingGroupService trainingGroups,
             Umbraco.Cms.Core.Services.IContentService contentService)
@@ -75,7 +68,6 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _memberService = memberService;
             _logger = logger;
-            _labelProtector = dataProtection.CreateProtector("Firearm.LoanLabel.v1");
             _clubRules = clubRules;
             _trainingGroups = trainingGroups;
             _contentService = contentService;
@@ -220,6 +212,11 @@ namespace HpskSite.Controllers
             try
             {
                 var rows = _firearms.GetForScope(FirearmScope.Club(clubId));
+
+                // ⚠️ EN fråga för hela klubben, inte ActiveLoanFor per rad. Femtio vapen hade
+                // annars blivit femtio frågor på en flik som redan hämtar vapen och relationer.
+                var claims = _bookings.ActiveClaimsForClub(clubId, DateTime.Now);
+
                 return Json(new
                 {
                     success = true,
@@ -244,6 +241,26 @@ namespace HpskSite.Controllers
                         number = f.ClubWeaponNumber, f.IsLoanable,
                         status = string.IsNullOrWhiteSpace(f.Status) ? FirearmStatus.Tillgangligt : f.Status,
                         hasDetails = f.HasProtectedDetails,
+
+                        // ⚠️ VEM SOM HAR VAPNET, härlett ur bokningarna — aldrig ur `status`, som
+                        // är en manuell flagga någon sätter för hand och glömmer. Klubbvapen är
+                        // föreningens egendom och inte personuppgifter, och den som får se listan
+                        // är redan klubbadmin — men namnet får INTE följa med till någon yta som
+                        // är öppen för medlemmarna: `/lanevapen` visar med flit bara nummer, namn
+                        // på vapnet och om det är ledigt, aldrig vem som bokat.
+                        loan = claims.TryGetValue(f.Id, out var b) ? new
+                        {
+                            status = b.Status,
+                            isOut = b.Status == FirearmBookingStatus.Utlamnad,
+                            memberName = b.MemberName,
+                            // Utlämnad: när vapnet gick ut. Reserverad: när fönstret börjar.
+                            since = (b.Status == FirearmBookingStatus.Utlamnad
+                                        ? b.HandedOutAt ?? b.FromTime
+                                        : b.FromTime).ToString("yyyy-MM-dd HH:mm"),
+                            until = b.ToTime.ToString("yyyy-MM-dd HH:mm"),
+                            occasion = b.OccasionDisplay,
+                            leavesTheClub = b.LeavesTheClub,
+                        } : null,
                         // Klubbvapen är licensbelagda precis som medlemmarnas, och en licens som
                         // förfaller obemärkt tar vapnet ur bruk. Klartext, så listan kan färga
                         // raden utan att avkryptera något.
@@ -960,16 +977,21 @@ namespace HpskSite.Controllers
         // ── Vapenetiketterna ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// QR-koden för ETT vapens etikett, som PNG.
+        /// QR-koden för ETT vapens etikett, som <b>SVG</b>.
         ///
         /// <para><b>⚠️ Etiketten sitter på VAPNET, inte på hyllplatsen</b> (Stefans beslut
         /// 2026-09-02, och han har rätt): ett vapen som läggs tillbaka på fel plats gör en
         /// hylletikett direkt felaktig, medan vapnet är identiteten. Hyllplatsen är föränderligt
         /// tillstånd som ingen underhåller.</para>
         ///
-        /// <para><b>⚠️ Token är INTE tidsbegränsad.</b> Etiketten är laminerad och sitter kvar i
-        /// åratal — en kortlivad token hade gjort den obrukbar vid första skanningen. Kontrollen
+        /// <para><b>⚠️ Koden är INTE tidsbegränsad.</b> Etiketten är laminerad och sitter kvar i
+        /// åratal — en kortlivad kod hade gjort den obrukbar vid första skanningen. Kontrollen
         /// görs av bokningsfönstret: ingen bokning i dag, ingen utcheckning.</para>
+        ///
+        /// <para><b>⚠️ SVG, inte PNG, och det är hela halva krympningen.</b> Etiketten trycks ~18 mm
+        /// bred. En PNG på några hundra pixlar skalas då ner av skrivaren och varje modulkant blir
+        /// en gråskala — precis det som gör en liten kod oläsbar. Vektorn tar skrivarens egen
+        /// upplösning och ger knivskarpa kanter oavsett storlek.</para>
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetFirearmLabelQr(int clubId, int firearmId, int size = 10)
@@ -982,8 +1004,12 @@ namespace HpskSite.Controllers
                 return Content("Vapnet hittades inte");
 
             var url = LabelUrl(firearmId);
-            var png = QrPng(url, Math.Clamp(size, 4, 20));
-            return png is null ? Content("Kunde inte skapa QR-kod") : File(png, "image/png");
+            if (url is null) return Content("Kunde inte skapa etikettkod");
+
+            var svg = QrSvg(url, Math.Clamp(size, 4, 20));
+            return svg is null
+                ? Content("Kunde inte skapa QR-kod")
+                : Content(svg, "image/svg+xml", System.Text.Encoding.UTF8);
         }
 
         /// <summary>
@@ -1007,33 +1033,59 @@ namespace HpskSite.Controllers
 
             var req = HttpContext.Request;
             var url = $"{req.Scheme}://{req.Host}/valvet?club={clubId}";
-            var png = QrPng(url, Math.Clamp(size, 4, 24));
-            return png is null ? Content("Kunde inte skapa QR-kod") : File(png, "image/png");
+            var svg = QrSvg(url, Math.Clamp(size, 4, 24));
+            return svg is null
+                ? Content("Kunde inte skapa QR-kod")
+                : Content(svg, "image/svg+xml", System.Text.Encoding.UTF8);
         }
 
-        /// <summary>Etikettens adress. Absolut, för den ska skannas från papper.</summary>
-        private string LabelUrl(int firearmId)
+        /// <summary>
+        /// Etikettens adress. Absolut, för den ska skannas från papper. Null om vapnet inte kunde
+        /// få en etikettkod.
+        ///
+        /// <para><b>⚠️ Koden myntas här, inte när vapnet skapas</b> — se
+        /// <c>FirearmService.EnsureLabelCode</c>. Den som begär en etikett är den som behöver en
+        /// kod.</para>
+        /// </summary>
+        private string? LabelUrl(int firearmId)
         {
-            var token = _labelProtector.Protect($"firearm:{firearmId}");
+            var code = _firearms.EnsureLabelCode(firearmId);
+            if (string.IsNullOrWhiteSpace(code)) return null;
+
             var req = HttpContext.Request;
-            return $"{req.Scheme}://{req.Host}/lanevapen/skanna?t={Uri.EscapeDataString(token)}";
+            return FirearmLabelCode.Url(req.Scheme, req.Host.Value ?? "", code);
         }
 
-        private static byte[]? QrPng(string url, int pixelsPerModule)
+        /// <summary>
+        /// QR-koden som SVG.
+        ///
+        /// <para><b>⚠️ ECC-nivå Q (25 %) behålls med flit.</b> Etiketten sitter på metall, i ett
+        /// valv, och får repor, olja och fingeravtryck. Med den korta adressen kostar Q inte en
+        /// enda QR-version jämfört med M, så det är felkorrigering man får gratis.</para>
+        ///
+        /// <para><b>⚠️ <c>ViewBoxAttribute</c>, inte standardläget.</b> QRCoder skriver som standard
+        /// bara <c>width</c>/<c>height</c> i pixlar och <b>ingen</b> <c>viewBox</c> — då har bilden
+        /// en fast egen storlek, och etiketten sätter sin i millimeter. Med en viewBox skalar
+        /// vektorn rent till vilket mått som helst. Den är dessutom det enda sättet att MÄTA
+        /// modulantalet utifrån, alltså att verifiera att koden fortfarande är liten nog att
+        /// tryckas på ett vapen.</para>
+        /// </summary>
+        private static string? QrSvg(string url, int pixelsPerModule)
         {
             try
             {
                 var gen = new QRCoder.QRCodeGenerator();
                 using var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.Q);
-                var qr = new QRCoder.QRCode(data);
-                using var img = qr.GetGraphic(
-                    pixelsPerModule: pixelsPerModule,
-                    darkColor: SixLabors.ImageSharp.Color.Black,
-                    lightColor: SixLabors.ImageSharp.Color.White,
-                    drawQuietZones: true);
-                using var ms = new System.IO.MemoryStream();
-                img.Save(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-                return ms.ToArray();
+
+                // Matrisen rymmer den tysta zonen, så sidan är hela kodens bredd i moduler.
+                var side = data.ModuleMatrix.Count * pixelsPerModule;
+
+                return new QRCoder.SvgQRCode(data).GetGraphic(
+                    new SixLabors.ImageSharp.Size(side, side),
+                    darkColorHex: "#000000",
+                    lightColorHex: "#FFFFFF",
+                    drawQuietZones: true,
+                    sizingMode: QRCoder.SvgQRCode.SizingMode.ViewBoxAttribute);
             }
             catch
             {
