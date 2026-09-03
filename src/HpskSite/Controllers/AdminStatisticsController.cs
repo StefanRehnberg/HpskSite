@@ -1564,13 +1564,28 @@ namespace HpskSite.Controllers
                 {
                     timestamp = e.Timestamp.ToString("yyyy-MM-dd HH:mm"),
                     question = e.Question,
-                    answer = Truncate(e.Answer, 200),
+                    answer = Truncate(CollapseWhitespace(e.Answer), 200),
                     answerFull = e.Answer
                 })
                 .ToList();
 
             return new { totalMessages, messages30d, perMonth, recentEntries };
         }
+
+        /// <summary>
+        /// Start of one logged exchange: "[2026-04-10 14:32:15]" at the beginning of a line.
+        /// </summary>
+        /// <remarks>
+        /// ⚠️ THE ENTRY BOUNDARY IS THIS HEADER, NEVER THE "---" SEPARATOR THE WRITER APPENDS.
+        /// An AI answer is Markdown and routinely contains a horizontal rule, so splitting the
+        /// file on "\n---\n" cut the answer at its FIRST rule — which usually sits right after
+        /// the opening sentence. Everything after it became a chunk with no header and was
+        /// dropped, so the stored answer was one line long and nothing said so. Reported from the
+        /// statistics page 2026-09-03, once the answer became readable in full.
+        /// </remarks>
+        private static readonly Regex ChatEntryHeaderRegex = new Regex(
+            @"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]",
+            RegexOptions.Multiline | RegexOptions.Compiled);
 
         private List<ChatLogEntry> ParseChatLogs()
         {
@@ -1588,26 +1603,59 @@ namespace HpskSite.Controllers
             {
                 try
                 {
-                    var content = System.IO.File.ReadAllText(file);
-                    var blocks = content.Split("\n---\n", StringSplitOptions.RemoveEmptyEntries);
+                    // Normalised to LF so the same offsets work whichever way the file was written.
+                    var content = System.IO.File.ReadAllText(file).Replace("\r\n", "\n");
+                    var headers = ChatEntryHeaderRegex.Matches(content);
 
-                    foreach (var block in blocks)
+                    for (int i = 0; i < headers.Count; i++)
                     {
-                        var lines = block.Trim().Split('\n');
-                        if (lines.Length < 3) continue;
+                        // Each entry runs from its own header to the next one — so an answer may
+                        // contain anything at all, "---" included.
+                        var start = headers[i].Index;
+                        var end = i + 1 < headers.Count ? headers[i + 1].Index : content.Length;
+                        var block = content.Substring(start, end - start);
 
-                        // Header is "[2026-04-10 14:32:15]". We only read the timestamp; any
-                        // trailing text on legacy lines (older logs stored an email there) is
-                        // deliberately ignored so no identity reaches the app.
-                        var headerMatch = Regex.Match(lines[0], @"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]");
-                        if (!headerMatch.Success) continue;
-
-                        if (!DateTime.TryParseExact(headerMatch.Groups[1].Value, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var timestamp))
+                        // We read only the timestamp out of the header; any trailing text on
+                        // legacy lines (older logs stored an email there) is deliberately ignored
+                        // so no identity reaches the app.
+                        if (!DateTime.TryParseExact(headers[i].Groups[1].Value, "yyyy-MM-dd HH:mm:ss",
+                                CultureInfo.InvariantCulture, DateTimeStyles.None, out var timestamp))
                             continue;
 
-                        var question = lines.Length > 1 && lines[1].StartsWith("Q: ") ? lines[1].Substring(3) : "";
-                        var answerLines = lines.Skip(2).Where(l => l.StartsWith("A: ") || !l.StartsWith("Q: ")).ToList();
-                        var answer = string.Join(" ", answerLines).Replace("A: ", "");
+                        var lines = block.Split('\n').ToList();
+                        lines.RemoveAt(0); // the header line itself
+
+                        // The writer ends every entry with a "---" line. Strip exactly ONE trailing
+                        // one: an answer whose own last line is a rule keeps it.
+                        while (lines.Count > 0 && lines[^1].Trim().Length == 0) lines.RemoveAt(lines.Count - 1);
+                        if (lines.Count > 0 && lines[^1].Trim() == "---") lines.RemoveAt(lines.Count - 1);
+
+                        // The question is everything from "Q: " up to the "A: " line — a pasted
+                        // question can span several lines, and a one-line read would silently
+                        // swallow the rest of it into the answer.
+                        var answerAt = lines.FindIndex(l => l.StartsWith("A: ", StringComparison.Ordinal));
+                        var questionAt = lines.FindIndex(l => l.StartsWith("Q: ", StringComparison.Ordinal));
+
+                        var question = "";
+                        if (questionAt >= 0)
+                        {
+                            var qEnd = answerAt > questionAt ? answerAt : lines.Count;
+                            question = string.Join("\n", lines.GetRange(questionAt, qEnd - questionAt))
+                                .Substring(3).Trim();
+                        }
+
+                        // Line breaks are PRESERVED. The answer is Markdown — steps, headings and
+                        // lists — and joining it with spaces made a wall of text out of a numbered
+                        // list. Only the "A: " prefix is removed, and only where it is a prefix:
+                        // a plain Replace also ate the string wherever it appeared inside the text.
+                        var answer = "";
+                        if (answerAt >= 0)
+                        {
+                            answer = string.Join("\n", lines.GetRange(answerAt, lines.Count - answerAt))
+                                .Substring(3).Trim();
+                        }
+
+                        if (question.Length == 0 && answer.Length == 0) continue;
 
                         entries.Add(new ChatLogEntry { Timestamp = timestamp, Question = question, Answer = answer });
                     }
@@ -1617,6 +1665,14 @@ namespace HpskSite.Controllers
 
             return entries;
         }
+
+        /// <summary>
+        /// Squashes newlines and runs of spaces for the table PREVIEW. The stored answer keeps its
+        /// line breaks; a 200-character preview of Markdown would otherwise spend its budget on a
+        /// heading and a blank line and show almost nothing of the answer.
+        /// </summary>
+        private static string CollapseWhitespace(string text) =>
+            string.IsNullOrEmpty(text) ? text : Regex.Replace(text, @"\s+", " ").Trim();
 
         private static string Truncate(string text, int maxLength)
         {
