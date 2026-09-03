@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +14,7 @@ using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Services;
 using HpskSite.Models;
+using HpskSite.Models.Firearms;
 
 namespace HpskSite.Controllers
 {
@@ -338,6 +339,21 @@ namespace HpskSite.Controllers
             public int Cnt { get; set; }
         }
 
+        /// <summary>
+        /// One row per (owner, active, loanable) in the vapenregister. Deliberately grouped by
+        /// OWNER rather than SUMmed in SQL: the demo-club exclusion needs the owner id, and an
+        /// <c>IN (@0)</c> exclusion list would silently hit the ~2100-parameter cap once the demo
+        /// club has enough seeded members. One row per owner is bounded and small.
+        /// </summary>
+        private class FirearmOwnerRow
+        {
+            public string ScopeKind { get; set; } = "";
+            public int ScopeId { get; set; }
+            public bool IsActive { get; set; }
+            public bool IsLoanable { get; set; }
+            public int Cnt { get; set; }
+        }
+
         /// <summary>Zero-valued Styrelse (board work) stats — default and no-table fallback.</summary>
         private static object ZeroStyrelseStats() => new
         {
@@ -367,6 +383,18 @@ namespace HpskSite.Controllers
             projectsActive = 0,
             projectsArchived = 0,
             configsInProjects = 0
+        };
+
+        /// <summary>Zero-valued vapenregister stats — default and no-table fallback.</summary>
+        private static object ZeroFirearmStats() => new
+        {
+            total = 0,
+            memberFirearms = 0,
+            clubFirearms = 0,
+            loanableClubFirearms = 0,
+            removed = 0,
+            membersWithFirearms = 0,
+            clubsWithFirearms = 0
         };
 
         /// <summary>Zero-valued Märken series stats — used as the default and the no-content fallback.</summary>
@@ -401,6 +429,17 @@ namespace HpskSite.Controllers
                 if (exRoot != null)
                     ComputeDemoExclusions(exRoot, excludedClubIds, excludedRegionIds);
             }
+
+            // The demo club's members, by id — needed where an aggregate is keyed on a member id
+            // instead of walking the member list (the vapenregister below). Taken from ALL members,
+            // not just approved ones: a seeded demo member need not be approved to own a row.
+            var excludedMemberIds = excludedClubIds.Count == 0
+                ? new HashSet<int>()
+                : allMembers
+                    .Where(m => int.TryParse(m.GetValue<string>("primaryClubId"), out var cid)
+                                && excludedClubIds.Contains(cid))
+                    .Select(m => m.Id)
+                    .ToHashSet();
 
             // Drop demo/test members by club membership (primaryClubId), regardless of email.
             approvedMembers = approvedMembers
@@ -734,6 +773,7 @@ namespace HpskSite.Controllers
                     var storageQuotas = new List<DocumentStorageQuota>();
                     object styrelseStats = ZeroStyrelseStats();
                     object faltkonfigStats = ZeroFaltkonfigStats();
+                    object firearmStats = ZeroFirearmStats();
 
                     using (var db = _databaseFactory.CreateDatabase())
                     {
@@ -1070,6 +1110,45 @@ namespace HpskSite.Controllers
                             };
                         }
                         catch { /* FaltskytteConfiguration table not present — keep zero defaults */ }
+
+                        // ── Vapenregister (krypterat vapeninnehav) ────────────────────────────
+                        // Volume only: how many firearms are stored and how many of them are the
+                        // clubs' own. Never a single stored DETAIL — those live encrypted per owner
+                        // and reading one writes an access-log row (see FirearmService.RevealDetails).
+                        // The counts read the CLEARTEXT columns only, so nothing is decrypted here.
+                        try
+                        {
+                            var firearmRows = db.Fetch<FirearmOwnerRow>(
+                                @"SELECT ScopeKind, ScopeId, IsActive, IsLoanable, COUNT(*) AS Cnt
+                                  FROM Firearm
+                                  GROUP BY ScopeKind, ScopeId, IsActive, IsLoanable");
+
+                            // ScopeKind holds the FirearmOwnerKind enum NAME ("Member" / "Club") —
+                            // it is part of the crypto AAD, so it cannot drift.
+                            bool IsClub(FirearmOwnerRow r) => string.Equals(r.ScopeKind, nameof(FirearmOwnerKind.Club), StringComparison.Ordinal);
+
+                            var live = firearmRows
+                                .Where(r => !(IsClub(r) ? excludedClubIds.Contains(r.ScopeId) : excludedMemberIds.Contains(r.ScopeId)))
+                                .ToList();
+
+                            // IsActive = 0 HIDES a firearm, it never deletes it (old intyg refer to
+                            // the row, and "antal vapen sedan tidigare" counts history). So the
+                            // headline figure is the active register and the hidden ones are stated
+                            // separately rather than folded in or dropped.
+                            var active = live.Where(r => r.IsActive).ToList();
+
+                            firearmStats = new
+                            {
+                                total = active.Sum(r => r.Cnt),
+                                memberFirearms = active.Where(r => !IsClub(r)).Sum(r => r.Cnt),
+                                clubFirearms = active.Where(IsClub).Sum(r => r.Cnt),
+                                loanableClubFirearms = active.Where(r => IsClub(r) && r.IsLoanable).Sum(r => r.Cnt),
+                                removed = live.Where(r => !r.IsActive).Sum(r => r.Cnt),
+                                membersWithFirearms = active.Where(r => !IsClub(r)).Select(r => r.ScopeId).Distinct().Count(),
+                                clubsWithFirearms = active.Where(IsClub).Select(r => r.ScopeId).Distinct().Count()
+                            };
+                        }
+                        catch { /* Firearm table not present — keep zero defaults */ }
                     }
 
                     // ── 5. Training stairs (Skyttetrappan) — in-memory ──────────
@@ -1341,6 +1420,7 @@ namespace HpskSite.Controllers
                         },
                         styrelse = styrelseStats,
                         faltkonfig = faltkonfigStats,
+                        firearms = firearmStats,
                         aiChat = BuildAiChatStats()
                     };
                 }
@@ -1410,6 +1490,7 @@ namespace HpskSite.Controllers
                 },
                 styrelse = ZeroStyrelseStats(),
                 faltkonfig = ZeroFaltkonfigStats(),
+                firearms = ZeroFirearmStats(),
                 aiChat = BuildAiChatStats()
             };
         }
@@ -1477,7 +1558,15 @@ namespace HpskSite.Controllers
             var recentEntries = entries
                 .OrderByDescending(e => e.Timestamp)
                 .Take(50)
-                .Select(e => new { timestamp = e.Timestamp.ToString("yyyy-MM-dd HH:mm"), question = e.Question, answer = Truncate(e.Answer, 200) })
+                // `answer` is the table preview; `answerFull` backs the click-to-read dialog, so
+                // it must NOT be truncated — the whole point is reading the answer that was given.
+                .Select(e => new
+                {
+                    timestamp = e.Timestamp.ToString("yyyy-MM-dd HH:mm"),
+                    question = e.Question,
+                    answer = Truncate(e.Answer, 200),
+                    answerFull = e.Answer
+                })
                 .ToList();
 
             return new { totalMessages, messages30d, perMonth, recentEntries };

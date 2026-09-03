@@ -1,4 +1,4 @@
-@* Admin Statistics Tab - Site admin only *@
+﻿@* Admin Statistics Tab - Site admin only *@
 
 <div id="statisticsContainer">
     <!-- Refresh button -->
@@ -607,6 +607,7 @@
                 <div class="card">
                     <div class="card-body">
                         <h6 class="card-title">Senaste frågor</h6>
+                        <p class="text-muted small mb-2">Klicka på en rad för att läsa hela frågan och hela svaret.</p>
                         <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                             <table class="table table-sm table-hover mb-0">
                                 <thead><tr><th style="width:130px">Tid</th><th>Fråga</th><th>Svar (utdrag)</th></tr></thead>
@@ -779,6 +780,85 @@
             </div>
         </div>
 
+        <!-- Section K: Vapenregister -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-shield-lock me-2"></i>Vapenregister</h5>
+        <p class="text-muted small mb-2"><i class="bi bi-shield-check me-1"></i>Endast volym. Vapnens uppgifter är krypterade per ägare och läses aldrig här — statistiken räknar bara de öppna kolumnerna, så ingen läsning loggas.</p>
+        <div class="row g-3 mb-4">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Vapen totalt
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal lagrade vapen i registret — medlemmarnas egna plus klubbarnas. Borttagna vapen göms men raderas aldrig (äldre föreningsintyg refererar dem) och räknas därför separat."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFwTotal">—</h2>
+                        <small class="text-muted" id="statFwRemoved"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Medlemmars vapen</h6>
+                        <h2 class="card-title mb-1" id="statFwMember">—</h2>
+                        <small class="text-muted" id="statFwMemberSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-info">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Klubbvapen
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Vapen som tillhör en klubb (inte en enskild medlem). Andelen av totalen visas under siffran."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFwClub">—</h2>
+                        <small class="text-muted" id="statFwClubSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Lånebara klubbvapen
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Klubbvapen som är markerade som lånebara och därmed går att boka på /lanevapen."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFwLoanable">—</h2>
+                        <small class="text-muted">går att boka</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- AI-chatt: hela frågan och hela svaret. Raden bär ett INDEX (data-ai-idx) och innehållet
+     hämtas ur aiChatRecent[] — aldrig en JS-literal byggd av användartext i ett attribut. -->
+<div class="modal fade" id="aiChatEntryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title mb-0">AI-chatt</h5>
+                    <small class="text-muted" id="aiChatModalTime"></small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <h6 class="text-muted small text-uppercase mb-1">Fråga</h6>
+                <p class="mb-4" id="aiChatModalQuestion" style="white-space:pre-wrap"></p>
+                <h6 class="text-muted small text-uppercase mb-1">Svar</h6>
+                <p class="mb-0" id="aiChatModalAnswer" style="white-space:pre-wrap"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -824,6 +904,37 @@
 
     let regionChartExpanded = false;
     let styrelseOwnersExpanded = false;
+    let aiChatRecent = [];
+
+    // Delegated once on the tbody, so it survives every re-render of the rows. Bound on the
+    // container rather than per row for the same reason.
+    (function bindAiChatRows() {
+        const body = document.getElementById('aiChatRecentBody');
+        if (!body) return;
+        body.addEventListener('click', function (ev) {
+            const tr = ev.target.closest('tr[data-ai-idx]');
+            if (tr) openAiChatEntry(parseInt(tr.getAttribute('data-ai-idx'), 10));
+        });
+        body.addEventListener('keydown', function (ev) {
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            const tr = ev.target.closest('tr[data-ai-idx]');
+            if (!tr) return;
+            ev.preventDefault();
+            openAiChatEntry(parseInt(tr.getAttribute('data-ai-idx'), 10));
+        });
+    })();
+
+    function openAiChatEntry(idx) {
+        const e = aiChatRecent[idx];
+        if (!e) return;
+        document.getElementById('aiChatModalTime').textContent = e.timestamp || '';
+        // textContent, never innerHTML: the question is text a visitor typed. The dialog keeps
+        // line breaks via white-space:pre-wrap instead of turning them into markup.
+        document.getElementById('aiChatModalQuestion').textContent = e.question || '(tom fråga)';
+        // answerFull is the untruncated answer; `answer` in the table row is only the preview.
+        document.getElementById('aiChatModalAnswer').textContent = e.answerFull || e.answer || '(tomt svar)';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('aiChatEntryModal')).show();
+    }
 
     function destroyChart(id) {
         if (chartInstances[id]) {
@@ -1402,18 +1513,43 @@
                 );
             }
 
-            // Recent questions table — anonymous (date, question, answer only)
+            // Recent questions table — anonymous (date, question, answer only).
+            // Each row is clickable and opens the full question + answer; the entries are kept in
+            // aiChatRecent and the row carries only its INDEX, so no user text ever reaches an
+            // attribute (an apostrophe in a question would otherwise break out of the literal).
+            aiChatRecent = d.aiChat.recentEntries || [];
             var recentBody = document.getElementById('aiChatRecentBody');
             recentBody.innerHTML = '';
-            if (d.aiChat.recentEntries) {
-                d.aiChat.recentEntries.forEach(function (e) {
-                    var tr = document.createElement('tr');
-                    tr.innerHTML = '<td><small class="text-muted">' + e.timestamp + '</small></td>'
-                        + '<td>' + escapeHtml(e.question) + '</td>'
-                        + '<td><small class="text-muted">' + escapeHtml(e.answer) + '</small></td>';
-                    recentBody.appendChild(tr);
-                });
-            }
+            aiChatRecent.forEach(function (e, i) {
+                var tr = document.createElement('tr');
+                tr.setAttribute('data-ai-idx', i);
+                tr.style.cursor = 'pointer';
+                tr.setAttribute('role', 'button');
+                tr.setAttribute('tabindex', '0');
+                tr.setAttribute('title', 'Klicka för att läsa hela frågan och svaret');
+                tr.innerHTML = '<td><small class="text-muted">' + escapeHtml(e.timestamp) + '</small></td>'
+                    + '<td>' + escapeHtml(e.question) + '</td>'
+                    + '<td><small class="text-muted">' + escapeHtml(e.answer) + '</small></td>';
+                recentBody.appendChild(tr);
+            });
+        }
+
+        // Section K: Vapenregister
+        if (d.firearms) {
+            const fw = d.firearms;
+            document.getElementById('statFwTotal').textContent = fw.total;
+            document.getElementById('statFwRemoved').textContent =
+                fw.removed > 0 ? (fw.removed + ' borttagna (dolda, ej raderade)') : 'aktiva vapen';
+            document.getElementById('statFwMember').textContent = fw.memberFirearms;
+            document.getElementById('statFwMemberSub').textContent =
+                fw.membersWithFirearms + (fw.membersWithFirearms === 1 ? ' medlem' : ' medlemmar');
+            document.getElementById('statFwClub').textContent = fw.clubFirearms;
+            // Share of the total, so "how many of them are club weapons" is answerable at a glance.
+            // Guarded: 0/0 must read as "inga vapen ännu", not NaN.
+            document.getElementById('statFwClubSub').textContent = fw.total > 0
+                ? (Math.round(fw.clubFirearms / fw.total * 100) + '% av totalen · ' + fw.clubsWithFirearms + (fw.clubsWithFirearms === 1 ? ' klubb' : ' klubbar'))
+                : 'inga vapen ännu';
+            document.getElementById('statFwLoanable').textContent = fw.loanableClubFirearms;
         }
 
         // Section I: Styrelsearbete
