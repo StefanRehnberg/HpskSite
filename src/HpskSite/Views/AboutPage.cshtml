@@ -120,6 +120,13 @@
             Tutorial = ""
         },
         new {
+            Image = "/images/about/aktivitet.png",
+            Title = "Min aktivitet — underlaget för ditt föreningsintyg",
+            Teaser = "Träning, tävlingar och närvaro samlat per verksamhetsår — och hur starkt varje post är.",
+            Detail = "Allt du gjort under året räknas samman automatiskt: aktivitetsdagar, tävlingar, träningsmatcher och närvaro på klubbens och kretsens evenemang. Du kan filtrera per vapengrupp och per gren, eftersom ett föreningsintyg gäller ett bestämt vapen och då är det den verksamheten som räknas. Det ovanliga är att sidan säger hur STARKT underlaget är: varje post märks som officiellt tävlingsresultat, självregistrerad på plats, eller självrapporterad — och rutan under listan säger i klartext vad som inte är intygat av någon funktionär, till exempel att sexton tävlingar har anmälan men inget inskrivet resultat. Det är samma sammanställning klubben läser när den skriver ditt föreningsintyg, genom samma renderare, så ni aldrig kan sitta med olika siffror. Ett underlag som döljer sina svagheter är inget underlag — styrelsen ska kunna se vad den intygar.",
+            Tutorial = ""
+        },
+        new {
             Image = "/images/about/lanevapen-boka.png",
             Title = "Låna klubbvapen — nr 7, som förra gången",
             Teaser = "Har du inget eget vapen än? Boka klubbens — och få samma nummer som sist.",
@@ -236,6 +243,13 @@
             Tutorial = ""
         },
         new {
+            Image = "/images/about/foreningsintyg.png",
+            Title = "Föreningsintyg — färdig blankett ur klubbens egna uppgifter",
+            Teaser = "Medlemmen begär, ni kontrollerar och skriver ut. Aktiviteten är redan ifylld.",
+            Detail = "Bilagan till ansökan om vapenlicens är utformad efter Polismyndighetens blankett och fylls i ur uppgifter klubben redan har: medlemmens namn och kontaktuppgifter, hur länge hen varit medlem, klubbens organisationsnummer, förbundstillhörighet och den aktivitet som styrker aktivt skytte. Medlemmen begär intyget själv från sin sida — även för ett vapen hen ännu inte äger — och har hen lagt in vapnet kan ni hämta fabrikat, modell, kaliber och piplängd direkt in i blanketten. Saknas något i medlemsregistret säger sidan vilka fält det gäller innan ni skriver ut, eftersom Polisen ofta avvisar ett ofullständigt intyg. De fält bara styrelsen kan svara för är tydligt utmärkta och fylls aldrig i automatiskt — det är styrelsen som intygar, inte systemet. Varje utfärdat intyg sparas som en kopia av exakt vad som stod i det, och beslutet får en egen punkt i styrelseprotokollet. Utkast bär ett vattenmärke så att ett okontrollerat intyg aldrig kan misstas för ett utfärdat.",
+            Tutorial = ""
+        },
+        new {
             Image = "/images/about/lanevapen-valvet.png",
             Title = "Valvet — kvällens lånevapen i telefonen",
             Teaser = "Två rader att läsa: vilka vapen som ska ut, och vilka som är ute. Ett tryck per vapen.",
@@ -300,7 +314,9 @@
     .about-slab img.about-shot[src*="lanevapen-valvet.png"],
     .about-slab img.about-shot[src*="lanevapen-boka.png"],
     .about-slab img.about-shot[src*="lanevapen-skanna.png"],
-    .about-slab img.about-shot[src*="lanevapen-affisch.png"] {
+    .about-slab img.about-shot[src*="lanevapen-affisch.png"],
+    /* Föreningsintyget är två A4 i höjd — utan tak trycker det undan all text omkring sig. */
+    .about-slab img.about-shot[src*="foreningsintyg.png"] {
         width: auto;
         max-width: 100%;
         max-height: 460px;
@@ -722,20 +738,18 @@
 <section class="container-fluid">
     <header class="about-section-heading text-center">
         <h2 class="mb-3"><i class="bi bi-signpost-2 me-2"></i>På gång</h2>
+        @* ⚠️ INLEDNINGEN MÅSTE STÄMMA MED INNEHÅLLET. Den sa "vad som är på väg in härnäst"
+           medan sektionen vuxit till 18 levererade poster och 3 kvarvarande — alltså läste den
+           som ett löfte om att allt nedan var ogjort. De kvarvarande ligger nu först, och texten
+           säger vad de överstrukna är. *@
         <p class="text-muted prose-wide mx-auto">
-            En liten glimt av vad som är på väg in i pistol.nu härnäst.
+            Först det som är på väg in i pistol.nu härnäst — och därefter det vi redan levererat,
+            <span class="text-decoration-line-through">överstruket</span> med en kort rad om vad
+            det blev. Saknar du något? <a href="@contactUrl">Hör av dig.</a>
         </p>
     </header>
 
     <div class="row g-3 mb-5">
-        <div class="col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                    <h6 class="card-title"><i class="bi bi-bullseye text-primary me-2"></i>Fler grenar: Standardpistol &amp; Sportpistol</h6>
-                    <p class="card-text small mb-0">Standardpistol och sportpistol blir egna grenar i pistol.nu — med startlistor, resultatinmatning, klasser och märken precis som för övriga grenar.</p>
-                </div>
-            </div>
-        </div>
         <div class="col-md-6 col-lg-4">
             <div class="card h-100 border-0 shadow-sm position-relative border-start border-4 border-info">
                 <div class="position-absolute top-0 end-0 m-2">
@@ -755,8 +769,56 @@
         <div class="col-md-6 col-lg-4">
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
-                    <h6 class="card-title"><i class="bi bi-card-checklist text-primary me-2"></i>Årlig märkes- och medaljlista för klubben</h6>
-                    <p class="card-text small mb-0">En färdig sammanställning per klubb och år av de märken och standardmedaljer skyttarna förtjänat — att beställa från SPSF och dela ut på årsmötet, direkt ur data som redan finns i pistol.nu.</p>
+                    <h6 class="card-title"><i class="bi bi-file-earmark-richtext text-primary me-2"></i>Klubbens egen sida — eget innehåll och internt material</h6>
+                    <p class="card-text small mb-0">Klubben ska kunna göra sidan till sin egen: skriva egen information och lägga upp egna undersidor, och ha ett <strong>internt utrymme som bara syns för inloggade medlemmar i klubben</strong> — för material som inte hör hemma publikt. Samma val gäller nyheter: när klubben publicerar en nyhet väljer den om den ska gå ut publikt eller bara internt.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-chat-square-text text-primary me-2"></i>Förslagslåda</h6>
+                    <p class="card-text small mb-0">En öppen kanal där användare lämnar förslag och röstar på vad som ska byggas härnäst.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm position-relative" style="opacity: 0.85;">
+                <div class="position-absolute top-0 end-0 m-2">
+                    <span class="badge rounded-pill bg-success">
+                        <i class="bi bi-check-circle-fill me-1"></i>Klart
+                    </span>
+                </div>
+                <div class="card-body">
+                    <h6 class="card-title text-decoration-line-through">
+                        <i class="bi bi-bullseye text-success me-2"></i>Fler grenar: Standardpistol &amp; Sportpistol
+                    </h6>
+                    <p class="card-text small mb-0">
+                        Standardpistol och sportpistol blir egna grenar i pistol.nu — med startlistor, resultatinmatning, klasser och märken precis som för övriga grenar.
+                        <span class="d-block mt-1 text-success small fw-semibold">
+                            <i class="bi bi-arrow-right me-1"></i>Levererat augusti 2026 — båda är egna grenar i tävlingsguiden med egna klasser, egna startlistor och egen resultatinmatning, och de räknas in i klubbrekord, klubbmästare, träningsloggen, träningsmatcher och underlaget för föreningsintyg precis som övriga grenar. Resultatlistan visar delsummor per sträng: <strong>150 s / 20 s / 10 s</strong> för standardpistol och <strong>precisionshalva + duellhalva</strong> för sportpistol. Funktionärsnavet och materielberäkningen följer med. <span class="fw-normal">Skjutledarvyn med automatisk kommandouppläsning är avsiktligt inte påslagen för dem — snabbskyttegrenarna har andra kommandon och annan tidssättning, så den skulle läsa upp fel; den byggs separat.</span>
+                        </span>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm position-relative" style="opacity: 0.85;">
+                <div class="position-absolute top-0 end-0 m-2">
+                    <span class="badge rounded-pill bg-success">
+                        <i class="bi bi-check-circle-fill me-1"></i>Klart
+                    </span>
+                </div>
+                <div class="card-body">
+                    <h6 class="card-title text-decoration-line-through">
+                        <i class="bi bi-card-checklist text-success me-2"></i>Årlig märkes- och medaljlista för klubben
+                    </h6>
+                    <p class="card-text small mb-0">
+                        En färdig sammanställning per klubb och år av de märken och standardmedaljer skyttarna förtjänat — att beställa från SPSF och dela ut på årsmötet.
+                        <span class="d-block mt-1 text-success small fw-semibold">
+                            <i class="bi bi-arrow-right me-1"></i>Levererat augusti–september 2026 — två listor ur samma underlag: <strong>att beställa</strong>, räknad per artikel och valör, och <strong>att dela ut</strong>, en rad per medlem med allt hen tog under året. Båda kan skrivas ut (utdelningslistan med en kryssruta per rad — vid utdelningen står någon med en penna) eller exporteras som CSV. Listan visar <strong>årets förvärvade märken</strong> och lagrar ingenting, så samma år ger alltid samma svar och kan aldrig glida från liggarna. Saknas ett guldnummer eller är en egenrapporterad medalj overifierad står det utskrivet i stället för att raden tystnar. Utdelningen kan dessutom föras in som en <strong>egen punkt i årsmötesprotokollet</strong> och prickas av där — det är klubbens enda beständiga uppgift om vem som faktiskt <em>fick</em> sitt märke, till skillnad från vem som skulle få det.
+                        </span>
+                    </p>
                 </div>
             </div>
         </div>
@@ -817,14 +879,6 @@
                             <i class="bi bi-arrow-right me-1"></i>Levererat september 2026 — en egen blankett efter Polisens formulär, förifylld med medlemmens träningar, tävlingar, matcher och märken. De fält bara styrelsen kan svara för är tydligt utmärkta, varje utfärdat intyg sparas som en kopia av exakt vad som stod i det, och styrelsebeslutet får en egen agendapunkt. Medlemmen begär intyget själv från sin sida — även för ett vapen hen ännu inte äger — och klubben kan hämta vapenuppgifterna direkt in i blanketten om medlemmen lagt in vapnet. Kvar: rullande sexmånadersfönster och förslag på §5/§6.
                         </span>
                     </p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                    <h6 class="card-title"><i class="bi bi-file-earmark-richtext text-primary me-2"></i>Klubbens egen sida — eget innehåll och internt material</h6>
-                    <p class="card-text small mb-0">Klubben ska kunna göra sidan till sin egen: skriva egen information och lägga upp egna undersidor, och ha ett <strong>internt utrymme som bara syns för inloggade medlemmar i klubben</strong> — för material som inte hör hemma publikt. Samma val gäller nyheter: när klubben publicerar en nyhet väljer den om den ska gå ut publikt eller bara internt.</p>
                 </div>
             </div>
         </div>
@@ -1065,14 +1119,6 @@
                             <i class="bi bi-arrow-right me-1"></i>Levererat maj 2026 — föreslaget värde med uppdelad förklaring i Fältskytte-konfiguratorn, plus en &quot;Använd&quot;-knapp som kopierar in det i Skjuttid-fältet.
                         </span>
                     </p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                    <h6 class="card-title"><i class="bi bi-chat-square-text text-primary me-2"></i>Förslagslåda</h6>
-                    <p class="card-text small mb-0">En öppen kanal där användare lämnar förslag och röstar på vad som ska byggas härnäst.</p>
                 </div>
             </div>
         </div>

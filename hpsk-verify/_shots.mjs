@@ -69,6 +69,115 @@ const anonymise = (selectors) => page.evaluate(([sels, names]) => {
   return [...seen.values()];
 }, [selectors, FAKE]);
 
+// ⚠️⚠️ TVÄTTEN MÅSTE UTGÅ FRÅN MEDLEMMENS FAKTISKA NAMN.
+//
+// Första versionen letade efter en HÅRDKODAD namnlista ("Lisa Svensson") och missade därför
+// medlem 1078:s riktiga namn helt — det stod kvar i föreningsintygets sidfot på båda sidorna och
+// som "Sökande" på sida 2. Bilden var alltså på väg att publiceras med en möjligen verklig
+// persons namn på en vapenlicensblankett. Ett publicerat skärmskott går inte att ta tillbaka.
+//
+// Namnet hämtas nu ur samma endpoint som ytorna själva använder, och varje NAMNDEL tvättas var
+// för sig: blanketten delar upp namnet i Efternamn och Tilltalsnamn, så bara helnamnet räcker
+// inte. Personnummer, e-post och telefonnummer tvättas på mönster, eftersom de dyker upp på
+// ställen man inte listar i förväg.
+let REAL = [], FULL = [], PARTS = [], APPLICANT = '';
+
+// ⚠️⚠️ EN YTA KAN BÄRA FLERA IDENTITETER. Andra försöket lärde bara SÖKANDENS namn — och då stod
+// ordförandens namn kvar i föreningsintygets namnförtydligande, för blanketten bär två personer:
+// den som ansöker och den som skriver under på styrelsens vägnar. Kontrollen var dessutom lika
+// smal som tvätten, så den godkände bilden.
+//
+// Därför lärs varje namn KLUBBEN känner, plus sökandens — inte de namn jag råkar tänka på. En
+// lista som är för lång kostar ingenting; en som är för kort kostar en publicerad personuppgift.
+const learnNames = async (memberId) => {
+  const applicant = await page.evaluate(async ([b, m]) => {
+    const r = await fetch(`${b}/umbraco/surface/Foreningsintyg/GetActivitySummary?memberId=${m}&year=2026`,
+      { credentials: 'same-origin' });
+    try { return ((await r.json()).data || {}).memberName || ''; } catch { return ''; }
+  }, [B, memberId]);
+
+  const clubNames = await page.evaluate(async ([b, c]) => {
+    const r = await fetch(`${b}/umbraco/surface/ClubAdmin/GetClubMembers?clubId=${c}`,
+      { credentials: 'same-origin' });
+    try { return ((await r.json()).data || []).map(m => m.memberName || '').filter(Boolean); }
+    catch { return []; }
+  }, [B, CLUB]);
+
+  if (!applicant) {
+    throw new Error('Kunde inte läsa sökandens namn — vägrar ta bilden hellre än att gissa.');
+  }
+
+  // ⚠️ TVÅ SKILDA LISTOR, av ett skäl som kostade en bild att upptäcka. Tredje försöket bytte
+  // varje NAMNDEL var den än stod, och då blev blankettens egna ord fel: en skräpmedlem i dev
+  // heter något med "Pistol", så kryssrutan "Pistol" blev "Fransson" och
+  // "Svenska Pistolskytteförbundet" blev "Svenska Franssonskytteförbundet". En bild där
+  // förbundets namn är utbytt är oanvändbar, och felet syns bara om man läser bilden.
+  //
+  //   FULL  — hela namn (innehåller mellanslag). Byts var de än står. Kan inte krocka med ett
+  //           domänord, och täcker både sökanden och den som skriver under.
+  //   PARTS — SÖKANDENS namndelar. Byts BARA när de utgör hela fältvärdet, eftersom blanketten
+  //           renderar Efternamn och Tilltalsnamn som egna fält. Aldrig i löpande text.
+  APPLICANT = applicant;
+  FULL = [...new Set([applicant, ...clubNames])]
+    .filter(n => n.includes(' '))
+    .sort((a, b) => b.length - a.length);
+  PARTS = applicant.split(/\s+/).filter(x => x.length > 2);
+  REAL = [...FULL, ...PARTS];
+  console.log(`  tvättar bort ${FULL.length} hela namn + ${PARTS.length} namndelar `
+            + `(${PARTS.join(', ')})`);
+};
+
+const scrub = () => page.evaluate(([full, parts, fake, applicant]) => {
+  const esc = r => r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const firsts = ['Karin', 'Olle', 'Majken', 'Bosse'];
+  const lasts = ['Nyberg', 'Fransson', 'Ahl', 'Rylander'];
+
+  // Regler som får gälla var som helst: hela namn, personnummer, e-post, telefonnummer.
+  // ⚠️ SÖKANDEN FÖRST OCH ALLTID SAMMA FIKTIVA NAMN. Utan den bindningen fick sökandens namn
+  // ett index ur en längdsorterad lista, och blanketten blev internt motstridig: sida 1 sa
+  // "Karin Nyberg" (fälten fylls med det) medan sidfoten och "Sökande" på sida 2 sa någon annan.
+  // Ett dokument som pekar ut två personer som samma sökande är sämre än inget dokument.
+  const anywhere = [
+    [new RegExp(esc(applicant), 'g'), fake[0]],
+    ...full.filter(n => n !== applicant)
+           .map((n, i) => [new RegExp(esc(n), 'g'), fake[1 + (i % (fake.length - 1))]]),
+    [/\b(19|20)?\d{6}[-\s]?\d{4}\b/g, '19750312-XXXX'],
+    [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, 'karin.nyberg@example.se'],
+    [/\b0\d{1,3}[-\s]?\d{2,3}\s?\d{2}\s?\d{2}\b/g, '070-123 45 67'],
+  ];
+
+  // Namndelar: bara när noden ENBART innehåller namndelen. Det är så ett ifyllt fält ser ut.
+  const exact = new Map();
+  parts.forEach((pt, i) => exact.set(pt, i === 0 ? firsts[0] : lasts[0]));
+
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let n, hits = 0;
+  while ((n = walker.nextNode())) {
+    const v0 = n.nodeValue;
+    if (!v0 || !v0.trim()) continue;
+    let v = v0;
+    if (exact.has(v0.trim())) {
+      v = v0.replace(v0.trim(), exact.get(v0.trim()));
+    } else {
+      anywhere.forEach(([re, to]) => { v = v.replace(re, to); });
+    }
+    if (v !== v0) { n.nodeValue = v; hits++; }
+  }
+  return hits;
+}, [FULL, PARTS, FAKE, APPLICANT]);
+
+// ⚠️ KONTROLL EFTER TVÄTTEN, inte i stället för den. En tvätt som tyst missade något är värre än
+// ingen tvätt, för den ger falsk trygghet. Hittas namnet kvar tas ingen bild.
+const assertClean = async (what) => {
+  const left = await page.evaluate(([real]) => {
+    const t = document.body.innerText || '';
+    return real.filter(r => t.includes(r));
+  }, [REAL]);
+  if (left.length) {
+    throw new Error(`${what}: namnet står KVAR efter tvätten (${left.join(', ')}) — ingen bild tas.`);
+  }
+};
+
 const shot = async (name, target) => {
   const p = `${OUT}/${name}`;
   await (target ? page.locator(target).screenshot({ path: p })
@@ -173,6 +282,81 @@ try {
   await page.goto(`${B}/lanevapen?club=${CLUB}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2000);
   await shot('lanevapen-boka.png', '.lv-wrap');
+
+
+  // ── 6. Aktivitetssammanställningen ────────────────────────────────────────────────────────
+  //
+  // ⚠️ RENDERAS FÖR EN ANNAN MEDLEM ÄN DEN INLOGGADE, med flit: kontot sviten kör som har noll
+  // registrerad verksamhet i dev, och en tom sammanställning visar ingenting av det funktionen
+  // gör. Medlem 1078 har 41 aktivitetsdagar 2026. Samma renderare används av både Min sida och
+  // klubbens Aktivitet-sida, så bilden är sann för båda ytorna.
+  await page.setViewportSize({ width: 1000, height: 1400 });
+  await page.goto(`${B}/user-profile-page/`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1200);
+  await page.click('[data-bs-target="#activity-pane"]');
+  await page.waitForTimeout(1500);
+  await learnNames(1078);
+  await page.evaluate(async () => {
+    await window.hpskLoadActivitySummary('myActivitySummary', 1078, 2026);
+  });
+  await page.waitForTimeout(2500);
+  await scrub();
+  await assertClean('aktivitet');
+  await shot('aktivitet.png', '#activity-pane');
+
+  // ── 7. Föreningsintyget ───────────────────────────────────────────────────────────────────
+  //
+  // ⚠️ MEST KÄNSLIGA YTAN PÅ HELA SAJTEN. Blanketten bär namn, personnummer, adress, telefon och
+  // vapenuppgifter. INGET av det får ut. Fälten fylls därför med påhittade värden i DOM:en före
+  // bilden — dev-datat rörs inte, och läsaren ser en ifylld blankett i stället för en med
+  // "uppgifter saknas", vilket också är den rättvisande bilden av en klubb som har sitt register
+  // i ordning.
+  await page.setViewportSize({ width: 1000, height: 1500 });
+  await page.goto(`${B}/foreningsintyg/utkast?memberId=1078&clubId=${CLUB}`,
+                  { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1800);
+
+  // ⚠️ ORDNINGEN ÄR TVÄTT FÖRST, IFYLLNAD SEDAN. Omvänt skrev personnummermönstret över det
+  // påhittade organisationsnumret — blanketten visade då samma siffra på båda raderna, vilket
+  // både ser fel ut och antyder att fälten hänger ihop.
+  await scrub();
+  await page.evaluate(() => {
+    const set = (label, value) => {
+      // Blanketten är fältetiketter med ett värde intill. Hitta etiketten, skriv i värdet.
+      const nodes = Array.from(document.querySelectorAll('*'))
+        .filter(e => e.children.length === 0 && e.textContent.trim() === label);
+      nodes.forEach(n => {
+        const holder = n.parentElement;
+        if (!holder) return;
+        const val = Array.from(holder.children).find(c => c !== n);
+        if (val) val.textContent = value;
+      });
+    };
+    set('Efternamn', 'Nyberg');
+    set('Tilltalsnamn', 'Karin');
+    set('Personnummer eller organisationsnummer', '19750312-XXXX');
+    set('E-postadress', 'karin.nyberg@example.se');
+    set('Adress', 'Banvägen 12');
+    set('Postnummer', '432 00');
+    set('Ort', 'Varberg');
+    set('Telefon', '');
+    set('Telefon (mobil)', '070-123 45 67');
+    set('Organisationsnummer', '802000-0000');
+    set('Har varit medlem kontinuerligt sedan datum', '2019-04-01');
+    // ⚠️ Varningen om saknade registeruppgifter gäller DEV-MEDLEMMEN, inte funktionen, och den
+    // dominerade bilden. Klassväljaren tog den inte — den letas nu på sin text i stället, vilket
+    // är det enda som säkert matchar oavsett hur rutan är uppbyggd.
+    Array.from(document.querySelectorAll('div,section,aside'))
+      .filter(e => /Uppgifter saknas i medlemsregistret/.test(e.textContent || '')
+                   && e.children.length < 8)
+      .forEach(e => e.remove());
+  });
+  await assertClean('foreningsintyg');
+  // ⚠️ BARA SIDA 1. Hela blanketten är två A4 i höjd, och med Om-sidans höjdtak krympte den till
+  // 175 px bredd — alltså en bild som visar att det finns ett formulär utan att gå att läsa. Sida
+  // 1 bär personuppgifterna, föreningen, förbundsvalet och vapenraden, vilket är det bilden ska
+  // visa; sida 2 är kryssrutor för enhandsvapen och underskriften.
+  await shot('foreningsintyg.png', '.sheet >> nth=0');
 
 } finally {
   try {
