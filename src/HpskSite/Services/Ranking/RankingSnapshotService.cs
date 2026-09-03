@@ -36,6 +36,9 @@ namespace HpskSite.Services.Ranking
         public const int RecencyDays = 120;
         public const int ImprovementWindowDays = 30;
 
+        /// <summary>Minsta indexförbättring (i poäng per serie) som är värd en push.</summary>
+        public const decimal ImprovementPushThreshold = 0.25m;
+
         public static readonly string[] Disciplines =
             { "Precision", "Milsnabb", "Duell", "NationellHelmatch", "MagnumPrecision" };
 
@@ -278,16 +281,41 @@ namespace HpskSite.Services.Ranking
             foreach (var ins in inserts)
                 db.Insert("RankingSnapshot", "Id", true, ins);
 
-            // 8. Improvement push candidates — best improvement per member vs the prior snapshot.
+            // 8. Improvement push candidates — best improvement per member.
+            //
+            // ⚠️ Baselinen är det index medlemmen SENAST fick en notis om (RankingPushLog), inte
+            // gårdagens snapshot. Med gårdagens snapshot som baseline skickades samma förbättring
+            // om igen vid varje ny körning samma dag — och hosted servicen kör inte bara 03:00 utan
+            // också ~2 min efter varje appstart, så varje deploy/recycle blev en ny notis om exakt
+            // samma sak. Gårdagens snapshot används nu bara som fallback för en (skytt, gren) vi
+            // aldrig har notifierat om, så att den allra första förbättringen fortfarande hörs.
             var improvements = new Dictionary<int, (string disc, string group, decimal newIdx, decimal delta)>();
+            var notifiedKeys = new List<(int memberId, string discipline, string group, decimal index)>();
             if (sendNotifications && _webPush.IsConfigured)
             {
+                var lastNotified = await LoadLastNotifiedAsync(db);
                 foreach (var kvp in acc)
                 {
                     var (memberId, discipline, group) = kvp.Key;
-                    if (!priorIndex.TryGetValue((memberId, discipline, group), out var old)) continue;
-                    var delta = old - kvp.Value.Index; // positive = improved (lower index is better)
-                    if (delta < 0.25m) continue;
+                    decimal baseline;
+                    if (lastNotified.TryGetValue(kvp.Key, out var alreadyToldAbout))
+                    {
+                        // Nivån är redan annonserad. En försämring följd av en återgång till samma
+                        // index är därmed ingen nyhet och får inte pusha igen.
+                        baseline = alreadyToldAbout;
+                    }
+                    else if (priorIndex.TryGetValue(kvp.Key, out var old))
+                    {
+                        baseline = old;
+                    }
+                    else continue;
+
+                    var delta = baseline - kvp.Value.Index; // positive = improved (lower index is better)
+                    if (delta < ImprovementPushThreshold) continue;
+
+                    // Varje kvalificerad gren loggas, inte bara den vi formulerar notisen kring:
+                    // annars skulle nästa körning samma dag pusha om medlemmens övriga grenar.
+                    notifiedKeys.Add((memberId, discipline, group, kvp.Value.Index));
                     if (!improvements.TryGetValue(memberId, out var ex) || delta > ex.delta)
                         improvements[memberId] = (discipline, group, kvp.Value.Index, delta);
                 }
@@ -300,14 +328,26 @@ namespace HpskSite.Services.Ranking
             // 9. Send the "din träningsform förbättrades" push (one per member, biggest improvement).
             if (improvements.Count > 0)
             {
+                var sentTo = new HashSet<int>();
                 foreach (var kv in improvements)
                 {
                     var (disc, group, newIdx, _) = kv.Value;
                     var body = $"Index {newIdx:0.00} i {DisciplineLabel(disc)} {group} — se var du ligger på topplistan.";
-                    try { await _webPush.SendToMemberAsync(kv.Key, "Din träningsform förbättrades 🎯", body, "/traningsmatch/#topplista", "ranking", onlyRanking: true); }
+                    try
+                    {
+                        await _webPush.SendToMemberAsync(kv.Key, "Din träningsform förbättrades 🎯", body, "/traningsmatch/#topplista", "ranking", onlyRanking: true);
+                        sentTo.Add(kv.Key);
+                    }
                     catch (Exception ex) { _logger.LogWarning(ex, "Ranking push failed for member {Member}", kv.Key); }
                 }
-                _logger.LogInformation("RankingSnapshot: sent improvement push to {Count} members.", improvements.Count);
+
+                // Loggas oavsett hur många enheter som faktiskt nåddes — även en medlem utan
+                // aktiv prenumeration ska räknas som "informerad", annars står förbättringen
+                // kvar som ny och pushas vid nästa körning. Bara ett kastat undantag hoppas över,
+                // så ett tillfälligt fel kan göra ett nytt försök i morgon.
+                await MarkNotifiedAsync(notifiedKeys.Where(k => sentTo.Contains(k.memberId)));
+
+                _logger.LogInformation("RankingSnapshot: sent improvement push to {Count} members.", sentTo.Count);
             }
 
             return inserts.Count;
@@ -501,6 +541,51 @@ namespace HpskSite.Services.Ranking
             return map;
         }
 
+        /// <summary>
+        /// Det index vi senast SKICKADE en förbättringsnotis om, per (skytt, gren, vapengrupp).
+        /// Det här — inte gårdagens snapshot — är baselinen för pushen, så att en omkörning eller
+        /// en appstart samma dag inte kan annonsera samma förbättring en andra gång.
+        /// </summary>
+        private static async Task<Dictionary<(int, string, string), decimal>> LoadLastNotifiedAsync(NPoco.IDatabase db)
+        {
+            var map = new Dictionary<(int, string, string), decimal>();
+            var rows = await db.FetchAsync<RankingPushLogRow>(
+                "SELECT MemberId, Discipline, WeaponGroup, NotifiedIndex FROM RankingPushLog");
+            foreach (var r in rows)
+                map[(r.MemberId, r.Discipline, r.WeaponGroup)] = r.NotifiedIndex;
+            return map;
+        }
+
+        /// <summary>Skriver (eller uppdaterar) push-loggen för de grenar notisen omfattade.</summary>
+        private async Task MarkNotifiedAsync(IEnumerable<(int memberId, string discipline, string group, decimal index)> keys)
+        {
+            var list = keys.ToList();
+            if (list.Count == 0) return;
+
+            try
+            {
+                using var scope = _scopeProvider.CreateScope();
+                foreach (var k in list)
+                {
+                    await scope.Database.ExecuteAsync(
+                        @"UPDATE RankingPushLog
+                             SET NotifiedIndex = @3, NotifiedAt = GETUTCDATE()
+                           WHERE MemberId = @0 AND Discipline = @1 AND WeaponGroup = @2;
+                          IF @@ROWCOUNT = 0
+                             INSERT INTO RankingPushLog (MemberId, Discipline, WeaponGroup, NotifiedIndex)
+                             VALUES (@0, @1, @2, @3);",
+                        k.memberId, k.discipline, k.group, k.index);
+                }
+                scope.Complete();
+            }
+            catch (Exception ex)
+            {
+                // Misslyckas den här skrivningen kan samma förbättring pushas igen nästa körning,
+                // så det är värt en varning i loggen och inte bara tystnad.
+                _logger.LogWarning(ex, "RankingSnapshot: could not update RankingPushLog for {Count} rows.", list.Count);
+            }
+        }
+
         private static async Task<Dictionary<(int, string, string), decimal>> LoadBaselineAsync(NPoco.IDatabase db, DateTime? date)
         {
             var map = new Dictionary<(int, string, string), decimal>();
@@ -597,6 +682,14 @@ namespace HpskSite.Services.Ranking
             public int TotalSeriesCount { get; set; }
             public decimal TotalSeriesPoints { get; set; }
             public decimal AveragePerSeries { get; set; }
+        }
+
+        private class RankingPushLogRow
+        {
+            public int MemberId { get; set; }
+            public string Discipline { get; set; } = "";
+            public string WeaponGroup { get; set; } = "";
+            public decimal NotifiedIndex { get; set; }
         }
 
         private class AccRow
