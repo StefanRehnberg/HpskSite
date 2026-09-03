@@ -47,6 +47,17 @@
     var demoClubUrl = "/ankeland/klubbar/ankeborg/";
 
     // Helper struct for the feature slabs so the template stays clean.
+    //
+    // ⚠️ TITLE, TEASER OCH DETAIL ÄR REN TEXT — ingen HTML. Mallen skriver ut dem med
+    // `@@slab.Detail`, alltså HTML-KODAT, så ett `<strong>` hamnar som synlig text i stycket
+    // ("...ändamålet, och <strong>varje uppslagning..."). Rapporterat 2026-09-03.
+    //
+    // Behövs eftertryck: gör det till en egen kort mening i stället. Det bär tyngd av sin plats
+    // och fungerar överallt — även i utdrag, i en söktreff och för en skärmläsare. Att i stället
+    // byta mallen till `Html.Raw` vore att öppna en HTML-väg genom modellen för en fetstil.
+    //
+    // Rutnätet "På gång" längre ner är RÅ MARKUP i vyn, inte modellvärden, och bär därför HTML
+    // som vanligt. Blanda inte ihop de två.
     var shooterSlabs = new[]
     {
         new {
@@ -123,7 +134,7 @@
             Image = "/images/about/vapenregister.png",
             Title = "Dina vapen — bara du ser dem",
             Teaser = "Ett register över dina egna vapen, krypterat, och med en logg över varje uppslagning.",
-            Detail = "Du lägger in dina egna vapen för att få påminnelser innan licensen förfaller, för att kunna se vilket vapen du sköt ett resultat med, och för att klubben ska kunna fylla i ett föreningsintyg utan att du behöver leta fram papper. Det gör frågan \"vem ser det här?\" till den enda som betyder något, och sidan svarar på den innan du skrivit in något: bara du ser din lista — ingen annan medlem, ingen annan klubb och ingen annan i din egen styrelse. Behöver du ett intyg kan den i styrelsen som klubben utsett till föreningsintygsansvarig slå upp uppgifterna, bara för det ändamålet, och <strong>varje uppslagning skrivs i en logg du själv läser</strong>. Behörigheten hänger på ett aktivt styrelseuppdrag och upphör samma sekund personen lämnar styrelsen, utan att någon behöver göra något. De känsligaste fälten — fabrikat, modell, kaliber, piplängd samt tillverknings- och licensnummer — krypteras var för sig innan de lagras, så de inte går att läsa ens för den som skulle komma åt själva databasen; därför står det punkter i listan tills du själv väljer att visa dem. Vapnets namn, vapengrupp och förfallodatum måste vi kunna räkna på och krypteras inte, men nås av exakt samma personer. Fälten är frivilliga, och du kan ta bort ett vapen när du vill.",
+            Detail = "Du lägger in dina egna vapen för att få påminnelser innan licensen förfaller, för att kunna se vilket vapen du sköt ett resultat med, och för att klubben ska kunna fylla i ett föreningsintyg utan att du behöver leta fram papper. Det gör frågan \"vem ser det här?\" till den enda som betyder något, och sidan svarar på den innan du skrivit in något: bara du ser din lista — ingen annan medlem, ingen annan klubb och ingen annan i din egen styrelse. Behöver du ett intyg kan den i styrelsen som klubben utsett till föreningsintygsansvarig slå upp uppgifterna, bara för det ändamålet. Varje uppslagning skrivs i en logg som du själv läser. Behörigheten hänger på ett aktivt styrelseuppdrag och upphör samma sekund personen lämnar styrelsen, utan att någon behöver göra något. De känsligaste fälten — fabrikat, modell, kaliber, piplängd samt tillverknings- och licensnummer — krypteras var för sig innan de lagras, så de inte går att läsa ens för den som skulle komma åt själva databasen; därför står det punkter i listan tills du själv väljer att visa dem. Vapnets namn, vapengrupp och förfallodatum måste vi kunna räkna på och krypteras inte, men nås av exakt samma personer. Fälten är frivilliga, och du kan ta bort ett vapen när du vill.",
             Tutorial = ""
         },
         new {
