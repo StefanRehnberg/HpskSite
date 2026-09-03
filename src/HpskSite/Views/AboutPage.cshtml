@@ -120,6 +120,13 @@
             Tutorial = ""
         },
         new {
+            Image = "/images/about/vapenregister.png",
+            Title = "Dina vapen — bara du ser dem",
+            Teaser = "Ett register över dina egna vapen, krypterat, och med en logg över varje uppslagning.",
+            Detail = "Du lägger in dina egna vapen för att få påminnelser innan licensen förfaller, för att kunna se vilket vapen du sköt ett resultat med, och för att klubben ska kunna fylla i ett föreningsintyg utan att du behöver leta fram papper. Det gör frågan \"vem ser det här?\" till den enda som betyder något, och sidan svarar på den innan du skrivit in något: bara du ser din lista — ingen annan medlem, ingen annan klubb och ingen annan i din egen styrelse. Behöver du ett intyg kan den i styrelsen som klubben utsett till föreningsintygsansvarig slå upp uppgifterna, bara för det ändamålet, och <strong>varje uppslagning skrivs i en logg du själv läser</strong>. Behörigheten hänger på ett aktivt styrelseuppdrag och upphör samma sekund personen lämnar styrelsen, utan att någon behöver göra något. De känsligaste fälten — fabrikat, modell, kaliber, piplängd samt tillverknings- och licensnummer — krypteras var för sig innan de lagras, så de inte går att läsa ens för den som skulle komma åt själva databasen; därför står det punkter i listan tills du själv väljer att visa dem. Vapnets namn, vapengrupp och förfallodatum måste vi kunna räkna på och krypteras inte, men nås av exakt samma personer. Fälten är frivilliga, och du kan ta bort ett vapen när du vill.",
+            Tutorial = ""
+        },
+        new {
             Image = "/images/about/aktivitet.png",
             Title = "Min aktivitet — underlaget för ditt föreningsintyg",
             Teaser = "Träning, tävlingar och närvaro samlat per verksamhetsår — och hur starkt varje post är.",
@@ -316,7 +323,8 @@
     .about-slab img.about-shot[src*="lanevapen-skanna.png"],
     .about-slab img.about-shot[src*="lanevapen-affisch.png"],
     /* Föreningsintyget är två A4 i höjd — utan tak trycker det undan all text omkring sig. */
-    .about-slab img.about-shot[src*="foreningsintyg.png"] {
+    .about-slab img.about-shot[src*="foreningsintyg.png"],
+    .about-slab img.about-shot[src*="vapenregister.png"] {
         width: auto;
         max-width: 100%;
         max-height: 460px;
@@ -836,7 +844,7 @@
                     <p class="card-text small mb-0">
                         En krypterad förteckning över medlemmens egna vapen, som grund både för licenspåminnelser och för att kunna se vilket vapen som användes vid ett resultat.
                         <span class="d-block mt-1 text-success small fw-semibold">
-                            <i class="bi bi-arrow-right me-1"></i>Levererat september 2026 — de känsliga uppgifterna (fabrikat, modell, kaliber, piplängd, tillverknings- och licensnummer) krypteras var för sig och <strong>bara du ser din lista</strong>. Varje vapen får ett eget alias som får visas, påminnelser går ut 90 och 30 dagar före licensen förfaller, och du kan koppla ett vapen till ett träningspass eller ett tävlingsresultat. Klubben lägger in sina egna vapen på samma sätt. Vill du att klubben ska kunna läsa dina uppgifter för ett föreningsintyg måste styrelsen först utse någon — och du ser i en logg vem som tittat och när.
+                            <i class="bi bi-arrow-right me-1"></i>Levererat september 2026 — de känsliga uppgifterna (fabrikat, modell, kaliber, piplängd, tillverknings- och licensnummer) krypteras var för sig och <strong>bara du ser din lista</strong>. Varje vapen får ett eget alias som får visas, påminnelser går ut 90 och 30 dagar före licensen förfaller, och du kan koppla ett vapen till ett träningspass eller ett tävlingsresultat. Klubben lägger in sina egna vapen på samma sätt. Vill du att klubben ska kunna läsa dina uppgifter för ett föreningsintyg måste styrelsen först utse någon — och du ser i en logg vem som tittat och när. Se bilden ovan.
                         </span>
                     </p>
                 </div>

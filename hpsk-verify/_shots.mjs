@@ -37,6 +37,7 @@ await ctx.addInitScript(() => {
 });
 
 let wA = null, wB = null, wC = null;
+let ownIds = [];   // egna fixturvapen — finally maste se dem, alltsa modulomfang
 
 const api = async (url, fields) => page.evaluate(async ([u, f]) => {
   const tokEl = document.querySelector('input[name="__RequestVerificationToken"]');
@@ -178,6 +179,21 @@ const assertClean = async (what) => {
   }
 };
 
+// Cookiesamtycket ligger fixerat langst ner och hamnar over det som ska fotograferas.
+const dismissCookies = async () => {
+  for (const sel of ['text=Jag förstår', 'text=Jag forstar', '[data-cookie-accept]',
+                     '.cookie-consent button', '#cookieConsent button']) {
+    const b = page.locator(sel);
+    if (await b.count()) { try { await b.first().click({ timeout: 1500 }); return; } catch (e) {} }
+  }
+  // Gick den inte att klicka bort tas den ur DOM:en — bilden far inte bara den halva.
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('div,section,aside'))
+      .filter(e => /Vi använder cookies/.test(e.textContent || '') && e.children.length < 8)
+      .forEach(e => e.remove());
+  });
+};
+
 const shot = async (name, target) => {
   const p = `${OUT}/${name}`;
   await (target ? page.locator(target).screenshot({ path: p })
@@ -304,7 +320,60 @@ try {
   await assertClean('aktivitet');
   await shot('aktivitet.png', '#activity-pane');
 
-  // ── 7. Föreningsintyget ───────────────────────────────────────────────────────────────────
+  // ── 7. Vapenregistret — FÖRTROENDEYTAN, inte vapenuppgifterna ─────────────────────────────
+  //
+  // ⚠️ BILDEN SKA SVARA PÅ "VEM SER DET HÄR?", INTE VISA ETT VAPENREGISTER. En publik sida är
+  // fel ställe att skylta med hur mycket vapendata vi förvarar — det säljer fel sak till fel
+  // läsare. Att öppet beskriva SKYDDET är däremot precis vad som får en medlem att vilja lägga in
+  // sina uppgifter alls, och den texten är redan publik i kunskapsbasen.
+  //
+  // Därför fångas förtroenderaden, förklaringsrutan och den MASKERADE listan. Inga klartextfält
+  // syns — inte för att de gömts i bilden, utan för att listan aldrig visar dem. Det är hela
+  // poängen, och en bild av just det är sannare än en bild av ett ifyllt formulär.
+  const own = [
+    { alias: 'Match .22', klass: 'C', typ: 'Pistol', exp: '2028-05-14' },
+    { alias: 'Fältvapen 9 mm', klass: 'B', typ: 'Pistol', exp: '2027-11-02' },
+  ];
+  for (const w of own) {
+    // Skyddade uppgifter skrivs med PÅHITTADE värden. De syns aldrig i listan, men de ska finnas
+    // så att låsikonen ("uppgifter sparade") är sann i bilden i stället för dekoration.
+    const r = await api('/umbraco/surface/Firearm/SaveFirearm', {
+      Id: 0, Alias: w.alias, WeaponClass: w.klass, Vapentyp: w.typ,
+      AcquisitionStatus: 'Innehas', LicenseExpiresOn: w.exp,
+      Federations: 'Svenska Pistolskytteförbundet', Disciplines: 'Precision',
+      WriteDetails: '1',
+      Fabrikat: 'Pardini', Modell: 'SP-1', Kaliber: '.22 LR', Piplangd: '15,2 cm',
+      Tillverkningsnummer: 'XX-00000', Licensnummer: 'XX-00000', Licensdatum: '2020-01-01',
+      Anteckning: '',
+    });
+    if (!r.success) console.log('  ⚠️ kunde inte lägga in', w.alias, r.message);
+  }
+  const mine = await api('/umbraco/surface/Firearm/GetMyFirearms');
+  (mine.firearms || []).forEach(f => { if (own.some(o => o.alias === f.alias)) ownIds.push(f.id); });
+
+  // ⚠️ Hogre vyport an panelen ar hog. Ett elementskott klipps av en fixerad overlay, och
+  // cookiebannern ligger langst ner pa varje sida — den atog upp de sista korten i forsta
+  // bilden. Bannern klickas bort forst.
+  await page.setViewportSize({ width: 900, height: 1700 });
+  await page.goto(`${B}/user-profile-page/`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1200);
+  await dismissCookies();
+  await page.click('#firearms-member-tab');
+  await page.waitForTimeout(2500);
+  // ⚠️ Förklaringsrutan är kollapsad när registret INTE är tomt (den är i vägen vid det
+  // femtionde besöket). För bilden fälls den ut — det är ett läge medlemmen når med ett klick,
+  // och det är det läget som svarar på frågan bilden finns för.
+  await page.evaluate(() => {
+    const d = document.querySelector('#fwExplain details');
+    if (d) d.open = true;
+  });
+  await page.waitForTimeout(400);
+  // Förtroenderaden NAMNGER klubbens föreningsintygsansvarig — en riktig medlem.
+  await scrub();
+  await assertClean('vapenregister');
+  await shot('vapenregister.png', '#fwPanel');
+
+  // ── 8. Föreningsintyget ───────────────────────────────────────────────────────────────────
   //
   // ⚠️ MEST KÄNSLIGA YTAN PÅ HELA SAJTEN. Blanketten bär namn, personnummer, adress, telefon och
   // vapenuppgifter. INGET av det får ut. Fälten fylls därför med påhittade värden i DOM:en före
@@ -370,6 +439,12 @@ try {
     for (const f of [wA, wB, wC]) {
       if (f) await api('/umbraco/surface/FirearmAdmin/RemoveClubFirearm',
         { clubId: CLUB, firearmId: f.id });
+    }
+    // ⚠️ `RemoveFirearm` GÖMMER (IsActive=0) i stället för att radera, så restposter samlas i dev.
+    // Det är rätt beteende för ett vapenregister — men det betyder att listan inte städar sig, och
+    // därför tas de egna fixturvapnen bort explicit i stället för att lämnas åt nästa körning.
+    for (const id of ownIds) {
+      await api('/umbraco/surface/Firearm/RemoveFirearm', { firearmId: id });
     }
     console.log('(städat)');
   } catch (e) {
