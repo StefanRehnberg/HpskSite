@@ -18,6 +18,21 @@
     var totalCompetitions = seriesCompetitions.Count();
     var progressPercentage = totalCompetitions > 0 ? (completedCompetitions * 100 / totalCompetitions) : 0;
 
+    // The carousel opens on the round that matters now — the first one that hasn't finished yet —
+    // the way a calendar opens on today rather than on January. If the whole series is over, the
+    // last round is the interesting one, so land there instead.
+    var currentRoundIndex = seriesCompetitions.FindIndex(c =>
+    {
+        var start = c.Value<DateTime>("competitionDate").Date;
+        var end = c.Value<DateTime?>("competitionEndDate");
+        var effectiveEndDate = (end.HasValue && end.Value.Date >= start) ? end.Value.Date : start;
+        return effectiveEndDate >= now.Date;
+    });
+    if (currentRoundIndex < 0)
+    {
+        currentRoundIndex = totalCompetitions - 1;
+    }
+
     var seriesStartDate = Model.Value<DateTime>("seriesStartDate");
     var seriesEndDate = Model.Value<DateTime>("seriesEndDate");
     var seriesName = Model.Value<string>("seriesName") ?? Model.Name;
@@ -92,35 +107,39 @@
                     </div>
                 </div>
 
+                @if (totalCompetitions > 0)
+                {
+                    <div class="card-body py-2">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="small text-muted text-nowrap">Serieframsteg</span>
+                            <div class="progress flex-grow-1" style="height: 8px; min-width: 8rem;"
+                                 role="progressbar" aria-label="Serieframsteg"
+                                 aria-valuenow="@progressPercentage" aria-valuemin="0" aria-valuemax="100">
+                                <div class="progress-bar bg-success" style="width: @progressPercentage%"></div>
+                            </div>
+                            <span class="small text-muted text-nowrap">@progressPercentage% genomfört</span>
+                        </div>
+                    </div>
+                }
+
                 @if (!string.IsNullOrEmpty(seriesDescription))
                 {
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-8">
-                                <!-- Expandable Description -->
-                                <div class="series-description-container prose">
-                                    <div class="series-description-preview" id="seriesDescriptionPreview">
-                                        @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
-                                    </div>
-                                    <div class="series-description-full" id="seriesDescriptionFull" style="display: none;">
-                                        @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
-                                    </div>
-                                    <button type="button" class="btn btn-link btn-sm p-0 mt-2 text-decoration-none"
-                                            id="toggleDescription"
-                                            onclick="toggleSeriesDescription()"
-                                            style="display: none;">
-                                        <i class="bi bi-chevron-down" id="toggleIcon"></i>
-                                        <span id="toggleText">Visa mer</span>
-                                    </button>
-                                </div>
+                    <div class="card-body border-top">
+                        <!-- Expandable Description -->
+                        <div class="series-description-container prose">
+                            <div class="series-description-preview" id="seriesDescriptionPreview">
+                                @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
                             </div>
-                            <div class="col-md-4">
-                                <h6>Serieframsteg</h6>
-                                <div class="progress mb-2" style="height: 8px;">
-                                    <div class="progress-bar bg-success" role="progressbar" style="width: @progressPercentage%"></div>
-                                </div>
-                                <small class="text-muted">@progressPercentage% genomfört</small>
+                            <div class="series-description-full" id="seriesDescriptionFull" style="display: none;">
+                                @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
                             </div>
+                            <button type="button" class="btn btn-link btn-sm p-0 mt-2 text-decoration-none"
+                                    id="toggleDescription"
+                                    onclick="toggleSeriesDescription()"
+                                    style="display: none;">
+                                <i class="bi bi-chevron-down" id="toggleIcon"></i>
+                                <span id="toggleText">Visa mer</span>
+                            </button>
                         </div>
                     </div>
                 }
@@ -129,9 +148,22 @@
             <!-- Competitions in Series -->
             @if (seriesCompetitions.Any())
             {
-                <div class="row">
-                    <div class="col-12">
-                        <div class="row">
+                <div class="series-rounds mb-4">
+                    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                        <h2 class="h5 mb-0" id="seriesRoundsHeading">
+                            Tävlingar i serien
+                            <span class="text-muted fw-normal small">@totalCompetitions st</span>
+                        </h2>
+                        <div class="btn-group" id="seriesRailNav" role="group" aria-label="Bläddra bland tävlingarna" hidden>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-rail-prev aria-label="Visa tidigare omgångar">
+                                <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-rail-next aria-label="Visa fler omgångar">
+                                <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="series-rail" id="seriesRail" tabindex="0" role="region" aria-labelledby="seriesRoundsHeading">
                             @{ int roundNumber = 1; }
                             @foreach (var competition in seriesCompetitions)
                             {
@@ -263,49 +295,52 @@
                                     }
                                 }
 
-                                <div class="col-md-6 col-lg-4 mb-4">
+                                var isCurrentRound = (roundNumber - 1) == currentRoundIndex;
+
+                                <div class="series-rail-item @(isCurrentRound ? "is-current" : "")">
                                     <div class="card h-100 border-@statusClass">
                                         <div class="card-header bg-@statusClass text-white d-flex justify-content-between align-items-center">
                                             <div class="flex-grow-1">
-                                                <h5 class="card-title mb-0">@competition.Name</h5>
+                                                <h5 class="card-title h6 mb-0">@competition.Name</h5>
                                                 <small><i class="bi @statusIcon me-1"></i>@statusText</small>
                                             </div>
-                                            <span class="badge bg-light text-dark">Omg. @roundNumber</span>
+                                            <span class="badge bg-light text-dark ms-2">Omg. @roundNumber</span>
                                         </div>
                                         <div class="card-body pt-2 pb-2">
                                             <ul class="list-unstyled small mb-0">
                                                 @if (!string.IsNullOrEmpty(description))
                                                 {
-                                                    <li class="mb-1">@Html.Raw(System.Net.WebUtility.HtmlDecode(description))</li>
+                                                    <li class="mb-1 series-card-desc">@Html.Raw(System.Net.WebUtility.HtmlDecode(description))</li>
                                                 }
                                                 <li>
                                                     @dateIcon @dateDisplay
                                                     <small class="text-muted ms-1">@durationInfo</small>
                                                 </li>
-                                                <li><i class="bi bi-geo-alt"></i> @venue</li>
+                                                <li class="series-card-line"><i class="bi bi-geo-alt" aria-hidden="true"></i> @venue</li>
                                                 @if (!string.IsNullOrEmpty(competitionTypeId))
                                                 {
-                                                    <li><i class="bi bi-trophy"></i> @competitionTypeDisplayName</li>
+                                                    <li class="series-card-line"><i class="bi bi-trophy" aria-hidden="true"></i> @competitionTypeDisplayName</li>
                                                 }
-                                                <li><i class="bi bi-bullseye"></i> @shootingClassName</li>
+                                                <li class="series-card-line"><i class="bi bi-bullseye" aria-hidden="true"></i> @shootingClassName</li>
                                             </ul>
                                         </div>
-                                        <div class="card-footer d-flex align-items-center">
-                                            <a href="@competition.CompetitionUrl()" class="btn @buttonClass btn-sm">@buttonText</a>
+                                        <div class="card-footer d-flex align-items-center flex-wrap gap-1">
+                                            <a href="@competition.CompetitionUrl()" class="btn @buttonClass btn-sm">
+                                                @buttonText<span class="visually-hidden"> – @competition.Name</span>
+                                            </a>
                                             @if (status == "open")
                                             {
-                                                <small class="text-muted ms-2">Stänger: @regCloseDate.ToString("yyyy-MM-dd")</small>
+                                                <small class="text-muted ms-1">Stänger: @regCloseDate.ToString("yyyy-MM-dd")</small>
                                             }
                                             else if (status == "upcoming")
                                             {
-                                                <small class="text-muted ms-2">Öppnar: @regOpenDate.ToString("yyyy-MM-dd")</small>
+                                                <small class="text-muted ms-1">Öppnar: @regOpenDate.ToString("yyyy-MM-dd")</small>
                                             }
                                         </div>
                                     </div>
                                 </div>
                                 roundNumber++;
                             }
-                        </div>
                     </div>
                 </div>
             }
@@ -338,6 +373,118 @@
 </div>
 
 <style>
+/* ---- Competition carousel (the "rail") --------------------------------
+   A horizontal scroll-snap rail instead of a growing card grid: the section
+   keeps ONE card's height no matter how many rounds the series has, so the
+   series standings stay above the fold. Native scrolling means touch swipe,
+   trackpad and the arrow keys all work without a carousel library, and there
+   is deliberately no autoplay. */
+.series-rail {
+    position: relative;
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    /* Padding leaves room for the focus ring and the scrollbar itself. */
+    padding: 0.25rem 0.25rem 0.75rem;
+    margin-bottom: -0.25rem;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+.series-rail:focus-visible {
+    outline: 2px solid var(--bs-primary);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
+}
+
+.series-rail-item {
+    flex: 0 0 auto;
+    width: 20rem;
+    max-width: 85%;
+    display: flex;
+    scroll-snap-align: start;
+}
+
+.series-rail-item > .card {
+    width: 100%;
+}
+
+/* Without this the far end of the rail is unreachable: with mandatory
+   snapping every resting place must be a snap point, and the last card's
+   start position lies beyond max scroll, so the browser silently rolls any
+   scroll that lands there back to where it came from. Snapping the last card
+   to the END makes max scroll a legal resting place. */
+.series-rail-item:last-child {
+    scroll-snap-align: end;
+}
+
+/* The round in play gets a ring — it is also the card the rail opens on. */
+.series-rail-item.is-current > .card {
+    box-shadow: 0 0 0 0.2rem var(--bs-primary-bg-subtle);
+}
+
+/* Descriptions are free-text RTE and were the biggest height variance in the
+   old grid. Two lines, then cut — the card links to the full competition. */
+.series-card-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.series-card-desc p:last-child {
+    margin-bottom: 0;
+}
+
+/* Venue/type/class values vary wildly in length; one line each keeps every
+   card the same height. */
+.series-card-line {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.series-rail .card-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+/* Phones: let the next card peek in, which is the affordance that says
+   "there is more sideways" better than any arrow. */
+@@media (max-width: 575.98px) {
+    .series-rail-item {
+        width: 85vw;
+        max-width: 20rem;
+    }
+}
+
+@@media (prefers-reduced-motion: reduce) {
+    .series-rail {
+        scroll-behavior: auto;
+    }
+}
+
+@@media print {
+    /* Paper has no sideways. Fall back to the grid. */
+    .series-rail {
+        display: flex;
+        flex-wrap: wrap;
+        overflow: visible;
+    }
+    #seriesRailNav {
+        display: none !important;
+    }
+}
+
 .series-description-container {
     position: relative;
 }
@@ -490,7 +637,106 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     initializeSeriesDescription();
+    initializeSeriesRail();
 });
+
+// Horizontal competition rail. Scrolling itself is native (CSS scroll-snap);
+// this only adds the arrows, disables them at the ends, hides them entirely
+// when everything already fits, and opens the rail on the current round.
+function initializeSeriesRail() {
+    const rail = document.getElementById('seriesRail');
+    const nav = document.getElementById('seriesRailNav');
+    if (!rail) return;
+
+    const prevBtn = nav ? nav.querySelector('[data-rail-prev]') : null;
+    const nextBtn = nav ? nav.querySelector('[data-rail-next]') : null;
+
+    // Scroll a whole "page" of cards, never a fixed pixel amount — the card
+    // width differs between phone and desktop.
+    function pageWidth() {
+        const item = rail.querySelector('.series-rail-item');
+        if (!item) return rail.clientWidth;
+        const gap = parseFloat(getComputedStyle(rail).columnGap) || 16;
+        const itemWidth = item.getBoundingClientRect().width + gap;
+        const perPage = Math.max(1, Math.floor(rail.clientWidth / itemWidth));
+        return itemWidth * perPage;
+    }
+
+    function updateNav() {
+        // A 4px slack absorbs sub-pixel rounding at the ends.
+        const scrollable = rail.scrollWidth - rail.clientWidth > 4;
+        if (nav) nav.hidden = !scrollable;
+        if (!scrollable) return;
+        if (prevBtn) prevBtn.disabled = rail.scrollLeft <= 4;
+        if (nextBtn) nextBtn.disabled = rail.scrollLeft >= rail.scrollWidth - rail.clientWidth - 4;
+    }
+
+    // Always come to rest on a card edge (or on one of the two ends). A
+    // mandatory snap container rejects any other resting place and rolls the
+    // scroll back, which reads as "the arrow does nothing".
+    // No behavior:'smooth' here on purpose — the CSS says smooth, and the CSS
+    // is what prefers-reduced-motion turns off.
+    function cardEdges() {
+        // offsetLeft, not 0, is the rail's first legal resting place: the rail
+        // has a little padding so the focus ring is not clipped.
+        return Array.prototype.map.call(
+            rail.querySelectorAll('.series-rail-item'),
+            function(item) { return item.offsetLeft; });
+    }
+
+    function scrollPage(direction) {
+        const edges = cardEdges();
+        if (edges.length === 0) return;
+
+        const maxScroll = rail.scrollWidth - rail.clientWidth;
+        const target = rail.scrollLeft + direction * pageWidth();
+        if (target >= maxScroll - 4) { rail.scrollTo({ left: maxScroll }); return; }
+
+        let nearestEdge = edges[0];
+        edges.forEach(function(edge) {
+            if (Math.abs(edge - target) < Math.abs(nearestEdge - target)) {
+                nearestEdge = edge;
+            }
+        });
+        rail.scrollTo({ left: nearestEdge });
+    }
+
+    if (prevBtn) prevBtn.addEventListener('click', function() { scrollPage(-1); });
+    if (nextBtn) nextBtn.addEventListener('click', function() { scrollPage(1); });
+
+    // Left/Right arrows are handled by the browser for a focused scroll
+    // container; Home/End are not, and they are what you reach for in a
+    // ten-round series.
+    rail.addEventListener('keydown', function(e) {
+        if (e.key === 'Home') {
+            e.preventDefault();
+            const edges = cardEdges();
+            rail.scrollTo({ left: edges.length ? edges[0] : 0 });
+        } else if (e.key === 'End') {
+            e.preventDefault();
+            rail.scrollTo({ left: rail.scrollWidth - rail.clientWidth });
+        }
+    });
+
+    rail.addEventListener('scroll', updateNav, { passive: true });
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(updateNav).observe(rail);
+    } else {
+        window.addEventListener('resize', updateNav);
+    }
+
+    // Land on the round in play rather than on round 1. Jump without the
+    // smooth animation so the page does not appear to slide on load.
+    const current = rail.querySelector('.series-rail-item.is-current');
+    if (current && current.offsetLeft > 0) {
+        const previousBehavior = rail.style.scrollBehavior;
+        rail.style.scrollBehavior = 'auto';
+        rail.scrollLeft = current.offsetLeft - rail.clientLeft;
+        rail.style.scrollBehavior = previousBehavior;
+    }
+
+    updateNav();
+}
 
 function initializeSeriesDescription() {
     const preview = document.getElementById('seriesDescriptionPreview');
