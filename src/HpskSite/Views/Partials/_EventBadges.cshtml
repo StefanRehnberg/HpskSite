@@ -16,9 +16,35 @@
         // det måste synas DÄR man planerar sin tid — inte först när man öppnat händelsens sida.
         // Varningsfärg och inte fara: det är något att passa, inte något som gått fel.
         window.hpskEventBadges = function (ev) {
-            if (!ev || !ev.isMandatory) return '';
-            return '<span class="badge bg-warning text-dark ms-1" title="Deltagandet är obligatoriskt och närvaron registreras">'
-                 + '<i class="bi bi-exclamation-triangle-fill me-1"></i>Obligatorisk</span>';
+            if (!ev) return '';
+            var out = '';
+
+            if (ev.isMandatory) {
+                out += '<span class="badge bg-warning text-dark ms-1" title="Deltagandet är obligatoriskt och närvaron registreras">'
+                    +  '<i class="bi bi-exclamation-triangle-fill me-1"></i>Obligatorisk</span>';
+            }
+
+            // Sista anmälningsdag. ⚠️ Dagen räknas MED — deadlinen den 20:e är öppen hela den
+            // 20:e, samma regel som servern stänger på (ClubEventParticipationService.IsSignupOpen).
+            // Räknas den fel här står det "stängd" på något man fortfarande kan anmäla sig till.
+            if (ev.registrationRequired && ev.registrationDeadline) {
+                var m = String(ev.registrationDeadline).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                if (m) {
+                    // Bokstavlig parsning, aldrig new Date(str): en ISO-sträng tolkas som UTC och
+                    // kan flytta dagen ett steg för den som sitter i svensk sommartid.
+                    var dl = new Date(+m[1], +m[2] - 1, +m[3]);
+                    var today = new Date(); today.setHours(0, 0, 0, 0);
+                    var closed = today > dl;
+                    var pretty = dl.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+                    out += closed
+                        ? '<span class="badge bg-secondary ms-1" title="Sista anmälningsdag har passerat">'
+                          + '<i class="bi bi-lock-fill me-1"></i>Anmälan stängd</span>'
+                        : '<span class="badge bg-light text-dark border ms-1" title="Sista anmälningsdag — dagen räknas med">'
+                          + '<i class="bi bi-hourglass-split me-1"></i>Anmäl senast ' + pretty + '</span>';
+                }
+            }
+
+            return out;
         };
     })();
     </script>

@@ -194,6 +194,22 @@
     line-height: 1.2;
 }
 
+/* Händelsen i dagrutan är en egen länk till händelsens sida. Den SKA se ut att gå att klicka
+   på — hela buggrapporten var att den redan såg klickbar ut och bara fällde ut dagen längre
+   ner på sidan. Träffytan går ut till rutans kant (display:block) så man inte behöver pricka
+   texten. */
+.event-preview-link {
+    display: block;
+    color: var(--bs-body-color);
+    text-decoration: none;
+}
+
+.event-preview-link:hover,
+.event-preview-link:focus {
+    color: var(--bs-primary);
+    text-decoration: underline;
+}
+
 .event-list {
     max-height: 400px;
     overflow-y: auto;
@@ -768,12 +784,25 @@ function renderCalendar() {
         html += `<div class="calendar-day-number">${day}</div>`;
         html += `<div class="calendar-day-events">`;
 
+        // ⚠️ VARJE HÄNDELSE ÄR SIN EGEN LÄNK. Rapporterat flera gånger som "kalendern är trasig":
+        // man klickar på händelsen i rutan, dagen fälls ut LÄNGRE NER på sidan utanför blickfånget,
+        // och slutsatsen blir att inget hände. Namnet i rutan ser ut som en länk, så det ska vara
+        // en länk — `stopPropagation` hindrar att dagen fälls ut samtidigt.
+        //
+        // Klick på dagrutan men UTANFÖR en händelse beter sig oförändrat (showDayEvents), och det
+        // är enda vägen in för en händelse utan egen sida — därför är det fortfarande en div då.
         dayEvents.slice(0, 2).forEach(event => {
             const color = eventTypeColors[event.eventType] || eventTypeColors.default;
             const mand = event.isMandatory
                 ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" title="Obligatorisk"></i>'
                 : '';
-            html += `<div class="event-item-preview" title="${event.isMandatory ? 'Obligatorisk: ' : ''}${(event.name || event.type)}"><span class="event-dot" style="background-color: ${color}"></span>${mand}${event.name || event.type}</div>`;
+            const label = event.name || event.type;
+            const title = `${event.isMandatory ? 'Obligatorisk: ' : ''}${label}`;
+            const inner = `<span class="event-dot" style="background-color: ${color}"></span>${mand}${label}`;
+
+            html += event.url
+                ? `<a class="event-item-preview event-preview-link" href="${event.url}" title="${title}" onclick="event.stopPropagation()">${inner}</a>`
+                : `<div class="event-item-preview" title="${title}">${inner}</div>`;
         });
 
         if (dayEvents.length > 2) {

@@ -98,6 +98,31 @@ namespace HpskSite.Models
         /// <summary>Doctype property carrying "deltagande är obligatoriskt" (operator-added).</summary>
         public const string MandatoryProperty = "isMandatory";
 
+        /// <summary>
+        /// Doctype property carrying "sista anmälningsdag" (operator-added, date picker).
+        /// <b>The day itself is INCLUSIVE</b> — a deadline of the 20th closes at midnight going
+        /// into the 21st, because a date with no clock time would otherwise close the deadline day
+        /// before anyone had it, which is the same trap the event-day rule already avoids.
+        /// </summary>
+        public const string DeadlineProperty = "registrationDeadline";
+
+        /// <summary>
+        /// "Har detta datum ett värde?" — <b>och det är inte städning.</b>
+        ///
+        /// <para>⚠️ En TOM Umbraco-DateTime läses tillbaka som <see cref="DateTime.MinValue"/>, inte
+        /// som null (samma fälla som <c>Value&lt;int&gt;()</c> som ger 0 i stället för null). Mätt
+        /// 2026-09-04: `GetClubEvents` svarade <c>registrationDeadline: "0001-01-01"</c> för varje
+        /// händelse utan deadline. Utan den här normaliseringen förfyller dialogen år 1, nästa
+        /// sparning skriver deadlinen <c>0001-01-01</c> på riktigt, och
+        /// <c>IsSignupOpen</c> stänger anmälan för alltid på en händelse ingen satt en deadline på.</para>
+        ///
+        /// <para>Gränsen är år 1900, samma som <c>ClubSimpleEvent.cshtml</c> redan använder för
+        /// <c>eventDate</c> — inte likhet mot <c>MinValue</c>, eftersom tidszonskonvertering och
+        /// olika lager kan flytta ett minimidatum några timmar och då slinker det igenom.</para>
+        /// </summary>
+        public static DateTime? RealDate(DateTime? value)
+            => value.HasValue && value.Value.Year > 1900 ? value : null;
+
         /// <summary>Doctype property carrying the numeric fee. <c>feeAmount</c> is free text ("100 kr/person")
         /// and can never be billed from; parsing it would be a silent wrong-amount generator.</summary>
         public const string FeeProperty = "eventFee";

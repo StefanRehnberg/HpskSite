@@ -131,6 +131,24 @@
                  + '</div>';
         }
 
+        // ── Sista anmälningsdag ──────────────────────────────────────────────────────────────
+        //
+        // ⚠️ DAGEN RÄKNAS MED, och det måste stå i klartext. "Sista anmälningsdag 20 september"
+        // lästes annars som "stängd den 20:e" av hälften och "öppen till den 21:a" av resten —
+        // och servern har bara ett svar (IsSignupOpen). Texten säger samma sak som grinden.
+        //
+        // Datumet parsas BOKSTAVLIGT ur strängen. new Date('2026-09-20') tolkas som UTC och
+        // skrivs ut i lokal tid, vilket flyttar dagen ett steg för den som sitter i sommartid.
+        function deadlineDate(s) {
+            const m = s ? String(s).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
+            return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+        }
+        function deadlineText(d) {
+            const dl = deadlineDate(d.event.registrationDeadline);
+            if (!dl) return '';
+            return dl.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long' });
+        }
+
         function render(d) {
             // The card only exists for events that actually take sign-ups. An event with an
             // external registration link keeps that link (the page renders it separately) — we must
@@ -165,6 +183,15 @@
             if (d.event.fee) {
                 html += `<div class="small text-muted mt-1"><i class="bi bi-wallet2 me-1"></i>Avgift ${esc(d.event.fee)} kr</div>`;
             }
+            const dlText = deadlineText(d);
+            if (dlText) {
+                html += `<div class="small ${d.signupOpen ? 'text-muted' : 'text-danger-emphasis'} mt-1">`
+                     +  '<i class="bi bi-hourglass-split me-1"></i>'
+                     +  (d.signupOpen
+                            ? `Anmälan är öppen till och med <strong>${dlText}</strong>.`
+                            : `Sista anmälningsdag var <strong>${dlText}</strong>.`)
+                     +  '</div>';
+            }
             html += '</div>';
 
             if (!d.loggedIn) {
@@ -184,7 +211,10 @@
                      +  '</div>';
                 if (d.me.note) html += `<div class="small text-muted mb-2">Din notering: ${esc(d.me.note)}</div>`;
                 html += myLoanLine(d);
-                html += d.signupOpen
+                // ⚠️ Knappen följer `cancelOpen`, INTE `signupOpen`. Efter sista anmälningsdag är
+                // anmälan stängd men avbokningen öppen till evenemangsdagens slut — den som inte
+                // kan komma måste kunna säga det, annars står hen kvar som väntad på listan.
+                html += d.cancelOpen
                     ? '<button type="button" class="btn btn-outline-danger w-100" id="ces-cancel">Avboka min anmälan</button>'
                     : '<div class="small text-muted">Anmälan är stängd — kontakta arrangören om du inte kan komma.</div>';
             } else if (!d.signupOpen) {

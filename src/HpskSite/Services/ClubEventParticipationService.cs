@@ -85,6 +85,9 @@ namespace HpskSite.Services
             // construction, but the WRITE side is what silently no-ops (see the controller).
             ctx.IsMandatory = node.GetValue<bool>(ClubEvents.MandatoryProperty);
             ctx.Fee = node.GetValue<decimal?>(ClubEvents.FeeProperty);
+            // ⚠️ RealDate, inte råvärdet: en tom Umbraco-DateTime läses som DateTime.MinValue, och
+            // en deadline år 1 hade stängt anmälan på varje händelse ingen satt en deadline på.
+            ctx.RegistrationDeadline = ClubEvents.RealDate(node.GetValue<DateTime?>(ClubEvents.DeadlineProperty));
 
             if (ctx.IsClubOwned)
                 ctx.RegionCode = parent?.GetValue<string>("regionalFederation") ?? "";
@@ -95,16 +98,43 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Is the sign-up window open? Closes at the END of the event's last day, not at its start
-        /// time — an event dated with no clock time would otherwise be closed from midnight, i.e.
-        /// for the whole day people actually sign up on. A functionary can still add someone at the
-        /// door afterwards; that is a different act (see <see cref="AddWalkInAsync"/>).
+        /// Is the sign-up window open? Closes at the END of a day, never at a start time — a date
+        /// with no clock time would otherwise be closed from midnight, i.e. for the whole day people
+        /// actually sign up on. A functionary can still add someone at the door afterwards; that is
+        /// a different act (see <see cref="AddWalkInAsync"/>).
+        ///
+        /// <para><b>Two windows, and the EARLIER one closes it.</b> The arrangör's
+        /// <c>registrationDeadline</c> (inclusive) and the event's own last day. Letting the
+        /// deadline simply override would leave sign-up open on an event that has already been
+        /// held whenever someone typed a deadline after the event date; letting the event day
+        /// override would ignore the deadline entirely. Both are gates, so both must pass.</para>
         /// </summary>
         public static bool IsSignupOpen(ClubEventContext ctx, DateTime? now = null)
         {
             if (!ctx.RegistrationRequired) return false;
+            var at = now ?? DateTime.Now;
+
+            if (ctx.RegistrationDeadline is DateTime deadline
+                && at >= deadline.Date.AddDays(1)) return false;
+
             var last = ctx.EventEndDate ?? ctx.EventDate;
             if (last == null) return true;                      // undated event — nothing to close against
+            return at < last.Value.Date.AddDays(1);
+        }
+
+        /// <summary>
+        /// May the member still withdraw? <b>Deliberately a WIDER window than
+        /// <see cref="IsSignupOpen"/>: it ignores the deadline</b> and runs to the end of the
+        /// event's last day. A deadline exists so the arrangör knows how many are coming — locking
+        /// someone in weeks ahead does the opposite, because the one who cannot come stops
+        /// telling anyone and the list says they are still expected. The cancellation itself
+        /// promotes the first reserve (derived, see <see cref="BuildRosterAsync"/>).
+        /// </summary>
+        public static bool IsCancelOpen(ClubEventContext ctx, DateTime? now = null)
+        {
+            if (!ctx.RegistrationRequired) return false;
+            var last = ctx.EventEndDate ?? ctx.EventDate;
+            if (last == null) return true;
             return (now ?? DateTime.Now) < last.Value.Date.AddDays(1);
         }
 
@@ -424,6 +454,13 @@ namespace HpskSite.Services
 
         public bool IsMandatory { get; set; }
         public decimal? Fee { get; set; }
+
+        /// <summary>
+        /// Sista anmälningsdag, <b>inklusive dagen själv</b> (operator-added doctype property; null
+        /// = no deadline, sign-up runs until the event itself). Read by
+        /// <see cref="ClubEventParticipationService.IsSignupOpen"/> — nowhere else decides it.
+        /// </summary>
+        public DateTime? RegistrationDeadline { get; set; }
 
         public int OwnerId { get; set; }
         public string OwnerName { get; set; } = "";

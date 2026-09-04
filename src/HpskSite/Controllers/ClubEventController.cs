@@ -102,6 +102,10 @@ namespace HpskSite.Controllers
                 loggedIn = me > 0,
                 eligible,
                 signupOpen = ClubEventParticipationService.IsSignupOpen(ctx),
+                // ⚠️ EGEN flagga, inte `signupOpen`. Avbokning är öppen till evenemangsdagens slut
+                // även efter sista anmälningsdag — annars slutar den som inte kan komma säga till,
+                // och listan påstår att hen är väntad.
+                cancelOpen = ClubEventParticipationService.IsCancelOpen(ctx),
                 @event = new
                 {
                     id = ctx.EventId,
@@ -111,6 +115,10 @@ namespace HpskSite.Controllers
                     registrationUrl = ctx.RegistrationUrl,
                     maxParticipants = ctx.MaxParticipants,
                     isMandatory = ctx.IsMandatory,
+                    // Sista anmälningsdag måste följa med ÄVEN när fönstret ännu är öppet — det är
+                    // beskedet som får någon att anmäla sig i tid. Ett kort som bara säger "stängd"
+                    // efteråt är för sent för precis den det gällde.
+                    registrationDeadline = ctx.RegistrationDeadline?.ToString("yyyy-MM-dd"),
                     fee = ctx.Fee,
                     ownerName = ctx.OwnerName,
                     isRegion = ctx.IsRegionOwned

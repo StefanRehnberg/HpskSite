@@ -3937,19 +3937,18 @@ function saveCopyEvent() {
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Kopierar...';
 
+    // ⚠️ SKICKAR BARA ID, NAMN OCH DATUM. Den här funktionen byggde tidigare en fältlista för
+    // hand och postade till CreateClubEvent — och listan saknade anmälan, kapaciteten,
+    // obligatorisk-flaggan, lånevapnen och sista anmälningsdag, så kopian tappade dem tyst.
+    // Servern (CopyClubEvent) itererar källnodens egna egenskaper i stället, så ett nytt fält på
+    // doctypen följer med utan att någon behöver ändra här.
     const formData = new FormData();
-    formData.append('clubId', clubId);
+    formData.append('sourceEventId', sourceId);
     formData.append('eventName', document.getElementById('copyEventName').value || event.name || '');
-    formData.append('eventType', event.type || 'Träning');
     formData.append('eventDate', newDate);
-    formData.append('venue', event.venue || '');
-    formData.append('description', event.description || '');
-    formData.append('contactPerson', event.contactPerson || '');
-    formData.append('contactEmail', event.contactEmail || '');
-    formData.append('contactPhone', event.contactPhone || '');
     formData.append('__RequestVerificationToken', getAntiForgeryToken());
 
-    fetch('/umbraco/surface/Club/CreateClubEvent', {
+    fetch('/umbraco/surface/Club/CopyClubEvent', {
         method: 'POST',
         body: formData
     })

@@ -3355,6 +3355,99 @@ Verifierat **101/101 `hpsk-verify/club-event-signup-verify.mjs`**, två körning
 sitt eget evenemang genom de riktiga endpointsen, kör hela flödet och raderar både rader och nod.
 Regression: action-menus-sweep 113/113, region-admin-rail 43/43, marken-orderlist 74/74.
 
+#### Sista anmälningsdag (2026-09-04)
+
+`clubSimpleEvent.registrationDeadline` (operatörstillagd Date picker) — **dagen räknas MED**. En
+deadline utan klockslag stänger annars vid midnatt in i deadlinedagen, alltså före den dag arrangören
+skrev, vilket är samma fälla som evenemangsdagen redan undviker.
+
+**⚠️ TVÅ FÖNSTER, och det TIDIGARE stänger.** `IsSignupOpen` kräver att både deadlinen och
+evenemangets sista dag är öppna. Låta deadlinen enbart *överskugga* hade hållit anmälan öppen på en
+redan genomförd händelse så fort någon skrev en deadline efter evenemangsdatumet; låta
+evenemangsdagen överskugga hade ignorerat deadlinen. **`IsSignupOpen` är enda stället som avgör
+det** — kortet, badgen och sidan visar bara.
+- Efter deadline går det fortfarande att **pricka av den som dyker upp** (`AddWalkInAsync` går med
+  flit runt fönstret) och att **avboka**: `IsCancelOpen` är en EGEN, bredare grind som **ignorerar
+  deadlinen** och löper till evenemangsdagens slut. Kortets avboka-knapp följde tidigare
+  `signupOpen`, vilket med en deadline hade låst in folk veckor i förväg — och den som inte kan
+  komma slutar då säga till, så listan påstår att hen är väntad. Motsatsen till vad en deadline är
+  till för.
+
+**⚠️ `ApplyEventRegistrationFields` returnerar nu ett FÄRDIGT felmeddelande, inte ett egenskapsnamn**,
+och **alla fem** skrivvägarna avbryter på det (tidigare kontrollerade bara `EditEventDetails` det —
+de fyra andra kastade svaret). Ett oläsbart datum skrivs därför aldrig som "ingen deadline", vilket
+hade sett ut som att arrangören tog bort den och tyst öppnat anmälan igen.
+- **⚠️ Samma pass avslöjade att `EditEventDetails` SLÄCKTE `lanevapenOffered`**: dialogen postade
+  aldrig fältet, så default `false` skrevs över klubbens val varje gång någon sparade från
+  händelsens egen sida. `GetEventEditData` bär nu flaggan så rutan kan förfyllas. Exakt den
+  glidning partialen finns för att förhindra — den hade bara smugit in via *endpointens* signatur.
+
+#### Fältlistor som glömmer — samma fel tre gånger på samma yta (2026-09-04)
+
+Luleå PK rapporterade "Erbjud lånevapen är urklickad efter att någon bokat ett vapen". **Bokningen
+var oskyldig** — `lanevapenOffered` skrivs på ETT ställe (`ApplyEventRegistrationFields`), och det
+finns inte ett enda `_contentService.Save`/`Publish` under `Services/Firearms`. Diagnosen blev de
+två hålen ovan: `GetEventEditData` lämnade fältet utanför → rutan renderades alltid urklickad →
+nästa Spara från evenemangssidan skrev `false` på riktigt.
+- **Bekräftat i prod utan inloggning:** `GET /umbraco/surface/ClubEvent/GetSignupState?eventId=6879`
+  svarade `loanWeapons: { offered: false, propertyExists: true, loanable: 15 }` för
+  *Nybörjare 2026*. Flaggan var alltså verkligen nollställd, inte bara felvisad — **den yta som
+  visar medlemmens läge är också det billigaste sättet att läsa en lagrad flagga i prod.**
+  (`data-event-id` på händelsesidan ger nod-id:t; browser-UA behövs mot Simplys WAF.)
+
+**Tredje instansen, hittad i samma svep: "Kopiera händelse".** `saveCopyEvent` byggde en `FormData`
+med sex grundfält och postade till `CreateClubEvent` — kopian tappade **tyst** anmälan, kapaciteten,
+obligatorisk-flaggan, lånevapnen och sista anmälningsdag. Ny endpoint **`CopyClubEvent`** kopierar
+i stället **källnodens egna egenskaper** (`foreach (var prop in source.Properties)`), så ett fält som
+läggs till på doctypen följer med utan att någon behöver ändra i JavaScript.
+- ⚠️ **Datumen är undantaget och måste räknas om**: slutdatum och sista anmälningsdag flyttas lika
+  många dagar som startdatumet. Rakt kopierade pekar de på källans vecka, och kopian föds med
+  stängd anmälan (`IsSignupOpen` räknar på sista dagen). Går källans startdatum inte att läsa nollas
+  de — ett datum vi inte kan räkna om är sämre än inget.
+- Deltagarrader följer aldrig med: `ClubEventParticipant` är nycklad på EventId, och kopian är en ny
+  nod. Tom lista är vad "samma träning nästa vecka" betyder.
+
+**Mönstret att dra lärdom av:** partialen delar *fälten*, men varje endpoint-signatur och varje
+JS-anropare är fortfarande handskriven. Alla tre buggarna är samma sak — en fältlista som glömmer.
+Det påståendet är därför **mätt** i `hpsk-verify/event-reg-fields-verify.mjs` (24/24, statisk
+läsning av `ClubController.cs`, ingen app och ingen inloggning behövs): varje läs- och skrivväg
+kontrolleras fält för fält, och de två avsiktliga undantagen (`GetUpcomingEvents` bär bara vad
+brickorna behöver; `CopyClubEvent` har ingen fältlista) mäts i **båda** riktningarna, så en
+återväxande fältlista faller ut. **A/B mot `git show HEAD:` före fixen ger 13/23 och namnger
+Luleås bugg** (`EditEventDetails … saknar lanevapenOffered`).
+
+**Skadeläget i prod lästes utan inloggning**, och det är den generella tekniken: `GetSignupState`
+speglar de lagrade flaggorna, och `data-event-id` på händelsesidan ger nod-id:t.
+- ⚠️ **`loanWeapons.offered` är det EFFEKTIVA läget, inte den lagrade flaggan.**
+  `BuildLoanWeaponState` svarar `offered: false` även när flaggan är på om klubben har noll lånebara
+  vapen. Slutsatsen "flaggan är nollställd" kräver därför att `loanable > 0` i samma svar (Luleå:
+  `loanable: 15`, alltså entydigt). Vill man läsa RÅFLAGGAN är det `GetClubEvents`
+  (`lanevapenOffered`) som ger den — mätt i dev 2026-09-04, där samma händelse svarade
+  `lanevapenOffered: true` men `offered: false` med `loanable: 0`.
+
+Luleå PK
+(klubb 2978) hade **båda** buggarna i sina fyra Nybörjare-tillfällen — originalet 6879
+(`reg=true, mand=true`, men `lanevapen=false`) och tre veckokopior 6883/6884/6885
+(`reg=false, mand=false, lanevapen=false`, alltså **ingen anmälan alls**). Noll anmälda på alla
+fyra, så kopiorna kan raderas och kopieras om.
+- ⚠️ **Löst tråd:** händelse 3761 ligger i klubbens kalender (`GetUpcomingEvents`, publicerad
+  `clubSimpleEvent`-barn) men `GetSignupState` svarar *"Evenemanget hittades inte"* — alltså hittar
+  `GetEventContext` (`IContentService.GetById` + aliaskontroll) den inte. En nod som finns i den
+  publicerade cachen men inte via content-servicen är värd en egen titt.
+
+**Ytor:** fältet i `_EventRegistrationFields` (alla tre dialogerna, flatpickr via
+`_DateInputHelpers.hpskSetDateField` — `setDate('')` TÖMMER, `clear()` säger det rakt ut), rad i
+anmälningskortet (**både** när det är öppet och stängt — "du hann inte" är för sent för just den
+det gällde), rad i evenemangssidans faktaruta (syns även utan inloggning och för externa länkar,
+där kortet göms), och en badge i `_EventBadges` ("Anmäl senast 20 sep" / "Anmälan stängd").
+**Badgens dagräkning måste vara samma som serverns** — räknas den fel står det "stängd" på något
+man fortfarande kan anmäla sig till.
+
+**Operatörssteg:** lägg till `clubSimpleEvent.registrationDeadline` (Date picker, **utan** tid).
+Utan egenskapen degraderar ytan namngivet: fältet är avstängt och säger vad som saknas i stället för
+att se ut att spara (`SetValue` på en saknad egenskap är en tyst no-op), och `IsSignupOpen` beter sig
+exakt som före. Fildeploy av `KnowledgeBase/docs/club-admin.md`.
+
 ### Att beställa och dela ut — klubbens årslista över märken OCH medaljer (2026-08-31)
 
 Klubben måste en gång om året svara på två frågor: *vad beställer vi från förbundet* och *vad delar

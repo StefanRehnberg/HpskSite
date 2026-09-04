@@ -26,6 +26,10 @@
     var eventImage = Model.Value<IPublishedContent>("eventImage");
     var registrationRequired = Model.Value<bool>("registrationRequired");
     var registrationUrl = Model.Value<string>("registrationUrl") ?? "";
+    // Sista anmälningsdag — inklusive dagen själv. Grinden bor i
+    // ClubEventParticipationService.IsSignupOpen; här visas den bara.
+    var registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
+        Model.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty));
     var feeAmount = Model.Value<string>("feeAmount") ?? "";
     var equipmentRequired = Model.Value<string>("equipmentRequired") ?? "";
     var targetAudience = Model.Value<string>("targetAudience") ?? "";
@@ -484,6 +488,17 @@
                                                här, utan någonstans att klicka — en återvändsgränd. *@
                                             <strong>Krävs</strong>
                                             <div class="small text-muted">Se rutan <em>Anmälan</em></div>
+                                        }
+                                        @* ⚠️ Deadlinen står HÄR också, inte bara i anmälningsrutan.
+                                           Rutan göms för den som inte är inloggad och för externa
+                                           anmälningslänkar — och just den läsaren är den som mest
+                                           behöver veta hur länge hen har på sig. *@
+                                        @if (registrationDeadline.HasValue)
+                                        {
+                                            <div class="small @(DateTime.Today > registrationDeadline.Value.Date ? "text-danger-emphasis" : "text-muted") mt-1">
+                                                @(DateTime.Today > registrationDeadline.Value.Date ? "Sista anmälningsdag var " : "Sista anmälningsdag ")
+                                                <strong>@registrationDeadline.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                            </div>
                                         }
                                     </div>
                                 </div>

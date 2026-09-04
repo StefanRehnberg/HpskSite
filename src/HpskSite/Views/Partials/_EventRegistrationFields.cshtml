@@ -12,7 +12,7 @@
 
     Fältens id följer konventionen prefix + fältnamn, så mappningen är härledbar:
       {prefix}RegistrationRequired / {prefix}RegistrationUrl / {prefix}MaxParticipants /
-      {prefix}IsMandatory / {prefix}LanevapenOffered
+      {prefix}IsMandatory / {prefix}LanevapenOffered / {prefix}RegistrationDeadline
 
     Skriptet definieras EN gång oavsett hur många gånger partialen renderas, och tar prefixet som
     argument. Anropa hpskEventRegToggle(prefix) från kryssrutans onchange.
@@ -28,6 +28,15 @@
 </div>
 
 <div id="@(regPrefix)RegistrationOwnGroup" style="display:none;">
+    <div class="mb-3">
+        <label for="@(regPrefix)RegistrationDeadline" class="form-label">Sista anmälningsdag</label>
+        <input type="text" class="form-control" id="@(regPrefix)RegistrationDeadline" placeholder="Lämna tom = anmälan är öppen till och med evenemangsdagen">
+        <div class="form-text" id="@(regPrefix)RegistrationDeadlineHelp">
+            Dagen räknas med — sätter du den 20:e kan man anmäla sig hela den 20:e. Efter det står
+            det <em>Anmälan är stängd</em> i anmälningsrutan. Du kan fortfarande pricka av den som
+            dyker upp på plats.
+        </div>
+    </div>
     <div class="mb-3">
         <label for="@(regPrefix)MaxParticipants" class="form-label">Max antal deltagare</label>
         <input type="number" class="form-control" id="@(regPrefix)MaxParticipants" min="0" step="1" placeholder="0 = ingen gräns">
@@ -55,6 +64,10 @@
     </div>
 </div>
 
+@* Datumfältet: hpskSetDateField skriver råvärdet OCH synkar flatpickr, och CLEAR:ar i stället för
+   setDate('') — se [[flatpickr-setdate-maxdate-trap]]. Partialen guardar sig själv. *@
+@await Html.PartialAsync("_DateInputHelpers")
+
 @if (ViewData["EventRegFieldsScriptLoaded"] == null)
 {
     ViewData["EventRegFieldsScriptLoaded"] = true;
@@ -63,6 +76,15 @@
         if (window.hpskEventRegToggle) return;
 
         function el(prefix, name) { return document.getElementById(prefix + name); }
+
+        // Skriver ett datumfält via den delade hjälparen när den finns. Faller tillbaka på
+        // råvärdet — ett fält utan flatpickr ska ändå visa datumet, aldrig bli tomt.
+        function setDate(prefix, name, value) {
+            var id = prefix + name;
+            if (window.hpskSetDateField) { window.hpskSetDateField(id, value || '', false); return; }
+            var f = document.getElementById(id);
+            if (f) f.value = value ? String(value).slice(0, 10) : '';
+        }
 
         window.hpskEventRegToggle = function (prefix) {
             var req = el(prefix, 'RegistrationRequired');
@@ -77,7 +99,17 @@
                 var man = el(prefix, 'IsMandatory'); if (man) man.checked = false;
                 var lw = el(prefix, 'LanevapenOffered'); if (lw) lw.checked = false;
                 var url = el(prefix, 'RegistrationUrl'); if (url) url.value = '';
+                setDate(prefix, 'RegistrationDeadline', '');
             }
+        };
+
+        // Flatpickr på sista anmälningsdag. Anropas per instans (partialen kan renderas flera
+        // gånger med olika prefix, men skriptet definieras bara en gång). Ingen minDate: en
+        // arrangör som rättar en händelse i efterhand måste kunna sätta ett datum som passerat.
+        window.hpskEventRegInitPicker = function (prefix) {
+            var f = el(prefix, 'RegistrationDeadline');
+            if (!f || f._flatpickr || typeof flatpickr === 'undefined') return;
+            flatpickr(f, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
         };
 
         window.hpskEventRegFill = function (prefix, d) {
@@ -90,6 +122,17 @@
             if (man) man.checked = !!d.isMandatory;
             var url = el(prefix, 'RegistrationUrl');
             if (url) url.value = d.registrationUrl || '';
+            setDate(prefix, 'RegistrationDeadline', d.registrationDeadline || '');
+
+            // Sista anmälningsdag: samma mönster som isMandatory nedan, av samma skäl — en
+            // operatörstillagd egenskap som saknas gör SetValue till en tyst no-op, och då hade
+            // datumet sett ut att spara och varit borta vid nästa laddning.
+            var dl = el(prefix, 'RegistrationDeadline');
+            if (d.deadlinePropertyExists === false && dl) {
+                dl.disabled = true;
+                var dlHelp = el(prefix, 'RegistrationDeadlineHelp');
+                if (dlHelp) dlHelp.innerHTML = '<span class="text-warning">Egenskapen \'registrationDeadline\' saknas på händelsetypen i Umbraco — kontakta en administratör innan sista anmälningsdag kan användas.</span>';
+            }
 
             // Säg ifrån i förväg i stället för att låta kryssrutan se ut att fungera och tyst
             // återgå vid nästa laddning: SetValue på en saknad doctype-egenskap är en no-op.
@@ -127,6 +170,8 @@
             formData.append('registrationUrl', url ? url.value : '');
             var lw = el(prefix, 'LanevapenOffered');
             formData.append('lanevapenOffered', lw ? lw.checked : false);
+            var dl = el(prefix, 'RegistrationDeadline');
+            formData.append('registrationDeadline', dl ? dl.value.trim() : '');
             return formData;
         };
 
@@ -141,8 +186,23 @@
                  + '&isMandatory=' + (man && man.checked ? 'true' : 'false')
                  + '&registrationUrl=' + encodeURIComponent(url ? url.value : '')
                  + '&lanevapenOffered=' + (el(prefix, 'LanevapenOffered')
-                        && el(prefix, 'LanevapenOffered').checked ? 'true' : 'false');
+                        && el(prefix, 'LanevapenOffered').checked ? 'true' : 'false')
+                 + '&registrationDeadline=' + encodeURIComponent(
+                        el(prefix, 'RegistrationDeadline')
+                            ? el(prefix, 'RegistrationDeadline').value.trim() : '');
         };
     })();
     </script>
 }
+
+@* Flatpickr initieras PER INSTANS. Skriptet ovan renderas bara en gång, men markupen kan
+   renderas flera gånger med olika prefix, och varje datumfält behöver sin egen picker. *@
+<script>
+(function () {
+    var init = function () {
+        if (window.hpskEventRegInitPicker) window.hpskEventRegInitPicker('@regPrefix');
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+})();
+</script>

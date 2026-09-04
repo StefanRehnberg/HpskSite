@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -266,7 +266,14 @@ namespace HpskSite.Controllers
                                 // Kalendern badgar obligatoriska händelser — deltagandet påverkar
                                 // medlemmens Föreningsintyg, så det ska synas där man planerar,
                                 // inte först när man öppnat händelsens egen sida.
-                                isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty)
+                                isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                                // ⚠️ Samma skäl för sista anmälningsdag: en deadline som bara syns
+                                // inne på händelsens sida hinner passera för den som planerar i
+                                // kalendern. Badgen bor i _EventBadges, delad av alla tre vyerna.
+                                registrationRequired = evt.Value<bool>("registrationRequired"),
+                                registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
+                                        evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
+                                    ?.ToString("yyyy-MM-dd") ?? ""
                             });
                         }
                     }
@@ -460,7 +467,8 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
+            string registrationDeadline = "")
         {
             try
             {
@@ -504,7 +512,14 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
+                var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline);
+                if (regFieldError != null)
+                {
+                    // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
+                    // evenemang utan sin deadline är värre än inget: det är publikt och öppet.
+                    return Ok(new { success = false, message = regFieldError });
+                }
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     newEvent.SetValue("eventDate", parsedEventDate);
@@ -557,6 +572,127 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Ok(new { success = false, message = "Error creating event: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Kopierar en händelse till ett nytt datum.
+        ///
+        /// ⚠️ <b>KOPIERINGEN GÖRS PÅ SERVERN, och det är hela poängen.</b> Tidigare byggde klienten
+        /// en `FormData` med de fält den kom ihåg och postade till <c>CreateClubEvent</c> — sex
+        /// grundfält. Kopian tappade därför TYST anmälan, kapaciteten, obligatorisk-flaggan,
+        /// lånevapnen och sista anmälningsdag: en klubb som lägger upp en träning med lånevapen och
+        /// kopierar den till nästa vecka fick en kopia utan anmälan alls. Det är tredje gången
+        /// samma fel dyker upp på den här ytan (först fälten som bara låg i en dialog, sedan
+        /// <c>EditEventDetails</c> som skrev över <c>lanevapenOffered</c>), och en lista i JavaScript
+        /// kan alltid glömma nästa fält.
+        ///
+        /// Här itereras källnodens EGNA egenskaper i stället. Ett fält som läggs till på doctypen
+        /// följer då med utan att någon behöver komma ihåg den här metoden.
+        ///
+        /// Deltagarrader följer aldrig med: <c>ClubEventParticipant</c> är nycklad på EventId, och
+        /// kopian är en ny nod — den nya händelsen börjar alltså med tom anmälningslista, vilket är
+        /// vad man vill av "samma träning nästa vecka".
+        ///
+        /// ⚠️ De ÖVRIGA datumen (slutdatum, sista anmälningsdag) flyttas lika många dagar som
+        /// startdatumet. Rakt kopierade hade de pekat på källans vecka, och kopian hade fötts med
+        /// stängd anmälan.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CopyClubEvent(int sourceEventId, string eventName = "",
+            string eventDate = "", string pageName = "")
+        {
+            try
+            {
+                if (sourceEventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Källhändelsens id saknas." });
+                }
+
+                var source = _contentService.GetById(sourceEventId);
+                if (source == null || source.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Källhändelsen hittades inte." });
+                }
+
+                var parentId = source.ParentId;
+                if (!await _authorizationService.IsClubAdminForClub(parentId))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                if (!DateTime.TryParse(eventDate, out var parsedDate))
+                {
+                    return Ok(new { success = false, message = "Ange ett datum för kopian." });
+                }
+
+                var newName = !string.IsNullOrWhiteSpace(eventName)
+                    ? eventName.Trim()
+                    : (source.GetValue<string>("eventName") ?? source.Name ?? "Kopia");
+                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName.Trim() : newName;
+
+                var copy = _contentService.Create(nodeName, parentId, "clubSimpleEvent");
+
+                // Varje egenskap källan bär, utan en fältlista att glömma. Namnet och datumet sätts
+                // efteråt — de är de två sakerna som per definition ska skilja sig.
+                foreach (var prop in source.Properties)
+                {
+                    copy.SetValue(prop.Alias, source.GetValue(prop.Alias));
+                }
+
+                copy.SetValue("eventName", newName);
+                copy.SetValue("eventDate", parsedDate);
+                copy.SetValue("isActive", true);
+
+                // ⚠️ DE ANDRA DATUMEN MÅSTE FLYTTAS MED, inte kopieras rakt. Ett slutdatum eller en
+                // sista anmälningsdag från källan ligger i förhållande till KÄLLANS datum: kopierade
+                // de rakt in hade kopian burit en deadline som redan passerat, och `IsSignupOpen`
+                // hade stängt anmälan direkt på en händelse som ser komplett ut. Samma antal dagar
+                // före/efter start bevaras därför, och saknas källans startdatum nollas de i stället
+                // — ett datum vi inte kan räkna om är sämre än inget.
+                var sourceStart = HpskSite.Models.ClubEvents.RealDate(source.GetValue<DateTime?>("eventDate"));
+                TimeSpan? shift = sourceStart.HasValue ? parsedDate.Date - sourceStart.Value.Date : null;
+
+                DateTime? Shifted(string alias)
+                {
+                    var v = HpskSite.Models.ClubEvents.RealDate(source.GetValue<DateTime?>(alias));
+                    if (v == null || shift == null) return null;
+                    return v.Value.Add(shift.Value);
+                }
+
+                copy.SetValue("eventEndDate", Shifted("eventEndDate"));
+                if (copy.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty))
+                    copy.SetValue(HpskSite.Models.ClubEvents.DeadlineProperty,
+                        Shifted(HpskSite.Models.ClubEvents.DeadlineProperty));
+
+                var (published, publishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, copy);
+                if (!published)
+                {
+                    // Samma städning som i CreateClubEvent: en sparad men opublicerad kopia är
+                    // osynlig på klubbsidan, så ett nytt försök hade skapat dubbletter i tysthet.
+                    var persisted = _contentService.GetById(copy.Id);
+                    if (persisted != null && !persisted.Published)
+                    {
+                        try { _contentService.Delete(persisted); } catch { /* best effort */ }
+                    }
+                    else if (persisted != null)
+                    {
+                        return Ok(new { success = true, message = "Händelse kopierad", data = new { id = copy.Id } });
+                    }
+
+                    return Ok(new
+                    {
+                        success = false,
+                        message = $"Kunde inte spara kopian: {publishError} Ingenting sparades — försök igen om en liten stund."
+                    });
+                }
+
+                return Ok(new { success = true, message = "Händelse kopierad", data = new { id = copy.Id } });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error copying event: " + ex.Message });
             }
         }
 
@@ -617,7 +753,15 @@ namespace HpskSite.Controllers
                             lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
                                 && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                             lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty)
+                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
+                            // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
+                            // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
+                            registrationDeadline = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
+                                ? HpskSite.Models.ClubEvents.RealDate(
+                                        evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
+                                    ?.ToString("yyyy-MM-dd") ?? ""
+                                : "",
+                            deadlinePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
                         });
                     }
                 }
@@ -748,7 +892,8 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
+            string registrationDeadline = "")
         {
             try
             {
@@ -782,7 +927,13 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
+                var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline);
+                if (regFieldError != null)
+                {
+                    // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
+                    return Ok(new { success = false, message = regFieldError });
+                }
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     eventContent.SetValue("eventDate", parsedEventDate);
@@ -2028,7 +2179,15 @@ namespace HpskSite.Controllers
                             lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
                                 && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                             lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty)
+                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
+                            // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
+                            // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
+                            registrationDeadline = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
+                                ? HpskSite.Models.ClubEvents.RealDate(
+                                        evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
+                                    ?.ToString("yyyy-MM-dd") ?? ""
+                                : "",
+                            deadlinePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
                         });
                     }
                 }
@@ -2054,7 +2213,8 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
+            string registrationDeadline = "")
         {
             try
             {
@@ -2094,7 +2254,14 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(newEvent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
+                var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline);
+                if (regFieldError != null)
+                {
+                    // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
+                    // evenemang utan sin deadline är värre än inget: det är publikt och öppet.
+                    return Ok(new { success = false, message = regFieldError });
+                }
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     newEvent.SetValue("eventDate", parsedEventDate);
@@ -2145,7 +2312,8 @@ namespace HpskSite.Controllers
             string description = "", string venue = "", string contactPerson = "",
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
-            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false)
+            bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
+            string registrationDeadline = "")
         {
             try
             {
@@ -2190,7 +2358,13 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
-                ApplyEventRegistrationFields(eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl, lanevapenOffered);
+                var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline);
+                if (regFieldError != null)
+                {
+                    // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
+                    return Ok(new { success = false, message = regFieldError });
+                }
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
                     eventContent.SetValue("eventDate", parsedEventDate);
@@ -2361,7 +2535,18 @@ namespace HpskSite.Controllers
                         // at all, since saving to a missing property is a silent no-op.
                         isMandatory = eventContent.GetValue<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
                         mandatoryPropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
-                        maxParticipants = eventContent.GetValue<int>("maxParticipants")
+                        maxParticipants = eventContent.GetValue<int>("maxParticipants"),
+                        registrationDeadline = eventContent.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
+                            ? HpskSite.Models.ClubEvents.RealDate(
+                                    eventContent.GetValue<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
+                                ?.ToString("yyyy-MM-dd") ?? ""
+                            : "",
+                        deadlinePropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty),
+                        // ⚠️ Måste med, annars kan dialogen inte förfylla kryssrutan — och en
+                        // urkryssad ruta som postas tillbaka SLÄCKER klubbens val.
+                        lanevapenOffered = eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
+                            && eventContent.GetValue<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
+                        lanevapenPropertyExists = eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
                     }
                 });
             }
@@ -2376,15 +2561,17 @@ namespace HpskSite.Controllers
         /// Skriver anmälningsinställningarna på en händelsenod. Delad av klubbens och kretsens
         /// skapa/redigera-endpoints så de tre dialogerna inte kan glida isär.
         ///
-        /// ⚠️ <c>isMandatory</c> är en operatörstillagd doctype-egenskap. <c>SetValue</c> på en egenskap
-        /// doctypen inte bär är en TYST no-op, så kryssrutan hade sett ut att fungera och gått tillbaka
-        /// vid nästa laddning. Returnerar egenskapens namn när arrangören faktiskt försökte sätta den
-        /// och den saknas — den som aldrig använder funktionen ska inte gnatas på.
+        /// ⚠️ <c>isMandatory</c>, <c>lanevapenOffered</c> och <c>registrationDeadline</c> är
+        /// operatörstillagda doctype-egenskaper. <c>SetValue</c> på en egenskap doctypen inte bär är en
+        /// TYST no-op, så fältet hade sett ut att fungera och gått tillbaka vid nästa laddning.
+        /// <b>Returnerar ett färdigt felmeddelande</b> när arrangören faktiskt försökte sätta ett
+        /// fält som inte går att spara — den som aldrig använder funktionen ska inte gnatas på.
+        /// Ett meddelande betyder att ANROPAREN ska avbryta sparningen; ingenting är publicerat än.
         /// </summary>
         private static string? ApplyEventRegistrationFields(
             Umbraco.Cms.Core.Models.IContent eventContent,
             bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl,
-            bool lanevapenOffered = false)
+            bool lanevapenOffered = false, string registrationDeadline = "")
         {
             eventContent.SetValue("registrationRequired", registrationRequired);
             eventContent.SetValue("registrationUrl", registrationUrl ?? "");
@@ -2410,7 +2597,28 @@ namespace HpskSite.Controllers
             else if (lanevapenOffered)
                 missing.Add(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty);
 
-            return missing.Count == 0 ? null : string.Join("' och '", missing);
+            // Sista anmälningsdag. Tom sträng = ingen deadline, och den ska kunna TAS BORT igen —
+            // därför skrivs null i stället för att raden hoppas över när fältet är tomt.
+            // ⚠️ Ett oparsbart datum skrivs INTE som null. Det hade sett ut som "arrangören tog
+            // bort deadlinen" och tyst öppnat anmälan igen.
+            DateTime? deadline = null;
+            if (!string.IsNullOrWhiteSpace(registrationDeadline))
+            {
+                if (!DateTime.TryParse(registrationDeadline, out var parsedDeadline))
+                    return $"\"{registrationDeadline}\" går inte att läsa som ett datum. "
+                         + "Skriv sista anmälningsdag som ÅÅÅÅ-MM-DD, eller lämna fältet tomt. "
+                         + "Ingenting sparades.";
+                deadline = parsedDeadline.Date;
+            }
+
+            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty))
+                eventContent.SetValue(HpskSite.Models.ClubEvents.DeadlineProperty, deadline);
+            else if (deadline != null)
+                missing.Add(HpskSite.Models.ClubEvents.DeadlineProperty);
+
+            if (missing.Count == 0) return null;
+            return $"Egenskapen '{string.Join("' och '", missing)}' saknas på händelsetypen i "
+                 + "Umbraco — kontakta en administratör. Ingenting sparades.";
         }
 
         /// <summary>
@@ -2424,7 +2632,8 @@ namespace HpskSite.Controllers
             string contactPerson = "", string contactEmail = "", string contactPhone = "",
             string feeAmount = "", string equipmentRequired = "", string targetAudience = "",
             bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "",
-            bool isMandatory = false, string eventFee = "", int maxParticipants = 0)
+            bool isMandatory = false, string eventFee = "", int maxParticipants = 0,
+            bool lanevapenOffered = false, string registrationDeadline = "")
         {
             try
             {
@@ -2474,16 +2683,16 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("feeAmount", feeAmount);
                 eventContent.SetValue("equipmentRequired", equipmentRequired);
                 eventContent.SetValue("targetAudience", targetAudience);
-                var missingProp = ApplyEventRegistrationFields(
-                    eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl);
+                // ⚠️ `lanevapenOffered` MÅSTE skickas med. Utan den skrev den här dialogen false
+                // över klubbens val varje gång någon sparade från händelsens egen sida — precis
+                // den tysta glidningen ApplyEventRegistrationFields finns för att förhindra.
+                var regFieldError = ApplyEventRegistrationFields(
+                    eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl,
+                    lanevapenOffered, registrationDeadline);
 
-                if (missingProp != null)
+                if (regFieldError != null)
                 {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = $"Egenskapen '{missingProp}' saknas på händelsetypen i Umbraco — kontakta en administratör. Övriga ändringar sparades inte."
-                    });
+                    return Ok(new { success = false, message = regFieldError });
                 }
 
                 if (!string.IsNullOrEmpty(eventEndDate) && DateTime.TryParse(eventEndDate, out var parsedEndDate))
