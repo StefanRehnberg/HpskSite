@@ -71,6 +71,17 @@ namespace HpskSite.Services
         public static string Key(int memberId, string? shootingClass) =>
             $"{memberId}|{ShootingClasses.NormalizeKey(shootingClass)}";
 
+        /// <summary>
+        /// Raden för en klass, oavsett om den lagrades i Id- eller namnform. Samma vikning som
+        /// <see cref="Key"/>, så en status satt från startlistan hittas av resultatinmatningen.
+        /// </summary>
+        private static CompetitionParticipantStatus? FindRow(
+            IEnumerable<CompetitionParticipantStatus> rows, string? shootingClass)
+        {
+            var key = ShootingClasses.NormalizeKey(shootingClass);
+            return rows.FirstOrDefault(r => ShootingClasses.NormalizeKey(r.ShootingClass) == key);
+        }
+
         // ── Writes ────────────────────────────────────────────────────
 
         public async Task<(bool Success, string? Message)> SetStatusAsync(
@@ -88,15 +99,24 @@ namespace HpskSite.Services
             if (status == CompetitionParticipantStatus.Dns)
                 fromSeriesNumber = null;
 
+            // ⚠️ Klassen når hit i BÅDA formerna: startlisteredigeraren skickar Id ("C_Vet_Y"),
+            // resultatinmatningen skickar namnet ("C Vet Y"). Ett exakt strängmatchat uppslag
+            // hittade därför inte den andras rad, och skytten fick TVÅ statusrader för samma
+            // klass — den ena osynlig från den skärm som inte skrev den. Kanonisera in, och
+            // matcha befintliga rader (även gamla, skrivna i Id-form) på den vikta nyckeln.
+            var canonicalClass = ShootingClasses.ToCanonicalName(shootingClass);
+
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
-                var existing = await db.SingleOrDefaultAsync<CompetitionParticipantStatus>(
-                    "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2",
-                    competitionId, memberId, shootingClass);
+                var existing = FindRow(
+                    await db.FetchAsync<CompetitionParticipantStatus>(
+                        "WHERE CompetitionId = @0 AND MemberId = @1", competitionId, memberId),
+                    shootingClass);
 
                 if (existing != null)
                 {
+                    existing.ShootingClass = canonicalClass;
                     existing.Status = status;
                     existing.FromSeriesNumber = fromSeriesNumber;
                     existing.Note = note;
@@ -110,7 +130,7 @@ namespace HpskSite.Services
                     {
                         CompetitionId = competitionId,
                         MemberId = memberId,
-                        ShootingClass = shootingClass,
+                        ShootingClass = canonicalClass,
                         Status = status,
                         FromSeriesNumber = fromSeriesNumber,
                         Note = note,
@@ -136,10 +156,23 @@ namespace HpskSite.Services
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
-                var affected = await db.ExecuteAsync(
-                    @"DELETE FROM CompetitionParticipantStatus
-                       WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2",
-                    competitionId, memberId, shootingClass);
+
+                // Samma vikning som SetStatusAsync: raden kan vara skriven i Id-form från
+                // startlistan och tas bort i namnform från resultatinmatningen. Radera på Id
+                // så att en gammal rad i "fel" form också försvinner.
+                var rows = await db.FetchAsync<CompetitionParticipantStatus>(
+                    "WHERE CompetitionId = @0 AND MemberId = @1", competitionId, memberId);
+                var matching = rows
+                    .Where(r => ShootingClasses.NormalizeKey(r.ShootingClass)
+                                == ShootingClasses.NormalizeKey(shootingClass))
+                    .ToList();
+
+                var affected = 0;
+                foreach (var row in matching)
+                {
+                    affected += await db.ExecuteAsync(
+                        "DELETE FROM CompetitionParticipantStatus WHERE Id = @0", row.Id);
+                }
 
                 return (affected > 0, affected > 0 ? null : "Hittade ingen status att ta bort.");
             }

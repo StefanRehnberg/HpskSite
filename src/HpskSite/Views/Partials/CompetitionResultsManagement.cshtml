@@ -1786,6 +1786,17 @@ function applyOfficerRange() {
 function loadCompetitionData() {
     const competitionId = $('.competition-results-management').data('competition-id');
 
+    // DNS/DNF först — hämtningen går parallellt med skyttlistan, och märkningen sätts om
+    // när den landar ifall ett skyttkort hann ritas dessförinnan.
+    resLoadParticipantStatuses().then(function () {
+        if (typeof currentShooterData !== 'undefined' && currentShooterData) {
+            const st = resStatusFor(currentShooterData.memberId, currentShooterData.class);
+            resRenderParticipantStatusBadge(st ? st.label : null);
+            resRenderParticipantStatusBanner(currentShooterData.memberId, currentShooterData.class);
+        }
+        resRefreshShooterNavLabels();
+    });
+
     // Get current user ID first
     fetch('/umbraco/surface/CompetitionResults/GetCurrentUserId')
     .then(response => response.json())
@@ -1941,6 +1952,10 @@ function updateShooterDisplay() {
     let displayText = `${currentShooterIndex + 1}/${shootersData.length}: ${shooter.name}`;
     if (currentEntryOrder === 'startlist' && shooter.teamNumber) {
         displayText += ` (Skjutlag ${shooter.teamNumber})`;
+    }
+    const navStatus = resStatusFor(shooter.memberId, shooter.shootingClass);
+    if (navStatus) {
+        displayText += ` — ${navStatus.label}`;
     }
 
     shooterInfoEl.textContent = displayText;
@@ -2295,6 +2310,13 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
     const nameArg = String(shooterData.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const pos = shooterData.position || 0;
 
+    // DNS/DNF — hämtat en gång per sidladdning (resLoadParticipantStatuses), inte per skytt.
+    const pstatus = resStatusFor(shooterData.memberId, shooterData.class);
+    const statusBadge = pstatus
+        ? `<span class="badge bg-warning text-dark ms-1">${escapeHtml(pstatus.label || '')}</span>`
+        : '';
+    const statusBanner = resStatusBannerHtml(shooterData.memberId, shooterData.class);
+
     let shotCells = '';
     for (let i = 0; i < 5; i++) {
         // .sp-shot ar utseendet (theme.css), .shot-placeholder ar JS-kroken.
@@ -2312,7 +2334,7 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                 </div>
                 <div class="sp-idmain">
                     <div class="sp-name">${nameEsc}</div>
-                    <div class="sp-sub"><span class="sp-cls">${clsEsc}</span>${clubEsc}<span id="shooterParticipantStatusBadge"></span></div>
+                    <div class="sp-sub"><span class="sp-cls">${clsEsc}</span>${clubEsc}<span id="shooterParticipantStatusBadge">${statusBadge}</span></div>
                 </div>
                 <div class="dropdown">
                     <button type="button" class="sp-kebab" data-bs-toggle="dropdown"
@@ -2343,6 +2365,8 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                     </ul>
                 </div>
             </div>
+
+            <div id="spStatusBannerHost">${statusBanner}</div>
 
             <div class="sp-series" id="spSeriesStrip"></div>
 
@@ -2673,12 +2697,16 @@ function spRenderPicker() {
         if (idx === currentShooterIndex) rcls += ' is-now';
         else if (hasGap) rcls += ' has-gap';
 
+        // "Ej start"/"Bruten" i lagvyn: funktionären ser vem som inte ska matas in
+        // utan att först öppna skyttens kort.
+        const pickerStatus = resStatusFor(s.memberId, s.shootingClass);
+
         rows += `
         <button type="button" class="${rcls}" data-idx="${idx}">
             <span class="sp-pt">${s.position || (idx + 1)}</span>
             <span class="sp-pn">
                 <span class="sp-pn-name">${escapeHtml(s.name || '')}</span>
-                <span class="sp-pn-meta">${escapeHtml(s.shootingClass || '')} · ${escapeHtml(s.club || '')}</span>
+                <span class="sp-pn-meta">${escapeHtml(s.shootingClass || '')} · ${escapeHtml(s.club || '')}${pickerStatus ? ' · ' + escapeHtml(pickerStatus.label || '') : ''}</span>
             </span>
             <span class="sp-ps">${dots}</span>
         </button>`;
@@ -4146,8 +4174,51 @@ if (competitionData.hasFinalsRound) {
 // ambiguous between "still shooting", "never started" and "withdrew". The championship
 // särskjutning gate reads this before it will decide a medal on a tie.
 // The shooter keeps their placement on whatever they scored — this only explains the short total.
+//
+// ⚠️ Statusen sätts från TVÅ skärmar — startlisteredigeraren och den här — och de skickar
+// klassen i olika form (Id respektive namn). Servern viker ihop dem; här räcker det att
+// alltid slå upp på den kanoniska namnformen (window.getShootingClassName).
+
+// Keyed "memberId|klassnamn" (gemener). Fylls av resLoadParticipantStatuses().
+window.resParticipantStatusByKey = window.resParticipantStatusByKey || {};
+
+function resStatusKey(memberId, shootingClass) {
+    var name = (window.getShootingClassName ? window.getShootingClassName(shootingClass) : (shootingClass || '')) || '';
+    return memberId + '|' + String(name).toLowerCase();
+}
+
+function resStatusFor(memberId, shootingClass) {
+    return (window.resParticipantStatusByKey || {})[resStatusKey(memberId, shootingClass)] || null;
+}
+
+// Hämtar alla DNS/DNF för tävlingen. Utan detta syntes en "ej start" satt i startlistan
+// INTE här — funktionären mötte en helt vanlig sifferpanel och matade in nollor.
+async function resLoadParticipantStatuses() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) return;
+    try {
+        const r = await fetch('/umbraco/surface/CompetitionResults/GetParticipantStatuses?competitionId=' + competitionId);
+        const d = await r.json();
+        const map = {};
+        (d.statuses || d.Statuses || []).forEach(function (s) {
+            const mid = s.memberId != null ? s.memberId : s.MemberId;
+            const cls = s.shootingClass || s.ShootingClass || '';
+            map[resStatusKey(mid, cls)] = {
+                status: s.status || s.Status,
+                label: s.label || s.Label,
+                note: s.note || s.Note || ''
+            };
+        });
+        window.resParticipantStatusByKey = map;
+    } catch (e) {
+        // En saknad statustabell får inte stoppa inmatningen — märkningen uteblir bara.
+        console.warn('Could not load participant statuses', e);
+        window.resParticipantStatusByKey = {};
+    }
+}
 
 async function resSetParticipantStatus(memberId, shootingClass, status) {
+    const competitionId = $('.competition-results-management').data('competition-id');
     const label = status === 'DNS' ? 'ej start' : 'bruten';
     if (!confirm(`Markera skytten som ${label}? Skytten behåller sina inmatade serier och sin placering, men markeras i resultatlistan.`)) return;
 
@@ -4162,7 +4233,14 @@ async function resSetParticipantStatus(memberId, shootingClass, status) {
         });
         const d = await r.json();
         if (d.success || d.Success) {
+            window.resParticipantStatusByKey[resStatusKey(memberId, shootingClass)] = {
+                status: d.status || d.Status || status,
+                label: d.label || d.Label || (status === 'DNS' ? 'Ej start' : 'Bruten'),
+                note: ''
+            };
             resRenderParticipantStatusBadge(d.label || d.Label);
+            resRenderParticipantStatusBanner(memberId, shootingClass);
+            resRefreshShooterNavLabels();
             loadResultsList();
         } else {
             alert(d.message || d.Message || 'Statusen kunde inte sparas.');
@@ -4173,6 +4251,7 @@ async function resSetParticipantStatus(memberId, shootingClass, status) {
 }
 
 async function resClearParticipantStatus(memberId, shootingClass) {
+    const competitionId = $('.competition-results-management').data('competition-id');
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
     if (!token) { alert('Säkerhetstoken saknas. Ladda om sidan och försök igen.'); return; }
 
@@ -4184,7 +4263,10 @@ async function resClearParticipantStatus(memberId, shootingClass) {
         });
         const d = await r.json();
         if (d.success || d.Success) {
+            delete window.resParticipantStatusByKey[resStatusKey(memberId, shootingClass)];
             resRenderParticipantStatusBadge(null);
+            resRenderParticipantStatusBanner(memberId, shootingClass);
+            resRefreshShooterNavLabels();
             loadResultsList();
         } else {
             alert(d.message || d.Message || 'Hittade ingen status att ta bort.');
@@ -4198,8 +4280,44 @@ function resRenderParticipantStatusBadge(label) {
     const el = document.getElementById('shooterParticipantStatusBadge');
     if (!el) return;
     el.innerHTML = label
-        ? `<span class="badge bg-warning text-dark">${label}</span>`
+        ? `<span class="badge bg-warning text-dark ms-1">${escapeHtml(label)}</span>`
         : '';
+}
+
+// Rutan ovanför sifferpanelen. En "ej start" MÅSTE synas här — det var just den
+// tystnaden som fick funktionären att mata in nollor på en skytt som inte kom.
+function resStatusBannerHtml(memberId, shootingClass) {
+    const st = resStatusFor(memberId, shootingClass);
+    if (!st) return '';
+    const isDns = st.status === 'DNS';
+    const text = isDns
+        ? 'Markerad som <strong>ej start</strong> — inga resultat ska matas in för den här skytten.'
+        : 'Markerad som <strong>bruten</strong> — inga fler serier ska matas in. Redan inmatade serier står kvar.';
+    const note = st.note ? ` <span class="text-muted">(${escapeHtml(st.note)})</span>` : '';
+    return `
+        <div class="alert alert-warning py-2 px-3 mb-2 d-flex flex-wrap align-items-center gap-2" id="spStatusBanner">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <span class="flex-grow-1">${text}${note}</span>
+            <button type="button" class="btn btn-sm btn-outline-dark"
+                    onclick="resClearParticipantStatus(${memberId}, '${escapeAttr(shootingClass || '')}'); return false;">
+                Ta bort status
+            </button>
+        </div>`;
+}
+
+function resRenderParticipantStatusBanner(memberId, shootingClass) {
+    const host = document.getElementById('spStatusBannerHost');
+    if (!host) return;
+    host.innerHTML = resStatusBannerHtml(memberId, shootingClass);
+}
+
+// Skyttväljaren och lagvyn läser samma karta, så en status syns var funktionären än tittar.
+function resRefreshShooterNavLabels() {
+    if (typeof updateShooterDisplay === 'function') updateShooterDisplay();
+    if (typeof spRenderPicker === 'function') {
+        const picker = document.getElementById('spPicker');
+        if (picker && !picker.classList.contains('d-none')) spRenderPicker();
+    }
 }
 
 function openChangeClassModal(memberId, name, currentClass) {

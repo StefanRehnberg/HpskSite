@@ -1437,8 +1437,16 @@ function loadStartListForEditing(startListId) {
 // Marks that a shooter will produce no further results. Consumed by the championship
 // särskjutning gate, which must not decide a medal on a tie a later series could still break.
 
-// Keyed "memberId|classid" (lowercased) — mirrors ParticipantStatusService.Key on the server.
+// Keyed "memberId|klassnamn" (lowercased) — mirrors ParticipantStatusService.Key on the server.
+// ⚠️ Startlistan bär klassens Id ("C_Vet_Y") och statusraden dess namn ("C Vet Y"). Nyckeln
+// måste därför vikas med getShootingClassName i BÅDA ändar, annars uteblir märket tyst för
+// exakt de klasser där formerna skiljer sig.
 window.participantStatusByKey = window.participantStatusByKey || {};
+
+function pstatusKey(memberId, shootingClass) {
+    var name = (window.getShootingClassName ? window.getShootingClassName(shootingClass) : (shootingClass || '')) || '';
+    return memberId + '|' + String(name).toLowerCase();
+}
 
 async function loadParticipantStatuses() {
     const competitionId = $('.competition-startlist-management').data('competition-id');
@@ -1449,8 +1457,8 @@ async function loadParticipantStatuses() {
         const map = {};
         (d.statuses || d.Statuses || []).forEach(s => {
             const mid = s.memberId ?? s.MemberId;
-            const cls = (s.shootingClass ?? s.ShootingClass ?? '').toLowerCase();
-            map[`${mid}|${cls}`] = { status: s.status ?? s.Status, label: s.label ?? s.Label };
+            const cls = s.shootingClass ?? s.ShootingClass ?? '';
+            map[pstatusKey(mid, cls)] = { status: s.status ?? s.Status, label: s.label ?? s.Label };
         });
         window.participantStatusByKey = map;
     } catch (e) {
@@ -1567,7 +1575,7 @@ function createTeamCard(team, index, isOfficial) {
             // The class Id, which is what SetParticipantStatus keys on — read defensively for the
             // same reason clubDisplay is: this JSON reaches us in both casings.
             const shooterWeaponClass = shooter.weaponClass || shooter.WeaponClass || '';
-            const pstatus = (window.participantStatusByKey || {})[`${shooter.memberId}|${shooterWeaponClass.toLowerCase()}`];
+            const pstatus = (window.participantStatusByKey || {})[pstatusKey(shooter.memberId, shooterWeaponClass)];
             const statusBadge = pstatus
                 ? `<span class="badge bg-warning text-dark" title="Skytten producerar inga fler resultat">${pstatus.label}</span>`
                 : '';
