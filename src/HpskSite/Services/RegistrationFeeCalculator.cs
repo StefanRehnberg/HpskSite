@@ -22,7 +22,7 @@ namespace HpskSite.Services
         {
             if (competition == null) return 0;
             var baseFee = ReadFee(competition, RegistrationFeeAlias);
-            var juniorFee = ReadFee(competition, JuniorRegistrationFeeAlias);
+            var juniorFee = ReadFeeOrNull(competition, JuniorRegistrationFeeAlias);
             var subCompFee = ReadFee(competition, SubCompetitionFeeAlias);
             var mode = competition.Value<string>(SubCompetitionFeeModeAlias);
             return CalculateTotal(selectedClasses, isSubCompetition, baseFee, juniorFee, subCompFee, mode);
@@ -35,7 +35,7 @@ namespace HpskSite.Services
         {
             if (competition == null) return 0;
             var baseFee = ReadFee(competition, RegistrationFeeAlias);
-            var juniorFee = ReadFee(competition, JuniorRegistrationFeeAlias);
+            var juniorFee = ReadFeeOrNull(competition, JuniorRegistrationFeeAlias);
             var subCompFee = ReadFee(competition, SubCompetitionFeeAlias);
             var mode = competition.GetValue<string>(SubCompetitionFeeModeAlias);
             return CalculateTotal(selectedClasses, isSubCompetition, baseFee, juniorFee, subCompFee, mode);
@@ -101,11 +101,22 @@ namespace HpskSite.Services
             return false;
         }
 
+        /// <summary>
+        /// ⚠️ <paramref name="juniorFee"/> är NULLBAR med avsikt, och skillnaden mellan null och
+        /// noll är hela poängen: <c>null</c> = ingen junioravgift är ifylld, alltså gäller
+        /// grundavgiften; <c>0</c> = arrangören har SATT junioravgiften till noll, alltså är
+        /// juniorerna gratis.
+        ///
+        /// Tidigare var parametern <c>decimal</c> och villkoret <c>juniorFee > 0</c>, så en
+        /// avgift satt till 0 föll tillbaka på grundavgiften — en junior som skulle vara gratis
+        /// fakturerades full avgift, och fältet gick helt enkelt inte att använda för det. Ett
+        /// nollbelopp är ett svar, inte ett tomt fält.
+        /// </summary>
         private static decimal CalculateTotal(
             IReadOnlyCollection<string> selectedClasses,
             bool isSubCompetition,
             decimal baseFee,
-            decimal juniorFee,
+            decimal? juniorFee,
             decimal subCompFee,
             string? subCompFeeMode)
         {
@@ -117,7 +128,7 @@ namespace HpskSite.Services
             {
                 foreach (var cls in selectedClasses)
                 {
-                    var feeForClass = IsJuniorClass(cls) && juniorFee > 0 ? juniorFee : baseFee;
+                    var feeForClass = IsJuniorClass(cls) && juniorFee.HasValue ? juniorFee.Value : baseFee;
                     if (isSubCompetition && subCompFee > 0 && applyPerClass)
                         feeForClass += subCompFee;
                     total += feeForClass;
@@ -142,12 +153,25 @@ namespace HpskSite.Services
             return ParseFee(raw);
         }
 
-        private static decimal ParseFee(string? raw)
+        private static decimal ParseFee(string? raw) => ParseFeeOrNull(raw) ?? 0;
+
+        /// <summary>
+        /// Samma tolkning som <see cref="ParseFee"/>, men skiljer "inte ifyllt" (null) från
+        /// "ifyllt till 0" (0m). Behövs bara där ett nollbelopp betyder något annat än ett tomt
+        /// fält — se <see cref="CalculateTotal"/>.
+        /// </summary>
+        public static decimal? ReadFeeOrNull(IPublishedContent competition, string alias)
+            => competition == null ? null : ParseFeeOrNull(competition.Value<string>(alias));
+
+        public static decimal? ReadFeeOrNull(IContent competition, string alias)
+            => competition == null ? null : ParseFeeOrNull(competition.GetValue<string>(alias));
+
+        private static decimal? ParseFeeOrNull(string? raw)
         {
-            if (string.IsNullOrWhiteSpace(raw)) return 0;
+            if (string.IsNullOrWhiteSpace(raw)) return null;
             if (decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var v)) return v;
             if (decimal.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out v)) return v;
-            return 0;
+            return null;
         }
     }
 }

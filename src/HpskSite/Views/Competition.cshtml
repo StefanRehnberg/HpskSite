@@ -52,7 +52,9 @@
     var subCompetitionNameRaw = Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : "";
     var teamRegistrationFeeStr = Model.Value<string>("teamRegistrationFee") ?? "";
     var stafettRegistrationFeeStr = Model.Value<string>("stafettRegistrationFee") ?? "";
-    decimal.TryParse(juniorRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var juniorRegistrationFeeVal);
+    decimal.TryParse(registrationFee, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var registrationFeeVal);
+    // ⚠️ Ifylld-till-0 är INTE samma sak som tom. Se RegistrationFeeCalculator.CalculateTotal.
+    var juniorRegistrationFeeHasValue = decimal.TryParse(juniorRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var juniorRegistrationFeeVal);
     decimal.TryParse(subCompetitionFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var subCompetitionFeeVal);
     decimal.TryParse(teamRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var teamRegistrationFeeVal);
     decimal.TryParse(stafettRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var stafettRegistrationFeeVal);
@@ -887,9 +889,16 @@
 										}
 									}
 									<li><i class="bi bi-currency-dollar"></i> Avgift: <strong>@registrationFee kr</strong> <small class="text-muted">per anmäld klass</small></li>
-										@if (juniorRegistrationFeeVal > 0)
+										@* En junioravgift satt till 0 betyder gratis, inte "ej ifylld" — samma
+										   skillnad RegistrationFeeCalculator gör. Visas den bara när den är
+										   > 0 syns aldrig det billigaste beskedet sidan har att ge. *@
+										@if (juniorRegistrationFeeHasValue && juniorRegistrationFeeVal > 0)
 										{
 											<li class="ms-4"><i class="bi bi-person-arms-up"></i> Junioravgift: <strong>@juniorRegistrationFeeStr kr</strong> <small class="text-muted">per anmäld juniorklass</small></li>
+										}
+										else if (juniorRegistrationFeeHasValue && registrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-person-arms-up"></i> Junioravgift: <strong>gratis</strong> <small class="text-muted">juniorklasser är avgiftsfria</small></li>
 										}
 										@if (subCompetitionFeeVal > 0)
 										{

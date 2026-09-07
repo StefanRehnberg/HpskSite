@@ -1085,7 +1085,7 @@ Each is a separate `WeaponClass` enum value (`A_M`, `A_P`, `A_G`) with 3 compete
 
 **Fee Types (all Textstring on `competition` doctype):**
 - `registrationFee` — base fee, charged per selected class
-- `juniorRegistrationFee` — optional. Replaces base fee per class for junior classes (IDs containing `_Jun`, or Springskytte age-class `jun`/`15`/`18`). 0 = fall back to base fee
+- `juniorRegistrationFee` — optional. Replaces base fee per class for junior classes (IDs containing `_Jun`, or Springskytte age-class `jun`/`15`/`18`). **⚠️ Blank = fall back to base fee; `0` = juniors are FREE.** A zero amount is an answer, not an empty field — `RegistrationFeeCalculator` reads this one through `ReadFeeOrNull` (`decimal?`) precisely so the two cases stay apart. It used to test `juniorFee > 0`, so a fee set to 0 fell back to the base fee and the field could not express "free" at all (fixed 2026-09-07). Every other fee already treats 0 as free, so none of them needs the nullable read.
 - `subCompetitionFee` — optional extra for shooters who opt into the deltävling at registration
 - `subCompetitionFeeMode` — `"perClass"` (default) or `"perRegistration"` — controls whether the deltävling fee multiplies by class count or is a flat one-off
 - `teamRegistrationFee` / `stafettRegistrationFee` — flat per-team fees (unchanged; not affected by junior/deltävling modifiers)
