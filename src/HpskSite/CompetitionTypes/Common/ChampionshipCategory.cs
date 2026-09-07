@@ -19,24 +19,49 @@ namespace HpskSite.CompetitionTypes.Common
     /// gäller oavsett deltagarantal och rör inte den spärren. Blanda inte de två: att pool:a
     /// C1–C3 via sammanslagningsmodalen skulle upphäva FR-102 för alla tävlingar.
     ///
-    /// Regeln är medvetet DENSAMMA som standardmedaljerna redan använder
-    /// (<see cref="Precision.Services.StandardMedalCalculationService.ShouldSplitGroupC"/> +
-    /// dess vapengruppsindelning) — medaljerna räknade redan per kategori medan finalerna
-    /// räknade per underklass, och den skillnaden var buggen.
+    /// Vapengruppsindelningen är densamma som standardmedaljerna använder — medaljerna
+    /// räknade redan per kategori medan finalerna räknade per underklass, och den skillnaden
+    /// var buggen. Men ⚠️ NIVÅVILLKORET är INTE detsamma: se <see cref="SplitsGroupC"/>.
+    /// Standardmedaljen delas per C-mästerskap bara vid SM/landsdel (C.5.1.1.4), medan
+    /// mästerskapsklasserna finns på alla mästerskapsnivåer (C.3.6.4, C.3.4.1).
     /// </summary>
     public static class ChampionshipCategory
     {
         /// <summary>
-        /// Delas vapengrupp C i sina fem kategorier? Bara vid SM och Landsdelsmästerskap —
-        /// samma villkor som <c>StandardMedalCalculationService.ShouldSplitGroupC</c>.
-        /// Vid krets- och klubbmästerskap är C en enda kategori.
+        /// Delas vapengrupp C i sina fem mästerskapsklasser? **Ja vid ALLA mästerskap.**
+        ///
+        /// ⚠️⚠️ FÖRVÄXLA INTE MED <c>StandardMedalCalculationService.ShouldSplitGroupC</c>,
+        /// som är sann bara för SM och Landsdelsmästerskap. Det är TVÅ OLIKA REGLER i SHB
+        /// 2026, och de gäller olika saker:
+        ///
+        /// • <b>Standardmedaljberäkningen</b> delas per C-mästerskap bara vid SM och
+        ///   landsdelsmästerskap. Ordagrant, C.5.1.1.4 (precision): *"Samtliga deltagare
+        ///   sammanförs oavsett klasstillhörighet vapengruppsvis (A, A optisk, B och C)
+        ///   UTOM vid SM och landsdelsmästerskap där separat standardmedaljberäkning skall
+        ///   ske för varje mästerskap i vapengrupp C."* Samma i C.5.1.1.1 och C.5.1.1.2.
+        ///
+        /// • <b>Mästerskapsklasserna</b> — vem som tävlar om vilken medalj, och därmed vilka
+        ///   finaler och särskjutningar som finns — har INGEN sådan begränsning:
+        ///   – <b>C.3.6.4</b>: ett kretsmästerskap *"utförs enligt bestämmelserna för tävling
+        ///     om svenskt mästerskap"*; undantagen rör bara femdeltagarkravet och vilka som
+        ///     får delta.
+        ///   – <b>C.3.4.1</b>: medaljreduceringen *"gäller vid landsdels-, krets- och
+        ///     klubbmästerskap då respektive styrelse bestämt att deltagarantalet FÖR EGEN
+        ///     KLASS får vara färre än 5"* — regeln förutsätter alltså att de egna klasserna
+        ///     finns på alla tre nivåerna. Få deltagare hanteras med MEDALJREDUCERING, inte
+        ///     med att klassen upphör.
+        ///   – <b>C.3.7.1.1</b>: rekord noteras vid SM, landsdels- och kretsmästerskap, och
+        ///     *"I vapengrupp C noteras rekord, förutom i öppen klass, även för damer, yngre
+        ///     veteraner (VY), äldre veteraner (VÄ) och juniorer."*
+        ///   – <b>F.2</b>: *"Skytt i junior-, dam- och veteranklass har möjlighet att vid ALLA
+        ///     TÄVLINGAR: tävla inom den egna klassen."*
+        ///
+        /// Rättat 2026-09-07 efter Stefans invändning: den här metoden speglade först
+        /// standardmedaljregeln, vilket poolade Dam/Vet/Junior in i öppen C på krets- och
+        /// klubbmästerskap. Det gav fel finalklasser och kunde begära särskjutning mellan en
+        /// dam och en öppen-klass-skytt.
         /// </summary>
-        public static bool SplitsGroupC(string? competitionScope)
-        {
-            var scope = Normalize(competitionScope);
-            return scope == CompetitionScopeHelper.SvensktMasterskap
-                || scope == CompetitionScopeHelper.Landsdelsmasterskap;
-        }
+        public static bool SplitsGroupC(string? competitionScope) => IsChampionship(competitionScope);
 
         /// <summary>Är omfattningen ett mästerskap alls?</summary>
         public static bool IsChampionship(string? competitionScope) =>
