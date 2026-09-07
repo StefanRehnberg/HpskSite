@@ -1261,7 +1261,7 @@ namespace HpskSite.Controllers
                 // Public "Visa resultat"-button stays hidden until isOfficial=true.
                 // (CompetitionManagement.cshtml has a fallback that creates this lazily on
                 // first tab open for legacy comps that pre-date this change.)
-                EnsureFaltskytteResultPage(newCompetition, competitionTypeId);
+                EnsureCompetitionResultPage(newCompetition, competitionTypeId);
 
                 // Invalidate caches
                 InvalidateCompetitionCaches();
@@ -2023,7 +2023,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Eager Resultat page for Fältskytte/MagnumFält copies — no-op for other types.
-                EnsureFaltskytteResultPage(newCompetition, newCompetition.GetValue<string>("competitionType"));
+                EnsureCompetitionResultPage(newCompetition, newCompetition.GetValue<string>("competitionType"));
 
                 // Invalidate caches
                 InvalidateCompetitionCaches();
@@ -2453,10 +2453,25 @@ namespace HpskSite.Controllers
         /// logged and swallowed — CompetitionManagement.cshtml has a lazy fallback
         /// that retries on first view.
         /// </summary>
-        private void EnsureFaltskytteResultPage(Umbraco.Cms.Core.Models.IContent competition, string? competitionType)
+        /// <summary>
+        /// Skapar tävlingens "Resultat"-barnnod direkt när tävlingen skapas eller kopieras.
+        ///
+        /// ⚠️ GÄLLER ALLA grenar sedan 2026-09-07, inte bara fältfamiljen. Skälet: admins
+        /// Resultat-flik bäddar in <c>{tävlingens url}/resultat/</c>, och den URL:en byggs
+        /// DETERMINISTISKT av <c>CompetitionResultsController</c> — den frågar inte om noden
+        /// finns. Saknades noden fick organisatören en "Page Not Found" mitt i fliken, vilket
+        /// är precis vad precisionsfamiljen gjorde ända till nu.
+        ///
+        /// En typlista här hade drivit isär från listan i CompetitionManagement.cshtml (samma
+        /// sorts drift som CompetitionFieldCatalog finns för att stoppa), så regeln är
+        /// grenoberoende.
+        ///
+        /// Säkert publikt: noden skapas med <c>isOfficial=false</c>, och Competition.cshtml
+        /// kräver <c>hasResultPage &amp;&amp; isResultsOfficial</c> för "Visa resultat"-knappen.
+        /// </summary>
+        private void EnsureCompetitionResultPage(Umbraco.Cms.Core.Models.IContent competition, string? competitionType)
         {
             if (competition == null) return;
-            if (competitionType != "Faltskytte" && competitionType != "MagnumFalt") return;
             try
             {
                 var existing = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
@@ -3233,7 +3248,7 @@ namespace HpskSite.Controllers
                                 {
                                     copiedCompetitionCount++;
                                     // Eager Resultat page for Fältskytte/MagnumFält — no-op otherwise.
-                                    EnsureFaltskytteResultPage(newComp, newComp.GetValue<string>("competitionType"));
+                                    EnsureCompetitionResultPage(newComp, newComp.GetValue<string>("competitionType"));
                                 }
                             }
                         }

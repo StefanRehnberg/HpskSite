@@ -680,14 +680,23 @@
                     // ("inga publicerade resultat ännu") when this is empty.
                     var resultChild = competition?.Children()?.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
 
-                    // Safety net: for Fältskytte/MagnumFält comps the Resultat page should always exist
-                    // (created eagerly when the comp is created or copied). If it's missing — legacy comp
-                    // that pre-dates the eager creation, or some other edge case — quietly create it here
-                    // on first view so the admin Resultat tab always works. Default state is Preliminär
-                    // (isOfficial=false), so the public "Visa resultat"-button stays hidden until the
-                    // admin explicitly clicks Officiell.
-                    var compTypeForResultPage = competition?.Value<string>("competitionType");
-                    if (resultChild == null && (compTypeForResultPage == "Faltskytte" || compTypeForResultPage == "MagnumFalt") && competition != null)
+                    // Safety net: the Resultat-page should always exist — den skapas ivrigt när
+                    // tävlingen skapas eller kopieras (CompetitionAdminController
+                    // .EnsureCompetitionResultPage). Saknas den — en tävling som är äldre än den
+                    // ivriga skapandet, eller något annat kantfall — skapas den tyst här vid
+                    // första visningen så att admins Resultat-flik alltid fungerar.
+                    //
+                    // ⚠️ GÄLLER ALLA grenar sedan 2026-09-07. Villkoret listade tidigare bara
+                    // Faltskytte/MagnumFalt, medan resten föll i else-grenen och fick en TOM
+                    // ResultPageUrl — men iframen fylls inte härifrån, utan av
+                    // CompetitionResultsController som bygger {tävlingens url}/resultat
+                    // DETERMINISTISKT utan att fråga om noden finns. Precisionsfamiljen fick
+                    // därför "Page Not Found" mitt i Resultat-fliken. En grenlista på två
+                    // ställen är just den drift som orsakade det; nu finns ingen lista.
+                    //
+                    // Läget är Preliminär (isOfficial=false), så publika "Visa resultat" är
+                    // fortsatt dold tills arrangören klickar Officiell.
+                    if (resultChild == null && competition != null)
                     {
                         try
                         {
@@ -708,21 +717,14 @@
                             }
                         }
                         catch { /* best effort — the partial will show the friendly empty-state if creation fails */ }
-                        // URL is deterministic from the competition's URL + the "/resultat/" slug, even before
-                        // the published cache picks up the just-created child.
-                        resultsViewData["ResultPageUrl"] = competition.Url().TrimEnd('/') + "/resultat/";
                     }
-                    else if (compTypeForResultPage == "Springskytte" && competition != null)
-                    {
-                        // Deterministic /resultat/ URL so the print buttons work even right after the
-                        // first calculation (before the published cache picks up the new child node).
-                        // The buttons themselves are only shown once a result list exists (client-side).
-                        resultsViewData["ResultPageUrl"] = competition.Url().TrimEnd('/') + "/resultat/";
-                    }
-                    else
-                    {
-                        resultsViewData["ResultPageUrl"] = resultChild != null ? (resultChild.Url().TrimEnd('/') + "/") : "";
-                    }
+
+                    // URL is deterministic from the competition's URL + the "/resultat/" slug, even before
+                    // the published cache picks up the just-created child. Samma form som
+                    // CompetitionResultsController bygger, så admin och API pekar på samma sida.
+                    resultsViewData["ResultPageUrl"] = competition != null
+                        ? competition.Url().TrimEnd('/') + "/resultat/"
+                        : "";
                     // NumberOfSeriesOrStations is already in ViewData from line 39
                 }
                 @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")

@@ -1576,23 +1576,22 @@
 							}
 							else if (showLiveResults)
 							{
-								@if (hasResultPage)
-								{
-									<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>
-								}
-								else
-								{
-									@* No competitionResult node yet. Live results do NOT need one — the board
-									   computes them straight from the result table (GetResultsList's node-free
-									   branch, gated on showLiveResults). The link appears as soon as the first
-									   series is entered; the JS below polls for that, so the organiser never
-									   has to reload. *@
-									<div id="liveResultsCheck">
-										<p class="text-muted small mb-0" id="noResultsText">
-											<i class="bi bi-hourglass-split me-1"></i> Live-resultat visas så snart det första resultatet är inmatat.
-										</p>
-									</div>
-								}
+								@* Live-resultat kräver INGEN competitionResult-nod — tavlan räknar rakt ur
+								   resultattabellen (GetResultsList's node-free branch, grindad på
+								   showLiveResults). Enda frågan är om något resultat är inmatat, och det
+								   frågar JS:en nedan databasen om var 30:e sekund. Länken dyker upp så snart
+								   första serien finns, utan omladdning.
+
+								   ⚠️ Grinden var tidigare `hasResultPage` — att NODEN finns. Det var samma
+								   fel som 404:an i admins Resultat-flik, fast åt andra hållet: en nod är
+								   inget bevis på att det finns resultat. Sedan noden skapas ivrigt för alla
+								   grenar (2026-09-07) hade den grinden lovat en tom live-tavla på varje ny
+								   tävling med live-resultat påslaget. Frågan databasen, inte innehållsträdet. *@
+								<div id="liveResultsCheck">
+									<p class="text-muted small mb-0" id="noResultsText">
+										<i class="bi bi-hourglass-split me-1"></i> Live-resultat visas så snart det första resultatet är inmatat.
+									</p>
+								</div>
 							}
 							else
 							{
@@ -2177,12 +2176,17 @@ window.openRegisteredShootersModal = function() {
 document.addEventListener('DOMContentLoaded', function() {
     const competitionId = @Model.Id;
 
-    @if (showLiveResults && !hasResultPage)
+    @if (showLiveResults && !(hasResultPage && isResultsOfficial))
     {
-        @* showLiveResults is on but no competitionResult node exists. A result list is NOT a
+        @* showLiveResults är på men resultatlistan är inte officiell än, så live-länken ritas av
+           platshållaren ovan i stället för av den officiella grenen. A result list is NOT a
            prerequisite for the live board — the only question is whether any result has been entered
            yet, which this asks the database directly. It re-asks every 30 s so the link appears
-           during the competition without a reload, and stops as soon as it has appeared. *@
+           during the competition without a reload, and stops as soon as it has appeared.
+
+           ⚠️ Villkoret var `!hasResultPage`. Nu när noden alltid finns hade sonderingen aldrig
+           körts, och live-länken hade suttit fast i sitt "väntar"-läge. Grinden är
+           publiceringsstatusen, inte nodens existens. *@
         <text>
     var liveProbeUrl = @Html.Raw(
         isSpringskytte ? "'/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=' + competitionId"
