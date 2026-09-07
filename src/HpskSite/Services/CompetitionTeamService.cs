@@ -75,6 +75,10 @@ namespace HpskSite.Services
             // Build member name lookup
             Dictionary<int, string> memberNameLookup;
 
+            // Lagmedlemmar som är INLÅNADE ur en annan klass i samma vapengrupp — de och bara de
+            // omfattas av lagtävlingens villkor "skytten ingår inte i något annat lag".
+            var borrowedIds = Array.Empty<int>();
+
             if (isRelay)
             {
                 // Relay: members do NOT need to be individually registered — look up names directly
@@ -111,6 +115,24 @@ namespace HpskSite.Services
                         return (false, $"{GetNameReg(memberId)} är inte anmäld i en kompatibel klass.", null);
                     }
                 }
+
+                // Lagtävlingens lånevillkor för en öppen vapengruppsklass: minst en deltagare
+                // måste vara anmäld i lagklassens EGNA klasser (villkor 1). Kontrollen görs bara
+                // för lagklasser som faktiskt lånar — för de andra är mängderna identiska.
+                if (TeamClassHelper.BorrowsFromOtherClasses(teamClass, isSpringskytte))
+                {
+                    var defining = TeamClassHelper.GetDefiningIndividualClasses(teamClass, isSpringskytte);
+                    var inOwnClass = GetRegisteredMembersInClasses(competitionId, defining, isSpringskytte)
+                        .Select(r => r.MemberId).ToHashSet();
+
+                    if (!nonSpareIds.Any(inOwnClass.Contains))
+                        return (false,
+                            $"Minst en av lagets ordinarie skyttar måste vara anmäld i {teamClass} " +
+                            $"({string.Join("/", defining)}). Ett lag som bara består av inlånade " +
+                            $"skyttar ur andra klasser är inte ett {teamClass}-lag.", null);
+
+                    borrowedIds = memberIds.Where(id => !inOwnClass.Contains(id)).ToArray();
+                }
             }
 
             string GetName(int id) => memberNameLookup.GetValueOrDefault(id, $"Medlem #{id}");
@@ -128,6 +150,21 @@ namespace HpskSite.Services
                 if (!isSpringskytteComp)
                     return (false, $"{GetName(conflicts[0].MemberId)} är redan med i ett lag i klassen {conflicts[0].TeamClass}.", null);
                 conflictWarning = BuildConflictWarning(conflicts);
+            }
+
+            // Lånevillkor 2: en INLÅNAD skytt får inte ingå i något annat lag i SAMMA
+            // vapengrupp. Att vara med i klubbens B- och A-lag samtidigt är i sin ordning —
+            // det regeln stoppar är att samma skytt räknas två gånger inom en vapengrupp
+            // (t.ex. både i damlaget och i det öppna C-laget).
+            if (borrowedIds.Length > 0)
+            {
+                var familyConflict = await FindFamilyMembershipConflictAsync(
+                    db, competitionId, teamClass, borrowedIds, excludeTeamId: null);
+                if (familyConflict != null)
+                    return (false,
+                        $"{GetName(familyConflict.MemberId)} är inlånad i {teamClass} ur en annan klass, " +
+                        $"men är redan med i {familyConflict.TeamName} ({familyConflict.TeamClass}). " +
+                        $"En inlånad skytt får bara ingå i ett lag per vapengrupp.", null);
             }
 
             // Lagnamn are unique per competition in the database (UX_CompetitionTeam_Name), and a
@@ -253,6 +290,25 @@ namespace HpskSite.Services
             var registeredMembers = GetRegisteredMembersInClasses(team.CompetitionId, compatibleClasses, isSpringskytte);
             if (!registeredMembers.Any(r => r.MemberId == memberId))
                 return (false, "Du är inte anmäld i en kompatibel klass.");
+
+            // Går man med som INLÅNAD ur en annan klass gäller lånevillkoret: bara ett lag per
+            // vapengrupp. Samma regel som CreateTeamAsync/UpdateTeamAsync tillämpar.
+            if (TeamClassHelper.BorrowsFromOtherClasses(team.TeamClass, isSpringskytte))
+            {
+                var defining = TeamClassHelper.GetDefiningIndividualClasses(team.TeamClass, isSpringskytte);
+                var inOwnClass = GetRegisteredMembersInClasses(team.CompetitionId, defining, isSpringskytte)
+                    .Any(r => r.MemberId == memberId);
+                if (!inOwnClass)
+                {
+                    var familyConflict = await FindFamilyMembershipConflictAsync(
+                        db, team.CompetitionId, team.TeamClass, new[] { memberId }, excludeTeamId: teamId);
+                    if (familyConflict != null)
+                        return (false,
+                            $"Du är inlånad i {team.TeamClass} ur en annan klass, men är redan med i " +
+                            $"{familyConflict.TeamName} ({familyConflict.TeamClass}). En inlånad skytt " +
+                            $"får bara ingå i ett lag per vapengrupp.");
+                }
+            }
 
             await db.InsertAsync(new CompetitionTeamMemberDto
             {
@@ -443,6 +499,32 @@ namespace HpskSite.Services
                     {
                         var who = eligibleNames.GetValueOrDefault(memberId, GetMemberDisplayName(memberId));
                         return (false, $"{who} är inte anmäld i en kompatibel klass för {team.TeamClass}.");
+                    }
+                }
+
+                // Samma lånevillkor som vid skapandet — annars gäller regeln bara den första
+                // sparningen och kan kringgås genom att redigera rostern efteråt.
+                if (TeamClassHelper.BorrowsFromOtherClasses(team.TeamClass, isSpringskytteComp))
+                {
+                    var defining = TeamClassHelper.GetDefiningIndividualClasses(team.TeamClass, isSpringskytteComp);
+                    var inOwnClass = GetRegisteredMembersInClasses(team.CompetitionId, defining, isSpringskytteComp)
+                        .Select(r => r.MemberId).ToHashSet();
+
+                    if (!nonSpareIds.Any(inOwnClass.Contains))
+                        return (false,
+                            $"Minst en av lagets ordinarie skyttar måste vara anmäld i {team.TeamClass} " +
+                            $"({string.Join("/", defining)}).");
+
+                    var borrowed = memberIds.Where(id => !inOwnClass.Contains(id)).ToArray();
+                    if (borrowed.Length > 0)
+                    {
+                        var familyConflict = await FindFamilyMembershipConflictAsync(
+                            db, team.CompetitionId, team.TeamClass, borrowed, excludeTeamId: teamId);
+                        if (familyConflict != null)
+                            return (false,
+                                $"{familyConflict.MemberName} är inlånad i {team.TeamClass} ur en annan klass, " +
+                                $"men är redan med i {familyConflict.TeamName} ({familyConflict.TeamClass}). " +
+                                $"En inlånad skytt får bara ingå i ett lag per vapengrupp.");
                     }
                 }
             }
@@ -1162,6 +1244,46 @@ namespace HpskSite.Services
         /// and never with a stafett. Every stafett collides with every other stafett (always class C).
         /// Other disciplines keep their original, narrower rule: the exact same team class.
         /// </summary>
+        /// <summary>
+        /// Första laget i SAMMA VAPENGRUPP som redan håller någon av <paramref name="memberIds"/>,
+        /// eller null. Bara för INLÅNADE skyttar (se lånevillkor 2 i CreateTeamAsync) — den
+        /// vanliga <see cref="SharesTeamBucket"/>-spärren är per exakt lagklass och ska förbli så.
+        /// </summary>
+        private async Task<TeamMembershipConflict?> FindFamilyMembershipConflictAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            int competitionId, string teamClass, int[] memberIds, int? excludeTeamId)
+        {
+            var family = TeamClassHelper.GetStandardWeaponFamily(teamClass);
+            if (string.IsNullOrEmpty(family) || memberIds.Length == 0) return null;
+
+            var rows = await db.FetchAsync<MembershipRow>(
+                @"SELECT ctm.MemberId, ctm.IsSpare, ct.Id AS TeamId, ct.TeamName, ct.TeamClass
+                  FROM CompetitionTeamMember ctm
+                  INNER JOIN CompetitionTeam ct ON ct.Id = ctm.TeamId
+                  WHERE ct.CompetitionId = @0",
+                competitionId);
+
+            var wanted = memberIds.ToHashSet();
+            foreach (var row in rows)
+            {
+                if (!wanted.Contains(row.MemberId)) continue;
+                if (excludeTeamId.HasValue && row.TeamId == excludeTeamId.Value) continue;
+                if (!string.Equals(TeamClassHelper.GetStandardWeaponFamily(row.TeamClass), family,
+                                   StringComparison.OrdinalIgnoreCase)) continue;
+
+                return new TeamMembershipConflict
+                {
+                    MemberId = row.MemberId,
+                    MemberName = GetMemberDisplayName(row.MemberId),
+                    TeamId = row.TeamId,
+                    TeamName = row.TeamName,
+                    TeamClass = row.TeamClass,
+                    IsSpare = row.IsSpare
+                };
+            }
+            return null;
+        }
+
         private static bool SharesTeamBucket(string a, string b, bool isSpringskytte)
         {
             if (!isSpringskytte)

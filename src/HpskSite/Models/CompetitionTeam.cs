@@ -29,23 +29,61 @@ namespace HpskSite.Models
 
     public static class TeamClassHelper
     {
-        // Standard competition team class mappings
-        private static readonly Dictionary<string, string[]> StandardTeamClassMap = new()
+        // ── Standard (icke-Springskytte) lagklasser ─────────────────────────────────────────
+        //
+        // ⚠️ TVÅ uppsättningar per lagklass, av samma skäl som Springskytte har det:
+        // `IndividualClasses` är de klasser som DEFINIERAR lagklassen (tävlingen erbjuder den
+        // när minst en av dem körs, och minst en lagmedlem måste vara anmäld i en av dem),
+        // `AlsoEligibleClasses` är de som bara får GÅ MED.
+        //
+        // Det öppna vapengruppslaget lånar in ur sin egen vapengrupps övriga klasser. Regeln
+        // (SHB, lagtävling): "en skytt från en annan C-klass får ingå i ett lag i Vapengrupp C
+        // om minst en deltagare i laget deltar i den aktuella klassen, skytten inte ingår i
+        // något annat lag [i vapengruppen], skjuter under samma förutsättningar och uppfyller
+        // kraven för klassen där laget ingår."
+        //
+        // Innan uppdelningen fanns pekade "C Öppen" BARA på C1/C2/C3, så en skytt som
+        // individuellt tävlar i C1 Dam eller C Vet Y kunde inte ingå i klubbens öppna C-lag —
+        // och eftersom öppna lag kräver exakt tre ordinarie föll HELA laget, inte bara
+        // skytten. Hittades med skarp SSM 2026-data (JPK och Lunds PK, 2026-09-07).
+        //
+        // ⚠️ Lägg ALDRIG in låneklasserna i `IndividualClasses` — då börjar en tävling som
+        // bara kör damklasser erbjuda ett tomt "C Öppen"-lag.
+        //
+        // Klasslagen (Dam/Vet/Jun) lånar INTE: de är klasspecifika, och att låna in en
+        // öppen-C-skytt i ett damlag är inte samma sak som det omvända.
+        private static readonly string[] CBorrowClasses =
+            { "C1_Dam", "C2_Dam", "C3_Dam", "C_Vet_Y", "C_Vet_A", "C_Jun" };
+        private static readonly string[] LBorrowClasses =
+            { "L1_Dam", "L2_Dam", "L3_Dam", "L_Vet_Y", "L_Vet_A", "L_Jun" };
+
+        private static readonly Dictionary<string, StandardTeamClassDef> StandardTeamClassMap = new()
         {
-            ["A"] = new[] { "A1", "A2", "A3" },
-            ["A Opt"] = new[] { "A_opt_1", "A_opt_2", "A_opt_3" },
-            ["B"] = new[] { "B1", "B2", "B3" },
-            ["C Öppen"] = new[] { "C1", "C2", "C3" },
-            ["C Vet"] = new[] { "C_Vet_Y", "C_Vet_A" },
-            ["C Jun"] = new[] { "C_Jun" },
-            ["C Dam"] = new[] { "C1_Dam", "C2_Dam", "C3_Dam" },
-            ["R"] = new[] { "R1", "R2", "R3" },
-            ["M"] = new[] { "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9" },
-            ["L Öppen"] = new[] { "L1", "L2", "L3" },
-            ["L Vet"] = new[] { "L_Vet_Y", "L_Vet_A" },
-            ["L Jun"] = new[] { "L_Jun" },
-            ["L Dam"] = new[] { "L1_Dam", "L2_Dam", "L3_Dam" },
+            ["A"] = new(new[] { "A1", "A2", "A3" }),
+            ["A Opt"] = new(new[] { "A_opt_1", "A_opt_2", "A_opt_3" }),
+            ["B"] = new(new[] { "B1", "B2", "B3" }),
+            ["C Öppen"] = new(new[] { "C1", "C2", "C3" }, AlsoEligibleClasses: CBorrowClasses),
+            ["C Vet"] = new(new[] { "C_Vet_Y", "C_Vet_A" }),
+            ["C Jun"] = new(new[] { "C_Jun" }),
+            ["C Dam"] = new(new[] { "C1_Dam", "C2_Dam", "C3_Dam" }),
+            ["R"] = new(new[] { "R1", "R2", "R3" }),
+            ["M"] = new(new[] { "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9" }),
+            ["L Öppen"] = new(new[] { "L1", "L2", "L3" }, AlsoEligibleClasses: LBorrowClasses),
+            ["L Vet"] = new(new[] { "L_Vet_Y", "L_Vet_A" }),
+            ["L Jun"] = new(new[] { "L_Jun" }),
+            ["L Dam"] = new(new[] { "L1_Dam", "L2_Dam", "L3_Dam" }),
         };
+
+        private record StandardTeamClassDef(string[] IndividualClasses, string[]? AlsoEligibleClasses = null)
+        {
+            public string[] AllEligibleClasses =>
+                AlsoEligibleClasses == null
+                    ? IndividualClasses
+                    : IndividualClasses.Concat(AlsoEligibleClasses).ToArray();
+
+            /// <summary>True när lagklassen kan låna in skyttar ur andra klasser.</summary>
+            public bool Borrows => AlsoEligibleClasses is { Length: > 0 };
+        }
 
         // Springskytte team class definitions per SHB 2026 rules (Lagtävling):
         //   Herrar: Junior & Senior t.o.m. 64 år (klasser Jun, 21, 35, 50, 60), 3 skyttar, MIXED gender
@@ -188,9 +226,11 @@ namespace HpskSite.Models
             }
             else
             {
-                foreach (var (teamClass, individualClasses) in StandardTeamClassMap)
+                foreach (var (teamClass, def) in StandardTeamClassMap)
                 {
-                    if (individualClasses.Any(ic => competitionClassIds.Contains(ic)))
+                    // Tillgänglig när tävlingen kör minst en DEFINIERANDE klass. Låneklasserna
+                    // får inte göra lagklassen synlig på en tävling som inte kör någon egen.
+                    if (def.IndividualClasses.Any(ic => competitionClassIds.Contains(ic)))
                     {
                         var (core, spare) = GetTeamSize(teamClass);
                         result.Add(new TeamClassInfo
@@ -198,7 +238,9 @@ namespace HpskSite.Models
                             TeamClass = teamClass,
                             CoreMembers = core,
                             MaxSpares = spare,
-                            CompatibleClasses = individualClasses
+                            // ...men vem som får VÄLJAS spänner över hela lånemängden, så en
+                            // dam anmäld i C1 Dam syns som valbar för C Öppen.
+                            CompatibleClasses = def.AllEligibleClasses
                                 .Where(ic => competitionClassIds.Contains(ic))
                                 .ToArray()
                         });
@@ -232,14 +274,64 @@ namespace HpskSite.Models
         {
             if (isSpringskytte)
             {
-                return SpringskytteTeamClassMap.TryGetValue(teamClass, out var def)
-                    ? def.AllEligibleClasses.ToArray()
+                return SpringskytteTeamClassMap.TryGetValue(teamClass, out var sdef)
+                    ? sdef.AllEligibleClasses.ToArray()
                     : Array.Empty<string>();
             }
 
-            return StandardTeamClassMap.TryGetValue(teamClass, out var classes)
-                ? classes
+            return StandardTeamClassMap.TryGetValue(teamClass, out var def)
+                ? def.AllEligibleClasses
                 : Array.Empty<string>();
+        }
+
+        /// <summary>
+        /// De klasser som DEFINIERAR lagklassen — delmängden av
+        /// <see cref="GetCompatibleIndividualClasses"/> som INTE är inlånade.
+        ///
+        /// Används för lagtävlingens villkor "minst en deltagare i laget deltar i den aktuella
+        /// klassen": ett "C Öppen"-lag av tre damklassanmälda skyttar är inte ett öppet C-lag.
+        /// För en lagklass som inte lånar är den identisk med den kompatibla mängden.
+        /// </summary>
+        public static string[] GetDefiningIndividualClasses(string teamClass, bool isSpringskytte)
+        {
+            if (isSpringskytte)
+            {
+                return SpringskytteTeamClassMap.TryGetValue(teamClass, out var sdef)
+                    ? sdef.IndividualClasses
+                    : Array.Empty<string>();
+            }
+
+            return StandardTeamClassMap.TryGetValue(teamClass, out var def)
+                ? def.IndividualClasses
+                : Array.Empty<string>();
+        }
+
+        /// <summary>True när lagklassen får låna in skyttar ur andra klasser i samma vapengrupp.</summary>
+        public static bool BorrowsFromOtherClasses(string teamClass, bool isSpringskytte)
+        {
+            if (isSpringskytte)
+                return SpringskytteTeamClassMap.TryGetValue(teamClass, out var sdef)
+                       && sdef.AlsoEligibleClasses is { Length: > 0 };
+
+            return StandardTeamClassMap.TryGetValue(teamClass, out var def) && def.Borrows;
+        }
+
+        /// <summary>
+        /// Vapengruppen en STANDARD-lagklass hör till, härledd ur dess definierande klasser —
+        /// "C Öppen", "C Vet", "C Jun" och "C Dam" ger alla <c>"C"</c>; "A Opt" ger
+        /// <c>"A_Opt"</c>. Tom sträng för okänd lagklass (och för Springskytte, som har
+        /// <see cref="GetSpringskytteWeaponGroup"/>).
+        ///
+        /// Finns för lagtävlingens villkor "skytten ingår inte i något annat lag": spärren
+        /// gäller inom VAPENGRUPPEN, så att vara med i klubbens B- och A-lag samtidigt är helt
+        /// i sin ordning — det är dubbelräkning inom samma vapengrupp regeln stoppar.
+        /// </summary>
+        public static string GetStandardWeaponFamily(string teamClass)
+        {
+            if (teamClass == null) return "";
+            if (!StandardTeamClassMap.TryGetValue(teamClass, out var def) || def.IndividualClasses.Length == 0)
+                return "";
+            return ShootingClasses.GetWeaponClassCode(def.IndividualClasses[0]);
         }
 
         public static bool IsVeteranClass(string cls) =>
