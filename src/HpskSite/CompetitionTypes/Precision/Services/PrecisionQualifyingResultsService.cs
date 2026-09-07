@@ -1,3 +1,4 @@
+using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.ViewModels;
 using HpskSite.Models;
@@ -198,8 +199,25 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
             var results = await GetQualifyingResultsAsync(competitionId, qualSeriesCount);
             var shooterInfo = GetShooterInfoFromStartList(competitionId);
-            var mergeLookup = GetMergeLookup(competitionId);
-            return _qualificationService.BuildFullClassRankings(results, shooterInfo, mergeLookup);
+
+            // ⚠️ Vid ett MÄSTERSKAP grupperas finalisterna per mästerskapskategori, inte per
+            // underklass: C1+C2+C3 är EN uppsättning finalister, Dam sin egen, Vet Y / Vet Ä /
+            // Junior sina egna, A1+A2+A3 = "A". Skicklighetsklasserna 1–3 är inte egna
+            // kategorier. Tidigare användes resultatlistans sammanslagningar även här, så
+            // guiden erbjöd 15 separata finaler på SSM 2026 där det ska vara 7 — och det gick
+            // inte att ställa om, eftersom sammanslagningsmodalen (regeln om färre än fem
+            // deltagare) bär spärren "Klass 1 sammanslås inte med annan klass".
+            //
+            // Kategorin är samma regel standardmedaljerna redan använde. Utanför ett
+            // mästerskap är beteendet oförändrat: resultatlistans sammanslagningar gäller.
+            var scope = competition.GetValue<string>("competitionScope");
+            var lookup = ChampionshipCategory.IsChampionship(scope)
+                ? ChampionshipCategory.BuildLookup(
+                    results.Select(r => r.ShootingClass).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(),
+                    ChampionshipCategory.SplitsGroupC(scope))
+                : GetMergeLookup(competitionId);
+
+            return _qualificationService.BuildFullClassRankings(results, shooterInfo, lookup);
         }
 
         private async Task<List<PrecisionResultEntry>> GetQualifyingResultsAsync(int competitionId, int qualSeriesCount)
