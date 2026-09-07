@@ -38,18 +38,34 @@ namespace HpskSite.Services
 
         // ── Writes ────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Klassen kanoniserad till visningsnamnet, samma form som resultatraderna lagras i.
+        ///
+        /// ⚠️ Härdning, inte en rättad bugg: idag når klassen hit bara i namnform (den kommer
+        /// från <c>ShooterResult</c>). Men nyckeln (CompetitionId, MemberId, ShootingClass) är
+        /// densamma som statustabellen hade, och där kostade exakt strängmatchning oss en tyst
+        /// bugg när en andra yta började skicka Id-formen. Se
+        /// <see cref="ShootingClasses.ToCanonicalName"/> och minnet participant-status-dns-dnf.
+        /// </summary>
+        private static string Canonical(string? shootingClass) =>
+            ShootingClasses.ToCanonicalName(shootingClass);
+
         public async Task<(bool Success, string? Message)> SaveEntryAsync(
             int competitionId, int memberId, string shootingClass, int round,
             string shotsJson, int actingMemberId, int seriesNumber = 1)
         {
+            var canonicalClass = Canonical(shootingClass);
+
             using var db = _databaseFactory.CreateDatabase();
-            var existing = await db.SingleOrDefaultAsync<CompetitionShootOffEntry>(
-                @"WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2
-                   AND Round = @3 AND SeriesNumber = @4",
-                competitionId, memberId, shootingClass, round, seriesNumber);
+            var candidates = await db.FetchAsync<CompetitionShootOffEntry>(
+                @"WHERE CompetitionId = @0 AND MemberId = @1 AND Round = @2 AND SeriesNumber = @3",
+                competitionId, memberId, round, seriesNumber);
+            var existing = candidates.FirstOrDefault(e =>
+                ShootingClasses.NormalizeKey(e.ShootingClass) == ShootingClasses.NormalizeKey(shootingClass));
 
             if (existing != null)
             {
+                existing.ShootingClass = canonicalClass;
                 existing.Shots = shotsJson;
                 existing.EnteredBy = actingMemberId;
                 existing.LastModified = DateTime.Now;
@@ -61,7 +77,7 @@ namespace HpskSite.Services
                 {
                     CompetitionId = competitionId,
                     MemberId = memberId,
-                    ShootingClass = shootingClass,
+                    ShootingClass = canonicalClass,
                     Round = round,
                     SeriesNumber = seriesNumber,
                     Shots = shotsJson,
@@ -78,11 +94,18 @@ namespace HpskSite.Services
             int competitionId, int memberId, string shootingClass, int round, int seriesNumber = 1)
         {
             using var db = _databaseFactory.CreateDatabase();
-            var affected = await db.ExecuteAsync(
-                @"DELETE FROM CompetitionShootOffEntry
-                   WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2
-                     AND Round = @3 AND SeriesNumber = @4",
-                competitionId, memberId, shootingClass, round, seriesNumber);
+
+            // Radera på Id efter samma vikning som sparningen, så en rad som ligger i den
+            // andra klassformen också går att ta bort.
+            var candidates = await db.FetchAsync<CompetitionShootOffEntry>(
+                @"WHERE CompetitionId = @0 AND MemberId = @1 AND Round = @2 AND SeriesNumber = @3",
+                competitionId, memberId, round, seriesNumber);
+            var key = ShootingClasses.NormalizeKey(shootingClass);
+
+            var affected = 0;
+            foreach (var row in candidates.Where(e => ShootingClasses.NormalizeKey(e.ShootingClass) == key))
+                affected += await db.ExecuteAsync(
+                    "DELETE FROM CompetitionShootOffEntry WHERE Id = @0", row.Id);
 
             return (affected > 0, affected > 0 ? null : "Hittade ingen särskjutningspost att ta bort.");
         }

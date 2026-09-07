@@ -1,4 +1,5 @@
 using HpskSite.CompetitionTypes.Faltskytte.Models;
+using HpskSite.Models;
 using Microsoft.Extensions.Logging;
 using NPoco;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -57,13 +58,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             int? tiebreakerScore, string? poangmalScores,
             int actingMemberId)
         {
+            var canonicalClass = ShootingClasses.ToCanonicalName(shootingClass);
+
             using var db = _databaseFactory.CreateDatabase();
-            var existing = await db.SingleOrDefaultAsync<FaltskytteShootOffEntry>(
-                @"WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND Round = @3",
-                competitionId, memberId, shootingClass, round);
+            var candidates = await db.FetchAsync<FaltskytteShootOffEntry>(
+                @"WHERE CompetitionId = @0 AND MemberId = @1 AND Round = @2",
+                competitionId, memberId, round);
+            var existing = candidates.FirstOrDefault(e =>
+                ShootingClasses.NormalizeKey(e.ShootingClass) == ShootingClasses.NormalizeKey(shootingClass));
 
             if (existing != null)
             {
+                existing.ShootingClass = canonicalClass;
                 existing.Hits = hits;
                 existing.Figures = figures;
                 existing.HitDistribution = hitDistribution;
@@ -79,7 +85,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 {
                     CompetitionId = competitionId,
                     MemberId = memberId,
-                    ShootingClass = shootingClass,
+                    ShootingClass = canonicalClass,
                     Round = round,
                     Hits = hits,
                     Figures = figures,
@@ -98,10 +104,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             int competitionId, int memberId, string shootingClass, int round)
         {
             using var db = _databaseFactory.CreateDatabase();
-            var affected = await db.ExecuteAsync(
-                @"DELETE FROM FaltskytteShootOffEntry
-                  WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND Round = @3",
-                competitionId, memberId, shootingClass, round);
+
+            // Vikt matchning + radering på Id, samma skäl som i SaveEntryAsync.
+            var candidates = await db.FetchAsync<FaltskytteShootOffEntry>(
+                @"WHERE CompetitionId = @0 AND MemberId = @1 AND Round = @2",
+                competitionId, memberId, round);
+            var key = ShootingClasses.NormalizeKey(shootingClass);
+
+            var affected = 0;
+            foreach (var row in candidates.Where(e => ShootingClasses.NormalizeKey(e.ShootingClass) == key))
+                affected += await db.ExecuteAsync(
+                    "DELETE FROM FaltskytteShootOffEntry WHERE Id = @0", row.Id);
+
             return (affected > 0, affected > 0 ? null : "Hittade ingen särskjutningspost att ta bort.");
         }
 

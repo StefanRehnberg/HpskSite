@@ -885,12 +885,26 @@ function springRenderCurrentShooterBanner(elId, s) {
     if (!s) { el.style.display = 'none'; el.innerHTML = ''; return; }
     const name = s.name || s.memberName || '';
     const cls = formatAgeSpan(s.ageGenderClass || s.registeredClass || '');
+
+    // DNS/DNF sätts i "Tidtagning & straff", men måste synas HÄR — paddens funktionär ska
+    // inte mata in skott på någon som inte startade. Statusen sattes tyst på en annan skärm.
+    // Tidtagningsvyns starterflöde bär `isDns` i stället för existingResult — samma sak för
+    // bannern, så båda vyerna märks likadant.
+    const st = s.existingResult?.status || (s.isDns === true ? 'DNS' : null);
+    const hasStatus = st === 'DNS' || st === 'DNF';
+    const statusLine = hasStatus
+        ? `<div class="small fw-bold">Markerad som ${springTimeEsc(springStatusLabel(st))} — ${st === 'DNS'
+            ? 'inga skott ska matas in.'
+            : 'skytten bröt; bara redan skjutna stationer matas in.'}</div>`
+        : '';
+
     el.style.display = '';
-    el.innerHTML = `<div class="alert alert-primary d-flex align-items-center gap-3 py-2 mb-0">
-            <span class="badge bg-primary fs-3 px-3" id="${elId}Number">#${s.startOrder ?? '–'}</span>
+    el.innerHTML = `<div class="alert ${hasStatus ? 'alert-warning' : 'alert-primary'} d-flex align-items-center gap-3 py-2 mb-0">
+            <span class="badge ${hasStatus ? 'bg-warning text-dark' : 'bg-primary'} fs-3 px-3" id="${elId}Number">#${s.startOrder ?? '–'}</span>
             <div class="lh-sm">
                 <div class="fw-bold fs-5">${springTimeEsc(name)}</div>
                 <div class="small">Registrerar nu &middot; Vapengrupp ${springTimeEsc(s.weaponClass || '')}${cls ? ' &middot; ' + springTimeEsc(cls) : ''}</div>
+                ${statusLine}
             </div>
         </div>`;
 }
@@ -1304,7 +1318,9 @@ async function springSaveResult() {
                 shootingScore: data.shootingScore,
                 totalTimeSeconds: data.totalTimeSeconds,
                 totalTimeDisplay: data.totalTimeDisplay,
-                status: null,
+                // Statusen kommer från serverns återläsning. Att hårdkoda null här gömde en
+                // DNS/DNF som tidtagningsrollen satt, ända till nästa omladdning.
+                status: data.status ?? null,
                 penaltyMultiplier: data.penaltyMultiplier,
                 shots: data.verificationShots || shotSeries
             };
@@ -1778,7 +1794,7 @@ async function springCAutoSave() {
             shooter.existingResult = {
                 shootingScore: data.shootingScore, totalTimeSeconds: data.totalTimeSeconds,
                 totalTimeDisplay: data.totalTimeDisplay, sprintTimeSeconds: data.sprintTimeSeconds,
-                status: null, penaltyMultiplier: data.penaltyMultiplier, shots: data.verificationShots || shotSeries
+                status: data.status ?? null, penaltyMultiplier: data.penaltyMultiplier, shots: data.verificationShots || shotSeries
             };
             let ok = true;
             if (data.verificationShots && JSON.stringify(shotSeries) !== JSON.stringify(data.verificationShots)) {
@@ -1963,7 +1979,7 @@ async function springCSave() {
                 totalTimeSeconds: data.totalTimeSeconds,
                 totalTimeDisplay: data.totalTimeDisplay,
                 sprintTimeSeconds: data.sprintTimeSeconds,
-                status: null,
+                status: data.status ?? null,
                 penaltyMultiplier: data.penaltyMultiplier,
                 shots: data.verificationShots || shotSeries
             };

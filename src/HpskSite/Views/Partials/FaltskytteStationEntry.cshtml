@@ -198,6 +198,12 @@
             </span>
         </div>
 
+        <!-- DNS: syns bara för en skytt som markerats "ej start" i startlistan/startledarvyn -->
+        <div id="fseDnsBanner" class="alert alert-warning py-2 px-3 mb-2" style="display:none">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+            <strong>Markerad som ej start.</strong> Inga resultat ska matas in för den här skytten.
+        </div>
+
         <!-- Navigation bar -->
         <div class="mb-2 bg-body-tertiary rounded p-2">
             <div class="mb-2">
@@ -385,7 +391,16 @@
         // applied by fseStartEntry / save UI.
         if (selfService) {
             presentMembers = new Set();
-            (currentPatrol.members || []).forEach(function (m) { presentMembers.add(m.memberId); });
+            // Samma undantag som i uppropet: en DNS är inte där och ska inte matas in.
+            (currentPatrol.members || []).forEach(function (m) {
+                if (!fseIsDns(m)) presentMembers.add(m.memberId);
+            });
+            // ...men lås inte ut en patrull där ALLA är DNS-markerade: står de vid stationen
+            // och skannar är markeringen fel, och de ska inte mötas av en spärr. Bannern på
+            // inmatningsskärmen säger vad som gäller i stället.
+            if (presentMembers.size === 0) {
+                (currentPatrol.members || []).forEach(function (m) { presentMembers.add(m.memberId); });
+            }
             fseStartEntry();
             return;
         }
@@ -416,11 +431,14 @@
         presentMembers = new Set();
         var rcHtml = '';
         (currentPatrol.members || []).forEach(function(m, idx) {
-            presentMembers.add(m.memberId);
-            rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom">' +
-                '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '" checked onchange="fseRcToggle(this)">' +
+            // En DNS förkryssas INTE: den som inte startade ska inte in i inmatningsslingan.
+            // Funktionären kan fortfarande kryssa i manuellt om markeringen var fel.
+            var isDns = fseIsDns(m);
+            if (!isDns) presentMembers.add(m.memberId);
+            rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom' + (isDns ? ' opacity-75' : '') + '">' +
+                '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isDns ? '' : ' checked') + ' onchange="fseRcToggle(this)">' +
                 '<span class="flex-grow-1">' + hpskEsc(m.name) + ' <span class="text-muted small">(' + hpskEsc(m.club) + ')</span>' +
-                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span></span>' +
+                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span>' + fseDnsBadge(m) + '</span>' +
                 (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
                 '</div>';
         });
@@ -430,6 +448,18 @@
         document.getElementById('fseSelectScreen').style.display = 'none';
         document.getElementById('fseRollCallScreen').style.display = '';
     };
+
+    // ── DNS ──────────────────────────────────────────────────────────────────────
+    // DNS sätts i startlistan/startledarvyn och frigör platsen i patrullen.
+    // GetStationEntryData har alltid skickat med status per skytt, men den här skärmen
+    // läste den inte: en skytt som markerats "ej start" såg ut som alla andra, låg
+    // förkryssad i uppropet och gick in i inmatningsslingan — så någon matade in bommar
+    // på en som aldrig kom. Samma fel som rapporterades för Duell 2026-09-06.
+    function fseIsDns(m) { return m && m.status === 'DNS'; }
+
+    function fseDnsBadge(m) {
+        return fseIsDns(m) ? ' <span class="badge bg-warning text-dark">Ej start</span>' : '';
+    }
 
     window.fseRcToggle = function(cb) {
         var memberId = parseInt(cb.dataset.memberId);
@@ -508,10 +538,10 @@
         var rcHtml = '';
         (currentPatrol.members || []).forEach(function(m) {
             var isPresent = presentMembers.has(m.memberId);
-            rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom">' +
+            rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom' + (fseIsDns(m) ? ' opacity-75' : '') + '">' +
                 '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isPresent ? ' checked' : '') + ' onchange="fseRcToggle(this)">' +
                 '<span class="flex-grow-1">' + hpskEsc(m.name) + ' <span class="text-muted small">(' + hpskEsc(m.club) + ')</span>' +
-                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span></span>' +
+                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span>' + fseDnsBadge(m) + '</span>' +
                 (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
                 '</div>';
         });
@@ -613,6 +643,8 @@
         document.getElementById('fsePrevBtn').disabled = currentShooterIdx === 0;
         document.getElementById('fseNextBtn').disabled = currentShooterIdx >= members.length - 1;
         document.getElementById('fseShooterSavedBadge').style.display = m.hasResult && !state._dirty ? '' : 'none';
+        var dnsBanner = document.getElementById('fseDnsBanner');
+        if (dnsBanner) dnsBanner.style.display = fseIsDns(m) ? '' : 'none';
         document.getElementById('fseShooterDirtyBadge').style.display = state._dirty ? '' : 'none';
 
         // Save button state

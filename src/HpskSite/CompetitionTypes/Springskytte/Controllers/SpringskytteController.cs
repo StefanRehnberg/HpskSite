@@ -157,6 +157,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Scoring-only save (shots, no finish/sprint/status): preserve the sprint the TIMING
                 // role set on its own screen so entering shots never wipes the finish time.
+                //
+                // ⚠️ Statusen måste bevaras av EXAKT samma skäl som sprinttiden. Poängpaddarna har
+                // medvetet inga DNS/DNF-knappar (rollen delades 2026-07) men postar ändå
+                // `status: null`, och MERGE:n nedan skriver det värdet rakt in. En DNS/DNF som
+                // tidtagningsrollen satt försvann därför tyst så fort poängrollen sparade eller
+                // autosparade skott — värst för en DNF, där det ju är just de skjutna stationerna
+                // som matas in efteråt. Tidtagningsrollens egen väg (SaveSpringskytteFinishTime,
+                // och en kombinerad sparning med måltid här) rensar statusen precis som förut.
+                string? effectiveStatus = request.Status;
                 if (sprintTimeSeconds == null
                     && string.IsNullOrWhiteSpace(request.FinishTimeInput)
                     && string.IsNullOrWhiteSpace(request.SprintTimeInput)
@@ -169,6 +178,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         request.CompetitionId, request.MemberId, request.WeaponClass);
                     if (existing?.SprintTimeSeconds != null)
                         sprintTimeSeconds = existing.SprintTimeSeconds;
+                    if (!string.IsNullOrWhiteSpace(existing?.Status))
+                        effectiveStatus = existing!.Status;
                 }
 
                 // Serialize shots
@@ -197,6 +208,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 using var transaction = db.GetTransaction();
 
                 // Atomic MERGE: eliminates race condition when multiple range masters save simultaneously
+                //
+                // Nollningen nedan hänger på request.Status, inte effectiveStatus: en EXPLICIT
+                // statussparning nollar tid och poäng som förut, medan en skottsparning på en skytt
+                // som redan är DNS/DNF lagrar de skjutna stationerna som vanligt. Det matchar
+                // tidtagningsrollens egen väg, som sätter status utan att röra ShootingScore.
                 var effectiveSprintTime = request.Status != null ? (decimal?)null : sprintTimeSeconds;
                 var effectiveShootingScore = request.Status != null ? (int?)null : shootingScore;
                 var effectiveTotalTime = request.Status != null ? (decimal?)null : totalTime;
@@ -229,7 +245,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     effectiveShootingScore,          // @6
                     penaltyMultiplier,               // @7
                     effectiveTotalTime,              // @8
-                    request.Status,                  // @9
+                    effectiveStatus,                 // @9 — bevarad status vid skottsparning
                     enteredBy,                       // @10
                     now,                             // @11
                     (object?)stationHandsJson ?? DBNull.Value   // @12
@@ -296,6 +312,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     TotalTimeSeconds = verification.TotalTimeSeconds,
                     TotalTimeDisplay = FormatTime(verification.TotalTimeSeconds),
                     PenaltyMultiplier = verification.PenaltyMultiplier,
+                    Status = verification.Status,
                     VerificationShots = storedShots
                 });
             }

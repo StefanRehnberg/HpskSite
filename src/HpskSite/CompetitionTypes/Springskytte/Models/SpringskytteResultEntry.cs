@@ -206,6 +206,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public decimal? TotalTimeSeconds { get; set; }
         public string TotalTimeDisplay { get; set; } = "";
         public int PenaltyMultiplier { get; set; }
+
+        /// <summary>
+        /// Status som den ligger i databasen EFTER sparningen (null / "DNS" / "DNF").
+        ///
+        /// Returneras för att paddarna ska kunna behålla sin statusbricka: en skottsparning
+        /// postar `status: null` men rensar inte längre en satt DNS/DNF, så klienten får inte
+        /// gissa att den är borta. Klienten ska läsa detta värde, aldrig anta null.
+        /// </summary>
+        public string? Status { get; set; }
+
         /// <summary>
         /// Verification: shots as stored in DB, returned for client-side integrity check.
         /// </summary>
