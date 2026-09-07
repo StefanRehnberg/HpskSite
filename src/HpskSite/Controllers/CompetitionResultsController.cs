@@ -3162,14 +3162,19 @@ namespace HpskSite.Controllers
 
                 var finalResults = await CalculateFinalResults(results, competitionId, merges);
 
-                var tiedGroups = finalResults.ClassGroups
-                    .Where(cg => cg.TiedMedalGroups != null && cg.TiedMedalGroups.Any())
-                    .Select(cg => new
-                    {
-                        className = cg.ClassName,
-                        groups = cg.TiedMedalGroups
-                    })
-                    .ToList();
+                // ⚠️ Medaljstriderna står per FINALKLASS (mästerskapskategori) när tävlingen
+                // har en finalrunda — de ligger då på MedalCategoryTies, inte på
+                // klassgrupperna. Utan finalrunda finns ingen finalklass och de gamla
+                // klassgrupperna gäller. JSON-formen är avsiktligt DENSAMMA i båda fallen
+                // (`className` bär kategorinamnet), så särskjutningskortet är oförändrat.
+                var tiedGroups = finalResults.MedalCategoryTies.Count > 0
+                    ? finalResults.MedalCategoryTies
+                        .Select(ct => new { className = ct.CategoryName, groups = ct.Groups })
+                        .ToList()
+                    : finalResults.ClassGroups
+                        .Where(cg => cg.TiedMedalGroups != null && cg.TiedMedalGroups.Any())
+                        .Select(cg => new { className = cg.ClassName, groups = cg.TiedMedalGroups })
+                        .ToList();
 
                 return Json(new { Success = true, ClassGroups = tiedGroups });
             }
@@ -3675,6 +3680,7 @@ namespace HpskSite.Controllers
             // after the grundomgång are not tied for a medal; they simply both go through
             // to the final, which is what separates them.
             var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
+            var medalCategoryTies = new List<PrecisionMedalCategoryTies>();
             if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
             {
                 // Who was taken to the final. Only looked up when there is a final to be taken
@@ -3712,14 +3718,74 @@ namespace HpskSite.Controllers
                 var shootOffEntries = await _shootOffService.GetEntriesForCompetitionAsync(competitionId);
                 var entriesByMember = shootOffEntries.ToLookup(e => e.MemberId);
 
-                foreach (var classGroup in classGroups)
+                // ── Vilka grupper avgörs en medalj i, och bland vilka? ───────────────
+                //
+                // ⚠️ INTE resultatlistans klassgrupper. Medaljen delas ut per FINALKLASS
+                // (mästerskapskategori): C, C Dam, C Vet Y, C Vet Ä, C Jun, A, B — aldrig per
+                // skicklighetsklass. Klasserna 1–3 är kompetensnivåer, inte egna
+                // mästerskapsklasser. Rapporterat 2026-09-07: sidan krävde särskjutning i C2,
+                // B2 och A1, och i C3/C3 Dam där striden i själva verket står i C respektive
+                // C Dam.
+                //
+                // ⚠️ Och bara bland dem som kan VINNA en medalj. En skytt som gallrats bort
+                // före finalen kan aldrig få medalj, så två sådana som står lika är inte tiade
+                // om något. Tre av de fem felaktiga grupperna var precis det: gallrade skyttar
+                // som stod lika efter grundomgången.
+                //
+                // Utan finalrunda finns ingen finalklass, och då säger regeln inget — då
+                // behålls det gamla beteendet (per klassgrupp, alla deltagare).
+                var useMedalCategories = hasFinalsRound;
+
+                var detectionGroups = new List<(string Key, List<PrecisionShooterResult> Shooters, bool PerCategory)>();
+
+                if (useMedalCategories)
                 {
-                    var tiedRaw = ShootOffService.DetectTiedMedalGroups(classGroup.Shooters, classGroup.ClassName)
+                    // Bara finalister är medaljkandidater. Är finalisterna okända ("ingen
+                    // finalstartlista än") är ingen det — samma försiktighet som
+                    // HasShotEverythingDue, annars är vi tillbaka i kvalrundefelet.
+                    var contenders = finalistsKnown
+                        ? classGroups.SelectMany(cg => cg.Shooters)
+                            .Where(s => finalistMemberIds.Contains(s.MemberId))
+                            .ToList()
+                        : new List<PrecisionShooterResult>();
+
+                    var splitC = ChampionshipCategory.SplitsGroupC(competitionScope);
+                    foreach (var cat in contenders
+                                 .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
+                                 .Where(gr => !string.IsNullOrWhiteSpace(gr.Key)))
+                    {
+                        var ordered = cat
+                            .OrderByDescending(s => s.TotalScore)
+                            .ThenByDescending(s => s.TotalXCount)
+                            .ThenBy(s => s.Name, StringComparer.CurrentCulture)
+                            .ToList();
+                        detectionGroups.Add((cat.Key, ordered, true));
+                    }
+                }
+                else
+                {
+                    foreach (var cg in classGroups)
+                        detectionGroups.Add((cg.ClassName, cg.Shooters, false));
+                }
+
+                foreach (var (groupKey, groupShooters, perCategory) in detectionGroups)
+                {
+                    var tiedRaw = ShootOffService.DetectTiedMedalGroups(groupShooters, groupKey)
                         .Where(g => g.Shooters.All(HasShotEverythingDue))
                         .ToList();
                     if (tiedRaw.Count == 0) continue;
 
-                    ShootOffService.ApplyShootOffOverride(classGroup.Shooters, tiedRaw, entriesByMember);
+                    ShootOffService.ApplyShootOffOverride(groupShooters, tiedRaw, entriesByMember);
+
+                    // Var landar grupperna? Per kategori på tävlingsnivå, annars som förut på
+                    // klassgruppen. Skytteobjekten är desamma i båda fallen, så ShootOffScore
+                    // -annoteringen (den publika SS-brickan) fungerar oavsett.
+                    var categoryTies = perCategory
+                        ? new PrecisionMedalCategoryTies { CategoryName = groupKey }
+                        : null;
+                    var classGroup = perCategory
+                        ? null
+                        : classGroups.First(cg => cg.ClassName == groupKey);
 
                     // Project DTO (decouple admin payload from the live model)
                     foreach (var g in tiedRaw)
@@ -3774,7 +3840,8 @@ namespace HpskSite.Controllers
                                 Rounds = rounds
                             });
                         }
-                        classGroup.TiedMedalGroups.Add(dto);
+                        if (categoryTies != null) categoryTies.Groups.Add(dto);
+                        else classGroup!.TiedMedalGroups.Add(dto);
 
                         // Build a public-friendly footnote when the group is resolved.
                         if (g.Resolved && g.Shooters.Count >= 2)
@@ -3787,11 +3854,30 @@ namespace HpskSite.Controllers
                             {
                                 var medalNouns = ShootOffService.MedalNounsForRange(g.FirstRank, g.LastRank);
                                 var parts = ordered.Select(s => $"{s.Name} {s.ShootOffScore}");
-                                classGroup.ShootOffNotes.Add(
-                                    $"Särskjutning avgjorde {medalNouns}: {string.Join(" vs ", parts)}");
+                                var note = $"Särskjutning avgjorde {medalNouns} i {groupKey}: {string.Join(" vs ", parts)}";
+                                if (categoryTies != null)
+                                {
+                                    categoryTies.ShootOffNotes.Add(note);
+
+                                    // Den publika resultatsidan renderar fotnoter PER KLASSTABELL.
+                                    // Ligger noten bara på kategorin blir en avgjord särskjutning
+                                    // osynlig för läsaren, så den upprepas under varje klass som
+                                    // en av de tiade skyttarna står i. Noten namnger finalklassen,
+                                    // så det framgår att medaljen avgjordes där och inte i klassen.
+                                    foreach (var cg in classGroups.Where(cg =>
+                                                 cg.Shooters.Any(sh => g.Shooters.Any(ts => ts.MemberId == sh.MemberId
+                                                     && ts.ShootingClass == sh.ShootingClass))))
+                                    {
+                                        if (!cg.ShootOffNotes.Contains(note)) cg.ShootOffNotes.Add(note);
+                                    }
+                                }
+                                else classGroup!.ShootOffNotes.Add(note);
                             }
                         }
                     }
+
+                    if (categoryTies != null && categoryTies.Groups.Count > 0)
+                        medalCategoryTies.Add(categoryTies);
                 }
             }
 
@@ -3922,7 +4008,8 @@ namespace HpskSite.Controllers
                 CompetitionId = competitionId,
                 UpdatedAt = DateTime.Now,
                 IsOfficial = true,
-                ClassGroups = classGroups
+                ClassGroups = classGroups,
+                MedalCategoryTies = medalCategoryTies
             };
         }
 

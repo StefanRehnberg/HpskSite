@@ -261,6 +261,27 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public DateTime UpdatedAt { get; set; }
         public bool IsOfficial { get; set; } = true;
         public List<PrecisionClassGroup> ClassGroups { get; set; } = new();
+
+        /// <summary>
+        /// Oavgjorda medaljstrider per MÄSTERSKAPSKATEGORI (finalklass) — "C", "C Dam",
+        /// "C Vet Y", "A", "B" osv.
+        ///
+        /// ⚠️ Särskjutning avgör en MEDALJ, och medaljen delas ut per finalklass efter
+        /// finalen — aldrig per skicklighetsklass (C1/C2/C3) och aldrig bland skyttar som
+        /// inte gick till final. Därför bor de här grupperna på tävlingsnivå och inte på
+        /// <see cref="PrecisionClassGroup.TiedMedalGroups"/>: resultatlistans grupper är
+        /// skicklighetsklasser, vilket är en annan indelning än medaljens.
+        /// Se ChampionshipCategory.
+        /// </summary>
+        public List<PrecisionMedalCategoryTies> MedalCategoryTies { get; set; } = new();
+    }
+
+    /// <summary>Medaljstriderna i en mästerskapskategori (finalklass).</summary>
+    public class PrecisionMedalCategoryTies
+    {
+        public string CategoryName { get; set; } = "";
+        public List<PrecisionTiedMedalGroup> Groups { get; set; } = new();
+        public List<string> ShootOffNotes { get; set; } = new();
     }
 
     /// <summary>
