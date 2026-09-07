@@ -1574,6 +1574,16 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     configuration.Teams[i].TeamNumber = i + 1;
                 }
 
+                // ⚠️ Omnumreringen ovan är avsiktlig, men den gör att DET REDIGERADE skjutlaget
+                // kan byta nummer — och då står ett ANNAT skjutlag kvar under det gamla numret
+                // med sina egna orörda värden. Rapporterat 2026-09-07 som "inget sparas": allt
+                // sparades, kortet flyttade sig bara ur synfältet. `team` är samma objekt genom
+                // sorteringen, så dess TeamNumber ÄR det nya numret. Skicka tillbaka det så
+                // klienten kan säga vart laget tog vägen i stället för att låta användaren tro
+                // att sparandet inte gick igenom.
+                var newTeamNumber = team.TeamNumber;
+                var moved = newTeamNumber != request.TeamNumber;
+
                 // Get competition name
                 var competitionId = startList.GetValue<int>("competitionId");
                 var competition = _contentService.GetById(competitionId);
@@ -1592,7 +1602,17 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     // Publish to make changes visible on frontend
                     _contentService.Publish(startList, new[] { "*" }, -1);
-                    return Json(new { success = true, message = "Skjutlaget har uppdaterats och skjutlagen har sorterats om." });
+                    return Json(new
+                    {
+                        success = true,
+                        teamNumber = newTeamNumber,
+                        previousTeamNumber = request.TeamNumber,
+                        moved,
+                        message = moved
+                            ? $"Sparat. Skjutlaget ligger nu som Skjutlag {newTeamNumber} "
+                              + $"(var {request.TeamNumber}) — skjutlagen numreras efter starttid."
+                            : "Skjutlaget har uppdaterats."
+                    });
                 }
                 else
                 {

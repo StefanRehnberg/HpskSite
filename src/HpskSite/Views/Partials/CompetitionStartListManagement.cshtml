@@ -50,6 +50,25 @@
         border: 1px solid var(--bs-border-color) !important;
     }
 
+    /* Blinkar det skjutlag som just sparades. Behövs för att omnumreringen (Skjutlag 1 kan
+       bli Skjutlag 4 när tiden ändras) inte ska läsa som ett misslyckat sparande.
+       ⚠️ Dubblera snabelan i Razor (@@keyframes, @@media) — ett ENSAMT snabel-a följt av
+       mellanslag är ett kompileringsfel, även inne i en CSS-kommentar som denna. */
+    @@keyframes teamCardFlash {
+        0%   { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.75); }
+        30%  { box-shadow: 0 0 0 6px rgba(13, 110, 253, 0.45); }
+        100% { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0); }
+    }
+
+    .team-card-flash {
+        animation: teamCardFlash 1.2s ease-out 2;
+        border-color: var(--bs-primary) !important;
+    }
+
+    @@media (prefers-reduced-motion: reduce) {
+        .team-card-flash { animation: none; }
+    }
+
     /* Mobile optimizations */
     @@media (max-width: 767.98px) {
         /* Full screen modal on mobile */
@@ -1408,11 +1427,13 @@ function refreshStartListDisplay() {
     }
 }
 
-// Load start list data from API
+// Load start list data from API.
+// Returnerar fetch-promisen så anropare kan göra något EFTER att korten ritats om —
+// t.ex. rulla till det skjutlag som just flyttade sig (se confirmUpdateTeamTimes).
 function loadStartListForEditing(startListId) {
     // Add cache-busting parameter to ensure fresh data after edits
     const cacheBuster = new Date().getTime();
-    fetch(`/umbraco/surface/PrecisionStartList/GetStartListForEditing?startListId=${startListId}&_=${cacheBuster}`, {
+    return fetch(`/umbraco/surface/PrecisionStartList/GetStartListForEditing?startListId=${startListId}&_=${cacheBuster}`, {
         cache: 'no-store'  // Prevent browser caching
     })
         .then(response => response.json())
@@ -2450,13 +2471,38 @@ function confirmUpdateTeamTimes() {
             date: document.getElementById('editTeamDate').value || ''
         })
     })
-    .then(response => response.json())
+    // ⚠️ Läs INTE svaret som JSON utan att först titta på statuskoden. Ett avvisat
+    // antiforgery-token är ett TOMT 400 — då kastar response.json() ett SyntaxError som
+    // landar i .catch och blir "Ett oväntat fel uppstod", vilket inte säger något om att
+    // sidan bara behöver laddas om. Mätt 2026-09-07 på en sida som stått öppen en stund.
+    .then(async response => {
+        if (response.status === 400) {
+            const body = await response.text();
+            if (!body) {
+                showAlert('danger', 'Sparandet avvisades — sidan har varit öppen för länge. '
+                                  + 'Ladda om sidan och försök igen.', 9000);
+                return null;
+            }
+        }
+        if (!response.ok) {
+            showAlert('danger', `Kunde inte uppdatera skjutlaget (fel ${response.status}).`);
+            return null;
+        }
+        return response.json();
+    })
     .then(data => {
+        if (data === null) return;   // redan rapporterat ovan
         if (data.success) {
-            showAlert('success', data.message || 'Skjutlaget har uppdaterats.');
+            // Ett sparat skjutlag kan ha BYTT NUMMER (listan numreras om efter starttid), och
+            // då står ett annat skjutlag kvar under det gamla numret. Utan att peka ut vart
+            // laget tog vägen läser det som "ingenting sparades" — det var precis den
+            // felrapporten 2026-09-07. Kvittot får längre livstid när laget flyttat.
+            showAlert('success', data.message || 'Skjutlaget har uppdaterats.',
+                      data.moved ? 9000 : 5000);
             editorHasChanges = true;  // Mark that changes were made
             editTeamTimesModal.hide();
-            loadStartListForEditing(window.currentStartListId);
+            loadStartListForEditing(window.currentStartListId)
+                .then(() => highlightTeamCard(data.teamNumber));
         } else {
             showAlert('danger', data.message || 'Kunde inte uppdatera tiderna.');
         }
@@ -2465,6 +2511,19 @@ function confirmUpdateTeamTimes() {
         console.error('Error updating team times:', error);
         showAlert('danger', 'Ett oväntat fel uppstod.');
     });
+}
+
+// Rulla fram och blinka det skjutlagskort som just sparades, så att en omnumrering
+// syns i stället för att se ut som ett misslyckat sparande.
+function highlightTeamCard(teamNumber) {
+    if (!teamNumber) return;
+    const card = document.querySelector(`.team-card[data-team-number="${teamNumber}"]`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('team-card-flash');
+    void card.offsetWidth;            // tvinga omstart av animationen vid upprepade sparanden
+    card.classList.add('team-card-flash');
+    setTimeout(() => card.classList.remove('team-card-flash'), 2600);
 }
 
 // Show error in editor
