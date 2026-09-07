@@ -906,11 +906,24 @@ namespace HpskSite.Services
                         // hard-coded PrecisionResultEntry query zeroed their team totals.
                         var resultTable = GetResultTableName(competitionType);
 
+                        // ⚠️ Resultatraderna MÅSTE begränsas till lagets vapengrupp. Samma fälla
+                        // som Springskyttegrenen ovan redan nålar med `teamWeaponClass`: en skytt
+                        // anmäld i C3 + B3 + A3 har tre rader med SeriesNumber = 1, så en
+                        // ofiltrerad `Take(seriesToCount)` plockade sju serier ur BLANDADE
+                        // vapengrupper — varken lagets grupp eller ens stabilt mellan körningar.
+                        // Precisionsfamiljen fick aldrig den behandling Springskytte fick.
+                        var teamClassKeys = TeamClassHelper
+                            .GetCompatibleIndividualClasses(classGroup.Key, isSpringskytte: false)
+                            .Select(ShootingClasses.NormalizeKey)
+                            .ToHashSet();
+
                         foreach (var member in coreMembers)
                         {
-                            var entries = await db.FetchAsync<PrecisionResultEntry>(
+                            var allEntries = await db.FetchAsync<PrecisionResultEntry>(
                                 $"SELECT * FROM {resultTable} WHERE CompetitionId = @0 AND MemberId = @1 ORDER BY SeriesNumber",
                                 competitionId, member.MemberId);
+
+                            var entries = ScopeEntriesToTeamClass(allEntries, classGroup.Key, teamClassKeys);
 
                             if (entries.Any())
                             {
@@ -1244,6 +1257,55 @@ namespace HpskSite.Services
         /// and never with a stafett. Every stafett collides with every other stafett (always class C).
         /// Other disciplines keep their original, narrower rule: the exact same team class.
         /// </summary>
+        /// <summary>
+        /// De av en skytts resultatrader som hör till lagets vapengrupp, i serieordning.
+        ///
+        /// ⚠️ <c>ShootingClass</c> på en resultatrad förekommer i BÅDA strängformerna — dev har
+        /// både <c>"C Vet Y"</c> (Name) och <c>"C_Vet_Y"</c> (Id), och <c>"C2 Dam"</c> vid sidan
+        /// av <c>"A_opt_2"</c>. Ett rakt strängjämförande filter tappar därför rader TYST, så
+        /// båda sidor normaliseras genom <see cref="ShootingClasses.NormalizeKey"/>.
+        ///
+        /// Två avsiktliga eftergifter:
+        /// • En rad UTAN klass räknas som träff. Sådana rader är äldre än per-klasslagringen och
+        ///   det finns inget att särskilja på — att filtrera bort dem hade tagit resultatet från
+        ///   ett gammalt lag i stället för att rätta det.
+        /// • Skulle en skytt ha rader i två klasser som BÅDA ryms i lagklassen (t.ex. både C2 och
+        ///   C2 Dam) väljs den definierande klassen först, annars den med flest serier — ett
+        ///   godtyckligt men STABILT val. Det är ett datafel, och att blanda dem är sämre.
+        /// </summary>
+        private static List<PrecisionResultEntry> ScopeEntriesToTeamClass(
+            List<PrecisionResultEntry> entries, string teamClass, HashSet<string> teamClassKeys)
+        {
+            if (entries.Count == 0 || teamClassKeys.Count == 0) return entries;
+
+            static bool Blank(string? s) => string.IsNullOrWhiteSpace(s);
+
+            var scoped = entries
+                .Where(e => Blank(e.ShootingClass)
+                         || teamClassKeys.Contains(ShootingClasses.NormalizeKey(e.ShootingClass)))
+                .ToList();
+            if (scoped.Count == 0) return scoped;
+
+            var byClass = scoped
+                .Where(e => !Blank(e.ShootingClass))
+                .GroupBy(e => ShootingClasses.NormalizeKey(e.ShootingClass))
+                .ToList();
+            if (byClass.Count <= 1) return scoped;
+
+            var definingKeys = TeamClassHelper
+                .GetDefiningIndividualClasses(teamClass, isSpringskytte: false)
+                .Select(ShootingClasses.NormalizeKey)
+                .ToHashSet();
+
+            var chosen = byClass
+                .OrderByDescending(g => definingKeys.Contains(g.Key))
+                .ThenByDescending(g => g.Count())
+                .ThenBy(g => g.Key, StringComparer.Ordinal)
+                .First();
+
+            return chosen.OrderBy(e => e.SeriesNumber).ToList();
+        }
+
         /// <summary>
         /// Första laget i SAMMA VAPENGRUPP som redan håller någon av <paramref name="memberIds"/>,
         /// eller null. Bara för INLÅNADE skyttar (se lånevillkor 2 i CreateTeamAsync) — den
