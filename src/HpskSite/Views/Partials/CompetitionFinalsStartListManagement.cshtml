@@ -606,18 +606,23 @@
                          <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera</button>`
                     : `<button class="btn btn-success btn-sm" data-fn-action="publish" data-fn-group="${esc(group)}">
                          <i class="bi bi-check-circle me-1"></i>Publicera</button>`}
-                <button class="btn btn-outline-info btn-sm" data-fn-action="edit" data-fn-group="${esc(group)}">
-                    <i class="bi bi-pencil-square me-1"></i>Redigera
-                </button>
-                <button class="btn btn-outline-primary btn-sm" data-fn-action="open" data-fn-group="${esc(group)}">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>Öppna
-                </button>
+                @* ⚠️ BARA PUBLICERINGSVERBET STÅR SYNLIGT — samma regel som på Resultatfliken:
+                   synlig = steget du står på, menyn = allt annat. På en finalstartlista är
+                   steget att publicera; Redigera är en tillfällig rättelse och Öppna en
+                   förhandsvisning. Fyra knappar i fyra färgvarianter (success, outline-info,
+                   outline-primary, outline-secondary) på samma rad var dessutom en del av
+                   "olika design överallt". Rapporterat 2026-09-08. *@
                 <div class="dropdown">
                     <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
                             data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false">
                         <i class="bi bi-sliders me-1"></i>Åtgärder
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
+                        <li><button class="dropdown-item" data-fn-action="edit" data-fn-group="${esc(group)}">
+                            <i class="bi bi-pencil-square me-2"></i>Redigera listan</button></li>
+                        <li><button class="dropdown-item" data-fn-action="open" data-fn-group="${esc(group)}">
+                            <i class="bi bi-box-arrow-up-right me-2"></i>Öppna listan</button></li>
+                        <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Bygg om listan</h6></li>
                         <li><button class="dropdown-item" data-fn-action="wizard" data-fn-group="${esc(group)}">
                             <i class="bi bi-trophy me-2"></i>Mästerskapsfinal (gallring per klass)</button></li>
