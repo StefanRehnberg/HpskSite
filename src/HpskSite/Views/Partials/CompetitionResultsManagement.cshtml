@@ -658,50 +658,24 @@ function toggleResultsEntry(event) {
     }
 }
 
-async function createResultsList(event) {
+// ⚠️ "Uppdatera" RÄKNAR OM LISTAN och gör ingenting annat. Den frågar INTE om
+// klassammanslagning — det är ett beslut arrangören redan har fattat, och en omräkning
+// ska följa beslutet, inte kräva att det fattas på nytt.
+//
+// Förut analyserade den klasserna och tvingade fram sammanslagningsmodalen vid varje klick
+// så snart någon klass hade färre än fem deltagare — vilket på ett mästerskap är i stort
+// sett alltid. Skälet var inte pedagogiskt utan tekniskt: servern tolkade "inga merges" som
+// "rensa sammanslagningen", så en tyst uppdatering hade raderat arrangörens val.
+// `keepExistingMerges` skiljer nu "rör inte" från "rensa". Rapporterat 2026-09-08.
+//
+// Vill man ÄNDRA sammanslagningen finns knappen "Sammanfoga klasser" intill.
+function createResultsList(event) {
     if (event) event.stopPropagation();
 
     const competitionId = $('.competition-results-management').data('competition-id');
     if (!competitionId) { alert('Ingen tävling vald.'); return; }
 
-    const button = event?.target?.closest('button');
-    if (!button) return;
-    const originalText = button.innerHTML;
-    button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyserar...';
-    button.disabled = true;
-
-    try {
-        // Step 1: Analyze classes for merge suggestions
-        const resp = await fetch(`/umbraco/surface/CompetitionResults/AnalyzeClassMerges?competitionId=${competitionId}`);
-        const data = await resp.json();
-
-        if (!data.success) {
-            alert('Fel vid analys: ' + (data.message || 'Okänt fel'));
-            return;
-        }
-
-        if (!data.classes || data.classes.length === 0) {
-            // No results data yet
-            if (confirm('Det finns inga resultat att bearbeta ännu. Vill du skapa en tom resultatlista?')) {
-                submitCreateResultsList(competitionId, null);
-            }
-        } else if (data.suggestions && data.suggestions.length > 0) {
-            // Show merge modal
-            renderMergeModal(data.classes, data.suggestions);
-            new bootstrap.Modal(document.getElementById('classMergeModal')).show();
-        } else {
-            // No merges needed — proceed directly
-            if (confirm('Alla klasser har minst 5 deltagare. Vill du skapa/uppdatera resultatlistan?')) {
-                submitCreateResultsList(competitionId, null);
-            }
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Ett fel uppstod vid analys av klasser.');
-    } finally {
-        button.innerHTML = originalText;
-        button.disabled = false;
-    }
+    submitCreateResultsList(competitionId, null, true);
 }
 
 // Dedicated "Sammanfoga klasser" button. Unlike "Uppdatera" (which only pops the
@@ -854,16 +828,21 @@ function applyMergesAndCreateResults() {
     const competitionId = $('.competition-results-management').data('competition-id');
     const merges = collectMergeConfig();
     bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
-    submitCreateResultsList(competitionId, merges.length > 0 ? merges : null);
+    submitCreateResultsList(competitionId, merges.length > 0 ? merges : null, false);
 }
 
+// "Skapa utan sammanslagning" i dialogen är ett UTTRYCKLIGT val och rensar därför en
+// tidigare sparad sammanslagning — till skillnad från "Uppdatera", som lämnar den orörd.
 function submitCreateResultsListNoMerges() {
     const competitionId = $('.competition-results-management').data('competition-id');
     bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
-    submitCreateResultsList(competitionId, null);
+    submitCreateResultsList(competitionId, null, false);
 }
 
-function submitCreateResultsList(competitionId, merges) {
+// keepExisting = true → servern räknar om med den SPARADE sammanslagningen och lämnar den
+// orörd. false → `merges` ersätter konfigurationen (tom/null = uttryckligt "utan
+// sammanslagning", vilket rensar den).
+function submitCreateResultsList(competitionId, merges, keepExisting) {
     const btn = document.getElementById('btnCreateResultsList');
     if (btn) {
         btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Skapar...';
@@ -872,6 +851,7 @@ function submitCreateResultsList(competitionId, merges) {
 
     const body = { competitionId: parseInt(competitionId) };
     if (merges) body.merges = merges;
+    if (keepExisting) body.keepExistingMerges = true;
 
     fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
         method: 'POST',
@@ -973,12 +953,25 @@ async function loadResultsList() {
             const resultsCountEl = document.getElementById('resultsListCount');
             if (resultsCountEl) resultsCountEl.textContent = totalShooters;
 
-            // Load the result page in iframe using the URL from API
+            // Load the result page in iframe using the URL from API.
+            //
+            // ⚠️ SÄTT INTE OM src TILL SAMMA URL. Att tilldela src tvingar en omladdning av
+            // hela inbäddade resultatlistan, och eftersom loadResultsList() körs vid varje
+            // flikbesok såg det ut som att listan "byggdes om efter några sekunder" varje gång
+            // man gick in på Resultat — fördröjningen är serverberäkningen (~8 s på en
+            // mästerskapsstor tävling). Rapporterat 2026-09-08.
+            //
+            // `noRefresh=1` stänger av den publika sidans egen 15-sekunderspoll inne i
+            // inbäddningen: den finns för publiken på en storbildsskärm, medan arrangören
+            // som tittar på samma lista har en Uppdatera-knapp.
             if (data.resultPageUrl) {
+                const wanted = data.resultPageUrl
+                    + (data.resultPageUrl.includes('?') ? '&' : '?') + 'noRefresh=1';
                 currentResultPageUrl = data.resultPageUrl;
                 const iframe = document.getElementById('resultsManagementIframe');
-                if (iframe) {
-                    iframe.src = currentResultPageUrl;
+                if (iframe && iframe.getAttribute('data-loaded-src') !== wanted) {
+                    iframe.setAttribute('data-loaded-src', wanted);
+                    iframe.src = wanted;
                 }
             }
 
@@ -1154,17 +1147,30 @@ function openResultsInNewTab(event) {
 let _subMergeContext = false;
 let currentSubResultsListData = null;
 
-async function createSubResultsList(event) {
+// Deltävlingens "Uppdatera" — samma regel som huvudlistans: räkna om med den sparade
+// sammanslagningen, fråga ingenting.
+function createSubResultsList(event) {
+    if (event) event.stopPropagation();
+
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) { alert('Ingen tävling vald.'); return; }
+
+    submitCreateSubResultsList(competitionId, null, true);
+}
+
+// Deltävlingens "Sammanslagning..." — öppnar alltid dialogen.
+async function showSubMergeAnalysisModal(event) {
     if (event) event.stopPropagation();
 
     const competitionId = $('.competition-results-management').data('competition-id');
     if (!competitionId) { alert('Ingen tävling vald.'); return; }
 
     const button = event?.target?.closest('button');
-    if (!button) return;
-    const originalText = button.innerHTML;
-    button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyserar...';
-    button.disabled = true;
+    const originalText = button ? button.innerHTML : '';
+    if (button) {
+        button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyserar...';
+        button.disabled = true;
+    }
 
     try {
         const resp = await fetch(`/umbraco/surface/CompetitionResults/AnalyzeClassMerges?competitionId=${competitionId}&subCompetitionOnly=true`);
@@ -1176,34 +1182,24 @@ async function createSubResultsList(event) {
         }
 
         if (!data.classes || data.classes.length === 0) {
-            if (confirm('Det finns inga resultat i deltävlingen att bearbeta ännu. Vill du skapa en tom resultatlista?')) {
-                submitCreateSubResultsList(competitionId, null);
-            }
-        } else if (data.suggestions && data.suggestions.length > 0) {
-            _subMergeContext = true;
-            renderMergeModal(data.classes, data.suggestions);
-            new bootstrap.Modal(document.getElementById('classMergeModal')).show();
-        } else {
-            if (confirm('Alla klasser i deltävlingen har minst 5 deltagare. Vill du skapa/uppdatera deltävlingens resultatlista?')) {
-                submitCreateSubResultsList(competitionId, null);
-            }
+            alert('Det finns inga resultat i deltävlingen att slå samman ännu. Klicka på "Uppdatera" först.');
+            return;
         }
+        _subMergeContext = true;
+        renderMergeModal(data.classes, data.suggestions || []);
+        new bootstrap.Modal(document.getElementById('classMergeModal')).show();
     } catch (error) {
         console.error('Error:', error);
         alert('Ett fel uppstod vid analys av deltävlingens klasser.');
     } finally {
-        button.innerHTML = originalText;
-        button.disabled = false;
+        if (button) {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
     }
 }
 
-function showSubMergeAnalysisModal(event) {
-    // Same flow as the toolbar's "Uppdatera" — Sammanslagning is just an alias
-    // for re-running the analysis + applying merges in one click.
-    createSubResultsList(event);
-}
-
-function submitCreateSubResultsList(competitionId, merges) {
+function submitCreateSubResultsList(competitionId, merges, keepExisting) {
     const btn = document.getElementById('btnCreateSubResultsList');
     if (btn) {
         btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Skapar...';
@@ -1212,6 +1208,7 @@ function submitCreateSubResultsList(competitionId, merges) {
 
     const body = { competitionId: parseInt(competitionId), isSubCompetition: true };
     if (merges) body.merges = merges;
+    if (keepExisting) body.keepExistingMerges = true;
 
     fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
         method: 'POST',
@@ -1670,9 +1667,9 @@ async function toggleSubResultsOfficial(makeOfficial, event) {
         bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
         if (_subMergeContext) {
             _subMergeContext = false;
-            submitCreateSubResultsList(competitionId, merges.length > 0 ? merges : null);
+            submitCreateSubResultsList(competitionId, merges.length > 0 ? merges : null, false);
         } else {
-            submitCreateResultsList(competitionId, merges.length > 0 ? merges : null);
+            submitCreateResultsList(competitionId, merges.length > 0 ? merges : null, false);
         }
     };
     const _origSkip = window.submitCreateResultsListNoMerges;
@@ -1681,34 +1678,41 @@ async function toggleSubResultsOfficial(makeOfficial, event) {
         bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
         if (_subMergeContext) {
             _subMergeContext = false;
-            submitCreateSubResultsList(competitionId, null);
+            submitCreateSubResultsList(competitionId, null, false);
         } else {
-            submitCreateResultsList(competitionId, null);
+            submitCreateResultsList(competitionId, null, false);
         }
     };
 })();
 
-// Load results list when page loads or when tab is shown
+// Load results list when page loads or when the tab is first shown.
+//
+// ⚠️ EN GÅNG PER SIDLADDNING, inte vid varje flikbesök. Förut hämtades listan om varje
+// gång man gick in på Resultat — och hämtningen är en full omräkning som tar ~8 s på en
+// mästerskapsstor tävling, varefter inbäddningen laddades om inför ögonen på arrangören.
+// Dessutom hämtades den villkorslöst efter 1 s ÄVEN NÄR en annan flik var aktiv, så varje
+// sidladdning drog en omräkning ingen bett om.
+//
+// Varje skrivning (Uppdatera, publicera, särskjutningsinmatning) anropar loadResultsList()
+// själv, så färskheten efter en åtgärd är oförändrad. Vill man se en lista som någon annan
+// ändrat finns Uppdatera.
+let _resultsListLoadedOnce = false;
+function loadResultsListOnce() {
+    if (_resultsListLoadedOnce) return;
+    _resultsListLoadedOnce = true;
+    loadResultsList();
+    loadSubResultsList();
+}
+
 $(document).ready(function() {
-    // Try multiple selectors for different page contexts
     $('button[data-bs-target="#results"], #results-tab').on('shown.bs.tab', function () {
-        // Try to load results list when tab is shown
-        setTimeout(() => { loadResultsList(); loadSubResultsList(); }, 500);
+        setTimeout(loadResultsListOnce, 300);
     });
 
-    // Also try on page load if results tab is active
+    // Bara om Resultat är den aktiva fliken vid sidladdning.
     if ($('#results').hasClass('active') || $('#results').hasClass('show')) {
-        setTimeout(() => { loadResultsList(); loadSubResultsList(); }, 500);
+        setTimeout(loadResultsListOnce, 300);
     }
-
-    // Force load after a short delay to ensure everything is initialized
-    setTimeout(() => {
-        const competitionId = $('.competition-results-management').data('competition-id');
-        if (competitionId) {
-            loadResultsList();
-            loadSubResultsList();
-        }
-    }, 1000);
 });
 
 function refreshResults() {

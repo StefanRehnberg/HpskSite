@@ -317,6 +317,16 @@
     const competitionId = @(competition?.Id ?? 0);
     const refreshInterval = 15000; // 15 seconds
     let autoRefreshTimer = null;
+
+    // ⚠️ ?noRefresh=1 stänger av den här sidans egen 15-sekunderspoll. Sätts av
+    // administrationens inbäddning: pollen finns för publiken (och för storbildsskärmen),
+    // men i arrangörens inbäddade vy laddade den om listan under händerna på den som
+    // tittade på den, och arrangören har en Uppdatera-knapp i stället.
+    const suppressAutoRefresh = new URLSearchParams(window.location.search).get('noRefresh') === '1';
+    function startAutoRefresh() {
+        if (suppressAutoRefresh || autoRefreshTimer) return;
+        autoRefreshTimer = setInterval(loadResults, refreshInterval);
+    }
     let isOfficialResults = false;
     
     // Finals configuration
@@ -812,10 +822,7 @@
                     container.innerHTML = html;
                     
                     // Setup auto-refresh for preliminary results
-                    if (!isOfficialResults && !autoRefreshTimer) {
-                        console.log('Preliminary results - enabling auto-refresh');
-                        autoRefreshTimer = setInterval(loadResults, refreshInterval);
-                    }
+                    if (!isOfficialResults) startAutoRefresh();
                 } else {
                     container.innerHTML = `
                         <div class="alert alert-warning">
@@ -1064,9 +1071,7 @@
                 container.innerHTML = html;
 
                 // Auto-refresh for live results
-                if (!autoRefreshTimer) {
-                    autoRefreshTimer = setInterval(loadResults, refreshInterval);
-                }
+                startAutoRefresh();
             } catch (error) {
                 console.error('Error loading Springskytte results:', error);
                 container.innerHTML = `
@@ -1297,8 +1302,8 @@
             if (document.hidden && autoRefreshTimer) {
                 clearInterval(autoRefreshTimer);
                 autoRefreshTimer = null;
-            } else if (!document.hidden && !isOfficialResults && !autoRefreshTimer) {
-                autoRefreshTimer = setInterval(loadResults, refreshInterval);
+            } else if (!document.hidden && !isOfficialResults) {
+                startAutoRefresh();
             }
         });
 </script>

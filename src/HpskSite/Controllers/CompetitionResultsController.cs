@@ -2641,12 +2641,32 @@ namespace HpskSite.Controllers
                     results = results.Where(r => subIds.Contains(r.MemberId)).ToList();
                 }
 
+                // ⚠️ ATT UPPDATERA RESULTATLISTAN OCH ATT ÄNDRA KLASSAMMANSLAGNINGEN ÄR TVÅ
+                // OLIKA SAKER. Sammanslagningen är ett beslut arrangören redan har fattat, och
+                // en omräkning ska följa det beslutet — inte kräva att det fattas på nytt.
+                //
+                // Förut kunde klienten inte skicka "räkna om" utan att också säga något om
+                // sammanslagningen: <c>Merges == null</c> NOLLSTÄLLDE mergeConfig längre ner,
+                // så en Uppdatera utan modal raderade tyst arrangörens klassammanslagning.
+                // Därför tvingades modalen fram vid varje Uppdatera så snart någon klass hade
+                // färre än fem deltagare. Rapporterat 2026-09-08.
+                //
+                // Tre lägen, explicit åtskilda:
+                //   KeepExistingMerges = true  → använd den SPARADE konfigurationen, rör den inte
+                //   Merges = [...]             → ersätt konfigurationen
+                //   annars                     → rensa konfigurationen (uttryckligt "utan sammanslagning")
+                var mergesToApply = request.Merges;
+                if (request.KeepExistingMerges)
+                {
+                    mergesToApply = ReadStoredMerges(resultPage, request.IsSubCompetition);
+                }
+
                 FinalResults finalResults;
 
                 if (results.Any())
                 {
                     // Calculate fresh results from database
-                    finalResults = await CalculateFinalResults(results, competition.Id, request.Merges);
+                    finalResults = await CalculateFinalResults(results, competition.Id, mergesToApply);
                 }
                 else if (resultPage != null)
                 {
@@ -2698,7 +2718,11 @@ namespace HpskSite.Controllers
                 {
                     // Deltävling path: don't overwrite the main resultData / mergeConfig.
                     // Just persist the sub-comp merge config; live recompute when read.
-                    if (resultPage.HasProperty("subCompetitionMergeConfig"))
+                    if (request.KeepExistingMerges)
+                    {
+                        // Ren uppdatering — deltävlingens sammanslagning ligger kvar orörd.
+                    }
+                    else if (resultPage.HasProperty("subCompetitionMergeConfig"))
                     {
                         resultPage.SetValue("subCompetitionMergeConfig", request.Merges?.Any() == true
                             ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
@@ -2719,10 +2743,14 @@ namespace HpskSite.Controllers
                     resultPage.SetValue("isOfficial", existingIsOfficial); // Keep existing status
                     resultPage.SetValue("resultType", "Final Results");
 
-                    // Persist merge config so GetResultsList can re-apply on preliminary reload
-                    resultPage.SetValue("mergeConfig", request.Merges?.Any() == true
-                        ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
-                        : "");
+                    // Persist merge config so GetResultsList can re-apply on preliminary reload.
+                    // ⚠️ RÖR DEN INTE vid en ren uppdatering — se resonemanget ovan.
+                    if (!request.KeepExistingMerges)
+                    {
+                        resultPage.SetValue("mergeConfig", request.Merges?.Any() == true
+                            ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
+                            : "");
+                    }
                 }
 
                 // Save and publish
@@ -3465,9 +3493,26 @@ namespace HpskSite.Controllers
 
 
         /// <summary>
-        /// MemberIds standing on the competition's finals start list, i.e. the shooters who
-        /// were taken through to the final. Returns an empty set when no finals start list
-        /// has been generated yet — callers must treat that as "unknown", not as "nobody".
+        /// De STARTER som står på tävlingens finalstartlistor — nycklade
+        /// <c>(MemberId, klass)</c> och inte bara på medlem. Tom mängd betyder att ingen
+        /// finalstartlista är genererad än, och anroparen måste läsa det som "vet inte",
+        /// aldrig som "ingen".
+        ///
+        /// ⚠️ NYCKELN MÅSTE BÄRA KLASSEN. En start är per (skytt, klass) i hela den här
+        /// kodbasen, och en skytt kan gå till final i en vapengrupp men gallras bort i en
+        /// annan — Ivan Slabiak är finalist i A, B och C på SSM 2026, medan andra är
+        /// finalister i A men utslagna i C. Med en medlemsbaserad mängd räknades ALLA en
+        /// finalists starter som medaljkandidater: mätt på SSM 2026 gav det 12 kandidater i
+        /// vapengrupp C och 16 i B där det bara finns 10 finalister i var grupp. Det gav
+        /// inget fel utfall där (en gallrad skytts sju serier når inte topp tre när
+        /// finalisterna har tio, och grinden nedan filtrerar dem innan finalresultaten är
+        /// inne), men det är fel fråga ställd, och den blev bredare när mängden 2026-09-08
+        /// blev en union över en finalstartlista per vapengrupp.
+        ///
+        /// ⚠️ Klassen normaliseras med <c>ShootingClasses.NormalizeKey</c>. Startlistan
+        /// lagrar klassens ID ("C_Vet_Y") medan <c>PrecisionShooterResult.ShootingClass</c>
+        /// bär visningsNAMNET ("C Vet Y"). En rak jämförelse ser rätt ut i all testning och
+        /// missar exakt veteran-, dam-, junior- och optikklasserna.
         /// </summary>
         /// <remarks>
         /// Read regardless of <c>isOfficialFinalsStartList</c> on purpose: that flag is reset
@@ -3480,9 +3525,9 @@ namespace HpskSite.Controllers
         /// slutar erbjuda särskjutning om deras medaljer. Att läsa EN lista var exakt rätt
         /// före den ändringen, vilket är varför det är värt en varning.
         /// </remarks>
-        private HashSet<int> GetFinalistMemberIds(int competitionId)
+        private HashSet<string> GetFinalistStarts(int competitionId)
         {
-            var finalists = new HashSet<int>();
+            var finalists = new HashSet<string>();
             try
             {
                 var children = _contentService.GetPagedChildren(competitionId, 0, 50, out _).ToList();
@@ -3513,7 +3558,13 @@ namespace HpskSite.Controllers
                         if (shooters == null) continue;
                         foreach (var shooter in shooters)
                         {
-                            if (shooter.MemberId > 0) finalists.Add(shooter.MemberId);
+                            if (shooter.MemberId <= 0) continue;
+                            // Saknar raden klass kan starten inte identifieras. Den räknas
+                            // ändå in på medlemsnivå ("*"), så en trasig eller mycket gammal
+                            // lista degraderar till det tidigare beteendet i stället för att
+                            // tappa en finalist helt.
+                            var cls = ShootingClasses.NormalizeKey(shooter.WeaponClass);
+                            finalists.Add(FinalistKey(shooter.MemberId, cls.Length > 0 ? cls : "*"));
                         }
                     }
                 }
@@ -3527,6 +3578,45 @@ namespace HpskSite.Controllers
             }
             return finalists;
         }
+
+        /// <summary>
+        /// Den sparade klassammanslagningen på resultatnoden, eller null.
+        ///
+        /// ⚠️ Null och tom lista betyder OLIKA saker för anroparen: null = "ingen sparad
+        /// konfiguration", tom = "arrangören har valt att inte slå samman". Båda ger samma
+        /// beräkning, men bara den ena får skrivas tillbaka.
+        /// </summary>
+        private List<ClassMergeAction>? ReadStoredMerges(IContent? resultPage, bool isSubCompetition)
+        {
+            if (resultPage == null) return null;
+            var prop = isSubCompetition ? "subCompetitionMergeConfig" : "mergeConfig";
+            if (!resultPage.HasProperty(prop)) return null;
+            var json = resultPage.GetValue<string>(prop);
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            try
+            {
+                return JsonConvert.DeserializeObject<List<ClassMergeAction>>(json);
+            }
+            catch (Exception ex)
+            {
+                // En trasig konfiguration får inte blockera en omräkning. Utan sammanslagning
+                // är listan råare men riktig, och operatören kan slå samman på nytt.
+                _logger.LogWarning(ex, "Could not read stored {Prop} for result page {Id}", prop, resultPage.Id);
+                return null;
+            }
+        }
+
+        /// <summary>Nyckelformen för finalistmängden: medlem + normaliserad klass.</summary>
+        private static string FinalistKey(int memberId, string normalizedClass) =>
+            memberId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + normalizedClass;
+
+        /// <summary>
+        /// Är den här STARTEN en finalist? Faller tillbaka på medlemsnivå ("*") för listor
+        /// vars rader saknar klass — se <see cref="GetFinalistStarts"/>.
+        /// </summary>
+        private static bool IsFinalistStart(HashSet<string> finalistStarts, int memberId, string? shootingClass) =>
+            finalistStarts.Contains(FinalistKey(memberId, ShootingClasses.NormalizeKey(shootingClass)))
+            || finalistStarts.Contains(FinalistKey(memberId, "*"));
 
         private async Task<FinalResults> CalculateFinalResults(List<PrecisionResultEntry> results, int competitionId, List<ClassMergeAction>? merges = null)
         {
@@ -3690,8 +3780,8 @@ namespace HpskSite.Controllers
                 // Who was taken to the final. Only looked up when there is a final to be taken
                 // to; an empty set means no finals start list exists yet, which is "unknown"
                 // rather than "nobody" — see the fallback in HasShotEverythingDue below.
-                var finalistMemberIds = hasFinalsRound ? GetFinalistMemberIds(competitionId) : new HashSet<int>();
-                var finalistsKnown = finalistMemberIds.Count > 0;
+                var finalistStarts = hasFinalsRound ? GetFinalistStarts(competitionId) : new HashSet<string>();
+                var finalistsKnown = finalistStarts.Count > 0;
 
                 // A tied shooter can be given a medal only once they have shot everything they
                 // were due to shoot: the qualifying series for everyone, plus the finals series
@@ -3708,7 +3798,11 @@ namespace HpskSite.Controllers
                     // With a finals round but no finals start list to read, we cannot tell who
                     // is due the finals series, so nobody counts as finished. That is what
                     // keeps a plain qualifying-round tie from being mistaken for a medal tie.
-                    int lastSeriesDue = !hasFinalsRound || (finalistsKnown && !finalistMemberIds.Contains(shooter.MemberId))
+                    // ⚠️ Frågan är om DEN HÄR STARTEN gick till final, inte om skytten gjorde
+                    // det i någon klass. En skytt som är finalist i A men gallrad i C ska
+                    // bedömas på sju serier i sin C-start och på tio i sin A-start.
+                    int lastSeriesDue = !hasFinalsRound
+                        || (finalistsKnown && !IsFinalistStart(finalistStarts, shooter.MemberId, shooter.ShootingClass))
                         ? qualificationSeriesCount
                         : numberOfSeriesOrStations;
 
@@ -3749,7 +3843,7 @@ namespace HpskSite.Controllers
                     // HasShotEverythingDue, annars är vi tillbaka i kvalrundefelet.
                     var contenders = finalistsKnown
                         ? classGroups.SelectMany(cg => cg.Shooters)
-                            .Where(s => finalistMemberIds.Contains(s.MemberId))
+                            .Where(s => IsFinalistStart(finalistStarts, s.MemberId, s.ShootingClass))
                             .ToList()
                         : new List<PrecisionShooterResult>();
 
@@ -4390,6 +4484,16 @@ namespace HpskSite.Controllers
     {
         public int CompetitionId { get; set; }
         public List<HpskSite.Services.ClassMergeAction>? Merges { get; set; }
+
+        /// <summary>
+        /// Räkna om listan med den SPARADE klassammanslagningen och lämna den orörd.
+        ///
+        /// ⚠️ Det här är vad knappen "Uppdatera" gör. Utan flaggan var <c>Merges = null</c>
+        /// tvetydigt — det betydde både "rör inte" och "rensa", och koden valde att rensa,
+        /// vilket tyst raderade arrangörens sammanslagning. Sätt den ALDRIG från
+        /// sammanslagningsdialogen: den ska kunna både ersätta och rensa.
+        /// </summary>
+        public bool KeepExistingMerges { get; set; }
         /// <summary>When true, persist merges to subCompetitionMergeConfig and treat the
         /// result generation as the Deltävling subset. The main resultData snapshot is
         /// left untouched.</summary>
