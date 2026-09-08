@@ -4324,6 +4324,38 @@ försvinner när det inte finns plats medan ordet och punkten bär tillståndet 
 - `Avpublicera` är `btn-outline-secondary`, inte `outline-warning`: det är ett steg tillbaka,
   inte en varning — och den gula knappen satt intill en gul tillståndsbricka.
 
+**⚠️ VAD SOM ÄR SYNLIGT OCH VAD SOM HÖR I MENYN — regeln är EN:**
+
+> **Synlig = steget du står på. Menyn = allt annat.**
+
+| Yta | Synligt | I Åtgärder |
+|---|---|---|
+| Resultatlistan | `Uppdatera` · `Publicera`/`Avpublicera` | Prisutdelningslistan, Öppna i ny flik |
+| Finalstartlista per vapengrupp | `Publicera`/`Avpublicera` | Redigera listan, Öppna listan, + *Bygg om listan* (3 metoder) |
+| Startlistor – grundomgång | `Skapa ny startlista`/`Regenerera` · `Publicera`/`Avpublicera` · `Till finalen` | — |
+
+Finalkorten bar tidigare FYRA knappar i FYRA färgvarianter (`success`, `outline-info`,
+`outline-primary`, `outline-secondary`) där bara en var steget; `Redigera` är en tillfällig
+rättelse och `Öppna` en förhandsvisning. Flyttade in 2026-09-08, vilket också tog bort två
+färgvarianter ur raden.
+
+**⚠️ `Uppdatera` och `Publicera` stannar SYNLIGA på Resultatfliken — det är ett medvetet nej
+till att lägga dem i menyn** (frågan ställdes 2026-09-08). `Uppdatera` trycks många gånger
+under en tävlingsdag (mata in → uppdatera → kontrollera → rätta), så en meny kostar ett extra
+klick per varv hela dagen. Och `Publicera` är den mest konsekvensrika handlingen på fliken:
+frågan *"vad gör jag nu?"* ska gå att besvara utan att öppna något. **En meny gömmer vad som är
+möjligt** — på en arbetsflödessida blir det en gåta, inte ordning. Konsekvensen pekar samma
+väg: Startlistor visar redan sitt primära verb synligt, så *primärt verb synligt* ÄR den
+genomgående regeln.
+
+**⚠️ `Till finalen` är ett medvetet undantag och får INTE flyttas till en meny.** Knappen finns
+just för att finalsektionen ligger under skärmkanten (grundomgångens iframe är 800 px) — den
+byggdes för att lösa "Kalle hittade inte finalen". I en meny gömmer den sig själv igen.
+
+**⚠️ Klickbindningen i finalpartialen är `querySelectorAll('[data-fn-action]')`** utan
+strukturkrav, vilket är varför knapparna kunde flyttas in i menyn utan att tappa sin hanterare.
+Byt aldrig den selektorn mot en som antar var i markupen knappen sitter.
+
 **KANONISK RUBRIKORDNING på varje kollapsbar sektion, vänster → höger:**
 
 ```
