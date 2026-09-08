@@ -3688,6 +3688,87 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 - `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
 - `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
+### Resultatfliken: Uppdatera är inte samma sak som att slå samman klasser (2026-09-08)
+
+Tre klagomål ur skarp användning, alla på Resultat-fliken.
+
+**1. ⚠️⚠️ "Uppdatera" tvingade fram sammanslagningsdialogen vid VARJE klick — och orsaken
+var att `Merges = null` betydde RENSA.** `CreateResultsList` skrev
+`mergeConfig = ""` så snart anroparen inte skickade några merges, så en tyst omräkning hade
+raderat arrangörens klassammanslagning. Därför analyserade klienten klasserna först och
+poppade modalen så snart någon klass hade färre än fem deltagare — vilket på ett mästerskap
+är i stort sett alltid. Sammanslagningen är ett beslut arrangören redan har fattat; en
+omräkning ska följa det, inte kräva att det fattas på nytt.
+
+**`CreateResultsListRequest.KeepExistingMerges` skiljer nu "rör inte" från "rensa"**, och det
+är tre lägen som måste hållas isär:
+- `KeepExistingMerges = true` → räkna om med den SPARADE konfigurationen, skriv inte över den.
+  Det är vad **Uppdatera** gör. `ReadStoredMerges` läser den; skrivningen ligger i
+  `if (!request.KeepExistingMerges)`.
+- `Merges = [...]` → ersätt konfigurationen (**Skapa med sammanslagning**).
+- Varken eller → rensa (**Skapa utan sammanslagning**, ett uttryckligt val).
+
+Sätt ALDRIG flaggan från sammanslagningsdialogen — den ska kunna både ersätta och rensa.
+Samma tre lägen gäller deltävlingens `subCompetitionMergeConfig`.
+
+Knappen **"Sammanfoga klasser"** fanns redan och öppnar dialogen på begäran; deltävlingens
+motsvarighet delegerade felaktigt till sin Uppdatera och har nu en egen
+`showSubMergeAnalysisModal`. ⚠️ Alla anropare av `submitCreateResultsList` /
+`submitCreateSubResultsList` skickar nu keepExisting **explicit** — det finns fyra
+anropsställen per variant (verktygsraden, dialogens två knappar, och den senare IIFE:n som
+patchar dialogens handlare för deltävlingskontexten), och en utelämnad parameter blir
+`undefined` → falsy → tyst rensning.
+
+**2. ⚠️ Listan byggdes om vid varje flikbesök.** `loadResultsList()` kördes på
+`shown.bs.tab` *och* villkorslöst efter 1 s vid varje sidladdning — **även när en annan flik
+var aktiv**. Hämtningen är en full omräkning (mätt: 8–16 s på SSM 2026:s 1174 resultatrader),
+och därefter sattes `iframe.src` om till samma URL, vilket tvingar en omladdning av hela den
+inbäddade listan. Följden lästes som "listan byggs om efter några sekunder varje gång jag
+går in".
+- `loadResultsListOnce` kör **en gång per sidladdning**; den villkorslösa 1-sekundshämtningen
+  är borta. Varje skrivning (Uppdatera, publicera, särskjutningsinmatning) anropar
+  `loadResultsList()` själv, så färskheten efter en åtgärd är oförändrad.
+- **`iframe.src` sätts bara när den ändras** (`data-loaded-src`).
+- **`?noRefresh=1`** stänger av den publika resultatsidans egen 15-sekunderspoll inne i
+  administrationens inbäddning. Pollen finns för publiken och storbildsskärmen; i
+  arrangörens vy laddade den om listan under händerna på den som tittade, och arrangören har
+  en Uppdatera-knapp. Alla tre timer-ställen i `CompetitionResult.cshtml` går nu genom
+  `startAutoRefresh()`, så flaggan kan inte kringgås av ett fjärde.
+
+**3. Finalistmängden nycklas på (medlem, KLASS)** — se nästa avsnitt.
+
+Verifierat i webbläsaren på SSM 2026: en enda hämtning vid första besöket och **ingen** vid
+återbesök; ingen "enabling auto-refresh" i konsolen; Uppdatera kör rakt igenom utan dialog.
+Bevarandet mätt genom att bygga tillståndet: sammanslagning tillagd (`mergeConfig` 88 tecken)
+→ Uppdatera → **ordagrant oförändrad** → "Skapa utan sammanslagning" rensade den, och dev är
+tillbaka i utgångsläget.
+
+### Finalistmängden nycklas på (medlem, KLASS) (2026-09-08)
+
+`GetFinalistMemberIds` → **`GetFinalistStarts`**, en mängd av `"{memberId}|{klass}"`.
+
+**En start är per (skytt, klass) i hela den här kodbasen, och en skytt kan gå till final i en
+vapengrupp men gallras bort i en annan.** Ivan Slabiak är finalist i A, B och C på SSM 2026;
+andra är finalister i A men utslagna i C. Med en medlemsbaserad mängd räknades ALLA en
+finalists starter som medaljkandidater — mätt på SSM 2026 gav det **12 kandidater i
+vapengrupp C och 16 i B där det bara finns 10 finalister i var grupp**.
+- Det gav inget fel utfall där: en gallrad skytts sju serier når inte topp tre när
+  finalisterna har tio, och innan finalresultaten är inne filtreras båda av
+  `HasShotEverythingDue`. Men det är fel fråga ställd, och den blev bredare när mängden blev
+  en union över en lista per vapengrupp.
+- Grinden frågar nu om **den här starten** gick till final: en skytt bedöms på sju serier i
+  sin C-start och på tio i sin A-start.
+- ⚠️ **Klassen normaliseras med `ShootingClasses.NormalizeKey`.** Startlistan lagrar
+  klassens ID ("C_Vet_Y"), `PrecisionShooterResult.ShootingClass` bär visningsNAMNET
+  ("C Vet Y"). En rak jämförelse ser rätt ut i all testning och missar exakt veteran-, dam-,
+  junior- och optikklasserna.
+- ⚠️ **Rader utan klass får nyckeln `"*"`** och matchar hela medlemmen, så en trasig eller
+  mycket gammal lista degraderar till det tidigare beteendet i stället för att tappa en
+  finalist helt.
+
+Utfallet oförändrat efter fixen: SSM 2026 visar exakt två medaljstrider — C brons 476
+(avgjord 47–46) och A brons 470 (kvar) — vilket är vad databasen självständigt räknat fram.
+
 ### EN finalstartlista PER VAPENGRUPP (2026-09-08)
 
 **En vapengrupps final är EN skjutsession: eget datum, egen starttid, egen publicering.**
