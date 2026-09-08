@@ -3688,6 +3688,125 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 - `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
 - `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
+### EN finalstartlista PER VAPENGRUPP (2026-09-08)
+
+**En vapengrupps final är EN skjutsession: eget datum, egen starttid, egen publicering.**
+SSM 2026 skjuter C med final på lördagseftermiddagen, A med final på söndag förmiddag och B
+på söndag eftermiddag. Fram till nu fanns **en** `finalsStartList`-nod per tävling, och det
+gick därför inte att ha C:s lista publicerad medan A:s var ett utkast.
+
+**⚠️⚠️ Och värre: `PersistFinalsStartListAsync` satte `isOfficialFinalsStartList = false`
+vid VARJE generering.** Att lägga till A på söndagen **avpublicerade alltså C:s redan
+publicerade lista, tyst**, mitt i tävlingen. Flaggan **bevaras** nu på en befintlig lista och
+sätts false bara på en NY nod; att en publicerad lista uppdaterades rapporteras i svaret
+(`FinalsPersistNote`) i stället för att listan försvinner från den publika sidan.
+
+**TVÅ AXLAR, och att blanda dem är hela buggförrådet i det här området:**
+- **Mellan listorna går VAPENGRUPPEN** — en skjutsession. `ChampionshipCategory.WeaponGroupFor`
+  (= `For(cls, splitGroupC: false)`, med flit implementerad så de två axlarna inte kan glida
+  isär) och `WeaponGroupForClasses` för en resultatlistegrupp.
+- **Inuti en lista går MÄSTERSKAPSKATEGORIN** (C öppen, Dam C, Vet Y C, Vet Ä C, Jun C) — vem
+  som tävlar om vilken medalj. Klasserna 1–3 delar medalj.
+
+**Gruppen ligger i `configurationData` (`StartListSettings.WeaponGroup`), INTE som en
+doctype-egenskap.** Medvetet: `SetValue` på en saknad egenskap är en TYST no-op, och en
+uppdelning som tappar sin gruppmärkning slår ihop alla finaler igen utan att något säger
+till. **`FinalsWeaponGroup.FromConfigurationData` är enda platsen den läses** (controllern OCH
+den publika tävlingssidan går dit). Läs den ALDRIG ur nodens namn — namnet sätts för att ge
+ett läsbart URL-segment ("finalstartlista-c") och kan ändras i backoffice.
+- **Ingen migrering behövdes:** saknas stämpeln HÄRLEDS gruppen ur skyttarnas klasser, så en
+  befintlig lista som bara innehåller C-skyttar blir C-listan av sig själv. Verifierat på
+  SSM 2026 i dev: nod 9000 adopterades som C, nod 9001 skapades för A.
+- **En äldre lista som spänner över flera vapengrupper** ger `""` = heltävlingslista, och
+  **adopteras av den första gruppen som genereras**. Att lämna den kvar hade dubbelräknat
+  finalister i unionen nedan. Inget går förlorat — resultatrader är nycklade
+  (tävling, medlem, klass, serie) och rörs inte av vilken startlista som finns.
+
+**⚠️⚠️ `GetFinalistMemberIds` MÅSTE UNIONERA ÖVER ALLA LISTOR.** Den läste
+`FirstOrDefault`, vilket var exakt rätt före den här ändringen. Med en lista per vapengrupp
+blir alla andra gruppers finalister då "inte finalister", och **särskjutningsgrinden slutar
+erbjuda särskjutning om deras medaljer** — tyst, eftersom tom mängd betyder "vet inte".
+Verifierat efter ändringen: SSM:s 476-strid i vapengrupp C står kvar som EN grupp.
+- **De andra läsarna var redan N-säkra** (de itererar `.Where(alias == ...)`):
+  `MyScheduleService`, `RegistrationClubPropagationService`,
+  `PrecisionFamilyStartListCleanupSource`. `PrecisionFamilyStartListCoverageSource` täcker
+  medvetet bara kvallistor. Kontrollera nya läsare mot den listan.
+
+**⚠️ SKJUTLAGSNUMREN ÄR UNIKA INOM EN LISTA, INTE MELLAN LISTOR.** Både C:s och A:s final kan
+ha ett skjutlag 1, och "fortsätt i samma ordning" behåller dessutom kvalets nummer med flit —
+det är hela löftet i det läget. `/station?c=X&s=N&phase=finals` blev därmed tvetydigt, så
+**varje finallänk bär `&fsl=<nodId>`** och inmatningsskärmen väljer lista på den. Saknas
+parametern tas första listan, vilket är hur ytan betedde sig förut (gamla bokmärken).
+**Att i stället omnumrera skjutlagen över listorna vore fel** — det skulle bryta clone-löftet.
+
+**Datumet stämplas på SKJUTLAGEN** (`StartListTeam.Date`), inte på noden: det är där
+`/mitt-schema` och kalenderexporten redan läser det, och `StartTime` är bara "HH:mm" så utan
+datum kan söndagens A-final inte ordnas efter lördagens C-final.
+
+**Endpoints tar nu en `WeaponGroup`** (obligatorisk på båda genereringsvägarna; `GetFinalsConfig`,
+`SaveFinalsConfig` och `PreviewFinalsConfig` scopar per grupp — utan det skriver A:s
+skjutlagsnummer över C:s, eftersom konfigurationen bor på gruppens egen nod).
+`GetFinalsStartList` returnerar **`Lists`** (alla listor); de gamla toppnivåfälten beskriver
+första listan och finns kvar för äldre anropare. `PublishFinalsStartList` tog redan ett nod-id
+och är alltså per lista utan ändring.
+
+### Startlistor-fliken: Kalle hittade inte finalen (2026-09-08)
+
+Rapporterat som en genomgång med "Kalle, som inte kan så mycket om pistol.nu". Tre fel, och
+alla tre var UX och inte funktion:
+
+1. **`+ Skapa ny startlista` låg UTANFÖR kortet**, ovanför båda sektionerna — så den som
+   ville skapa en FINALstartlista klickade rimligtvis på knappen som skapar grundomgångens.
+   Den bor nu i grundomgångskortets rubrikrad. **Id:t `generateStartListBtn` är oförändrat**
+   (JS återställer sin egen etikett på det); det tomma läget har en EGEN knapp med eget id,
+   eftersom två element med samma id gör det andra dött för `getElementById`.
+2. **Rubriken sa "Startlista"** på en tävling som har två slags startlistor. Nu
+   **"Startlistor – grundomgång"** respektive **"Startlistor – final"**, men bara när
+   `numberOfFinalSeries > 0` — utan finalserier betyder "grundomgång" ingenting för arrangören.
+3. **Ingen väg till A-finalen fanns på skärmen.** Enda vägen hette "Skapa om / byt metod",
+   vilket läser som att man förlorar det man har — fast operationen var ADDITIV. Finalkortet
+   bär nu **en rad per mästerskapsklass** med sitt eget tillstånd och **"Lägg till i finalen"**
+   (låser klassen + genererar om gruppen).
+
+**Kollaps, inte underflikar** (avgjort med Stefan). Flikar är för parallella, jämbördiga vyer;
+grundomgång → lås → final är en sekvens med beroende, och en flik hade gjort finalsektionen
+HELT osynlig tills någon klickar — "måste skrolla" utbytt mot "måste veta att den finns". Ett
+ihopfällt kort behåller sin rubrik, alltså strikt bättre på just den punkten. Två `nav-tabs`-rader
+ovanpå varandra är dessutom en känd fella (jfr klubbens 13 underflikar som fick bli en räls).
+- **Ihopfällt döljs bara KROPPEN** — rubrik, statusbricka, antal och knappar ligger i
+  rubrikraden och står kvar. Sortera, göm inte.
+- **Autokollaps av grundomgången är HÄRLETT och körs EN gång per sidladdning**
+  (`maybeCollapseQualifyingOnce`): bara när listan är publicerad OCH tävlingen har finaler.
+  `loadStartLists()` körs om efter varje redigering, så utan spärren skulle kortet fällas ihop
+  under händerna på den som just fällt ut det.
+- Grundomgångskortet bär en 800 px iframe, så finalsektionen ligger under skärmkanten på varje
+  laptop även ihopfälld — därför knappen **"Till finalen"**, som också FÄLLER UT
+  finalsektionen (`window.hpskGoToFinalsSection`). Att bara rulla dit hade landat på en
+  ihopfälld rubrik, vilket läser som att sektionen är tom.
+
+**⚠️ Framgångskvitton är en INLINE-NOTIS, inte `alert()`.** Första utsågan la
+`alert(meddelandet)` på genereringens framgångsväg — en modal dialogruta som blockerar hela
+sidan tills någon klickar OK, och som frös både webbläsaren och verifieringen (samma fälla som
+[[reported-freeze-was-a-blocking-dialog]]). Notisen står dessutom kvar, så texten "listan var
+publicerad och uppdaterades direkt på den publika sidan" går att läsa i efterhand. **Fel visas
+fortfarande som alert** — ett fel MÅSTE bekräftas.
+
+**⚠️ `classesInList` returnerar NULL, inte en tom mängd, när listan saknar kategoriinformation.**
+"Fortsätt i samma ordning" kopierar kvalstartlistan, vars skyttar inte bär `ChampionshipClass`.
+En tom mängd hade lästs som "ingen klass är med" och visat "Lägg till i finalen" på varje rad i
+en lista där alla redan står. Null renderas som just det: en förklaring att alla klasser ingår.
+
+**⚠️ Knapparna bär data-attribut och INDEX, aldrig klassnamnet i ett onclick.** Klassnamn kan
+vara admin-omdöpta (`classNameOverrides`) och alltså bära vilken text som helst; ett dubbelfnutt
+avslutar attributet. Fjärde instansen av den luckan i kodbasen.
+
+Verifierat i webbläsaren på SSM 2026 (tävling **8695**, inte 2205 — 2205 var noden vi
+återanvände): guiden scopad till vapengrupp A visade bara klass A, gallringen gav 10 av 37
+(`max(10, ceil(37/6))`), A-listan fick datum 2026-09-06, **C:s lista stod oförändrad på 35
+finalister**, och särskjutningskortet visade fortfarande exakt en grupp (Ivan Slabiak mot Stefan
+Toivonen, 476, brons i vapengrupp C). Inga konsolfel. Adds C# → full ombyggnad. **Ingen SQL,
+ingen doctype-egenskap, ingen Umbraco-nod.**
+
 ### Skjutlag / Patrull Label (2026-05-20)
 **What:** Freeform per-skjutlag/patrol label admins can type to disambiguate multi-day competitions (e.g. "Lördag fm", "Söndag 14 juni", "Final"). Replaces a backlog item that originally asked for a structured day-of-week + date field.
 
