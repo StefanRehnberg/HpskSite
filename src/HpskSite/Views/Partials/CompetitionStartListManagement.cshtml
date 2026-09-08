@@ -8,6 +8,9 @@
    Included by this partial rather than by its host pages, so the helper travels with the code that
    needs it and cannot be forgotten when the partial is added to a new surface. *@
 @await Html.PartialAsync("_HtmlEscape")
+@* Publiceringstillstandet: EN form och ETT ordpar over Resultat, Startlistor och
+   Finalstartlistor. *@
+@await Html.PartialAsync("_PublishState")
 
 @* Delad publiceringsdialog (kryssrutan "stäng självanmälan"). Inkluderas av partialen själv, inte
    av värdsidan — samma regel som _HtmlEscape, så den inte kan glömmas när partialen läggs på en ny
@@ -292,7 +295,7 @@
     <!-- Published Start List Warning -->
     <div id="publishedStartListWarning" class="alert alert-warning d-none" role="alert">
         <h6 class="alert-heading">
-            <i class="bi bi-lock-fill me-2"></i>Publicerad startlista aktiv
+            <i class="bi bi-lock-fill me-2"></i>Startlistan är publicerad
         </h6>
         <p class="mb-2">
             En startlista har publicerats för denna tävling. Att generera en ny startlista <strong>rekommenderas inte</strong>
@@ -333,6 +336,13 @@
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>@qualCardTitle</h5>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
+                    @* Antal fore tillstand: lasordningen ar "vad det ar -> hur mycket ->
+                       vilket lage -> vad jag kan gora -> visa/dolj", samma pa bada flikarna. *@
+                    <span class="text-muted">
+                        <small><i class="bi bi-people me-1"></i><span id="startListShooterCount">0</span> skyttar</small>
+                        <small class="ms-2"><i class="bi bi-flag me-1"></i><span id="startListStartCount">0</span> starter</small>
+                    </span>
+
                     @* Skapa/generera om ligger i kortet — se kommentaren ovanför. *@
                     <button id="generateStartListBtn" class="btn btn-success btn-sm" onclick="openGenerateStartListModal()">
                         <i class="bi bi-plus me-1"></i>Skapa ny startlista
@@ -347,27 +357,29 @@
                             <i class="bi bi-trophy me-1"></i>Till finalen
                         </button>
                     }
+                    @* ⚠️ TILLSTAND, INTE KNAPP — se .hpsk-state i theme.css. Satt aldrig
+                       tillbaka `badge bg-warning fs-6 px-3 py-2`: det ger exakt en knapps
+                       matt, och brickan stod mitt bland Publicera/Avpublicera. *@
+                    <span class="hpsk-state hpsk-state--draft" id="startListStatusBadge">
+                        <span class="hpsk-state-dot"></span>Preliminär
+                    </span>
+
+                    <button class="btn btn-success btn-sm" id="btnPublishStartList" onclick="publishStartList()">
+                        <i class="bi bi-check-circle me-1"></i>Publicera
+                    </button>
+                    @* Ett steg tillbaka, inte en varning. *@
+                    <button class="btn btn-outline-secondary btn-sm" id="btnUnpublishStartList" onclick="unpublishStartList()" style="display: none;">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
+                    </button>
+
+                    @* ⚠️ VISA/DOLJ SIST, likadant som pa Resultatfliken. Den lag tidigare mitt
+                       i raden har och i en meny dar — samma kontroll i tva former pa tva
+                       flikar. Rapporterat 2026-09-08. *@
                     <button class="btn btn-sm btn-outline-secondary" type="button"
                             data-bs-toggle="collapse" data-bs-target="#qualStartListBody"
                             aria-expanded="true" aria-controls="qualStartListBody">
                         <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
                     </button>
-                    <!-- Status Badge -->
-                    <span class="badge bg-warning fs-6 px-3 py-2" id="startListStatusBadge">
-                        <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
-                    </span>
-                    <!-- Publish Action Buttons -->
-                    <button class="btn btn-success btn-sm" id="btnPublishStartList" onclick="publishStartList()">
-                        <i class="bi bi-check-circle me-1"></i>Publicera
-                    </button>
-                    <button class="btn btn-outline-warning btn-sm" id="btnUnpublishStartList" onclick="unpublishStartList()" style="display: none;">
-                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
-                    </button>
-                    <!-- Shooter and Start Counts -->
-                    <span class="text-muted">
-                        <small><i class="bi bi-people me-1"></i><span id="startListShooterCount">0</span> skyttar</small>
-                        <small class="ms-2"><i class="bi bi-flag me-1"></i><span id="startListStartCount">0</span> starter</small>
-                    </span>
                 </div>
             </div>
         </div>
@@ -1253,23 +1265,17 @@ function updateStartListStatus(isOfficial) {
     const isEgenbokning = document.querySelector('.competition-startlist-management')?.dataset.isEgenbokning === 'true';
 
     if (badge && btnPublish && btnUnpublish) {
-        if (isEgenbokning) {
-            // Egenbokning: always published, no manual controls
-            badge.className = 'badge bg-success fs-6 px-3 py-2';
-            badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Aktiv';
-            btnPublish.style.display = 'none';
-            btnUnpublish.style.display = 'none';
-        } else if (isOfficial) {
-            badge.className = 'badge bg-success fs-6 px-3 py-2';
-            badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
-            btnPublish.style.display = 'none';
-            btnUnpublish.style.display = 'inline-block';
-        } else {
-            badge.className = 'badge bg-warning fs-6 px-3 py-2';
-            badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
-            btnPublish.style.display = 'inline-block';
-            btnUnpublish.style.display = 'none';
-        }
+        // ⚠️ EN skrivvag, delad med Resultat och Finalstartlistor (_PublishState.cshtml).
+        // Den har grenen skrev tidigare 'Aktiv' i ett fall och 'Publicerad' i ett annat —
+        // tva ord for samma tillstand, pa samma yta.
+        // ⚠️ 'Aktiv' är BORTTAGET. Egenbokningsgrenen skrev 'Aktiv' och nästa gren
+        // 'Publicerad' för samma sak — skyttarna ser listan. Två ord för ett tillstånd,
+        // på samma yta. Brickan svarar bara på EN fråga (syns listan för skyttarna?),
+        // och att en egenbokningslista inte kan ändras säger frånvaron av knappar redan.
+        const published = isEgenbokning || !!isOfficial;
+        hpskSetPublishState(badge, published, 'Startlistan');
+        btnPublish.style.display = published ? 'none' : 'inline-block';
+        btnUnpublish.style.display = (!isEgenbokning && isOfficial) ? 'inline-block' : 'none';
     }
 }
 

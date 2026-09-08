@@ -1,0 +1,83 @@
+@*
+    Publiceringstillståndet — EN form, ETT ordpar, överallt.
+
+    ⚠️ VARFÖR DEN HÄR PARTIALEN FINNS. Tillståndet var handskrivet på fem ställen med
+    fem olika utseenden och FYRA ord för TVÅ tillstånd:
+
+        badge bg-warning fs-6 px-3 py-2   "Preliminär"     (Resultat + Startlistor)
+        badge bg-success fs-6 px-3 py-2   "Publicerad"     (Resultat)
+        badge bg-success fs-6 px-3 py-2   "Aktiv"          (Startlistor, annan gren)
+        badge bg-success                  "Publicerad"     (Finalstartlistor)
+        alert-heading                     "Publicerad startlista aktiv"
+
+    Och `fs-6 px-3 py-2` ger exakt en knapps mått, så tillståndet SÅG UT som en knapp
+    och stod mitt bland riktiga knappar. Rapporterat 2026-09-08.
+
+    ORDPARET ÄR NU: **Preliminär** (syns inte för skyttarna) / **Publicerad** (syns för
+    skyttarna). "Aktiv" är borta — det var ett tredje ord för samma sak som "Publicerad".
+
+    ⚠️ VERBEN är skilda från tillstånden och får aldrig blandas ihop: knapparna heter
+    **Publicera** och **Avpublicera**. Ett tillstånd är ett adjektiv, en knapp är ett verb.
+
+    Inkluderas av partialerna SJÄLVA (samma husregel som `_HtmlEscape`), så hjälparen
+    följer med koden som behöver den och kan inte glömmas när en ny yta läggs till.
+    Utseendet bor i `.hpsk-state` i theme.css.
+*@
+@* ⚠️ INGEN ViewData-vakt här. En sådan fanns först och den VAKTADE INTE: mätt i
+   webbläsaren renderades skriptet ändå tre gånger, eftersom varje partial får sin egen
+   ViewData-instans från CompetitionManagement — en flagga satt i ett barn når aldrig ett
+   syskon. `window.hpskPublishStateLoaded` nedan är den vakt som håller, och tre identiska
+   skripttaggar är ofarliga. En vakt som ser ut att vakta men inte gör det är värre än
+   ingen, för nästa läsare litar på den. *@
+<script>
+if (!window.hpskPublishStateLoaded) {
+    window.hpskPublishStateLoaded = true;
+
+    // Tillståndets INNEHÅLL. `noun` används bara i förklaringen och i title —
+    // "Startlistan" / "Resultatlistan" / "Finalstartlistan".
+    window.hpskStateParts = function (published, noun) {
+        const n = noun || 'Listan';
+        return published
+            ? { cls: 'hpsk-state--live',  word: 'Publicerad', note: 'syns för skyttarna',
+                title: n + ' syns för skyttarna.' }
+            : { cls: 'hpsk-state--draft', word: 'Preliminär', note: 'syns inte för skyttarna',
+                title: n + ' syns inte för skyttarna än.' };
+    };
+
+    // Hela brickan som HTML-sträng, för renderare som bygger markup (finalkorten).
+    window.hpskStatePill = function (published, noun) {
+        const p = window.hpskStateParts(published, noun);
+        return '<span class="hpsk-state ' + p.cls + '" title="' + p.title + '">'
+             + '<span class="hpsk-state-dot"></span>' + p.word
+             + '<span class="hpsk-state-note d-none d-lg-inline"> · ' + p.note + '</span>'
+             + '</span>';
+    };
+
+    // Skriver om ett BEFINTLIGT element. Ytorna behåller sina egna id:n — ett dussin
+    // JS-krokar binder på dem och en omdöpning fallerar TYST — så hjälparen ändrar
+    // bara klass och innehåll.
+    window.hpskSetPublishState = function (el, published, noun) {
+        if (!el) return;
+        const p = window.hpskStateParts(published, noun);
+        el.className = 'hpsk-state ' + p.cls;
+        el.title = p.title;
+        el.innerHTML = '<span class="hpsk-state-dot"></span>' + p.word
+            + '<span class="hpsk-state-note d-none d-lg-inline"> · ' + p.note + '</span>';
+        el.style.display = '';
+    };
+
+    // Tredje tillståndet: ingen lista finns. Får inte se ut som en olagd lista.
+    window.hpskSetNoListState = function (el, label) {
+        if (!el) return;
+        el.className = 'hpsk-state hpsk-state--none';
+        el.title = '';
+        el.innerHTML = '<span class="hpsk-state-dot"></span>' + (label || 'Ingen lista');
+        el.style.display = '';
+    };
+
+    window.hpskNoListPill = function (label) {
+        return '<span class="hpsk-state hpsk-state--none">'
+             + '<span class="hpsk-state-dot"></span>' + (label || 'Ingen lista') + '</span>';
+    };
+}
+</script>

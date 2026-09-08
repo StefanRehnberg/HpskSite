@@ -4,6 +4,10 @@
     var competitionId = ViewData["CompetitionId"] as int? ?? 0;
 }
 
+@* Publiceringstillstandet: EN form och ETT ordpar over Resultat, Startlistor och
+   Finalstartlistor. Inkluderas av partialen sjalv, samma husregel som _HtmlEscape. *@
+@await Html.PartialAsync("_PublishState")
+
 @*
     FINALSTARTLISTOR — EN PER VAPENGRUPP (omarbetad 2026-09-08)
 
@@ -381,12 +385,14 @@
         return groups;
     }
 
+    // ⚠️ EN form och ETT ordpar, delat med Resultat och Startlistor (_PublishState.cshtml).
+    // Den här ytan bar en FJÄRDE variant: `badge bg-success` respektive
+    // `badge bg-warning text-dark`, alltså mindre än de andras `fs-6 px-3 py-2` — samma
+    // tillstånd såg olika ut beroende på vilken flik man stod på.
     function statusBadge(L) {
-        if (!L) return '<span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Ingen lista</span>';
+        if (!L) return hpskNoListPill('Ingen lista');
         const isOfficial = L.isOfficial || L.IsOfficial;
-        return isOfficial
-            ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Publicerad</span>'
-            : '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Preliminär</span>';
+        return hpskStatePill(!!isOfficial, 'Finalstartlistan');
     }
 
     function renderHeaderSummary(groups) {
@@ -596,7 +602,7 @@
         return `
             <div class="d-flex justify-content-end flex-wrap gap-2">
                 ${isOfficial
-                    ? `<button class="btn btn-outline-warning btn-sm" data-fn-action="unpublish" data-fn-group="${esc(group)}">
+                    ? `<button class="btn btn-outline-secondary btn-sm" data-fn-action="unpublish" data-fn-group="${esc(group)}">
                          <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera</button>`
                     : `<button class="btn btn-success btn-sm" data-fn-action="publish" data-fn-group="${esc(group)}">
                          <i class="bi bi-check-circle me-1"></i>Publicera</button>`}

@@ -52,6 +52,11 @@
     System.Diagnostics.Debug.WriteLine($"  qualificationSeriesCount: {qualificationSeriesCount}");
 }
 
+@* Publiceringstillstandet: EN form och ETT ordpar over Resultat, Startlistor och
+   Finalstartlistor. Partialen inkluderas av den som behover den, samma husregel
+   som _HtmlEscape. *@
+@await Html.PartialAsync("_PublishState")
+
 <div class="competition-results-management" data-competition-id="@competitionId" data-preset-phase="@presetPhase">
     @* Hela precisionsfamiljen startar sin inmatning från "Funktionärer"-fliken, så
        startknappskortet är dolt här för dem. Gaten går på HUBBEN, inte på Skjutledare-vyn —
@@ -377,19 +382,30 @@
                     <span class="text-muted" id="resultsListSummary" style="display: none;">
                         <small><i class="bi bi-people me-1"></i><span id="resultsListCount">0</span> deltagare</small>
                     </span>
-                    <span class="badge bg-warning fs-6 px-3 py-2" id="resultsListStatusBadge" style="display: none;">
-                        <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
+
+                    @* ⚠️ TILLSTAND, INTE KNAPP. Klasserna kommer ur .hpsk-state i theme.css;
+                       innehallet skrivs av hpskSetPublishState(). Satt aldrig tillbaka
+                       `badge bg-warning fs-6 px-3 py-2` — det ger exakt en knapps matt och
+                       var halva skalet att brickan lastes som en knapp man skulle trycka pa. *@
+                    <span class="hpsk-state hpsk-state--draft" id="resultsListStatusBadge" style="display: none;">
+                        <span class="hpsk-state-dot"></span>Preliminär
                     </span>
+
                     <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
                         <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
                     </button>
                     <button class="btn btn-success btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
                         <i class="bi bi-check-circle me-1"></i>Publicera
                     </button>
-                    <button class="btn btn-outline-warning btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
+                    @* Avpublicera ar ett STEG TILLBAKA, inte en varning. outline-warning gjorde
+                       den gula och larmande i en rad som redan bar en gul tillstandsbricka. *@
+                    <button class="btn btn-outline-secondary btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
                         <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
                     </button>
 
+                    @* Tva poster ar under husregelns "3+ ger meny", och det ar ett medvetet
+                       undantag: raden bar redan antal, tillstand och tre knappar, och de tva
+                       posterna som fullbreda knappar spranger 768 px. *@
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
                                 data-bs-toggle="dropdown" aria-expanded="false">
@@ -409,16 +425,17 @@
                                     <i class="bi bi-box-arrow-up-right me-2"></i>Öppna listan i ny flik
                                 </button>
                             </li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li>
-                                <button class="dropdown-item" type="button"
-                                        data-bs-toggle="collapse" data-bs-target="#resultsListBody"
-                                        aria-expanded="true" aria-controls="resultsListBody">
-                                    <i class="bi bi-chevron-expand me-2"></i>Visa/dölj listan
-                                </button>
-                            </li>
                         </ul>
                     </div>
+
+                    @* ⚠️ VISA/DOLJ LIGGER SIST, likadant pa varje kollapsbar sektion. Den lag
+                       tidigare i menyn har och som knapp mitt i raden pa Startlistor — samma
+                       kontroll pa tva stallen i tva former. Rapporterat 2026-09-08. *@
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#resultsListBody"
+                            aria-expanded="true" aria-controls="resultsListBody">
+                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
+                    </button>
                 </div>
             </div>
             <div class="card-body py-2 border-bottom">
@@ -428,7 +445,7 @@
                     <strong>Publicera</strong> gör listan synlig för skyttarna.
                     Under <strong>Åtgärder</strong> finns <strong>Prisutdelningslistan</strong>,
                     som visar vem som ska ha vilken medalj — den bygger på den här listan, så
-                    uppdatera först.
+                    uppdatera den först.
                 </div>
             </div>
             <div class="collapse show" id="resultsListBody">
@@ -482,13 +499,13 @@
                 <button class="btn btn-outline-secondary btn-sm" onclick="showSubMergeAnalysisModal(event)" id="btnSubAnalyzeMerges">
                     <i class="bi bi-intersect me-1"></i>Sammanslagning...
                 </button>
-                <span class="badge bg-warning fs-6 px-3 py-2" id="subResultsListStatusBadge" style="display: none;">
+                <span class="hpsk-state hpsk-state--draft" id="subResultsListStatusBadge" style="display: none;">
                     <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
                 </span>
                 <button class="btn btn-success btn-sm" id="btnSubMarkOfficial" onclick="markSubResultsOfficial(event)" style="display: none;">
                     <i class="bi bi-check-circle me-1"></i>Publicera
                 </button>
-                <button class="btn btn-outline-warning btn-sm" id="btnSubMarkPreliminary" onclick="markSubResultsPreliminary(event)" style="display: none;">
+                <button class="btn btn-outline-secondary btn-sm" id="btnSubMarkPreliminary" onclick="markSubResultsPreliminary(event)" style="display: none;">
                     <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
                 </button>
             </div>
@@ -1125,7 +1142,9 @@ async function loadResultsList() {
             if (resultsDisplay) resultsDisplay.style.display = 'block';
 
             // Show status badge, summary, and action buttons
-            if (statusBadge) statusBadge.style.display = 'inline-block';
+            // ⚠️ Tom strang, inte 'inline-block': .hpsk-state ar inline-FLEX och punkten
+            // faller ur linje annars.
+            if (statusBadge) statusBadge.style.display = '';
             if (summary) summary.style.display = 'inline-block';
             if (btnMarkOfficial || btnMarkPreliminary) {
                 updateResultsListStatus(data.isOfficial);
@@ -1223,19 +1242,12 @@ function updateResultsListStatus(isOfficial) {
     const btnMarkOfficial = document.getElementById('btnMarkOfficial');
     const btnMarkPreliminary = document.getElementById('btnMarkPreliminary');
 
-    if (isOfficial) {
-        // Official status
-        statusBadge.className = 'badge bg-success fs-6 px-3 py-2';
-        statusBadge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
-        btnMarkOfficial.style.display = 'none';
-        btnMarkPreliminary.style.display = 'inline-block';
-    } else {
-        // Preliminary status
-        statusBadge.className = 'badge bg-warning fs-6 px-3 py-2';
-        statusBadge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
-        btnMarkOfficial.style.display = 'inline-block';
-        btnMarkPreliminary.style.display = 'none';
-    }
+    // ⚠️ EN skrivvag for tillstandet, delad med Startlistor och Finalstartlistor
+    // (_PublishState.cshtml). Handskrivna brickor gav fyra ord for tva tillstand och
+    // ett utseende som lastes som en knapp.
+    hpskSetPublishState(statusBadge, !!isOfficial, 'Resultatlistan');
+    btnMarkOfficial.style.display = isOfficial ? 'none' : 'inline-block';
+    btnMarkPreliminary.style.display = isOfficial ? 'inline-block' : 'none';
 }
 
 async function markResultsOfficial(event) {
@@ -1450,7 +1462,9 @@ async function loadSubResultsList() {
             section.style.display = 'block';
             if (noResultsMessage) noResultsMessage.style.display = 'none';
             if (resultsDisplay) resultsDisplay.style.display = 'block';
-            if (statusBadge) statusBadge.style.display = 'inline-block';
+            // ⚠️ Tom strang, inte 'inline-block': .hpsk-state ar inline-FLEX och punkten
+            // faller ur linje annars.
+            if (statusBadge) statusBadge.style.display = '';
             updateSubResultsListStatus(data.isOfficial);
 
             if (data.resultPageUrl) {
@@ -2126,17 +2140,9 @@ function updateSubResultsListStatus(isOfficial) {
     const btnMarkPreliminary = document.getElementById('btnSubMarkPreliminary');
     if (!statusBadge) return;
 
-    if (isOfficial) {
-        statusBadge.className = 'badge bg-success fs-6 px-3 py-2';
-        statusBadge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
-        if (btnMarkOfficial) btnMarkOfficial.style.display = 'none';
-        if (btnMarkPreliminary) btnMarkPreliminary.style.display = 'inline-block';
-    } else {
-        statusBadge.className = 'badge bg-warning fs-6 px-3 py-2';
-        statusBadge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
-        if (btnMarkOfficial) btnMarkOfficial.style.display = 'inline-block';
-        if (btnMarkPreliminary) btnMarkPreliminary.style.display = 'none';
-    }
+    hpskSetPublishState(statusBadge, !!isOfficial, 'Deltävlingens resultatlista');
+    if (btnMarkOfficial) btnMarkOfficial.style.display = isOfficial ? 'none' : 'inline-block';
+    if (btnMarkPreliminary) btnMarkPreliminary.style.display = isOfficial ? 'inline-block' : 'none';
 }
 
 async function markSubResultsOfficial(event) {
