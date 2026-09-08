@@ -3715,10 +3715,26 @@ mästerskapsklass?" innan något räknas per klass i det här området.**
 - **C.3.6.2.1** — *"Antalet startande i en vapengrupp/klass skall vara lägst 5"*; de två orden
   används som EN enhet, vilket är varför "vapengrupp" i C.3.4.1 innehåller C-klasserna.
 - **F.2.3** — klassammanslagning gäller *"vid nationell tävling, landsdelstävling och
-  krets­tävling"*. **Ordet mästerskap förekommer inte.** Vid mästerskap är mekanismen för få
-  deltagare i stället medaljreducering (C.3.6.3, C.3.6.4: *"Undantag från regeln om lägst 5
-  startande kan medges. Antalet medaljer reduceras därvid enligt moment C.3.4.1."*).
-  Att slå samman en liten klass "räddar" alltså ingen mästerskapsmedalj.
+  krets­tävling"*, och den **GÄLLER ÄVEN MÄSTERSKAP**: **C.3.1.1** slår fast att
+  *"Mästerskapstävling kan ingå i ovan angivna tävlingar"* — ett landsdelsmästerskap ÄR en
+  landsdelstävling. (⚠️ Rättelse: den här anteckningen hävdade först motsatsen, ur att ordet
+  mästerskap saknas i F.2.3. Det var fel läst.)
+  Vid mästerskap finns därutöver medaljreduceringen (C.3.6.3, C.3.6.4: *"Undantag från regeln
+  om lägst 5 startande kan medges. Antalet medaljer reduceras därvid enligt moment
+  C.3.4.1."*). De två mekanismerna lever alltså sida vid sida på skilda axlar: sammanslagning
+  ändrar hur resultatlistan GRUPPERAS, reduceringen hänger på MÄSTERSKAPSKLASSENS
+  deltagarantal. Att slå samman en liten klass ändrar därför inget om medaljerna — det
+  påståendet står kvar, men skälet är axeln, inte tävlingsnivån.
+- **F.2.3:s egen översiktstabell** för vapengrupp C är auktoriteten för vad som slås samman
+  med vad, och den **delar upp damklassen i 1–3**:
+  *Dam C 1-3* → C1 / C2 / C3 · *Junior C* och *Veteran Y och Ä* → "C 1 eller Dam 1",
+  "C 2 eller Dam 2", "C 3 eller Dam 3". Plus *"I övriga vapengrupper får klass 2 och 3 slås
+  samman"* och den absoluta *"Klass 1 sammanslås inte med annan klass"*.
+  ⚠️ Dam 1 → C1 är alltså tillåtet och krockar INTE med klass 1-spärren: spärren gäller
+  sammanslagning av SKICKLIGHETSNIVÅER (1 med 2/3), inte att flytta damklassen till den
+  öppna klassen på samma nivå. Koden gör rätt (Dam → öppen klass på samma nivå).
+  ⚠️ Junior C och Veteran C är däremot INTE nivåindelade — fotnoterna säger att de vid färre
+  än fem *"uppdelas … i damer och/eller öppen klass i klass 1-3 efter sina kvalifikationer"*.
 
 **Blast radius var LITEN, och det är värt att ha kontrollerat:** `MedalImpact` är bara en
 ETIKETT. Den sätts i `ClassMergingService.Analyze` och lästes av sammanslagningsdialogen och
@@ -3737,12 +3753,11 @@ tabell per mästerskapsklass intill. Sammanslagningsdialogens kolumn "Om ej samm
 nu *"Rankas för sig med N deltagare"* i stället för en medaljförlust, och dialogen bär vid
 mästerskap en notis om att sammanslagningen inte påverkar medaljerna.
 
-**⚠️ FLAGGAT, INTE ÅTGÄRDAT:** C.3.6.2.1 säger att *vapengruppindelning* tillämpas vid SM, och
-F.2.3 begränsar klassammanslagning till tävlingar. Det öppnar frågan om resultatlistan vid ett
-mästerskap borde grupperas per mästerskapsklass i stället för per skicklighetsklass — allttså
-samma axelfråga en nivå upp. Det är en STOR ändring (hela resultatlistans gruppering, publika
-sidan, standardmedaljerna) och Stefan har tidigare medvetet avgränsat bort
-klassammanslagningen från den här sortens fix. Rör den inte utan hans beslut.
+**⚠️ FLAGGAT, INTE ÅTGÄRDAT:** C.3.6.2.1 säger att *vapengruppindelning* tillämpas vid SM,
+medan resultatlistan grupperas per skicklighetsklass. Det är samma axelfråga en nivå upp: borde
+listan vid ett mästerskap grupperas per mästerskapsklass? Det är en STOR ändring (hela
+resultatlistans gruppering, publika sidan, standardmedaljerna) och Stefan har tidigare medvetet
+avgränsat bort klassammanslagningen från den här sortens fix. Rör den inte utan hans beslut.
 
 Verifierat på SSM 2026 mot endpointen: A 37, B 31, C 48, C Dam 14, C Vet Ä 7, C Vet Y 6 →
 alla "Guld, Silver, Brons"; C Jun 2 → "Medaljer till alla 2 deltagande". Enda kategorin under

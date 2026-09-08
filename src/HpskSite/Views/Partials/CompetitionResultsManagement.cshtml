@@ -1468,6 +1468,22 @@ async function loadMergeState() {
         summary.innerHTML = parts.join(' ');
     }
 
+    // Förslagen ur analysen: källklass → vad den FÅR slås samman med. Visas i klartext i
+    // stället för att bara antydas med en gul siffra — en gul siffra läses som en varning,
+    // och läsningen "varför påstår den att C2 Dam kan slås samman?" är då inte granskningsbar.
+    // Sammanslagningen följer SHB F.2.3:s tabell för vapengrupp C: Dam 1-3 → C1/C2/C3,
+    // Junior och Veteran → "C n eller Dam n". Klass 1 slås aldrig samman med annan NIVÅ.
+    // ⚠️ Bara defaultTarget, inte possibleTargets. För Dam 2 svarar F.2.3:s tabell "C2" —
+    // motsvarande öppen klass — medan kodens possibleTargets också erbjuder C3 och C3 Dam som
+    // kaskadalternativ. Panelen ska påstå exakt det boken säger; alternativen hör i dialogen,
+    // där arrangören väljer och ser skälet.
+    const suggestionMap = {};
+    (data.suggestions || []).forEach(sg => {
+        const src = sg.sourceClass || sg.SourceClass;
+        const tgt = sg.defaultTarget || sg.DefaultTarget;
+        if (src && tgt) suggestionMap[src] = { target: tgt, reason: sg.reason || sg.Reason || '' };
+    });
+
     const rows = classes.map(c => {
         const target = appliedMap[c.className];
         const isMerged = Object.prototype.hasOwnProperty.call(appliedMap, c.className);
@@ -1479,6 +1495,10 @@ async function loadMergeState() {
             mergeCell = `<span class="badge bg-info-subtle text-info-emphasis">→ ${escapeHtml(target || '?')}</span>`;
         } else if (incoming.length) {
             mergeCell = `<span class="text-muted small">tar emot ${escapeHtml(incoming.join(', '))}</span>`;
+        } else if (suggestionMap[c.className]) {
+            const sg = suggestionMap[c.className];
+            mergeCell = `<span class="text-muted small" title="${escapeAttr(sg.reason)}">`
+                + `kan slås samman med <em>${escapeHtml(sg.target)}</em></span>`;
         } else {
             mergeCell = '<span class="text-muted">—</span>';
         }
@@ -1570,10 +1590,13 @@ async function loadMergeState() {
                     </table>
                 </div>
                 <div class="form-text mb-0">
-                    Klasserna styr hur resultatlistan grupperas. En klass med färre än fem
-                    deltagare kan slås samman med närmaste klass inom vapengruppen. Tabellen visar
-                    det som är <strong>sparat</strong> — <strong>Uppdatera</strong> räknar om
-                    listan med precis den här uppställningen.
+                    Klasserna styr hur resultatlistan <strong>grupperas</strong> — de påverkar inte
+                    medaljerna. En klass med färre än fem deltagare får slås samman med närmaste
+                    klass inom vapengruppen (SHB F.2.3): damklassen är nivåindelad som de övriga,
+                    så Dam 2 slås samman med C2 — inte med de andra damklasserna. Klass 1 slås
+                    aldrig samman med en annan nivå. Tabellen visar det som är
+                    <strong>sparat</strong> — <strong>Uppdatera</strong> räknar om listan med
+                    precis den här uppställningen.
                 </div>
             </div>
             <div class="col-lg-5">
