@@ -565,6 +565,22 @@
                 <input type="hidden" id="soModalClass" />
                 <input type="hidden" id="soModalRoundValue" />
                 <input type="hidden" id="soModalIsSub" />
+                <input type="hidden" id="soModalIsEdit" />
+
+                @* Syns bara nar en redan inmatad runda andras. En dialog som ser
+                   identisk ut oavsett om man matar in nytt eller skriver over ett
+                   befintligt resultat ar det som gor en overskrivning till en
+                   olycka. *@
+                <div id="soModalEditNotice" class="alert alert-warning py-2 small d-flex flex-wrap align-items-center gap-2" style="display:none">
+                    <span class="flex-grow-1">
+                        <i class="bi bi-pencil-square me-1"></i>
+                        Du ändrar ett redan inmatat resultat
+                        (<span id="soModalEditPrev"></span>). Sparar du skrivs det över.
+                    </span>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="soModalDelete">
+                        <i class="bi bi-trash me-1"></i>Ta bort rundan
+                    </button>
+                </div>
 
                 <div class="sp-shots mb-2">
                     <div class="so-shots-grid d-flex align-items-center gap-2">
@@ -1719,13 +1735,49 @@ function renderShootOffGroup(competitionId, className, group, isSub) {
     group.shooters.forEach(s => {
         const row = document.createElement('div');
         row.className = 'd-flex align-items-center gap-2 flex-wrap mb-1';
-        const roundsSummary = (s.rounds || [])
-            .map(r => `R${r.round}: <strong>${r.total}</strong>${r.xCount ? ` (${r.xCount}X)` : ''}`)
-            .join(' · ');
         row.innerHTML = `
             <div style="min-width: 200px;"><strong>${escapeHtml(s.name)}</strong> <span class="text-muted small">${escapeHtml(s.club || '')}</span></div>
-            <div class="text-muted small flex-grow-1">${roundsSummary || '<em>Inga särskjutningsskott</em>'}</div>
+            <div class="text-muted small flex-grow-1" data-so-rounds></div>
         `;
+
+        // ⚠️ VARJE INMATAD RUNDA MÅSTE GÅ ATT ÄNDRA, i alla tre tillstånden.
+        // Förut fick bara "nextRound"-skytten en knapp, så ett felinmatat resultat
+        // var oåtkomligt så snart skytten blivit avgjord eller hamnat i väntan —
+        // och det är då felet upptäcks. Ett skott skrivs fel i farten; det som
+        // saknades var vägen tillbaka, inte skrivvägen (SaveEntryAsync är redan
+        // en upsert).
+        const roundsEl = row.querySelector('[data-so-rounds]');
+        const rounds = s.rounds || [];
+        if (rounds.length === 0) {
+            roundsEl.innerHTML = '<em>Inga särskjutningsskott</em>';
+        } else {
+            rounds.forEach((r, idx) => {
+                if (idx > 0) roundsEl.appendChild(document.createTextNode(' · '));
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'btn btn-link btn-sm p-0 align-baseline text-decoration-none';
+                // ⚠️ Skyttens namn sätts som TEXT, aldrig genom en sträng som byggs
+                // ihop till HTML eller till ett attribut — samma lucka som gav
+                // kodexekvering i Fältskyttes "lägg till skytt".
+                chip.title = 'Ändra runda ' + r.round + ' för ' + s.name;
+                chip.innerHTML = `R${r.round}: <strong>${r.total}</strong>`
+                    + (r.xCount ? ` (${r.xCount}X)` : '')
+                    + ' <i class="bi bi-pencil"></i>';
+                chip.addEventListener('click', () => {
+                    openShootOffEntryModal({
+                        competitionId,
+                        memberId: s.memberId,
+                        shooterName: s.name,
+                        shootingClass: s.shootingClass,
+                        round: r.round,
+                        isSub,
+                        shots: parseShootOffShots(r.shots),
+                        prevSummary: `R${r.round}: ${r.total}${r.xCount ? ` (${r.xCount}X)` : ''}`
+                    });
+                });
+                roundsEl.appendChild(chip);
+            });
+        }
 
         // Progressive resolution per shooter:
         //  - IsResolved → placement decided; show ✓ Avgjord
@@ -1787,6 +1839,39 @@ async function saveShootOffEntry(competitionId, memberId, shootingClass, round, 
     }
 }
 
+async function deleteShootOffEntry(competitionId, memberId, shootingClass, round, isSub) {
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const response = await fetch('/umbraco/surface/CompetitionResults/DeleteShootOffEntry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({
+                competitionId: parseInt(competitionId, 10),
+                memberId, shootingClass, round
+            })
+        });
+        // ⚠️ Läs som TEXT och parsa själv: ett antiforgery-avslag svarar med tom
+        // kropp, och r.json() kastar då ett SyntaxError som gömmer statuskoden —
+        // felet läses som "knappen gör ingenting".
+        const text = await response.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch (e) {
+            alert('Oväntat svar från servern. Är du fortfarande inloggad?');
+            return false;
+        }
+        if (!data.Success && !data.success) {
+            alert('Kunde inte ta bort: ' + (data.Message || data.message || 'okänt fel'));
+            return false;
+        }
+        await (isSub ? loadSubResultsList() : loadResultsList());
+        return true;
+    } catch (e) {
+        alert('Fel: ' + e);
+        return false;
+    }
+}
+
 // ── Särskjutning shot-entry modal ────────────────────────────────────────────
 // Mirrors the keypad UX from the regular Resultatinmatning view. Scoped to
 // "so-" class names so it doesn't collide with the page's global
@@ -1821,8 +1906,31 @@ function openShootOffEntryModal(ctx) {
     document.getElementById('soModalRoundValue').value = String(ctx.round);
     document.getElementById('soModalIsSub').value = ctx.isSub ? '1' : '0';
 
-    _soModalState.shots = ['', '', '', '', ''];
-    _soModalState.cursor = 0;
+    // ⚠️ ÄNDRAR vi en befintlig runda, eller matar in en ny? Skillnaden måste synas:
+    // sparningen är en upsert, så en oavsiktlig omöppning skriver över tyst annars.
+    const isEdit = Array.isArray(ctx.shots) && ctx.shots.length > 0;
+    document.getElementById('soModalIsEdit').value = isEdit ? '1' : '0';
+    const notice = document.getElementById('soModalEditNotice');
+    if (notice) {
+        notice.style.display = isEdit ? '' : 'none';
+        const prev = document.getElementById('soModalEditPrev');
+        if (prev) prev.textContent = ctx.prevSummary || '';
+    }
+
+    // Förfyll med det som redan står inne, så en rättelse bara är att skriva om
+    // det skott som blev fel — inte att mata in alla fem igen.
+    const pre = isEdit ? ctx.shots.slice(0, 5) : [];
+    _soModalState.shots = ['', '', '', '', ''].map((_, i) => pre[i] || '');
+    _soModalState.cursor = isEdit
+        ? Math.min(5, _soModalState.shots.filter(v => v !== '').length)
+        : 0;
+
+    // ⚠️ KNAPPEN ÅTERSTÄLLS HÄR, inte bara i RENSA. Etiketten och is-done levde
+    // kvar mellan öppningarna, så nästa skytt möttes av en avstängd knapp som
+    // påstod "✓ SPARAT" över en tom panel — rapporterat från banan 2026-09-08.
+    // Skyddet fanns i clearShootOffShots(), alltså i den funktion som INTE körs
+    // när dialogen öppnas. En skyddsåtgärd i fel funktion är inget skydd.
+    resetShootOffSaveButton();
     renderShootOffModal();
 
     bindShootOffModalHandlersOnce();
@@ -1865,16 +1973,34 @@ function backspaceShootOffShot() {
     }
 }
 
+// Modalen återanvänds mellan rundor OCH mellan skyttar. Sparknappen är sitt eget
+// kvitto (SPARA → SPARAR… → ✓ SPARAT), och det kvittot hör till FÖRRA sparningen —
+// alltså måste det städas bort både av RENSA och av varje öppning.
+function resetShootOffSaveButton() {
+    const saveBtn = document.getElementById('soModalSave');
+    if (!saveBtn) return;
+    saveBtn.classList.remove('is-busy', 'is-done');
+    saveBtn.textContent = 'SPARA';
+}
+
+// Skotten från en lagrad runda: en JSON-array som ["X","10","9","8","7"].
+// ⚠️ Defensiv: en oläsbar sträng ger en TOM lista, så dialogen öppnas som en
+// nyinmatning i stället för att förfyllas med skräp — och kastar aldrig.
+function parseShootOffShots(raw) {
+    if (Array.isArray(raw)) return raw.map(v => String(v ?? ''));
+    if (typeof raw !== 'string' || raw.trim() === '') return [];
+    try {
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr.map(v => String(v ?? '')) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
 function clearShootOffShots() {
     _soModalState.shots = ['', '', '', '', ''];
     _soModalState.cursor = 0;
-    const saveBtn = document.getElementById('soModalSave');
-    if (saveBtn) {
-        // Modalen återanvänds mellan rundor: utan detta står "✓ SPARAT" kvar över
-        // en tömd panel nästa gång den öppnas.
-        saveBtn.classList.remove('is-busy', 'is-done');
-        saveBtn.textContent = 'SPARA';
-    }
+    resetShootOffSaveButton();
     renderShootOffModal();
 }
 
@@ -1888,6 +2014,37 @@ function bindShootOffModalHandlersOnce() {
     });
     document.getElementById('soModalClear').addEventListener('click', clearShootOffShots);
     document.getElementById('soModalBackspace').addEventListener('click', backspaceShootOffShot);
+
+    // Ta bort rundan. Behövs för det fall en RÄTTELSE inte kan lösa: en runda
+    // inmatad på fel skytt. Att skriva om värdena lämnar då kvar en runda som
+    // fortsätter påverka ordningen.
+    const delBtn = document.getElementById('soModalDelete');
+    if (delBtn) {
+        delBtn.addEventListener('click', async () => {
+            if (_soModalState.saving) return;
+            const shooter = document.getElementById('soModalShooter').textContent || 'skytten';
+            const round = document.getElementById('soModalRoundValue').value;
+            if (!confirm('Ta bort särskjutningsrunda ' + round + ' för ' + shooter + '?\n\n'
+                + 'Resultatet raderas och ordningen räknas om.')) return;
+
+            _soModalState.saving = true;
+            delBtn.disabled = true;
+            try {
+                const ok = await deleteShootOffEntry(
+                    parseInt(document.getElementById('soModalCompetitionId').value, 10),
+                    parseInt(document.getElementById('soModalMemberId').value, 10),
+                    document.getElementById('soModalClass').value,
+                    parseInt(round, 10),
+                    document.getElementById('soModalIsSub').value === '1'
+                );
+                if (ok && _soModalState.bsModal) _soModalState.bsModal.hide();
+            } finally {
+                _soModalState.saving = false;
+                delBtn.disabled = false;
+                renderShootOffModal();
+            }
+        });
+    }
 
     // Save
     document.getElementById('soModalSave').addEventListener('click', async () => {
