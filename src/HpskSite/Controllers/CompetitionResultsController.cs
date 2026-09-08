@@ -2678,6 +2678,15 @@ namespace HpskSite.Controllers
                                     ?? new List<ClassMergeAction>();
                 var hasResultList = mergeResultPage != null;
 
+                // Medaljerna avgörs per mästerskapsklass, inte per skicklighetsklass — se
+                // ChampionshipMedals. Tom lista utanför mästerskap.
+                // ⚠️ GetValue<string> och inte Value<string> — samma försiktighet som rad 4003:
+                // en FlexibleDropdown kan ha lagrat omfattningen som en JSON-array, och
+                // ChampionshipCategory.Normalize skalar av den.
+                var scopeForMedals = competition?.GetValue<string>("competitionScope") ?? "";
+                var medalGroups = BuildMedalGroups(results, scopeForMedals);
+                var isChampionship = ChampionshipCategory.IsChampionship(scopeForMedals);
+
                 // Fallback to cached result data if DB is empty
                 if (!results.Any())
                 {
@@ -2721,17 +2730,20 @@ namespace HpskSite.Controllers
                             var svc = new ClassMergingService();
                             var analysis = svc.Analyze(syntheticResults, compTypeId);
                             return Json(new { success = true, analysis.Suggestions, analysis.Classes,
-                                              applied = appliedMerges, hasResultList });
+                                              applied = appliedMerges, hasResultList,
+                                              medalGroups, isChampionship });
                         }
                     }
                     return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>(),
-                                      applied = appliedMerges, hasResultList });
+                                      applied = appliedMerges, hasResultList,
+                                      medalGroups, isChampionship });
                 }
 
                 var service = new ClassMergingService();
                 var result = service.Analyze(results, compTypeId);
                 return Json(new { success = true, result.Suggestions, result.Classes,
-                                  applied = appliedMerges, hasResultList });
+                                  applied = appliedMerges, hasResultList,
+                                  medalGroups, isChampionship });
             }
             catch (Exception ex)
             {
@@ -2749,6 +2761,79 @@ namespace HpskSite.Controllers
                 3 => "Enbart Guld",
                 _ => "Inga medaljer"
             };
+        }
+
+        /// <summary>
+        /// Hur många mästerskapsmedaljer som delas ut i en mästerskapsklass, ordagrant enligt
+        /// SHB 2026 C.3.4.1.
+        ///
+        /// ⚠️⚠️ MÄTS PÅ MÄSTERSKAPSKLASSEN, INTE PÅ SKICKLIGHETSKLASSEN. C.3.4.1 säger
+        /// ordagrant: *"Antalet medaljer till de främsta i individuella mästerskap reduceras när
+        /// antalet deltagare i EN VAPENGRUPP är lägre än fem"*. Klasserna 1, 2 och 3 är
+        /// kompetensnivåer inom en vapengrupp och har inga egna medaljer — lagavsnittet
+        /// räknar upp medaljgrupperna explicit: *"Förbundets medaljer inom var och en av
+        /// vapengrupperna A, B, C, samt klasserna Damer C, Juniorer C, Veteraner C"* (och R i
+        /// fält). Samma axel som finalerna och särskjutningen, se ChampionshipCategory.
+        ///
+        /// Att mäta per skicklighetsklass gav rakt felaktiga påståenden på skärmen: "B1, 3
+        /// deltagare → Enbart Guld" på en tävling där vapengrupp B har 31 deltagare och alltså
+        /// full medaljömgivning. Rapporterat 2026-09-08.
+        ///
+        /// ⚠️ Juniorregeln är EGEN och går i motsatt riktning: *"Vid samtliga
+        /// juniormästerskap skall medaljer delas ut till de 3 bästa. Är deltagarantalet färre än
+        /// 3, delas medaljer ut till de som deltagit."* Junioren förlorar alltså aldrig sin
+        /// medalj på få deltagare — antalet följer bara deltagarantalet.
+        /// </summary>
+        private static (int Medals, string Text) ChampionshipMedals(int participants, bool isJuniorCategory)
+        {
+            if (isJuniorCategory)
+            {
+                var n = Math.Min(3, Math.Max(0, participants));
+                return (n, participants >= 3
+                    ? "Guld, Silver, Brons"
+                    : $"Medaljer till alla {n} deltagande");
+            }
+            return participants switch
+            {
+                >= 5 => (3, "Guld, Silver, Brons"),
+                4 => (2, "Guld + Silver"),
+                3 => (1, "Enbart Guld"),
+                _ => (0, "Inga medaljer")
+            };
+        }
+
+        /// <summary>
+        /// Deltagarantal och medaljutdelning per MÄSTERSKAPSKLASS. Tom lista när tävlingen inte
+        /// är ett mästerskap — då delas inga mästerskapsmedaljer ut alls och ytan ska inte
+        /// påstå något om medaljer.
+        /// </summary>
+        private List<object> BuildMedalGroups(List<PrecisionResultEntry> results, string? competitionScope)
+        {
+            var groups = new List<object>();
+            if (!ChampionshipCategory.IsChampionship(competitionScope)) return groups;
+
+            var splitC = ChampionshipCategory.SplitsGroupC(competitionScope);
+
+            // Deltagare = distinkta skyttar i kategorin. En skytt kan inte starta i två klasser
+            // inom samma vapengrupp i precision (F.2.2), så distinkta medlemmar är rätt mått.
+            foreach (var g in results
+                         .GroupBy(r => ChampionshipCategory.For(r.ShootingClass, splitC))
+                         .Where(g => !string.IsNullOrWhiteSpace(g.Key))
+                         .OrderBy(g => g.Key, StringComparer.CurrentCulture))
+            {
+                var count = g.Select(r => r.MemberId).Distinct().Count();
+                var isJun = g.Key.Contains("Jun", StringComparison.OrdinalIgnoreCase);
+                var (medals, text) = ChampionshipMedals(count, isJun);
+                groups.Add(new
+                {
+                    category = g.Key,
+                    participants = count,
+                    medals,
+                    text,
+                    reduced = medals < 3
+                });
+            }
+            return groups;
         }
 
         [HttpPost]

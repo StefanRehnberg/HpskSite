@@ -671,9 +671,16 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small mb-3">
-                    Klasser med färre än 5 deltagare kan slås samman med närmaste klass. Avmarkera för att behålla klassen separat.
+                <p class="text-muted small mb-2">
+                    Klasser med färre än 5 deltagare kan slås samman med närmaste klass inom
+                    vapengruppen. Avmarkera för att behålla klassen separat.
                 </p>
+                @* ⚠️ Fylls av renderMergeModal vid mästerskap. Kolumnen "Om ej sammanslagen"
+                   visade tidigare en MEDALJFÖRLUST per klass ("Enbart Guld"), vilket är fel axel:
+                   medaljerna avgörs per mästerskapsklass och klasserna 1–3 delar medalj. En
+                   arrangör kunde därför slå samman klasser för att "rädda" en medalj som aldrig
+                   var i fara. SHB C.3.4.1. *@
+                <div id="mergeModalMedalNote" class="alert alert-info small py-2 d-none"></div>
                 <div class="table-responsive">
                     <table class="table table-sm align-middle" id="classMergeTable">
                         <thead>
@@ -779,6 +786,7 @@ async function showMergeAnalysisModal(event) {
             return;
         }
 
+        _lastMergeAnalysis = data;   // notisen om medaljer läses härifrån
         renderMergeModal(data.classes, data.suggestions || [], data.applied || []);
         new bootstrap.Modal(document.getElementById('classMergeModal')).show();
     } catch (error) {
@@ -812,6 +820,28 @@ function renderMergeModal(classes, suggestions, applied) {
         if (src) appliedMap[src] = tgt || '';
     });
     const hasApplied = Object.keys(appliedMap).length > 0;
+
+    // Notisen om vad sammanslagningen INTE påverkar. Byggd ur senaste analysen, så den
+    // behöver inget eget anrop.
+    const note = document.getElementById('mergeModalMedalNote');
+    if (note) {
+        const an = _lastMergeAnalysis;
+        if (an && an.isChampionship) {
+            const reduced = (an.medalGroups || []).filter(g => g.reduced);
+            let html = '<i class="bi bi-info-circle me-1"></i>'
+                + 'Sammanslagningen styr <strong>hur resultatlistan grupperas</strong> — inte medaljerna. '
+                + 'Medaljerna delas ut per mästerskapsklass, och klasserna 1, 2 och 3 delar medalj.';
+            html += reduced.length
+                ? ' <span class="d-block mt-1">Färre än fem deltagare i en mästerskapsklass reducerar medaljerna: '
+                  + reduced.map(g => `<strong>${escapeHtml(g.category)}</strong> ${escapeHtml(g.text.toLowerCase())}`).join(', ')
+                  + '.</span>'
+                : ' <span class="d-block mt-1">Alla mästerskapsklasser har minst fem deltagare, så fulla medaljer delas ut.</span>';
+            note.innerHTML = html;
+            note.classList.remove('d-none');
+        } else {
+            note.classList.add('d-none');
+        }
+    }
 
     // Also track which classes are targets of other merges (to show "(ingår i sammanslagning ovan)")
     const mergeTargets = new Set();
@@ -878,15 +908,13 @@ function renderMergeModal(classes, suggestions, applied) {
         }
         row.appendChild(tdMerge);
 
-        // Medal impact
+        // ⚠️ INTE en medaljkonsekvens. Att inte slå samman betyder att klassen rankas för
+        // sig i resultatlistan — medaljerna avgörs per mästerskapsklass och påverkas inte
+        // (SHB C.3.4.1). Se notisen ovanför tabellen.
         const tdMedal = document.createElement('td');
-        if (cls.medalImpact) {
-            const isJunior = cls.className.includes('Jun');
-            const badgeClass = isJunior ? 'bg-info' : (cls.participantCount <= 2 ? 'bg-danger' : 'bg-warning text-dark');
-            tdMedal.innerHTML = `<span class="badge ${badgeClass} small">${escapeHtml(cls.medalImpact)}</span>`;
-        } else {
-            tdMedal.innerHTML = '<span class="text-muted">—</span>';
-        }
+        tdMedal.innerHTML = cls.belowThreshold
+            ? `<span class="text-muted small">Rankas för sig med ${cls.participantCount} deltagare</span>`
+            : '<span class="text-muted">—</span>';
         row.appendChild(tdMedal);
 
         tbody.appendChild(row);
@@ -1284,6 +1312,7 @@ async function showSubMergeAnalysisModal(event) {
             return;
         }
         _subMergeContext = true;
+        _lastMergeAnalysis = data;   // notisen om medaljer läses härifrån
         renderMergeModal(data.classes, data.suggestions || [], data.applied || []);
         new bootstrap.Modal(document.getElementById('classMergeModal')).show();
     } catch (error) {
@@ -1454,47 +1483,103 @@ async function loadMergeState() {
             mergeCell = '<span class="text-muted">—</span>';
         }
 
-        // Medaljkonsekvensen gäller den klass som FAKTISKT tävlar. Är klassen sammanslagen är
-        // det målklassens antal som avgör, så den egna varningen är då inte längre sann.
-        let medalCell = '<span class="text-muted">—</span>';
-        if (isMerged) {
-            medalCell = '<span class="text-muted small">avgörs i målklassen</span>';
-        } else if (c.medalImpact) {
-            const isJunior = (c.className || '').includes('Jun');
-            const badge = isJunior ? 'bg-info' : (c.participantCount <= 2 ? 'bg-danger' : 'bg-warning text-dark');
-            medalCell = `<span class="badge ${badge} small">${escapeHtml(c.medalImpact)}</span>`;
-        }
-
+        // ⚠️⚠️ INGEN MEDALJKOLUMN HÄR. Medaljerna avgörs per MÄSTERSKAPSKLASS, inte per
+        // skicklighetsklass — SHB C.3.4.1 mäter reduktionen på "antalet deltagare i en
+        // vapengrupp". Klasserna 1, 2 och 3 delar medalj. Den här tabellen visade tidigare
+        // "B1, 3 deltagare → Enbart Guld" på en tävling där vapengrupp B har 31 deltagare,
+        // vilket är ett rakt felaktigt påstående om vem som får medalj. Medaljerna står i sin
+        // egen tabell nedan, per mästerskapsklass.
         const countBadge = c.belowThreshold && !isMerged
-            ? `<span class="badge bg-warning text-dark">${c.participantCount}</span>`
+            ? `<span class="badge bg-warning text-dark" title="Färre än fem — klassen kan slås samman">${c.participantCount}</span>`
             : `${c.participantCount}`;
 
         return `<tr>
             <td><strong>${escapeHtml(c.className)}</strong></td>
             <td class="text-center">${countBadge}</td>
             <td>${mergeCell}</td>
-            <td>${medalCell}</td>
         </tr>`;
     }).join('');
 
+    // ── Medaljer per mästerskapsklass (bara vid mästerskap) ──
+    const medalGroups = data.medalGroups || [];
+    const isChampionship = !!data.isChampionship;
+    let medalBlock;
+    if (!isChampionship) {
+        medalBlock = `<div class="alert alert-secondary small py-2 mb-0">
+            <i class="bi bi-info-circle me-1"></i>
+            Tävlingen är inte ett mästerskap, så inga mästerskapsmedaljer delas ut.
+            Klassindelningen styr placeringarna i resultatlistan, och en klass med färre än fem
+            deltagare kan slås samman med närmaste klass inom vapengruppen (SHB F.2.3).
+        </div>`;
+    } else if (!medalGroups.length) {
+        medalBlock = `<div class="text-muted small">Inga resultat än, så medaljgrupperna kan inte räknas.</div>`;
+    } else {
+        const medalRows = medalGroups.map(g => {
+            const badge = g.reduced
+                ? (g.medals === 0 ? 'bg-danger' : 'bg-warning text-dark')
+                : 'bg-success';
+            return `<tr>
+                <td><strong>${escapeHtml(g.category)}</strong></td>
+                <td class="text-center">${g.participants}</td>
+                <td><span class="badge ${badge} small">${escapeHtml(g.text)}</span></td>
+            </tr>`;
+        }).join('');
+        const reducedCount = medalGroups.filter(g => g.reduced).length;
+        medalBlock = `
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-2">
+                    <thead>
+                        <tr>
+                            <th>Mästerskapsklass</th>
+                            <th class="text-center">Deltagare</th>
+                            <th>Medaljer</th>
+                        </tr>
+                    </thead>
+                    <tbody>${medalRows}</tbody>
+                </table>
+            </div>
+            <div class="form-text mb-0">
+                Medaljerna delas ut per mästerskapsklass — vapengrupp A, B och C samt Dam C,
+                Veteran C och Junior C. <strong>Klasserna 1, 2 och 3 är kompetensnivåer och delar
+                medalj.</strong> Är deltagarna färre än fem reduceras antalet medaljer
+                (SHB C.3.4.1): fyra ger guld och silver, tre ger bara guld, två eller en ger ingen.
+                Juniorklassen är undantagen — där delas medaljer alltid ut till de tre bästa,
+                eller till alla om de är färre.
+                ${reducedCount > 0
+                    ? '<span class="d-block mt-1"><i class="bi bi-exclamation-triangle text-warning me-1"></i>'
+                      + 'Reducering måste vara känd för de startande innan den tillämpas, och den som berörs '
+                      + 'ska erbjudas att byta till en start hen är kvalificerad till.</span>'
+                    : ''}
+            </div>`;
+    }
+
     host.innerHTML = `
-        <div class="table-responsive">
-            <table class="table table-sm align-middle mb-2">
-                <thead>
-                    <tr>
-                        <th>Klass</th>
-                        <th class="text-center">Deltagare</th>
-                        <th>Sammanslagning</th>
-                        <th>Medaljer</th>
-                    </tr>
-                </thead>
-                <tbody>${rows}</tbody>
-            </table>
-        </div>
-        <div class="form-text mb-0">
-            En klass med färre än fem deltagare kan slås samman med närmaste klass. Slås den inte
-            samman reduceras medaljerna. Tabellen visar det som är <strong>sparat</strong> —
-            <strong>Uppdatera</strong> räknar om listan med precis den här uppställningen.
+        <div class="row g-3">
+            <div class="col-lg-7">
+                <div class="fw-semibold small mb-1">Klasser i resultatlistan</div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2">
+                        <thead>
+                            <tr>
+                                <th>Klass</th>
+                                <th class="text-center">Deltagare</th>
+                                <th>Sammanslagning</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                <div class="form-text mb-0">
+                    Klasserna styr hur resultatlistan grupperas. En klass med färre än fem
+                    deltagare kan slås samman med närmaste klass inom vapengruppen. Tabellen visar
+                    det som är <strong>sparat</strong> — <strong>Uppdatera</strong> räknar om
+                    listan med precis den här uppställningen.
+                </div>
+            </div>
+            <div class="col-lg-5">
+                <div class="fw-semibold small mb-1">Medaljer</div>
+                ${medalBlock}
+            </div>
         </div>`;
 }
 

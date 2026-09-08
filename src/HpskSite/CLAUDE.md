@@ -3688,6 +3688,66 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 - `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
 - `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
+### ⚠️⚠️ MEDALJREDUKTIONEN MÄTS PÅ MÄSTERSKAPSKLASSEN (2026-09-08)
+
+**SHB C.3.4.1, ordagrant:** *"Antalet medaljer till de främsta i individuella mästerskap
+reduceras när antalet deltagare i EN VAPENGRUPP är lägre än fem"*. Inte per klass.
+
+Ytan mätte det per **skicklighetsklass** och skrev därmed rakt felaktiga påståenden på
+skärmen. Mätt på SSM 2026: "B1, 3 deltagare → Enbart Guld" och "C2 Dam, 4 → Guld + Silver",
+medan vapengrupp B har **31** deltagare och C Dam **14** — fulla medaljer i båda. Rapporterat av
+Stefan 2026-09-08 med orden "det ska inte utgå medaljer till de olika 1-3 klasserna, det ska
+delas ut medaljer till de olika finalgrupperna". Han hade rätt.
+
+**Samma axel som finalerna och särskjutningen** — `ChampionshipCategory`. Tredje gången samma
+förväxling dyker upp i det här området: finalgallringen (rättad 2026-09-07), särskjutningen
+(samma dag) och nu medaljräkningen. **Ställ alltid frågan "per klass eller per
+mästerskapsklass?" innan något räknas per klass i det här området.**
+
+**Belagt i SHB, med citat:**
+- **C.3.4.1** — reduktionen mäts på vapengruppen (citat ovan). Vidare: *"Vid samtliga
+  juniormästerskap skall medaljer delas ut till de 3 bästa. Är deltagarantalet färre än 3,
+  delas medaljer ut till de som deltagit."* Juniorregeln går alltså i motsatt riktning — den
+  reducerar aldrig, den följer bara deltagarantalet.
+- **C.3.6.5.1** (lag, precision/fält/milsnabb) räknar upp medaljgrupperna explicit: *"utdelas
+  Förbundets medaljer inom var och en av vapengrupperna A, B, C, samt klasserna Damer C,
+  Juniorer C, Veteraner C. I fältskjutning dessutom i vapengrupp R."*
+- **C.3.6.2.1** — *"Antalet startande i en vapengrupp/klass skall vara lägst 5"*; de två orden
+  används som EN enhet, vilket är varför "vapengrupp" i C.3.4.1 innehåller C-klasserna.
+- **F.2.3** — klassammanslagning gäller *"vid nationell tävling, landsdelstävling och
+  krets­tävling"*. **Ordet mästerskap förekommer inte.** Vid mästerskap är mekanismen för få
+  deltagare i stället medaljreducering (C.3.6.3, C.3.6.4: *"Undantag från regeln om lägst 5
+  startande kan medges. Antalet medaljer reduceras därvid enligt moment C.3.4.1."*).
+  Att slå samman en liten klass "räddar" alltså ingen mästerskapsmedalj.
+
+**Blast radius var LITEN, och det är värt att ha kontrollerat:** `MedalImpact` är bara en
+ETIKETT. Den sätts i `ClassMergingService.Analyze` och lästes av sammanslagningsdialogen och
+den nya panelen — **ingenting delar ut eller reducerar medaljer i beräkningen**.
+Mästerskapsmedaljer är placeringar, och Std-kolumnen är standardmedaljer (egen regel, egen
+kod). Ingen publicerad resultatlista var alltså fel; det var påståendena på arrangörens skärm.
+
+**Implementation:** `ChampionshipMedals(participants, isJuniorCategory)` är regeln, och
+`BuildMedalGroups` räknar deltagare per kategori (distinkta medlemmar — F.2.2 förbjuder start i
+två klasser inom samma vapengrupp, så det måttet är rätt). `AnalyzeClassMerges` returnerar
+`medalGroups` + `isChampionship`; **tom lista utanför mästerskap**, där ytan i stället säger att
+inga mästerskapsmedaljer delas ut alls.
+
+**Ytorna:** panelens klasstabell har **ingen** medaljkolumn längre — medaljerna står i en egen
+tabell per mästerskapsklass intill. Sammanslagningsdialogens kolumn "Om ej sammanslagen" säger
+nu *"Rankas för sig med N deltagare"* i stället för en medaljförlust, och dialogen bär vid
+mästerskap en notis om att sammanslagningen inte påverkar medaljerna.
+
+**⚠️ FLAGGAT, INTE ÅTGÄRDAT:** C.3.6.2.1 säger att *vapengruppindelning* tillämpas vid SM, och
+F.2.3 begränsar klassammanslagning till tävlingar. Det öppnar frågan om resultatlistan vid ett
+mästerskap borde grupperas per mästerskapsklass i stället för per skicklighetsklass — allttså
+samma axelfråga en nivå upp. Det är en STOR ändring (hela resultatlistans gruppering, publika
+sidan, standardmedaljerna) och Stefan har tidigare medvetet avgränsat bort
+klassammanslagningen från den här sortens fix. Rör den inte utan hans beslut.
+
+Verifierat på SSM 2026 mot endpointen: A 37, B 31, C 48, C Dam 14, C Vet Ä 7, C Vet Y 6 →
+alla "Guld, Silver, Brons"; C Jun 2 → "Medaljer till alla 2 deltagande". Enda kategorin under
+fem är alltså juniorklassen, som inte reduceras.
+
 ### Resultatfliken: besluten först, artefakten under (2026-09-08)
 
 Samma form som Startlistor-fliken fick. Fliken visade tidigare en omärkt verktygsrad och sedan
