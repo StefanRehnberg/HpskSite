@@ -287,36 +287,106 @@
     <!-- Results List Section (Collapsible) — hidden on station page -->
     @if (!isStationPage)
     {
+    @*
+        RESULTATFLIKENS FORM: BESLUTEN FÖRST, ARTEFAKTEN UNDER (2026-09-08)
+
+        Fliken visade tidigare en omärkt verktygsrad och sedan resultatlistan i en iframe —
+        alltså artefakten, men inget om de BESLUT som formar den. Klassammanslagningen låg helt
+        osynlig bakom en modal, och det är ett beslut som avgör VEM SOM FÅR MEDALJ
+        (medaljreduktionen hänger på deltagarantalet per klass).
+
+        Samma form som Startlistor-fliken fick: namngivna sektioner med tillstånd överst,
+        artefakten kollapsbar underst. Listan är medvetet KVAR inbäddad — arrangörens slinga på
+        tävlingsdagen är mata in → titta i listan → rätta, och den slingan ska inte kosta ett
+        flikbyte per varv. Det är också så man verifierar en sammanslagning: rubriken "C2+Dam"
+        med rätt skyttar under.
+    *@
     <div class="mt-3" id="resultsListSection">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <div class="d-flex align-items-center gap-2" id="resultsListActions">
-                <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
-                    <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
-                </button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="showMergeAnalysisModal(event)" id="btnAnalyzeMerges">
-                    <i class="bi bi-intersect me-1"></i>Sammanfoga klasser
-                </button>
-                <span class="badge bg-warning fs-6 px-3 py-2" id="resultsListStatusBadge" style="display: none;">
-                    <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
-                </span>
-                <button class="btn btn-success btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
-                    <i class="bi bi-check-circle me-1"></i>Publicera
-                </button>
-                <button class="btn btn-outline-warning btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
-                    <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
-                </button>
-                <span class="text-muted" id="resultsListSummary" style="display: none;">
-                    <small><i class="bi bi-people me-1"></i><span id="resultsListCount">0</span> deltagare</small>
-                </span>
+
+        <!-- ===== Sektion 1: Klasser och sammanslagning ===== -->
+        <div class="card mb-3" id="mergeStateSection">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+                <span class="fw-bold"><i class="bi bi-intersect me-2"></i>Klasser och sammanslagning</span>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="small" id="mergeStateSummary"></span>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="showMergeAnalysisModal(event)" id="btnAnalyzeMerges">
+                        <i class="bi bi-pencil-square me-1"></i>Ändra
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#mergeStateBody"
+                            aria-expanded="true" aria-controls="mergeStateBody">
+                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
+                    </button>
+                </div>
+            </div>
+            <div class="collapse show" id="mergeStateBody">
+                <div class="card-body py-2">
+                    <div id="mergeStateContent">
+                        <div class="text-muted small py-2">
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>Läser klasser…
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-        <div id="resultsListBody">
-            <div id="noResultsMessage" class="text-center py-4" style="display: none;">
-                <p class="text-muted">Klicka "Uppdatera" för att skapa en resultatlista.</p>
+
+        <!-- ===== Sektion 2: Publicering ===== -->
+        <div class="card mb-3" id="publishSection">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+                <span class="fw-bold"><i class="bi bi-megaphone me-2"></i>Publicering</span>
+                <div class="d-flex align-items-center gap-2 flex-wrap" id="resultsListActions">
+                    <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                    <span class="badge bg-warning fs-6 px-3 py-2" id="resultsListStatusBadge" style="display: none;">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
+                    </span>
+                    <button class="btn btn-success btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
+                        <i class="bi bi-check-circle me-1"></i>Publicera
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
+                    </button>
+                    <span class="text-muted" id="resultsListSummary" style="display: none;">
+                        <small><i class="bi bi-people me-1"></i><span id="resultsListCount">0</span> deltagare</small>
+                    </span>
+                </div>
             </div>
-            <div id="resultsDisplay" style="display: none;">
-                <div id="resultsIframeContainer">
-                    <iframe id="resultsManagementIframe" src="" style="width: 100%; height: 800px; border: 1px solid #dee2e6; border-radius: 0.375rem;"></iframe>
+            <div class="card-body py-2">
+                <div class="small text-muted mb-0" id="publishHint">
+                    <strong>Uppdatera</strong> räknar om listan ur de inmatade resultaten med den
+                    sammanslagning som står ovan — den frågar ingenting och ändrar ingen
+                    sammanslagning. <strong>Publicera</strong> gör listan synlig för skyttarna.
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Sektion 3: Resultatlistan (artefakten) ===== -->
+        <div class="card" id="resultsArtifactSection">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+                <span class="fw-bold"><i class="bi bi-list-ol me-2"></i>Resultatlistan</span>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <button class="btn btn-outline-primary btn-sm" id="btnOpenResultsNewTab"
+                            onclick="openResultsListInNewTab()" style="display: none;">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Öppna i ny flik
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#resultsListBody"
+                            aria-expanded="true" aria-controls="resultsListBody">
+                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
+                    </button>
+                </div>
+            </div>
+            <div class="collapse show" id="resultsListBody">
+                <div class="card-body">
+                    <div id="noResultsMessage" class="text-center py-4" style="display: none;">
+                        <p class="text-muted">Klicka "Uppdatera" under Publicering för att skapa en resultatlista.</p>
+                    </div>
+                    <div id="resultsDisplay" style="display: none;">
+                        <div id="resultsIframeContainer">
+                            <iframe id="resultsManagementIframe" src="" style="width: 100%; height: 800px; border: 1px solid #dee2e6; border-radius: 0.375rem;"></iframe>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -709,7 +779,7 @@ async function showMergeAnalysisModal(event) {
             return;
         }
 
-        renderMergeModal(data.classes, data.suggestions || []);
+        renderMergeModal(data.classes, data.suggestions || [], data.applied || []);
         new bootstrap.Modal(document.getElementById('classMergeModal')).show();
     } catch (error) {
         console.error('Error:', error);
@@ -722,13 +792,26 @@ async function showMergeAnalysisModal(event) {
     }
 }
 
-function renderMergeModal(classes, suggestions) {
+// applied = den SPARADE konfigurationen (kan vara tom). ⚠️ Finns den förkryssas dialogen
+// ur DEN, inte ur förslagen. Förut förkryssades alltid förslagen, så en arrangör som valt
+// ett annat mål än förslaget — eller kryssat av ett förslag — fick sitt val överskrivet
+// nästa gång dialogen öppnades och sparades. Rapporterat 2026-09-08.
+function renderMergeModal(classes, suggestions, applied) {
     const tbody = document.getElementById('classMergeTableBody');
     tbody.innerHTML = '';
 
     // Build a lookup for quick access
     const suggestionMap = {};
     suggestions.forEach(s => { suggestionMap[s.sourceClass] = s; });
+
+    // Källklass → tillämpat mål. Nycklarna kommer från servern i PascalCase.
+    const appliedMap = {};
+    (applied || []).forEach(a => {
+        const src = a.sourceClass || a.SourceClass;
+        const tgt = a.targetClass || a.TargetClass;
+        if (src) appliedMap[src] = tgt || '';
+    });
+    const hasApplied = Object.keys(appliedMap).length > 0;
 
     // Also track which classes are targets of other merges (to show "(ingår i sammanslagning ovan)")
     const mergeTargets = new Set();
@@ -764,8 +847,11 @@ function renderMergeModal(classes, suggestions) {
         const tdMerge = document.createElement('td');
         if (suggestion) {
             const checkId = `merge_${cls.className.replace(/\s/g, '_')}`;
+            // Finns en sparad konfiguration styr DEN kryssrutan; annars förslaget.
+            const isApplied = Object.prototype.hasOwnProperty.call(appliedMap, cls.className);
+            const checkedAttr = (hasApplied ? isApplied : true) ? 'checked' : '';
             let mergeHtml = `<div class="form-check d-inline-block">`;
-            mergeHtml += `<input class="form-check-input merge-checkbox" type="checkbox" id="${checkId}" checked `;
+            mergeHtml += `<input class="form-check-input merge-checkbox" type="checkbox" id="${checkId}" ${checkedAttr} `;
             mergeHtml += `data-source="${escapeAttr(cls.className)}" `;
 
             if (suggestion.requiresAdminChoice) {
@@ -775,7 +861,8 @@ function renderMergeModal(classes, suggestions) {
                 mergeHtml += `</div>`;
                 mergeHtml += `<select class="form-select form-select-sm d-inline-block ms-1 merge-target-select" style="width: auto;" data-source="${escapeAttr(cls.className)}">`;
                 suggestion.possibleTargets.forEach((t, i) => {
-                    mergeHtml += `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`;
+                    const sel = isApplied && appliedMap[cls.className] === t ? ' selected' : '';
+                    mergeHtml += `<option value="${escapeAttr(t)}"${sel}>${escapeHtml(t)}</option>`;
                 });
                 mergeHtml += `</select>`;
             } else {
@@ -842,6 +929,14 @@ function submitCreateResultsListNoMerges() {
 // keepExisting = true → servern räknar om med den SPARADE sammanslagningen och lämnar den
 // orörd. false → `merges` ersätter konfigurationen (tom/null = uttryckligt "utan
 // sammanslagning", vilket rensar den).
+// Öppnar den publika resultatlistan i en ny flik — medvetet UTAN noRefresh, så den beter sig
+// som för vilken besökare som helst där (inklusive 15-sekundersuppdateringen på en preliminär
+// lista). Inbäddningen på fliken är den som ska stå still.
+function openResultsListInNewTab() {
+    if (!currentResultPageUrl) { alert('Ingen resultatlista att öppna än.'); return; }
+    window.open(currentResultPageUrl, '_blank');
+}
+
 function submitCreateResultsList(competitionId, merges, keepExisting) {
     const btn = document.getElementById('btnCreateResultsList');
     if (btn) {
@@ -866,6 +961,7 @@ function submitCreateResultsList(competitionId, merges, keepExisting) {
         if (data.success) {
             showSaveMessage('Resultatlistan har skapats/uppdaterats! (' + data.resultsCount + ' deltagare)', 'success');
             loadResultsList();
+            loadMergeState();
         } else {
             alert('Fel vid skapande av resultatlista: ' + (data.message || 'Okänt fel'));
         }
@@ -968,6 +1064,8 @@ async function loadResultsList() {
                 const wanted = data.resultPageUrl
                     + (data.resultPageUrl.includes('?') ? '&' : '?') + 'noRefresh=1';
                 currentResultPageUrl = data.resultPageUrl;
+                const btnOpen = document.getElementById('btnOpenResultsNewTab');
+                if (btnOpen) btnOpen.style.display = 'inline-block';
                 const iframe = document.getElementById('resultsManagementIframe');
                 if (iframe && iframe.getAttribute('data-loaded-src') !== wanted) {
                     iframe.setAttribute('data-loaded-src', wanted);
@@ -1186,7 +1284,7 @@ async function showSubMergeAnalysisModal(event) {
             return;
         }
         _subMergeContext = true;
-        renderMergeModal(data.classes, data.suggestions || []);
+        renderMergeModal(data.classes, data.suggestions || [], data.applied || []);
         new bootstrap.Modal(document.getElementById('classMergeModal')).show();
     } catch (error) {
         console.error('Error:', error);
@@ -1282,6 +1380,122 @@ async function loadSubResultsList() {
     } catch (error) {
         console.error('Error loading sub-comp results list:', error);
     }
+}
+
+// ─── Klasser och sammanslagning ───────────────────────────────────────
+//
+// Visar det TILLÄMPADE läget, inte förslagen. Sammanslagningen avgör vem som får medalj
+// (medaljreduktionen hänger på deltagarantalet per klass), och den låg tidigare helt osynlig
+// bakom en modal — varken fliken eller dialogen kunde svara på "vad är sammanslaget nu".
+let _lastMergeAnalysis = null;
+
+async function loadMergeState() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const host = document.getElementById('mergeStateContent');
+    const summary = document.getElementById('mergeStateSummary');
+    if (!competitionId || !host) return;
+
+    let data;
+    try {
+        const resp = await fetch(`/umbraco/surface/CompetitionResults/AnalyzeClassMerges?competitionId=${competitionId}`);
+        data = await resp.json();
+    } catch (e) {
+        host.innerHTML = '<div class="text-muted small py-2">Kunde inte läsa klasserna.</div>';
+        return;
+    }
+    if (!data || !data.success) {
+        host.innerHTML = '<div class="text-muted small py-2">Kunde inte läsa klasserna.</div>';
+        return;
+    }
+
+    _lastMergeAnalysis = data;
+    const classes = data.classes || [];
+    const applied = data.applied || [];
+    const appliedMap = {};
+    applied.forEach(a => {
+        const src = a.sourceClass || a.SourceClass;
+        const tgt = a.targetClass || a.TargetClass;
+        if (src) appliedMap[src] = tgt || '';
+    });
+
+    if (!classes.length) {
+        host.innerHTML = '<div class="text-muted small py-2">Inga klasser med resultat än. '
+            + 'Klasserna dyker upp här när resultat matas in.</div>';
+        if (summary) summary.innerHTML = '';
+        return;
+    }
+
+    const mergedCount = Object.keys(appliedMap).length;
+    const belowCount = classes.filter(c => c.belowThreshold && !appliedMap[c.className]).length;
+
+    if (summary) {
+        const parts = [`<span class="badge bg-secondary-subtle text-secondary-emphasis">${classes.length} klasser</span>`];
+        parts.push(mergedCount > 0
+            ? `<span class="badge bg-info-subtle text-info-emphasis">${mergedCount} sammanslagen${mergedCount === 1 ? '' : 'a'}</span>`
+            : '<span class="badge bg-secondary-subtle text-secondary-emphasis">ingen sammanslagning</span>');
+        if (belowCount > 0) {
+            parts.push(`<span class="badge bg-warning-subtle text-warning-emphasis">${belowCount} under 5 deltagare</span>`);
+        }
+        summary.innerHTML = parts.join(' ');
+    }
+
+    const rows = classes.map(c => {
+        const target = appliedMap[c.className];
+        const isMerged = Object.prototype.hasOwnProperty.call(appliedMap, c.className);
+        // Är klassen MÅL för någon annans sammanslagning?
+        const incoming = Object.keys(appliedMap).filter(src => appliedMap[src] === c.className);
+
+        let mergeCell;
+        if (isMerged) {
+            mergeCell = `<span class="badge bg-info-subtle text-info-emphasis">→ ${escapeHtml(target || '?')}</span>`;
+        } else if (incoming.length) {
+            mergeCell = `<span class="text-muted small">tar emot ${escapeHtml(incoming.join(', '))}</span>`;
+        } else {
+            mergeCell = '<span class="text-muted">—</span>';
+        }
+
+        // Medaljkonsekvensen gäller den klass som FAKTISKT tävlar. Är klassen sammanslagen är
+        // det målklassens antal som avgör, så den egna varningen är då inte längre sann.
+        let medalCell = '<span class="text-muted">—</span>';
+        if (isMerged) {
+            medalCell = '<span class="text-muted small">avgörs i målklassen</span>';
+        } else if (c.medalImpact) {
+            const isJunior = (c.className || '').includes('Jun');
+            const badge = isJunior ? 'bg-info' : (c.participantCount <= 2 ? 'bg-danger' : 'bg-warning text-dark');
+            medalCell = `<span class="badge ${badge} small">${escapeHtml(c.medalImpact)}</span>`;
+        }
+
+        const countBadge = c.belowThreshold && !isMerged
+            ? `<span class="badge bg-warning text-dark">${c.participantCount}</span>`
+            : `${c.participantCount}`;
+
+        return `<tr>
+            <td><strong>${escapeHtml(c.className)}</strong></td>
+            <td class="text-center">${countBadge}</td>
+            <td>${mergeCell}</td>
+            <td>${medalCell}</td>
+        </tr>`;
+    }).join('');
+
+    host.innerHTML = `
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-2">
+                <thead>
+                    <tr>
+                        <th>Klass</th>
+                        <th class="text-center">Deltagare</th>
+                        <th>Sammanslagning</th>
+                        <th>Medaljer</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+        <div class="form-text mb-0">
+            En klass med färre än fem deltagare kan slås samman med närmaste klass. Slås den inte
+            samman reduceras medaljerna. Tabellen visar det som är <strong>sparat</strong> —
+            <strong>Uppdatera</strong> räknar om listan med precis den här uppställningen.
+        </div>`;
 }
 
 // ─── Särskjutning (shoot-off) card ───────────────────────────────────────────
@@ -1702,6 +1916,9 @@ function loadResultsListOnce() {
     _resultsListLoadedOnce = true;
     loadResultsList();
     loadSubResultsList();
+    // Panelen är sitt eget anrop — den ska stå där även på en tävling som ännu inte har
+    // någon resultatlista, eftersom klasserna och deras deltagarantal finns före listan.
+    loadMergeState();
 }
 
 $(document).ready(function() {

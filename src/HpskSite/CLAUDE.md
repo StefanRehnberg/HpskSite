@@ -3688,6 +3688,47 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 - `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
 - `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
+### Resultatfliken: besluten först, artefakten under (2026-09-08)
+
+Samma form som Startlistor-fliken fick. Fliken visade tidigare en omärkt verktygsrad och sedan
+resultatlistan i en iframe — alltså ARTEFAKTEN, men ingenting om de BESLUT som formar den.
+Tre namngivna sektioner nu:
+
+1. **Klasser och sammanslagning** — tabell: klass · deltagare · sammanslagning · medaljer,
+   med brickor i rubriken ("15 klasser · 2 sammanslagna · 1 under 5 deltagare") och en
+   **Ändra**-knapp som öppnar den befintliga dialogen.
+2. **Publicering** — Uppdatera / status / Publicera, med en rad som förklarar vad Uppdatera
+   gör (och inte gör).
+3. **Resultatlistan** — artefakten, kollapsbar, med **Öppna i ny flik**.
+
+**⚠️⚠️ LISTAN ÄR MEDVETET KVAR INBÄDDAD.** Förslaget var att ta bort den och bara länka ut
+den, som Startlistor "gör" — men Startlistor bäddar också in sin lista, och tre skäl talar
+emot: (a) arrangörens slinga på tävlingsdagen är mata in → titta i listan → rätta, och den
+ska inte kosta ett flikbyte per varv — startlistan skapas en gång, resultatlistan läses hela
+dagen; (b) listan ÄR kontrollen av sammanslagningen (rubriken "C2+Dam" med rätt skyttar
+under), så inställningar utan lista betyder att man ställer in i blindo; (c) publicering är
+ett omdöme om vad publiken ska se, och då är den exakta publika renderingen värd något —
+samma skäl som Deltävlingskortet redan bäddar in `/resultat/?sub=true`.
+
+**⚠️ Panelen visar det TILLÄMPADE läget, och det gick inte att läsa någonstans förut.**
+`AnalyzeClassMerges` svarade bara på "vad KAN slås samman" (klasser under fem deltagare +
+förslag). Den returnerar nu också **`applied`** = den sparade `mergeConfig` (respektive
+`subCompetitionMergeConfig`), läst via `ReadStoredMerges`.
+- **Följdfix: dialogen förkryssar ur `applied` när den finns**, annars ur förslagen. Förut
+  förkryssades alltid FÖRSLAGEN, så en arrangör som valt ett annat mål än förslaget — eller
+  kryssat av ett förslag — fick sitt val överskrivet nästa gång dialogen öppnades och
+  sparades. Dropdownen för admin-val är också förvald ur det tillämpade målet.
+- **Medaljvarningen flyttar med sammanslagningen.** En sammanslagen klass visar
+  "avgörs i målklassen" i stället för sin egen reduktion — den egna är inte längre sann,
+  eftersom det är målklassens deltagarantal som gäller. Att låta "Guld + Silver" stå kvar på
+  en klass som slås samman vore ett direkt felaktigt påstående om vem som får medalj.
+
+Verifierat i webbläsaren på SSM 2026 genom att bygga tillståndet och återställa det:
+utgångsläge "ingen sammanslagning · 3 under 5 deltagare" → tillämpa C2 Dam→C2 och C Jun→C1
+→ panelen visar "→ C2" / "→ C1" och "tar emot" på målklasserna, brickan "2 sammanslagna · 1
+under 5 deltagare", medaljvarningen borta från de sammanslagna → dialogen öppnad igen är
+förkryssad ur just det → rensat, och dev är tillbaka i utgångsläget.
+
 ### Resultatlistan tog tolv sekunder — N+1 i skyttuppslaget (2026-09-08)
 
 `GetResultsList` / `CreateResultsList` mättes till **10–12 sekunder** på SSM 2026 (1174

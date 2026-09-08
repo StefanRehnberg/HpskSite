@@ -2652,7 +2652,8 @@ namespace HpskSite.Controllers
 
                 // Excluded types
                 if (compTypeId is "MagnumPrecision" or "Springskytte")
-                    return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>() });
+                    return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>(),
+                                      applied = Array.Empty<object>(), hasResultList = false });
 
                 var results = await GetCompetitionResultsInternal(competitionId);
                 if (subCompetitionOnly)
@@ -2661,11 +2662,26 @@ namespace HpskSite.Controllers
                     results = results.Where(r => subIds.Contains(r.MemberId)).ToList();
                 }
 
+                // ⚠️ DEN SPARADE KONFIGURATIONEN returneras vid sidan av förslagen.
+                //
+                // Analysen svarar på "vad KAN slås samman" (klasser med färre än fem deltagare
+                // och deras förslag). Den svarar inte på "vad ÄR sammanslaget", och det var en
+                // brist med följder: sammanslagningen avgör vem som får medalj (medaljreduktionen
+                // hänger på deltagarantalet per klass), men det tillämpade läget syntes ingenstans
+                // i gränssnittet — varken på fliken eller i dialogen, som förkryssade FÖRSLAG.
+                // En arrangör som valt ett annat mål än förslaget, eller kryssat av ett förslag,
+                // fick sitt val överskrivet nästa gång dialogen öppnades och sparades.
+                // Rapporterat 2026-09-08.
+                var mergeResultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var appliedMerges = ReadStoredMerges(mergeResultPage, subCompetitionOnly)
+                                    ?? new List<ClassMergeAction>();
+                var hasResultList = mergeResultPage != null;
+
                 // Fallback to cached result data if DB is empty
                 if (!results.Any())
                 {
-                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
-                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    var resultPage = mergeResultPage;
                     var existingJson = resultPage?.GetValue<string>("resultData");
                     if (!string.IsNullOrEmpty(existingJson))
                     {
@@ -2704,15 +2720,18 @@ namespace HpskSite.Controllers
                             }
                             var svc = new ClassMergingService();
                             var analysis = svc.Analyze(syntheticResults, compTypeId);
-                            return Json(new { success = true, analysis.Suggestions, analysis.Classes });
+                            return Json(new { success = true, analysis.Suggestions, analysis.Classes,
+                                              applied = appliedMerges, hasResultList });
                         }
                     }
-                    return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>() });
+                    return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>(),
+                                      applied = appliedMerges, hasResultList });
                 }
 
                 var service = new ClassMergingService();
                 var result = service.Analyze(results, compTypeId);
-                return Json(new { success = true, result.Suggestions, result.Classes });
+                return Json(new { success = true, result.Suggestions, result.Classes,
+                                  applied = appliedMerges, hasResultList });
             }
             catch (Exception ex)
             {
