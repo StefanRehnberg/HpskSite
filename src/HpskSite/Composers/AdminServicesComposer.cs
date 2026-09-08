@@ -66,6 +66,12 @@ namespace HpskSite.Composers
             // Register CompetitionTeamService as scoped
             builder.Services.AddScoped<CompetitionTeamService>();
 
+            // Prisutdelningsvyn. Laser den SPARADE resultatartefakten och rankar aldrig om
+            // nagot - medaljorerna kommer ur artefaktens MedalAwards, som byggs dar hela
+            // kontexten finns (CalculateFinalResults). Beror pa CompetitionTeamService for
+            // lagmedaljerna, sa den maste registreras efter den.
+            builder.Services.AddScoped<PrizeGivingService>();
+
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)

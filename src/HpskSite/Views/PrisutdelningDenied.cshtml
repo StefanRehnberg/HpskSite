@@ -1,0 +1,30 @@
+@model int
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prisutdelning</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-body">
+    <div class="container py-5" style="max-width: 560px;">
+        <div class="card">
+            <div class="card-body text-center">
+                <div class="display-6 mb-3">🏅</div>
+                <h1 class="h4">Prisutdelning</h1>
+                <p class="text-secondary mb-4">
+                    Den här sidan är för tävlingens funktionärer. Du behöver vara inloggad med ett
+                    konto som har behörighet för tävlingen.
+                </p>
+                <a class="btn btn-primary" href="/login-register?returnUrl=/prisutdelning/@Model">
+                    Logga in
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

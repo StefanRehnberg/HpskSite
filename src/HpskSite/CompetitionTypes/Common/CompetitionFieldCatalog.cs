@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -117,6 +117,12 @@ namespace HpskSite.CompetitionTypes.Common
             new("showLiveResults", "Visa live-resultat", FieldControl.Checkbox, "Konfiguration", 5),
             new("isAwardingStandardMedals", "Standardmedaljsgrundande", FieldControl.Checkbox, "Konfiguration", 6,
                 help: "Standardmedaljer får inte delas ut vid klubbtävlingar (BR-PS.1.3)."),
+            // Hederspriser (SHB C.3.4.2): arrangören avgör om de utgår, och om de gör det
+            // skall de tillfalla minst en fjärdedel av deltagarna. Styr hedersprissektionen
+            // på prisutdelningssidan.
+            new("isAwardingHonoraryAward", "Hederspriser utgår", FieldControl.Checkbox, "Konfiguration", 8,
+                help: "Hederspriser skall tillfalla minst en fjärdedel av deltagarna (SHB C.3.4.2). "
+                    + "Utgår de inte skall det anges på tävlingsinbjudan."),
             new("allowSelfReporting", "Tillåt resultatrapportering (hemmabana)", FieldControl.Checkbox, "Konfiguration", 7,
                 notFor: new[] { Springskytte }),
 

@@ -2763,44 +2763,18 @@ namespace HpskSite.Controllers
             };
         }
 
+        /// <summary>Valören för en placering. Regeln bor i <see cref="ChampionshipMedalCount"/>.</summary>
+        private static string MedalNameForPlace(int place)
+            => ChampionshipMedalCount.MedalNameForPlace(place);
+
         /// <summary>
-        /// Hur många mästerskapsmedaljer som delas ut i en mästerskapsklass, ordagrant enligt
-        /// SHB 2026 C.3.4.1.
-        ///
-        /// ⚠️⚠️ MÄTS PÅ MÄSTERSKAPSKLASSEN, INTE PÅ SKICKLIGHETSKLASSEN. C.3.4.1 säger
-        /// ordagrant: *"Antalet medaljer till de främsta i individuella mästerskap reduceras när
-        /// antalet deltagare i EN VAPENGRUPP är lägre än fem"*. Klasserna 1, 2 och 3 är
-        /// kompetensnivåer inom en vapengrupp och har inga egna medaljer — lagavsnittet
-        /// räknar upp medaljgrupperna explicit: *"Förbundets medaljer inom var och en av
-        /// vapengrupperna A, B, C, samt klasserna Damer C, Juniorer C, Veteraner C"* (och R i
-        /// fält). Samma axel som finalerna och särskjutningen, se ChampionshipCategory.
-        ///
-        /// Att mäta per skicklighetsklass gav rakt felaktiga påståenden på skärmen: "B1, 3
-        /// deltagare → Enbart Guld" på en tävling där vapengrupp B har 31 deltagare och alltså
-        /// full medaljömgivning. Rapporterat 2026-09-08.
-        ///
-        /// ⚠️ Juniorregeln är EGEN och går i motsatt riktning: *"Vid samtliga
-        /// juniormästerskap skall medaljer delas ut till de 3 bästa. Är deltagarantalet färre än
-        /// 3, delas medaljer ut till de som deltagit."* Junioren förlorar alltså aldrig sin
-        /// medalj på få deltagare — antalet följer bara deltagarantalet.
+        /// Antal mästerskapsmedaljer i en mästerskapsklass. Regeln bor i
+        /// <see cref="ChampionshipMedalCount"/> — den behövs även för lagmedaljerna och för
+        /// prisutdelningssidan, och en andra kopia av den är en andra chans att förväxla
+        /// mästerskapskategori med skicklighetsklass.
         /// </summary>
         private static (int Medals, string Text) ChampionshipMedals(int participants, bool isJuniorCategory)
-        {
-            if (isJuniorCategory)
-            {
-                var n = Math.Min(3, Math.Max(0, participants));
-                return (n, participants >= 3
-                    ? "Guld, Silver, Brons"
-                    : $"Medaljer till alla {n} deltagande");
-            }
-            return participants switch
-            {
-                >= 5 => (3, "Guld, Silver, Brons"),
-                4 => (2, "Guld + Silver"),
-                3 => (1, "Enbart Guld"),
-                _ => (0, "Inga medaljer")
-            };
-        }
+            => ChampionshipMedalCount.For(participants, isJuniorCategory);
 
         /// <summary>
         /// Deltagarantal och medaljutdelning per MÄSTERSKAPSKLASS. Tom lista när tävlingen inte
@@ -4005,6 +3979,8 @@ namespace HpskSite.Controllers
             // to the final, which is what separates them.
             var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
             var medalCategoryTies = new List<PrecisionMedalCategoryTies>();
+            var medalAwards = new List<PrecisionMedalCategoryAwards>();
+            var medalAwardsComputed = false;
             if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
             {
                 // Who was taken to the final. Only looked up when there is a final to be taken
@@ -4207,6 +4183,134 @@ namespace HpskSite.Controllers
                     if (categoryTies != null && categoryTies.Groups.Count > 0)
                         medalCategoryTies.Add(categoryTies);
                 }
+
+                // ── Vem ska ha vilken medalj? ────────────────────────────────────────
+                //
+                // Byggs HÄR och inte av prisutdelningssidan, för här är listorna redan
+                // rätt: detectionGroups håller finalisterna per mästerskapskategori i
+                // poängordning, och ApplyShootOffOverride har just skrivit om den tiade
+                // delen av varje lista till särskjutningens utfall. En konsument som
+                // rankade om själv skulle behöva återskapa fyra saker samtidigt
+                // (kategorin, finalistfiltret, innertiorna, särskjutningen) — och den
+                // förväxlingen har uppstått tre gånger i den här kodbasen.
+                //
+                // ⚠️ TVÅ OLIKA MÄNGDER, som inte får blandas:
+                //   ANTALET medaljer mäts på ALLA startande i kategorin (SHB C.3.4.1:
+                //     "antalet deltagare i en vapengrupp"),
+                //   MEDALJÖRERNA hämtas bara ur finalisterna (en gallrad skytt kan
+                //     aldrig få medalj).
+                if (useMedalCategories)
+                {
+                    var splitCForAwards = ChampionshipCategory.SplitsGroupC(competitionScope);
+                    var participantsByCategory = classGroups
+                        .SelectMany(cg => cg.Shooters)
+                        .GroupBy(sh => ChampionshipCategory.For(sh.ShootingClass, splitCForAwards))
+                        .Where(gr => !string.IsNullOrWhiteSpace(gr.Key))
+                        .ToDictionary(
+                            gr => gr.Key,
+                            gr => gr.Select(sh => sh.MemberId).Distinct().Count(),
+                            StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var (categoryKey, orderedContenders, perCategory) in detectionGroups)
+                    {
+                        if (!perCategory) continue;
+
+                        var participants = participantsByCategory.TryGetValue(categoryKey, out var pc)
+                            ? pc
+                            : orderedContenders.Count;
+                        var isJunCategory = categoryKey.Contains("Jun", StringComparison.OrdinalIgnoreCase);
+                        var (medalCount, medalCountText) = ChampionshipMedals(participants, isJunCategory);
+
+                        var categoryAwards = new PrecisionMedalCategoryAwards
+                        {
+                            CategoryName = categoryKey,
+                            WeaponGroup = orderedContenders.Count > 0
+                                ? ChampionshipCategory.WeaponGroupFor(orderedContenders[0].ShootingClass)
+                                : "",
+                            Participants = participants,
+                            MedalCount = medalCount,
+                            MedalCountText = medalCountText,
+                            Reduced = medalCount < 3
+                        };
+
+                        var categoryTieGroups = medalCategoryTies
+                            .FirstOrDefault(t => string.Equals(t.CategoryName, categoryKey, StringComparison.OrdinalIgnoreCase))
+                            ?.Groups ?? new List<PrecisionTiedMedalGroup>();
+
+                        for (int place = 1; place <= medalCount && place <= orderedContenders.Count; place++)
+                        {
+                            var shooter = orderedContenders[place - 1];
+                            var tie = categoryTieGroups.FirstOrDefault(g => place >= g.FirstRank && place <= g.LastRank);
+
+                            // Oavgjord medaljstrid → INGEN medaljör utses för platsen. Att
+                            // skriva ut den som poängordningen råkar ge just nu vore att
+                            // namnge fel person i uppropet; C.4.3.1.11 kräver kontrollerade
+                            // resultat före prisutdelningen.
+                            if (tie != null && !tie.Resolved)
+                            {
+                                var contenderNames = tie.Shooters
+                                    .Select(x => x.Name)
+                                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                                    .ToList();
+                                var between = contenderNames.Count switch
+                                {
+                                    0 => "",
+                                    1 => contenderNames[0],
+                                    _ => string.Join(", ", contenderNames.Take(contenderNames.Count - 1))
+                                         + " och " + contenderNames.Last()
+                                };
+                                var line = between.Length > 0
+                                    ? $"{MedalNameForPlace(place)} — särskjutning krävs mellan {between}"
+                                    : $"{MedalNameForPlace(place)} — särskjutning krävs";
+                                if (!categoryAwards.Unresolved.Contains(line)) categoryAwards.Unresolved.Add(line);
+                                continue;
+                            }
+
+                            // Avgjord särskjutning skrivs ut, dels för att det ofta nämns i
+                            // uppropet, dels för att det visar att ordningen inte är gissad.
+                            string? decidedBy = null;
+                            if (tie != null && tie.Resolved && tie.Shooters.Count >= 2)
+                            {
+                                int SumRounds(PrecisionTiedMedalShooter x) => x.Rounds?.Sum(r => r.Total) ?? 0;
+                                var mine = tie.Shooters.FirstOrDefault(x => x.MemberId == shooter.MemberId
+                                    && string.Equals(x.ShootingClass, shooter.ShootingClass, StringComparison.OrdinalIgnoreCase));
+                                var others = tie.Shooters
+                                    .Where(x => !(x.MemberId == shooter.MemberId
+                                        && string.Equals(x.ShootingClass, shooter.ShootingClass, StringComparison.OrdinalIgnoreCase)))
+                                    .ToList();
+                                if (mine != null && others.Count > 0)
+                                {
+                                    decidedBy = $"avgjord på särskjutning: {SumRounds(mine)} mot "
+                                        + string.Join(" och ", others.Select(o => SumRounds(o).ToString()));
+                                }
+                            }
+
+                            categoryAwards.Awards.Add(new PrecisionMedalAward
+                            {
+                                Place = place,
+                                Medal = MedalNameForPlace(place),
+                                MemberId = shooter.MemberId,
+                                Name = shooter.Name,
+                                Club = shooter.Club,
+                                ShootingClass = shooter.ShootingClass,
+                                TotalScore = shooter.TotalScore,
+                                XCount = shooter.TotalXCount,
+                                DecidedBy = decidedBy
+                            });
+                        }
+
+                        medalAwards.Add(categoryAwards);
+                    }
+
+                    medalAwards = medalAwards
+                        .OrderBy(a => a.WeaponGroup, StringComparer.CurrentCulture)
+                        .ThenBy(a => a.CategoryName, StringComparer.CurrentCulture)
+                        .ToList();
+
+                    // Sätts även när listan blev tom: "beräknat, inga medaljer" är ett annat
+                    // svar än "vet inte", och prisutdelningssidan måste kunna skilja dem åt.
+                    medalAwardsComputed = true;
+                }
             }
 
             // Calculate Standard Medal Awards if enabled
@@ -4337,7 +4441,14 @@ namespace HpskSite.Controllers
                 UpdatedAt = DateTime.Now,
                 IsOfficial = true,
                 ClassGroups = classGroups,
-                MedalCategoryTies = medalCategoryTies
+                MedalCategoryTies = medalCategoryTies,
+                MedalAwards = medalAwards,
+                MedalAwardsComputed = medalAwardsComputed,
+                ParticipantCount = classGroups
+                    .SelectMany(g => g.Shooters)
+                    .Select(sh => sh.MemberId)
+                    .Distinct()
+                    .Count()
             };
         }
 

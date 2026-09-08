@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using NPoco;
 
 namespace HpskSite.CompetitionTypes.Precision.Models
@@ -274,6 +274,100 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         /// Se ChampionshipCategory.
         /// </summary>
         public List<PrecisionMedalCategoryTies> MedalCategoryTies { get; set; } = new();
+
+        /// <summary>
+        /// Vem som ska ha vilken medalj, per mästerskapskategori. Fylls av
+        /// CalculateFinalResults och läses av prisutdelningssidan.
+        ///
+        /// ⚠️ MEDALJÖRERNA LAGRAS SOM DATA I STÄLLET FÖR ATT RÄKNAS OM AV KONSUMENTEN.
+        /// Rankningen kräver fyra saker samtidigt: mästerskapskategorin (inte
+        /// skicklighetsklassen), finalistfiltret per (medlem, klass)-start, poängordningen
+        /// med innertior, och särskjutningens utfall. Allt fyra finns i hand exakt en gång —
+        /// i CalculateFinalResults. Skrivs regeln en andra gång blir den fel: förväxlingen
+        /// mästerskapskategori/skicklighetsklass har uppstått tre gånger i den här
+        /// kodbasen (finalgallringen, särskjutningen, medaljräkningen).
+        ///
+        /// Tom lista betyder "inga mästerskapsmedaljer" — antingen för att tävlingen inte är
+        /// ett mästerskap, eller för att artefakten är äldre än den här funktionen. Läsaren
+        /// måste skilja de fallen åt via <see cref="MedalAwardsComputed"/>.
+        /// </summary>
+        public List<PrecisionMedalCategoryAwards> MedalAwards { get; set; } = new();
+
+        /// <summary>
+        /// True när <see cref="MedalAwards"/> faktiskt beräknats för den här artefakten.
+        ///
+        /// ⚠️ Skiljer "inga medaljer" från "vet inte". En artefakt sparad före den här
+        /// funktionen deserialiseras med en TOM MedalAwards, vilket är oskiljbart från en
+        /// icke-mästerskapstävling — och en prisutdelningssida som visar en tom ceremoni
+        /// för ett mästerskap är värre än en som säger "räkna om resultatlistan först".
+        /// Fältet saknas i gammal JSON och blir då false, vilket är precis rätt.
+        /// </summary>
+        public bool MedalAwardsComputed { get; set; }
+
+        /// <summary>Antal distinkta skyttar med minst en serie i tävlingen. Underlaget för
+        /// hederspristaket i SHB C.3.4.2 ("minst en fjärdedel av de i tävlingen deltagande").</summary>
+        public int ParticipantCount { get; set; }
+    }
+
+    /// <summary>Medaljörerna i EN mästerskapskategori ("C", "C Dam", "A", "B" ...).</summary>
+    public class PrecisionMedalCategoryAwards
+    {
+        public string CategoryName { get; set; } = "";
+
+        /// <summary>Vapengruppen kategorin hör till — "A", "B", "C" eller "R". Prisutdelningen
+        /// kan hållas vid flera bord samtidigt, ett per vapengrupp (SHB C.4.3.1.11), och det
+        /// här fältet är det som gör vyn delbar per bord.</summary>
+        public string WeaponGroup { get; set; } = "";
+
+        /// <summary>Antal deltagare i kategorin — skälet till ett reducerat medaljantal.</summary>
+        public int Participants { get; set; }
+
+        /// <summary>Antal medaljer som delas ut, enligt SHB C.3.4.1 (juniorregeln inräknad).</summary>
+        public int MedalCount { get; set; }
+
+        /// <summary>Klartext för medaljantalet, t.ex. "Guld, Silver, Brons" eller "Enbart Guld".</summary>
+        public string MedalCountText { get; set; } = "";
+
+        /// <summary>True när kategorin får färre än tre medaljer.</summary>
+        public bool Reduced { get; set; }
+
+        public List<PrecisionMedalAward> Awards { get; set; } = new();
+
+        /// <summary>
+        /// Medaljplatser som INTE kan delas ut ännu, för att särskjutningen är oavgjord.
+        /// En rad per oavgjord valör, t.ex. "Brons — särskjutning krävs mellan Ivan Slabiak
+        /// och Markus Henningsson".
+        ///
+        /// ⚠️ Fylld lista betyder att ceremonin inte är komplett. Prisutdelningssidan måste
+        /// visa dem, inte gömma dem: SHB C.4.3.1.11 kräver att resultaten är kontrollerade
+        /// FÖRE prisutdelningen, och ett gissat namn på en medaljplats är det värsta utfallet.
+        /// </summary>
+        public List<string> Unresolved { get; set; } = new();
+    }
+
+    /// <summary>En medalj och skytten som ska ha den.</summary>
+    public class PrecisionMedalAward
+    {
+        /// <summary>1, 2 eller 3.</summary>
+        public int Place { get; set; }
+
+        /// <summary>"Guld" / "Silver" / "Brons".</summary>
+        public string Medal { get; set; } = "";
+
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string Club { get; set; } = "";
+
+        /// <summary>Skicklighetsklassen skytten sköt i ("C2", "C3 Dam"). Medaljen delas ut per
+        /// kategori, men klassen visas eftersom den ofta läses upp med namnet.</summary>
+        public string ShootingClass { get; set; } = "";
+
+        public int TotalScore { get; set; }
+        public int XCount { get; set; }
+
+        /// <summary>Satt när placeringen avgjordes av särskjutning, t.ex.
+        /// "avgjord på särskjutning: 47 mot 46". Null annars.</summary>
+        public string? DecidedBy { get; set; }
     }
 
     /// <summary>Medaljstriderna i en mästerskapskategori (finalklass).</summary>

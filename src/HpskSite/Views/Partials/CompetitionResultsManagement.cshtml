@@ -361,7 +361,34 @@
             </div>
         </div>
 
-        <!-- ===== Sektion 3: Resultatlistan (artefakten) ===== -->
+        @*
+            ===== Sektion 3: Prisutdelning =====
+
+            Ligger EFTER publiceringen med flit: SHB C.4.3.1.11 kraver att resultaten ar
+            "noga kontrollerade" fore ceremonin, sa lasordningen ar besluten -> publicera ->
+            dela ut. Sidan ar en egen adress och inte ett kort har, eftersom funktionaren star
+            vid prisbordet med en telefon och ceremonin kan hallas vid flera bord samtidigt,
+            ett per vapengrupp.
+        *@
+        <div class="card mb-3" id="prizeGivingSection">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+                <span class="fw-bold"><i class="bi bi-award me-2"></i>Prisutdelning</span>
+                <a class="btn btn-primary btn-sm" href="/prisutdelning/@competitionId" target="_blank" rel="noopener">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Öppna prisutdelningslistan
+                </a>
+            </div>
+            <div class="card-body py-2">
+                <div class="small text-muted mb-0">
+                    Vem som ska ha vilken medalj och för vad — individuellt och lag, per
+                    mästerskapsklass. Listan bygger på resultatlistan ovan, så
+                    <strong>Uppdatera</strong> den först. Håller ni prisutdelningen vid flera
+                    bord samtidigt kan varje bord öppna sin egen vapengrupp med
+                    <code>?grupp=A</code> i adressen.
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Sektion 4: Resultatlistan (artefakten) ===== -->
         <div class="card" id="resultsArtifactSection">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
                 <span class="fw-bold"><i class="bi bi-list-ol me-2"></i>Resultatlistan</span>

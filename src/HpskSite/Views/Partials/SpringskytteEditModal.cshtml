@@ -1,4 +1,4 @@
-@inject HpskSite.Services.AdminAuthorizationService SpringEditAuthService
+﻿@inject HpskSite.Services.AdminAuthorizationService SpringEditAuthService
 @{
     var springEditIsSiteAdmin = await SpringEditAuthService.IsCurrentUserAdminAsync();
 }
@@ -362,6 +362,14 @@
                                     <input class="form-check-input" type="checkbox" id="springEdit_isAwardingStandardMedals" name="isAwardingStandardMedals">
                                     <label class="form-check-label" for="springEdit_isAwardingStandardMedals">
                                         Standardmedaljsgrundande
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="springEdit_isAwardingHonoraryAward" name="isAwardingHonoraryAward">
+                                    <label class="form-check-label" for="springEdit_isAwardingHonoraryAward">
+                                        Hederspriser utgår
                                     </label>
                                 </div>
                             </div>
@@ -890,7 +898,8 @@ function springEditSave() {
     // Delad fältinsamling (_CompetitionFormSave). Listorna är Springskyttes EGNA --
     // de ska inte harmoniseras med den vanliga modalens, som har fler kryssrutor.
     const SPRING_BOOLS = ['showLiveResults', 'addToMenu', 'isClubOnly',
-                          'isAwardingStandardMedals', 'allowTeams', 'allowStafett'];
+                          'isAwardingStandardMedals', 'isAwardingHonoraryAward',
+                          'allowTeams', 'allowStafett'];
     const collected = hpskCollectCompetitionFields(form, {
         skipKeys: ['competitionId', 'competitionManagers', 'competitionManagerIds'],
         skipEmptyKeys: ['competitionEndDate', 'description', 'contactPhone'],

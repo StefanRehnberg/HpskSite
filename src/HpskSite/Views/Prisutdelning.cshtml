@@ -1,0 +1,593 @@
+@using System.Globalization
+@using HpskSite.Models.PrizeGiving
+@model HpskSite.Models.PrizeGiving.PrizeGivingModel
+@{
+    Layout = null;
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+
+    // Grupperingen per vapengrupp är inte kosmetisk: SHB C.4.3.1.11 räknar med att ceremonin
+    // kan hållas vid flera bord samtidigt, ett per vapengrupp. Den här indelningen är vad som
+    // gör att varje bord kan skriva ut sitt eget blad (sidbrytning per sektion nedan) och
+    // öppna sin egen adress (?grupp=).
+    var individualByGroup = Model.Individual
+        .GroupBy(c => string.IsNullOrWhiteSpace(c.WeaponGroup) ? "Övrigt" : c.WeaponGroup)
+        .OrderBy(g => g.Key, StringComparer.CurrentCulture)
+        .ToList();
+
+    var teamsByGroup = Model.Teams
+        .GroupBy(t => string.IsNullOrWhiteSpace(t.WeaponGroup) ? "Övrigt" : t.WeaponGroup)
+        .OrderBy(g => g.Key, StringComparer.CurrentCulture)
+        .ToList();
+
+    var updated = Model.ResultsUpdatedAt.HasValue
+        ? Model.ResultsUpdatedAt.Value.ToString("d MMM HH:mm", sv)
+        : null;
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prisutdelning – @Model.CompetitionName</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { padding-bottom: 3rem; }
+
+        .pu-top {
+            position: sticky; top: 0; z-index: 20;
+            background: var(--bs-body-bg);
+            border-bottom: 1px solid var(--bs-border-color);
+        }
+
+        /* Medaljkortet: valören leder, NAMNET är störst - det är det som läses upp. */
+        .pu-award {
+            display: flex; align-items: center; gap: .9rem;
+            padding: .85rem 1rem;
+            border-bottom: 1px solid var(--bs-border-color);
+        }
+        .pu-award:last-child { border-bottom: 0; }
+        .pu-medal {
+            flex: 0 0 auto; width: 3.1rem; text-align: center;
+            font-size: 1.9rem; line-height: 1;
+        }
+        .pu-medal small {
+            display: block; font-size: .62rem; letter-spacing: .06em;
+            text-transform: uppercase; font-weight: 600; margin-top: .15rem;
+        }
+        .pu-who { flex: 1 1 auto; min-width: 0; }
+        .pu-name { font-size: 1.22rem; font-weight: 600; line-height: 1.2; }
+        .pu-club { color: var(--bs-secondary-color); font-size: .92rem; }
+        .pu-score { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
+
+        .pu-gold   { color: #b8860b; }
+        .pu-silver { color: #6c757d; }
+        .pu-bronze { color: #a0522d; }
+
+        .pu-unresolved {
+            border-left: 4px solid var(--bs-danger);
+            background: var(--bs-danger-bg-subtle);
+            color: var(--bs-danger-text-emphasis);
+            padding: .7rem 1rem;
+        }
+
+        .pu-cand { font-variant-numeric: tabular-nums; }
+        .pu-cand.pu-out { opacity: .45; }
+        .pu-step { width: 2.4rem; }
+        .pu-count { width: 3.4rem; text-align: center; font-variant-numeric: tabular-nums; }
+
+        @@media print {
+            .pu-noprint { display: none !important; }
+            .pu-top { position: static; border-bottom: 0; }
+            body { padding-bottom: 0; }
+            /* Ett blad per vapengrupp - ett per bord. */
+            .pu-group { break-before: page; page-break-before: always; }
+            .pu-group:first-of-type { break-before: auto; page-break-before: auto; }
+            .pu-award, .card { break-inside: avoid; page-break-inside: avoid; }
+            a[href]:after { content: ""; }
+        }
+    </style>
+</head>
+<body>
+@Html.AntiForgeryToken()
+
+<div class="pu-top py-2 mb-3">
+    <div class="container-xl">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <div class="me-auto">
+                <div class="h5 mb-0">Prisutdelning</div>
+                <div class="small text-secondary">
+                    @Model.CompetitionName
+                    @if (!string.IsNullOrWhiteSpace(Model.SelectedWeaponGroup))
+                    {
+                        <span class="badge text-bg-primary ms-1">Vapengrupp @Model.SelectedWeaponGroup</span>
+                    }
+                </div>
+            </div>
+
+            <div class="pu-noprint d-flex flex-wrap align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="puSortBtn">
+                    <i class="bi bi-arrow-down-up"></i> <span id="puSortLabel">Brons först</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.print()">
+                    <i class="bi bi-printer"></i> Skriv ut
+                </button>
+            </div>
+        </div>
+
+        @if (Model.AvailableWeaponGroups.Count > 1)
+        {
+            <div class="pu-noprint mt-2 d-flex flex-wrap align-items-center gap-1">
+                <span class="small text-secondary me-1">Bord:</span>
+                <a class="btn btn-sm @(string.IsNullOrWhiteSpace(Model.SelectedWeaponGroup) ? "btn-primary" : "btn-outline-primary")"
+                   href="/prisutdelning/@Model.CompetitionId">Alla</a>
+                @foreach (var g in Model.AvailableWeaponGroups)
+                {
+                    var active = string.Equals(g, Model.SelectedWeaponGroup, StringComparison.OrdinalIgnoreCase);
+                    <a class="btn btn-sm @(active ? "btn-primary" : "btn-outline-primary")"
+                       href="/prisutdelning/@Model.CompetitionId?grupp=@Uri.EscapeDataString(g)">@g</a>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<div class="container-xl">
+
+    @*
+        Tidsstämpeln står i sidhuvudet och inte i en fot. Sidan läser den SPARADE
+        resultatlistan, så en gammal lista ger en gammal prislista - och funktionären måste
+        kunna se det utan att leta.
+    *@
+    <div class="d-flex flex-wrap gap-3 align-items-center mb-3 small">
+        @if (updated != null)
+        {
+            <span class="text-secondary">
+                <i class="bi bi-clock-history"></i> Resultatlistan uppdaterad @updated
+            </span>
+        }
+        <span class="text-secondary">
+            <i class="bi bi-award"></i> @Model.TotalMedals medaljer att dela ut
+        </span>
+        @if (Model.TotalUnresolved > 0)
+        {
+            <span class="text-danger fw-semibold">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                @Model.TotalUnresolved oavgjord@(Model.TotalUnresolved == 1 ? "" : "a") medaljplats@(Model.TotalUnresolved == 1 ? "" : "er")
+            </span>
+        }
+    </div>
+
+    @if (Model.Warnings.Count > 0)
+    {
+        <div class="alert alert-warning">
+            <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle"></i> Kontrollera innan ceremonin</div>
+            <ul class="mb-0 ps-3">
+                @foreach (var w in Model.Warnings)
+                {
+                    <li>@w</li>
+                }
+            </ul>
+        </div>
+    }
+
+    @* ───────────────────────── Individuella medaljer ───────────────────────── *@
+    @if (individualByGroup.Count == 0 && Model.MedalsComputed)
+    {
+        <div class="alert alert-secondary">Inga individuella mästerskapsmedaljer att dela ut.</div>
+    }
+
+    @foreach (var group in individualByGroup)
+    {
+        <section class="pu-group mb-4">
+            <h2 class="h5 mb-3">
+                <span class="badge text-bg-dark align-middle">@group.Key</span>
+                <span class="align-middle">Individuellt</span>
+            </h2>
+
+            @foreach (var cat in group.OrderBy(c => c.CategoryName, StringComparer.CurrentCulture))
+            {
+                <div class="card mb-3">
+                    <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                        <span class="fw-semibold">@cat.CategoryName</span>
+                        <span class="badge text-bg-secondary">@cat.Participants deltagare</span>
+                        @if (cat.Reduced)
+                        {
+                            @* Reducerat antal SÄGS, med skälet. En kategori som tyst visar två
+                               medaljer läses som ett fel i listan. SHB C.3.4.1 mäter på
+                               vapengruppen, inte på skicklighetsklassen. *@
+                            <span class="badge text-bg-warning">@cat.MedalCountText</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-light text-body-secondary">@cat.MedalCountText</span>
+                        }
+                    </div>
+
+                    @if (cat.Awards.Count == 0 && cat.Unresolved.Count == 0)
+                    {
+                        <div class="card-body text-secondary small">Inga medaljer i den här kategorin.</div>
+                    }
+
+                    <div class="pu-list" data-pu-list="1">
+                        @foreach (var a in cat.Awards)
+                        {
+                            var icon = a.Place == 1 ? "🥇" : a.Place == 2 ? "🥈" : "🥉";
+                            var tone = a.Place == 1 ? "pu-gold" : a.Place == 2 ? "pu-silver" : "pu-bronze";
+                            <div class="pu-award" data-place="@a.Place">
+                                <div class="pu-medal @tone">
+                                    <span>@icon</span>
+                                    <small>@a.Medal</small>
+                                </div>
+                                <div class="pu-who">
+                                    <div class="pu-name">@a.Name</div>
+                                    <div class="pu-club">
+                                        @a.Club
+                                        @if (!string.IsNullOrWhiteSpace(a.ShootingClass))
+                                        {
+                                            <span class="badge text-bg-light text-body-secondary ms-1">@a.ShootingClass</span>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(a.DecidedBy))
+                                    {
+                                        <div class="small text-secondary mt-1">
+                                            <i class="bi bi-shuffle"></i> @a.DecidedBy
+                                        </div>
+                                    }
+                                </div>
+                                <div class="pu-score">
+                                    <div class="fw-semibold">@a.TotalScore p</div>
+                                    <div class="small text-secondary">@a.XCount X</div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    @foreach (var u in cat.Unresolved)
+                    {
+                        <div class="pu-unresolved">
+                            <i class="bi bi-exclamation-triangle-fill"></i> @u
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+    }
+
+    @* ───────────────────────────── Lagmedaljer ─────────────────────────────── *@
+    @if (teamsByGroup.Count > 0)
+    {
+        foreach (var group in teamsByGroup)
+        {
+            <section class="pu-group mb-4">
+                <h2 class="h5 mb-3">
+                    <span class="badge text-bg-dark align-middle">@group.Key</span>
+                    <span class="align-middle">Lag</span>
+                </h2>
+
+                @foreach (var t in group.OrderBy(x => x.TeamClass, StringComparer.CurrentCulture))
+                {
+                    <div class="card mb-3">
+                        <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                            <span class="fw-semibold">@t.TeamClass</span>
+                            <span class="badge text-bg-secondary">@t.StartingTeams startande lag</span>
+                            <span class="badge @(t.Reduced ? "text-bg-warning" : "text-bg-light text-body-secondary")">@t.MedalCountText</span>
+                            @if (t.IsRelay)
+                            {
+                                <span class="badge text-bg-info">Stafett</span>
+                            }
+                        </div>
+
+                        <div class="pu-list" data-pu-list="1">
+                            @foreach (var a in t.Awards)
+                            {
+                                var icon = a.Place == 1 ? "🥇" : a.Place == 2 ? "🥈" : "🥉";
+                                var tone = a.Place == 1 ? "pu-gold" : a.Place == 2 ? "pu-silver" : "pu-bronze";
+                                <div class="pu-award" data-place="@a.Place">
+                                    <div class="pu-medal @tone">
+                                        <span>@icon</span>
+                                        <small>@a.Medal</small>
+                                    </div>
+                                    <div class="pu-who">
+                                        <div class="pu-name">@a.TeamName</div>
+                                        <div class="pu-club">@a.ClubName</div>
+                                        @if (a.Members.Count > 0)
+                                        {
+                                            @* Medaljerna delas ut till SKYTTARNA, så namnen måste
+                                               stå på kortet - annars vet funktionären inte hur
+                                               många medaljer laget ska ha. *@
+                                            <div class="small mt-1">@string.Join(" · ", a.Members)</div>
+                                        }
+                                    </div>
+                                    <div class="pu-score">
+                                        <div class="fw-semibold">@a.TotalScore p</div>
+                                        <div class="small text-secondary">@a.XCount X</div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        @foreach (var u in t.Unresolved)
+                        {
+                            <div class="pu-unresolved">
+                                <i class="bi bi-exclamation-triangle-fill"></i> @u
+                            </div>
+                        }
+                    </div>
+                }
+            </section>
+        }
+    }
+
+    @* ───────────────────────────── Hederspriser ────────────────────────────── *@
+    @if (Model.Honorary.Enabled)
+    {
+        <section class="pu-group mb-4" id="puHonorary">
+            <h2 class="h5 mb-3">Hederspriser</h2>
+
+            <div class="card mb-3">
+                <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                    <span class="fw-semibold">
+                        <span id="puHonAssigned">@Model.Honorary.Assigned</span> av minst @Model.Honorary.Minimum
+                    </span>
+                    <span class="badge @(Model.Honorary.MeetsMinimum ? "text-bg-success" : "text-bg-danger")" id="puHonBadge">
+                        @(Model.Honorary.MeetsMinimum ? "Uppfyller kravet" : "För få")
+                    </span>
+                    <span class="small text-secondary">
+                        @Model.Honorary.ParticipantCount deltagare · minst en fjärdedel (SHB C.3.4.2)
+                    </span>
+
+                    @if (Model.CanEdit)
+                    {
+                        <span class="pu-noprint ms-auto d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="puHonReset">
+                                Återställ förslag
+                            </button>
+                            <button type="button" class="btn btn-sm btn-primary" id="puHonSave">
+                                Spara fördelning
+                            </button>
+                        </span>
+                    }
+                </div>
+
+                <div class="card-body">
+                    @if (Model.Honorary.IsCustomised)
+                    {
+                        <p class="small text-secondary mb-3">
+                            Fördelningen är arrangörens egen. <em>Återställ förslag</em> går tillbaka till
+                            en fjärdedel per klass.
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="small text-secondary mb-3">
+                            Förslaget är en fjärdedel av deltagarna i varje klass. Justera med
+                            <strong>−</strong> och <strong>+</strong> — SHB anger bara totalen, fördelningen
+                            är arrangörens beslut.
+                        </p>
+                    }
+
+                    <div id="puHonNotice"></div>
+
+                    @foreach (var cat in Model.Honorary.Categories)
+                    {
+                        <div class="mb-4" data-hon-cat="@cat.CategoryName">
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                <span class="fw-semibold">@cat.CategoryName</span>
+                                <span class="badge text-bg-secondary">@cat.Participants deltagare</span>
+                                <span class="small text-secondary">förslag @cat.ProposedCount</span>
+
+                                <span class="ms-auto d-flex align-items-center gap-1">
+                                    @if (Model.CanEdit)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-secondary pu-step pu-noprint"
+                                                data-hon-step="-1">−</button>
+                                    }
+                                    <span class="pu-count fw-semibold" data-hon-count="@cat.Count">@cat.Count</span>
+                                    @if (Model.CanEdit)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-secondary pu-step pu-noprint"
+                                                data-hon-step="1">+</button>
+                                    }
+                                </span>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle mb-0">
+                                    <tbody>
+                                    @foreach (var c in cat.Candidates)
+                                    {
+                                        <tr class="pu-cand @(c.Order > cat.Count ? "pu-out" : "")" data-hon-order="@c.Order">
+                                            <td style="width:2.6rem" class="text-secondary">@c.Order</td>
+                                            <td>
+                                                @c.Name
+                                                <span class="text-secondary small">@c.Club</span>
+                                                @if (!string.IsNullOrWhiteSpace(c.ShootingClass))
+                                                {
+                                                    <span class="badge text-bg-light text-body-secondary">@c.ShootingClass</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(c.TieNote))
+                                                {
+                                                    <div class="small text-danger mt-1">
+                                                        <i class="bi bi-dice-3"></i> @c.TieNote
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td class="text-end text-nowrap">@c.TotalScore p</td>
+                                            <td class="text-end text-secondary small text-nowrap">@c.XCount X</td>
+                                        </tr>
+                                    }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+    else if (Model.Honorary.PropertyMissing)
+    {
+        @* Saknad doctype-egenskap SÄGS. Att bara utelämna sektionen är oskiljbart från att
+           arrangören valt bort hederspriser. *@
+        <div class="alert alert-secondary pu-noprint">
+            <strong>Hederspriser visas inte.</strong>
+            Egenskapen <code>isAwardingHonoraryAward</code> saknas på dokumenttypen
+            <code>competition</code>. Lägg till den i Umbraco backoffice (True/False) och kryssa
+            i den på tävlingen för att få hedersprislistan här.
+        </div>
+    }
+
+</div>
+
+<script>
+(function () {
+    // ── Ordningsväxel ───────────────────────────────────────────────────────────
+    //
+    // Uppropet sker ofta BAKIFRÅN, så att ceremonin avslutas med guldmedaljören - men
+    // vissa tävlingar gör tvärtom. Ordningen är därför en knapp och inte ett antagande,
+    // och valet ligger kvar per enhet.
+    var KEY = 'hpsk_pu_sort_@Model.CompetitionId';
+    var btn = document.getElementById('puSortBtn');
+    var lbl = document.getElementById('puSortLabel');
+
+    function readPref() {
+        try { return localStorage.getItem(KEY) === 'gold' ? 'gold' : 'bronze'; }
+        catch (e) { return 'bronze'; }
+    }
+    function writePref(v) { try { localStorage.setItem(KEY, v); } catch (e) { /* privat läge */ } }
+
+    function applySort(mode) {
+        var lists = document.querySelectorAll('[data-pu-list]');
+        for (var i = 0; i < lists.length; i++) {
+            var list = lists[i];
+            var rows = Array.prototype.slice.call(list.querySelectorAll('[data-place]'));
+            rows.sort(function (a, b) {
+                var pa = parseInt(a.getAttribute('data-place'), 10) || 0;
+                var pb = parseInt(b.getAttribute('data-place'), 10) || 0;
+                return mode === 'gold' ? pa - pb : pb - pa;
+            });
+            for (var r = 0; r < rows.length; r++) list.appendChild(rows[r]);
+        }
+        if (lbl) lbl.textContent = mode === 'gold' ? 'Guld först' : 'Brons först';
+    }
+
+    var mode = readPref();
+    applySort(mode);
+    if (btn) {
+        btn.addEventListener('click', function () {
+            mode = mode === 'gold' ? 'bronze' : 'gold';
+            writePref(mode);
+            applySort(mode);
+        });
+    }
+
+    // ── Hederspriser ────────────────────────────────────────────────────────────
+    var minimum = @Model.Honorary.Minimum;
+    var assignedEl = document.getElementById('puHonAssigned');
+    var badgeEl = document.getElementById('puHonBadge');
+    var noticeEl = document.getElementById('puHonNotice');
+
+    function catCounts() {
+        var out = {};
+        var cats = document.querySelectorAll('[data-hon-cat]');
+        for (var i = 0; i < cats.length; i++) {
+            var name = cats[i].getAttribute('data-hon-cat');
+            var cnt = cats[i].querySelector('[data-hon-count]');
+            out[name] = parseInt(cnt.getAttribute('data-hon-count'), 10) || 0;
+        }
+        return out;
+    }
+
+    function refreshTotals() {
+        var counts = catCounts();
+        var sum = 0;
+        for (var k in counts) { if (Object.prototype.hasOwnProperty.call(counts, k)) sum += counts[k]; }
+        if (assignedEl) assignedEl.textContent = sum;
+        if (badgeEl) {
+            var ok = sum >= minimum;
+            badgeEl.className = 'badge ' + (ok ? 'text-bg-success' : 'text-bg-danger');
+            badgeEl.textContent = ok ? 'Uppfyller kravet' : ('För få — ' + (minimum - sum) + ' kvar');
+        }
+    }
+
+    function applyCatCount(catEl, next) {
+        var cntEl = catEl.querySelector('[data-hon-count]');
+        var rows = catEl.querySelectorAll('[data-hon-order]');
+        if (next < 0) next = 0;
+        if (next > rows.length) next = rows.length;
+        cntEl.setAttribute('data-hon-count', next);
+        cntEl.textContent = next;
+        for (var i = 0; i < rows.length; i++) {
+            var ord = parseInt(rows[i].getAttribute('data-hon-order'), 10) || 0;
+            rows[i].classList.toggle('pu-out', ord > next);
+        }
+        refreshTotals();
+    }
+
+    document.addEventListener('click', function (ev) {
+        var step = ev.target.closest ? ev.target.closest('[data-hon-step]') : null;
+        if (!step) return;
+        var catEl = step.closest('[data-hon-cat]');
+        if (!catEl) return;
+        var delta = parseInt(step.getAttribute('data-hon-step'), 10) || 0;
+        var cur = parseInt(catEl.querySelector('[data-hon-count]').getAttribute('data-hon-count'), 10) || 0;
+        applyCatCount(catEl, cur + delta);
+    });
+
+    function token() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
+    // Kvitto som en INLINE-notis, inte alert(): en blockerande dialogruta fryser sidan tills
+    // någon klickar OK, och kvittot ska gå att läsa i efterhand. Fel bekräftas däremot.
+    function notice(kind, text) {
+        if (!noticeEl) return;
+        noticeEl.innerHTML = '';
+        var d = document.createElement('div');
+        d.className = 'alert alert-' + kind + ' py-2';
+        d.textContent = text;
+        noticeEl.appendChild(d);
+    }
+
+    function send(body, okText) {
+        return fetch('/prisutdelning/@Model.CompetitionId/hederspriser', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+            body: JSON.stringify(body)
+        })
+        .then(function (r) { return r.text(); })
+        .then(function (t) {
+            var d;
+            try { d = JSON.parse(t); }
+            catch (e) { alert('Oväntat svar från servern. Är du fortfarande inloggad?'); return; }
+            if (d && d.success) {
+                notice('success', okText);
+                if (body.reset) window.location.reload();
+            } else {
+                alert((d && d.message) || 'Fel vid sparande.');
+            }
+        })
+        .catch(function () { alert('Kunde inte nå servern.'); });
+    }
+
+    var saveBtn = document.getElementById('puHonSave');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', function () {
+            send({ counts: catCounts(), reset: false }, 'Fördelningen är sparad.');
+        });
+    }
+    var resetBtn = document.getElementById('puHonReset');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', function () {
+            if (!confirm('Ta bort den egna fördelningen och gå tillbaka till förslaget?')) return;
+            send({ reset: true }, 'Fördelningen är återställd.');
+        });
+    }
+
+    refreshTotals();
+})();
+</script>
+</body>
+</html>

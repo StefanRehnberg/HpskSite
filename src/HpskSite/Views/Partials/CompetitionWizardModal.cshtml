@@ -528,6 +528,17 @@
                                             </small>
                                         </div>
 
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="wizard_isAwardingHonoraryAward" name="isAwardingHonoraryAward">
+                                            <label class="form-check-label" for="wizard_isAwardingHonoraryAward">
+                                                Hederspriser utgår
+                                            </label>
+                                            <small class="form-text text-muted d-block mt-1">
+                                                Hederspriser skall tillfalla minst en fjärdedel av deltagarna
+                                                (SHB C.3.4.2). Utgår de inte skall det anges på tävlingsinbjudan.
+                                            </small>
+                                        </div>
+
                                         <div class="mb-3">
                                             <label for="wizard_competitionEndDate" class="form-label">Slutdatum</label>
                                             <input type="text" class="form-control" id="wizard_competitionEndDate" name="competitionEndDate">
@@ -1746,6 +1757,7 @@ function submitWizard() {
     // vilket redan löser det flikbytet löser i modalerna.
     const WIZARD_BOOLS = ['allowDualCClass', 'showLiveResults', 'isClubOnly',
                           'allowSelfReporting', 'isAwardingStandardMedals',
+                          'isAwardingHonoraryAward',
                           'allowTeams', 'allowStafett'];
     const fields = hpskCollectCompetitionFields(
         document.getElementById('competitionWizardForm'),
