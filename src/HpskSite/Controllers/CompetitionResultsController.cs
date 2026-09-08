@@ -1309,36 +1309,8 @@ namespace HpskSite.Controllers
                 try { await UpdateLiveLeaderboard(request.CompetitionId); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Failed to update live leaderboard after DeleteShooterFromClass"); }
 
-                // Refresh the persisted Slutresultat snapshot so officially-marked pages also reflect the deletion.
-                try
-                {
-                    var dbResults = await GetCompetitionResultsInternal(request.CompetitionId);
-                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long _)
-                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                    if (resultPage != null)
-                    {
-                        var mergeConfigJson = resultPage.GetValue<string>("mergeConfig");
-                        List<ClassMergeAction>? storedMerges = null;
-                        if (!string.IsNullOrEmpty(mergeConfigJson))
-                        {
-                            storedMerges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfigJson);
-                        }
-
-                        var finalResults = await CalculateFinalResults(dbResults, request.CompetitionId, storedMerges);
-                        var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
-
-                        resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
-                        resultPage.SetValue("lastUpdated", DateTime.Now);
-                        resultPage.SetValue("isOfficial", existingIsOfficial);
-
-                        _contentService.Save(resultPage);
-                        _contentService.Publish(resultPage, new[] { "*" }, -1);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to refresh final results page after DeleteShooterFromClass");
-                }
+                // Skriv om artefakten så även en publicerad lista speglar borttagningen.
+                await RefreshResultArtifactAsync(request.CompetitionId, "skytt borttagen ur klass");
 
                 return Json(new { success = true, message = $"{rowsDeleted} resultatrad(er) borttagna.", rowsDeleted });
             }
@@ -3451,7 +3423,24 @@ namespace HpskSite.Controllers
 
                 if (!ok) return Json(new { Success = false, Message = err ?? "Kunde inte spara." });
 
-                return Json(new { Success = true });
+                // ⚠️ En särskjutning avgör en MEDALJ, så artefakten måste skrivas om här.
+                // Prisutdelningssidan läser den sparade artefakten och räknar aldrig om, så
+                // utan detta står medaljplatsen kvar som oavgjord efter att striden avgjorts
+                // — och funktionären vid prisbordet har ingen rimlig väg att gissa att
+                // "Uppdatera" på en annan flik är det som saknas. Rapporterat 2026-09-08.
+                var refreshed = await RefreshResultArtifactAsync(request.CompetitionId, "särskjutning sparad");
+
+                return Json(new
+                {
+                    Success = true,
+                    // Rapporteras så en misslyckad omräkning inte blir tyst: skottet ÄR
+                    // sparat, men medaljlistan är då fortfarande gammal.
+                    ResultsRefreshed = refreshed,
+                    Message = refreshed
+                        ? null
+                        : "Skotten sparades, men resultatlistan kunde inte räknas om automatiskt. "
+                          + "Klicka Uppdatera på fliken Resultat."
+                });
             }
             catch (Exception ex)
             {
@@ -3478,12 +3467,85 @@ namespace HpskSite.Controllers
                 var (ok, err) = await _shootOffService.DeleteEntryAsync(
                     request.CompetitionId, request.MemberId, request.ShootingClass, request.Round);
 
+                // Samma skäl som vid sparningen: en borttagen runda gör en avgjord medalj
+                // oavgjord igen, och det måste synas i medaljlistan.
+                if (ok) await RefreshResultArtifactAsync(request.CompetitionId, "särskjutning borttagen");
+
                 return Json(new { Success = ok, Message = err });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in DeleteShootOffEntry");
                 return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Räknar om och SPARAR resultatartefakten (<c>resultData</c> på noden "Resultat").
+        ///
+        /// ⚠️ EN skrivväg för artefakten, inte fyra. Blocket var handskrivet på tre ställen
+        /// och de hade redan glidit isär: <see cref="ChangeShooterClass"/> läste INTE den
+        /// sparade klassammanslagningen, så ett klassbyte skrev om artefakten utan den och
+        /// slog tyst ihop-delningen isär. Rättat genom att alla går hit.
+        ///
+        /// ⚠️ Och den MÅSTE anropas av allt som ändrar utfallet. Särskjutningens endpoints
+        /// gjorde det inte, och de är de enda som avgör en MEDALJ: prisutdelningssidan läser
+        /// artefakten (avsiktligt — medaljerna ska spegla den lista arrangören kontrollerat),
+        /// så en oskriven artefakt betyder att sidan påstår "särskjutning krävs" om en strid
+        /// som just avgjorts. Mätt på SSM 2026: artefakt 13:10, avgörande resultat 14:06.
+        ///
+        /// Publicerar bara om noden fanns; <c>isOfficial</c> bevaras, så en preliminär lista
+        /// förblir preliminär och en publicerad förblir publicerad.
+        /// </summary>
+        private async Task<bool> RefreshResultArtifactAsync(int competitionId, string reason)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null) return false;
+
+                var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                if (resultPage == null) return false;
+
+                // ⚠️ Den sparade sammanslagningen MÅSTE med. Utan den räknas artefakten om
+                // utan arrangörens klassammanslagning — samma tysta förlust som
+                // `Merges = null` gav i CreateResultsList innan KeepExistingMerges fanns.
+                List<ClassMergeAction>? storedMerges = null;
+                var mergeConfigJson = resultPage.GetValue<string>("mergeConfig");
+                if (!string.IsNullOrEmpty(mergeConfigJson))
+                {
+                    try { storedMerges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfigJson); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Kunde inte läsa mergeConfig vid omräkning ({Reason})", reason); }
+                }
+
+                // Tom resultatmängd är ett giltigt läge — efter att den sista raden tagits
+                // bort SKA listan bli tom. Att hoppa över omräkningen då lämnar en artefakt
+                // som beskriver resultat som inte finns.
+                var results = await GetCompetitionResultsInternal(competitionId);
+                var finalResults = await CalculateFinalResults(results, competitionId, storedMerges);
+
+                var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
+                resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
+                resultPage.SetValue("lastUpdated", DateTime.Now);
+                resultPage.SetValue("isOfficial", existingIsOfficial);
+                resultPage.SetValue("resultType", "Final Results");
+
+                _contentService.Save(resultPage);
+                _contentService.Publish(resultPage, new[] { "*" }, -1);
+
+                _logger.LogInformation("Resultatartefakten omräknad för tävling {CompetitionId} ({Reason})",
+                    competitionId, reason);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Best-effort: en misslyckad omräkning får inte rapportera den lyckade
+                // skrivningen som misslyckad. Anroparen berättar i stället att listan
+                // behöver uppdateras för hand.
+                _logger.LogWarning(ex, "Kunde inte räkna om resultatartefakten för tävling {CompetitionId} ({Reason})",
+                    competitionId, reason);
+                return false;
             }
         }
 
@@ -4550,37 +4612,14 @@ namespace HpskSite.Controllers
                 }
 
                 // 4. Recalculate results
-                bool resultsRecalculated = false;
-                try
-                {
-                    var results = await GetCompetitionResultsInternal(request.CompetitionId);
-                    if (results.Any())
-                    {
-                        var finalResults = await CalculateFinalResults(results, request.CompetitionId);
-
-                        var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
-                            .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-
-                        if (resultPage != null)
-                        {
-                            var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
-                            resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
-                            resultPage.SetValue("lastUpdated", DateTime.Now);
-                            resultPage.SetValue("isOfficial", existingIsOfficial);
-                            resultPage.SetValue("resultType", "Final Results");
-
-                            _contentService.Save(resultPage);
-                            _contentService.Publish(resultPage, new[] { "*" }, -1);
-                            resultsRecalculated = true;
-
-                            _logger.LogInformation("Recalculated results after class change for competition {CompetitionId}", request.CompetitionId);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to recalculate results after class change, continuing");
-                }
+                //
+                // ⚠️ RÄTTAT 2026-09-08: den här kopian anropade CalculateFinalResults UTAN
+                // den sparade sammanslagningen, så ett klassbyte skrev om artefakten utan
+                // arrangörens klassammanslagning — resultatlistan delade tyst upp sig igen.
+                // Hjälpmetoden läser mergeConfig, och den refreshar även när resultatmängden
+                // är tom (vilket är ett giltigt läge, inte ett skäl att hoppa över).
+                bool resultsRecalculated =
+                    await RefreshResultArtifactAsync(request.CompetitionId, "klassbyte");
 
                 // 5. Invalidate series cache
                 try

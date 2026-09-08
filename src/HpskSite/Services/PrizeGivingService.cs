@@ -41,15 +41,18 @@ namespace HpskSite.Services
 
         private readonly IContentService _contentService;
         private readonly CompetitionTeamService _teamService;
+        private readonly ShootOffService _shootOffService;
         private readonly ILogger<PrizeGivingService> _logger;
 
         public PrizeGivingService(
             IContentService contentService,
             CompetitionTeamService teamService,
+            ShootOffService shootOffService,
             ILogger<PrizeGivingService> logger)
         {
             _contentService = contentService;
             _teamService = teamService;
+            _shootOffService = shootOffService;
             _logger = logger;
         }
 
@@ -145,7 +148,7 @@ namespace HpskSite.Services
             model.Honorary = BuildHonorary(competition, resultNode, artifact, scope, model.SelectedWeaponGroup);
 
             // ── Varningar som gör ceremonin osäker ───────────────────────────────────
-            AddIntegrityWarnings(model, competition, resultNode, artifact);
+            await AddIntegrityWarningsAsync(model, competition, resultNode, artifact);
 
             return model;
         }
@@ -392,12 +395,51 @@ namespace HpskSite.Services
         public bool CanStoreHonoraryConfig(IContent? resultNode) =>
             resultNode != null && resultNode.HasProperty(HonoraryConfigProperty);
 
-        private void AddIntegrityWarnings(
+        private async Task AddIntegrityWarningsAsync(
             PrizeGivingModel model,
             IContent competition,
             IContent? resultNode,
             PrecisionFinalResults artifact)
         {
+            // ⚠️ ÄR ARTEFAKTEN ÄLDRE ÄN SÄRSKJUTNINGEN? Då beskriver medaljlistan ett
+            // annat utfall än det som faktiskt skjutits, och det syns inte på något annat
+            // sätt — en oavgjord medaljplats ser likadan ut oavsett om striden är oavgjord
+            // eller om artefakten bara inte hunnit med. Rapporterat 2026-09-08: artefakt
+            // skriven 13:10, det avgörande resultatet inmatat 14:06.
+            //
+            // Orsaken är åtgärdad (SaveShootOffEntry räknar om artefakten), men vakten
+            // står kvar: den täcker artefakter sparade före den fixen, och den gör en
+            // misslyckad omräkning synlig i stället för tyst.
+            //
+            // Medvetet SMAL — bara särskjutningen, inte resultatrader i allmänhet. En
+            // allmän "resultaten är nyare än listan" skulle larma oavbrutet medan
+            // resultaten matas in, och en varning som alltid lyser slutar betyda något.
+            try
+            {
+                var entries = await _shootOffService.GetEntriesForCompetitionAsync(model.CompetitionId);
+                if (entries.Count > 0)
+                {
+                    var newest = entries.Max(e => e.LastModified);
+                    if (newest > artifact.UpdatedAt)
+                    {
+                        model.Warnings.Insert(0,
+                            $"Särskjutningsresultat matades in {newest:d MMM HH:mm}, efter att den här "
+                            + $"listan räknades ut ({artifact.UpdatedAt:d MMM HH:mm}). "
+                            + "Medaljerna nedan kan vara felaktiga — klicka Uppdatera på fliken Resultat "
+                            + "och ladda om den här sidan.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // En vakt som inte kan läsas får inte ta ner ceremonin. Men den får inte
+                // heller tiga: kan vi inte avgöra om listan är aktuell ska det sägas.
+                _logger.LogWarning(ex, "Kunde inte jämföra särskjutningen mot resultatlistan för tävling {CompetitionId}",
+                    model.CompetitionId);
+                model.Warnings.Add("Kunde inte kontrollera om listan är räknad efter de senaste "
+                    + "särskjutningsresultaten. Klicka Uppdatera på fliken Resultat om en särskjutning nyligen matats in.");
+            }
+
             // C.4.3.1.11: "Tävlingsresultaten skall före prisutdelningen vara noga kontrollerade,
             // inte minst i lagtävlingar." En opublicerad lista är per definition inte den
             // kontrollerade listan.
