@@ -1,4 +1,4 @@
-using HpskSite.CompetitionTypes.Common.Utilities;
+﻿using HpskSite.CompetitionTypes.Common.Utilities;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
@@ -16,8 +16,8 @@ namespace HpskSite.Routing
     ///   /competitions/{year}/{region}/{series}/{comp}/              (region-hosted in series)
     ///   /competitions/{year}/{region}/{club}/{comp}/                (club-hosted)
     ///   /competitions/{year}/{region}/{club}/{series}/{comp}/       (club-hosted in series)
-    /// plus an optional trailing /startlista/ , /resultat/ , or /finalstartlista/ for
-    /// the matching child node.
+    /// plus an optional trailing /startlista/ , /resultat/ , or /finalstartlista[-vapengrupp]/
+    /// for the matching child node.
     ///
     /// Returns false (Umbraco falls through to the next finder) for anything that
     /// doesn't parse cleanly.
@@ -38,6 +38,23 @@ namespace HpskSite.Routing
         {
             "startlista", "resultat", "finalstartlista"
         };
+
+        /// <summary>
+        /// Är sista segmentet ett barnsegment?
+        ///
+        /// ⚠️ En FAST lista räcker inte för finalstartlistorna. Sedan 2026-09-08 finns EN
+        /// per vapengrupp, och noderna heter därför "Finalstartlista A" → segmentet
+        /// "finalstartlista-a", som ingen fast lista känner. Följden var **404** på varje
+        /// finalstartlista utom den första — både arrangörens Öppna-knapp (som redirigerar till
+        /// nodens publika URL) och skyttarnas länk på tävlingssidan.
+        ///
+        /// Att peela ett segment som INTE är ett barn är ofarligt: upplösningen av resten
+        /// misslyckas då, finnern returnerar false, och Umbraco går vidare till nästa finder med
+        /// hela sökvägen. Felet degraderar alltså till "inte vår URL", inte till en 404.
+        /// </summary>
+        private static bool IsChildSlug(string segment) =>
+            ChildSlugs.Contains(segment)
+            || HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup.IsFinalsSlug(segment);
 
         public CompetitionUrlContentFinder(IUmbracoContextAccessor umbracoContextAccessor,
             ILogger<CompetitionUrlContentFinder> logger)
@@ -64,7 +81,7 @@ namespace HpskSite.Routing
 
                 // Peel off optional trailing child segment.
                 string? childSegment = null;
-                if (ChildSlugs.Contains(segments[^1]))
+                if (IsChildSlug(segments[^1]))
                 {
                     childSegment = segments[^1];
                     segments = segments[..^1];

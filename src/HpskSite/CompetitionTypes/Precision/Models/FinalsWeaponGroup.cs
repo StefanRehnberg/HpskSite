@@ -1,4 +1,4 @@
-using HpskSite.CompetitionTypes.Common;
+﻿using HpskSite.CompetitionTypes.Common;
 using Newtonsoft.Json;
 
 namespace HpskSite.CompetitionTypes.Precision.Models
@@ -22,6 +22,34 @@ namespace HpskSite.CompetitionTypes.Precision.Models
     /// </summary>
     public static class FinalsWeaponGroup
     {
+        /// <summary>
+        /// Nodnamnets prefix. Noden heter "Finalstartlista" (äldre heltävlingslista) eller
+        /// "Finalstartlista C" — namnet blir Umbracos URL-segment, så två vapengrupper måste
+        /// ha olika namn.
+        /// </summary>
+        public const string NodeNamePrefix = "Finalstartlista";
+
+        /// <summary>URL-segmentets prefix, dvs. <see cref="NodeNamePrefix"/> i slug-form.</summary>
+        public const string UrlSlugPrefix = "finalstartlista";
+
+        /// <summary>Nodnamnet för en vapengrupps finalstartlista.</summary>
+        public static string NodeName(string? weaponGroup) =>
+            string.IsNullOrWhiteSpace(weaponGroup) ? NodeNamePrefix : $"{NodeNamePrefix} {weaponGroup.Trim()}";
+
+        /// <summary>
+        /// Är URL-segmentet en finalstartlista? Sant för "finalstartlista" OCH för
+        /// "finalstartlista-c", "finalstartlista-a-opt" …
+        ///
+        /// ⚠️ <c>CompetitionUrlContentFinder</c> MÅSTE gå via den här metoden. Den bär annars
+        /// en FAST lista över barnsegment, och en finalstartlista per vapengrupp ger segment den
+        /// listan inte känner — följden är **404 på hela finalstartlistan**, både för
+        /// arrangörens Öppna-knapp och för skyttarnas publika länk. Hittat i skarp användning
+        /// 2026-09-08, dagen efter uppdelningen.
+        /// </summary>
+        public static bool IsFinalsSlug(string? urlSegment) =>
+            !string.IsNullOrWhiteSpace(urlSegment)
+            && urlSegment.StartsWith(UrlSlugPrefix, StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// Gruppen ur en finalstartlistas <c>configurationData</c>, eller <c>""</c>.
         ///

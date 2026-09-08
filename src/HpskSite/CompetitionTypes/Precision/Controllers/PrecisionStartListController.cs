@@ -3104,9 +3104,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// </summary>
         private const int FinalsChildScanSize = 50;
 
-        /// <summary>Nodnamnet, som också blir URL-segmentet ("finalstartlista-c").</summary>
-        private static string FinalsNodeName(string? weaponGroup) =>
-            string.IsNullOrWhiteSpace(weaponGroup) ? "Finalstartlista" : $"Finalstartlista {weaponGroup.Trim()}";
+        /// <summary>
+        /// Nodnamnet, som också blir URL-segmentet ("finalstartlista-c").
+        /// ⚠️ Delegerar till <see cref="FinalsWeaponGroup.NodeName"/> — samma konstant som
+        /// URL-routingen känner igen segmentet med. Skrivs namnet här för hand kan de två
+        /// glida isär, och då blir listan 404.
+        /// </summary>
+        private static string FinalsNodeName(string? weaponGroup) => FinalsWeaponGroup.NodeName(weaponGroup);
 
         /// <summary>
         /// Alla finalstartlistor för en tävling. Inkluderar den äldre placeringen under en

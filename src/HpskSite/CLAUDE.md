@@ -3739,6 +3739,25 @@ det är hela löftet i det läget. `/station?c=X&s=N&phase=finals` blev därmed 
 parametern tas första listan, vilket är hur ytan betedde sig förut (gamla bokmärken).
 **Att i stället omnumrera skjutlagen över listorna vore fel** — det skulle bryta clone-löftet.
 
+**⚠️⚠️ `CompetitionUrlContentFinder.ChildSlugs` VAR EN FAST LISTA — och det gav 404 på varje
+finalstartlista utom den första** (hittat i skarp användning 2026-09-08, dagen efter
+uppdelningen). Noderna heter "Finalstartlista A" → segmentet `finalstartlista-a`, som
+`{"startlista","resultat","finalstartlista"}` inte känner; segmentet peelades då aldrig av,
+resten resolvade inte som en tävling, och den trädbaserade default-provideren kan inte heller
+hitta noden eftersom tävlingens URL är en funktion av EGENSKAPER. Träffade både arrangörens
+**Öppna** (som redirigerar till nodens publika URL via `PreviewStartList`) och skyttarnas länk
+på tävlingssidan.
+- Regeln är nu `IsChildSlug` = exakt match ELLER `FinalsWeaponGroup.IsFinalsSlug`
+  (prefix). **Namnregeln och slug-regeln delar konstant** (`FinalsWeaponGroup.NodeName` /
+  `UrlSlugPrefix`), så de inte kan glida isär — gör de det blir listan 404 igen.
+- **Att peela ett segment som inte är ett barn är ofarligt:** upplösningen av resten
+  misslyckas, finnern returnerar false, och Umbraco går vidare med hela sökvägen. Verifierat:
+  `finalstartlista-x` (ingen sådan grupp) och `foobar` ger fortfarande 404, alltså blev
+  prefixregeln ingen slasktratt.
+- **Lägg till en ny barndoctype under tävlingen? Rikta in dig på TVÅ ställen:**
+  `CompetitionUrlProvider.ChildAliases` (bygger URL:en) och den här finnern (resolvar den
+  tillbaka). Bara den första ger en URL som 404:ar.
+
 **Datumet stämplas på SKJUTLAGEN** (`StartListTeam.Date`), inte på noden: det är där
 `/mitt-schema` och kalenderexporten redan läser det, och `StartTime` är bara "HH:mm" så utan
 datum kan söndagens A-final inte ordnas efter lördagens C-final.
