@@ -2134,6 +2134,134 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Namn och klubb för ALLA skyttar i en resultatlista — i ETT svep.
+        ///
+        /// ⚠️⚠️ Ersätter en loop som anropade <see cref="GetShooterNameAndClub"/> en gång per
+        /// skytt. Kommentaren där sa "PERFORMANCE FIX: build the lookup ONCE", men den
+        /// avdubblade bara per RESULTATRAD (1174 → 145 anrop på SSM 2026) — och varje anrop
+        /// gjorde TVÅ fulla innehållsläsningar: alla tävlingens barn, och sedan hela
+        /// anmälningsnavet med sina 94 anmälningsnoder. Alltså ~145 × (barn + 94 noder) per
+        /// uppdatering av resultatlistan, vilket mättes till 8–16 sekunder. Rapporterat
+        /// 2026-09-08. Samma mönster som gjorde Fakturor-sidan 12 sekunder lång.
+        ///
+        /// ⚠️ PRECEDENSEN ÄR OFÖRÄNDRAD och avsiktligt bevarad rad för rad: startlistan
+        /// under det ÄLDRE navet först, sedan anmälningarna, sist medlemsregistret. Att här
+        /// börja läsa den MODERNA startlistan (direkt barn) hade varit en tysk
+        /// beteendeändring i en prestandafix — se anteckningen i CLAUDE.md om att
+        /// resultatlistan inte läser startlistan först på moderna tävlingar, tvärtemot vad
+        /// dokumentationen påstår.
+        /// </summary>
+        private async Task<Dictionary<int, (string Name, string Club)>> BuildShooterLookupAsync(
+            int competitionId, List<int> memberIds)
+        {
+            var map = new Dictionary<int, (string Name, string Club)>();
+            if (memberIds == null || memberIds.Count == 0) return map;
+
+            // Steg 1 — startlistan under det äldre navet, läst EN gång.
+            var fromStartList = LoadLegacyHubStartListShooters(competitionId);
+            foreach (var id in memberIds)
+            {
+                if (fromStartList.TryGetValue(id, out var sl) && sl.Name != "Unknown")
+                    map[id] = sl;
+            }
+
+            // Steg 2 — anmälningarna, lästa EN gång.
+            var missing = memberIds.Where(id => !map.ContainsKey(id)).ToList();
+            if (missing.Count > 0)
+            {
+                try
+                {
+                    var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+                    var byMember = new Dictionary<int, (string Name, string Club)>();
+                    foreach (var r in registrations ?? new())
+                    {
+                        if (r.MemberId <= 0 || string.IsNullOrEmpty(r.MemberName)) continue;
+                        if (!byMember.ContainsKey(r.MemberId))
+                            byMember[r.MemberId] = (r.MemberName, r.MemberClub ?? "Okänd klubb");
+                    }
+                    foreach (var id in missing)
+                    {
+                        if (byMember.TryGetValue(id, out var reg)) map[id] = reg;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not read registrations for competition {CompetitionId}", competitionId);
+                }
+            }
+
+            // Steg 3 — medlemsregistret, bara för dem som fortfarande saknas. En skytt som
+            // direktplacerats vid disken kan sakna anmälningsnod, så grenen behövs — men den
+            // gäller ett fåtal, inte alla.
+            foreach (var id in memberIds.Where(id => !map.ContainsKey(id)))
+            {
+                try
+                {
+                    var member = _memberService.GetById(id);
+                    if (member != null)
+                    {
+                        var clubId = member.GetValue<int>("primaryClubId");
+                        map[id] = (member.Name ?? "Unknown",
+                                   clubId > 0 ? (_clubService?.GetClubNameById(clubId) ?? "Okänd klubb") : "Okänd klubb");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Could not find name/club for MemberId {MemberId}", id);
+                        map[id] = ("Unknown", "Unknown");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error getting shooter name and club for MemberId {MemberId}", id);
+                    map[id] = ("Unknown", "Unknown");
+                }
+            }
+
+            return map;
+        }
+
+        /// <summary>
+        /// Skyttarna på den officiella startlistan UNDER DET ÄLDRE NAVET, memberId → (namn, klubb).
+        /// Tom karta när navet inte finns, vilket är fallet för varje tävling skapad efter att
+        /// startlistorna blev direkta barn.
+        /// </summary>
+        private Dictionary<int, (string Name, string Club)> LoadLegacyHubStartListShooters(int competitionId)
+        {
+            var map = new Dictionary<int, (string Name, string Club)>();
+            try
+            {
+                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _);
+                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+                if (startListsHub == null) return map;
+
+                var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out _);
+                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
+                var officialStartList = hubChildren
+                    .Where(c => possibleAliases.Contains(c.ContentType.Alias))
+                    .FirstOrDefault(c => { try { return c.GetValue<bool>("isOfficialStartList"); } catch { return false; } });
+                if (officialStartList == null) return map;
+
+                var json = officialStartList.GetValue<string>("configurationData");
+                if (string.IsNullOrEmpty(json)) return map;
+
+                var config = JsonConvert.DeserializeObject<StartListConfiguration>(json);
+                foreach (var team in config?.Teams ?? new List<StartListTeam>())
+                {
+                    foreach (var sh in team.Shooters ?? new List<StartListShooter>())
+                    {
+                        if (sh.MemberId > 0 && !map.ContainsKey(sh.MemberId))
+                            map[sh.MemberId] = (sh.Name ?? "Unknown", sh.Club ?? "Unknown");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read legacy hub start list for competition {CompetitionId}", competitionId);
+            }
+            return map;
+        }
+
         private async Task<(string Name, string Club)> GetShooterNameAndClub(int competitionId, int memberId)
         {
             try
@@ -3638,18 +3766,16 @@ namespace HpskSite.Controllers
             var hasFinalsRound = numberOfFinalSeries > 0;
             var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations - numberOfFinalSeries) : numberOfSeriesOrStations;
 
-            // PERFORMANCE FIX: Build shooter lookup dictionary ONCE instead of calling GetShooterNameAndClub for every result
-            _logger.LogInformation("Building shooter lookup cache for competition {CompetitionId}", competitionId);
+            // Namn och klubb för alla skyttar i ETT svep — se BuildShooterLookupAsync för
+            // varför den här raden en gång var en åtta sekunder lång loop.
+            //
+            // ⚠️ Loggade dessutom en rad PER SKYTT (145 rader per uppdatering). Loggen är
+            // till för att felsoka, och 145 rader per klick dänker det som går att felsoka.
             var uniqueMemberIds = results.Select(r => r.MemberId).Distinct().ToList();
-            var shooterLookup = new Dictionary<int, (string Name, string Club)>();
-
-            foreach (var memberId in uniqueMemberIds)
-            {
-                var (name, club) = await GetShooterNameAndClub(competitionId, memberId);
-                shooterLookup[memberId] = (name, Helpers.ClubNameHelper.Shorten(club));
-                _logger.LogInformation("Cached shooter info for MemberId {MemberId}: {Name} from {Club}", memberId, name, club);
-            }
-            _logger.LogInformation("Shooter lookup cache built with {Count} entries", shooterLookup.Count);
+            var rawShooterLookup = await BuildShooterLookupAsync(competitionId, uniqueMemberIds);
+            var shooterLookup = rawShooterLookup.ToDictionary(
+                kv => kv.Key,
+                kv => (kv.Value.Name, Club: Helpers.ClubNameHelper.Shorten(kv.Value.Club)));
 
             // DNS / DNF. Loaded once for the whole competition and probed per shooter below.
             // The status table stores the class *Id* ("C1", "A_opt_1") while the rows here carry the

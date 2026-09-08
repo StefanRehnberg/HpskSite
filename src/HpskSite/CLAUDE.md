@@ -3688,6 +3688,50 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 - `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
 - `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
+### Resultatlistan tog tolv sekunder — N+1 i skyttuppslaget (2026-09-08)
+
+`GetResultsList` / `CreateResultsList` mättes till **10–12 sekunder** på SSM 2026 (1174
+resultatrader, 145 starter). Orsaken satt i `CalculateFinalResults`:
+
+```
+foreach (var memberId in uniqueMemberIds)          // 145 varv
+    await GetShooterNameAndClub(competitionId, memberId);
+```
+
+och varje varv gjorde **två fulla innehållsläsningar**: `GetPagedChildren` över alla
+tävlingens barn (i `TryGetFromStartList`) och därefter `GetCompetitionRegistrations`, som
+läser hela anmälningsnavets 94 noder. Alltså ~145 × (barn + 94 noder) per klick på Uppdatera.
+
+⚠️ **Raden ovanför loopen sa "PERFORMANCE FIX: build the lookup ONCE".** Den avdubblade per
+RESULTATRAD (1174 → 145 anrop), inte per uppslag — en kommentar som beskriver en fix som
+inte gjordes är värre än ingen kommentar, eftersom den avskräcker nästa läsare från att
+titta. Samma mönster som gjorde Fakturor-sidan 12 sekunder lång: en trädläsning per objekt.
+
+**`BuildShooterLookupAsync(competitionId, memberIds)`** gör de tre stegen en gång var:
+äldre-navets startlista → anmälningarna → medlemsregistret (bara för dem som fortfarande
+saknas, t.ex. direktplacerade utan anmälningsnod).
+- ⚠️ **PRECEDENSEN ÄR BEVARAD RAD FÖR RAD, med flit.** Att här börja läsa den MODERNA
+  startlistan hade varit en tyst beteendeändring inuti en prestandafix.
+- ⚠️ **Loggen skrev en rad PER SKYTT** ("Cached shooter info for MemberId …"), 145 rader per
+  klick. En logg som fylls av normal drift är ingen logg. Borta.
+
+**Mätt A/B med samma verktyg** (curl mot samma endpoint, stash → bygg → mät → återställ):
+baseline **12,4 / 11,3 / 10,1 s** → fixad **2,1 s kall, 0,31 / 0,27 / 0,25 s varm**. Cirka
+**40× varmt**.
+
+⚠️ **Och lika viktigt: svaret är IDENTISKT.** Ett avtryck över (klassgrupp, namn, klubb,
+total, X, placering) för alla 145 starter ger samma SHA på båda byggena
+(`41f0136630d3e51d`), 15 klassgrupper, 403 344 byte, noll "Unknown". Utan det påståendet
+kunde snabbheten lika gärna komma av att göra mindre.
+
+**⚠️ FYND SOM INTE ÄR ÅTGÄRDAT:** `TryGetFromStartList` läser bara startlistan under det
+äldre `competitionStartListsHub` och returnerar "Unknown" så fort navet saknas — vilket det
+gör på varje tävling skapad efter att startlistorna blev direkta barn. **Resultatlistan läser
+därför INTE startlistan först på moderna tävlingar**, tvärtemot vad avsnittet
+"Tävlar för" påstår; namn och klubb kommer från ANMÄLNINGEN. För klubben ger det samma svar
+i praktiken (`RegistrationClubPropagationService` håller startlistan i takt med anmälan), men
+dokumentationen och koden är oöverens och det bör avgöras åt vilket håll.
+
 ### Resultatfliken: Uppdatera är inte samma sak som att slå samman klasser (2026-09-08)
 
 Tre klagomål ur skarp användning, alla på Resultat-fliken.
