@@ -4282,6 +4282,83 @@ oavgjorda, alla sju mästerskapskategorier och fem lagklasser intakta.
 
 Adds C# → full ombyggnad. Ingen SQL, ingen doctype-egenskap.
 
+### ⚠️ Publiceringstillståndet: EN form, ETT ordpar, EN rubrikordning (2026-09-08)
+
+Rapporterat: *"Märket 'Preliminär' ser ut som en knapp och det är genomgående ett UX-problem på
+både Resultat- och Startlistor-flikarna. Publicera, Avpublicera, Publicerad — det är olika
+funktioner och benämningar och design överallt."* Han hade rätt på varje punkt.
+
+**Inventeringen: FEM utseenden och FYRA ord för TVÅ tillstånd.**
+
+| Yta | Klasser | Ord |
+|---|---|---|
+| Resultat | `badge bg-warning fs-6 px-3 py-2` | Preliminär |
+| Resultat | `badge bg-success fs-6 px-3 py-2` | Publicerad |
+| Startlistor (egenbokning) | `badge bg-success fs-6 px-3 py-2` | **Aktiv** |
+| Finalstartlistor | `badge bg-success` / `bg-warning text-dark` | Publicerad / Preliminär |
+| Startlistor (banner) | `alert-heading` | **Publicerad startlista aktiv** |
+
+**⚠️ `fs-6 px-3 py-2` ger exakt en knapps mått**, och brickan stod mitt bland
+`Publicera`/`Avpublicera`. Den läste sig därför som en knapp man skulle trycka på.
+
+**`.hpsk-state` i theme.css är formen**, och den säger "information, inte kontroll": ingen ram,
+ingen skugga (knapparna har båda), låg fyllnad, liten text, `cursor: default` och en ifylld
+punkt före ordet — samma språk som en statuslampa. Färgerna kommer ur
+`--bs-*-bg-subtle` / `--bs-*-text-emphasis`, så dark mode följer utan egna värden.
+**Sätt aldrig tillbaka `badge … fs-6 px-3 py-2` på ett tillstånd.**
+
+**`Views/Partials/_PublishState.cshtml` är den enda skrivvägen** —
+`hpskSetPublishState(el, published, noun)` för befintliga element, `hpskStatePill(...)` för
+renderare som bygger strängar (finalkorten), `hpskNoListPill(...)` för det tredje tillståndet
+*ingen lista*. Inkluderas av partialerna SJÄLVA, samma husregel som `_HtmlEscape`.
+
+**ORDPARET:** *Preliminär* / *Publicerad*, med följden i samma bricka —
+`● Publicerad · syns för skyttarna`. **"Preliminär" ensamt är jargong**; det som betyder något
+för en tävlingsledare är om skyttarna ser listan. Följden är `d-none d-lg-inline`, så den
+försvinner när det inte finns plats medan ordet och punkten bär tillståndet ändå.
+- **⚠️ "Aktiv" är BORTTAGET.** Egenbokningsgrenen skrev "Aktiv" och nästa gren "Publicerad" för
+  samma sak, på samma yta. Brickan svarar bara på EN fråga — syns listan? — och att en
+  egenbokningslista inte kan ändras säger frånvaron av knappar redan.
+- **⚠️ VERB skiljs från TILLSTÅND:** knapparna heter `Publicera` / `Avpublicera` (verb), brickan
+  `Preliminär` / `Publicerad` (adjektiv). Blanda aldrig ihop dem.
+- `Avpublicera` är `btn-outline-secondary`, inte `outline-warning`: det är ett steg tillbaka,
+  inte en varning — och den gula knappen satt intill en gul tillståndsbricka.
+
+**KANONISK RUBRIKORDNING på varje kollapsbar sektion, vänster → höger:**
+
+```
+rubrik | (mellanrum) | antal | TILLSTÅND | verb-knappar | Åtgärder | Visa/dölj
+```
+
+Läsordningen blir *vad det är → hur mycket → vilket läge → vad jag kan göra → visa/dölj*.
+**⚠️ `Visa/dölj` ligger SIST och är samma knapp överallt.** Den låg i en Åtgärder-meny på
+Resultat och som knapp MITT i raden på Startlistor — samma kontroll, två former, två flikar.
+På Startlistor låg dessutom antalet sist, alltså rakt motsatt ordning.
+
+**⚠️ ViewData-vakten i `_PublishState` TOGS BORT för att den inte vaktade.** Mätt i
+webbläsaren renderades skriptet ändå tre gånger: varje partial får sin egen ViewData-instans
+från `CompetitionManagement`, så en flagga satt i ett barn når aldrig ett syskon.
+`window.hpskPublishStateLoaded` är den vakt som håller, och tre identiska skripttaggar är
+ofarliga. **En vakt som ser ut att vakta men inte gör det är värre än ingen** — samma lärdom som
+sparknappens återställning, som låg i den funktion som inte kördes vid öppning.
+
+**⚠️ `style.display = ''`, aldrig `'inline-block'`, på en `.hpsk-state`.** Brickan är
+inline-FLEX (punkten och orden är flexbarn) och punkten faller ur linje annars. Tom sträng
+återställer elementets eget läge och är riktig oavsett vilken form elementet har.
+
+**Bredd — och gränsen för vad jag kunde mäta.** Rubrikraden på Resultat är 48 px och en rad vid
+skrivbordsbredd. `flex-wrap` är satt och **ingenting klipps eller får horisontell rullning** vid
+någon framtvingad kortbredd (1024/768/600/390 px → 1–4 rader), så ytan degraderar genom att
+radbryta. ⚠️ **Det exakta 768-fallet gick INTE att verifiera här**: `resize_window` fick inte
+viewporten att ändra sig (den rapporterade lyckat men `innerWidth` låg kvar på 1946), och
+`d-none d-lg-inline` lyder viewportens bredd och inte kortets — så en framtvingad kortbredd
+låter följd-texten ligga kvar och överskattar radantalet. Räknat behöver raden 762 px mot 744
+tillgängliga vid 768, alltså två rader; en tidigare siffra i den här filen (698 px) gällde
+FÖRE att `Visa/dölj` flyttades tillbaka till raden.
+
+Endast vyer + theme.css → **ingen ombyggnad**. ⚠️ `theme.css` är cp1252 med ASCII-svenska
+kommentarer; tillägget gav 71 insertions och noll ändrade rader.
+
 ### Skjutlag / Patrull Label (2026-05-20)
 **What:** Freeform per-skjutlag/patrol label admins can type to disambiguate multi-day competitions (e.g. "Lördag fm", "Söndag 14 juni", "Final"). Replaces a backlog item that originally asked for a structured day-of-week + date field.
 
