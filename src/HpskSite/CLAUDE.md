@@ -4189,6 +4189,58 @@ Markus Henningsson, vilket stämmer med särskjutningskortet. Inga konsolfel.
 
 Adds C# → full ombyggnad. **Två doctype-egenskaper.** Ingen SQL, ingen Umbraco-nod.
 
+### ⚠️⚠️ Resultatartefakten har EN skrivväg — och särskjutningen måste anropa den (2026-09-08)
+
+Rapporterat: *"Jag har matat in särskjutningsresultaten men prisutdelningslistan säger
+fortfarande att det inte är avgjort."* Prissidan läste rätt — **artefakten var en timme
+gammal**. Mätt på SSM 2026: `resultData` skriven 13:10:43, det avgörande resultatet inmatat
+14:06:56.
+
+`resultData` skrevs av `CreateResultsList` (knappen **Uppdatera**), `DeleteShooterFromClass`
+och `ChangeShooterClass` — men **INTE** av `SaveShootOffEntry` / `DeleteShootOffEntry`. De var
+de enda muterande endpointsen som inte gjorde det, och de enda som avgör en **MEDALJ**.
+Prisutdelningssidan läser artefakten med flit (medaljerna ska spegla den lista arrangören
+kontrollerat, inte ett nytt utfall som råkar räknas fram vid prisbordet), så en oskriven
+artefakt betyder att sidan påstår "särskjutning krävs" om en strid som just avgjorts — och
+funktionären har ingen rimlig väg att gissa att "Uppdatera" på en annan flik är det som
+saknas.
+
+**`RefreshResultArtifactAsync(competitionId, reason)` är nu den enda skrivvägen**, anropad
+från alla fyra ställena. **Allt som ändrar utfallet måste anropa den.**
+- ⚠️ **Den läser den sparade `mergeConfig`.** Kopian i `ChangeShooterClass` gjorde INTE det
+  och anropade `CalculateFinalResults` utan merges — så ett klassbyte skrev om artefakten
+  **utan arrangörens klassammanslagning** och delade tyst upp resultatlistan igen. Rättat
+  genom att alla går genom hjälpmetoden; tre handskrivna kopior hade redan hunnit glida isär,
+  vilket är hela skälet att den finns. Samma tysta förlust som `Merges = null` gav i
+  `CreateResultsList` innan `KeepExistingMerges` fanns.
+- ⚠️ **Tom resultatmängd är ett GILTIGT läge** och räknas om. `ChangeShooterClass` hade
+  `if (results.Any())`, vilket lämnar en artefakt som beskriver resultat som inte finns kvar
+  när den sista raden tagits bort.
+- `isOfficial` bevaras, så en preliminär lista förblir preliminär och en publicerad förblir
+  publicerad. Best-effort: en misslyckad omräkning får inte rapportera den lyckade
+  skrivningen som misslyckad — `SaveShootOffEntry` returnerar i stället
+  `resultsRefreshed: false` **och ett meddelande** som säger att skotten sparades men att
+  listan behöver uppdateras för hand. En tyst miss här är exakt den bugg som rapporterades.
+
+**Vakten på prisutdelningssidan står kvar även med orsaken åtgärdad.** `PrizeGivingService`
+jämför artefaktens `UpdatedAt` mot senaste `LastModified` bland särskjutningsposterna och
+skriver ut BÅDA tiderna: *"Särskjutningsresultat matades in 8 Sep 14:06, efter att den här
+listan räknades ut (8 Sep 13:10)."* Den täcker artefakter sparade före fixen, och den gör en
+misslyckad omräkning synlig i stället för tyst.
+- ⚠️ **Medvetet SMAL — bara särskjutningen, inte resultatrader i allmänhet.** En allmän
+  "resultaten är nyare än listan" skulle larma oavbrutet under en tävling medan listan är
+  preliminär, och en varning som alltid lyser slutar betyda något. Särskjutningen är sällsynt
+  och betyder ALLTID att en medalj är fel.
+- Kan vakten inte läsas SÄGS det, i stället för att tiga om huruvida listan är aktuell.
+
+Verifierat på SSM 2026: vakten lyste med båda tiderna medan artefakten var gammal; en
+omsparning av ett befintligt särskjutningsresultat (oförändrade skott) gav
+`resultsRefreshed: true`, artefakten 13:10 → 14:15, varningen borta, och **A-bronset delas ut
+till Ivan Slabiak med "avgjord på särskjutning: 47 mot 46"**. Totalt 27 → 28 medaljer, 0
+oavgjorda, alla sju mästerskapskategorier och fem lagklasser intakta.
+
+Adds C# → full ombyggnad. Ingen SQL, ingen doctype-egenskap.
+
 ### Skjutlag / Patrull Label (2026-05-20)
 **What:** Freeform per-skjutlag/patrol label admins can type to disambiguate multi-day competitions (e.g. "Lördag fm", "Söndag 14 juni", "Final"). Replaces a backlog item that originally asked for a structured day-of-week + date field.
 
