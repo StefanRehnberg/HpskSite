@@ -3765,18 +3765,59 @@ Verifierat på SSM 2026 mot endpointen: A 37, B 31, C 48, C Dam 14, C Vet Ä 7, 
 alla "Guld, Silver, Brons"; C Jun 2 → "Medaljer till alla 2 deltagande". Enda kategorin under
 fem är alltså juniorklassen, som inte reduceras.
 
-### Resultatfliken: besluten först, artefakten under (2026-09-08)
+### Resultatfliken: besluten först, artefakten under (2026-09-08, omarbetad samma dag)
 
 Samma form som Startlistor-fliken fick. Fliken visade tidigare en omärkt verktygsrad och sedan
 resultatlistan i en iframe — alltså ARTEFAKTEN, men ingenting om de BESLUT som formar den.
-Tre namngivna sektioner nu:
 
-1. **Klasser och sammanslagning** — tabell: klass · deltagare · sammanslagning · medaljer,
-   med brickor i rubriken ("15 klasser · 2 sammanslagna · 1 under 5 deltagare") och en
-   **Ändra**-knapp som öppnar den befintliga dialogen.
-2. **Publicering** — Uppdatera / status / Publicera, med en rad som förklarar vad Uppdatera
-   gör (och inte gör).
-3. **Resultatlistan** — artefakten, kollapsbar, med **Öppna i ny flik**.
+**⚠️ Första utsågan blev FEM sektioner (sju med Deltävling) och tre av dem handlade om samma
+sak.** Underkänd av Stefan ur en tävlingsledares perspektiv:
+- *"Varför är Publicering en egen sektion? Det får en bara att undra: vad är det som publiceras
+  där?"* — en sektion döpt efter en HANDLING säger att något publiceras men visar inte VAD.
+  Objektet låg i nästa kort. Jag delade upp efter handling när användaren tänker i SAKER.
+- *"Prisutdelning har en egen sektion, varför då"* — ett helt kort för en enda länk.
+
+**⚠️⚠️ Och det allvarligaste, som ingen rapporterade: ORDNINGEN MOTSADE ARBETSORDNINGEN.**
+Särskjutningskortet låg SIST på sidan, men en särskjutning måste vara avgjord FÖRE
+publiceringen och FÖRE prisutdelningen. En tävlingsledare läser uppifrån och ner, trycker
+Publicera, och upptäcker först därefter att en medaljstrid är oavgjord — sidan lärde alltså
+ut fel ordning. **Lägg aldrig ett villkorligt kort som BLOCKERAR ett steg efter det steget.**
+
+**Tre sektioner nu, i den ordning arbetet sker:**
+
+1. **Klasser och medaljer** — tabell: klass · deltagare · sammanslagning, och medaljtabellen
+   per mästerskapsklass intill. Brickor i rubriken ("15 klasser · 2 sammanslagna · 1 under 5
+   deltagare") och en **Ändra**-knapp som öppnar den befintliga dialogen.
+   ⚠️ **INTE "Klasser och priser"** — *pris* betyder hederspris i SHB och är något annat.
+2. **Särskjutning** — flyttad HIT från sidans slut. Syns bara när det finns en tiad
+   medaljplats (servern gallrar i `CalculateFinalResults`).
+3. **Resultatlistan** — artefakten, kollapsbar. Rubrikraden bär **deltagarantal · status ·
+   Uppdatera · Publicera/Avpublicera · Åtgärder**, alltså publiceringen där objektet syns.
+
+**⚠️ Prisutdelningslänken ligger i resultatlistans Åtgärder-meny, INTE i "Klasser och
+medaljer"** — trots att medaljtabellen står där och Stefan föreslog det. Skälet: prislistans
+enda verkliga felläge är att den är ÄLDRE än resultatlistan (se avsnittet om artefaktens
+skrivväg — det inträffade samma dag). Intill `Uppdatera` syns beroendet; två sektioner bort
+syns det inte.
+
+**Åtgärder-menyn följer husregeln:** `Uppdatera` + `Publicera` står synliga (det är
+arbetsflödet), medan `Prisutdelningslistan`, `Öppna listan i ny flik` och `Visa/dölj listan`
+ligger i menyn — fem kontroller på en rad radbryter på en surfplatta i porträtt. Mätt: 698 px
+behövs mot 744 px tillgängligt vid 768 px bredd (576 px i publicerat läge), och rubrikraden är
+49 px hög utan radbrytning.
+
+**⚠️ Deltävlingens hälva bär SAMMA ordning** — dess särskjutning flyttades också före dess
+resultatlista. Bär de två hälvorna motsatt ordning lär sidan ut två olika arbetsgångar för
+samma sak.
+
+**⚠️ Varje id är bevarat** (`resultsListActions`, `btnCreateResultsList`,
+`resultsListStatusBadge`, `btnMarkOfficial`, `btnMarkPreliminary`, `resultsListSummary`,
+`resultsListCount`, `btnOpenResultsNewTab`, `publishHint`, `resultsListBody`) — ett dussin
+JS-krokar binder på dem, och en omdöpning där fallerar TYST. Verifierat att var och en
+förekommer exakt en gång.
+⚠️ **`btnOpenResultsNewTab` är nu en `.dropdown-item`**, så `loadResultsList()` sätter
+`style.display = ''` och inte `'inline-block'` — en menypost ska vara `block`, och tom sträng
+återställer elementets eget läge oavsett var knappen sitter.
 
 **⚠️⚠️ LISTAN ÄR MEDVETET KVAR INBÄDDAD.** Förslaget var att ta bort den och bara länka ut
 den, som Startlistor "gör" — men Startlistor bäddar också in sin lista, och tre skäl talar
