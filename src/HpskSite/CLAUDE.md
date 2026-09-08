@@ -2832,6 +2832,8 @@ Navigate to **Members → Member Groups**:
 - **competition**: add `closeRegistrationOnStartList` True/False property (optional, default false, label "Stäng självanmälan när startlistan publiceras"). Arrangörens val i publiceringsdialogen. **Default false = deploy ändrar ingenting för en tävling vars startlista redan är publicerad** — det är avsiktligt, inte försiktighet: en default-on hade stängt anmälan på levande tävlingar i deploy-ögonblicket utan att någon fick veta det. Utan egenskapen är `SetValue` en tyst no-op, så publiceringen **vägrar och namnger egenskapen** i stället för att rapportera en sparning som inte hände. Added 2026-08-31.
 - **clubSimpleEvent**: add `isMandatory` True/False property (optional, default false, label "Obligatoriskt deltagande"). Marks an event whose attendance is part of the club's Föreningsintyg decision. Klubbens OCH kretsens händelser delar doctype, så den gäller båda. Utan egenskapen är `SetValue` en tyst no-op — därför är kryssrutan avstängd och namnger egenskapen i stället för att se ut att fungera; allt annat (anmälan, reservplats, upprop) fungerar oförändrat. Kör även `Migrations/create-club-event-participant-table.sql`. Added 2026-08-31.
 - **club**: add `activityFromRangeCheckIn` True/False property (optional, default false, label "Incheckning på banan räknas som aktivitet"). Låter QR-incheckningar på klubbens länkade banor räknas i aktivitetssammanställningen. **Av som standard, så en deploy ändrar ingen klubbs siffror.** Utan egenskapen är `SetValue` en tyst no-op — därför **vägrar** skrivvägen och namnger egenskapen, och switchen renderas låst med förklaringen intill. Added 2026-09-01.
+- **competition**: add `isAwardingHonoraryAward` True/False property (optional, default false, label "Hederspriser utgår"). Arrangören avgör om hederspriser utgår (SHB C.3.4.2); styr hedersprissektionen på **/prisutdelning**. Utan egenskapen degraderar läsvägen till "utgår inte" **och säger vilken egenskap som saknas** — en tyst utelämnad sektion är oskiljbar från att arrangören valt bort hederspriser. Kryssrutan finns i tävlingsguiden, redigeringsmodalen OCH Springskyttemodalen (samt i `CompetitionFieldCatalog`); redigeringsmodalen renderar den **avstängd** och namnger egenskapen när den saknas. Added 2026-09-08.
+- **competitionResult**: add `honoraryAwardConfig` Textarea property (optional, label "Hedersprisfördelning (JSON)"). Arrangörens egen fördelning av hederspriser — JSON, kategorinamn → antal. **⚠️ EGEN egenskap, skild från `resultData`:** fördelningen är ett manuellt beslut och måste överleva att resultatlistan räknas om (samma lärdom som `mergeConfig`). Utan egenskapen visas systemets förslag men **sparningen VÄGRAR och namnger egenskapen** i stället för att rapportera lyckat och vara borta vid nästa laddning. Added 2026-09-08.
 - **competition**: add `teamResultSeriesCount` Integer property (optional, default 0, label "Antal serier i lagresultat"). How many series count toward a team's total — surfaced next to "Tillåt laganmälan" in the competition wizard + edit modals. 0/empty = auto (defaults to the qualification series count = `numberOfSeriesOrStations − numberOfFinalSeries`), so a 7+3 finals comp counts only the 7 qualifying series without any config. Set a value to override. Read by `CompetitionTeamController.GetTeamResultSeriesCount`. **The team-results-show-0 fix does NOT depend on this property** (the qualification default handles it); the property only adds explicit override. Missing property = silent no-op (auto default used). Added 2026-07-22.
 
 ### Märken (Pistolskyttemärket) ✅ Phase 1 (2026-05-31)
@@ -4066,6 +4068,126 @@ Verifierat i webbläsaren på SSM 2026 (tävling **8695**, inte 2205 — 2205 va
 finalister**, och särskjutningskortet visade fortfarande exakt en grupp (Ivan Slabiak mot Stefan
 Toivonen, 476, brons i vapengrupp C). Inga konsolfel. Adds C# → full ombyggnad. **Ingen SQL,
 ingen doctype-egenskap, ingen Umbraco-nod.**
+
+### Prisutdelningssidan — /prisutdelning/{id} (2026-09-08)
+
+Funktionären som delar ut medaljer hade ingen lista över vem som skulle ha vilken medalj och
+för vad. Enda underlaget var resultatlistorna, och Stefan avvisade att skriva ut
+placeringsmedaljer där av två skäl: vi skriver ut standardmedaljer och det blir förvirring om
+även placeringsmedaljer står där, och det är onödigt mycket att bläddra igenom hela
+resultatlistor vid prisbordet. Ett tredje skäl tillkom vid designen: resultatlistan är en
+**publik** artefakt medan prislistan är ett internt arbetsdokument som innehåller
+"särskjutning krävs" och "lotta här", och det ska inte vara publikt före ceremonin.
+
+**⚠️⚠️ SIDAN RANKAR ALDRIG OM NÅGOT — medaljörerna är DATA i resultatartefakten.**
+`PrecisionFinalResults.MedalAwards` fylls av `CalculateFinalResults`, där fyra saker finns i
+hand samtidigt: mästerskapskategorin (inte skicklighetsklassen), finalistfiltret per
+(medlem, klass)-start, poängordningen med innertior, och särskjutningens utfall. En konsument
+som rankade om själv skulle behöva återskapa alla fyra — och förväxlingen
+mästerskapskategori/skicklighetsklass har uppstått **tre gånger** i den här kodbasen
+(finalgallringen, särskjutningen, medaljräkningen). Bygget ligger direkt efter
+`ApplyShootOffOverride`, som just skrivit om den tiade delen av varje kategoris lista, så
+`detectionGroups` ÄR den slutliga placeringsordningen.
+
+**⚠️ TVÅ OLIKA MÄNGDER, som inte får blandas:** ANTALET medaljer mäts på ALLA startande i
+kategorin (SHB C.3.4.1: *"antalet deltagare i en vapengrupp"*), men MEDALJÖRERNA hämtas bara
+ur finalisterna — en gallrad skytt kan aldrig få medalj. Två skilda `GroupBy` i samma metod.
+
+**⚠️ `MedalAwardsComputed` skiljer "inga medaljer" från "vet inte".** En artefakt sparad före
+funktionen deserialiseras med en TOM `MedalAwards`, vilket är oskiljbart från en
+icke-mästerskapstävling — och en tom ceremoni för ett mästerskap är värre än ett ärligt
+"räkna om resultatlistan först". Fältet saknas i gammal JSON och blir false, vilket är rätt.
+
+**Medaljantalsregeln bor i `CompetitionTypes/Common/ChampionshipMedalCount`**, utbruten ur
+`CompetitionResultsController` eftersom lagmedaljerna reduceras enligt **samma** regel
+(C.3.6.5.1: *"reduceras … i samma ordning som i individuell tävling"*). En fjärde kopia av
+regeln är en fjärde chans att förväxla axlarna. `unitPlural` finns bara för att lagkortet inte
+ska säga "Medaljer till alla 1 deltagande" om ett LAG — antalet var rätt, ordet var fel, och
+ett felaktigt ord på en funktionärsskärm läses som ett felaktigt antal.
+
+**⚠️ `?grupp=` ÄR CEREMONINS FORM, inte ett filter.** SHB C.4.3.1.11: *"För att vinna tid kan
+prisutdelningen vid större tävlingar försiggå vid flera bord samtidigt, exempelvis ett för
+varje vapengrupp."* Därför ligger vapengruppen i ADRESSEN och inte bara i en kontroll på
+sidan — varje bord ska kunna öppna sin egen länk (och på sikt sin egen QR-affisch). Utskriften
+har `break-before: page` per vapengruppssektion av samma skäl: ett blad per bord.
+
+**Ordningen är en KNAPP, inte ett antagande.** Uppropet sker ofta bakifrån så att ceremonin
+avslutas med guldmedaljören, men vissa tävlingar gör tvärtom (Stefan 2026-09-08). Default
+brons först, växel `Guld först ⇄ Brons först`, valet i `localStorage` per enhet. Det är också
+skälet att ytan är en **lista och inte en kort-i-taget-guide**: uppropet behöver se vad som
+kommer härnäst, en andra person delar ut medan den första läser, den som inte är närvarande
+måste kunna hoppas över — och en guide hade krävt två navigeringsriktningar.
+
+**⚠️ EN OAVGJORD MEDALJPLATS NAMNGER INGEN.** Är särskjutningen inte avgjord skrivs platsen ut
+som ett rött kort ("Brons — särskjutning krävs mellan X och Y") och ingen medaljör utses. Att
+skriva ut den poängordningen råkar ge just nu vore att namnge fel person i uppropet, och
+C.4.3.1.11 kräver *"noga kontrollerade"* resultat före prisutdelningen. En avgjord särskjutning
+skrivs tvärtom UT ("avgjord på särskjutning: 47 mot 46") — dels nämns det ofta i uppropet, dels
+visar det att ordningen inte är gissad.
+
+**Sidan läser den SPARADE artefakten och räknar inte om.** Det är rätt för en prisutdelning:
+medaljerna ska spegla exakt den lista arrangören kontrollerat, inte ett nytt utfall som råkar
+räknas fram medan funktionären står vid bordet. Priset är att en gammal artefakt ger en gammal
+prislista, och därför är tidsstämpeln inte gömd i en fot utan en del av sidhuvudet.
+
+**Hederspriserna är REDIGERBARA** (Stefans krav). Sidan räknar golvet — C.3.4.2: *"skall dessa
+tillfalla minst en fjärdedel av de i tävlingen deltagande"* — och föreslår en fjärdedel per
+kategori, med stegare per rad och summan mätt mot golvet.
+- **⚠️ EGEN egenskap (`competitionResult.honoraryAwardConfig`), skild från `resultData`.**
+  Fördelningen är ett manuellt beslut och måste överleva att resultatlistan räknas om. Exakt
+  den lärdomen kostade oss `mergeConfig`, som låg i samma skrivväg som omräkningen.
+- **Återställ = RADERA arrangörens siffror**, aldrig skriv ner förslagets. Skrevs de ner vore
+  "förslaget" ett gammalt förslag nästa gång deltagarantalet ändras.
+- **⚠️ Oskiljbara skyttar flaggas BARA VID GRÄNSEN** för sista hederspriset (D.6.11.2:
+  särskjutning avgör ordningen, annars lottning). Två som står lika mitt i listan får båda ett
+  pris och ordningen saknar betydelse — att be funktionären lotta där vore påhittat arbete.
+- **⚠️ Hederspriskandidaternas ordning är INTE medaljordningen** och får aldrig användas för
+  att peka ut en medaljör: mängden är en annan (alla deltagare, inte bara finalisterna). Det
+  är det enda som sorteras i `PrizeGivingService`, och det är dokumenterat där.
+
+**Två doctype-egenskaper.** `competition.isAwardingHonoraryAward` (True/False) och
+`competitionResult.honoraryAwardConfig` (Textarea). Läsvägen degraderar till "utgår inte" och
+**säger vilken egenskap som saknas**; skrivvägen VÄGRAR och namnger den, eftersom `SetValue` på
+en saknad egenskap är en TYST no-op och en sparning annars rapporterar lyckat och är borta vid
+nästa laddning.
+- **⚠️ `isAwardingHonoraryAward` lades in i `CompetitionFieldCatalog` OCH i alla TRE
+  dialogerna** (guiden, redigeringsmodalen, Springskyttemodalen) — inklusive `boolKeys` och
+  `forceFalseKeys` i var och en, eftersom FormData utelämnar en omarkerad kryssruta och rutan
+  annars inte går att stänga AV. Det är exakt fältlista-som-glömmer-buggen Luleå PK rapporterade
+  om lånevapen: tre skrivvägar, ett fält i bara en av dem.
+
+**⚠️ Grinden är `HasCompetitionStaffAccessAsync`**, inte en egen `clubId`-kontroll — en
+kretsvärdad tävling (SM-formen) har `clubId` tomt, och en handskriven kontroll låser ut den
+arrangerande kretsen från sin egen tävling. Redigering av fördelningen kräver
+`HasCompetitionManagementAccess`.
+
+**Lagmedaljerna** läser `CompetitionTeamService.CalculateTeamResultsAsync`. "Startande lag" är
+inte "anmälda lag" och skillnaden ändrar antalet medaljer — ett lag utan en enda inmatad serie
+har inte startat. Lagsärskjutning är inte modellerad, så ett oskiljbart lagpar SÄGS ("lagen står
+lika … ordningen måste avgöras av arrangören") i stället för att gissas; C.4.3.1.11 pekar
+särskilt ut lagtävlingar som det som måste kontrolleras. Medlemsnamnen står på kortet eftersom
+medaljerna delas ut till SKYTTARNA — utan dem vet funktionären inte hur många medaljer laget
+ska ha.
+
+**Standardmedaljerna är medvetet UTANFÖR** sidan (Stefans invändning): de syns på resultatlistan
+och i klubbens beställningslista.
+
+**Ingen utdelningslogg i v1** (Stefans beslut). En avprickning hjälper när två personer delar
+bord, och C.4.3.1.11 kräver kvittens för vandringspriser — men det kräver en tabell och en
+skrivväg, och en ren läsvy som fungerar när den väl laddats plus utskrift som reserv är vad
+ceremonin behöver först.
+
+**Bara precisionsfamiljen.** Fält och spring har egna medaljgrupper (R i fält, egna
+stafettklasser i spring) och är eget arbete per gren.
+
+Verifierat i webbläsaren på SSM 2026 (tävling 8695): 27 medaljer över sju mästerskapskategorier,
+`?grupp=C` ger 20, deltagarantalen (A 37, B 31, C 48, C Dam 14, C Jun 2, C Vet Ä 7, C Vet Y 6)
+identiska med Resultat-flikens medaljpanel — som räknar dem på en **annan kodväg**
+(`BuildMedalGroups`), alltså två oberoende beräkningar som är överens. C brons visar
+"avgjord på särskjutning: 47 mot 46" och A brons står som oavgjord mellan Ivan Slabiak och
+Markus Henningsson, vilket stämmer med särskjutningskortet. Inga konsolfel.
+
+Adds C# → full ombyggnad. **Två doctype-egenskaper.** Ingen SQL, ingen Umbraco-nod.
 
 ### Skjutlag / Patrull Label (2026-05-20)
 **What:** Freeform per-skjutlag/patrol label admins can type to disambiguate multi-day competitions (e.g. "Lördag fm", "Söndag 14 juni", "Final"). Replaces a backlog item that originally asked for a structured day-of-week + date field.
