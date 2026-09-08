@@ -909,3 +909,28 @@
     #managementTabs .nav-item { flex: 0 0 auto; }
     #managementTabs .nav-link { white-space: nowrap; }
 }
+
+/* =====================================================================
+   Dampad text pa en LJUS tabellrad (dark mode)
+
+   Bootstraps tabellvarianter - .table-warning, .table-info, .table-success ... -
+   ger raden en LJUS bakgrund aven i dark mode, eftersom varianten satter bade
+   --bs-table-bg och --bs-table-color. Men .text-muted inuti raden loser upp till
+   --bs-secondary-color, som i dark mode ar LJUS. Foljden ar ljusgra text pa
+   ljusgul rad: fullstandigt osynlig.
+
+   Upptackt 2026-09-08 i Klassammanslagning-dialogen, dar "Rankas for sig med N
+   deltagare" forsvann pa varje markerad rad.
+
+   Regeln arver radens EGEN farg i stallet. --bs-table-color satts av varianten
+   sjalv, sa ingen farg hardkodas har - samma husregel som for ovrig CSS.
+
+   .table-dark och .table-active undantas: de ar morka respektive genomskinliga
+   och har alltsa inte problemet.
+   ===================================================================== */
+.table > :not(caption) > tr[class*="table-"]:not(.table-dark):not(.table-active) .text-muted,
+.table > :not(caption) > tr[class*="table-"]:not(.table-dark):not(.table-active) .text-secondary,
+.table > :not(caption) > tr[class*="table-"]:not(.table-dark):not(.table-active) .form-text {
+    color: var(--bs-table-color) !important;
+    opacity: .72;
+}
