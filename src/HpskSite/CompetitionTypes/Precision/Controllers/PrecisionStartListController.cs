@@ -2390,40 +2390,50 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 var generatedBy = request.GeneratedBy ?? currentMember.Name ?? "Unknown";
 
-                // Workflow gate: at least one class must be frozen.
-                var snapshot = _qualifyingResultsService.GetSnapshot(request.CompetitionId);
+                // ⚠️ Vapengruppen är listans identitet, så den måste anges. Att falla tillbaka
+                // på "hela tävlingen" hade byggt en fjärde, grupplös lista bredvid de andra.
+                var weaponGroup = (request.WeaponGroup ?? "").Trim();
+                if (weaponGroup.Length == 0)
+                    return Json(new { Success = false, Message = "Ingen vapengrupp angiven — finalstartlistan skapas per vapengrupp." });
+
+                // Workflow gate: at least one class in THIS weapon group must be frozen.
+                var fullSnapshot = _qualifyingResultsService.GetSnapshot(request.CompetitionId);
+                var snapshot = ScopeSnapshotToWeaponGroup(fullSnapshot, weaponGroup);
                 if (snapshot.ClassSnapshots.Count == 0)
-                    return Json(new { Success = false, Message = "Lås minst en klass innan finalsstartlistan kan genereras." });
+                    return Json(new { Success = false, Message = $"Lås minst en klass i vapengrupp {weaponGroup} innan finalstartlistan kan genereras." });
 
-                // Pull persisted per-class config from the existing finalsStartList node if any,
-                // otherwise use the merge-aware defaults.
-                var existingFinalsStartList = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
-
-                var perClassConfig = LoadFinalsConfig(existingFinalsStartList);
+                // Per-class config ligger på GRUPPENS egen nod, så A:s skjutlagsnummer inte
+                // skriver över C:s.
+                var existingFinalsStartList = FindFinalsNodeForGroup(competition.Id, weaponGroup, out var legacyForConfig);
+                var perClassConfig = LoadFinalsConfig(existingFinalsStartList ?? legacyForConfig);
 
                 var settings = new FinalsStartListSettings
                 {
                     FirstStartTime = string.IsNullOrWhiteSpace(request.FirstStartTime) ? "10:00" : request.FirstStartTime,
                     StartInterval = string.IsNullOrWhiteSpace(request.StartInterval) ? "1:45" : request.StartInterval,
-                    MaxShootersPerTeam = request.MaxShootersPerTeam > 0 ? request.MaxShootersPerTeam : 20
+                    MaxShootersPerTeam = request.MaxShootersPerTeam > 0 ? request.MaxShootersPerTeam : 20,
+                    WeaponGroup = weaponGroup,
+                    Date = (request.FinalsDate ?? "").Trim()
                 };
 
                 var build = _finalsBuilder.Build(snapshot, perClassConfig, settings);
                 if (!build.Ok || build.Configuration == null)
                     return Json(new { Success = false, Message = build.Message });
 
-                var persist = await PersistFinalsStartListAsync(competition, build.Configuration, generatedBy, settings.MaxShootersPerTeam);
+                var persist = await PersistFinalsStartListAsync(
+                    competition, build.Configuration, generatedBy, settings.MaxShootersPerTeam, weaponGroup, settings.Date);
                 if (!persist.ok)
                     return Json(new { Success = false, Message = persist.message });
 
                 return Json(new
                 {
                     Success = true,
-                    Message = build.Message,
+                    Message = build.Message + FinalsPersistNote(persist.wasPublished, persist.adoptedLegacy, weaponGroup),
+                    WeaponGroup = weaponGroup,
                     FinalsStartListId = persist.id,
                     TotalFinalists = persist.totalFinalists,
-                    Teams = persist.teams
+                    Teams = persist.teams,
+                    WasPublished = persist.wasPublished
                 });
             }
             catch (Exception ex)
@@ -2473,37 +2483,45 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var generatedBy = request.GeneratedBy ?? currentMember.Name ?? "Unknown";
                 var maxPerTeam = request.MaxShootersPerTeam > 0 ? request.MaxShootersPerTeam : 20;
 
+                var weaponGroup = (request.WeaponGroup ?? "").Trim();
+                if (weaponGroup.Length == 0)
+                    return Json(new { Success = false, Message = "Ingen vapengrupp angiven — finalstartlistan skapas per vapengrupp." });
+                var finalsDate = (request.FinalsDate ?? "").Trim();
+
                 StartListConfiguration config;
                 if (mode == "clone")
                 {
-                    config = BuildCloneFinalsConfig(request.CompetitionId, maxPerTeam);
+                    config = BuildCloneFinalsConfig(request.CompetitionId, maxPerTeam, weaponGroup);
                     if (config.Teams == null || config.Teams.Count == 0)
-                        return Json(new { Success = false, Message = "Ingen kvalstartlista att kopiera. Skapa och publicera kvalstartlistan först." });
+                        return Json(new { Success = false, Message = $"Ingen kvalstartlista att kopiera för vapengrupp {weaponGroup}. Skapa och publicera kvalstartlistan först." });
                 }
                 else // rerank
                 {
                     var firstStart = string.IsNullOrWhiteSpace(request.FirstStartTime) ? "10:00" : request.FirstStartTime;
                     var interval = string.IsNullOrWhiteSpace(request.StartInterval) ? "1:45" : request.StartInterval;
-                    config = await BuildRerankFinalsConfigAsync(request.CompetitionId, maxPerTeam, firstStart, interval);
+                    config = await BuildRerankFinalsConfigAsync(request.CompetitionId, maxPerTeam, firstStart, interval, weaponGroup);
                     if (config.Teams == null || config.Teams.Count == 0)
-                        return Json(new { Success = false, Message = "Inga kvalresultat att placera om. Registrera resultat först." });
+                        return Json(new { Success = false, Message = $"Inga kvalresultat i vapengrupp {weaponGroup} att placera om. Registrera resultat först." });
                 }
 
-                var persist = await PersistFinalsStartListAsync(competition, config, generatedBy, maxPerTeam);
+                var persist = await PersistFinalsStartListAsync(
+                    competition, config, generatedBy, maxPerTeam, weaponGroup, finalsDate);
                 if (!persist.ok)
                     return Json(new { Success = false, Message = persist.message });
 
                 var msg = mode == "clone"
-                    ? $"Finalen använder samma ordning som kvalet — {persist.totalFinalists} skyttar i {persist.teams} skjutlag."
-                    : $"Finalen placerad efter kvalresultat — {persist.totalFinalists} skyttar i {persist.teams} skjutlag.";
+                    ? $"Finalen i vapengrupp {weaponGroup} använder samma ordning som kvalet — {persist.totalFinalists} skyttar i {persist.teams} skjutlag."
+                    : $"Finalen i vapengrupp {weaponGroup} placerad efter kvalresultat — {persist.totalFinalists} skyttar i {persist.teams} skjutlag.";
 
                 return Json(new
                 {
                     Success = true,
-                    Message = msg,
+                    Message = msg + FinalsPersistNote(persist.wasPublished, persist.adoptedLegacy, weaponGroup),
+                    WeaponGroup = weaponGroup,
                     FinalsStartListId = persist.id,
                     TotalFinalists = persist.totalFinalists,
-                    Teams = persist.teams
+                    Teams = persist.teams,
+                    WasPublished = persist.wasPublished
                 });
             }
             catch (Exception ex)
@@ -2517,20 +2535,59 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// Shared save/publish tail for all finals-generation paths. Creates or updates the
         /// finalsStartList node, serializes the config, renders cached HTML, saves + publishes.
         /// </summary>
-        private async Task<(bool ok, string message, int id, int totalFinalists, int teams)> PersistFinalsStartListAsync(
-            IContent competition, StartListConfiguration config, string generatedBy, int maxShootersPerTeam)
+        private async Task<(bool ok, string message, int id, int totalFinalists, int teams, bool wasPublished, bool adoptedLegacy)> PersistFinalsStartListAsync(
+            IContent competition, StartListConfiguration config, string generatedBy, int maxShootersPerTeam,
+            string weaponGroup, string? finalsDate = null)
         {
-            var existingFinalsStartList = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+            var existingFinalsStartList = FindFinalsNodeForGroup(competition.Id, weaponGroup, out var legacyNode);
+
+            // ⚠️ En äldre lista utan gruppmärkning ADOPTERAS av den första gruppen som
+            // genereras, i stället för att lämnas kvar. Lämnad kvar skulle den fortfarande
+            // bära sina gamla skyttar, och GetFinalistMemberIds unionen över alla listor —
+            // så samma skytt hade räknats som finalist i två listor. Inget går förlorat:
+            // resultatrader är nycklade (tävling, medlem, klass, serie) och rörs inte av
+            // vilken startlista som finns.
+            var adoptedLegacy = false;
+            if (existingFinalsStartList == null && legacyNode != null)
+            {
+                existingFinalsStartList = legacyNode;
+                adoptedLegacy = true;
+            }
 
             IContent finalsStartList = existingFinalsStartList
-                ?? _contentService.Create("Finalstartlista", competition.Id, "finalsStartList");
+                ?? _contentService.Create(FinalsNodeName(weaponGroup), competition.Id, "finalsStartList");
+
+            // Namnet blir URL-segmentet, så två grupper måste ha olika namn. Byt bara när det
+            // behövs — en onödig omdöpning lämnar en rad i umbracoRedirectUrl efter sig.
+            var wantedName = FinalsNodeName(weaponGroup);
+            if (!string.IsNullOrWhiteSpace(weaponGroup) && finalsStartList.Name != wantedName)
+                finalsStartList.Name = wantedName;
+
+            // ⚠️ BEHÅLL publiceringsflaggan på en befintlig lista. Den nollades förr vid
+            // varje generering, vilket tyst avpublicerade en lista skyttarna redan tittade
+            // på. Att uppdatera en publicerad lista är vad som faktiskt hände — listan
+            // ändrades — och det rapporteras till organisatören i stället för att listan
+            // försvinner från den publika sidan utan förvarning.
+            var wasPublished = existingFinalsStartList != null
+                && existingFinalsStartList.GetValue<bool>("isOfficialFinalsStartList");
+
+            config.Settings ??= new StartListSettings();
+            config.Settings.WeaponGroup = weaponGroup ?? "";
+
+            // Datumet stämplas på SKJUTLAGEN, som är där /mitt-schema och kalenderexporten
+            // redan läser det. StartTime är bara "HH:mm", så utan datum kan söndagens
+            // A-final inte ordnas efter lördagens C-final.
+            if (!string.IsNullOrWhiteSpace(finalsDate) && config.Teams != null)
+            {
+                foreach (var team in config.Teams)
+                    team.Date = finalsDate.Trim();
+            }
 
             var totalFinalists = config.Teams?.Sum(t => t.Shooters?.Count ?? 0) ?? 0;
             finalsStartList.SetValue("competitionId", competition.Id);
             finalsStartList.SetValue("generatedDate", DateTime.Now);
             finalsStartList.SetValue("generatedBy", generatedBy);
-            finalsStartList.SetValue("isOfficialFinalsStartList", false);
+            finalsStartList.SetValue("isOfficialFinalsStartList", wasPublished);
             finalsStartList.SetValue("teamFormat", config.Settings?.Format ?? "Championship Finals");
             finalsStartList.SetValue("totalFinalists", totalFinalists);
             finalsStartList.SetValue("maxShootersPerTeam", maxShootersPerTeam);
@@ -2565,11 +2622,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             {
                 _logger.LogError("Failed to save finals start list. Messages: {Messages}",
                     string.Join(", ", saveResult.EventMessages?.GetAll().Select(m => m.Message) ?? Array.Empty<string>()));
-                return (false, "Kunde inte spara finalstartlistan.", 0, 0, 0);
+                return (false, "Kunde inte spara finalstartlistan.", 0, 0, 0, false, false);
             }
             _contentService.Publish(finalsStartList, new[] { "*" }, -1);
 
-            return (true, "", finalsStartList.Id, totalFinalists, config.Teams?.Count ?? 0);
+            return (true, "", finalsStartList.Id, totalFinalists, config.Teams?.Count ?? 0, wasPublished, adoptedLegacy);
         }
 
         /// <summary>
@@ -2577,7 +2634,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// relabel the format so the finals label ("Final") applies. No Rang/Kval columns render
         /// because these shooters carry no qualification rank/score.
         /// </summary>
-        private StartListConfiguration BuildCloneFinalsConfig(int competitionId, int maxPerTeam)
+        private StartListConfiguration BuildCloneFinalsConfig(int competitionId, int maxPerTeam, string weaponGroup)
         {
             var empty = new StartListConfiguration { Teams = new List<StartListTeam>() };
 
@@ -2592,6 +2649,25 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
             var qualConfig = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
             if (qualConfig?.Teams == null || qualConfig.Teams.Count == 0) return empty;
+
+            // Skär ned till vapengruppen. ⚠️ SKJUTLAGSNUMREN BEHÅLLS — hela poängen med
+            // "forsätt i samma ordning" är att skytten står på samma skjutlag och plats som i
+            // kvalet, så en omnumrering hade tagit bort just det löftet. Tomma skjutlag faller
+            // bort, allttså kan numren ha luckor, och det är rätt.
+            if (!string.IsNullOrWhiteSpace(weaponGroup))
+            {
+                foreach (var team in qualConfig.Teams)
+                {
+                    team.Shooters = (team.Shooters ?? new List<StartListShooter>())
+                        .Where(sh => string.Equals(
+                            ChampionshipCategory.WeaponGroupFor(sh.WeaponClass), weaponGroup, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    team.ShooterCount = team.Shooters.Count;
+                    team.WeaponClasses = team.Shooters.Select(sh => sh.WeaponClass).Distinct().OrderBy(c => c).ToList();
+                }
+                qualConfig.Teams = qualConfig.Teams.Where(t => (t.Shooters?.Count ?? 0) > 0).ToList();
+                if (qualConfig.Teams.Count == 0) return empty;
+            }
 
             qualConfig.Settings ??= new StartListSettings();
             qualConfig.Settings.Format = "Final";
@@ -2608,12 +2684,17 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// is its own skjutlag (split into more if it exceeds maxPerTeam). Weapon groups follow the
         /// canonical WeaponClass enum order.
         /// </summary>
-        private async Task<StartListConfiguration> BuildRerankFinalsConfigAsync(int competitionId, int maxPerTeam, string firstStart, string interval)
+        private async Task<StartListConfiguration> BuildRerankFinalsConfigAsync(int competitionId, int maxPerTeam, string firstStart, string interval, string weaponGroup)
         {
             var empty = new StartListConfiguration { Teams = new List<StartListTeam>() };
 
             var rankings = await _qualifyingResultsService.GetAvailableClassRankingsAsync(competitionId);
             var all = rankings.SelectMany(r => r.QualifiedShooters).ToList();
+            if (!string.IsNullOrWhiteSpace(weaponGroup))
+            {
+                all = all.Where(sh => string.Equals(
+                    ChampionshipCategory.WeaponGroupFor(sh.ShootingClass), weaponGroup, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
             if (all.Count == 0) return empty;
 
             if (maxPerTeam < 1) maxPerTeam = 20;
@@ -2796,9 +2877,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     var ranking = availableRankings.FirstOrDefault(r => r.ChampionshipClass == group);
                     snapshot.ClassSnapshots.TryGetValue(group, out var frozen);
+
+                    // Vapengruppen härleds ur SKYTTARNA, aldrig ur gruppens rubrik —
+                    // "C2+Dam" och admin-omdöpta rubriker resolvar inte som klassnamn.
+                    // Ytan grupperar låsraderna per vapengrupp, eftersom det är en
+                    // finalstartlista per grupp.
+                    var groupShooters = (ranking?.QualifiedShooters ?? frozen?.QualifiedShooters)
+                                        ?? new List<QualifiedShooter>();
+                    var weaponGroup = ChampionshipCategory.WeaponGroupForClasses(
+                        groupShooters.Select(sh => sh.ShootingClass));
+
                     return new
                     {
                         groupName = group,
+                        weaponGroup,
                         // championshipClass kept for client-side backward compat
                         championshipClass = group,
                         totalShooters = ranking?.TotalShooters ?? 0,
@@ -2826,7 +2918,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// groups that don't yet have a saved entry.
         /// </summary>
         [HttpGet]
-        public IActionResult GetFinalsConfig(int competitionId)
+        public IActionResult GetFinalsConfig(int competitionId, string? weaponGroup = null)
         {
             if (competitionId <= 0)
                 return Json(new { success = false });
@@ -2835,12 +2927,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            var finalsNode = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+            var group = (weaponGroup ?? "").Trim();
+            var finalsNode = group.Length > 0
+                ? FindFinalsNodeForGroup(competition.Id, group, out var legacy) ?? legacy
+                : GetFinalsNodes(competition.Id).FirstOrDefault();
 
             var config = LoadFinalsConfig(finalsNode);
 
-            return Json(new { success = true, config });
+            return Json(new { success = true, weaponGroup = group, config });
         }
 
         /// <summary>
@@ -2867,11 +2961,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                var finalsNode = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+                // Konfigurationen hör till GRUPPENS nod. ⚠️ Skapas noden här stämplas
+                // vapengruppen i namnet, men <c>Settings.WeaponGroup</c> sätts först vid
+                // genereringen — tills dess härleds gruppen ur namnet inte alls, utan noden
+                // hittas som "grupplös" och adopteras av första genereringen. Det är rätt:
+                // en nod utan skyttar hör inte till någon grupp än.
+                var configGroup = (request.WeaponGroup ?? "").Trim();
+                var finalsNode = configGroup.Length > 0
+                    ? FindFinalsNodeForGroup(competition.Id, configGroup, out var legacyCfgNode) ?? legacyCfgNode
+                    : GetFinalsNodes(competition.Id).FirstOrDefault();
                 if (finalsNode == null)
                 {
-                    finalsNode = _contentService.Create("Finalstartlista", competition.Id, "finalsStartList");
+                    finalsNode = _contentService.Create(FinalsNodeName(configGroup), competition.Id, "finalsStartList");
                     finalsNode.SetValue("competitionId", request.CompetitionId);
                 }
 
@@ -2906,6 +3007,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 return Json(new { success = false, message = "Ogiltig förfrågan." });
 
             var snapshot = _qualifyingResultsService.GetSnapshot(request.CompetitionId);
+
+            // Scopad till vapengruppen när en anges — annars förhandsvisar guiden
+            // skjutlagsnummer för andra gruppers klasser, som ligger i EGNA listor med egen
+            // numrering. Det syntes som krockande skjutlag i förhandsvisningen.
+            var previewGroup = (request.WeaponGroup ?? "").Trim();
+            if (previewGroup.Length > 0)
+                snapshot = ScopeSnapshotToWeaponGroup(snapshot, previewGroup);
+
             if (snapshot.ClassSnapshots.Count == 0)
                 return Json(new { success = true, perClass = new Dictionary<string, object>() });
 
@@ -2957,6 +3066,140 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 success = true,
                 message = request.IsPublished ? "Finalsstartlistan har publicerats." : "Finalsstartlistan är inte längre publicerad."
             });
+        }
+
+        // =====================================================================
+        // EN FINALSTARTLISTA PER VAPENGRUPP (2026-09-08)
+        //
+        // ⚠️ En vapengrupps final är EN skjutsession: eget datum, egen starttid, egen
+        // publicering. På SSM 2026 skjuts C med final på lördagen, A på söndag förmiddag
+        // och B på söndag eftermiddag. Med EN nod för hela tävlingen gick det inte att ha
+        // C:s lista publicerad medan A:s var ett utkast — och varje omgenerering nollade
+        // publiceringsflaggan, så att lägga till A på söndagen AVPUBLICERADE C:s lista tyst.
+        //
+        // Mellan listorna går allttså VAPENGRUPPEN; inuti en lista går
+        // MÄSTERSKAPSKATEGORIN (Dam C, Vet Y C …), som avgör vem som tävlar om vilken
+        // medalj. Se ChampionshipCategory.WeaponGroupFor.
+        // =====================================================================
+
+        /// <summary>
+        /// Tillägg till kvittot när genereringen gjorde något organisatören måste veta om.
+        /// En publicerad lista som uppdateras är inte ett fel, men det är fel att inte säga
+        /// det: skyttarna ser ändringen direkt på den publika sidan.
+        /// </summary>
+        private static string FinalsPersistNote(bool wasPublished, bool adoptedLegacy, string weaponGroup)
+        {
+            var note = "";
+            if (adoptedLegacy)
+                note += $" Den tidigare finalstartlistan täckte hela tävlingen och är nu vapengrupp {weaponGroup}:s lista.";
+            if (wasPublished)
+                note += " Listan var publicerad och uppdaterades direkt på den publika sidan.";
+            return note;
+        }
+
+        /// <summary>
+        /// Hur många barn som skannas när finalstartlistorna letas upp. En tävling har
+        /// kvalstartlistor, resultatnod, fakturahubb och nu en finallista per vapengrupp —
+        /// 50 räcker med marginal, och en fast övre gräns håller uppslaget billigt.
+        /// </summary>
+        private const int FinalsChildScanSize = 50;
+
+        /// <summary>Nodnamnet, som också blir URL-segmentet ("finalstartlista-c").</summary>
+        private static string FinalsNodeName(string? weaponGroup) =>
+            string.IsNullOrWhiteSpace(weaponGroup) ? "Finalstartlista" : $"Finalstartlista {weaponGroup.Trim()}";
+
+        /// <summary>
+        /// Alla finalstartlistor för en tävling. Inkluderar den äldre placeringen under en
+        /// <c>competitionStartListsHub</c> — en tävling där listan ligger i hubben måste
+        /// fortfarande hittas, annars försvinner dess finalister ur särskjutningsgrinden.
+        /// </summary>
+        private List<IContent> GetFinalsNodes(int competitionId)
+        {
+            var found = new List<IContent>();
+            try
+            {
+                var children = _contentService.GetPagedChildren(competitionId, 0, FinalsChildScanSize, out _).ToList();
+                found.AddRange(children.Where(c => c.ContentType.Alias == "finalsStartList"));
+
+                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+                if (hub != null)
+                {
+                    found.AddRange(_contentService.GetPagedChildren(hub.Id, 0, FinalsChildScanSize, out _)
+                        .Where(c => c.ContentType.Alias == "finalsStartList"));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not enumerate finals start lists for competition {CompetitionId}", competitionId);
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// Vilken vapengrupp en finalstartlista gäller.
+        ///
+        /// ⚠️ Ordningen är inte godtycklig: <c>Settings.WeaponGroup</c> är vad generatorn
+        /// stämplade, men listor skapade före 2026-09 saknar den. Då HÄRLEDS gruppen ur
+        /// skyttarnas klasser, vilket gör att en befintlig lista som råkar innehålla bara
+        /// C-skyttar adopteras som C-listan utan migrering. En äldre lista som täcker flera
+        /// vapengrupper ger <c>""</c> — den är en heltävlingslista, inte en gruppista.
+        /// </summary>
+        private string WeaponGroupOfFinalsNode(IContent? node)
+        {
+            if (node == null) return "";
+            var group = FinalsWeaponGroup.FromConfigurationData(node.GetValue<string>("configurationData"));
+            if (group.Length == 0)
+            {
+                // Inte ett fel i sig — en äldre heltävlingslista, eller en nod som ännu bara
+                // bär en sparad konfiguration utan skyttar. Loggas på debug så en oväntad
+                // grupplös lista ändå går att spåra.
+                _logger.LogDebug("Finals node {Id} has no resolvable weapon group", node.Id);
+            }
+            return group;
+        }
+
+        /// <summary>
+        /// Finalstartlistan för en vapengrupp, eller null. <paramref name="legacyWholeCompetition"/>
+        /// sätts när det enda som finns är en äldre lista utan gruppmärkning som täcker flera
+        /// vapengrupper — den kan återanvändas, men organisatören ska få veta det.
+        /// </summary>
+        private IContent? FindFinalsNodeForGroup(int competitionId, string weaponGroup, out IContent? legacyWholeCompetition)
+        {
+            legacyWholeCompetition = null;
+            var nodes = GetFinalsNodes(competitionId);
+            IContent? match = null;
+
+            foreach (var node in nodes)
+            {
+                var group = WeaponGroupOfFinalsNode(node);
+                if (group.Length == 0)
+                {
+                    legacyWholeCompetition ??= node;
+                    continue;
+                }
+                if (string.Equals(group, weaponGroup, StringComparison.OrdinalIgnoreCase))
+                    match ??= node;
+            }
+            return match;
+        }
+
+        /// <summary>
+        /// Skär ned låssnapshotten till en vapengrupp. Gruppen härleds ur SKYTTARNA i varje
+        /// grupp, aldrig ur gruppens rubrik — "C2+Dam" och admin-omdöpta "C2 Allmänt"
+        /// resolvar inte som klassnamn.
+        /// </summary>
+        private static QualifyingResultsSnapshot ScopeSnapshotToWeaponGroup(
+            QualifyingResultsSnapshot snapshot, string weaponGroup)
+        {
+            var scoped = new QualifyingResultsSnapshot { CompetitionId = snapshot.CompetitionId };
+            foreach (var (group, classSnap) in snapshot.ClassSnapshots)
+            {
+                var g = ChampionshipCategory.WeaponGroupForClasses(
+                    (classSnap.QualifiedShooters ?? new List<QualifiedShooter>()).Select(sh => sh.ShootingClass));
+                if (string.Equals(g, weaponGroup, StringComparison.OrdinalIgnoreCase))
+                    scoped.ClassSnapshots[group] = classSnap;
+            }
+            return scoped;
         }
 
         private Dictionary<string, FinalsClassConfig> LoadFinalsConfig(IContent? finalsNode)
@@ -3140,48 +3383,83 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 50, out _);
-
-                // NEW ARCHITECTURE: Look for finals start list as DIRECT child of competition
-                var finalsStartList = children.FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
-
-                // BACKWARD COMPATIBILITY: Check under hub during migration period
-                if (finalsStartList == null)
+                // ⚠️ Returnerar ALLA finalstartlistor — en per vapengrupp. En tävling över
+                // flera dagar har C:s final på lördagen och A:s på söndagen, med egna datum,
+                // egna starttider och egen publicering.
+                var finalsNodes = GetFinalsNodes(competition.Id);
+                if (finalsNodes.Count == 0)
                 {
-                    var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                    if (startListsHub != null)
+                    return Json(new { Success = false, Message = "Ingen finalstartlista hittades.", Exists = false, Lists = Array.Empty<object>() });
+                }
+
+                // Sorterat på vapengrupp FÖRE projektionen — gruppen läses ur
+                // configurationData, så den ska resolvas en gång per nod och inte en gång per
+                // jämförelse.
+                var ordered = finalsNodes
+                    .Select(n => (Node: n, Group: WeaponGroupOfFinalsNode(n)))
+                    .OrderBy(x => x.Group.Length == 0 ? 1 : 0)      // heltävlingslistan sist
+                    .ThenBy(x => x.Group, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var lists = new List<object>();
+                foreach (var (node, group) in ordered)
+                {
+                    var configData = node.GetValue<string>("configurationData");
+                    StartListConfiguration? startListData = null;
+                    if (!string.IsNullOrWhiteSpace(configData))
                     {
-                        finalsStartList = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out _)
-                            .Where(c => c.ContentType.Alias == "finalsStartList")
-                            .OrderByDescending(c => c.CreateDate)
-                            .FirstOrDefault();
+                        try { startListData = JsonConvert.DeserializeObject<StartListConfiguration>(configData); }
+                        catch (Exception parseEx)
+                        {
+                            // En trasig lista får inte gömma de andra — den redovisas utan innehåll.
+                            _logger.LogWarning(parseEx, "Could not parse finals configurationData on node {Id}", node.Id);
+                        }
                     }
+
+                    var firstTeamDate = startListData?.Teams?.FirstOrDefault()?.Date ?? "";
+
+                    lists.Add(new
+                    {
+                        FinalsStartListId = node.Id,
+                        WeaponGroup = group,
+                        // Tom grupp = äldre lista som täcker hela tävlingen. Ytan måste kunna
+                        // säga det i klartext i stället för att visa den som någon grupps lista.
+                        IsWholeCompetition = group.Length == 0,
+                        IsOfficial = node.GetValue<bool>("isOfficialFinalsStartList"),
+                        GeneratedDate = node.GetValue<DateTime>("generatedDate"),
+                        GeneratedBy = node.GetValue<string>("generatedBy") ?? "",
+                        TotalFinalists = node.GetValue<int>("totalFinalists"),
+                        TeamFormat = node.GetValue<string>("teamFormat"),
+                        FinalsDate = firstTeamDate,
+                        FirstStartTime = startListData?.Settings?.FirstStartTime ?? "",
+                        TeamCount = startListData?.Teams?.Count ?? 0,
+                        HasData = startListData?.Teams != null && startListData.Teams.Count > 0,
+                        StartList = startListData
+                    });
                 }
 
-                if (finalsStartList == null)
+                var primary = ordered[0].Node;
+                var primaryConfig = primary.GetValue<string>("configurationData");
+                StartListConfiguration? primaryData = null;
+                if (!string.IsNullOrWhiteSpace(primaryConfig))
                 {
-                    return Json(new { Success = false, Message = "Ingen finalstartlista hittades.", Exists = false });
+                    try { primaryData = JsonConvert.DeserializeObject<StartListConfiguration>(primaryConfig); } catch { }
                 }
-
-                var configData = finalsStartList.GetValue<string>("configurationData");
-
-                if (string.IsNullOrEmpty(configData))
-                {
-                    return Json(new { Success = false, Message = "Finalstartlistan saknar data.", Exists = false });
-                }
-
-                var startListData = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
 
                 return Json(new
                 {
                     Success = true,
                     Exists = true,
-                    FinalsStartListId = finalsStartList.Id,
-                    IsOfficial = finalsStartList.GetValue<bool>("isOfficialFinalsStartList"),
-                    GeneratedDate = finalsStartList.GetValue<DateTime>("generatedDate"),
-                    TotalFinalists = finalsStartList.GetValue<int>("totalFinalists"),
-                    TeamFormat = finalsStartList.GetValue<string>("teamFormat"),
-                    StartList = startListData
+                    Lists = lists,
+                    // De fem fälten nedan beskriver FÖRSTA listan och finns kvar för äldre
+                    // anropare (resultatfliken läser Exists för att veta om finalinmatning kan
+                    // öppnas). Nya ytor ska läsa Lists.
+                    FinalsStartListId = primary.Id,
+                    IsOfficial = primary.GetValue<bool>("isOfficialFinalsStartList"),
+                    GeneratedDate = primary.GetValue<DateTime>("generatedDate"),
+                    TotalFinalists = finalsNodes.Sum(n => n.GetValue<int>("totalFinalists")),
+                    TeamFormat = primary.GetValue<string>("teamFormat"),
+                    StartList = primaryData
                 });
             }
             catch (Exception ex)
@@ -3544,6 +3822,12 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public string? GeneratedBy { get; set; }
         public string? FirstStartTime { get; set; }
         public string? StartInterval { get; set; }
+
+        /// <summary>Vilken vapengrupps final som byggs ("C", "A", "B" …). Obligatorisk.</summary>
+        public string? WeaponGroup { get; set; }
+
+        /// <summary>Vilken dag finalen skjuts, "yyyy-MM-dd". Tom = tävlingens datum.</summary>
+        public string? FinalsDate { get; set; }
     }
 
     public class GenerateSimpleFinalsRequest
@@ -3554,6 +3838,12 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public string? GeneratedBy { get; set; }
         public string? FirstStartTime { get; set; }
         public string? StartInterval { get; set; }
+
+        /// <summary>Vilken vapengrupps final som byggs. Obligatorisk.</summary>
+        public string? WeaponGroup { get; set; }
+
+        /// <summary>Vilken dag finalen skjuts, "yyyy-MM-dd".</summary>
+        public string? FinalsDate { get; set; }
     }
 
     public class FreezeClassResultsRequest
@@ -3566,6 +3856,12 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
     {
         public int CompetitionId { get; set; }
         public Dictionary<string, HpskSite.CompetitionTypes.Precision.Models.FinalsClassConfig> Config { get; set; } = new();
+
+        /// <summary>
+        /// Vilken vapengrupps lista konfigurationen hör till. Utan den skulle A:s
+        /// skjutlagsnummer skriva över C:s, eftersom de bor på skilda noder.
+        /// </summary>
+        public string? WeaponGroup { get; set; }
     }
 
     public class PublishFinalsStartListRequest

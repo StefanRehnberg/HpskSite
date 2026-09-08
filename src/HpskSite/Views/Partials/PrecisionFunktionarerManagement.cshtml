@@ -222,44 +222,84 @@
             return;
         }
 
-        var cfg = d.startList || d.StartList || {};
-        var teams = cfg.teams || cfg.Teams || [];
-        if (!teams.length) {
-            host.innerHTML = '<div class="col-12"><div class="alert alert-warning mb-0">'
-                + '<i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan innehåller inga skjutlag.'
-                + '</div></div>';
-            return;
+        // ⚠️ EN FINALSTARTLISTA PER VAPENGRUPP. Skjutlagsnumren är unika inom en lista
+        // men INTE mellan listor — både C:s och A:s final kan ha ett skjutlag 1, och
+        // "fortsatt i samma ordning" behåller dessutom kvalets nummer med flit. Därför bär
+        // varje länk listans id (&fsl=), som är det inmatningsskärmen väljer lista på.
+        var lists = d.lists || d.Lists || [];
+        if (!lists.length) {
+            // Äldre svar utan Lists — behåll den gamla formen så ytan inte tystnar.
+            lists = [{
+                finalsStartListId: d.finalsStartListId || d.FinalsStartListId || 0,
+                weaponGroup: '',
+                isOfficial: !!(d.isOfficial || d.IsOfficial),
+                startList: d.startList || d.StartList || {}
+            }];
         }
 
-        var isOfficial = !!(d.isOfficial || d.IsOfficial);
-        var notice = isOfficial ? '' :
-            '<div class="col-12"><div class="alert alert-warning py-2 mb-0 small">'
-            + '<i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad än. '
-            + 'Inmatningen fungerar ändå, men skyttarna kan inte se listan förrän du publicerar den.'
-            + '</div></div>';
+        var blocks = [];
+        var multi = lists.length > 1;
 
-        host.innerHTML = notice + teams.map(function (t) {
-            var num = t.teamNumber != null ? t.teamNumber : t.TeamNumber;
-            var time = t.startTime || t.StartTime || '';
-            var label = t.label || t.Label || '';
-            var shooters = t.shooters || t.Shooters || [];
-            return '<div class="col-12 col-xl-6">'
-                + '<div class="card h-100">'
-                + '<div class="card-header d-flex justify-content-between align-items-center py-2 gap-2">'
-                + '<span><span class="fw-bold">Finalskjutlag ' + esc(num) + '</span>'
-                + (time ? '<span class="text-muted ms-1">' + esc(time) + '</span>' : '')
-                + (label ? '<span class="text-muted ms-1">· ' + esc(label) + '</span>' : '')
-                + '</span>'
-                + '<span class="badge bg-secondary">' + shooters.length + ' skyttar</span>'
-                + '</div>'
-                + '<div class="card-footer p-2">'
-                + '<a class="btn btn-primary w-100' + (pfnHasSkjutledare ? ' mb-2' : '') + '" href="/station?c=' + compId + '&s=' + encodeURIComponent(num)
-                + '&phase=finals" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna finalinmatning</a>'
-                + (pfnHasSkjutledare ? '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + encodeURIComponent(num)
-                + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>' : '')
-                + '</div>'
-                + '</div></div>';
-        }).join('');
+        lists.forEach(function (L) {
+            var cfg = L.startList || L.StartList || {};
+            var teams = cfg.teams || cfg.Teams || [];
+            var group = L.weaponGroup || L.WeaponGroup || '';
+            var fslId = L.finalsStartListId || L.FinalsStartListId || 0;
+            var isOfficial = !!(L.isOfficial || L.IsOfficial);
+            var finalsDate = L.finalsDate || L.FinalsDate || '';
+
+            // Rubrik per lista bara när det finns fler än en — på en tävling med bara
+            // C-final vore "Vapengrupp C" en rubrik över allt som finns.
+            if (multi) {
+                blocks.push('<div class="col-12"><h6 class="mt-2 mb-0">'
+                    + '<i class="bi bi-trophy me-1 text-warning"></i>'
+                    + (group ? 'Final – vapengrupp ' + esc(group) : 'Final – hela tävlingen')
+                    + (finalsDate ? '<span class="text-muted fw-normal ms-2 small">' + esc(finalsDate) + '</span>' : '')
+                    + '</h6></div>');
+            }
+
+            if (!teams.length) {
+                blocks.push('<div class="col-12"><div class="alert alert-warning py-2 mb-0 small">'
+                    + '<i class="bi bi-exclamation-triangle me-1"></i>'
+                    + (group ? 'Finalstartlistan för vapengrupp ' + esc(group) : 'Finalstartlistan')
+                    + ' innehåller inga skjutlag.</div></div>');
+                return;
+            }
+
+            if (!isOfficial) {
+                blocks.push('<div class="col-12"><div class="alert alert-warning py-2 mb-0 small">'
+                    + '<i class="bi bi-exclamation-triangle me-1"></i>'
+                    + (group ? 'Finalstartlistan för vapengrupp ' + esc(group) + ' är' : 'Finalstartlistan är')
+                    + ' inte publicerad än. Inmatningen fungerar ändå, men skyttarna kan inte se '
+                    + 'listan förrän du publicerar den.</div></div>');
+            }
+
+            teams.forEach(function (t) {
+                var num = t.teamNumber != null ? t.teamNumber : t.TeamNumber;
+                var time = t.startTime || t.StartTime || '';
+                var label = t.label || t.Label || '';
+                var shooters = t.shooters || t.Shooters || [];
+                var fslQuery = fslId ? '&fsl=' + encodeURIComponent(fslId) : '';
+                blocks.push('<div class="col-12 col-xl-6">'
+                    + '<div class="card h-100">'
+                    + '<div class="card-header d-flex justify-content-between align-items-center py-2 gap-2">'
+                    + '<span><span class="fw-bold">Finalskjutlag ' + esc(num) + '</span>'
+                    + (time ? '<span class="text-muted ms-1">' + esc(time) + '</span>' : '')
+                    + (label ? '<span class="text-muted ms-1">· ' + esc(label) + '</span>' : '')
+                    + '</span>'
+                    + '<span class="badge bg-secondary">' + shooters.length + ' skyttar</span>'
+                    + '</div>'
+                    + '<div class="card-footer p-2">'
+                    + '<a class="btn btn-primary w-100' + (pfnHasSkjutledare ? ' mb-2' : '') + '" href="/station?c=' + compId + '&s=' + encodeURIComponent(num)
+                    + '&phase=finals' + fslQuery + '" target="_blank"><i class="bi bi-pencil-square me-1"></i>Öppna finalinmatning</a>'
+                    + (pfnHasSkjutledare ? '<a class="btn btn-outline-secondary w-100" href="/skjutledare?c=' + compId + '&l=' + encodeURIComponent(num)
+                    + '" target="_blank"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>' : '')
+                    + '</div>'
+                    + '</div></div>');
+            });
+        });
+
+        host.innerHTML = blocks.join('');
     }
 
     async function refresh() {

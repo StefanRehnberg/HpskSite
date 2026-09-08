@@ -1,4 +1,4 @@
-using Umbraco.Cms.Core.Models.PublishedContent;
+﻿using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Extensions;
 using Newtonsoft.Json;
 
@@ -115,6 +115,18 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public string StartInterval { get; set; } = "1:45";
         public string FirstStartTime { get; set; } = "09:00";
         public DateTime Generated { get; set; } = DateTime.Now;
+
+        /// <summary>
+        /// Vapengruppen listan gäller — sätts bara på FINALstartlistor, där det finns en
+        /// lista per vapengrupp. Tom på varje kvalstartlista och på varje finallista
+        /// genererad före 2026-09, där gruppen i stället härleds ur skyttarnas klasser.
+        ///
+        /// Ligger här och inte som en doctype-egenskap med flit: <c>SetValue</c> på en
+        /// saknad egenskap är en TYST no-op, och en uppdelning som tyst tappar sin
+        /// gruppmärkning slår ihop alla finaler igen. <c>configurationData</c> läses
+        /// ändå av varje yta som rör listan, så den behöver inget operatörssteg.
+        /// </summary>
+        public string WeaponGroup { get; set; } = "";
     }
 
     public class StartListTeam

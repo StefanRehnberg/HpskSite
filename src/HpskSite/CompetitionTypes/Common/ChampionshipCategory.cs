@@ -1,4 +1,4 @@
-using HpskSite.CompetitionTypes.Common.Utilities;
+﻿using HpskSite.CompetitionTypes.Common.Utilities;
 using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Common
@@ -92,6 +92,46 @@ namespace HpskSite.CompetitionTypes.Common
             }
 
             return weapon;
+        }
+
+        /// <summary>
+        /// **Vapengruppen** en skytteklass hör till — "C", "A", "A Opt", "B", "R" …
+        ///
+        /// ⚠️ Detta är en ANNAN axel än <see cref="For"/>. Vapengruppen är en
+        /// SKJUTSESSION: alla C-klasser — öppen, Dam, Vet Y, Vet Ä och Junior — skjuter sin
+        /// final tillsammans, på ett datum och en starttid, och hör därför i SAMMA
+        /// finalstartlista. Kategorin avgör vem som tävlar om vilken MEDALJ inuti den listan.
+        /// På SSM 2026 skjuts C med final på lördagen, A med final på söndag förmiddag och B
+        /// på söndag eftermiddag — tre listor, sju kategorier.
+        ///
+        /// Implementerad som <c>For(cls, splitGroupC: false)</c> just för att de två axlarna
+        /// inte ska kunna glida isär: vidgas kategorierna någon gång till vapengrupp L följer
+        /// gruppetiketten med automatiskt.
+        /// </summary>
+        public static string WeaponGroupFor(string? shootingClassIdOrName) =>
+            For(shootingClassIdOrName, splitGroupC: false);
+
+        /// <summary>
+        /// Vapengruppen för en MÄNGD klasser — en resultatlistegrupp, t.ex. de skyttar som
+        /// står under rubriken "C2+Dam".
+        ///
+        /// ⚠️ Läser SKYTTARNAS klasser, aldrig gruppens rubrik. En grupp kan vara
+        /// sammanslagen ("C2+Dam") eller omdöpt av en admin ("C2 Allmänt"), och rubriken
+        /// resolvar då till ingenting. Samma regel som resultatlistans <c>crFlattenByWeaponGroup</c>.
+        ///
+        /// ⚠️ Spänner mängden över flera vapengrupper returneras <c>""</c> — en gissning
+        /// skulle lägga skyttar i en final de inte skjuter. Det ska inte kunna hända (en
+        /// resultatlistegrupp korsar aldrig vapengruppen), men om det gör det ska det sägas.
+        /// </summary>
+        public static string WeaponGroupForClasses(IEnumerable<string?>? shootingClasses)
+        {
+            var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var raw in shootingClasses ?? Enumerable.Empty<string?>())
+            {
+                var g = WeaponGroupFor(raw);
+                if (g.Length > 0) groups.Add(g);
+            }
+            return groups.Count == 1 ? groups.First() : "";
         }
 
         /// <summary>

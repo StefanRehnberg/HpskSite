@@ -1,4 +1,4 @@
-using Umbraco.Cms.Core.Models.PublishedContent;
+﻿using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Extensions;
 using HpskSite.CompetitionTypes.Precision.ViewModels;
@@ -139,5 +139,22 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public string FirstStartTime { get; set; } = "10:00";
         public string StartInterval { get; set; } = "1:45";
         public int MaxShootersPerTeam { get; set; } = 20;
+
+        /// <summary>
+        /// Vilken vapengrupp den här finalstartlistan gäller ("C", "A", "B" …).
+        /// En lista per vapengrupp, eftersom en vapengrupps final är EN skjutsession med
+        /// eget datum, egen starttid och egen publicering — se
+        /// <see cref="Common.ChampionshipCategory.WeaponGroupFor"/>.
+        /// Tom sträng = en äldre lista som täcker hela tävlingen.
+        /// </summary>
+        public string WeaponGroup { get; set; } = "";
+
+        /// <summary>
+        /// Vilken dag finalen skjuts, "yyyy-MM-dd". Tom = tävlingens eget datum.
+        /// Stämplas på varje genererat skjutlag (<see cref="StartListTeam.Date"/>), som är
+        /// den plats /mitt-schema och kalenderexporten redan läser — utan datum kan
+        /// söndagens finalskjutlag inte ordnas efter lördagens.
+        /// </summary>
+        public string Date { get; set; } = "";
     }
 }

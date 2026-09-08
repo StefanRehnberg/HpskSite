@@ -3473,44 +3473,48 @@ namespace HpskSite.Controllers
         /// Read regardless of <c>isOfficialFinalsStartList</c> on purpose: that flag is reset
         /// to false on every generation and only flipped when the organiser presses Publicera,
         /// so gating on it would make a perfectly good list look like it has no finalists.
+        ///
+        /// ⚠️ UNION ÖVER ALLA FINALSTARTLISTOR. Sedan 2026-09-08 finns en lista per
+        /// vapengrupp — C:s final på lördagen, A:s på söndagen. Läser man bara den första
+        /// blir alla andra gruppers finalister "inte finalister", och särskjutningsgrinden
+        /// slutar erbjuda särskjutning om deras medaljer. Att läsa EN lista var exakt rätt
+        /// före den ändringen, vilket är varför det är värt en varning.
         /// </remarks>
         private HashSet<int> GetFinalistMemberIds(int competitionId)
         {
             var finalists = new HashSet<int>();
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, 50, out _);
-                var finalsNode = children.FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+                var children = _contentService.GetPagedChildren(competitionId, 0, 50, out _).ToList();
+                var finalsNodes = children.Where(c => c.ContentType.Alias == "finalsStartList").ToList();
 
                 // Backward compatibility: older competitions keep start lists under a hub node.
-                if (finalsNode == null)
+                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+                if (hub != null)
                 {
-                    var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                    if (hub != null)
-                    {
-                        finalsNode = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                            .Where(c => c.ContentType.Alias == "finalsStartList")
-                            .OrderByDescending(c => c.CreateDate)
-                            .FirstOrDefault();
-                    }
+                    finalsNodes.AddRange(_contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
+                        .Where(c => c.ContentType.Alias == "finalsStartList"));
                 }
 
-                var configData = finalsNode?.GetValue<string>("configurationData");
-                if (string.IsNullOrWhiteSpace(configData)) return finalists;
-
-                var config = Newtonsoft.Json.JsonConvert
-                    .DeserializeObject<CompetitionTypes.Precision.Models.StartListConfiguration>(configData);
-
-                var teams = config?.Teams;
-                if (teams == null) return finalists;
-
-                foreach (var team in teams)
+                foreach (var finalsNode in finalsNodes)
                 {
-                    var shooters = team.Shooters;
-                    if (shooters == null) continue;
-                    foreach (var shooter in shooters)
+                    var configData = finalsNode.GetValue<string>("configurationData");
+                    if (string.IsNullOrWhiteSpace(configData)) continue;
+
+                    var config = Newtonsoft.Json.JsonConvert
+                        .DeserializeObject<CompetitionTypes.Precision.Models.StartListConfiguration>(configData);
+
+                    var teams = config?.Teams;
+                    if (teams == null) continue;
+
+                    foreach (var team in teams)
                     {
-                        if (shooter.MemberId > 0) finalists.Add(shooter.MemberId);
+                        var shooters = team.Shooters;
+                        if (shooters == null) continue;
+                        foreach (var shooter in shooters)
+                        {
+                            if (shooter.MemberId > 0) finalists.Add(shooter.MemberId);
+                        }
                     }
                 }
             }

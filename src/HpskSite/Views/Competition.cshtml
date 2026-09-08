@@ -1,4 +1,4 @@
-@using HpskSite.Models
+﻿@using HpskSite.Models
 @using HpskSite.Extensions
 @using HpskSite.CompetitionTypes.Springskytte.Models
 @using Umbraco.Cms.Web.Common.PublishedModels;
@@ -529,12 +529,25 @@
     // widening the server would ship a dead button.
     var startListClosesRegistration = startListGateActive && !canManageCompetition;
 
-    // 2b. Finals start list (championship competitions). Direct child of competition,
-    //     gated on isOfficialFinalsStartList. Shown alongside the qualifying button.
-    var officialFinalsStartList = competitionChildren.FirstOrDefault(c =>
-        c.ContentType.Alias == "finalsStartList" && c.Value<bool>("isOfficialFinalsStartList"));
-    var hasOfficialFinalsStartList = officialFinalsStartList != null;
-    var finalsStartListPageUrl = hasOfficialFinalsStartList ? officialFinalsStartList.Url() : "";
+    // 2b. Finals start lists (championship competitions). Direct children of the
+    //     competition, gated on isOfficialFinalsStartList.
+    //     ⚠️ EN LISTA PER VAPENGRUPP sedan 2026-09-08, var och en publicerad för sig —
+    //     på ett flerdagarsmästerskap är C:s final publicerad på lördagen medan A:s ännu
+    //     är ett utkast. Alla publicerade visas, en knapp per lista, märkt med gruppen.
+    //     Gruppen läses via FinalsWeaponGroup — samma regel som administrationsytan.
+    var officialFinalsStartLists = competitionChildren
+        .Where(c => c.ContentType.Alias == "finalsStartList" && c.Value<bool>("isOfficialFinalsStartList"))
+        .Select(c => new
+        {
+            Node = c,
+            Group = HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup
+                .FromConfigurationData(c.Value<string>("configurationData"))
+        })
+        .OrderBy(x => x.Group.Length == 0 ? 1 : 0)
+        .ThenBy(x => x.Group, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+    var hasOfficialFinalsStartList = officialFinalsStartLists.Count > 0;
+    var finalsStartListPageUrl = hasOfficialFinalsStartList ? officialFinalsStartLists[0].Node.Url() : "";
 
     // 3. Result page availability from published content
     var resultPageNode = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
@@ -1526,10 +1539,18 @@
 								</p>
 							}
 
-							@if (hasOfficialFinalsStartList)
+							@*
+								En knapp per publicerad finalstartlista — en per vapengrupp. Gruppen står i
+								etiketten när det finns fler än en; med bara en lista skär vi bort gruppnamnet,
+								eftersom "Visa finalsstartlista C" på en tävling med bara C-final är brus.
+							*@
+							@foreach (var fsl in officialFinalsStartLists)
 							{
-								<a href="@finalsStartListPageUrl" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('finalsstartlistan'); }">
-									<i class="bi bi-trophy me-1"></i> Visa finalsstartlista
+								var fslLabel = officialFinalsStartLists.Count > 1 && fsl.Group.Length > 0
+									? $"Visa finalsstartlista – {fsl.Group}"
+									: "Visa finalsstartlista";
+								<a href="@fsl.Node.Url()" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('finalsstartlistan'); }">
+									<i class="bi bi-trophy me-1"></i> @fslLabel
 								</a>
 							}
 

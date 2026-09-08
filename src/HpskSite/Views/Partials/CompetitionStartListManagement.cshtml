@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Competition Start List Management Partial View
  * Handles creation and management of start lists for a specific competition
 *@
@@ -273,14 +273,21 @@
     </script>
     }
 
+    @{
+        // Har tävlingen finalserier finns TVÅ slags startlistor på den här fliken, och då
+        // måste rubriken säga vilken av dem det här kortet är. Utan finalserier vore
+        // "grundomgång" ett ord som inte betyder något för arrangören.
+        var hasFinalsSeries = (ViewData["NumberOfFinalSeries"] as int? ?? 0) > 0;
+        var qualCardTitle = hasFinalsSeries ? "Startlistor – grundomgång" : "Startlista";
+    }
+
     @if (!isDirektplacering)
     {
-    <!-- Traditional Start List Management -->
-    <div class="mb-4">
-        <button id="generateStartListBtn" class="btn btn-success" onclick="openGenerateStartListModal()">
-            <i class="bi bi-plus me-1"></i>Skapa ny startlista
-        </button>
-    </div>
+    @* ⚠️ "Skapa ny startlista" LÅG HÄR, utanför kortet, och det var det första felet på
+       sidan: en knapp som skapar GRUNDOMGÅNGENS lista svävade ovanför båda sektionerna, så
+       den som ville skapa en FINALstartlista klickade rimligtvis på den. Knappen bor nu i
+       grundomgångskortets rubrikrad, där den hör, och i det tomma läget där kortet inte finns.
+       Id:t generateStartListBtn är oförändrat — JS återställer sin egen etikett på det. *@
 
     <!-- Published Start List Warning -->
     <div id="publishedStartListWarning" class="alert alert-warning d-none" role="alert">
@@ -323,9 +330,28 @@
     <!-- Official Start List Card (ONE list) -->
     <div class="card" id="officialStartListSection" style="display: none;">
         <div class="card-header">
-            <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Startlista</h5>
-                <div class="d-flex align-items-center gap-2">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>@qualCardTitle</h5>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    @* Skapa/generera om ligger i kortet — se kommentaren ovanför. *@
+                    <button id="generateStartListBtn" class="btn btn-success btn-sm" onclick="openGenerateStartListModal()">
+                        <i class="bi bi-plus me-1"></i>Skapa ny startlista
+                    </button>
+                    @if (hasFinalsSeries)
+                    {
+                        @* Vägen till finalen, härifrån. Grundomgångens kort är högt — iframen
+                           är 800 px — så finalsektionen hamnar under skärmkanten även ihopfälld
+                           på en laptop. En länk som också FÄLLER UT finalsektionen är skillnaden
+                           mellan "finns inte" och "finns därnere". *@
+                        <button class="btn btn-outline-warning btn-sm" type="button" onclick="hpskGoToFinalsSection()">
+                            <i class="bi bi-trophy me-1"></i>Till finalen
+                        </button>
+                    }
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#qualStartListBody"
+                            aria-expanded="true" aria-controls="qualStartListBody">
+                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
+                    </button>
                     <!-- Status Badge -->
                     <span class="badge bg-warning fs-6 px-3 py-2" id="startListStatusBadge">
                         <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
@@ -345,6 +371,10 @@
                 </div>
             </div>
         </div>
+        @* ⚠️ Ihopfällt döljs bara KROPPEN. Rubrik, statusbricka, skytte-/startantal och
+           knapparna ligger i rubrikraden och står kvar — en ihopfälld sektion får aldrig
+           läsas som en borttagen sektion. *@
+        <div class="collapse show" id="qualStartListBody">
         <div class="card-body">
             <!-- Info Section -->
             <div class="alert alert-info mb-3">
@@ -391,6 +421,7 @@
             <!-- Start List Display (iframe) -->
             <iframe id="startListIframe" src="" class="border rounded" style="width: 100%; height: 800px; display: none;"></iframe>
         </div>
+        </div>
     </div>
 
     <!-- No Start List State -->
@@ -402,8 +433,24 @@
         }
         else
         {
-        <h6><i class="bi bi-info-circle me-2"></i>Ingen Startlista Ännu</h6>
-        <p class="mb-0">Klicka "Skapa ny startlista" ovan för att skapa en startlista för denna tävling.</p>
+        <h6><i class="bi bi-info-circle me-2"></i>@(hasFinalsSeries ? "Ingen startlista för grundomgången ännu" : "Ingen startlista ännu")</h6>
+        <p class="mb-2">
+            @if (hasFinalsSeries)
+            {
+                <text>Grundomgångens startlista bestämmer skjutlag och tider för serie 1 och framåt.
+                Finalens startlistor skapas separat, längre ner på sidan — en per vapengrupp — och
+                bygger på grundomgångens resultat.</text>
+            }
+            else
+            {
+                <text>Startlistan bestämmer vilka skjutlag skyttarna står i och när de startar.</text>
+            }
+        </p>
+        @* Egen id — JS rör bara generateStartListBtn, och två element med samma id gör det
+           andra dött för getElementById. *@
+        <button id="generateStartListBtnEmpty" class="btn btn-success" onclick="openGenerateStartListModal()">
+            <i class="bi bi-plus me-1"></i>Skapa startlista för grundomgången
+        </button>
         }
     </div>
 
@@ -1170,6 +1217,32 @@ function displayOfficialStartList(startList) {
 
     // Show the section
     document.getElementById('officialStartListSection').style.display = 'block';
+    maybeCollapseQualifyingOnce(startList);
+}
+
+// ⚠️ FÄLL IHOP GRUNDOMGÅNGEN NÄR DEN ÄR KLAR — men bara EN gång per sidladdning, och
+// bara på en tävling med finalserier. Grundomgångskortet bär en 800 px iframe, så med den
+// utfälld ligger finalsektionen under skärmkanten på varje laptop. Är listan publicerad är
+// det arbetet gjort och det som återstår är finalen.
+//
+// HÄRLETT tillstånd, ingen sparad preferens: är listan inte publicerad står kortet utfällt
+// igen nästa gång, vilket är rätt. Och "en gång" är inte kosmetik — loadStartLists() körs
+// om efter varje redigering, så utan spärren skulle kortet fällas ihop under händerna på den
+// som just fällt ut det.
+let qualCollapseApplied = false;
+function maybeCollapseQualifyingOnce(startList) {
+    if (qualCollapseApplied) return;
+    const body = document.getElementById('qualStartListBody');
+    if (!body || typeof bootstrap === 'undefined') return;
+    const hasFinals = !!document.querySelector('.competition-finals-start-list-management');
+    if (!hasFinals) return;
+
+    const isOfficial = !!(startList && (startList.isOfficial || startList.IsOfficial
+        || startList.status === 'Official'));
+    if (!isOfficial) return;
+
+    qualCollapseApplied = true;
+    bootstrap.Collapse.getOrCreateInstance(body, { toggle: false }).hide();
 }
 
 // Update status badge and publish/unpublish buttons

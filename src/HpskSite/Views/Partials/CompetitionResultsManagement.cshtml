@@ -147,26 +147,51 @@
                 var ok = data.Success || data.success;
                 var exists = data.Exists || data.exists;
                 if (!ok || !exists) return;
-                var sl = data.StartList || data.startList;
-                var teams = sl && (sl.Teams || sl.teams);
-                if (!teams || !teams.length) return;
+
+                // ⚠️ EN LISTA PER VAPENGRUPP. Skjutlagsnumren är unika inom en lista men
+                // inte mellan listor, så varje länk måste bära listans id (&fsl=).
+                var lists = data.Lists || data.lists;
+                if (!lists || !lists.length) {
+                    var slFallback = data.StartList || data.startList;
+                    if (!slFallback) return;
+                    lists = [{ finalsStartListId: data.FinalsStartListId || data.finalsStartListId || 0,
+                               weaponGroup: '', startList: slFallback }];
+                }
 
                 var wrapper = document.getElementById('precisionFinalsTeamLinksWrapper');
                 var el = document.getElementById('precisionFinalsTeamLinks');
                 el.innerHTML = '';
-                teams.forEach(function(team) {
-                    var teamNum = team.teamNumber || team.TeamNumber;
-                    var startTime = team.startTime || team.StartTime || '';
-                    var label = team.label || team.Label || '';
-                    var a = document.createElement('a');
-                    a.href = '/station?c=' + cid + '&s=' + teamNum + '&phase=finals';
-                    a.className = 'btn btn-outline-warning btn-sm';
-                    a.target = '_blank';
-                    a.innerHTML = '<i class="bi bi-trophy me-1"></i>Final ' + teamNum
-                        + (label ? ' — ' + escapeHtmlInline(label) : '')
-                        + (startTime ? ' <small class="text-muted">(' + escapeHtmlInline(startTime) + ')</small>' : '');
-                    el.appendChild(a);
+                var rendered = 0;
+                var multiList = lists.length > 1;
+
+                lists.forEach(function(L) {
+                    var sl = L.startList || L.StartList;
+                    var teams = sl && (sl.Teams || sl.teams);
+                    if (!teams || !teams.length) return;
+                    var group = L.weaponGroup || L.WeaponGroup || '';
+                    var fslId = L.finalsStartListId || L.FinalsStartListId || 0;
+
+                    teams.forEach(function(team) {
+                        var teamNum = team.teamNumber || team.TeamNumber;
+                        var startTime = team.startTime || team.StartTime || '';
+                        var label = team.label || team.Label || '';
+                        var a = document.createElement('a');
+                        a.href = '/station?c=' + cid + '&s=' + teamNum + '&phase=finals'
+                               + (fslId ? '&fsl=' + encodeURIComponent(fslId) : '');
+                        a.className = 'btn btn-outline-warning btn-sm';
+                        a.target = '_blank';
+                        // Gruppen skrivs ut bara när det finns flera listor — två knappar
+                        // som båda heter "Final 1" är annars omöjliga att skilja på.
+                        a.innerHTML = '<i class="bi bi-trophy me-1"></i>Final ' + teamNum
+                            + (multiList && group ? ' · ' + escapeHtmlInline(group) : '')
+                            + (label ? ' — ' + escapeHtmlInline(label) : '')
+                            + (startTime ? ' <small class="text-muted">(' + escapeHtmlInline(startTime) + ')</small>' : '');
+                        el.appendChild(a);
+                        rendered++;
+                    });
                 });
+
+                if (rendered === 0) return;
                 wrapper.style.display = '';
             })
             .catch(function() { /* finals are optional — fail silently */ });
@@ -3981,6 +4006,9 @@ function navigateToNextSeries() {
 // ========================================
 
 let finalsStartListData = null;
+// Vilken vapengrupps final som matas in — sätts när finalstartlistan väljs, används i
+// rubriken så funktionären ser vilken final skärmen står på.
+let finalsWeaponGroup = '';
 
 // Phase is locked at page load by the URL (?phase=finals on the finals buttons in the
 // Resultatinmatning section, anything else defaults to qualification). The in-page radio
@@ -4022,7 +4050,31 @@ function loadFinalsStartList() {
             // function is robust to either casing convention.
             var ok = data.Success || data.success;
             var exists = data.Exists || data.exists;
-            var sl = data.StartList || data.startList;
+
+            // ⚠️ VILKEN finalstartlista? Det finns en per vapengrupp, och deras
+            // skjutlagsnummer kan kollidera (både C:s och A:s final kan ha skjutlag 1;
+            // "fortsätt i samma ordning" behåller dessutom kvalets nummer med flit).
+            // Länkarna bär därför listans id i ?fsl=. Saknas det — en gammal länk eller ett
+            // bokmärke — tas första listan, vilket är exakt hur ytan betedde sig förut.
+            var sl = null;
+            var lists = data.Lists || data.lists;
+            if (lists && lists.length) {
+                var wantedFsl = parseInt(new URLSearchParams(window.location.search).get('fsl') || '0', 10);
+                var picked = null;
+                if (wantedFsl > 0) {
+                    picked = lists.find(function(L) {
+                        return (L.finalsStartListId || L.FinalsStartListId) === wantedFsl;
+                    }) || null;
+                    if (!picked) {
+                        console.warn('Finalstartlista', wantedFsl, 'finns inte — tar den första.');
+                    }
+                }
+                picked = picked || lists[0];
+                sl = picked.startList || picked.StartList || null;
+                finalsWeaponGroup = picked.weaponGroup || picked.WeaponGroup || '';
+            } else {
+                sl = data.StartList || data.startList;
+            }
 
             if (ok && exists && sl) {
                 finalsStartListData = sl;

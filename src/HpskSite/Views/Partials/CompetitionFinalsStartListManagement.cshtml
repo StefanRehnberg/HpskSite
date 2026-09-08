@@ -1,212 +1,166 @@
-@*
- * Competition Finals Start List Management
- *
- * Mirrors the visual pattern of CompetitionStartListManagement.cshtml:
- *   - "Skapa ny finalsstartlista" button at the top (always visible)
- *   - Official finals start list card with status badge, Publicera/Avpublicera, info row, Redigera, iframe
- *   - Generation flow lives entirely inside #generateFinalsStartListModal (3-step wizard)
- *   - Editing reuses the standard #startListEditorModal via window.openStartListEditor(finalsId) —
- *     the shared editor is parameterized on window.currentStartListId so the same JS works for
- *     both qualifying and finals lists. The controller's GetStartListForEditing branches on the
- *     doctype alias for the isOfficial flag.
- *
- * Gated by CompetitionManagement.cshtml on `numberOfFinalSeries > 0`.
-*@
+﻿@using Umbraco.Cms.Core.Models.PublishedContent
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
-    var competitionId = ViewData["CompetitionId"] is int cid ? cid : 0;
+    var competitionId = ViewData["CompetitionId"] as int? ?? 0;
 }
 
-@Html.AntiForgeryToken()
+@*
+    FINALSTARTLISTOR — EN PER VAPENGRUPP (omarbetad 2026-09-08)
+
+    ⚠️ En vapengrupps final är EN skjutsession: eget datum, egen starttid, egen publicering.
+    På SSM 2026 skjuts C med final på lördagseftermiddagen, A med final på söndag förmiddag
+    och B på söndag eftermiddag. Med EN lista för hela tävlingen gick det inte att ha C:s
+    lista publicerad medan A:s var ett utkast, och varje omgenerering nollade
+    publiceringsflaggan — så att lägga till A på söndagen AVPUBLICERADE C:s lista tyst.
+
+    Mellan korten går VAPENGRUPPEN. Inuti ett kort går MÄSTERSKAPSKATEGORIN (C öppen, Dam C,
+    Vet Y C, Vet Ä C, Jun C), som avgör vem som tävlar om vilken medalj — klasserna 1–3 är
+    skicklighetsklasser och delar medalj. Se CompetitionTypes/Common/ChampionshipCategory.
+
+    ⚠️ Varför en per-klass-tabell och inte bara en knapp: den vanligaste frågan är "jag har en
+    finalstartlista för C och vill nu skapa A-finalen", och den gick inte att svara på från
+    skärmen — den enda vägen hette "Skapa om / byt metod", vilket läser som att man förlorar
+    det man har. Nu står varje kategori på en rad med sitt eget tillstånd och sin egen åtgärd.
+
+    Ren vy → runtime-kompilerad, så SIDLADDNINGEN är kompileringskontrollen.
+*@
+
+@await Html.PartialAsync("_HtmlEscape")
 
 <style>
-    #finalsWizardRoot .wizard-progress {
-        display: flex;
-        gap: .5rem;
-        margin-bottom: 1rem;
-        flex-wrap: wrap;
-    }
+    #finalsWizardRoot .wizard-progress { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
     #finalsWizardRoot .wizard-progress .step {
-        flex: 1 1 12rem;
-        padding: .5rem .75rem;
-        border-radius: .375rem;
-        background: var(--bs-tertiary-bg);
-        border: 1px solid var(--bs-border-color);
-        font-size: .85rem;
-        color: var(--bs-secondary-color);
+        flex: 1 1 0; min-width: 140px; padding: .4rem .6rem; border: 1px solid var(--bs-border-color);
+        border-radius: .375rem; font-size: .85rem; color: var(--bs-secondary-color); background: var(--bs-tertiary-bg);
     }
     #finalsWizardRoot .wizard-progress .step.active {
-        background: var(--bs-primary);
-        color: #fff;
-        border-color: var(--bs-primary);
+        background: var(--bs-primary-bg-subtle); border-color: var(--bs-primary);
+        color: var(--bs-primary-text-emphasis); font-weight: 600;
     }
     #finalsWizardRoot .wizard-progress .step.done {
-        background: var(--bs-success-bg-subtle);
-        border-color: var(--bs-success);
-        color: var(--bs-success-text-emphasis);
+        background: var(--bs-success-bg-subtle); border-color: var(--bs-success); color: var(--bs-success-text-emphasis);
     }
     #finalsWizardRoot .step-pane { display: none; }
     #finalsWizardRoot .step-pane.active { display: block; }
+    .fn-group-card { border-left: 3px solid var(--bs-warning); }
+    .fn-group-card.fn-missing { border-left-color: var(--bs-border-color); }
+    .fn-group-card.fn-published { border-left-color: var(--bs-success); }
 </style>
 
 <div class="competition-finals-start-list-management mt-4" data-competition-id="@competitionId">
 
-    <!-- What this is -->
-    <div class="alert alert-secondary d-flex align-items-start gap-2 mb-3">
-        <i class="bi bi-info-circle mt-1"></i>
-        <div class="small mb-0">
-            <strong>Finalsstartlistan bestämmer i vilken ordning skyttarna står när ni matar in finalens resultat</strong>
-            (serie F1 och framåt). Välj hur finalen ska ställas upp nedan — för de flesta tävlingar räcker de två
-            första valen.
-        </div>
-    </div>
-
-    <!-- Readiness ladder — always visible; rows injected by JS -->
-    <div id="finalsReadiness" class="mb-3"></div>
-
-    <!-- Loading -->
-    <div id="finalsStartListLoading" class="text-center py-3 d-none">
-        <div class="spinner-border spinner-border-sm" role="status"></div>
-        <small class="ms-2 text-muted">Laddar finalsstartlista...</small>
-    </div>
-
-    <!-- Mode chooser -->
-    <div id="finalsModeChooser" class="mb-3 d-none">
-        <div class="row g-3">
-            <div class="col-md-4">
-                <div class="card h-100 border-success">
-                    <div class="card-body d-flex flex-column">
-                        <h6 class="card-title"><i class="bi bi-arrow-right-circle me-1 text-success"></i>Fortsätt i samma ordning</h6>
-                        <p class="card-text small text-muted flex-grow-1">
-                            Alla skyttar fortsätter i <strong>samma skjutlag och ordning som i kvalet</strong>.
-                            Enklast — inget behöver gallras eller frysas.
-                        </p>
-                        <button type="button" class="btn btn-success btn-sm mt-2" id="btnFinalsModeClone">
-                            <i class="bi bi-check2 me-1"></i>Skapa final – samma ordning
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100 border-primary">
-                    <div class="card-body d-flex flex-column">
-                        <h6 class="card-title"><i class="bi bi-sort-numeric-down me-1 text-primary"></i>Placera om efter resultat</h6>
-                        <p class="card-text small text-muted flex-grow-1">
-                            Skyttarna placeras om efter kvalresultatet — <strong>en final per vapengrupp</strong>
-                            (A, B, C … var för sig, bäst poäng först).
-                        </p>
-                        <button type="button" class="btn btn-primary btn-sm mt-2" id="btnFinalsModeRerank">
-                            <i class="bi bi-check2 me-1"></i>Skapa final – efter resultat
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100">
-                    <div class="card-body d-flex flex-column">
-                        <h6 class="card-title"><i class="bi bi-trophy me-1 text-warning"></i>Mästerskapsfinal (avancerad)</h6>
-                        <p class="card-text small text-muted flex-grow-1">
-                            Gallra till final (topp 1/6, minst 10) med <strong>frysning per klass</strong> och egna
-                            skjutlag. För mästerskap där bara de bästa går vidare.
-                        </p>
-                        <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="btnOpenFinalsWizard">
-                            <i class="bi bi-sliders me-1"></i>Öppna guiden
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Official finals start list card -->
-    <div class="card d-none" id="officialFinalsStartListSection">
+    <div class="card">
+        @*
+            ⚠️ Rubriken står ALLTID kvar, även ihopfälld. En datorovan arrangör ska aldrig få
+            något att försvinna — sortera, göm inte. Ihopfällt visas en sammanfattning per
+            vapengrupp i rubrikraden, så det går att se läget utan att fälla ut.
+        *@
         <div class="card-header">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h5 class="mb-0"><i class="bi bi-trophy me-2 text-warning"></i>Finalsstartlista</h5>
+                <h5 class="mb-0">
+                    <i class="bi bi-trophy me-2 text-warning"></i>Startlistor – final
+                </h5>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span class="badge bg-warning fs-6 px-3 py-2" id="finalsStartListStatusBadge">
-                        <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
-                    </span>
-                    <button class="btn btn-success btn-sm" id="btnPublishFinalsStartList">
-                        <i class="bi bi-check-circle me-1"></i>Publicera
+                    <span id="fnHeaderSummary" class="small"></span>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#fnSectionBody"
+                            aria-expanded="true" aria-controls="fnSectionBody">
+                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
                     </button>
-                    <button class="btn btn-outline-warning btn-sm d-none" id="btnUnpublishFinalsStartList">
-                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
-                    </button>
-                    <span class="text-muted">
-                        <small><i class="bi bi-people me-1"></i><span id="finalsStartListFinalistCount">0</span> finalister</small>
-                        <small class="ms-2"><i class="bi bi-grid me-1"></i><span id="finalsStartListTeamCount">0</span> skjutlag</small>
-                    </span>
                 </div>
             </div>
         </div>
-        <div class="card-body">
-            <div class="alert alert-info mb-3">
-                <div class="row">
-                    <div class="col-md-6">
-                        <small class="text-muted">Metod:</small>
-                        <strong id="finalsStartListFormatLabel">Final</strong>
-                    </div>
-                    <div class="col-md-3">
-                        <small class="text-muted">Genererad:</small>
-                        <strong id="finalsStartListGeneratedDate"></strong>
-                    </div>
-                    <div class="col-md-3">
-                        <small class="text-muted">Av:</small>
-                        <strong id="finalsStartListGeneratedBy"></strong>
+
+        <div class="collapse show" id="fnSectionBody">
+            <div class="card-body">
+
+                <div class="alert alert-secondary d-flex align-items-start gap-2 mb-3">
+                    <i class="bi bi-info-circle mt-1"></i>
+                    <div class="small mb-0">
+                        <strong>En finalstartlista per vapengrupp.</strong>
+                        Den bestämmer i vilken ordning skyttarna står när finalens resultat matas in
+                        (serie F1 och framåt), och den publiceras för sig — så C:s final kan vara
+                        publicerad på lördagen medan A:s ännu är ett utkast.
+                        <span class="d-block mt-1">
+                            Inuti en vapengrupp har varje mästerskapsklass sina egna finalister:
+                            Dam C, Veteran C och Junior C tävlar om egna medaljer, medan klasserna
+                            1, 2 och 3 är skicklighetsklasser som delar medalj.
+                        </span>
                     </div>
                 </div>
+
+                @* Kvitto på senaste åtgärden. ⚠️ INTE en alert(): en modal dialogruta
+                   blockerar hela sidan (och varje automatiserad kontroll) tills någon
+                   klickar OK, och den försvinner utan spår. Notisen står kvar tills nästa
+                   åtgärd, så texten "listan var publicerad och uppdaterades direkt på den
+                   publika sidan" går att läsa i efterhand. Fel visas fortfarande som
+                   alert — ett fel MÅSTE bekräftas. *@
+                <div id="fnNotice" class="alert alert-success alert-dismissible fade show d-none" role="status">
+                    <span id="fnNoticeText"></span>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Stäng"></button>
+                </div>
+
+                <div id="fnLoading" class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    <small class="ms-2 text-muted">Laddar finalstartlistor...</small>
+                </div>
+
+                <div id="fnGroups" class="d-flex flex-column gap-3"></div>
+
+                <div id="fnNoGroups" class="alert alert-warning small d-none mb-0">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    <strong>Inga klasser med resultat hittades än.</strong>
+                    Finalisterna räknas fram ur grundomgångens resultat, så mata in resultat på
+                    fliken <strong>Resultat</strong> först. Har du redan gjort det: klicka
+                    <strong>Uppdatera</strong> där, så att resultatlistan (med eventuella
+                    klassammanslagningar) finns att räkna på.
+                </div>
+
             </div>
-            <div class="d-flex justify-content-end mb-3 flex-wrap gap-2">
-                <button class="btn btn-outline-secondary" id="btnFinalsRedo">
-                    <i class="bi bi-arrow-repeat me-1"></i>Skapa om / byt metod
-                </button>
-                <button class="btn btn-outline-info" id="btnEditFinalsStartList">
-                    <i class="bi bi-pencil-square me-1"></i>Redigera
-                </button>
-                <button class="btn btn-outline-primary" id="btnOpenFinalsStartListNewTab">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>Öppna i ny flik
-                </button>
-            </div>
-            <iframe id="finalsStartListIframe" src="" class="border rounded" style="width: 100%; height: 800px; display: none;"></iframe>
         </div>
     </div>
 
     <!-- =====================================================================
-         Wizard modal — Lås grupper → Konfigurera grupper → Generera
+         Guide för mästerskapsfinal — SCOPAD TILL EN VAPENGRUPP.
+         Lås kategorier → konfigurera skjutlag → generera.
          ===================================================================== -->
-    <div class="modal fade" id="generateFinalsStartListModal" tabindex="-1" aria-hidden="true" id-root="finalsWizardRoot">
+    <div class="modal fade" id="generateFinalsStartListModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-fullscreen-md-down">
             <div class="modal-content" id="finalsWizardRoot">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-trophy me-2 text-warning"></i>Mästerskapsfinal – guide</h5>
+                    <h5 class="modal-title">
+                        <i class="bi bi-trophy me-2 text-warning"></i>Mästerskapsfinal –
+                        <span id="wizardGroupLabel">vapengrupp</span>
+                    </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
                 </div>
                 <div class="modal-body">
 
                     <div class="wizard-progress">
                         <div class="step active" data-step="1">1. Lås kvalresultat</div>
-                        <div class="step" data-step="2">2. Konfigurera grupper</div>
+                        <div class="step" data-step="2">2. Konfigurera skjutlag</div>
                         <div class="step" data-step="3">3. Generera</div>
                     </div>
 
-                    <!-- STEP 1 — Per-group lock -->
+                    <!-- STEG 1 — lås per kategori -->
                     <div class="step-pane active" data-step="1">
                         <p class="text-muted small mb-3">
-                            Lås kvalresultatet för varje grupp i resultatlistan när dess kvalrundor är klara.
-                            Grupperna kommer från resultatlistan — om du har slagit ihop klasser där så ses de
-                            som <em>en</em> grupp här också. Du kan låsa grupperna i valfri ordning.
+                            Lås kvalresultatet för varje klass i den här vapengruppen när dess
+                            grundomgång är klar. Låsningen fryser rangordningen, så att en rättelse
+                            i efterhand inte tyst flyttar vem som gick till final. Grupperna kommer
+                            från resultatlistan — har du slagit ihop klasser där räknas de som en
+                            grupp här också.
                         </p>
-                        <div id="noResultListMsg" class="alert alert-warning small" style="display:none">
+                        <div id="noResultListMsg" class="alert alert-warning small d-none">
                             <i class="bi bi-exclamation-triangle me-1"></i>
-                            <strong>Resultatlistan måste genereras först.</strong> Gå till fliken "Resultat",
-                            klicka "Uppdatera" för att skapa preliminärresultat (med eventuella klass-sammanslagningar),
-                            och kom sedan tillbaka hit för att låsa varje grupp inför finalen.
+                            <strong>Resultatlistan måste genereras först.</strong> Gå till fliken
+                            "Resultat", klicka "Uppdatera", och kom sedan tillbaka hit.
                         </div>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle">
                                 <thead>
                                     <tr>
-                                        <th>Grupp</th>
+                                        <th>Klass</th>
                                         <th>Skyttar</th>
                                         <th>Låsstatus</th>
                                         <th class="text-end">Åtgärd</th>
@@ -219,19 +173,20 @@
                         </div>
                     </div>
 
-                    <!-- STEP 2 — Per-group config -->
+                    <!-- STEG 2 — konfigurera skjutlag -->
                     <div class="step-pane" data-step="2">
                         <p class="text-muted small mb-3">
-                            För varje låst grupp: välj vilket skjutlag den ska ligga i, och om flera grupper
-                            delar ett skjutlag — vilken ordning. <strong>Skytten som leder en grupp hamnar
-                            alltid först i sitt gruppblock.</strong> Exempel: C (skjutlag 1, ordning 0) får
-                            positioner 1–10, C Vet Y (skjutlag 1, ordning 1) får 11–17.
+                            För varje låst klass: vilket skjutlag den ska ligga i, och om flera
+                            klasser delar skjutlag — i vilken ordning. <strong>Den som leder en
+                            klass hamnar alltid först i sitt block.</strong> Exempel: C öppen
+                            (skjutlag 1, ordning 0) får platserna 1–10, C Vet Y (skjutlag 1,
+                            ordning 1) får 11–17.
                         </p>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle" id="configTable">
                                 <thead>
                                     <tr>
-                                        <th>Grupp</th>
+                                        <th>Klass</th>
                                         <th>Skjutlag #</th>
                                         <th>Ordning i skjutlag</th>
                                         <th>Antal finalister</th>
@@ -241,22 +196,28 @@
                                     </tr>
                                 </thead>
                                 <tbody id="configTableBody">
-                                    <tr><td colspan="7" class="text-muted text-center">Lås minst en grupp i Steg 1 först.</td></tr>
+                                    <tr><td colspan="7" class="text-muted text-center">Lås minst en klass i steg 1 först.</td></tr>
                                 </tbody>
                             </table>
                         </div>
                     </div>
 
-                    <!-- STEP 3 — Generate settings -->
+                    <!-- STEG 3 — generera -->
                     <div class="step-pane" data-step="3">
                         <p class="text-muted small mb-3">
-                            Generera finalsstartlistan från de låsta grupperna och din konfiguration.
+                            Generera finalstartlistan för den här vapengruppen ur de låsta klasserna.
                         </p>
                         <div class="alert alert-warning small d-none" id="wizardGateMsg">
                             <i class="bi bi-lock me-1"></i>
-                            Lås minst en grupp i <strong>Steg 1</strong> innan du kan generera.
+                            Lås minst en klass i <strong>steg 1</strong> innan du kan generera.
                         </div>
                         <div class="row g-2 align-items-end mb-3">
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Finaldag</label>
+                                <input type="text" class="form-control form-control-sm" id="finalsDate"
+                                       placeholder="åååå-mm-dd" style="max-width:140px">
+                                <div class="form-text">Tom = tävlingens datum</div>
+                            </div>
                             <div class="col-auto">
                                 <label class="form-label small mb-0">Första starttid</label>
                                 <input type="text" class="form-control form-control-sm" id="finalsFirstStartTime" value="10:00" style="max-width:120px">
@@ -272,7 +233,9 @@
                         </div>
                         <div class="alert alert-warning small d-none" id="generateOverwriteWarning">
                             <i class="bi bi-exclamation-triangle me-1"></i>
-                            En finalsstartlista finns redan. Generering skriver över eventuella manuella ändringar.
+                            Vapengruppen har redan en finalstartlista. Generering bygger om den ur
+                            de låsta klasserna, så manuella ändringar i skjutlagen skrivs över.
+                            <span class="d-block mt-1">Andra vapengruppers listor berörs inte.</span>
                         </div>
                     </div>
 
@@ -300,6 +263,8 @@
     if (!root) return;
     const competitionId = parseInt(root.dataset.competitionId, 10);
     if (!competitionId) return;
+
+    const esc = window.hpskEsc || function (s) { return String(s == null ? '' : s); };
 
     // ---- helpers ----
     function token() { const el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
@@ -330,20 +295,64 @@
             try { return await r.json(); } catch (e) { console.error('[finals] GET not JSON', url, e); return { success: false }; }
         }).catch(err => { console.error('[finals] GET network error', url, err); return { success: false }; });
     }
+    function ok(d) { return d && (d.Success ?? d.success); }
+    function msg(d) { return (d && (d.Message ?? d.message)) || ''; }
+
+    // Kvitto på skärmen i stället för en blockerande alert(). Anropas efter refreshAll(),
+    // eftersom omritningen inte rör notisen.
+    function notice(text) {
+        if (!text) return;
+        const box = document.getElementById('fnNotice');
+        const span = document.getElementById('fnNoticeText');
+        if (!box || !span) return;
+        span.textContent = text;
+        box.classList.remove('d-none');
+    }
 
     // ---- state ----
-    let finalsListInfo = null;   // last GetFinalsStartList response
-    let perClassState = [];      // last GetQualifyingSnapshot perClass array
-    let perClassConfig = {};     // last GetFinalsConfig config dict (mutated by Step 2)
+    let finalsLists = [];        // GetFinalsStartList → Lists
+    let perClassState = [];      // GetQualifyingSnapshot → perClass (bär weaponGroup)
     let hasResultList = false;
-    let currentStep = 1;
-    let editorOpenForFinalsId = null;  // tracks when the shared editor is being used for finals
+    let editorOpenForFinalsId = null;
 
-    // ---- card load + render ----
-    // Single source of truth: pull the finals list + qualifying readiness together, then
-    // render the ladder, the mode chooser (when no list yet) or the official card.
+    // Guidens tillstånd är scopat till EN vapengrupp åt gången.
+    let wizardGroup = '';
+    let perClassConfig = {};
+    let currentStep = 1;
+
+    function listForGroup(group) {
+        return finalsLists.find(L => (L.weaponGroup || L.WeaponGroup || '') === group) || null;
+    }
+    function classesForGroup(group) {
+        return perClassState.filter(s => (s.weaponGroup || '') === group);
+    }
+
+    // Vilka klasser i gruppen som FAKTISKT står i listan. ⚠️ Läses ur listans skyttar,
+    // aldrig ur konfigurationen: konfigurationen beskriver vad som SKULLE genereras, och
+    // efter en manuell redigering är den inte längre sann om vad som står i listan.
+    //
+    // ⚠️ Returnerar NULL när listan inte bär någon kategoriinformation alls. Det är
+    // fallet för "fortsätt i samma ordning": den kopierar kvalstartlistan, vars skyttar
+    // saknar ChampionshipClass. En tom mängd hade då lästs som "ingen klass är med" och
+    // visat "Lägg till i finalen" på varje rad i en lista där alla redan står.
+    // Null betyder "vet inte per klass" och renderas som just det.
+    function classesInList(L) {
+        const sl = L && (L.startList || L.StartList);
+        const teams = (sl && (sl.Teams || sl.teams)) || [];
+        const out = new Set();
+        let sawAnyShooter = false;
+        teams.forEach(t => (t.Shooters || t.shooters || []).forEach(sh => {
+            sawAnyShooter = true;
+            const c = sh.ChampionshipClass || sh.championshipClass || '';
+            if (c) out.add(c);
+        }));
+        if (sawAnyShooter && out.size === 0) return null;
+        return out;
+    }
+
+    // ---- ladda allt ----
     async function refreshAll() {
-        showLoading();
+        document.getElementById('fnLoading').classList.remove('d-none');
         const [finals, readiness] = await Promise.all([
             jget(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`),
             jget(`/umbraco/surface/PrecisionStartList/GetQualifyingSnapshot?competitionId=${competitionId}`)
@@ -351,108 +360,421 @@
 
         hasResultList = !!(readiness && readiness.hasResultList);
         perClassState = (readiness && readiness.perClass) || [];
+        finalsLists = (finals && (finals.Lists || finals.lists)) || [];
 
-        const exists = finals && (finals.Exists || finals.exists);
-        document.getElementById('finalsStartListLoading').classList.add('d-none');
-        if (exists) {
-            finalsListInfo = finals;
-            renderOfficialCard();
-            hideChooser();
-        } else {
-            finalsListInfo = null;
-            document.getElementById('officialFinalsStartListSection').classList.add('d-none');
-            showChooser();
-        }
-        renderReadiness();
+        document.getElementById('fnLoading').classList.add('d-none');
+        renderGroups();
     }
-
-    // Back-compat alias — the wizard + editor-close hook call loadFinalsStartList().
+    // Bakåtkompatibelt namn — redigerarens stängningskrok anropar det.
     async function loadFinalsStartList() { await refreshAll(); }
 
-    function showLoading() {
-        document.getElementById('finalsStartListLoading').classList.remove('d-none');
-    }
-    function showChooser() { document.getElementById('finalsModeChooser').classList.remove('d-none'); }
-    function hideChooser() { document.getElementById('finalsModeChooser').classList.add('d-none'); }
-
-    // ---- readiness ladder ----
-    function readinessRow(done, label, hint) {
-        const icon = done
-            ? '<i class="bi bi-check-circle-fill text-success"></i>'
-            : '<i class="bi bi-circle text-muted"></i>';
-        const hintHtml = hint ? ` <span class="text-muted">— ${hint}</span>` : '';
-        return `<div class="d-flex align-items-center gap-2 py-1 small">${icon}<span>${label}${hintHtml}</span></div>`;
-    }
-    function renderReadiness() {
-        const el = document.getElementById('finalsReadiness');
-        if (!el) return;
-        const exists = !!finalsListInfo;
-        const isOfficial = exists && (finalsListInfo.IsOfficial || finalsListInfo.isOfficial);
-        el.innerHTML =
-            readinessRow(hasResultList, 'Resultat registrerade',
-                hasResultList ? '' : 'mata in kvalresultat på fliken Resultat först') +
-            readinessRow(exists, 'Finalsstartlista skapad',
-                exists ? '' : 'välj en metod nedan') +
-            readinessRow(isOfficial, 'Publicerad',
-                (exists && !isOfficial) ? 'klicka Publicera när listan är klar' : '');
+    // ---- rendering ----
+    function groupOrder() {
+        // Vapengrupper som har klasser med resultat, plus grupper som redan har en lista
+        // (en klass kan ha låsts och sedan tagits ur resultatlistan). Heltävlingslistor
+        // (tom grupp) hamnar sist och får en egen förklaring.
+        const set = new Set();
+        perClassState.forEach(s => { if (s.weaponGroup) set.add(s.weaponGroup); });
+        finalsLists.forEach(L => { const g = L.weaponGroup || L.WeaponGroup || ''; if (g) set.add(g); });
+        const groups = Array.from(set).sort((a, b) => a.localeCompare(b, 'sv'));
+        if (finalsLists.some(L => !(L.weaponGroup || L.WeaponGroup))) groups.push('');
+        return groups;
     }
 
-    function renderOfficialCard() {
-        const card = document.getElementById('officialFinalsStartListSection');
-        card.classList.remove('d-none');
+    function statusBadge(L) {
+        if (!L) return '<span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Ingen lista</span>';
+        const isOfficial = L.isOfficial || L.IsOfficial;
+        return isOfficial
+            ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Publicerad</span>'
+            : '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Preliminär</span>';
+    }
 
-        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
-        const isOfficial = finalsListInfo.IsOfficial || finalsListInfo.isOfficial;
-        const total = finalsListInfo.TotalFinalists || finalsListInfo.totalFinalists || 0;
-        const gen = finalsListInfo.GeneratedDate || finalsListInfo.generatedDate;
-        const fmt = finalsListInfo.TeamFormat || finalsListInfo.teamFormat || '';
-        const sl = finalsListInfo.StartList || finalsListInfo.startList;
-        const teams = (sl && (sl.Teams || sl.teams)) || [];
+    function renderHeaderSummary(groups) {
+        const parts = groups.map(g => {
+            const L = listForGroup(g);
+            const label = g || 'hela tävlingen';
+            if (!L) return `<span class="badge bg-secondary-subtle text-secondary-emphasis">${esc(label)}: ingen lista</span>`;
+            const isOfficial = L.isOfficial || L.IsOfficial;
+            const cls = isOfficial ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis';
+            const word = isOfficial ? 'publicerad' : 'preliminär';
+            return `<span class="badge ${cls}">${esc(label)}: ${word}</span>`;
+        });
+        document.getElementById('fnHeaderSummary').innerHTML = parts.join(' ');
+    }
 
-        const fmtLabel = fmt === 'Final' ? 'Samma ordning som kvalet' : 'Rangordnad efter kvalresultat';
-        document.getElementById('finalsStartListFormatLabel').textContent = fmtLabel;
-        document.getElementById('finalsStartListFinalistCount').textContent = total;
-        document.getElementById('finalsStartListTeamCount').textContent = teams.length;
-        document.getElementById('finalsStartListGeneratedDate').textContent = gen ? new Date(gen).toLocaleString('sv-SE') : '';
-        // GeneratedBy isn't always present in the response; leave blank if absent.
-        document.getElementById('finalsStartListGeneratedBy').textContent = '';
+    function renderGroups() {
+        const host = document.getElementById('fnGroups');
+        const groups = groupOrder();
+        renderHeaderSummary(groups);
 
-        const badge = document.getElementById('finalsStartListStatusBadge');
-        if (isOfficial) {
-            badge.className = 'badge bg-success fs-6 px-3 py-2';
-            badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
+        document.getElementById('fnNoGroups').classList.toggle('d-none', groups.length > 0);
+        if (!groups.length) { host.innerHTML = ''; return; }
+
+        host.innerHTML = groups.map(renderGroupCard).join('');
+
+        // ⚠️ Delegerade lyssnare på data-attribut — ALDRIG en JS-literal byggd av
+        // klassnamnet i ett onclick. Klassnamn kan vara admin-omdöpta (classNameOverrides)
+        // och alltså bära vilken text som helst; ett dubbelfnutt avslutar attributet.
+        host.querySelectorAll('[data-fn-action]').forEach(btn => {
+            btn.addEventListener('click', onGroupAction);
+        });
+    }
+
+    function renderGroupCard(group) {
+        const L = listForGroup(group);
+        const classes = classesForGroup(group);
+        const label = group ? `Vapengrupp ${group}` : 'Hela tävlingen (äldre lista)';
+        const cardCls = !L ? 'fn-missing' : ((L.isOfficial || L.IsOfficial) ? 'fn-published' : '');
+
+        const finalists = L ? (L.totalFinalists || L.TotalFinalists || 0) : 0;
+        const teamCount = L ? (L.teamCount || L.TeamCount || 0) : 0;
+        const finalsDate = L ? (L.finalsDate || L.FinalsDate || '') : '';
+        const firstStart = L ? (L.firstStartTime || L.FirstStartTime || '') : '';
+        const fmt = L ? (L.teamFormat || L.TeamFormat || '') : '';
+        const fmtLabel = fmt === 'Final' ? 'samma ordning som kvalet' : 'rangordnad efter kvalresultat';
+        const inList = L ? classesInList(L) : new Set();
+
+        let body;
+        if (!L) {
+            body = renderCreateBlock(group, classes);
         } else {
-            badge.className = 'badge bg-warning fs-6 px-3 py-2';
-            badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
+            body = `
+                <div class="d-flex flex-wrap gap-3 small text-muted mb-3">
+                    <span><i class="bi bi-people me-1"></i>${finalists} finalister</span>
+                    <span><i class="bi bi-grid me-1"></i>${teamCount} skjutlag</span>
+                    ${finalsDate ? `<span><i class="bi bi-calendar-event me-1"></i>${esc(finalsDate)}</span>` : ''}
+                    ${firstStart ? `<span><i class="bi bi-clock me-1"></i>första start ${esc(firstStart)}</span>` : ''}
+                    <span><i class="bi bi-sort-numeric-down me-1"></i>${esc(fmtLabel)}</span>
+                </div>
+                ${renderClassTable(group, classes, inList)}
+                ${renderGroupActions(group, L)}`;
         }
-        document.getElementById('btnPublishFinalsStartList').classList.toggle('d-none', isOfficial);
-        document.getElementById('btnUnpublishFinalsStartList').classList.toggle('d-none', !isOfficial);
 
-        const iframe = document.getElementById('finalsStartListIframe');
-        const ts = Date.now();
-        iframe.src = `/umbraco/Surface/PrecisionStartList/PreviewStartList?competitionId=${competitionId}&startListId=${id}&t=${ts}`;
-        iframe.style.display = 'block';
+        return `
+            <div class="card fn-group-card ${cardCls}">
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+                    <span class="fw-bold"><i class="bi bi-trophy me-2 text-warning"></i>${esc(label)}</span>
+                    ${statusBadge(L)}
+                </div>
+                <div class="card-body">${body}</div>
+            </div>`;
     }
 
-    // ---- card actions ----
-    async function togglePublish(makeOfficial) {
-        if (!finalsListInfo) return;
-        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
+    // Ingen lista än — visa de tre metoderna, scopade till gruppen.
+    function renderCreateBlock(group, classes) {
+        const withResults = classes.filter(c => c.hasResults);
+        if (!group) {
+            return `<p class="text-muted small mb-0">
+                Den här listan täcker hela tävlingen och skapades innan finalerna delades per
+                vapengrupp. Skapa en lista per vapengrupp i korten ovan — den första
+                genereringen tar över den här listan.</p>`;
+        }
+        if (!withResults.length) {
+            return `<p class="text-muted small mb-0">
+                Inga resultat i vapengrupp ${esc(group)} än. Finalisterna räknas ur
+                grundomgångens resultat, så mata in dem på fliken Resultat först.</p>`;
+        }
+        const shooters = withResults.reduce((n, c) => n + (c.totalShooters || 0), 0);
+        return `
+            <p class="small mb-3">
+                <strong>Ingen finalstartlista för vapengrupp ${esc(group)} än.</strong>
+                ${withResults.length} ${withResults.length === 1 ? 'klass' : 'klasser'} med
+                resultat, ${shooters} skyttar. Välj hur finalen ska ställas upp:
+            </p>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <button class="btn btn-outline-success btn-sm w-100 h-100 text-start"
+                            data-fn-action="clone" data-fn-group="${esc(group)}">
+                        <i class="bi bi-arrow-right-circle me-1"></i><strong>Fortsätt i samma ordning</strong>
+                        <span class="d-block small text-muted">Samma skjutlag och platser som i grundomgången.</span>
+                    </button>
+                </div>
+                <div class="col-md-4">
+                    <button class="btn btn-outline-primary btn-sm w-100 h-100 text-start"
+                            data-fn-action="rerank" data-fn-group="${esc(group)}">
+                        <i class="bi bi-sort-numeric-down me-1"></i><strong>Placera om efter resultat</strong>
+                        <span class="d-block small text-muted">Alla med resultat, bäst först. Ingen gallring.</span>
+                    </button>
+                </div>
+                <div class="col-md-4">
+                    <button class="btn btn-outline-warning btn-sm w-100 h-100 text-start"
+                            data-fn-action="wizard" data-fn-group="${esc(group)}">
+                        <i class="bi bi-trophy me-1"></i><strong>Mästerskapsfinal</strong>
+                        <span class="d-block small text-muted">Gallring till de bästa, per mästerskapsklass.</span>
+                    </button>
+                </div>
+            </div>`;
+    }
+
+    // Per-klass-tabellen: DET som gör att "jag vill lägga till A-finalen" går att besvara
+    // från skärmen. En rad per mästerskapsklass i gruppen, med sitt eget tillstånd.
+    function renderClassTable(group, classes, inList) {
+        if (!classes.length) {
+            return `<p class="text-muted small mb-3">Inga klasser med resultat i den här vapengruppen.</p>`;
+        }
+        // Listan saknar kategoriinformation (kopierad kvalordning) — säg det i klartext i
+        // stället för att låtsas veta per klass.
+        if (inList === null) {
+            const withRes = classes.filter(c => c.hasResults);
+            return `
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Listan följer grundomgångens ordning, så <strong>alla
+                    ${withRes.length} ${withRes.length === 1 ? 'klass' : 'klasser'} i vapengruppen
+                    ingår</strong> — ingen gallring är gjord.
+                    Vill du gallra till de bästa per mästerskapsklass: välj
+                    <strong>Mästerskapsfinal</strong> i Åtgärder nedan.
+                </div>
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr><th>Mästerskapsklass</th><th>Skyttar i grundomgången</th></tr></thead>
+                        <tbody>${withRes.map(c => `<tr><td><strong>${esc(c.groupName || c.championshipClass || '')}</strong></td><td>${c.totalShooters || 0}</td></tr>`).join('')}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        const rows = classes.map((c, i) => {
+            const name = c.groupName || c.championshipClass || '';
+            const isIn = inList.has(name);
+            let state, action;
+
+            if (isIn) {
+                state = '<span class="badge bg-success-subtle text-success-emphasis">I finalstartlistan</span>';
+                if (c.stale) {
+                    state += ' <span class="badge bg-danger ms-1">Resultaten har ändrats</span>';
+                    action = `<button class="btn btn-outline-primary btn-sm" data-fn-action="relock"
+                                data-fn-group="${esc(group)}" data-fn-class-index="${i}">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera</button>`;
+                } else {
+                    action = `<button class="btn btn-outline-danger btn-sm" data-fn-action="remove"
+                                data-fn-group="${esc(group)}" data-fn-class-index="${i}">
+                                <i class="bi bi-x-circle me-1"></i>Ta bort ur finalen</button>`;
+                }
+            } else if (!c.hasResults) {
+                state = '<span class="text-muted small">Inga resultat</span>';
+                action = '';
+            } else {
+                state = '<span class="badge bg-secondary-subtle text-secondary-emphasis">Inte i finalstartlistan</span>';
+                action = `<button class="btn btn-primary btn-sm" data-fn-action="add"
+                            data-fn-group="${esc(group)}" data-fn-class-index="${i}">
+                            <i class="bi bi-plus-circle me-1"></i>Lägg till i finalen</button>`;
+            }
+
+            const lockInfo = c.frozen
+                ? `<i class="bi bi-lock-fill text-success" title="Kvalresultatet är låst"></i> <span class="text-muted">${c.frozenShooterCount || 0} skyttar låsta</span>`
+                : '<span class="text-muted">Inte låst</span>';
+
+            return `<tr>
+                <td><strong>${esc(name)}</strong></td>
+                <td>${c.totalShooters || 0}</td>
+                <td class="small">${lockInfo}</td>
+                <td class="small">${state}</td>
+                <td class="text-end">${action}</td>
+            </tr>`;
+        }).join('');
+
+        return `
+            <div class="table-responsive mb-3">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Mästerskapsklass</th>
+                            <th>Skyttar i grundomgången</th>
+                            <th>Kvalresultat</th>
+                            <th>Final</th>
+                            <th class="text-end">Åtgärd</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+    }
+
+    function renderGroupActions(group, L) {
+        const id = L.finalsStartListId || L.FinalsStartListId;
+        const isOfficial = L.isOfficial || L.IsOfficial;
+        return `
+            <div class="d-flex justify-content-end flex-wrap gap-2">
+                ${isOfficial
+                    ? `<button class="btn btn-outline-warning btn-sm" data-fn-action="unpublish" data-fn-group="${esc(group)}">
+                         <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera</button>`
+                    : `<button class="btn btn-success btn-sm" data-fn-action="publish" data-fn-group="${esc(group)}">
+                         <i class="bi bi-check-circle me-1"></i>Publicera</button>`}
+                <button class="btn btn-outline-info btn-sm" data-fn-action="edit" data-fn-group="${esc(group)}">
+                    <i class="bi bi-pencil-square me-1"></i>Redigera
+                </button>
+                <button class="btn btn-outline-primary btn-sm" data-fn-action="open" data-fn-group="${esc(group)}">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Öppna
+                </button>
+                <div class="dropdown">
+                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                            data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false">
+                        <i class="bi bi-sliders me-1"></i>Åtgärder
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><h6 class="dropdown-header">Bygg om listan</h6></li>
+                        <li><button class="dropdown-item" data-fn-action="wizard" data-fn-group="${esc(group)}">
+                            <i class="bi bi-trophy me-2"></i>Mästerskapsfinal (gallring per klass)</button></li>
+                        <li><button class="dropdown-item" data-fn-action="clone" data-fn-group="${esc(group)}">
+                            <i class="bi bi-arrow-right-circle me-2"></i>Fortsätt i samma ordning</button></li>
+                        <li><button class="dropdown-item" data-fn-action="rerank" data-fn-group="${esc(group)}">
+                            <i class="bi bi-sort-numeric-down me-2"></i>Placera om efter resultat</button></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="form-text mt-2">
+                Listans id: ${id}. Publiceringen gäller bara vapengrupp ${esc(group || '—')}; andra
+                gruppers listor påverkas inte.
+            </div>`;
+    }
+
+    // ---- åtgärder ----
+    async function onGroupAction(e) {
+        const btn = e.currentTarget;
+        const action = btn.dataset.fnAction;
+        const group = btn.dataset.fnGroup || '';
+        const idx = btn.dataset.fnClassIndex != null ? parseInt(btn.dataset.fnClassIndex, 10) : -1;
+        const classes = classesForGroup(group);
+        const cls = idx >= 0 && idx < classes.length ? classes[idx] : null;
+        const clsName = cls ? (cls.groupName || cls.championshipClass || '') : '';
+
+        switch (action) {
+            case 'clone':
+            case 'rerank':
+                await generateSimple(group, action);
+                break;
+            case 'wizard':
+                await openWizard(group);
+                break;
+            case 'publish':
+                await togglePublish(group, true);
+                break;
+            case 'unpublish':
+                await togglePublish(group, false);
+                break;
+            case 'edit':
+                openFinalsEditor(group);
+                break;
+            case 'open':
+                openInNewTab(group);
+                break;
+            case 'add':
+                await addClassToFinal(group, clsName);
+                break;
+            case 'relock':
+                await addClassToFinal(group, clsName, true);
+                break;
+            case 'remove':
+                await removeClassFromFinal(group, clsName);
+                break;
+        }
+    }
+
+    // "Lägg till i finalen" = lås klassens kvalresultat, nolla ett eventuellt hoppa-över,
+    // och generera om GRUPPENS lista. ⚠️ Genereringen bygger listan ur de låsta klasserna,
+    // så manuella ändringar i just den gruppens skjutlag skrivs över — det sägs innan.
+    async function addClassToFinal(group, className, isRelock) {
+        if (!className) return;
+        const L = listForGroup(group);
+        const verb = isRelock ? 'Uppdatera' : 'Lägg till';
+        let warn = isRelock
+            ? `Uppdatera ${className} i finalen för vapengrupp ${group}?\n\nKvalresultatet låses om med de aktuella resultaten.`
+            : `Lägg till ${className} i finalen för vapengrupp ${group}?\n\nKlassens kvalresultat låses och finalstartlistan byggs om.`;
+        if (L) warn += '\n\nManuella ändringar i den här gruppens skjutlag skrivs över. Andra vapengrupper påverkas inte.';
+        if (!confirm(warn)) return;
+
+        const fz = await jpost('/umbraco/surface/PrecisionStartList/FreezeClassResults',
+            { CompetitionId: competitionId, ChampionshipClass: className });
+        if (!(fz.success ?? fz.Success)) { alert(msg(fz) || 'Kunde inte låsa kvalresultatet.'); return; }
+
+        // Klassen kan ha varit markerad "hoppa över" av en tidigare generering — annars
+        // låses den nu men dyker aldrig upp i listan, vilket ser ut som att knappen
+        // inte gjorde något.
+        const cfgResp = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsConfig?competitionId=${competitionId}&weaponGroup=${encodeURIComponent(group)}`);
+        const cfg = (cfgResp && cfgResp.config) || {};
+        if (cfg[className] && cfg[className].skip) {
+            cfg[className].skip = false;
+            await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
+                { CompetitionId: competitionId, WeaponGroup: group, Config: cfg });
+        }
+
+        await regenerateGroup(group, `${verb.toLowerCase()} ${className}`);
+    }
+
+    // "Ta bort ur finalen" = markera klassen som hoppa-över och generera om gruppen.
+    // ⚠️ Låsningen tas INTE bort: den är historik om vilka kvalresultat som gällde, och
+    // att tappa den vid en ändring av vem som är med hade gjort en återgång svårare.
+    async function removeClassFromFinal(group, className) {
+        if (!className) return;
+        if (!confirm(`Ta bort ${className} ur finalen för vapengrupp ${group}?\n\nKlassens skyttar tas ur finalstartlistan. Deras kvalresultat och låsning ligger kvar.`)) return;
+
+        const cfgResp = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsConfig?competitionId=${competitionId}&weaponGroup=${encodeURIComponent(group)}`);
+        const cfg = (cfgResp && cfgResp.config) || {};
+        cfg[className] = Object.assign({ skjutlagNumber: 1, orderInSkjutlag: 0 }, cfg[className] || {}, { skip: true });
+        const sv = await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
+            { CompetitionId: competitionId, WeaponGroup: group, Config: cfg });
+        if (!(sv.success ?? sv.Success)) { alert(msg(sv) || 'Kunde inte spara.'); return; }
+
+        await regenerateGroup(group, `ta bort ${className}`);
+    }
+
+    async function regenerateGroup(group, what) {
+        const L = listForGroup(group);
+        const body = {
+            CompetitionId: competitionId,
+            WeaponGroup: group,
+            FinalsDate: L ? (L.finalsDate || L.FinalsDate || '') : '',
+            FirstStartTime: (L && (L.firstStartTime || L.FirstStartTime)) || '10:00',
+            StartInterval: '1:45',
+            MaxShootersPerTeam: 20
+        };
+        const d = await jpost('/umbraco/surface/PrecisionStartList/GenerateFinalsStartList', body);
+        if (!ok(d)) { alert(msg(d) || `Kunde inte ${what}.`); await refreshAll(); return; }
+        await refreshAll();
+        notice(msg(d));
+    }
+
+    async function generateSimple(group, mode) {
+        const label = mode === 'clone' ? 'samma ordning som kvalet' : 'omplacering efter kvalresultat';
+        const L = listForGroup(group);
+        if (L && !confirm(`Vapengrupp ${group} har redan en finalstartlista. Bygg om den med ${label}?\n\nManuella ändringar skrivs över. Andra vapengrupper påverkas inte.`)) return;
+        const d = await jpost('/umbraco/surface/PrecisionStartList/GenerateSimpleFinalsStartList', {
+            CompetitionId: competitionId,
+            WeaponGroup: group,
+            Mode: mode,
+            FinalsDate: L ? (L.finalsDate || L.FinalsDate || '') : '',
+            FirstStartTime: '10:00',
+            StartInterval: '1:45',
+            MaxShootersPerTeam: 20
+        });
+        if (!ok(d)) { alert(msg(d) || 'Kunde inte skapa finalen.'); await refreshAll(); return; }
+        await refreshAll();
+        notice(msg(d));
+    }
+
+    async function togglePublish(group, makeOfficial) {
+        const L = listForGroup(group);
+        if (!L) return;
+        const id = L.finalsStartListId || L.FinalsStartListId;
         const verb = makeOfficial ? 'Publicera' : 'Avpublicera';
-        if (!confirm(`${verb} finalsstartlistan?`)) return;
+        if (!confirm(`${verb} finalstartlistan för vapengrupp ${group || '—'}?`)) return;
         const d = await jpost('/umbraco/surface/PrecisionStartList/PublishFinalsStartList',
             { FinalsStartListId: id, IsPublished: makeOfficial });
-        if (!d.success) { alert(d.message || 'Kunde inte ändra status.'); return; }
-        await loadFinalsStartList();
+        if (!(d.success ?? d.Success)) { alert(msg(d) || 'Kunde inte ändra status.'); return; }
+        await refreshAll();
     }
-    function openInNewTab() {
-        if (!finalsListInfo) return;
-        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
+
+    function openInNewTab(group) {
+        const L = listForGroup(group);
+        if (!L) return;
+        const id = L.finalsStartListId || L.FinalsStartListId;
         window.open(`/umbraco/Surface/PrecisionStartList/PreviewStartList?competitionId=${competitionId}&startListId=${id}`, '_blank');
     }
-    function openFinalsEditor() {
-        if (!finalsListInfo) return;
-        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
+
+    function openFinalsEditor(group) {
+        const L = listForGroup(group);
+        if (!L) return;
+        const id = L.finalsStartListId || L.FinalsStartListId;
         if (typeof window.openStartListEditor !== 'function') {
             alert('Startlistredigeraren är inte tillgänglig. Den initialiseras när Startlistor-fliken läses in.');
             return;
@@ -461,48 +783,30 @@
         window.openStartListEditor(id);
     }
 
-    // ---- one-click modes (no freeze / no cut) ----
-    async function generateSimple(mode) {
-        const label = mode === 'clone' ? 'samma ordning som kvalet' : 'omplacering efter kvalresultat';
-        if (finalsListInfo && !confirm('En finalsstartlista finns redan. Skapa om med ' + label + '?\n\nManuella ändringar i listan skrivs över.')) return;
-        showLoading();
-        const d = await jpost('/umbraco/surface/PrecisionStartList/GenerateSimpleFinalsStartList', {
-            CompetitionId: competitionId,
-            Mode: mode,
-            FirstStartTime: '10:00',
-            StartInterval: '1:45',
-            MaxShootersPerTeam: 20
-        });
-        const ok = d.Success ?? d.success;
-        if (!ok) { alert((d.Message ?? d.message) || 'Kunde inte skapa finalen.'); await refreshAll(); return; }
-        await refreshAll();
-    }
-
-    // Refresh the finals card after the shared editor closes — only if it was opened for finals.
     function attachEditorCloseHook() {
         const editorEl = document.getElementById('startListEditorModal');
         if (!editorEl || editorEl.dataset.finalsHookAttached === '1') return;
         editorEl.dataset.finalsHookAttached = '1';
         editorEl.addEventListener('hidden.bs.modal', function () {
             if (editorOpenForFinalsId) {
-                const closedForFinals = editorOpenForFinalsId;
                 editorOpenForFinalsId = null;
-                // Slight delay so the editor's own state writes settle first.
                 setTimeout(() => loadFinalsStartList(), 50);
             }
         });
     }
 
-    // ---- wizard ----
-    function openWizard() {
+    // ---- guiden, scopad till en vapengrupp ----
+    async function openWizard(group) {
+        wizardGroup = group;
         currentStep = 1;
+        document.getElementById('wizardGroupLabel').textContent = group ? `vapengrupp ${group}` : 'hela tävlingen';
         showStep(1);
-        Promise.all([loadFreezeState(), loadFinalsConfig()]).then(() => {
-            const m = bootstrap.Modal.getOrCreateInstance(document.getElementById('generateFinalsStartListModal'));
-            m.show();
-            updateGenerateWarning();
-        });
+        await Promise.all([loadFreezeState(), loadFinalsConfig(group)]);
+        const m = bootstrap.Modal.getOrCreateInstance(document.getElementById('generateFinalsStartListModal'));
+        m.show();
+        updateGenerateWarning();
     }
+
     function showStep(step) {
         currentStep = step;
         document.querySelectorAll('#finalsWizardRoot .step-pane').forEach(p => {
@@ -519,8 +823,7 @@
         if (step === 3) {
             nextBtn.classList.add('d-none');
             genBtn.classList.remove('d-none');
-            // Explicit gate: can't generate until at least one group is frozen.
-            const frozenCount = perClassState.filter(s => s.frozen).length;
+            const frozenCount = classesForGroup(wizardGroup).filter(s => s.frozen).length;
             genBtn.disabled = frozenCount === 0;
             document.getElementById('wizardGateMsg').classList.toggle('d-none', frozenCount > 0);
         } else {
@@ -530,30 +833,29 @@
         }
     }
 
-    // ---- step 1: per-group freeze ----
     async function loadFreezeState() {
         const d = await jget(`/umbraco/surface/PrecisionStartList/GetQualifyingSnapshot?competitionId=${competitionId}`);
-        if (!d.success) return;
+        if (!(d.success ?? d.Success)) return;
         hasResultList = !!d.hasResultList;
         perClassState = d.perClass || [];
         renderFreezeTable();
     }
+
     function renderFreezeTable() {
         const tbody = document.getElementById('freezeTableBody');
         const noResultListMsg = document.getElementById('noResultListMsg');
-        noResultListMsg.style.display = (!hasResultList && perClassState.length === 0) ? '' : 'none';
+        const classes = classesForGroup(wizardGroup);
+        noResultListMsg.classList.toggle('d-none', !(!hasResultList && classes.length === 0));
 
-        if (!perClassState.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Inga grupper hittades — generera resultatlistan först.</td></tr>';
+        if (!classes.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Inga klasser i den här vapengruppen — generera resultatlistan först.</td></tr>';
             return;
         }
-        tbody.innerHTML = '';
-        perClassState.forEach(s => {
+        tbody.innerHTML = classes.map((s, i) => {
             const groupName = s.groupName || s.championshipClass;
-            const tr = document.createElement('tr');
             let stateCell = '<span class="badge bg-secondary"><i class="bi bi-unlock me-1"></i>Inte låst</span>';
             if (s.frozen) {
-                const lockedText = `${new Date(s.frozenAt).toLocaleString('sv-SE')} av ${s.frozenBy}`;
+                const lockedText = `${new Date(s.frozenAt).toLocaleString('sv-SE')} av ${esc(s.frozenBy)}`;
                 stateCell = `<span class="badge bg-success"><i class="bi bi-lock-fill me-1"></i>Låst</span> <small class="text-muted ms-2">${lockedText} • ${s.frozenShooterCount} skyttar</small>`;
                 if (s.stale) stateCell += ' <span class="badge bg-danger ms-2">Inaktuell — resultaten har ändrats</span>';
             }
@@ -561,59 +863,65 @@
             if (!s.hasResults && !s.frozen) {
                 actionCell = '<span class="text-muted small">Inga resultat</span>';
             } else if (s.frozen) {
-                actionCell = `<button class="btn btn-outline-warning btn-sm" data-action="unlock" data-cls="${groupName}"><i class="bi bi-unlock-fill me-1"></i>Lås upp</button>
-                              <button class="btn btn-outline-primary btn-sm ms-1" data-action="relock" data-cls="${groupName}"><i class="bi bi-arrow-clockwise me-1"></i>Uppdatera</button>`;
+                actionCell = `<button class="btn btn-outline-warning btn-sm" data-action="unlock" data-cls-index="${i}"><i class="bi bi-unlock-fill me-1"></i>Lås upp</button>
+                              <button class="btn btn-outline-primary btn-sm ms-1" data-action="relock" data-cls-index="${i}"><i class="bi bi-arrow-clockwise me-1"></i>Uppdatera</button>`;
             } else {
-                actionCell = `<button class="btn btn-primary btn-sm" data-action="lock" data-cls="${groupName}"><i class="bi bi-lock-fill me-1"></i>Lås</button>`;
+                actionCell = `<button class="btn btn-primary btn-sm" data-action="lock" data-cls-index="${i}"><i class="bi bi-lock-fill me-1"></i>Lås</button>`;
             }
-            tr.innerHTML = `<td><strong>${groupName}</strong></td>
-                            <td>${s.totalShooters}</td>
-                            <td>${stateCell}</td>
-                            <td class="text-end">${actionCell}</td>`;
-            tbody.appendChild(tr);
-        });
+            return `<tr>
+                        <td><strong>${esc(groupName)}</strong></td>
+                        <td>${s.totalShooters}</td>
+                        <td>${stateCell}</td>
+                        <td class="text-end">${actionCell}</td>
+                    </tr>`;
+        }).join('');
         tbody.querySelectorAll('button[data-action]').forEach(b => b.addEventListener('click', onFreezeAction));
     }
+
     async function onFreezeAction(e) {
         const btn = e.currentTarget;
         const action = btn.dataset.action;
-        const cls = btn.dataset.cls;
+        const classes = classesForGroup(wizardGroup);
+        const i = parseInt(btn.dataset.clsIndex, 10);
+        const s = classes[i];
+        if (!s) return;
+        const cls = s.groupName || s.championshipClass;
+
         if (action === 'unlock') {
-            if (!confirm(`Lås upp gruppen ${cls}?`)) return;
+            if (!confirm(`Lås upp klassen ${cls}?`)) return;
             const d = await jpost('/umbraco/surface/PrecisionStartList/UnfreezeClassResults',
                 { CompetitionId: competitionId, ChampionshipClass: cls });
-            if (!d.success && d.message) alert(d.message);
+            if (!(d.success ?? d.Success) && msg(d)) alert(msg(d));
         } else {
-            // 'lock' and 'relock' both call the freeze endpoint (re-locks captures any new results).
             const d = await jpost('/umbraco/surface/PrecisionStartList/FreezeClassResults',
                 { CompetitionId: competitionId, ChampionshipClass: cls });
-            if (!d.success && d.message) alert(d.message);
+            if (!(d.success ?? d.Success) && msg(d)) alert(msg(d));
         }
         await loadFreezeState();
     }
 
-    // ---- step 2: per-group config ----
-    async function loadFinalsConfig() {
-        const d = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsConfig?competitionId=${competitionId}`);
-        if (d.success) perClassConfig = d.config || {};
+    async function loadFinalsConfig(group) {
+        const d = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsConfig?competitionId=${competitionId}&weaponGroup=${encodeURIComponent(group || '')}`);
+        if (d.success ?? d.Success) perClassConfig = d.config || {};
     }
+
     function renderConfigTable() {
         const tbody = document.getElementById('configTableBody');
-        const frozen = perClassState.filter(s => s.frozen);
+        const frozen = classesForGroup(wizardGroup).filter(s => s.frozen);
         if (!frozen.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">Lås minst en grupp i Steg 1 först.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">Lås minst en klass i steg 1 först.</td></tr>';
             return;
         }
         tbody.innerHTML = '';
         let autoSkjutlag = 1;
-        frozen.forEach(s => {
+        frozen.forEach((s, i) => {
             const groupName = s.groupName || s.championshipClass;
             const cfg = perClassConfig[groupName] || {};
             const defaultSkjutlag = cfg.skjutlagNumber || autoSkjutlag++;
             const tr = document.createElement('tr');
-            tr.dataset.cls = groupName;
+            tr.dataset.clsIndex = String(i);
             tr.innerHTML = `
-                <td><strong>${groupName}</strong><br><small class="text-muted">${s.frozenShooterCount} skyttar</small></td>
+                <td><strong>${esc(groupName)}</strong><br><small class="text-muted">${s.frozenShooterCount} skyttar</small></td>
                 <td><input type="number" min="1" max="20" class="form-control form-control-sm cfg-skjutlag" value="${defaultSkjutlag}" style="max-width:80px"></td>
                 <td><input type="number" min="0" max="20" class="form-control form-control-sm cfg-order" value="${cfg.orderInSkjutlag || 0}" style="max-width:80px"></td>
                 <td><input type="number" min="1" class="form-control form-control-sm cfg-count" placeholder="Auto" value="${cfg.finalistCountOverride != null ? cfg.finalistCountOverride : ''}" style="max-width:90px"></td>
@@ -626,9 +934,17 @@
         readConfigFromTable();
         previewBuckets();
     }
+
+    function frozenClassNameAt(i) {
+        const frozen = classesForGroup(wizardGroup).filter(s => s.frozen);
+        const s = frozen[i];
+        return s ? (s.groupName || s.championshipClass) : '';
+    }
+
     function readConfigFromTable() {
-        document.querySelectorAll('#configTableBody tr[data-cls]').forEach(tr => {
-            const group = tr.dataset.cls;
+        document.querySelectorAll('#configTableBody tr[data-cls-index]').forEach(tr => {
+            const group = frozenClassNameAt(parseInt(tr.dataset.clsIndex, 10));
+            if (!group) return;
             const countStr = tr.querySelector('.cfg-count').value.trim();
             perClassConfig[group] = {
                 skip: tr.querySelector('.cfg-skip').checked,
@@ -640,63 +956,55 @@
         });
     }
     function onConfigChange() { readConfigFromTable(); previewBuckets(); }
+
     async function previewBuckets() {
         const d = await jpost('/umbraco/surface/PrecisionStartList/PreviewFinalsConfig',
-            { CompetitionId: competitionId, Config: perClassConfig });
-        if (!d.success) return;
-        document.querySelectorAll('#configTableBody tr[data-cls]').forEach(tr => {
-            const group = tr.dataset.cls;
+            { CompetitionId: competitionId, WeaponGroup: wizardGroup, Config: perClassConfig });
+        if (!(d.success ?? d.Success)) return;
+        document.querySelectorAll('#configTableBody tr[data-cls-index]').forEach(tr => {
+            const group = frozenClassNameAt(parseInt(tr.dataset.clsIndex, 10));
             const cell = tr.querySelector('.preview-cell');
-            const info = d.perClass[group];
+            const info = group ? d.perClass[group] : null;
             if (!info) { cell.textContent = '-'; return; }
             if (info.skjutlag == null) { cell.innerHTML = '<span class="badge bg-secondary">Hoppas över</span>'; return; }
             cell.innerHTML = `<span class="badge bg-info">Skjutlag ${info.skjutlag}</span> <span class="text-muted small">${info.finalistCount} av ${info.totalInClass}</span>`;
         });
     }
 
-    // ---- step 3: generate ----
     function updateGenerateWarning() {
-        document.getElementById('generateOverwriteWarning').classList.toggle('d-none', !finalsListInfo);
+        document.getElementById('generateOverwriteWarning').classList.toggle('d-none', !listForGroup(wizardGroup));
     }
+
     async function doGenerate() {
-        const lockedCount = perClassState.filter(s => s.frozen).length;
+        const lockedCount = classesForGroup(wizardGroup).filter(s => s.frozen).length;
         if (lockedCount === 0) {
-            alert('Inga grupper är låsta. Gå tillbaka till Steg 1 och lås minst en grupp.');
+            alert('Inga klasser är låsta. Gå tillbaka till steg 1 och lås minst en klass.');
             return;
         }
-        if (finalsListInfo && !confirm('En finalsstartlista finns redan. Generera om?\n\nManuella ändringar skrivs över.')) return;
+        if (listForGroup(wizardGroup) &&
+            !confirm(`Vapengrupp ${wizardGroup} har redan en finalstartlista. Bygg om den?\n\nManuella ändringar skrivs över. Andra vapengrupper påverkas inte.`)) return;
 
-        // Save config (handles the case where Step 2 wasn't touched).
         const saveResp = await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
-            { CompetitionId: competitionId, Config: perClassConfig });
-        if (!saveResp.success) { alert('Kunde inte spara konfigurationen: ' + (saveResp.message || '')); return; }
+            { CompetitionId: competitionId, WeaponGroup: wizardGroup, Config: perClassConfig });
+        if (!(saveResp.success ?? saveResp.Success)) { alert('Kunde inte spara konfigurationen: ' + msg(saveResp)); return; }
 
-        const body = {
+        const genResp = await jpost('/umbraco/surface/PrecisionStartList/GenerateFinalsStartList', {
             CompetitionId: competitionId,
+            WeaponGroup: wizardGroup,
+            FinalsDate: document.getElementById('finalsDate').value,
             FirstStartTime: document.getElementById('finalsFirstStartTime').value,
             StartInterval: document.getElementById('finalsStartInterval').value,
             MaxShootersPerTeam: parseInt(document.getElementById('finalsMaxShootersPerTeam').value, 10) || 20
-        };
-        const genResp = await jpost('/umbraco/surface/PrecisionStartList/GenerateFinalsStartList', body);
-        const ok = genResp.Success ?? genResp.success;
-        const message = genResp.Message ?? genResp.message ?? (ok ? 'OK' : 'Okänt fel');
-        if (!ok) { alert(message); return; }
+        });
+        if (!ok(genResp)) { alert(msg(genResp) || 'Okänt fel'); return; }
 
-        // Close modal, refresh card.
         const modalInst = bootstrap.Modal.getInstance(document.getElementById('generateFinalsStartListModal'));
         if (modalInst) modalInst.hide();
-        await loadFinalsStartList();
+        await refreshAll();
+        notice(msg(genResp));
     }
 
     // ---- wiring ----
-    document.getElementById('btnOpenFinalsWizard').addEventListener('click', openWizard);
-    document.getElementById('btnFinalsModeClone').addEventListener('click', () => generateSimple('clone'));
-    document.getElementById('btnFinalsModeRerank').addEventListener('click', () => generateSimple('rerank'));
-    document.getElementById('btnFinalsRedo').addEventListener('click', showChooser);
-    document.getElementById('btnPublishFinalsStartList').addEventListener('click', () => togglePublish(true));
-    document.getElementById('btnUnpublishFinalsStartList').addEventListener('click', () => togglePublish(false));
-    document.getElementById('btnEditFinalsStartList').addEventListener('click', openFinalsEditor);
-    document.getElementById('btnOpenFinalsStartListNewTab').addEventListener('click', openInNewTab);
     document.getElementById('wizardBackBtn').addEventListener('click', () => { if (currentStep > 1) showStep(currentStep - 1); });
     document.getElementById('wizardNextBtn').addEventListener('click', async () => {
         if (currentStep === 1) {
@@ -704,20 +1012,32 @@
             renderConfigTable();
         } else if (currentStep === 2) {
             const saveResp = await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
-                { CompetitionId: competitionId, Config: perClassConfig });
-            if (!saveResp.success) { alert(saveResp.message || 'Kunde inte spara.'); return; }
+                { CompetitionId: competitionId, WeaponGroup: wizardGroup, Config: perClassConfig });
+            if (!(saveResp.success ?? saveResp.Success)) { alert(msg(saveResp) || 'Kunde inte spara.'); return; }
             showStep(3);
             updateGenerateWarning();
         }
     });
     document.getElementById('wizardGenerateBtn').addEventListener('click', doGenerate);
 
-    // Hook editor close once the standard partial has loaded the editor modal.
     attachEditorCloseHook();
-    // Retry once after a short delay in case the standard partial JS runs after us.
     setTimeout(attachEditorCloseHook, 500);
 
-    // ---- init ----
+    // Exporteras explicit — en funktionsdeklaration i ett block läcker inte till global
+    // scope (Annex B:s hoisting gäller inte i block, och inte alls för async), och
+    // kvalstartlistans "Till finalen"-knapp behöver kunna fälla ut sektionen.
+    window.hpskRefreshFinalsSection = refreshAll;
+
+    // Fäller UT finalsektionen och rullar dit. Att bara rulla hade landat på en ihopfälld
+    // rubrik, vilket läser som att sektionen är tom.
+    window.hpskGoToFinalsSection = function () {
+        const body = document.getElementById('fnSectionBody');
+        if (body && typeof bootstrap !== 'undefined') {
+            bootstrap.Collapse.getOrCreateInstance(body, { toggle: false }).show();
+        }
+        root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
     refreshAll();
 })();
 </script>
