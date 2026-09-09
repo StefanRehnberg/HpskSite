@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
 
@@ -120,10 +120,25 @@ namespace HpskSite.Services
         // ── Medlem sedan ─────────────────────────────────────────────
 
         /// <summary>
-        /// <c>ClubMembership.MemberSince</c> för (medlem, denna klubb) är auktoritativ — "medlem
-        /// sedan" är ett faktum om ett KLUBBMEDLEMSKAP, inte om det delade inloggningskontot, och
-        /// intyget utfärdas alltid av en klubb. Den äldre medlemsegenskapen <c>memberSince</c>
-        /// skrivs fortfarande på flera ställen och används därför som reserv.
+        /// <c>ClubMembership.MemberSince</c> för (medlem, DENNA klubb) är den enda källan.
+        ///
+        /// <para><b>⚠️⚠️ INGEN RESERV PÅ MEDLEMSEGENSKAPEN LÄNGRE (2026-09-09).</b> "Medlem sedan"
+        /// är ett faktum om ett KLUBBMEDLEMSKAP — en medlem kan tillhöra flera klubbar och ha olika
+        /// tid i var och en — så ett fält på det delade inloggningskontot kan aldrig vara sant för
+        /// mer än en klubb. Prod bar 6 fall där de två sa emot varandra, t.ex. medlemskapet
+        /// 2026-01-13 (Varberg PK) mot egenskapen 1997-05-01: båda sanna, om olika saker, och bara
+        /// den klubbspecifika hör på en handling till Polismyndigheten.</para>
+        ///
+        /// <para><b>⚠️ ORDNINGEN VAR BÄRANDE.</b> Reserven kunde inte släppas förrän raderna fanns:
+        /// före backfillen täckte <c>ClubMembership</c> bara 317 av 883 medlemmar, så det här hade
+        /// lämnat blankettens rad TOM för de flesta. Efter
+        /// <c>backfill-clubmembership-from-club-properties.sql</c> (körd i prod 2026-09-09) har
+        /// varje medlem en rad per klubb, och <b>0 fall behövde reserven</b>. Släpp aldrig en reserv
+        /// utan att först mäta att ingen använder den.</para>
+        ///
+        /// <para><b>⚠️ Tomt är ett ÄRLIGT svar.</b> 597 rader saknar datum, och det är klubbens att
+        /// fylla i — utfärdandeskärmen flaggar det redan som ett saknat KLUBBfält med gul triangel.
+        /// Att gissa fram ett datum ur ett registreringsdatum vore en påhittad uppgift.</para>
         /// </summary>
         private void FillMembershipStart(ForeningsintygDocument doc, int memberId, int clubId)
         {
@@ -131,20 +146,12 @@ namespace HpskSite.Services
             {
                 var membership = clubId > 0 ? _clubMemberships.Get(memberId, clubId) : null;
                 if (membership?.MemberSince != null)
-                {
                     doc.MedlemSedan = membership.MemberSince.Value.ToString("yyyy-MM-dd");
-                    return;
-                }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Föreningsintyg: kunde inte läsa ClubMembership för {MemberId}/{ClubId}", memberId, clubId);
             }
-
-            var member = _memberService.GetById(memberId);
-            var fallback = member?.GetValue<DateTime?>("memberSince");
-            if (fallback != null && fallback.Value != default)
-                doc.MedlemSedan = fallback.Value.ToString("yyyy-MM-dd");
         }
 
         // ── Underskrift ──────────────────────────────────────────────

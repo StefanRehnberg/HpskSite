@@ -32,6 +32,8 @@ namespace HpskSite.Controllers
         private readonly IWebHostEnvironment _webHostEnvironment;
         private readonly IMemberManager _memberManager;
         private readonly MemberDataPurgeService _purgeService;
+        private readonly MemberClubService _memberClubs;
+        private readonly ClubMembershipService _clubMemberships;
         private readonly string _adminEmail;
 
         private const string ClubMemberTypeAlias = "hpskClub";
@@ -50,6 +52,8 @@ namespace HpskSite.Controllers
             IWebHostEnvironment webHostEnvironment,
             IMemberManager memberManager,
             MemberDataPurgeService purgeService,
+            MemberClubService memberClubs,
+            ClubMembershipService clubMemberships,
             IConfiguration configuration)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -61,7 +65,43 @@ namespace HpskSite.Controllers
             _webHostEnvironment = webHostEnvironment;
             _memberManager = memberManager;
             _purgeService = purgeService;
+            _memberClubs = memberClubs;
+            _clubMemberships = clubMemberships;
             _adminEmail = configuration["Email:AdminEmail"] ?? "";
+        }
+
+        /// <summary>
+        /// Ser till att medlemmen har en <c>ClubMembership</c>-rad för var och en av sina klubbar.
+        ///
+        /// <para><b>⚠️⚠️ SKAPAR RELATIONEN, ALDRIG ETT DATUM.</b> <c>MemberSince</c> lämnas NULL —
+        /// se <see cref="ClubMembershipService.EnsureMembership"/>. Poängen är att klubben ska HA
+        /// någonstans att skriva "medlem sedan"; före backfillen 2026-09-09 saknade 595 av 910
+        /// (medlem, klubb)-par en rad, och då fanns fältet inte att fylla i.</para>
+        ///
+        /// <para><b>⚠️ Klubbarna resolvas via <see cref="MemberClubService.GetAllClubIds"/></b> —
+        /// husets enda svar på "vilka klubbar tillhör medlemmen", och det enda som ser BÅDE
+        /// primärklubben och CSV:n. <c>GetValue&lt;int&gt;("primaryClubId")</c> ger dessutom tyst 0.</para>
+        /// </summary>
+        private void EnsureClubMemberships(int memberId)
+        {
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null) return;
+
+                foreach (var clubId in _memberClubs.GetAllClubIds(member))
+                {
+                    if (_clubMemberships.EnsureMembership(memberId, clubId))
+                        Console.WriteLine($"[EnsureClubMemberships] Skapade medlemskap {memberId}/{clubId} (utan datum)");
+                }
+            }
+            catch (Exception ex)
+            {
+                // ⚠️ Sväljs. Ett misslyckat radskapande får inte fälla ett godkännande eller en
+                // sparning — raden kan alltid skapas i efterhand, men ett nekat godkännande
+                // stoppar en medlem från att komma in.
+                Console.WriteLine($"[EnsureClubMemberships] Misslyckades for {memberId}: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -931,6 +971,12 @@ namespace HpskSite.Controllers
                     _memberService.Save(member);
                     Console.WriteLine("Member saved successfully");
 
+                    // ⚠️ Klubbtillhörigheten kan just ha ändrats (primaryClubId / memberClubIds).
+                    // Relationen ska då finnas i ClubMembership så klubben HAR någonstans att
+                    // skriva "medlem sedan". Datumet sätts aldrig här — se `EnsureClubMemberships`.
+                    // EFTER Save: raden härleds ur egenskaperna, som måste vara skrivna först.
+                    EnsureClubMemberships(member.Id);
+
                     // Send email notification if approval status changed from false to true
                     if (!wasApproved && nowApproved)
                     {
@@ -1036,6 +1082,9 @@ namespace HpskSite.Controllers
 
                     _memberService.Save(newMember);
                     Console.WriteLine("New member saved successfully");
+
+                    // Samma sak för en nyskapad medlem: relationen, aldrig datumet.
+                    EnsureClubMemberships(newMember.Id);
 
                     // Always assign to Users group first (default for all members)
                     _memberService.AssignRole(newMember.Id, "Users");
@@ -1477,6 +1526,11 @@ namespace HpskSite.Controllers
                 _memberService.AssignRole(member.Id, "Users");
                 _memberService.DissociateRole(member.Id, "PendingApproval");
                 Console.WriteLine($"[ApproveMember] Member groups updated: {memberId}");
+
+                // ⚠️ RELATIONEN, inte datumet. Godkännandet är när klubben tagit emot medlemmen,
+                // alltså när medlemskapet finns — men NÄR hen blev medlem i klubben vet vi inte,
+                // och får inte gissa. Se `EnsureClubMemberships`.
+                EnsureClubMemberships(member.Id);
 
                 // Generate auto-login token (single-use, 7-day validity)
                 var autoLoginToken = Guid.NewGuid().ToString("N"); // 32-character hex string

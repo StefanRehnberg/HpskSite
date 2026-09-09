@@ -6204,6 +6204,62 @@ redan: utfärdandeskärmen listar *"Har varit medlem kontinuerligt sedan datum"*
 **klubbfält** med gul triangel, och medlemmens egen ruta säger "Din klubb behöver fylla i". Ingen
 siffra hittas på, och ingen klubb tvingas gissa.
 
+#### Steg 2–5: klubbmedlemskapet är enda källan (2026-09-09)
+
+Backfillen **körd i prod 2026-09-09** av Stefan. Efterläge, mätt: **912 medlemskap, 884 distinkta
+medlemmar, 0 medlemmar utan rad, och 0 fall där reserven fortfarande behövdes** — vilket var
+förutsättningen för att få släppa den. 597 rader saknar datum; det är klubbens att fylla i.
+
+**Steg 3 — raden skapas när RELATIONEN uppstår, aldrig med ett datum.**
+`ClubMembershipService.EnsureMembership(memberId, clubId)` gör en villkorad INSERT (`WHERE NOT
+EXISTS` i SQL:en, inte läsning-följd-av-skrivning, så ett godkännande och en sparning samtidigt inte
+ger två rader) och **sätter aldrig `MemberSince`**. Anropas ur `MemberAdminController` via
+`EnsureClubMemberships`, som resolvar klubbarna med `MemberClubService.GetAllClubIds`:
+- vid **godkännande** (`ApproveMember`) — då klubben tagit emot medlemmen,
+- efter **sparning** av en medlem (både befintlig och ny), då klubbtillhörigheten kan ha ändrats.
+  ⚠️ EFTER `Save`: raden härleds ur egenskaperna, som måste vara skrivna först.
+
+⚠️ **Sväljer sina egna fel.** Ett misslyckat radskapande får inte fälla ett godkännande — raden kan
+skapas i efterhand, men ett nekat godkännande stoppar en medlem från att komma in.
+
+**Steg 4 — reserven är borta.** `FillMembershipStart` läser bara
+`ClubMembership.MemberSince` för (medlem, DENNA klubb). **Tomt är ett ärligt svar**;
+utfärdandeskärmen flaggar redan saknat datum som ett KLUBBfält med gul triangel.
+⚠️ **Släpp aldrig en reserv utan att först mäta att ingen använder den** — före backfillen hade det
+här tömt blankettens rad för 64 % av medlemmarna.
+
+**Min sida visar EN RAD PER MEDLEMSKAP**, klubbnamn + datum, läsbart men inte redigerbart.
+⚠️⚠️ **Källan är `ClubMembership.GetForMember`, INTE klubbegenskaperna.** De två kan säga olika
+saker: dev-medlem 1078 har tre medlemskap (Haaplinge 1997, Kungsbacka 2001, Varberg utan datum) men
+bara primärklubben i `primaryClubId`/`memberClubIds` — egenskapsvägen hade tappat två av medlemmens
+tre datum. Tabellen är den vi gjort auktoritativ och kan inte vara smalare än verkligheten.
+
+**Steg 5 — den sista felläsaren.** Klubbens medlemsregister (`ClubMembersDirectory`, detaljmodalen)
+visade *"Medlem sedan"* ur **medlemsegenskapen**, alltså ett värde delat över alla klubbar — på
+klubbens egen sida kunde den visa en annan klubbs datum. `ClubController.GetClubMembers` läser nu
+`ClubMembership` för den klubb man står på, i **EN** fråga (`GetForClub` + dictionary), inte en
+uppslagning per medlem i loopen.
+- **Importen var redan rätt:** `memberSince` ligger i `MemberImportController.ClubScopedAliases` och
+  skrivs till medlemskapet, aldrig till medlemmen. Inget att ändra.
+- `MemberMergeService` behåller `memberSince` i sin fältlista **med flit**: egenskapen finns kvar på
+  42 medlemmar som en historisk anteckning, och en sammanslagning ska kunna bära den. Den läses inte
+  längre av något som producerar ett intyg.
+
+**Verifierat i dev, med återställning.** Fixtur: medlem 8315 med tre medlemskap (2604 `1998-04-01`,
+2610 `2015-09-15`, 2614 NULL) **och medlemsegenskapen satt till det särskiljande `1977-07-07`**.
+- Intygsutkastet gav `1998-04-01` / `2015-09-15` / **tomt** per klubb — **aldrig 1977-07-07**, alltså
+  är reserven verkligen borta. Att sätta ett särskiljande värde i egenskapen är det enda sättet att
+  få det påståendet att kunna FALLA.
+- Min sida visade tre rader med rätt klubbnamn och datum, den tomma med texten om att klubben fyller i.
+- Klubbens medlemsregister för 2604 gav `1998-04-01`, inte egenskapen.
+- `EnsureMembership`: raden för 2604 raderades, en riktig sparning genom medlemsdialogen skapade den
+  igen — **`MemberSince NULL`** — och rörde inte 2610:s datum.
+- ⚠️ Medlemmen syns inte i 2610/2614:s medlemsREGISTER, eftersom den listan drivs av
+  klubbegenskaperna och inte av medlemskapen. Befintlig inkonsekvens, inte införd här, men värd en
+  egen titt: registret och medlemskapstabellen svarar olika på "vilka är medlemmar i klubben".
+
+Fixturen raderad (0 medlemskap och 0 egenskapsrader för 8315).
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

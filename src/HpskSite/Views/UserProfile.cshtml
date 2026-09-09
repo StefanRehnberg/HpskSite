@@ -6,6 +6,7 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.ClubMembershipService ClubMemberships
+@inject HpskSite.Services.ClubService Clubs
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -24,16 +25,29 @@
     // vyns runtime-kompilering med ett meddelandelöst UmbracoCompilationException. (Kommentaren
     // skriver medvetet inte ut kodblockets tecken — en klammer i en kommentar är sin egen risk i
     // Razors klammerbalansering.)
-    var memberSinceDisplay = "";
+    // EN RAD PER MEDLEMSKAP. Medlemmen kan tillhöra flera klubbar och ha olika tid i var och en —
+    // det var hela skälet till omarbetningen — så en enda ruta för primärklubben kunde bara visa
+    // ett av svaren.
+    //
+    // ⚠️ KÄLLAN ÄR ClubMembership, INTE klubbegenskaperna. `MemberClubService` läser
+    // primaryClubId + memberClubIds, och de två kan säga olika saker: dev-medlem 1078 har tre
+    // medlemskap (Haaplinge 1997, Kungsbacka 2001, Varberg utan datum) men bara primärklubben i
+    // egenskaperna. Egenskapsvägen hade då tappat två av medlemmens tre datum. Tabellen är den vi
+    // gjort auktoritativ, och den kan inte vara smalare än verkligheten.
+    //
+    // Ingen reserv på medlemsegenskapen: se ForeningsintygDocumentService.FillMembershipStart.
+    var mySinceRows = new List<(string Club, string Since)>();
     if (memberData != null)
     {
-        int.TryParse(memberData.GetValue<string>("primaryClubId") ?? "", out int mySincePrimaryClubId);
-        DateTime? since = mySincePrimaryClubId > 0
-            ? ClubMemberships.Get(memberData.Id, mySincePrimaryClubId)?.MemberSince
-            : null;
-        since ??= memberData.GetValue<DateTime?>("memberSince");
-        if (since != null && since.Value != default)
-            memberSinceDisplay = since.Value.ToString("yyyy-MM-dd");
+        foreach (var m in ClubMemberships.GetForMember(memberData.Id))
+        {
+            var name = Clubs.GetClubNameById(m.ClubId);
+            if (string.IsNullOrWhiteSpace(name)) continue;   // klubbnod borta — visa inget spöke
+            mySinceRows.Add((name!,
+                m.MemberSince != null && m.MemberSince.Value != default
+                    ? m.MemberSince.Value.ToString("yyyy-MM-dd")
+                    : ""));
+        }
     }
 }
 
@@ -847,19 +861,32 @@
                                             något hen inte kan göra.
                                         *@
                                         <div class="mb-3">
-                                            <label for="memberSince" class="form-label">Medlem sedan</label>
-                                            <input type="text" class="form-control" id="memberSince" name="memberSince"
-                                                   value="@memberSinceDisplay" readonly>
-                                            <div class="form-text">
-                                                @if (string.IsNullOrEmpty(memberSinceDisplay))
+                                            <label class="form-label">Medlem sedan</label>
+                                            @if (mySinceRows.Count == 0)
+                                            {
+                                                <input type="text" class="form-control" value="" readonly>
+                                                <div class="form-text">Du är inte registrerad i någon klubb.</div>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var row in mySinceRows)
                                                 {
-                                                    <span>Din klubb fyller i detta. Saknas det kan klubben inte utfärda ett komplett föreningsintyg.</span>
+                                                    <div class="input-group input-group-sm mb-1">
+                                                        <span class="input-group-text">@row.Club</span>
+                                                        <input type="text" class="form-control" value="@row.Since" readonly>
+                                                    </div>
                                                 }
-                                                else
-                                                {
-                                                    <span>Sätts av din klubb.</span>
-                                                }
-                                            </div>
+                                                <div class="form-text">
+                                                    @if (mySinceRows.Any(r => string.IsNullOrEmpty(r.Since)))
+                                                    {
+                                                        <span>Sätts av respektive klubb. Saknas datumet kan klubben inte utfärda ett komplett föreningsintyg.</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>Sätts av respektive klubb.</span>
+                                                    }
+                                                </div>
+                                            }
                                         </div>
                                     </div>
                                 </div>

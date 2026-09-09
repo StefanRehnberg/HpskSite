@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Antiforgery;
+﻿using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMediaService _mediaService;
         private readonly MemberDataPresenceService _presenceService;
+        private readonly ClubMembershipService _clubMembershipService;
         private readonly IAntiforgery _antiforgery;
 
         public ClubController(
@@ -48,6 +49,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             IMediaService mediaService,
             MemberDataPresenceService presenceService,
+            ClubMembershipService clubMembershipService,
             IAntiforgery antiforgery)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -58,6 +60,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _mediaService = mediaService;
             _presenceService = presenceService;
+            _clubMembershipService = clubMembershipService;
         }
 
         /// <summary>
@@ -832,6 +835,16 @@ namespace HpskSite.Controllers
                 // powers the green dot on each row's dashboard button.
                 var presenceMap = await _presenceService.GetClubPresenceAsync();
 
+                // ⚠️ "Medlem sedan" är KLUBBENS uppgift, för DEN HÄR klubben. Listan läste förut
+                // medlemsegenskapen `memberSince`, som är delad över alla klubbar en medlem
+                // tillhör — alltså kunde den bara vara sann för en av dem, och på klubbens egen
+                // sida visade den då någon annan klubbs datum. En rad per medlem hämtas i EN fråga
+                // (`GetForClub`), inte en uppslagning per medlem i loopen nedan.
+                var membershipSince = _clubMembershipService.GetForClub(clubId)
+                    .Where(cm => cm.MemberSince != null)
+                    .GroupBy(cm => cm.MemberId)
+                    .ToDictionary(g => g.Key, g => g.First().MemberSince);
+
                 // Build member data with privacy levels
                 foreach (var member in clubMembers.OrderBy(m => m.Name))
                 {
@@ -860,7 +873,12 @@ namespace HpskSite.Controllers
                         phoneNumber = isClubAdmin ? (member.GetValue<string>("phoneNumber") ?? "") : null,
                         personNumber = isClubAdmin ? (member.GetValue<string>("personNumber") ?? "") : null,
                         shooterIdNumber = isClubAdmin ? (member.GetValue<string>("shooterIdNumber") ?? "") : null,
-                        memberSince = isClubAdmin ? member.GetValue<DateTime?>("memberSince") : null
+                        // ⚠️ KLUBBENS datum, inte medlemsegenskapen. Se kommentaren vid
+                        // `membershipSince` ovan. Tomt är ett ärligt svar — klubben har inte fyllt
+                        // i det, och medlemsdialogen under Klubbmedlemskap är där det görs.
+                        memberSince = isClubAdmin && membershipSince.TryGetValue(member.Id, out var since)
+                            ? since
+                            : null
                     };
 
                     members.Add(memberData);

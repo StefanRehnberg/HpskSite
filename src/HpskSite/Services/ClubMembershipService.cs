@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using Umbraco.Cms.Infrastructure.Scoping;
 
 namespace HpskSite.Services
@@ -47,6 +47,50 @@ namespace HpskSite.Services
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<ClubMembership>(
                 "SELECT * FROM ClubMembership WHERE HouseholdId = @0 AND ClubId = @1", householdId.Trim(), clubId);
+        }
+
+        /// <summary>
+        /// Skapar RELATIONEN (medlem, klubb) om den saknas. Returnerar true när en rad skapades.
+        ///
+        /// <para><b>⚠️⚠️ SÄTTER ALDRIG <c>MemberSince</c>.</b> "Medlem sedan" är hur länge personen
+        /// varit medlem i DEN HÄR klubben, och det föregår ofta pistol.nu med decennier — ett
+        /// registrerings- eller godkännandedatum säger ingenting om det. Uppgiften kan bara komma
+        /// från någon som vet (klubben, i medlemsdialogen under Klubbmedlemskap), och den hamnar på
+        /// en handling till Polismyndigheten. Ett härlett datum vore en påhittad uppgift.
+        /// Stefans beslut 2026-09-09.</para>
+        ///
+        /// <para><b>⚠️ RÖR ALDRIG en befintlig rad.</b> Metoden är till för att relationen ska
+        /// finnas så att klubben HAR någonstans att skriva datumet — inte för att fylla i något.
+        /// Fanns raden är den klubbens, med de uppgifter klubben satt.</para>
+        ///
+        /// <para><b>⚠️ Sväljer sina egna fel.</b> Anroparna är registrering och godkännande; ett
+        /// misslyckat radskapande får inte fälla ett godkännande. Utfallet returneras så anroparen
+        /// kan logga.</para>
+        /// </summary>
+        public bool EnsureMembership(int memberId, int clubId)
+        {
+            if (memberId <= 0 || clubId <= 0) return false;
+
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var db = scope.Database;
+
+                // ⚠️ Villkoret ligger i SQL:en, inte i en läsning följd av en skrivning: två
+                // samtidiga anrop (godkännande + en sparning) får inte ge två rader för samma par.
+                var affected = db.Execute(
+                    @"INSERT INTO ClubMembership (MemberId, ClubId, MembershipStatus, CreatedDate)
+                      SELECT @0, @1, @2, @3
+                       WHERE NOT EXISTS (SELECT 1 FROM ClubMembership
+                                          WHERE MemberId = @0 AND ClubId = @1)",
+                    memberId, clubId, "Aktiv", DateTime.UtcNow);
+
+                return affected > 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
