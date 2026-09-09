@@ -5904,6 +5904,74 @@ orörda — 1 `Ny`, 2 `Utfardad → 9`.
   `-y 0` till en fil, och `-y 0` är ömsesidigt uteslutande med BÅDE `-W` och `-h` — alltså en egen
   körning utan dem.
 
+#### ⚠️ ETT BORTTAGET VAPEN LÄMNADE ETT ÄRENDE SOM INTE GICK ATT HANDLÄGGA (2026-09-09)
+
+Rapporterat ur prod: *"när medlem tar bort vapen som hen har frågat efter Föreningsintyg på så
+försvinner inte förfrågan, även om ett intyg hade skrivits och det tas bort så är förfrågan kvar
+fast medlemmen har raderat vapnet."* Två fel, med samma rot.
+
+Förfrågan **pekar på vapnet**, och utfärdaren hämtar fabrikat, modell och kaliber därifrån
+(`FetchIntygFirearmData`). Ett vapen medlemmen tagit bort betyder alltså en rad i klubbens gula ruta
+som ingen kan handlägga — och `RemoveFirearm` rörde inte förfrågan alls.
+
+**Att ta bort vapnet ÄR att dra tillbaka begäran.** `ForeningsintygRequestService.WithdrawOpenForFirearm`
+sätter medlemmens **öppna** förfrågningar för vapnet till den nya statusen `Aterkallad`.
+
+**⚠️ `Aterkallad` är en EGEN status, inte `Avslagen`.** Ett avslag är klubbens beslut och kräver ett
+skäl medlemmen kan läsa; det här är medlemmens eget tillbakadragande. Att bunta ihop dem skulle
+skriva in i klubbens historik att den nekat något den aldrig prövade. Den ligger med i `All` men
+**inte i `Open`** — vore den öppen skulle den ligga kvar i den gula rutan och räknas i menybrickan,
+alltså arbete som inte finns.
+
+**⚠️ BARA ÖPPNA förfrågningar.** En `Utfardad` rörs inte: dokumentet finns, det är utfärdat och
+undertecknat, och att medlemmen senare städar sin garderob gör inte handlingen ogjord. Mätt: en
+borttagning med en `Utfardad` förfrågan ger `withdrawnRequestIds: []` och lämnar statusen orörd.
+
+**⚠️ Återkallandet ligger i `RemoveFirearm`, EFTER `Deactivate` — och medvetet INTE i `Deactivate`.**
+Gick borttagningen inte igenom får förfrågan inte återkallas; och att låta tjänsten som *gömmer ett
+vapen* skriva i intygsflödet skulle göra varje framtida anropare till en arbetsflödesändring utan
+att veta om det.
+
+**⚠️ MEDLEMMEN MÅSTE FÅ VETA ATT FÖRFRÅGAN FÖLJDE MED.** Hen bad klubben om ett intyg; ett tyst
+"vapnet är borttaget" lämnar hen i tron att ärendet lever. Kvittot säger att förfrågan är återkallad
+och att vägen tillbaka är att lägga in vapnet och fråga på nytt.
+
+**⚠️⚠️ OCH ÅTERÖPPNINGEN FICK INTE VÄCKA ETT ÄRENDE VARS VAPEN ÄR BORTA.** Det var rapportens andra
+halva, och den var ett fel jag själv införde dagen innan: `ReopenAfterIntygRemoved` satte förfrågan
+till `Ny` villkorslöst, så *radera intyget* på en medlem som redan tagit bort vapnet lade tillbaka
+en ohandläggbar rad i den gula rutan. Nu blir den `Aterkallad` i stället, med en anteckning som
+skiljer de två fallen. **Prod bar exakt den raden** (förfrågan 2, `Ny`, anteckning *"Det utfärdade
+intyget togs bort — förfrågan är obehandlad igen"*, vapen 71 `IsActive = 0`).
+
+**⚠️⚠️ KVITTOT LJÖG, OCH VERIFIERINGEN FÅNGADE DET — inte kompilatorn.** Första versionen av
+`ReopenAfterIntygRemoved` returnerade bara id:n, så `DeleteIntyg` sa *"förfrågan ligger nu som
+obehandlad igen, så du kan skriva ett nytt intyg från den"* även när den i själva verket
+återkallades. Utfärdaren skulle ha letat efter en rad i en tom gul ruta. Metoden returnerar nu
+`(Reopened, Withdrawn)` och kvittot följer utfallet. **Samma lögn som notifieringskvittona redan
+tvingats rätta en gång** — se `Task<bool>`-ändringen i EmailService: *ett svar får aldrig påstå vad
+som brukar hända.*
+
+**⚠️ Joinen i `GetForClub` får INTE filtrera på `f.IsActive`.** Då försvinner raden ur klubbens
+inkorg när medlemmen tar bort vapnet — ett ärende som tystnar mitt i handläggningen. Kolumnen läses
+in (`FirearmIsActive`) och raden **säger** i stället att vapnet är borttaget, i rött, med vad
+klubben ska göra. Nya sådana rader kan inte uppstå längre, men de som skapades innan regeln fanns
+ligger kvar.
+
+**Verifierat i dev, fyra utfall, med återställning:**
+- Öppen förfrågan + medlemmen tar bort vapnet → `Aterkallad`, `withdrawnRequestIds: [78]`, kvittot
+  namnger återkallandet; gula rutan 0, rälsbrickan 0, raden ligger under Behandlade som *Återkallad*.
+- `Utfardad` förfrågan + medlemmen tar bort vapnet → orörd, `withdrawnRequestIds: []`.
+- Intyg raderat, **vapnet kvar** → `Ny` + *"…obehandlad igen, så du kan skriva ett nytt intyg"*, och
+  gula rutan visar 1.
+- Intyg raderat, **vapnet borta** → `Aterkallad` + *"…det finns inget vapen att utfärda ett nytt
+  intyg för"*, gula rutan 0.
+- En äldre rad med borttaget vapen visar den röda varningen i inkorgen.
+
+⚠️ **Fixturvapnet 295 i dev låg redan på `IsActive = 0`** från en tidigare session, vilket är precis
+prods läge — bra för varningstestet, men det betyder att en `RemoveFirearm`-körning måste sätta
+`IsActive = 1` först, och städningen sätta det tillbaka. Ett test som utgår från att ett fixturvapen
+är aktivt mäter ingenting.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

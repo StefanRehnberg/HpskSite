@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using HpskSite.Models.Firearms;
 using HpskSite.Services;
 using HpskSite.Services.Firearms;
@@ -269,9 +269,29 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Du kan bara ta bort dina egna vapen." });
 
             var error = _firearms.Deactivate(firearmId);
-            return error is null
-                ? Json(new { success = true, message = "Vapnet är borttaget ur listan." })
-                : Json(new { success = false, message = error });
+            if (error is not null) return Json(new { success = false, message = error });
+
+            // ⚠️⚠️ ATT TA BORT VAPNET ÄR ATT DRA TILLBAKA BEGÄRAN. Förfrågan pekar på vapnet och
+            // utfärdaren hämtar fabrikat, modell och kaliber därifrån — lämnas den öppen ligger ett
+            // ärende i klubbens inkorg som ingen kan handlägga. Rapporterat ur prod.
+            //
+            // ⚠️ EFTER Deactivate, aldrig före: gick borttagningen inte igenom får förfrågan inte
+            // återkallas. Och medvetet INTE i `Deactivate` — tjänsten gömmer ett vapen, och att
+            // låta den skriva i intygsflödet skulle göra varje framtida anropare till en
+            // arbetsflödesändring utan att veta om det.
+            var withdrawn = _requests.WithdrawOpenForFirearm(firearmId, memberId);
+
+            return Json(new
+            {
+                success = true,
+                withdrawnRequestIds = withdrawn,
+                // ⚠️ Medlemmen MÅSTE få veta att förfrågan följde med. Hen bad klubben om ett intyg;
+                // ett tyst "vapnet är borttaget" lämnar hen i tron att ärendet lever.
+                message = withdrawn.Count > 0
+                    ? "Vapnet är borttaget ur listan. Din förfrågan om föreningsintyg för vapnet är " +
+                      "därmed återkallad — behöver du ett intyg igen får du lägga in vapnet och fråga på nytt."
+                    : "Vapnet är borttaget ur listan.",
+            });
         }
 
         /// <summary>Medlemmens egen läslogg — "vem har läst mina uppgifter".</summary>

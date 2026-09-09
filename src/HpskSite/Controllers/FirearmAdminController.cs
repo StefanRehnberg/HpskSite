@@ -502,6 +502,12 @@ namespace HpskSite.Controllers
                     // att något dokument skapades, så det finns rader där de två går isär. Ytan
                     // måste kunna säga det i stället för att visa dem som avklarade.
                     r.IssuedIntygId,
+
+                    // ⚠️ Falskt = medlemmen har tagit bort vapnet. Raden ska SÄGA det: uppgifterna
+                    // till intyget hämtas ur vapnet, så ett ärende utan vapen går inte att
+                    // handlägga. Nya sådana rader kan inte uppstå (borttagningen återkallar
+                    // förfrågan), men de som skapades innan den regeln fanns ligger kvar.
+                    firearmRemoved = !r.FirearmIsActive,
                     handledAt = r.HandledAt?.ToString("yyyy-MM-dd"),
                 }),
             });

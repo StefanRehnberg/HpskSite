@@ -182,16 +182,27 @@ namespace HpskSite.Controllers
                 var reopened = _firearmRequests.ReopenAfterIntygRemoved(id, (await GetCurrentMemberDataAsync())?.Id ?? 0);
 
                 _logger.LogInformation("Föreningsintyg {Id} deleted", id);
+                // ⚠️ KVITTOT FÖLJER UTFALLET, inte det vanligaste fallet. Ligger vapnet kvar är
+                // förfrågan obehandlad igen; är vapnet borttaget av medlemmen är den återkallad, och
+                // då finns ingen rad att skriva ett nytt intyg från. Ett kvitto som lovade den raden
+                // skulle skicka utfärdaren att leta i en tom gul ruta.
+                string message;
+                if (reopened.Reopened.Count > 0)
+                    message = "Intyget är borttaget. Förfrågan ligger nu som obehandlad igen, så du " +
+                              "kan skriva ett nytt intyg från den.";
+                else if (reopened.Withdrawn.Count > 0)
+                    message = "Intyget är borttaget. Medlemmen har tagit bort vapnet ur sin garderob, " +
+                              "så förfrågan är återkallad — det finns inget vapen att utfärda ett nytt " +
+                              "intyg för.";
+                else
+                    message = "Föreningsintyg borttaget.";
+
                 return Json(new
                 {
                     success = true,
-                    reopenedRequestIds = reopened,
-                    // Kvittot måste säga att ett ÄRENDE öppnades igen. Ett tyst "borttaget" får
-                    // utfärdaren att tro att hen måste börja om från medlemslistan.
-                    message = reopened.Count > 0
-                        ? "Intyget är borttaget. Förfrågan ligger nu som obehandlad igen, så du kan " +
-                          "skriva ett nytt intyg från den."
-                        : "Föreningsintyg borttaget."
+                    reopenedRequestIds = reopened.Reopened,
+                    withdrawnRequestIds = reopened.Withdrawn,
+                    message
                 });
             }
             catch (Exception ex)

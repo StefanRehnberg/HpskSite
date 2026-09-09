@@ -33,7 +33,19 @@ namespace HpskSite.Services.Firearms
         public const string Utfardad = "Utfardad";
         public const string Avslagen = "Avslagen";
 
-        public static readonly string[] All = { Ny, UnderBehandling, Utfardad, Avslagen };
+        /// <summary>
+        /// Medlemmen tog bort vapnet, alltså finns ingenting kvar att intyga.
+        ///
+        /// <para><b>⚠️ EGEN STATUS, inte "Avslagen".</b> Ett avslag är klubbens beslut och kräver ett
+        /// skäl medlemmen kan läsa; det här är medlemmens eget tillbakadragande. Att bunta ihop dem
+        /// skulle skriva in i klubbens historik att den nekat något den aldrig prövade.</para>
+        /// </summary>
+        public const string Aterkallad = "Aterkallad";
+
+        public static readonly string[] All = { Ny, UnderBehandling, Utfardad, Avslagen, Aterkallad };
+
+        // ⚠️ `Aterkallad` hör INTE hit. Vore den öppen skulle den ligga kvar i den gula rutan och
+        // räknas i menybrickan — alltså arbete som inte finns.
         public static readonly string[] Open = { Ny, UnderBehandling };
 
         public static bool IsValid(string? v) => All.Contains((v ?? "").Trim(), StringComparer.Ordinal);
@@ -44,6 +56,7 @@ namespace HpskSite.Services.Firearms
             UnderBehandling => "Under behandling",
             Utfardad => "Utfärdad",
             Avslagen => "Avslagen",
+            Aterkallad => "Återkallad",
             _ => v ?? "",
         };
     }
@@ -72,6 +85,9 @@ namespace HpskSite.Services.Firearms
         [ResultColumn] public string? FirearmAlias { get; set; }
         [ResultColumn] public string? FirearmWeaponClass { get; set; }
         [ResultColumn] public string? FirearmVapentyp { get; set; }
+
+        /// <summary>Falskt = medlemmen har tagit bort vapnet ur sin garderob sedan förfrågan skapades.</summary>
+        [ResultColumn] public bool FirearmIsActive { get; set; } = true;
 
         [Ignore] public string KindLabel => ForeningsintygRequestKind.Label(Kind);
         [Ignore] public string StatusLabel => ForeningsintygRequestStatus.Label(Status);
@@ -174,8 +190,12 @@ namespace HpskSite.Services.Firearms
         {
             if (clubId <= 0) return new List<ForeningsintygRequest>();
 
+            // ⚠️ `f.IsActive` MÅSTE med, och joinen får INTE filtrera på den. Medlemmen kan ta bort
+            // vapnet efter att förfrågan skapades — då försvinner raden ur klubbens inkorg om
+            // joinen filtrerar, alltså ett ärende som tystnar mitt i handläggningen. Klubben ska i
+            // stället SE att vapnet är borttaget.
             var sql = @"SELECT r.*, f.Alias AS FirearmAlias, f.WeaponClass AS FirearmWeaponClass,
-                               f.Vapentyp AS FirearmVapentyp
+                               f.Vapentyp AS FirearmVapentyp, f.IsActive AS FirearmIsActive
                           FROM ForeningsintygRequest r
                           JOIN Firearm f ON f.Id = r.FirearmId
                          WHERE r.ClubId = @0";
@@ -245,6 +265,56 @@ namespace HpskSite.Services.Firearms
         }
 
         /// <summary>
+        /// Återkallar medlemmens ÖPPNA förfrågningar för ett vapen hen just tagit bort, och
+        /// returnerar deras id:n.
+        ///
+        /// <para><b>⚠️ ETT BORTTAGET VAPEN LÄMNAR ETT ÄRENDE SOM INTE GÅR ATT HANDLÄGGA.</b>
+        /// Förfrågan pekar på vapnet, och utfärdaren hämtar fabrikat, modell och kaliber därifrån —
+        /// på ett vapen medlemmen inte längre har. Rapporterat ur prod: förfrågan låg kvar i
+        /// klubbens inkorg efter att medlemmen raderat vapnet. Att ta bort vapnet ÄR att dra
+        /// tillbaka begäran.</para>
+        ///
+        /// <para><b>⚠️ BARA ÖPPNA förfrågningar.</b> En `Utfardad` rör vi inte: dokumentet finns, det
+        /// är utfärdat och undertecknat, och att medlemmen senare städar sin garderob gör inte
+        /// handlingen ogjord. En `Avslagen` är likaså redan avgjord.</para>
+        ///
+        /// <para><b>⚠️ Vapnet raderas aldrig</b> (`IsActive = 0`), så förfrågans join håller och
+        /// klubben kan fortfarande läsa vad ärendet gällde.</para>
+        /// </summary>
+        public List<int> WithdrawOpenForFirearm(int firearmId, int memberId)
+        {
+            if (firearmId <= 0 || memberId <= 0) return new List<int>();
+
+            using var uow = _scopeProvider.CreateScope(autoComplete: true);
+            var db = uow.Database;
+
+            var openStatuses = string.Join(",", ForeningsintygRequestStatus.Open.Select(x => $"'{x}'"));
+
+            // ⚠️ MedlemsId i WHERE, inte bara vapnets. Ett vapen tillhör en medlem, men grinden ska
+            // vara strukturell: ingen kan råka återkalla någon annans ärende genom ett vapen-id.
+            var ids = db.Fetch<int>(
+                $@"SELECT Id FROM ForeningsintygRequest
+                    WHERE FirearmId = @0 AND MemberId = @1 AND Status IN ({openStatuses})",
+                firearmId, memberId);
+            if (ids.Count == 0) return ids;
+
+            db.Execute(
+                $@"UPDATE ForeningsintygRequest
+                      SET Status = @0, HandledAt = @1,
+                          HandlerNote = @2
+                    WHERE FirearmId = @3 AND MemberId = @4 AND Status IN ({openStatuses})",
+                ForeningsintygRequestStatus.Aterkallad, DateTime.Now,
+                "Medlemmen tog bort vapnet ur sin garderob — förfrågan är återkallad.",
+                firearmId, memberId);
+
+            _logger.LogInformation(
+                "Vapen {FirearmId} borttaget av medlem {MemberId} — förfrågan {Requests} återkallad.",
+                firearmId, memberId, string.Join(", ", ids));
+
+            return ids;
+        }
+
+        /// <summary>
         /// Öppnar varje förfrågan som pekade på ett nu BORTTAGET intyg, och returnerar deras id:n.
         ///
         /// <para><b>⚠️ ETT BORTTAGET DOKUMENT FÅR INTE LÄMNA FÖRFRÅGAN "UTFÄRDAD".</b> Statusen
@@ -264,31 +334,65 @@ namespace HpskSite.Services.Firearms
         /// det är inte längre sant. Den nya texten säger vad som hände, så nästa läsare inte tror
         /// att förfrågan aldrig behandlats.</para>
         /// </summary>
-        public List<int> ReopenAfterIntygRemoved(int intygId, int actorMemberId)
+        /// <returns>
+        /// <c>Reopened</c> = förfrågningar som ligger som obehandlade igen, <c>Withdrawn</c> = de
+        /// vars vapen är borta och som därför återkallades.
+        ///
+        /// <para><b>⚠️ BÅDA LISTORNA RETURNERAS för att anroparen ska kunna säga vad som HÄNDE.</b>
+        /// En tidigare version returnerade bara id:n, och kvittot påstod därför "förfrågan ligger nu
+        /// som obehandlad igen" även när den i själva verket återkallades — utfärdaren letade efter
+        /// en rad i den gula rutan som aldrig kom. Exakt den sortens lögn som
+        /// notifieringskvittona redan tvingats rätta en gång.</para>
+        /// </returns>
+        public (List<int> Reopened, List<int> Withdrawn) ReopenAfterIntygRemoved(int intygId, int actorMemberId)
         {
-            if (intygId <= 0) return new List<int>();
+            var reopened = new List<int>();
+            var withdrawn = new List<int>();
+            if (intygId <= 0) return (reopened, withdrawn);
 
             using var uow = _scopeProvider.CreateScope(autoComplete: true);
             var db = uow.Database;
 
-            var ids = db.Fetch<int>(
-                "SELECT Id FROM ForeningsintygRequest WHERE IssuedIntygId = @0", intygId);
-            if (ids.Count == 0) return ids;
+            var rows = db.Fetch<ForeningsintygRequest>(
+                "SELECT * FROM ForeningsintygRequest WHERE IssuedIntygId = @0", intygId);
+            if (rows.Count == 0) return (reopened, withdrawn);
 
-            db.Execute(
-                @"UPDATE ForeningsintygRequest
-                     SET Status = @0, IssuedIntygId = NULL,
-                         HandledByMemberId = NULL, HandledAt = NULL, HandlerNote = @1
-                   WHERE IssuedIntygId = @2",
-                ForeningsintygRequestStatus.Ny,
-                "Det utfärdade intyget togs bort — förfrågan är obehandlad igen.",
-                intygId);
+            // ⚠️⚠️ ÅTERÖPPNA ALDRIG ETT ÄRENDE VARS VAPEN ÄR BORTA. Rapporterat ur prod i samma
+            // andetag som fallet ovan: medlemmen hade tagit bort vapnet, intyget raderades, och
+            // förfrågan kom då tillbaka som obehandlad — alltså en rad i den gula rutan som ingen
+            // kan handlägga, eftersom uppgifterna hämtas ur ett vapen som inte finns kvar.
+            // Återöppningen är rätt för "det blev fel, skriv om"; är vapnet borta har medlemmen
+            // dragit tillbaka sin begäran och statusen ska säga just det.
+            foreach (var row in rows)
+            {
+                var firearm = _firearms.GetById(row.FirearmId);
+                bool firearmGone = firearm is null || !firearm.IsActive;
+                (firearmGone ? withdrawn : reopened).Add(row.Id);
+
+                db.Execute(
+                    @"UPDATE ForeningsintygRequest
+                         SET Status = @0, IssuedIntygId = NULL,
+                             HandledByMemberId = NULL, HandledAt = @1, HandlerNote = @2
+                       WHERE Id = @3",
+                    firearmGone
+                        ? ForeningsintygRequestStatus.Aterkallad
+                        : ForeningsintygRequestStatus.Ny,
+                    firearmGone ? (DateTime?)DateTime.Now : null,
+                    firearmGone
+                        ? "Intyget togs bort och vapnet finns inte längre i medlemmens garderob — " +
+                          "förfrågan är återkallad."
+                        : "Det utfärdade intyget togs bort — förfrågan är obehandlad igen.",
+                    row.Id);
+            }
 
             _logger.LogInformation(
-                "Föreningsintyg {IntygId} borttaget av medlem {Actor} — förfrågan {Requests} öppnad igen.",
-                intygId, actorMemberId, string.Join(", ", ids));
+                "Föreningsintyg {IntygId} borttaget av medlem {Actor} — öppnade igen: {Reopened}; " +
+                "återkallade (vapnet borta): {Withdrawn}.",
+                intygId, actorMemberId,
+                reopened.Count > 0 ? string.Join(", ", reopened) : "inga",
+                withdrawn.Count > 0 ? string.Join(", ", withdrawn) : "inga");
 
-            return ids;
+            return (reopened, withdrawn);
         }
 
         /// <summary>Antal öppna förfrågningar — badgen på klubbens flik.</summary>
