@@ -1050,6 +1050,65 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Klubben ber medlemmen komplettera sin förfrågan om föreningsintyg.
+        ///
+        /// <para><b>⚠️ DETTA ÄR INTE ETT AVSLAG.</b> Ärendet lever, och mejlet måste säga det —
+        /// annars läser medlemmen det som ett nej och slutar vänta. Texten säger vad som saknas, att
+        /// förfrågan ligger kvar, och var uppgifterna fylls i.</para>
+        ///
+        /// <para><b>⚠️ Skälet är OBLIGATORISKT här</b> (till skillnad från beslutsmejlet, där en tom
+        /// notering bara utelämnar citatet). "Komplettera något" utan att säga vad är ett
+        /// supportärende, inte ett besked.</para>
+        ///
+        /// <para>Returnerar utfallet av utskicket. <b>Anta aldrig att det gick igenom</b> — ett
+        /// kvitto som påstår att medlemmen fått ett mejl som fastnade lämnar den enda som kan göra
+        /// något utan att veta.</para>
+        /// </summary>
+        public async Task<bool> SendForeningsintygCompletionRequestAsync(
+            string toEmail, string toName, string clubName, string firearmLabel, string note)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning(
+                    "SendForeningsintygCompletionRequestAsync skipped — no email address for {Name}", toName);
+                return false;
+            }
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeClub = System.Web.HttpUtility.HtmlEncode(clubName);
+            var safeFirearm = System.Web.HttpUtility.HtmlEncode(firearmLabel);
+            var safeNote = System.Web.HttpUtility.HtmlEncode(note ?? "");
+
+            const string subject = "Din förfrågan om föreningsintyg behöver kompletteras";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p>{safeClub} behöver fler uppgifter innan de kan skriva ditt föreningsintyg för
+       <strong>{safeFirearm}</strong>.</p>
+    <p><strong>Det här behöver kompletteras:</strong></p>
+    <blockquote style=""border-left:3px solid #ffc107; margin:10px 0; padding:5px 10px; color:#555;"">
+        {safeNote}
+    </blockquote>
+    <p><strong>Din förfrågan ligger kvar</strong> — den är inte avslagen. Så snart du fyllt i
+       uppgifterna kan klubben skriva intyget.</p>
+    <p>Personuppgifter fyller du i under <em>Min sida → Profil</em>. Uppgifter om vapnet ändrar du
+       under <em>Min sida → Vapen</em>.</p>
+    <p>Hör av dig till styrelsen om något är oklart.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(toEmail, subject, body);
+        }
+
+        /// <summary>
         /// Send a single formatted HTML email through the site SMTP, but presented as coming from a
         /// club/region (display name) with replies routed to their own address. Lets clubs without
         /// Brevo still send nice HTML member mail. From address stays the authenticated site address

@@ -584,6 +584,78 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Det TREDJE handläggningsvalet: uppgifter saknas, medlemmen behöver komplettera.
+        ///
+        /// <para><b>⚠️ ÄRENDET LEVER — det här är inget avslag.</b> Inkorgen erbjöd bara "Skriv
+        /// intyget" eller "Avslå", och det verkliga tredje fallet — något fattas och medlemmen kan
+        /// fixa det — hade ingen plats. Utan valet blir alternativen att avslå (fel: klubben nekar
+        /// inget) eller att låta ärendet ligga tyst medan medlemmen väntar på ett besked som aldrig
+        /// kommer. Rapporterat av Stefan 2026-09-09.</para>
+        ///
+        /// <para><b>⚠️ Statusen blir `UnderBehandling`, som ligger i `Open`.</b> Förfrågan är
+        /// fortfarande klubbens ärende — bara inte klubbens tur. Att flytta den till ett stängt
+        /// tillstånd hade gjort den osynlig, och då hade ingen följt upp den.</para>
+        ///
+        /// <para><b>⚠️ SKÄLET ÄR OBLIGATORISKT.</b> "Komplettera något" utan att säga vad är ett
+        /// supportärende, inte ett besked — samma regel som avslaget redan har.</para>
+        ///
+        /// <para><b>⚠️ MEJLET ÄR HELA POÄNGEN, inte en sidoeffekt.</b> Därför rapporteras utfallet
+        /// separat: <c>notified</c> är FAKTISKT SKICKAT, aldrig "vi bad om det". Gick det inte fram
+        /// är klubben den enda som kan nå medlemmen på annat sätt, och de måste få veta det.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RequestIntygCompletion(
+            int clubId, int requestId, string? note)
+        {
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var req = _requests.GetById(requestId);
+            if (req is null) return Json(new { success = false, message = "Förfrågan hittades inte" });
+            if (req.ClubId != clubId)
+                return Json(new { success = false, message = "Förfrågan tillhör inte den här klubben" });
+
+            var reason = (note ?? "").Trim();
+            if (reason.Length == 0)
+                return Json(new
+                {
+                    success = false,
+                    message = "Skriv vad som saknas — medlemmen ska kunna se vad hen ska komplettera."
+                });
+
+            // ⚠️ Bara ett ÖPPET ärende kan begäras kompletterat. Ett utfärdat intyg är skrivet, och
+            // ett avslag är avgjort; att be om komplettering på dem skulle skicka medlemmen ett
+            // besked om ett ärende som inte längre väntar på något.
+            if (!req.IsOpen)
+                return Json(new
+                {
+                    success = false,
+                    message = "Förfrågan är redan avgjord. Öppna ett nytt ärende om något saknas."
+                });
+
+            var actor = await CurrentMemberIdAsync();
+            var err = _requests.SetStatus(
+                requestId, ForeningsintygRequestStatus.UnderBehandling, actor, reason);
+            if (err is not null) return Json(new { success = false, message = err });
+
+            req.FirearmAlias ??= _firearms.GetById(req.FirearmId)?.Alias;
+            var notified = await _intygNotifications.NotifyMemberOfCompletionRequestAsync(req, reason);
+
+            return Json(new
+            {
+                success = true,
+                notified,
+                message = notified
+                    ? "Medlemmen har fått ett mejl om vad som saknas. Förfrågan ligger kvar som " +
+                      "pågående tills hen kompletterat."
+                    : "Förfrågan är markerad som pågående, men MEJLET KUNDE INTE SKICKAS — " +
+                      "meddela medlemmen på annat sätt.",
+                openCount = _requests.CountOpenForClub(clubId)
+            });
+        }
+
+        /// <summary>
         /// Utelämnat värde betyder JA. Se kommentaren i <see cref="SetIntygRequestStatus"/>.
         ///
         /// <para><b>⚠️ Godtar "1", "true" och "on".</b> ASP.NET Cores bool-bindning godtar bara

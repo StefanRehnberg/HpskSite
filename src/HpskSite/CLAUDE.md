@@ -6073,6 +6073,64 @@ saknad tabell ger nolldefault i stället för att ta ner hela statistiksidan.
 Verifierat i webbläsaren mot dev: 1 obesvarad ("inkom i dag"), 0 utfärdade, 15 förfrågningar totalt,
 14 avslagna + 0 återkallade, 2 dokument varav 2 utan sparad kopia — samtliga stämmer med SQL.
 
+#### Det TREDJE handläggningsvalet: begär komplettering (2026-09-09)
+
+Stefan: *"som vi har det nu så är det två olika sätt att hantera en förfrågan … men jag ser en tredje
+variant; uppgifter saknas, medlem behöver komplettera något. Det borde finnas som val och generera ett
+mail med förfrågan om att komplettera."*
+
+**Han har rätt, och det saknade valet tvingade fram ett fel svar.** Inkorgen erbjöd bara *Skriv
+intyget* eller *Avslå*. Det vanliga tredje fallet — något fattas och medlemmen kan fixa det — hade
+ingen plats, så alternativen blev att **avslå** (fel: klubben nekar ingenting) eller att låta ärendet
+**ligga tyst** medan medlemmen väntar på ett besked som aldrig kommer. Det senare är precis vad hela
+den här ombyggnaden började med.
+
+**⚠️ STATUSEN BLIR `UnderBehandling`, som ligger i `Open`.** Förfrågan är fortfarande klubbens ärende
+— bara inte klubbens tur. Att flytta den till ett stängt tillstånd hade gjort den osynlig, och då
+hade ingen följt upp den. Statusen fanns sedan början och sattes av ingenting; nu har den en
+användning.
+
+**⚠️ RADEN MÅSTE SE ANNORLUNDA UT — annars är den halva av fixen borta.** Ett `UnderBehandling`-ärende
+ligger kvar i den gula rutan och räknas i menybrickan, vilket är rätt, men utan markeringen ser det ut
+som ett obesvarat ärende ingen rört, och nästa funktionär börjar om från början. Raden bär därför
+*"Väntar på medlemmen: <det som begärdes>"* — **anteckningen ÄR begäran**, samma text som mejlet.
+
+**⚠️ Att skriva intyget är INTE blockerat av en pågående komplettering.** Medlemmen kan ha fixat det
+och hört av sig på skjutbanan; en spärr där hade tvingat klubben att först "avmarkera" något. Mätt:
+*Skriv intyget* fungerar oförändrat på ett `UnderBehandling`-ärende.
+
+**⚠️ SKÄLET ÄR OBLIGATORISKT**, på servern och i klienten. "Komplettera något" utan att säga vad är
+ett supportärende, inte ett besked — samma regel som avslaget redan har. Andra gången dialogen öppnas
+**förifylls den förra texten**, så den kan fyllas på i stället för att skrivas om från noll.
+
+**⚠️ EN AVGJORD FÖRFRÅGAN VÄGRAS** (`!req.IsOpen`). Att be om komplettering på ett utfärdat intyg
+eller ett avslag skulle skicka medlemmen ett besked om ett ärende som inte längre väntar på något.
+
+**⚠️ MEJLET ÄR HELA POÄNGEN, inte en sidoeffekt** — och därför rapporteras utfallet separat.
+`notified` är FAKTISKT SKICKAT, aldrig "vi bad om det". Gick det inte fram säger kvittot
+*"MEJLET KUNDE INTE SKICKAS — meddela medlemmen på annat sätt"*, eftersom klubben är den enda som då
+kan nå medlemmen. Samma regel som notifieringskvittona tvingades rätta en gång.
+
+**⚠️ Mejlet säger i klartext att det INTE är ett avslag.** `SendForeningsintygCompletionRequestAsync`
+är en egen mall, inte beslutsmejlet med annan text: *"Din förfrågan ligger kvar — den är inte
+avslagen"*, plus vart uppgifterna fylls i (Profil för personuppgifter, Vapen för vapnets). Utan den
+raden läser medlemmen ett mejl om att något fattas som ett nej och slutar vänta.
+
+**⚠️ EGEN `NotifyKind.Komplettering` i utskicksloggen.** Loggen ska kunna svara på skillnaden mellan
+"vi avslog" och "vi bad om mer" — två helt olika besked, och den som läser loggen i efterhand kan inte
+gissa vilket det var ur ett gemensamt "Beslut".
+
+**Dialogen är INLINE, aldrig `prompt()`** — skälet ska gå att läsa och rätta innan det skickas, och en
+blockerande dialog har redan en gång rapporterats som att "fliken frös". Menyposten ligger **före**
+avslaget med en avdelare emellan: den är det mildare valet, och den destruktiva ska ligga sist.
+
+**Verifierat i dev, med återställning:** menyn bär *Begär komplettering…* före avdelaren och avslaget ·
+dialogen namnger medlemmen och säger att förfrågan inte avslås · tom text nekas · efter skickat blev
+förfrågan `UnderBehandling` med anteckningen, `HandledByMemberId 8315` och tidsstämpel · raden ligger
+kvar i gula rutan som *"Väntar på medlemmen: …"* med brickan 1 · loggraden `Komplettering … Succeeded
+0` (dev saknar SMTP) och kvittot sa just att mejlet inte gick fram · andra öppningen förifyllde texten
+· ett avslaget ärende (52) nekades · *Skriv intyget* fungerar på ärendet. Fixturen raderad.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

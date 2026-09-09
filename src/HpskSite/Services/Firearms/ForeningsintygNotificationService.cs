@@ -142,6 +142,9 @@ namespace HpskSite.Services.Firearms
             public const string NewRequest = "NyForfragan";
             public const string Reminder = "Paminnelse";
             public const string Decision = "Beslut";
+
+            /// <summary>Klubben bad medlemmen komplettera. Ärendet lever — det är inget avslag.</summary>
+            public const string Completion = "Komplettering";
         }
 
         private void LogNotify(int clubId, int? requestId, int? memberId, string email,
@@ -405,6 +408,46 @@ namespace HpskSite.Services.Firearms
             {
                 _logger.LogError(ex,
                     "Kunde inte avisera medlem {MemberId} om beslut på förfrågan {Id}.",
+                    request.MemberId, request.Id);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Ber medlemmen komplettera sin förfrågan. Returnerar om mejlet FAKTISKT gick ut.
+        ///
+        /// <para><b>⚠️ Samma form som beslutsaviseringen, men en EGEN `NotifyKind`.</b> Loggen ska
+        /// kunna svara på skillnaden mellan "vi avslog" och "vi bad om mer" — det är två helt olika
+        /// besked till medlemmen, och den som läser loggen i efterhand kan inte gissa vilket det
+        /// var ur ett gemensamt "Beslut".</para>
+        /// </summary>
+        public async Task<bool> NotifyMemberOfCompletionRequestAsync(
+            ForeningsintygRequest request, string note)
+        {
+            try
+            {
+                var toEmail = EmailOf(request.MemberId);
+                if (string.IsNullOrWhiteSpace(toEmail))
+                {
+                    _logger.LogWarning(
+                        "Föreningsintygsförfrågan {Id}: medlem {MemberId} saknar e-postadress.",
+                        request.Id, request.MemberId);
+                    return false;
+                }
+
+                var ok = await _email.SendForeningsintygCompletionRequestAsync(
+                    toEmail!, ResolveMemberName(request.MemberId),
+                    _clubs.GetClubById(request.ClubId)?.Name ?? "Klubben",
+                    FirearmLabel(request), note);
+
+                LogNotify(request.ClubId, request.Id, request.MemberId, toEmail!,
+                          NotifyKind.Completion, note, ok);
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Kunde inte be medlem {MemberId} komplettera förfrågan {Id}.",
                     request.MemberId, request.Id);
                 return false;
             }

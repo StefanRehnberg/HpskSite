@@ -413,6 +413,52 @@
    styrelsen gör en gång och sedan aldrig rör — de ska inte ligga mellan det dagliga arbetet och
    vapenlistan och konkurrera om uppmärksamhet med saker som händer varje vecka.
 *@
+@*
+    Begär komplettering — det TREDJE handläggningsvalet.
+
+    ⚠️ INLINE, aldrig `prompt()`. Skälet ska gå att läsa och rätta innan det skickas, och en
+    blockerande dialog har redan en gång rapporterats som att "fliken frös". Samma form som
+    avslaget.
+
+    ⚠️ RUTAN SÄGER ATT ÄRENDET LEVER. Utan det läser utfärdaren "begär komplettering" som ett
+    mellanting mot avslag och undrar om medlemmen får börja om.
+*@
+<div class="modal fade" id="fiCompModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Begär komplettering</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small mb-2">
+                    <span id="fiCompWho" class="fw-semibold"></span> får ett mejl om vad som saknas.
+                </p>
+                <div class="alert alert-info py-2 px-3 small">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Förfrågan <strong>avslås inte</strong> — den ligger kvar som pågående, och du
+                    kan skriva intyget så snart medlemmen kompletterat.
+                </div>
+                <div id="fiCompError" class="alert alert-danger small d-none"></div>
+                <label class="form-label small" for="fiCompNote">Vad behöver kompletteras?</label>
+                <textarea class="form-control" id="fiCompNote" rows="4" maxlength="1000"
+                          autocomplete="off"
+                          placeholder="t.ex. Personnummer saknas i din profil, och vapnets kaliber är inte ifylld."></textarea>
+                <div class="form-text">
+                    Texten står i mejlet till medlemmen och som anteckning på förfrågan. Skriv vad
+                    som saknas och var det fylls i.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" data-vap-action="req-completion-send">
+                    Skicka begäran
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="vapLwModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
@@ -948,6 +994,9 @@
 
         if (action === 'intyg-remove') { await removeIssuedIntyg(btn); return; }
 
+        if (action === 'req-completion') { openCompletionDialog(btn.getAttribute('data-request-id')); return; }
+        if (action === 'req-completion-send') { await sendCompletionRequest(); return; }
+
         // Behörighetsinställningen som modal, öppnad ur Åtgärder ELLER ur varningsraden.
         // ⚠️ `load()` körs om varje gång: en klubbadmin kan ha ändrat styrelsen sedan sidan
         // laddades, och en väljare som visar en avgången ledamot är sämre än en tom väljare.
@@ -1427,9 +1476,20 @@
         var msg = r.memberMessage
             ? '<div class="small text-muted fst-italic">”' + esc(r.memberMessage) + '”</div>'
             : '';
+
+        // ⚠️ ETT ÄRENDE SOM VÄNTAR PÅ MEDLEMMEN MÅSTE SE ANNORLUNDA UT. `UnderBehandling` ligger i
+        // `Open` med flit — förfrågan är fortfarande klubbens ärende, bara inte klubbens tur — men
+        // utan den här raden ser den ut som ett obesvarat ärende ingen har rört, och nästa
+        // funktionär börjar om från början. Anteckningen ÄR det som begärdes.
+        var waiting = r.status === 'UnderBehandling'
+            ? '<div class="small text-warning-emphasis mt-1">' +
+              '<i class="bi bi-hourglass-split me-1"></i>Väntar på medlemmen' +
+              (r.handlerNote ? ': ' + esc(r.handlerNote) : '') + '</div>'
+            : '';
         return '<tr>' +
             '<td class="small text-nowrap">' + esc(r.createdAt) + '</td>' +
-            '<td><strong>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</strong>' + msg + '</td>' +
+            '<td><strong>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</strong>' +
+                msg + waiting + '</td>' +
             '<td class="small">' + esc(r.firearmAlias) +
             (r.firearmWeaponClass
                 ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' +
@@ -1458,6 +1518,16 @@
                         'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' ' +
                         'aria-expanded="false" aria-label="Fler åtgärder"></button>' +
                     '<ul class="dropdown-menu dropdown-menu-end">' +
+                        // ⚠️ DET TREDJE VALET, och det ligger FÖRE avslaget. Inkorgen erbjöd bara
+                        // "Skriv intyget" eller "Avslå", så det vanliga tredje fallet — något
+                        // fattas och medlemmen kan fixa det — hade ingen plats. Utan det blir
+                        // alternativen att avslå (fel: klubben nekar inget) eller att låta ärendet
+                        // ligga tyst medan medlemmen väntar på ett besked som aldrig kommer.
+                        '<li><button class="dropdown-item" type="button" ' +
+                            'data-vap-action="req-completion" data-request-id="' + r.id + '">' +
+                            '<i class="bi bi-envelope-exclamation me-2"></i>Begär komplettering…' +
+                            '</button></li>' +
+                        '<li><hr class="dropdown-divider"></li>' +
                         '<li><button class="dropdown-item text-danger" type="button" ' +
                             'data-vap-action="req-reject" data-request-id="' + r.id + '">' +
                             '<i class="bi bi-x-circle me-2"></i>Avslå förfrågan</button></li>' +
@@ -1465,6 +1535,68 @@
                 '</div>' +
             '</td>' +
         '</tr>';
+    }
+
+    var _completionRequestId = 0;
+
+    /// Öppnar dialogen "begär komplettering".
+    ///
+    /// ⚠️ FÖRSLAGET KOMMER UR SAMMA KÄLLA SOM INTYGET LÄSER. `GetMyIntygReadiness` kan bara svara
+    /// för den INLOGGADE medlemmen, så här används underlaget vi redan har på skärmen: rutan om
+    /// saknade registerfält (`#aiMissingFields`) fylls när ärendet öppnas. Ett förslag som gissade
+    /// vore värre än inget — det är klubben som skriver texten och medlemmen som ska förstå den.
+    ///
+    /// ⚠️ INLINE, aldrig `prompt()`. Skälet ska gå att läsa och rätta innan det skickas, och en
+    /// blockerande dialog har redan en gång rapporterats som att "fliken frös". Samma regel som
+    /// avslaget följer.
+    function openCompletionDialog(requestId) {
+        _completionRequestId = Number(requestId) || 0;
+        var req = ((reqState && reqState.requests) || [])
+            .find(function (x) { return String(x.id) === String(requestId); });
+
+        var who = document.getElementById('fiCompWho');
+        if (who) who.textContent = req
+            ? (req.memberName || ('Medlem ' + req.memberId))
+            : 'medlemmen';
+
+        var ta = document.getElementById('fiCompNote');
+        if (ta) ta.value = req && req.status === 'UnderBehandling' && req.handlerNote
+            // Redan begärt en gång: visa vad som begärdes, så texten kan fyllas på i stället för
+            // att skrivas om från noll.
+            ? req.handlerNote
+            : '';
+
+        var err = document.getElementById('fiCompError');
+        if (err) { err.textContent = ''; err.classList.add('d-none'); }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fiCompModal')).show();
+    }
+
+    /// ⚠️ KVITTOT FÖLJER UTFALLET. `notified` är faktiskt skickat — gick mejlet inte fram är
+    /// klubben den enda som kan nå medlemmen, och de måste få veta det i stället för ett "klart".
+    async function sendCompletionRequest() {
+        var ta = document.getElementById('fiCompNote');
+        var err = document.getElementById('fiCompError');
+        var note = (ta.value || '').trim();
+
+        if (!note) {
+            err.textContent = 'Skriv vad som saknas — medlemmen ska kunna se vad hen ska komplettera.';
+            err.classList.remove('d-none');
+            return;
+        }
+
+        var j = await post('/umbraco/surface/FirearmAdmin/RequestIntygCompletion', null,
+            { clubId: vapClubId(), requestId: _completionRequestId, note: note });
+
+        if (!j.success) {
+            err.textContent = j.message || 'Kunde inte skicka.';
+            err.classList.remove('d-none');
+            return;
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fiCompModal')).hide();
+        await loadRequests();
+        alert(j.message);
     }
 
     /// Vägen till det utfärdade dokumentet — den enda åtgärd en behandlad rad bär.
