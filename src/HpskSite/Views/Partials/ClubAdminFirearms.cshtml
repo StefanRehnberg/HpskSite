@@ -124,6 +124,18 @@
                         <i class="bi bi-pencil me-2"></i>Skriv ett intyg utan förfrågan
                     </button>
                 </li>
+                <li>
+                    @*
+                        Påminnelsen. ⚠️ `d-none` tills det FINNS något att påminna om — en menypost
+                        som svarar "inget att göra" är en kontroll som inte gör något. Antalet
+                        skrivs in av `renderRequests()`.
+                    *@
+                    <button class="dropdown-item d-none" type="button" data-vap-action="req-remind"
+                            id="fiRemindItem">
+                        <i class="bi bi-bell me-2"></i>Påminn de ansvariga
+                        <span class="text-muted" id="fiRemindCount"></span>
+                    </button>
+                </li>
                 <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Inställningar</h6></li>
                 <li>
@@ -151,7 +163,10 @@
                 <span class="badge bg-dark ms-2" id="fiPendingCount">0</span>
             </h6>
         </div>
-        <div class="card-body p-0">
+        @* ⚠️ INTE `p-0`. Med `p-0` låg tabellens rader direkt an mot den gula ramens innersida och
+           såg inklämda ut. Kortet behåller sin normala inre marginal; tabellen behåller `mb-0` så
+           den inte lägger till en extra botten under sista raden. *@
+        <div class="card-body">
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0">
                     <thead>
@@ -172,9 +187,11 @@
             <strong><i class="bi bi-clock-history me-2"></i>Behandlade förfrågningar</strong>
             <span class="small text-muted" id="fiHandledCount"></span>
         </div>
-        <div class="card-body p-0">
+        @* ⚠️ Samma inre marginal som kortet ovanför. Två intilliggande tabeller där den ena är
+           flush mot ramen och den andra inte läser som ett fel, inte som två avsikter. *@
+        <div class="card-body">
             <div id="vapReqBody">
-                <div class="text-muted small p-3">Laddar…</div>
+                <div class="text-muted small">Laddar…</div>
             </div>
         </div>
     </div>
@@ -632,6 +649,31 @@
 
     var state = null;
 
+    /// Rälsknappens två indikatorer — EN funktion, med flit.
+    ///
+    /// ⚠️⚠️ TVÅ RENDERARE RÖR SAMMA PLATS, OCH DE HÄMTAR PARALLELLT. Behörighetsläget (`state`)
+    /// och förfrågningarna (`reqState`) kommer från två oberoende anrop, så vilket som svarar sist
+    /// varierar. Satte var och en sin egen indikator skulle den som svarade sist vinna — alltså en
+    /// bricka som ibland syns och ibland inte, av samma slag som kapplöpningen i utfärdandeskärmens
+    /// `select()`. Beslutet ligger därför HÄR och läser båda tillstånden; båda renderarna anropar
+    /// den här funktionen i stället för att röra elementen själva.
+    ///
+    /// ⚠️ De delar dessutom `ms-auto`-platsen: två element som båda trycks åt höger hamnar ovanpå
+    /// varandra. Bara ett visas, och ANTALET vinner — "någon väntar på ett intyg" är mer akut än
+    /// "ingen är utsedd", och den som ser antalet får varningen i klartext på sidan ändå.
+    function updateRailIndicators() {
+        var open = ((reqState && reqState.requests) || []).filter(function (r) { return r.isOpen; }).length;
+        var unstaffed = !!(state && (state.unstaffed || state.noBoardRegistered));
+
+        var count = document.getElementById('firearmsRailCount');
+        if (count) {
+            count.textContent = open;
+            count.classList.toggle('d-none', open === 0);
+        }
+        var warn = document.getElementById('firearmsRailWarning');
+        if (warn) warn.classList.toggle('d-none', !(unstaffed && open === 0));
+    }
+
     function render() {
         var body = document.getElementById('vapViewerBody');
         if (!body || !state) return;
@@ -678,6 +720,10 @@
         if (viewers.length === 0) {
             html += '<p class="text-muted small mb-3">Ingen är utsedd.</p>';
         } else {
+            html += '<div class="small text-muted mb-2">' +
+                    '<i class="bi bi-envelope me-1"></i>Switchen <strong>Mejl</strong> styr om ' +
+                    'personen får ett mejl när en ny förfrågan kommer in. Den är påslagen från ' +
+                    'början — den som är utsedd bör få veta att någon väntar.</div>';
             viewers.forEach(function (v) {
                 var roles = (v.roleTitles || []).join(', ');
                 html += '<div class="vap-row' + (v.isDormant ? ' vap-dormant' : '') + '">' +
@@ -704,6 +750,26 @@
                 }
 
                 html += '</div></div>';
+
+                // ── Mejl till just den här personen ────────────────────────────────────────────
+                //
+                // ⚠️ Bara för en AKTIV behörighet. En vilande (avgången) person får ingen avisering
+                // ändå, så en switch där hade beskrivit ett val som inte gäller.
+                //
+                // ⚠️ Switchen är LÅST när man inte får ändra behörigheten. Att kunna stänga av
+                // någon annans avisering utan att få röra behörigheten vore ett sätt att göra
+                // klubben tyst utan att det syns i behörighetslistan.
+                if (!v.isDormant) {
+                    var swId = 'vapNotify' + v.memberId;
+                    html += '<div class="form-check form-switch mb-0 me-2" title="' +
+                            'Mejl när en ny förfrågan om föreningsintyg kommer in">' +
+                            '<input class="form-check-input" type="checkbox" role="switch" ' +
+                                'id="' + swId + '" data-vap-notify="' + v.memberId + '"' +
+                                (v.notifyEnabled ? ' checked' : '') +
+                                (state.canAssign ? '' : ' disabled') + '>' +
+                            '<label class="form-check-label small" for="' + swId + '">Mejl</label>' +
+                            '</div>';
+                }
 
                 if (state.canAssign) {
                     html += '<button type="button" class="btn btn-sm btn-outline-danger" ' +
@@ -733,8 +799,9 @@
 
         body.innerHTML = html;
 
-        var railWarn = document.getElementById('firearmsRailWarning');
-        if (railWarn) railWarn.classList.toggle('d-none', !(state.unstaffed || state.noBoardRegistered));
+        // ⚠️ Rör INTE rälsens element härifrån — se `updateRailIndicators`. Den här renderaren och
+        // förfrågningarnas hämtar parallellt, och den som skrev sist vann.
+        updateRailIndicators();
 
         // ── Behorighetslaget pa sjalva sidan ────────────────────────────────────────────────────
         //
@@ -885,6 +952,23 @@
         if (action === 'viewer-settings') {
             await load();
             new bootstrap.Modal(document.getElementById('vapViewerModal')).show();
+            return;
+        }
+
+        // Påminnelsen till de ansvariga. ⚠️ Dialogen namnger ANTALET som väntar — "skicka
+        // påminnelse?" utan antal säger inte om det är värt att störa någon för.
+        if (action === 'req-remind') {
+            var openNow = ((reqState && reqState.requests) || []).filter(function (r) { return r.isOpen; }).length;
+            if (openNow === 0) {
+                alert('Det finns inga obehandlade förfrågningar att påminna om.');
+                return;
+            }
+            if (!confirm('Skicka en påminnelse till klubbens föreningsintygsansvariga om att ' +
+                         openNow + (openNow === 1 ? ' medlem väntar' : ' medlemmar väntar') + ' på intyg?')) return;
+
+            var res = await post('/umbraco/surface/FirearmAdmin/SendIntygReminder', null,
+                { clubId: vapClubId() });
+            alert(res.success ? res.message : (res.message || 'Kunde inte skicka påminnelsen.'));
             return;
         }
 
@@ -1272,6 +1356,16 @@
             badge.classList.toggle('d-none', open.length === 0);
         }
 
+        // Påminnelseposten i Åtgärder — bara när det finns något att påminna om.
+        var remind = document.getElementById('fiRemindItem');
+        if (remind) {
+            remind.classList.toggle('d-none', open.length === 0);
+            var rc = document.getElementById('fiRemindCount');
+            if (rc) rc.textContent = open.length ? '(' + open.length + ' väntar)' : '';
+        }
+
+        updateRailIndicators();
+
         // ── Obesvarade ──────────────────────────────────────────────────────────────────────────
         var pendCard = document.getElementById('fiPendingCard');
         var pendRows = document.getElementById('fiPendingRows');
@@ -1292,7 +1386,7 @@
 
         if (done.length === 0) {
             body.innerHTML = open.length
-                ? '<p class="text-muted small mb-0 p-3">Inga behandlade förfrågningar än.</p>'
+                ? '<p class="text-muted small mb-0">Inga behandlade förfrågningar än.</p>'
                 : '<div class="text-center text-muted py-4">' +
                   '<i class="bi bi-inbox display-6 d-block mb-2"></i>' +
                   '<p class="mb-0 small">Inga förfrågningar om föreningsintyg än.</p></div>';
@@ -1411,6 +1505,34 @@
     // (Annex B:s hoisting gäller inte async), vilket redan kostat en felsökningsrunda i de två
     // samlingsfaktura-partialerna.
     window.hpskReloadIntygRequests = function () { loadRequests(); };
+
+    // Mejlswitchen per ansvarig. Egen lyssnare eftersom `change` inte bubblar genom
+    // klickdispatchern ovan.
+    //
+    // ⚠️ Rullas TILLBAKA när servern inte sparade. En switch som står kvar i sitt nya läge efter
+    // ett misslyckat sparande är det tystaste felet av alla — nästa gång sidan laddas har den
+    // hoppat tillbaka, och ingen vet varför.
+    document.addEventListener('change', async function (ev) {
+        var sw = ev.target;
+        if (!sw || !sw.getAttribute || !sw.getAttribute('data-vap-notify')) return;
+
+        var memberId = sw.getAttribute('data-vap-notify');
+        var want = sw.checked;
+        sw.disabled = true;
+        try {
+            var res = await post('/umbraco/surface/FirearmAdmin/SetIntygNotifySetting', null,
+                { clubId: vapClubId(), memberId: memberId, enabled: want ? '1' : '0' });
+            if (!res.success) {
+                sw.checked = !want;
+                alert(res.message || 'Kunde inte spara inställningen.');
+            }
+        } catch (e) {
+            sw.checked = !want;
+            alert('Ett fel uppstod.');
+        } finally {
+            sw.disabled = false;
+        }
+    });
 
     // Utfärdandeskärmens notis "den här medlemmen har redan ett ärende" behöver LISTANS bild av
     // förfrågan (medlemmens meddelande, inkomstdatum, typ). Den lilla endpointen skärmen själv

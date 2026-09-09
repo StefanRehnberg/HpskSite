@@ -95,6 +95,7 @@ namespace HpskSite.Controllers
             try
             {
                 var viewers = _firearmAuth.GetViewers(clubId);
+                var notifySettings = _intygNotifications.GetNotifySettings(clubId);
                 var candidates = _firearmAuth.GetBoardCandidates(clubId);
                 var canAssign = await _firearmAuth.CanAssignViewersAsync(clubId);
                 var activeCount = viewers.Count(v => !v.IsDormant);
@@ -120,10 +121,13 @@ namespace HpskSite.Controllers
                     // knappen låst" finns på skärmen.
                     needsSiteAdminToAssign = !canAssign && candidates.Count > 0,
 
+                    // ⚠️ `notifyEnabled` speglar mejlinställningen. Frånvaro av rad = PÅ, så en
+                    // nyutsedd person syns som påslagen utan att någon behövt röra något.
                     viewers = viewers.Select(v => new
                     {
                         v.MemberId, v.Name, v.IsDormant, v.TermExpired,
                         v.TermEndsDate, roleTitles = v.RoleTitles,
+                        notifyEnabled = !notifySettings.TryGetValue(v.MemberId, out var on) || on,
                     }),
                     candidates = candidates.Select(c => new
                     {
@@ -506,7 +510,8 @@ namespace HpskSite.Controllers
         /// <summary>Klubbens statusändring på en förfrågan.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SetIntygRequestStatus(int clubId, int requestId, string status, string? note)
+        public async Task<IActionResult> SetIntygRequestStatus(
+            int clubId, int requestId, string status, string? note, string? notifyMember)
         {
             if (!await _adminAuth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
@@ -539,17 +544,113 @@ namespace HpskSite.Controllers
 
             // Avslaget ska medlemmen få veta, med skälet. Ett avslag som bara syns för klubben blir
             // ett supportärende, och medlemmen väntar på ett besked som aldrig kommer.
+            //
+            // ⚠️ VALET LIGGER HOS DEN SOM AVSLÅR (Stefans begäran 2026-09-09), men standardläget är
+            // JA: `notifyMember` är en STRÄNG just för att en omarkerad kryssruta inte skickas alls
+            // av FormData — en `bool` hade blivit `false`, alltså tyst tystnad, för varje anropare
+            // som inte känner till fältet. Utelämnat värde = skicka.
+            //
+            // ⚠️ Ett avslag UTAN besked lämnar medlemmen utan förklaring och utan väg vidare, vilket
+            // är exakt det supportärende skälkravet finns för att undvika. Kryssrutan i
+            // gränssnittet är därför förkryssad och säger vad ett nej innebär.
+            bool notified = false;
+            bool notifyWanted = false;
             if (string.Equals(status?.Trim(), ForeningsintygRequestStatus.Avslagen, StringComparison.Ordinal))
             {
-                req.FirearmAlias ??= _firearms.GetById(req.FirearmId)?.Alias;
-                await _intygNotifications.NotifyMemberOfDecisionAsync(req, issued: false, note: note);
+                notifyWanted = IsTrueFlag(notifyMember);
+                // ⚠️ FAKTISKT SKICKAT, inte "bads om". Se ForeningsintygController.
+                if (IsTrueFlag(notifyMember))
+                {
+                    req.FirearmAlias ??= _firearms.GetById(req.FirearmId)?.Alias;
+                    notified = await _intygNotifications
+                        .NotifyMemberOfDecisionAsync(req, issued: false, note: note);
+                }
             }
 
             return Json(new
             {
                 success = true,
                 message = "Status ändrad.",
+                notifiedMember = notified,
+                notifyRequested = notifyWanted,
                 openCount = _requests.CountOpenForClub(clubId)
+            });
+        }
+
+        /// <summary>
+        /// Utelämnat värde betyder JA. Se kommentaren i <see cref="SetIntygRequestStatus"/>.
+        ///
+        /// <para><b>⚠️ Godtar "1", "true" och "on".</b> ASP.NET Cores bool-bindning godtar bara
+        /// "true"/"false" — "1" faller tillbaka på default. Den fällan kostade en runda på
+        /// klubbvapnens <c>writeDetails</c>, där de krypterade uppgifterna aldrig skrevs medan
+        /// sparningen rapporterade lyckat.</para>
+        /// </summary>
+        private static bool IsTrueFlag(string? v)
+        {
+            if (string.IsNullOrWhiteSpace(v)) return true;
+            var t = v.Trim();
+            return t.Equals("1", StringComparison.Ordinal)
+                || t.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || t.Equals("on", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Slår på eller av mejl till EN föreningsintygsansvarig när en ny förfrågan kommer in.
+        ///
+        /// <para><b>Grinden är densamma som för att UTSE någon</b> — klubbadmin som också sitter i
+        /// styrelsen. Att låta vem som helst med klubbadmin stänga av någon annans avisering vore
+        /// att kunna göra klubben tyst utan att röra behörigheten.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetIntygNotifySetting(int clubId, int memberId, string? enabled)
+        {
+            if (clubId <= 0 || memberId <= 0)
+                return Json(new { success = false, message = "Ogiltig begäran" });
+
+            if (!await _firearmAuth.CanAssignViewersAsync(clubId))
+                return Json(new { success = false, message = "Bara en klubbadministratör som också sitter i klubbens styrelse kan ändra det här." });
+
+            // ⚠️ Bara den som FAKTISKT är utsedd kan ha en inställning. Utan kontrollen kunde en rad
+            // skrivas för vem som helst, och tabellen sluta beskriva verkligheten.
+            if (!_firearmAuth.GetViewers(clubId).Any(v => v.MemberId == memberId && !v.IsDormant))
+                return Json(new { success = false, message = "Personen är inte utsedd till föreningsintygsansvarig." });
+
+            var on = IsTrueFlag(enabled);
+            var actor = await CurrentMemberIdAsync();
+            var err = _intygNotifications.SetNotify(clubId, memberId, on, actor);
+
+            return err is null
+                ? Json(new { success = true, enabled = on })
+                : Json(new { success = false, message = err });
+        }
+
+        /// <summary>
+        /// Påminner klubbens ansvariga om obehandlade förfrågningar.
+        ///
+        /// <para><b>Grinden är den vanliga klubbadmingrinden</b>, inte styrelsegrinden: att påminna
+        /// är inget beslut och ändrar ingen behörighet — det är att peta någon på axeln.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendIntygReminder(int clubId)
+        {
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltig klubb" });
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var open = _requests.GetForClub(clubId, openOnly: true);
+            var (sent, error) = await _intygNotifications.SendPendingReminderAsync(clubId, open);
+
+            if (error is not null) return Json(new { success = false, message = error });
+
+            return Json(new
+            {
+                success = true,
+                sent,
+                message = sent == 1
+                    ? "Påminnelse skickad till 1 person."
+                    : $"Påminnelse skickad till {sent} personer."
             });
         }
 

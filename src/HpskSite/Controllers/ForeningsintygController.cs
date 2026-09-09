@@ -356,6 +356,7 @@ namespace HpskSite.Controllers
                 // annan medlems ärende — och medlemmen skulle få ett besked om ett intyg som inte
                 // gäller hen.
                 bool requestClosed = false;
+                bool notifiedMember = false;
                 if (req.RequestId > 0)
                 {
                     var openRequest = _firearmRequests.GetById(req.RequestId);
@@ -375,8 +376,19 @@ namespace HpskSite.Controllers
                         if (statusError is null)
                         {
                             requestClosed = true;
-                            openRequest.FirearmAlias ??= _firearms.GetById(openRequest.FirearmId)?.Alias;
-                            await _intygNotifications.NotifyMemberOfDecisionAsync(openRequest, issued: true, note: null);
+
+                            // ⚠️ Utfärdaren väljer om medlemmen ska få besked (Stefans begäran
+                            // 2026-09-09). `null` = inget val skickat = JA, alltså det tidigare
+                            // beteendet — se DTO:ns kommentar om varför fältet är nullbart.
+                            // ⚠️ `notifiedMember` ar FAKTISKT SKICKAT, inte "anvandaren bad om det".
+                            // Kvittot pa skarmen laser det har faltet, och ett kvitto som lovar ett
+                            // mejl som fastnade i SMTP ar samre an inget kvitto.
+                            if (req.ShouldNotifyMember)
+                            {
+                                openRequest.FirearmAlias ??= _firearms.GetById(openRequest.FirearmId)?.Alias;
+                                notifiedMember = await _intygNotifications
+                                    .NotifyMemberOfDecisionAsync(openRequest, issued: true, note: null);
+                            }
                         }
                         else
                         {
@@ -395,6 +407,11 @@ namespace HpskSite.Controllers
                     success = true,
                     message = "Föreningsintyget är utfärdat.",
                     requestClosed,
+                    notifiedMember,
+                    // ⚠️ BADA behovs pa skarmen. Utan `notifyRequested` gav ett valt-bort mejl och
+                    // ett mejl som fastnade i SMTP samma text, och utfardaren kunde inte veta att
+                    // hen behovde meddela medlemmen pa annat satt.
+                    notifyRequested = req.ShouldNotifyMember,
                     data = new { entry.Id, printUrl = $"/foreningsintyg/{entry.Id}" }
                 });
             }

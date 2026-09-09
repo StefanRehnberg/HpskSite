@@ -44,6 +44,38 @@ namespace HpskSite.Models
         /// </summary>
         public int RequestId { get; set; }
 
+        /// <summary>
+        /// Ska medlemmen få ett mejl om att intyget är utfärdat? Utfärdaren väljer per gång.
+        ///
+        /// <para><b>⚠️⚠️ STRÄNG OCH INTE `bool?` — OCH DET ÄR TREDJE GÅNGEN DEN FÄLLAN SLÅR TILL I
+        /// DEN HÄR KODBASEN.</b> ASP.NET Cores bool-bindning godtar bara "true"/"false"; <b>"0" och
+        /// "1" binder INTE</b> utan faller tillbaka på default. Med en `bool?` blev ett urkryssat
+        /// val alltså `null`, som tolkas som JA — så mejlet gick ut ändå och kvittot påstod att
+        /// medlemmen fått besked. Mätt i webbläsaren 2026-09-09.</para>
+        ///
+        /// <para>Samma fälla kostade en runda på klubbvapnens <c>writeDetails</c> (där de krypterade
+        /// uppgifterna aldrig skrevs medan sparningen rapporterade lyckat) och är dokumenterad i
+        /// CLAUDE.md. <b>Skicka aldrig "1"/"0" till en bool-parameter.</b></para>
+        ///
+        /// <para><b>Utelämnat värde betyder JA</b>, alltså det beteende som gällde innan valet
+        /// fanns: en omarkerad kryssruta skickas inte alls av FormData, och en äldre klient som inte
+        /// känner till fältet ska inte tysta beskedet till medlemmen.</para>
+        /// </summary>
+        public string? NotifyMember { get; set; }
+
+        /// <summary>Tolkningen av <see cref="NotifyMember"/>. Tomt/utelämnat = ja.</summary>
+        public bool ShouldNotifyMember => IsTrueFlag(NotifyMember);
+
+        /// <summary>Godtar "1", "true" och "on". Tomt eller null = true.</summary>
+        internal static bool IsTrueFlag(string? v)
+        {
+            if (string.IsNullOrWhiteSpace(v)) return true;
+            var t = v.Trim();
+            return t.Equals("1", StringComparison.Ordinal)
+                || t.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || t.Equals("on", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Loggradens ändamål. Tomt blir "Vapenlicens".</summary>
         public string? Purpose { get; set; }
 

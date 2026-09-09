@@ -5634,6 +5634,97 @@ teckenfel**. Reparerades genom att kopiera värdet ur rad 52 i SQL.
 → **full ombyggnad**; uppdelningen av ytorna är **enbart vyer** och kan fildeployas.
 **Fildeploy av KB:** `foreningsintyg.md`, `aktivitetssammanstallning.md`, `vapen-klubbadmin.md`.
 
+### Föreningsintygssidan: väntande över tabell, aviseringar per person (2026-09-09, tredje omgången)
+
+Stefans genomgång gav sex punkter. Fem byggda rakt av, en nyanserad — och verifieringen i webbläsaren
+hittade **tre fel som inte fanns i uppdragslistan**.
+
+**1. Gula kortet hade ingen marginal.** `card-body p-0` la tabellens rader an mot ramens innersida.
+Båda korten (obesvarade + behandlade) har nu normal inre marginal; två intilliggande tabeller där
+den ena är flush och den andra inte läser som ett fel, inte som två avsikter.
+
+**2. Antalet obesvarade står i vänstermenyn** (`#firearmsRailCount`). Utan den syns arbetet bara om
+man redan öppnat fliken, vilket upprepar ursprungsfelet en nivå upp.
+- ⚠️⚠️ **`updateRailIndicators()` ÄR EN FUNKTION, med flit.** Behörighetsläget (`state`) och
+  förfrågningarna (`reqState`) hämtas av två oberoende anrop, så vilket som svarar sist varierar.
+  Satte var renderare sin egen indikator vann den som skrev sist — en bricka som ibland syns. Samma
+  kapplöpningsform som `select()` i utfärdandeskärmen.
+- De delar `ms-auto`-platsen, så bara EN visas: **antalet vinner** över varningstriangeln. "Någon
+  väntar" är mer akut än "ingen är utsedd", och den som ser antalet får varningen i klartext på sidan.
+
+**3. Mejl per ansvarig** — `ForeningsintygNotifySetting(ClubId, MemberId, Enabled)`, switch per rad i
+behörighetsmodalen.
+- ⚠️⚠️ **FRÅNVARO AV RAD BETYDER MEJLA.** Tabellen lagrar bara avvikelser. Vore standardläget
+  "mejla inte" skulle en nyutsedd person TYST gå miste om aviseringen — precis det fel hela det här
+  arbetet handlar om. Läsningen sväljer sina egna fel och svarar "mejla": en trasig tabell ska ge
+  för många mejl, aldrig för få.
+- ⚠️ Inställningen **filtrerar** mottagarlistan, den ersätter den inte. Grunden är alltid "utsedd och
+  inte vilande", så en kvarglömd rad kan inte ge en avgången ledamot mejl.
+- ⚠️ **Fallbacken till klubbens kontaktadress tystas ALDRIG av inställningen** — inte ens när alla
+  utsedda stängt av sitt mejl. Annars kunde en klubb av misstag göra sig helt onåbar för förfrågningar.
+- Grinden är densamma som för att UTSE någon (klubbadmin + styrelseuppdrag). Att kunna stänga av
+  någon annans avisering utan att få röra behörigheten vore att göra klubben tyst i smyg.
+
+**4. Påminnelse** — `SendIntygReminder`, menyval i Åtgärder som räknar ("Påminn de ansvariga (2
+väntar)") och göms vid noll.
+- **ETT mejl som räknar, inte N som upprepar.** Begäran var "skicka mailen på nytt", men fem likadana
+  brev om fem ärenden är sämre än ett som säger antalet och åldern på det äldsta — och den som
+  ignorerat ett brev ignorerar fem.
+
+**5. Avisera medlemmen? Ett val vid både utfärdande och avslag.** Förkryssat; avslagets etikett säger
+vad ett nej innebär, eftersom ett avslag utan besked lämnar medlemmen utan väg vidare.
+
+**6. ⚠️ Blanketten ligger nu FÖRST på utfärdandeskärmen, aktiviteten hopfälld under.** Rapporten:
+*"Gösta ser vapengruppsknapparna och tror att han ska klicka på dem och fattar ingenting"* — och han
+har rätt, filterknapparna är ett utforskningsverktyg, inte ett steg i uppgiften.
+- **Förslaget att ta bort aktiviteten helt avvisades, medvetet.** Kryssen för **5 § och 6 §** är ett
+  juridiskt intygande om just de siffrorna, och blankettens egen underlagsrad (`#aiEvidenceHint`)
+  matas av SAMMA hämtning (`loadActivity` → `renderEvidenceHint`) — tas kortet bort tystnar den.
+  Att tvinga utfärdaren till en annan sida, minnas talen och komma tillbaka gör intygandet sämre.
+  `<details>` utan `open`: rubriken står kvar, knapparna är ett klick bort.
+
+### ⚠️⚠️ TRE FEL SOM VERIFIERINGEN HITTADE — och alla tre var samma familj: tysta lögner
+
+**a) "1"/"0" binder INTE till `bool?` — TREDJE gången den fällan slår till här.** `NotifyMember` var
+`bool?`; ett urkryssat val blev `null`, som tolkas som JA, så **mejlet gick ut ändå och kvittot
+påstod att medlemmen fått besked**. Fältet är nu `string?` med `ShouldNotifyMember` /
+`IsTrueFlag` ("1"/"true"/"on"; tomt = ja). Samma fälla kostade en runda på klubbvapnens
+`writeDetails`. **Skicka aldrig "1"/"0" till en bool-parameter.**
+
+**b) Kryssrutan LÄCKTE mellan ärenden.** `resetIssueForm` nollställer `ISSUE_CHECKS`, men
+`fiNotifyMember` ligger medvetet utanför den kartan (den nollställer till FALSE — ett förkryssat
+juridiskt intygande är precis vad den inte får göra). Följden: kryssade utfärdaren av för EN medlem
+slutade hen **tyst avisera alla framtida**. `resetIssueForm` sätter nu `fiNotifyMember` och
+`aiRejectNotify` till TRUE explicit.
+
+**c) ⚠️⚠️ YTAN SA "PÅMINNELSE SKICKAD TILL 1 PERSON" MEDAN LOGGEN SA "Failed to send email".**
+`EmailService`s egna metoder returnerade `Task` och kastade bort `SendEmailAsync`s `bool`. Det är
+ordagrant den lögn filens egen dokumentation varnar för: *"Assuming success here is what made
+Betalningshistorik claim 'Betalningsbekräftelse skickad' for confirmations that never went out."*
+- De tre föreningsintygsmetoderna returnerar nu `Task<bool>`, påminnelsen räknar **bara lyckade**,
+  och `NotifyMemberOfDecisionAsync` propagerar utfallet.
+- **`notifiedMember` i svaret är FAKTISKT SKICKAT**, aldrig "användaren bad om det".
+- Och svaret bär **`notifyRequested`** också, för att kvittot ska kunna skilja **tre** utfall:
+  *"medlemmen har fått ett mejl"* · *"MEJLET KUNDE INTE SKICKAS — meddela medlemmen på annat sätt"* ·
+  *"Du valde att inte meddela medlemmen"*. Utan den distinktionen såg ett mejl som fastnade ut som
+  ett val, och den enda som kunde göra något åt det fick aldrig veta.
+
+### Verifierat i webbläsaren, med återställning
+
+Marginal 16 px runt tabellen · menybricka "2" med triangeln gömd · Åtgärder-menyn (Skriv utan
+förfrågan / Påminn (2 väntar) / behörighetsinställning) · modalen 0→899×1749→0 med utse/ta-bort
+intakt · mejlswitchen av→`notifyEnabled:false`→på→`true` läst tillbaka från servern · blanketten
+(topp 783) före aktiviteten (2458), hopfälld, **vapengruppsknapparna inte synliga** · kryssrutan PÅ
+vid både första och andra ärendet · tre kvittotexter, en per utfall · påminnelsen
+*"kunde inte skickas. Kontrollera e-postinställningarna"* i dev (SMTP saknas) i stället för
+"skickad".
+
+⚠️ **`offsetParent` är INTE ett synlighetsmått för `position: fixed`** — en Bootstrap-modal ger
+alltid `null`. Mät `getBoundingClientRect()` där. Det påståendet var rött på en fungerande modal.
+
+**Operatörssteg:** kör `Migrations/create-foreningsintyg-notify-setting-table.sql` (körd i dev
+2026-09-09; **EJ körd i prod**). Adds C# → full ombyggnad.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

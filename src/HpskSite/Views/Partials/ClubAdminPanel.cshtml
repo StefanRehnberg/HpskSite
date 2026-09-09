@@ -146,6 +146,19 @@
                    `d-flex` krävs för att `ms-auto` ska trycka det åt höger. *@
                 <button class="nav-link d-flex align-items-center" id="foreningsintyg-tab" data-bs-toggle="tab" data-bs-target="#foreningsintygTab" type="button" role="tab" aria-controls="foreningsintygTab" aria-selected="false">
                     <i class="bi bi-shield-lock me-2"></i>Föreningsintyg
+                    @*
+                        ⚠️ ANTALET OBESVARADE FÖRFRÅGNINGAR, i menyn. Utan den syns arbetet bara om
+                        man redan öppnat fliken — och hela ärendet började med att ingen fick veta
+                        att en medlem väntade.
+
+                        Sätts av `renderRequests()` i `ClubAdminFirearms.cshtml`, som hämtar
+                        DIREKT vid sidladdning (inte lazy) just för att brickan ska vara sann innan
+                        någon klickat. Badgen och triangeln delar `ms-auto`-platsen: badgen får den
+                        när det finns arbete, triangeln annars — två saker som trycks åt höger
+                        samtidigt hamnar ovanpå varandra.
+                    *@
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="firearmsRailCount"
+                          title="Obesvarade förfrågningar om föreningsintyg">0</span>
                     <i class="bi bi-exclamation-triangle-fill ms-auto text-warning d-none" id="firearmsRailWarning" title="Ingen kan läsa medlemmarnas vapeninnehav"></i>
                 </button>
                 <button class="nav-link" id="traininggroups-tab" data-bs-toggle="tab" data-bs-target="#trainingGroupsTab" type="button" role="tab" aria-controls="trainingGroupsTab" aria-selected="false">

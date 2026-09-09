@@ -885,14 +885,14 @@ namespace HpskSite.Services
         /// vapnet; fabrikat, kaliber och modell är krypterade och läses genom grinden med en
         /// loggrad. Ett mejl är en okontrollerad kopia och får aldrig bära dem.</para>
         /// </summary>
-        public async Task SendForeningsintygRequestSubmittedAsync(
+        public async Task<bool> SendForeningsintygRequestSubmittedAsync(
             string toEmail, string toName, string memberName, string kindLabel,
             string firearmLabel, string clubName)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
                 _logger.LogWarning("SendForeningsintygRequestSubmittedAsync skipped — no email address for {Name}", toName);
-                return;
+                return false;
             }
 
             var subject = $"Ny förfrågan om föreningsintyg: {memberName}";
@@ -924,7 +924,74 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(toEmail, subject, body);
+            return await SendEmailAsync(toEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Remind the club's föreningsintyg handlers that requests are still waiting.
+        ///
+        /// <para><b>ETT mejl som räknar, inte N som upprepar.</b> Att skicka om varje
+        /// ursprungsmejl hade gett fem likadana brev när fem ärenden väntar — och den som redan
+        /// ignorerat ett brev ignorerar fem. Antalet, åldern på det äldsta och vilka som väntar är
+        /// vad som gör påminnelsen värd att läsa.</para>
+        ///
+        /// <para><b>⚠️ Namnen är medlemmar som väntar, inga vapenuppgifter.</b> Samma regel som
+        /// övriga mejl i det här flödet.</para>
+        /// </summary>
+        public async Task<bool> SendForeningsintygReminderAsync(
+            string toEmail, string toName, string clubName, int count,
+            DateTime oldest, List<string> memberNames)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("SendForeningsintygReminderAsync skipped — no email address for {Name}", toName);
+                return false;
+            }
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeClub = System.Web.HttpUtility.HtmlEncode(clubName);
+            var days = (int)Math.Floor((DateTime.Now - oldest).TotalDays);
+
+            var subject = count == 1
+                ? "Påminnelse: en förfrågan om föreningsintyg väntar"
+                : $"Påminnelse: {count} förfrågningar om föreningsintyg väntar";
+
+            var waitLine = days <= 0
+                ? "Den äldsta kom in idag."
+                : days == 1
+                    ? "Den äldsta har väntat <strong>1 dag</strong>."
+                    : $"Den äldsta har väntat <strong>{days} dagar</strong>.";
+
+            var list = (memberNames == null || memberNames.Count == 0)
+                ? ""
+                : "<ul>" + string.Join("", memberNames
+                        .Select(n => $"<li>{System.Web.HttpUtility.HtmlEncode(n)}</li>")) + "</ul>";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .notice {{ color: #666; font-size: 13px; margin-top: 10px; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p>{safeClub} har <strong>{count}</strong> obehandlad{(count == 1 ? "" : "e")} förfrågning{(count == 1 ? "" : "ar")}
+       om föreningsintyg. {waitLine}</p>
+    <p>Följande medlemmar väntar:</p>
+    {list}
+    <p>Logga in på pistol.nu, gå till klubbens <em>Administration</em> och välj
+       <strong>Föreningsintyg</strong> i menyn. Varje förfrågan har en knapp
+       <em>Skriv intyget</em>, som öppnar blanketten färdigt ifylld.</p>
+    <p class=""notice"">Den här påminnelsen skickades av någon i klubben. Vill du inte få mejl om
+       föreningsintyg kan du stänga av det under <em>Föreningsintyg → Åtgärder → Vem får läsa
+       medlemmarnas vapeninnehav</em>.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(toEmail, subject, body);
         }
 
         /// <summary>
@@ -933,14 +1000,14 @@ namespace HpskSite.Services
         /// <para><b>⚠️ Ett avslag måste bära sitt skäl.</b> Utan det blir avslaget ett supportärende
         /// till klubben och medlemmen har ingen väg vidare.</para>
         /// </summary>
-        public async Task SendForeningsintygRequestDecisionAsync(
+        public async Task<bool> SendForeningsintygRequestDecisionAsync(
             string toEmail, string toName, string clubName, string firearmLabel,
             bool issued, string? note)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
                 _logger.LogWarning("SendForeningsintygRequestDecisionAsync skipped — no email address for {Name}", toName);
-                return;
+                return false;
             }
 
             var safeName = System.Web.HttpUtility.HtmlEncode(toName);
@@ -979,7 +1046,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(toEmail, subject, body);
+            return await SendEmailAsync(toEmail, subject, body);
         }
 
         /// <summary>
