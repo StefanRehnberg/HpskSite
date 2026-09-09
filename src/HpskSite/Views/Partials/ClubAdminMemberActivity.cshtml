@@ -1,4 +1,4 @@
-@*
+﻿@*
     Klubbens AKTIVITETSYTA — menyvalet "Aktivitet" under Medlemmar.
 
     ⚠️⚠️ EGEN YTA SEDAN 2026-09-09, och skälet är värt att läsa innan någon slår ihop dem igen.
@@ -127,19 +127,14 @@
             </div>
 
             @*
-                Bryggan till ärendet. Den finns för att den som läser aktiviteten ibland vill agera
-                på den — men den är SEKUNDÄR och namnger vart den leder. Normalvägen till ett intyg
-                är fortfarande medlemmens egen förfrågan i inkorgen under Föreningsintyg.
+                ⚠️ HÄR LÅG EN "Skriv föreningsintyg för NN"-knapp, och den är BORTTAGEN på Stefans
+                begäran 2026-09-09. Sidan svarar på en fråga — hur aktiv är medlemmen — och ska inte
+                bära en genväg till ett annat ärende. Vägen till ett intyg är medlemmens egen
+                förfrågan i listan under **Föreningsintyg**; behöver klubben skriva ett utan
+                förfrågan finns det i den sidans Åtgärder-meny.
+
+                Lägg den inte tillbaka utan att fråga.
             *@
-            <div class="d-flex flex-wrap align-items-center gap-2">
-                <button type="button" class="btn btn-outline-primary btn-sm" id="caGoToIntyg">
-                    <i class="bi bi-shield-lock me-1"></i>Skriv föreningsintyg för
-                    <span id="caGoToIntygName"></span>
-                </button>
-                <span class="small text-muted">
-                    Öppnar Föreningsintyg med den här medlemmen förvald.
-                </span>
-            </div>
         </div>
     </div>
 </div>
@@ -261,21 +256,6 @@
                 loadActivityDays();
             });
         }
-        var go = document.getElementById('caGoToIntyg');
-        if (go && !go.dataset.wired) {
-            go.dataset.wired = '1';
-            go.addEventListener('click', function () {
-                if (!window._caMemberId) return;
-                // ⚠️ Lämnar över MEDLEMS-ID:T, inget mer. Utfärdandeskärmen läser själv fram
-                // utkastet och eventuella öppna förfrågningar — hade den här sidan skickat med
-                // uppgifter hade det varit en andra källa till samma sak.
-                if (window.hpskOpenIntygForMember) {
-                    window.hpskOpenIntygForMember(window._caMemberId);
-                } else {
-                    alert('Föreningsintygssidan kunde inte öppnas. Ladda om sidan.');
-                }
-            });
-        }
     }
 
     async function loadActivity(memberId, year) {
@@ -294,7 +274,6 @@
         document.getElementById('caDetail').classList.remove('d-none');
         document.getElementById('caMemberName').textContent = m ? fullName(m) : ('Medlem ' + memberId);
         document.getElementById('caMemberMeta').textContent = m && m.email ? m.email : '';
-        document.getElementById('caGoToIntygName').textContent = m ? fullName(m) : ('medlem ' + memberId);
 
         // ⚠️ Avataren måste sättas även när medlemmen INTE hittades i listan (m är null): annars
         // står förra medlemmens bild kvar intill det nya namnet, vilket är värre än ingen bild.

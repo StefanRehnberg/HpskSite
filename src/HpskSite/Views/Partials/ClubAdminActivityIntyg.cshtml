@@ -1178,19 +1178,10 @@
         document.getElementById('fiStepIssue').scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
-    /// Fritt läge med en medlem redan vald — bryggan från aktivitetsytans knapp
-    /// "Skriv föreningsintyg för NN".
-    window.hpskOpenIntygForMember = async function (memberId) {
-        if (!memberId) return;
-        _focusRequest = null;
-        await load();
-        setIssueMode(false);
-        showIssueStep();
-        var pick = document.getElementById('aiMemberPick');
-        if (pick) pick.value = String(memberId);
-        await select(Number(memberId));
-        document.getElementById('fiStepIssue').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
+    // ⚠️ HÄR LÅG `hpskOpenIntygForMember`, som aktivitetsytans brygga anropade. Bryggan togs
+    // bort 2026-09-09 (Stefans beslut — aktivitetssidan ska inte bära en genväg till ett annat
+    // ärende), och exporten blev därmed död kod. Behövs en brygga igen är den fem rader:
+    // `_focusRequest = null; await load(); setIssueMode(false); showIssueStep(); await select(id);`
 
     /// Tillbaka till ärendelistan. Listan läser om sig själv, så en nyss stängd förfrågan är borta
     /// när man kommer fram.
@@ -1461,7 +1452,7 @@
 
     // ⚠️ INGEN LAZY-BINDNING PÅ EN EGEN FLIK LÄNGRE. Skärmen bor i panelen `#foreningsintygTab`
     // och visas av `openIntygScreen` i ClubAdminFirearms — den anropar `hpskOpenIntygFor` /
-    // `hpskOpenIntygFree` / `hpskOpenIntygForMember`, som alla kallar `load()` själva. En
+    // `hpskOpenIntygFree`, som båda kallar `load()` själva. En
     // `shown.bs.tab`-bindning här hade dessutom hämtat medlemsregistret varje gång någon bara
     // ville läsa ärendelistan.
 })();

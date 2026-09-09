@@ -48,107 +48,136 @@
 @*
     ── STEG 1 AV FÖRENINGSINTYGSFLÖDET: ÄRENDELISTAN ──────────────────────────────────────────────
 
-    ⚠️ EN DÖRR, TVÅ STEG (omgjort 2026-09-09). Sidan bar tidigare behörighetskortet plus inkorgen,
-    och blanketten låg bakom ett ANNAT menyval ("Aktivitet"). En klubbsekreterare som letade
-    "Föreningsintyg" hittade det, klickade — och möttes av två jämnstarka knappar, "Utfärdad" och
-    "Avslå", där ingen av dem öppnade en blankett. "Utfärdad" satte bara en statusrad, så han
-    markerade ärendet klart utan att något intyg existerade och trodde att han förstört något.
+    ⚠️ EN DÖRR, TVÅ STEG. Sidan bar tidigare behörighetskortet plus inkorgen, och blanketten låg
+    bakom ett ANNAT menyval ("Aktivitet"). En klubbsekreterare som letade "Föreningsintyg" hittade
+    det, klickade — och möttes av två jämnstarka knappar, "Utfärdad" och "Avslå", där ingen av dem
+    öppnade en blankett. "Utfärdad" satte bara en statusrad, så han markerade ärendet klart utan att
+    något intyg existerade och trodde att han förstört något.
 
     Nu ligger BÅDA stegen i den här panelen:
       • `#fiStepList`  — ärendelistan (nedan)
       • `#fiStepIssue` — utfärdandeskärmen (`ClubAdminActivityIntyg`, monterad sist här)
 
-    `openIntygScreen` växlar mellan dem. **Det är ingen flikväxling** — det var det i en första
-    version, via en `d-none`-rälsknapp som bara fanns för att Bootstrap behövde något att aktivera.
-    Den knappen är borta; inkorgen och blanketten hör till samma uppgift och ligger därför i samma
-    panel. Utfärdandet stänger förfrågan, och det finns ingen knapp här som sätter "Utfärdad" —
+    `openIntygScreen` växlar mellan dem. **Det är ingen flikväxling** — det var det i en mellanversion,
+    via en `d-none`-rälsknapp som bara fanns för att Bootstrap behövde något att aktivera. Den knappen
+    är borta. Utfärdandet stänger förfrågan, och det finns ingen knapp här som sätter "Utfärdad" —
     servern vägrar det numera också (se `FirearmAdminController.SetIntygRequestStatus`).
 
-    ⚠️ AKTIVITETEN HAR ETT EGET MENYVAL (`ClubAdminMemberActivity.cshtml`). Att läsa en medlems
-    aktivitet är en egen uppgift, och en första version som gömde den bakom knappen "Skriv ett
-    intyg utan förfrågan" underkändes — en hel funktion får inte ligga bakom en knapp vars text
-    handlar om något annat.
+    ⚠️⚠️ FORMEN ÄR "VÄNTANDE ÖVER TABELL", och den är hämtad ur `UserManagement.cshtml`
+    (Väntande godkännanden) — inte påhittad här. Stefans dom 2026-09-09 om föregående version:
+    *"man möts av en massa text och/eller om där är många som väntar på intyg, en massa sektioner
+    som knuffar ner inställningar, som dessutom göms bakom en expander, inte bra."* Han hade rätt
+    på alla tre punkter:
 
-    ⚠️ Behörighetskortet ligger SIST och hopfällt. Det är något styrelsen rör en gång om året och
-    ska inte konkurrera om platsen högst upp med det dagliga arbetet — samma kritik som redan står
-    skriven längre ner i den här filen om inställningskortet mitt på klubbvapensidan.
+      1. **Texten är borta.** Förklaringen hör i kunskapsbasen och i AI-chatten, inte som en vägg
+         över arbetet. Raden som står kvar säger bara VEM som kan läsa vapenuppgifterna, vilket är
+         det enda man behöver veta innan man börjar.
+      2. **Obesvarade förfrågningar är en TABELL, inte kort.** Ett kort per ärende växer utan tak
+         och knuffar ner allt annat; en tabellrad kostar en rad oavsett antal.
+      3. **Inställningen ligger i Åtgärder-menyn, inte i en expander längst ner.** En expander under
+         en lista som växer är i praktiken osynlig. En namngiven meny är en plats man kan lära sig.
+
+    ⚠️ MEN PRIMÄRKNAPPEN STANNAR PÅ RADEN. Husregeln är *synligt = steget du står på, menyn = allt
+    annat*. På en obesvarad rad ÄR steget "Skriv intyget". Det är sidnivåns kontroller som hör i
+    menyn — aldrig radens eget nästa steg.
+
+    ⚠️ OCH VARNINGEN NÄR INGEN ÄR UTSEDD STANNAR SYNLIG (`#fiUnstaffedWarning`). Inställningen är en
+    årsfråga och hör i menyn, men är rollen OBESATT kan klubben inte utfärda något alls — då är det
+    dagens problem och inte en årsfråga. Flytta aldrig in den varningen i menyn.
 *@
 <div class="tab-pane fade" id="foreningsintygTab">
 
   @* ── STEG 1: ärendelistan ─────────────────────────────────────────────────────────────────── *@
   <div id="fiStepList">
 
-    @* ── Intygsinkorgen: ärendena, det första man ser ──────────────────────────────────────── *@
-    <div class="card mb-4">
-        <div class="card-body">
-            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
-                <div>
-                    <h5 class="card-title mb-1">
-                        <i class="bi bi-inbox text-primary me-2"></i>Föreningsintyg
-                        <span class="badge bg-primary ms-1 d-none" id="vapReqBadge">0</span>
-                    </h5>
-                    <p class="text-muted small mb-0" style="max-width:62ch;">
-                        När en medlem ska söka licens för ett vapen begär hen ett föreningsintyg av
-                        klubben. Förfrågan hamnar här, och du skriver intyget genom att öppna den.
-                    </p>
-                </div>
-                @*
-                    ⚠️ En SEKUNDÄR väg, med flit. Normalfallet är att medlemmen begär intyget, och en
-                    lika stark knapp här hade inbjudit till att gå runt förfrågan — då stängs den
-                    aldrig och medlemmen får inget besked.
-                *@
-                <button type="button" class="btn btn-outline-secondary btn-sm"
-                        data-vap-action="req-free">
-                    <i class="bi bi-pencil me-1"></i>Skriv ett intyg utan förfrågan
-                </button>
-            </div>
-            <div id="vapReqBody">
-                <div class="text-muted small">Laddar…</div>
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+        <div>
+            <h5 class="mb-1">
+                <i class="bi bi-shield-lock text-primary me-2"></i>Föreningsintyg
+                <span class="badge bg-warning text-dark ms-1 d-none" id="vapReqBadge">0</span>
+            </h5>
+            @* Vem som kan läsa vapenuppgifterna. Egen permanent rad — den syntes tidigare bara
+               när det fanns förfrågningar, alltså inte när man mest behövde den (en klubb som ska
+               börja använda funktionen har noll förfrågningar). *@
+            <div class="small text-muted" id="fiViewerLine"></div>
+        </div>
+
+        @*
+            Sidnivåns Åtgärder. Blå och stor, samma form som klubbens Medlemmar-flik och
+            Anmälningar — den agerar på HELA listan. Radernas egna menyer är små och grå, så
+            blått+stort läser som "sidan" och grått+litet som "den här raden".
+        *@
+        <div class="dropdown">
+            <button class="btn btn-primary shadow dropdown-toggle" type="button"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-sliders me-2"></i>Åtgärder
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width:280px;">
+                <li><h6 class="dropdown-header">Intyg</h6></li>
+                <li>
+                    @*
+                        ⚠️ En SEKUNDÄR väg, med flit. Normalfallet är att medlemmen begär intyget.
+                        En lika stark knapp hade inbjudit till att gå runt förfrågan — då stängs den
+                        aldrig och medlemmen får inget besked.
+                    *@
+                    <button class="dropdown-item" type="button" data-vap-action="req-free">
+                        <i class="bi bi-pencil me-2"></i>Skriv ett intyg utan förfrågan
+                    </button>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header">Inställningar</h6></li>
+                <li>
+                    <button class="dropdown-item" type="button" data-vap-action="viewer-settings">
+                        <i class="bi bi-shield-lock me-2"></i>Vem får läsa medlemmarnas vapeninnehav
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    @* ⚠️ Renderas av `render()`. Se filhuvudet: den här får inte flyttas in i menyn. *@
+    <div id="fiUnstaffedWarning" class="alert alert-warning d-none"></div>
+
+    @*
+        ── Obesvarade förfrågningar ─────────────────────────────────────────────────────────────
+        Samma form som "Väntande godkännanden" i UserManagement: gul ram, gul rubrik, mörk
+        räknarbricka. Hela kortet göms när det inte finns något obesvarat — ett tomt gult kort
+        läser som ett problem.
+    *@
+    <div class="card mb-3 border-warning d-none" id="fiPendingCard">
+        <div class="card-header bg-warning text-dark">
+            <h6 class="mb-0">
+                <i class="bi bi-inbox me-1"></i>Obesvarade förfrågningar
+                <span class="badge bg-dark ms-2" id="fiPendingCount">0</span>
+            </h6>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Inkom</th><th>Medlem</th><th>Vapen</th><th>Typ</th>
+                            <th>Förbund</th><th class="text-end"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="fiPendingRows"></tbody>
+                </table>
             </div>
         </div>
     </div>
 
-    @* ── Behörigheten: en årsinställning, hopfälld ─────────────────────────────────────────── *@
-    <details class="card mb-4" id="vapViewerCard">
-        <summary class="card-header py-2" style="cursor:pointer;list-style:none;">
-            <strong><i class="bi bi-shield-lock text-primary me-2"></i>Vem får läsa medlemmarnas
-            vapeninnehav?</strong>
-            <span class="small text-muted ms-1" id="vapViewerSummary"></span>
-        </summary>
-        <div class="card-body">
-            <h5 class="card-title d-flex align-items-center mb-3 visually-hidden">
-                Vem får läsa medlemmarnas vapeninnehav?
-            </h5>
-
-            <div class="vap-explain small mb-3">
-                <p class="mb-2">
-                    Medlemmarnas vapenuppgifter är <strong>krypterade</strong>. Bara den
-                    styrelsemedlem klubben utser här kan läsa dem, och bara för att kunna skriva ett
-                    <strong>föreningsintyg</strong> vid ny licens eller förnyelse. Ingen annan i
-                    klubben och ingen annan medlem ser något av det.
-                </p>
-                <p class="mb-2">
-                    <i class="bi bi-info-circle me-1"></i>
-                    Behörigheten kan <strong>bara ges till någon som sitter i klubbens styrelse</strong>,
-                    och den <strong>upphör automatiskt</strong> samma dag personen lämnar styrelsen.
-                    Ni behöver inte göra något då — men klubben står i det ögonblicket utan någon som
-                    kan skriva intyg, så <strong>utse en efterträdare i samma möte</strong>.
-                </p>
-                <p class="mb-0">
-                    <i class="bi bi-eye me-1"></i>
-                    Varje läsning loggas, och <strong>medlemmen ser själv vem som läst och när</strong>.
-                </p>
-            </div>
-
-            <div id="vapViewerBody">
-                <div class="text-center py-3">
-                    <div class="spinner-border spinner-border-sm" role="status">
-                        <span class="visually-hidden">Laddar…</span>
-                    </div>
-                </div>
+    @* ── Behandlade förfrågningar ────────────────────────────────────────────────────────────── *@
+    <div class="card">
+        <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <strong><i class="bi bi-clock-history me-2"></i>Behandlade förfrågningar</strong>
+            <span class="small text-muted" id="fiHandledCount"></span>
+        </div>
+        <div class="card-body p-0">
+            <div id="vapReqBody">
+                <div class="text-muted small p-3">Laddar…</div>
             </div>
         </div>
-    </details>
+    </div>
 
   </div>@* /#fiStepList *@
 
@@ -156,12 +185,62 @@
       ── STEG 2: utfärdandeskärmen ────────────────────────────────────────────────────────────────
 
       ⚠️ MONTERAD HÄR, i samma panel som listan, och inte i en egen flik. Partialen skriver ut
-      `#fiStepIssue` (hidden) själv och exporterar `hpskOpenIntygFor` / `hpskOpenIntygFree` /
-      `hpskOpenIntygForMember`. Flyttar du den till en egen panel återinför du den delning som var
-      hela felet: två skärmar för en uppgift, utan väg mellan dem.
+      `#fiStepIssue` (hidden) själv och exporterar `hpskOpenIntygFor` / `hpskOpenIntygFree`.
+      Flyttar du den till en egen panel återinför du den delning som var hela felet: två skärmar
+      för en uppgift, utan väg mellan dem.
   *@
   @await Html.PartialAsync("ClubAdminActivityIntyg")
 
+</div>
+
+@*
+    ── Behörigheten: en MODAL, öppnad ur Åtgärder ────────────────────────────────────────────────
+
+    ⚠️ Låg tidigare som ett `<details>`-kort längst ner på sidan. Det var fel av två skäl:
+    en expander under en lista som växer är i praktiken osynlig, och kortet knuffades ner av varje
+    ny förfrågan. Innehållet är oförändrat; `#vapViewerBody` behåller sitt id, så `render()` och
+    hela utse/ta-bort-flödet fungerar utan ändring.
+*@
+<div class="modal fade" id="vapViewerModal" tabindex="-1" aria-labelledby="vapViewerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="vapViewerModalLabel">
+                    <i class="bi bi-shield-lock text-primary me-2"></i>Vem får läsa medlemmarnas vapeninnehav?
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="vap-explain small mb-3">
+                    <p class="mb-2">
+                        Medlemmarnas vapenuppgifter är <strong>krypterade</strong>. Bara den
+                        styrelsemedlem klubben utser här kan läsa dem, och bara för att kunna skriva ett
+                        <strong>föreningsintyg</strong> vid ny licens eller förnyelse. Ingen annan i
+                        klubben och ingen annan medlem ser något av det.
+                    </p>
+                    <p class="mb-2">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Behörigheten kan <strong>bara ges till någon som sitter i klubbens styrelse</strong>,
+                        och den <strong>upphör automatiskt</strong> samma dag personen lämnar styrelsen.
+                        Ni behöver inte göra något då — men klubben står i det ögonblicket utan någon som
+                        kan skriva intyg, så <strong>utse en efterträdare i samma möte</strong>.
+                    </p>
+                    <p class="mb-0">
+                        <i class="bi bi-eye me-1"></i>
+                        Varje läsning loggas, och <strong>medlemmen ser själv vem som läst och när</strong>.
+                    </p>
+                </div>
+
+                <div id="vapViewerBody">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visually-hidden">Laddar…</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @* ⚠️ `vapPanel` bär klubb-id:t och måste ligga i den panel som laddas FÖRST vid sidladdning —
@@ -657,29 +736,45 @@
         var railWarn = document.getElementById('firearmsRailWarning');
         if (railWarn) railWarn.classList.toggle('d-none', !(state.unstaffed || state.noBoardRegistered));
 
-        // Sammanfattningen i den HOPFÄLLDA rubriken. ⚠️ Kortet är ett `<details>` sedan 2026-09-09,
-        // så svaret på "vem kan läsa?" måste synas UTAN att någon fäller ut det — annars är
-        // hopfällningen en gömning. Är rollen obesatt står det i klartext, med en varningsfärg:
-        // klubben kan då inte fylla i vapenuppgifterna på ett intyg.
-        // ⚠️ Fäll UT kortet när rollen är obesatt. Det är det enda läget där inställningen är
-        // dagens arbete i stället för en årsfråga — utan någon utsedd kan inget intyg skrivas, och
-        // då ska åtgärden ligga framme. Bara en gång per sidladdning, annars går kortet inte att
-        // fälla ihop medan man läser (`load()` körs om efter varje ändring).
-        var card = document.getElementById('vapViewerCard');
-        if (card && !card.dataset.autoOpened && (state.unstaffed || state.noBoardRegistered)) {
-            card.dataset.autoOpened = '1';
-            card.open = true;
+        // ── Behorighetslaget pa sjalva sidan ────────────────────────────────────────────────────
+        //
+        // Inställningen bor i Åtgärder-menyn (den ar en arsfraga), men SVARET pa "vem kan lasa?"
+        // hor pa sidan. Tva olika rader, med flit:
+        //
+        //   `#fiViewerLine`         — namnger de utsedda. Diskret, alltid dar.
+        //   `#fiUnstaffedWarning`   — ⚠️ EN VARNING, och den far ALDRIG flytta in i menyn. Ar
+        //                             rollen obesatt kan klubben inte utfarda nagot alls; da ar
+        //                             det dagens problem, inte en arsfraga, och atgarden ska
+        //                             ligga framme.
+        var active = (state.viewers || []).filter(function (v) { return !(v.IsDormant || v.isDormant); });
+        var names = active.map(function (v) { return v.Name || v.name; }).filter(Boolean);
+
+        var line = document.getElementById('fiViewerLine');
+        if (line) {
+            line.innerHTML = names.length
+                ? '<i class="bi bi-shield-lock me-1"></i>Vapenuppgifterna kan läsas av <strong>' +
+                  esc(names.join(', ')) + '</strong>.'
+                : '';
         }
 
-        var sum = document.getElementById('vapViewerSummary');
-        if (sum) {
-            var active = (state.viewers || []).filter(function (v) { return !v.IsDormant && !v.isDormant; });
-            if (!active.length) {
-                sum.className = 'small text-danger ms-1';
-                sum.textContent = '— ingen är utsedd';
+        var warn = document.getElementById('fiUnstaffedWarning');
+        if (warn) {
+            if (state.noBoardRegistered) {
+                warn.className = 'alert alert-warning';
+                warn.innerHTML = '<i class="bi bi-exclamation-triangle-fill me-2"></i>' +
+                    '<strong>Klubbens styrelse är inte registrerad</strong>, så ingen kan utses till ' +
+                    'föreningsintygsansvarig — och då kan klubben inte fylla i vapenuppgifterna på ett ' +
+                    'intyg. Lägg in styrelsen under <strong>Styrelsearbete</strong> först.';
+            } else if (state.unstaffed) {
+                warn.className = 'alert alert-warning';
+                warn.innerHTML = '<i class="bi bi-exclamation-triangle-fill me-2"></i>' +
+                    '<strong>Ingen är utsedd till föreningsintygsansvarig.</strong> Klubben kan inte ' +
+                    'fylla i vapenuppgifterna på ett föreningsintyg förrän någon är det. ' +
+                    '<button type="button" class="btn btn-sm btn-warning ms-2" ' +
+                    'data-vap-action="viewer-settings">Utse någon</button>';
             } else {
-                sum.className = 'small text-muted ms-1';
-                sum.textContent = '— ' + active.map(function (v) { return v.Name || v.name; }).join(', ');
+                warn.className = 'alert alert-warning d-none';
+                warn.innerHTML = '';
             }
         }
     }
@@ -783,6 +878,15 @@
             return;
         }
         if (action === 'req-free') { openIntygScreen(null, false); return; }
+
+        // Behörighetsinställningen som modal, öppnad ur Åtgärder ELLER ur varningsraden.
+        // ⚠️ `load()` körs om varje gång: en klubbadmin kan ha ändrat styrelsen sedan sidan
+        // laddades, och en väljare som visar en avgången ledamot är sämre än en tom väljare.
+        if (action === 'viewer-settings') {
+            await load();
+            new bootstrap.Modal(document.getElementById('vapViewerModal')).show();
+            return;
+        }
 
         if (action === 'remove') {
             var mid = btn.getAttribute('data-member-id');
@@ -1148,72 +1252,121 @@
         }
     }
 
-    /// Ärendelistan.
+    /// Ärendelistan: obesvarade som en TABELL överst, behandlade som huvudtabell.
     ///
-    /// ⚠️ ETT KORT PER ÖPPEN FÖRFRÅGAN, MED EN PRIMÄRKNAPP. Formen är vald mot den tidigare
-    /// tabellraden, som bar två jämnstarka knappar — "Utfärdad" och "Avslå". Ett sådant par läses
-    /// som ja/nej, och det var precis feltolkningen som fick en klubbsekreterare att markera ett
-    /// ärende klart utan att skriva något intyg. Nu står nästa steg i klartext på knappen.
+    /// ⚠️ FORMEN ÄR HÄMTAD UR `UserManagement.cshtml` (Väntande godkännanden), inte påhittad. Se
+    /// filhuvudet för varför korten och expandern försvann.
     ///
-    /// Behandlade ärenden fälls ihop: de är historik, och en lista som växer i oändlighet slutar
-    /// vara en lista (samma regel som valvets "visa klara i dag").
+    /// ⚠️ Obesvarade får en EGEN tabell och inte en sorterad topp i den stora. Skälet är att de
+    /// bär en åtgärd och de behandlade inte gör det — en enda tabell hade behövt en åtgärdskolumn
+    /// som är tom på nästan varje rad, vilket läser som att något saknas.
     function renderRequests() {
-        var body = document.getElementById('vapReqBody');
         var list = (reqState && reqState.requests) || [];
         var open = list.filter(function (r) { return r.isOpen; });
         var done = list.filter(function (r) { return !r.isOpen; });
 
+        // ── Räknare i rubriken ──────────────────────────────────────────────────────────────────
         var badge = document.getElementById('vapReqBadge');
         if (badge) {
             badge.textContent = open.length;
             badge.classList.toggle('d-none', open.length === 0);
         }
 
-        // ⚠️ Namnge vem som kan läsa vapenuppgifterna. Kan den inloggade inte det ska det stå
-        // här i stället för att en knapp nekas längre fram.
-        var names = (reqState && reqState.viewerNames) || [];
-        var html = names.length
-            ? '<p class="small text-muted"><i class="bi bi-shield-lock me-1"></i>Vapenuppgifterna kan ' +
-              'läsas av <strong>' + esc(names.join(', ')) + '</strong>.</p>'
-            : '<div class="alert alert-warning small">Ingen är utsedd till föreningsintygsansvarig, ' +
-              'så vapenuppgifterna kan inte läsas. Utse någon under ' +
-              '<em>Vem får läsa medlemmarnas vapeninnehav?</em> längre ner.</div>';
-
-        if (open.length === 0) {
-            html += '<div class="text-center text-muted py-4">' +
-                '<i class="bi bi-inbox display-6 d-block mb-2"></i>' +
-                '<p class="mb-0 small">Inga obehandlade förfrågningar just nu.</p></div>';
-        } else {
-            html += '<div class="list-group mb-3">';
-            open.forEach(function (r) { html += openRequestCard(r); });
-            html += '</div>';
+        // ── Obesvarade ──────────────────────────────────────────────────────────────────────────
+        var pendCard = document.getElementById('fiPendingCard');
+        var pendRows = document.getElementById('fiPendingRows');
+        var pendCount = document.getElementById('fiPendingCount');
+        if (pendCard && pendRows) {
+            // ⚠️ HELA kortet göms när inget väntar. Ett tomt gult kort läser som ett problem.
+            pendCard.classList.toggle('d-none', open.length === 0);
+            if (pendCount) pendCount.textContent = open.length;
+            pendRows.innerHTML = open.map(pendingRow).join('');
         }
 
-        if (done.length) {
-            html += '<details><summary class="small text-muted" style="cursor:pointer;">' +
-                'Behandlade förfrågningar (' + done.length + ')</summary>' +
-                '<div class="table-responsive mt-2"><table class="table table-sm align-middle">' +
-                '<thead><tr><th>Inkom</th><th>Medlem</th><th>Vapen</th><th>Status</th>' +
-                '<th>Anteckning</th></tr></thead><tbody>';
-            done.forEach(function (r) {
-                html += '<tr class="opacity-75">' +
-                    '<td class="small">' + esc(r.createdAt) + '</td>' +
-                    '<td>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</td>' +
-                    '<td class="small">' + esc(r.firearmAlias) + '</td>' +
-                    '<td>' + doneStatusCell(r) + '</td>' +
-                    '<td class="small text-muted">' + esc(r.handlerNote || '') + '</td>' +
-                    '</tr>';
-            });
-            html += '</tbody></table></div></details>';
+        // ── Behandlade ──────────────────────────────────────────────────────────────────────────
+        var body = document.getElementById('vapReqBody');
+        var handledCount = document.getElementById('fiHandledCount');
+        if (handledCount) handledCount.textContent = done.length ? done.length + ' st' : '';
+
+        if (!body) return;
+
+        if (done.length === 0) {
+            body.innerHTML = open.length
+                ? '<p class="text-muted small mb-0 p-3">Inga behandlade förfrågningar än.</p>'
+                : '<div class="text-center text-muted py-4">' +
+                  '<i class="bi bi-inbox display-6 d-block mb-2"></i>' +
+                  '<p class="mb-0 small">Inga förfrågningar om föreningsintyg än.</p></div>';
+            return;
         }
 
-        body.innerHTML = html;
+        var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
+            '<thead><tr><th>Inkom</th><th>Medlem</th><th>Vapen</th><th>Typ</th>' +
+            '<th>Status</th><th>Anteckning</th></tr></thead><tbody>';
+        done.forEach(function (r) {
+            html += '<tr>' +
+                '<td class="small text-nowrap">' + esc(r.createdAt) + '</td>' +
+                '<td>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</td>' +
+                '<td class="small">' + esc(r.firearmAlias) + '</td>' +
+                '<td class="small">' + esc(r.kindLabel) + '</td>' +
+                '<td>' + doneStatusCell(r) + '</td>' +
+                '<td class="small text-muted">' + esc(r.handlerNote || '') + '</td>' +
+                '</tr>';
+        });
+        body.innerHTML = html + '</tbody></table></div>';
+    }
+
+    /// En obesvarad förfrågan som tabellrad.
+    ///
+    /// ⚠️ PRIMÄRKNAPPEN LIGGER PÅ RADEN. Husregeln är *synligt = steget du står på, menyn = allt
+    /// annat*, och här ÄR steget "Skriv intyget". Avslaget ligger bakom radens lilla meny —
+    /// undantaget, inte hälften av valet. Ett par jämnstarka knappar ("Utfärdad"/"Avslå") var
+    /// precis den feltolkning hela ombyggnaden handlar om.
+    ///
+    /// ⚠️ Knapparna bär ett ID, aldrig medlemmens namn eller vapnets alias. Ett onclick byggt av
+    /// användartext är samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt" — och
+    /// aliaset är medlemmens eget fritextnamn på vapnet.
+    function pendingRow(r) {
+        var msg = r.memberMessage
+            ? '<div class="small text-muted fst-italic">”' + esc(r.memberMessage) + '”</div>'
+            : '';
+        return '<tr>' +
+            '<td class="small text-nowrap">' + esc(r.createdAt) + '</td>' +
+            '<td><strong>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</strong>' + msg + '</td>' +
+            '<td class="small">' + esc(r.firearmAlias) +
+            (r.firearmWeaponClass
+                ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' +
+                  esc(r.firearmWeaponClass) + '</span>'
+                : '') + '</td>' +
+            '<td class="small">' + esc(r.kindLabel) + '</td>' +
+            '<td class="small">' + esc(r.forbund) + '</td>' +
+            '<td class="text-end text-nowrap">' +
+                '<button type="button" class="btn btn-primary btn-sm me-1" ' +
+                    'data-vap-action="req-open" data-request-id="' + r.id + '">' +
+                    'Skriv intyget <i class="bi bi-arrow-right ms-1"></i></button>' +
+                // ⚠️ `data-bs-popper-config` med strategy fixed: tabellen ligger i
+                // `.table-responsive` (overflow-x:auto), som klipper en absolut positionerad meny.
+                // `data-bs-strategy` ignoreras TYST av Bootstrap. Syns bara på sista raden.
+                '<div class="dropdown d-inline-block">' +
+                    '<button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" ' +
+                        'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' ' +
+                        'aria-expanded="false" aria-label="Fler åtgärder"></button>' +
+                    '<ul class="dropdown-menu dropdown-menu-end">' +
+                        '<li><button class="dropdown-item text-danger" type="button" ' +
+                            'data-vap-action="req-reject" data-request-id="' + r.id + '">' +
+                            '<i class="bi bi-x-circle me-2"></i>Avslå förfrågan</button></li>' +
+                    '</ul>' +
+                '</div>' +
+            '</td>' +
+        '</tr>';
     }
 
     /// ⚠️ "Utfärdad" utan ett `issuedIntygId` är ett tillstånd som INTE BORDE KUNNA FINNAS — och som
     /// finns, eftersom den gamla knappen kunde sätta statusen utan att något dokument skapades. Att
     /// visa sådana rader som avklarade gömmer att medlemmen aldrig fick sitt intyg. Servern vägrar
     /// numera statusen härifrån, så nya rader kan inte hamna här.
+    ///
+    /// Verkligt fall: prod bar EN sådan rad (Torbjörn Andreasson, Falkenbergs PK, Pardini SP22,
+    /// inkom 2026-09-07, stängd 2026-09-09 utan intyg). Den återställdes för hand.
     function doneStatusCell(r) {
         if (r.status === 'Utfardad' && !r.issuedIntygId) {
             return '<span class="badge bg-warning text-dark" title="Statusen sattes med den gamla ' +
@@ -1222,47 +1375,6 @@
                    'intyg saknas</span>';
         }
         return '<span class="badge bg-secondary">' + esc(r.statusLabel) + '</span>';
-    }
-
-    /// Kortet för en öppen förfrågan.
-    ///
-    /// ⚠️ Knapparna bär ett ID, aldrig medlemmens namn eller vapnets alias. Ett onclick byggt av
-    /// användartext är samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt" — och
-    /// aliaset här är medlemmens eget fritextnamn på vapnet.
-    function openRequestCard(r) {
-        var bits = [];
-        if (r.kindLabel) bits.push(esc(r.kindLabel));
-        if (r.firearmAlias) bits.push(esc(r.firearmAlias));
-        if (r.forbund) bits.push(esc(r.forbund));
-        if (r.createdAt) bits.push('inkom ' + esc(r.createdAt));
-
-        return '<div class="list-group-item">' +
-            '<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">' +
-                '<div class="flex-grow-1" style="min-width:0;">' +
-                    '<div class="fw-semibold">' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</div>' +
-                    '<div class="small text-muted">' + bits.join(' · ') + '</div>' +
-                    (r.memberMessage
-                        ? '<div class="small text-muted fst-italic mt-1">”' + esc(r.memberMessage) + '”</div>'
-                        : '') +
-                '</div>' +
-                '<div class="d-flex align-items-center gap-1 flex-shrink-0">' +
-                    '<button type="button" class="btn btn-primary btn-sm" ' +
-                        'data-vap-action="req-open" data-request-id="' + r.id + '">' +
-                        'Skriv intyget <i class="bi bi-arrow-right ms-1"></i></button>' +
-                    '<div class="dropdown">' +
-                        '<button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" ' +
-                            'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' ' +
-                            'aria-expanded="false" aria-label="Fler åtgärder"></button>' +
-                        '<ul class="dropdown-menu dropdown-menu-end">' +
-                            '<li><button class="dropdown-item text-danger" type="button" ' +
-                                'data-vap-action="req-reject" data-request-id="' + r.id + '">' +
-                                '<i class="bi bi-x-circle me-2"></i>Avslå förfrågan' +
-                                '</button></li>' +
-                        '</ul>' +
-                    '</div>' +
-                '</div>' +
-            '</div>' +
-        '</div>';
     }
 
     /// Går till steg 2 — utfärdandeskärmen.

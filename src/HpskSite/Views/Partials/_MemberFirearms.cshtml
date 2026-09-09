@@ -1,4 +1,4 @@
-@*
+﻿@*
     Medlemmens eget vapenregister — Min sida, fliken "Vapen".
 
     ⚠️ MASKERAT SOM STANDARD, ÄVEN FÖR ÄGAREN. Två skäl, och det andra är det viktiga:
@@ -254,9 +254,22 @@
                     <select class="form-select" id="fwReqFirearm"></select>
                 </div>
 
+                @*
+                    Klubbvalet.
+
+                    ⚠️ Rullgardinen göms vid EN klubb (husets regel för enkelvalsdropdowns), men
+                    `#fwReqClubNote` namnger den valda klubben i BÅDA lägen — vem man begär av får
+                    aldrig vara otydligt på en förfrågan som leder till ett myndighetsdokument.
+
+                    ⚠️ Alternativen kommer ur medlemmens KLUBBAR, inte ur vilka klubbar som utsett
+                    en föreningsintygsansvarig. Se kommentaren vid `state.clubs` i openRequest().
+                *@
                 <div class="mb-3">
-                    <label class="form-label small" for="fwReqClub">Klubb</label>
-                    <select class="form-select" id="fwReqClub"></select>
+                    <div id="fwReqClubWrap" class="d-none">
+                        <label class="form-label small" for="fwReqClub">Vilken klubb begär du av?</label>
+                        <select class="form-select" id="fwReqClub"></select>
+                    </div>
+                    <div class="small mt-1" id="fwReqClubNote"></div>
                 </div>
 
                 <div class="mb-3">
@@ -820,23 +833,41 @@
         }).join('');
         if (!fsel.value) fsel.selectedIndex = 0;
 
-        // Klubbvaljaren: bara de klubbar medlemmen tillhor. Servern kontrollerar det anda.
-        var clubs = {};
-        (state.viewers || []).forEach(function (v) { clubs[v.clubId] = true; });
+        // ⚠️⚠️ KLUBBVALJAREN BYGGS UR `state.clubs`, ALDRIG UR `state.viewers`.
+        //
+        // Den byggdes tidigare ur `viewers`, alltsa ur de klubbar som RAKAT utse en
+        // foreningsintygsansvarig. Foljden var att en klubb utan utsedd person inte fanns i
+        // valjaren alls: en medlem i flera klubbar kunde bara begara av dem som gjort sin interna
+        // administration, och hade ingen gjort den var valjaren TOM med ett felmeddelande som var
+        // en atervandsgrand. Rapporterat av Stefan 2026-09-09.
+        //
+        // Forfragan stalls till KLUBBEN, inte till personen. Klubben kan utse nagon efter att den
+        // kommit in — och det ar precis vad serverns avisering rakner med: den mejlar klubbens
+        // KONTAKTADRESS nar ingen ar utsedd. `RequestIntyg` grindar bara pa medlemskap, sa det var
+        // enbart granssnittet som stangde dorren.
+        var clubList = state.clubs || [];
         var sel = document.getElementById('fwReqClub');
-        var ids = Object.keys(clubs);
-        if (ids.length === 0) {
-            // ⚠️ Ingen klubb har en foreningsintygsansvarig. Da finns ingen att begara av, och det
-            // ska sagas i klartext i stallet for att erbjuda en tom valjare.
+        var wrap = document.getElementById('fwReqClubWrap');
+
+        if (clubList.length === 0) {
+            // Medlemmen tillhor ingen klubb. Det ar ett ANNAT problem an "ingen ar utsedd" — sag
+            // vilket, sa medlemmen vet vem hen ska prata med.
             sel.innerHTML = '';
-            showReqError('Ingen av dina klubbar har utsett n\u00e5gon f\u00f6reningsintygsansvarig \u00e4n. ' +
-                'Prata med styrelsen \u2014 de utser en under Klubbadministration \u2192 Vapen & l\u00e5nevapen.');
+            showReqError('Du är inte registrerad i någon klubb, så det finns ingen att ' +
+                'begära intyget av. Kontakta din klubb så kopplar de ditt medlemskap.');
         } else {
-            sel.innerHTML = ids.map(function (cid) {
-                var name = (state.viewers.find(function (v) { return String(v.clubId) === String(cid); }) || {}).clubName;
-                return '<option value="' + cid + '">' + esc(name || ('Klubb ' + cid)) + '</option>';
+            sel.innerHTML = clubList.map(function (c) {
+                return '<option value="' + esc(c.id) + '"' + (c.isPrimary ? ' selected' : '') + '>' +
+                    esc(c.name) + '</option>';
             }).join('');
+            if (!sel.value) sel.selectedIndex = 0;
         }
+
+        // ⚠️ Sjalva rullgardinen visas fran TVA klubbar och uppat (husets regel for enkelvals-
+        // dropdowns, samma som "Tavlar for"). Men VILKEN klubb det galler far aldrig bli otydligt,
+        // sa raden under namnger den valda klubben i bada lagen.
+        if (wrap) wrap.classList.toggle('d-none', clubList.length < 2);
+        syncReqClub();
 
         var fb = document.getElementById('fwReqForbund');
         fb.innerHTML = ((state.options || {}).forbund || []).map(function (x) {
@@ -846,6 +877,28 @@
 
         syncReqFirearm();
         bootstrap.Modal.getOrCreateInstance(document.getElementById('fwReqModal')).show();
+    }
+
+    /// Namnger den valda klubben, och säger om den utsett någon som kan läsa vapenuppgifterna.
+    ///
+    /// ⚠️ INFORMATION, ALDRIG EN GRIND. Att klubben inte utsett någon hindrar inte förfrågan —
+    /// den går till klubbens kontaktadress, och styrelsen kan utse någon när ärendet kommit in.
+    /// Att blockera här var precis den återvändsgränd som fanns innan 2026-09-09.
+    function syncReqClub() {
+        var sel = document.getElementById('fwReqClub');
+        var note = document.getElementById('fwReqClubNote');
+        if (!sel || !note) return;
+
+        var c = (state.clubs || []).find(function (x) { return String(x.id) === String(sel.value); });
+        if (!c) { note.innerHTML = ''; return; }
+
+        note.innerHTML = c.hasViewer
+            ? '<span class="text-muted"><i class="bi bi-shield-check me-1"></i>Förfrågan går till ' +
+              '<strong>' + esc(c.name) + '</strong>, som har en utsedd föreningsintygsansvarig.</span>'
+            : '<span class="text-warning-emphasis"><i class="bi bi-info-circle me-1"></i>Förfrågan går ' +
+              'till <strong>' + esc(c.name) + '</strong>. Klubben har ännu ingen utsedd ' +
+              'föreningsintygsansvarig, så den går till klubbens kontaktadress — styrelsen kan utse ' +
+              'någon när den kommit in.</span>';
     }
 
     /// Speglar det VALDA vapnet i de fält som beror på det. Körs vid öppning OCH vid byte — annars
@@ -915,6 +968,9 @@
     });
     document.addEventListener('change', function (ev) {
         if (ev.target && ev.target.id === 'fwReqFirearm') syncReqFirearm();
+        // ⚠️ Klubbytet MÅSTE spegla sig i noten. Utan detta står förra klubbens namn — och
+        // "utsedd/ej utsedd" — kvar under en väljare som pekar på en annan klubb.
+        if (ev.target && ev.target.id === 'fwReqClub') syncReqClub();
     });
 
     async function showLog() {

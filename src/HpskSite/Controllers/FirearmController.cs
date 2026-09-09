@@ -112,12 +112,43 @@ namespace HpskSite.Controllers
                 {
                     // Klubbnamnet följer med: raden namnger vem som kan läsa, och "Anna Svensson
                     // (Vetlanda PK)" säger något helt annat än "Anna Svensson" för en medlem som
-                    // tillhör två klubbar. Samma lista driver dessutom klubbväljaren i
-                    // intygsförfrågan, som behöver namnet.
+                    // tillhör två klubbar.
                     var clubName = _clubService.GetClubNameById(clubId);
                     foreach (var v in _auth.GetViewers(clubId).Where(x => !x.IsDormant))
                         viewers.Add(new { v.MemberId, v.Name, clubId, clubName });
                 }
+
+                // ── Klubbarna medlemmen kan BEGÄRA ett föreningsintyg av ────────────────────────
+                //
+                // ⚠️⚠️ EGEN LISTA, OCH DEN FÅR ALDRIG BYGGAS UR `viewers` IGEN. Klubbväljaren i
+                // intygsförfrågan gjorde just det, och följden var att en klubb som ännu inte utsett
+                // någon föreningsintygsansvarig **inte fanns i väljaren alls**. En medlem i tre
+                // klubbar där bara en utsett någon kunde alltså bara begära av den enda — och hade
+                // ingen utsett någon var väljaren tom med ett meddelande som var en återvändsgränd.
+                //
+                // Det är fel av två skäl:
+                //   1. **Förfrågan ställs till KLUBBEN, inte till den utsedda personen.** Klubben kan
+                //      utse någon efter att förfrågan kommit in — och det är precis vad den gör:
+                //      `ForeningsintygNotificationService` mejlar klubbens KONTAKTADRESS när ingen är
+                //      utsedd, "eftersom det är just då ingen kan hantera ärendet". Att blockera
+                //      förfrågan motsäger den aviseringen.
+                //   2. `RequestIntyg` grindar bara på MEDLEMSKAP, aldrig på att en läsare finns. Det
+                //      var alltså enbart gränssnittet som stängde dörren.
+                //
+                // Källan är `MemberClubService.GetClubOptions` — husets enda svar på "vilka klubbar
+                // tillhör den här medlemmen" (primär först, klubbar vars nod inte resolvar släpps).
+                //
+                // `hasViewer` följer med som INFORMATION, aldrig som en grind: väljaren kan säga att
+                // klubben ännu inte utsett någon, utan att hindra förfrågan.
+                var clubs = _memberClubs.GetClubOptions(member)
+                    .Select(o => new
+                    {
+                        o.Id,
+                        o.Name,
+                        o.IsPrimary,
+                        hasViewer = _auth.GetViewers(o.Id).Any(x => !x.IsDormant),
+                    })
+                    .ToList();
 
                 return Json(new
                 {
@@ -128,6 +159,7 @@ namespace HpskSite.Controllers
                     // intygsförfrågningar) utan att först behöva slå upp vem den inloggade är.
                     memberId,
                     viewers,
+                    clubs,
                     lastForeignRead = _accessLog.LastForeignReadFor(memberId)?.ToString("yyyy-MM-dd HH:mm"),
                     // Valmängderna kommer ur konstanterna, aldrig ur en lista i vyn — annars kan
                     // formuläret erbjuda ett förbund intygets ruta inte känner igen.
