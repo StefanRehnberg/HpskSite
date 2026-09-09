@@ -390,6 +390,19 @@ namespace HpskSite.Controllers
 
                 int clubId = req.ClubId > 0 ? req.ClubId : PrimaryClubIdOf(req.MemberId);
 
+                // ⚠️⚠️ KLUBBEN MASTE VARA EN AV MEDLEMMENS. Utan kontrollen kan ett intyg utfardas
+                // i en forenings namn for nagon som inte ar medlem dar — och det var precis vad som
+                // hande i prod 2026-09-09: medlemmens `primaryClubId` pekade pa en klubb (2614) som
+                // inte ens fanns i hens `memberClubIDs`, och intyget fick den klubbens
+                // organisationsnummer och foreningsnamn.
+                if (clubId <= 0 || !_memberClubs.IsMemberOfClub(member, clubId))
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Intyget kan inte utfärdas: medlemmen är inte registrerad i den " +
+                                  "klubben. Kontrollera medlemskapet under Medlemmar."
+                    });
+
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 bool isClubAdmin = clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId);
                 if (!isSiteAdmin && !isClubAdmin)
@@ -429,14 +442,26 @@ namespace HpskSite.Controllers
                 // gäller hen.
                 bool requestClosed = false;
                 bool notifiedMember = false;
+                bool requestMismatch = false;
                 if (req.RequestId > 0)
                 {
                     var openRequest = _firearmRequests.GetById(req.RequestId);
                     if (openRequest is null || openRequest.MemberId != req.MemberId || openRequest.ClubId != clubId)
                     {
-                        _logger.LogWarning(
-                            "Föreningsintyg {Id}: förfrågan {RequestId} matchar inte medlem {MemberId}/klubb {ClubId} — lämnas orörd.",
-                            entry.Id, req.RequestId, req.MemberId, clubId);
+                        // ⚠️⚠️ TYSTNADEN HAR VAR SJALV ETT FEL. Fram till 2026-09-09 loggades bara
+                        // en varning och `requestClosed: false` returnerades — och i prod betydde
+                        // det att ett intyg utfardades i FEL KLUBBS namn medan forfragan lag kvar
+                        // som obehandlad. Anvandaren sag en gron ruta och trodde att allt var klart.
+                        //
+                        // Kontrollen sitter EFTER att intyget sparats, sa den kan inte vagra
+                        // utfardandet — men den maste skrika. Loggraden bar nu bada klubbarna, och
+                        // svaret sager i klartext vad som inte hande.
+                        _logger.LogError(
+                            "Föreningsintyg {Id}: förfrågan {RequestId} (medlem {ReqMember}, klubb {ReqClub}) " +
+                            "matchar inte utfärdandet (medlem {MemberId}, klubb {ClubId}) — lämnas orörd.",
+                            entry.Id, req.RequestId, openRequest?.MemberId, openRequest?.ClubId,
+                            req.MemberId, clubId);
+                        requestMismatch = true;
                     }
                     else
                     {
@@ -479,6 +504,7 @@ namespace HpskSite.Controllers
                     success = true,
                     message = "Föreningsintyget är utfärdat.",
                     requestClosed,
+                    requestMismatch,
                     notifiedMember,
                     // ⚠️ BADA behovs pa skarmen. Utan `notifyRequested` gav ett valt-bort mejl och
                     // ett mejl som fastnade i SMTP samma text, och utfardaren kunde inte veta att
@@ -812,8 +838,21 @@ namespace HpskSite.Controllers
             var candidate = _memberService.GetById(memberId);
             if (candidate == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
 
-            int.TryParse(candidate.GetValue<string>("primaryClubId") ?? "", out int candidateClubId);
-            if (candidateClubId > 0 && await _authorizationService.IsClubAdminForClub(candidateClubId)) return null;
+            // ⚠️⚠️ NAGON AV MEDLEMMENS KLUBBAR, inte bara primarklubben.
+            //
+            // Grinden lag tidigare pa `primaryClubId` ensamt, och det lasar ut den klubb som
+            // faktiskt handlagger arendet: en medlem kan tillhora flera klubbar och stalla sin
+            // forfragan till en annan an sin primara. I prod 2026-09-09 var en medlems primarklubb
+            // Varberg (2614) medan forfragan lag hos Falkenbergs PK (2607) — Falkenbergs
+            // klubbadmin hade nekats underlaget for sin egen medlem. Det syntes inte, eftersom
+            // sajtadmin slapps igenom nagra rader ovanfor.
+            //
+            // `GetAllClubIds` ar husets enda svar pa "vilka klubbar tillhor medlemmen".
+            foreach (var candidateClubId in _memberClubs.GetAllClubIds(candidate))
+            {
+                if (candidateClubId > 0 && await _authorizationService.IsClubAdminForClub(candidateClubId))
+                    return null;
+            }
 
             return Json(new { success = false, message = "Åtkomst nekad" });
         }

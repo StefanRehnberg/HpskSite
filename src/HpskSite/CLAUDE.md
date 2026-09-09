@@ -5725,6 +5725,80 @@ alltid `null`. Mät `getBoundingClientRect()` där. Det påståendet var rött p
 **Operatörssteg:** kör `Migrations/create-foreningsintyg-notify-setting-table.sql` (körd i dev
 2026-09-09; **EJ körd i prod**). Adds C# → full ombyggnad.
 
+### ⚠️⚠️ INTYGET UTFÄRDADES I FEL FÖRENINGS NAMN — primärklubben där den handläggande gällde (2026-09-09)
+
+Rapporterat ur prod: *"testade att skapa ett intyg från förfrågan från Stefan Rehnberg och det blev
+en grön ruta som sa att intyget va skapat, men på Föreningsintyg-sidan står den fortfarande kvar som
+en förfrågan."* Den kvarstående förfrågan var **symptomet**. Felet var värre.
+
+**Utfärdandeskärmen byggde utkastet mot medlemmens `primaryClubId`, inte mot den klubb vars
+adminsida man stod på.** `GetIntygDraft` anropades utan `clubId`, och servern faller då tillbaka på
+primärklubben. I prod låg förfrågan hos **Falkenbergs PK (2607)** medan medlemmens `primaryClubId`
+var **2614 (Varberg)** — en klubb som inte ens fanns i hens `memberClubIDs` (`2607,2604,2608`).
+Följden: **intyg 8 skrevs med Varbergs föreningsnamn och organisationsnummer, på en handling till
+Polismyndigheten.** `IssueIntyg`s klubbkontroll vägrade korrekt koppla förfrågan till ett intyg i en
+annan klubb — den räddade situationen — men den **loggade bara en varning**, så rutan blev grön och
+användaren gick vidare. Den kvarliggande förfrågan var alltså det enda spåret av ett dokument i fel
+förenings namn.
+
+**⚠️ `primaryClubId` LIGGER I `intValue`.** En första prodfråga läste bara `varcharValue`/`textValue`
+och svarade NULL, vilket lästes som "medlemmen har ingen primärklubb" och sköt diagnosen åt sidan.
+Alla 883 prodrader bär värdet i `intValue`. Läs egenskapen genom
+`MemberClubService.GetPrimaryClubId`, och i SQL: läs **alla** värdekolumner.
+
+**Tre fixar, samma familj — det är alltid den HANDLÄGGANDE klubben som gäller:**
+
+1. **Klienten skickar ALLTID sidans klubb till `GetIntygDraft`**, och postar aldrig `ClubId 0`
+   (`_draftClubId || clubId`, aldrig `|| 0`). En nolla får servern att falla tillbaka på
+   primärklubben, alltså exakt buggen igen genom en annan dörr.
+2. **`DenyIfCannotReadMemberAsync` accepterar en klubbadmin för NÅGON av medlemmens klubbar**
+   (`_memberClubs.GetAllClubIds`), inte bara den primära. Grinden låste annars ut just den klubb som
+   handlägger ärendet — i prod hade Falkenbergs klubbadmin nekats underlaget för sin egen medlem.
+   Det syntes inte, eftersom sajtadmin släpps igenom några rader ovanför.
+3. **`IssueIntyg` vägrar när klubben inte är en av medlemmens** (`IsMemberOfClub`), och när förfrågan
+   inte matchar returneras `requestMismatch` med en **`LogError`** som bär BÅDA klubbarna. Kvittot
+   blir då **rött** och säger i klartext att intyget kan vara utfärdat i fel förenings namn och ska
+   kontrolleras. **Sätt aldrig tillbaka en grön ruta där** — kontrollen sitter efter att intyget
+   sparats, så den kan inte vägra utfärdandet; det enda den kan göra är att skrika.
+
+**⚠️ FYND PÅ VÄGEN: förfrågningsväljaren i FRITT läge är inte klubbskopad.** Den listar medlemmens
+öppna förfrågningar över alla klubbar, så en klubbadmin på 2604:s sida erbjuds en förfrågan som
+ligger hos 2607. Det är den naturliga vägen in i `requestMismatch` — och skälet att den vägran måste
+vara högljudd och inte bara loggad.
+
+**Verifierat i dev, med prods form byggd på beställning och återställd efteråt.** Dev reproducerar
+inte felet av sig själv (fixturmedlemmens primärklubb är samma som sidans), så fixturen sattes:
+`primaryClubId = 2607` medan `memberClubIds = 2604`.
+- **Repron är mätt på endpointen**: `GetIntygDraft` utan `clubId` svarade
+  `ClubId 2607 / "Falkenbergs Pistolklubb"`, med `clubId=2604` svarade den
+  `2604 / "Haaplinge GoAss"`. Det är felet respektive fixen i två anrop.
+- **Klienten skickar rätt:** ett fetch-avlyssnat `GetIntygDraft` bar `clubId=2604`, och
+  `IssueIntyg` postade `ClubId 2604` + `RequestId 74`.
+- **Kedjan håller:** förfrågan 74 → `Utfardad` med `IssuedIntygId 57`; intyg 57 har `ClubId 2604`
+  och en snapshot som innehåller *Haaplinge* och **inte** *Falkenberg* — trots att primärklubben
+  pekade på Falkenberg. Listan lästes om och förfrågan låg **inte** kvar som obesvarad, vilket var
+  det rapporterade symptomet.
+- **Mismatchen håller:** en förfrågan hos 2607 utfärdad från 2604:s sida gav
+  `alert alert-danger` + varningstriangel, texten *"det gick INTE att koppla till förfrågan …
+  kontrollera intyget"*, förfrågan **orörd** (`Ny`, ingen länk), och loggraden
+  *"Föreningsintyg 58: förfrågan 75 (medlem 8315, klubb 2607) matchar inte utfärdandet (medlem 8315,
+  klubb 2604) — lämnas orörd."*
+- Dev återställt: primärklubben tillbaka på 2604, `memberClubIds`-raden borttagen, fixturerna
+  raderade (14 förfrågningar, alla `Avslagen`, 2 intyg — utgångsläget).
+
+⚠️ **`confirm()` i utfärdandet FRÖS webbläsaren mid-verifiering.** Dialogen är rätt UX (utfärdandet
+är oåterkalleligt) men en blockerande dialog stoppar all automation, och fliken måste stängas för att
+komma vidare. Stubba `window.confirm`/`window.alert` **innan** knappen klickas — samma fälla som
+[[reported-freeze-was-a-blocking-dialog]].
+
+⚠️ **Dev servar inloggningssidan på `/login-&-register/`** — inte `/login-register`, som 404:ar.
+Sluggen är namnet "Login & Register" med `&` bevarat.
+
+**Prodstädning som väntar på beslut:** intyg 8 är utfärdat i **Varbergs PK:s namn för en förfrågan
+till Falkenbergs PK** och bör tas bort; förfrågningarna 1 och 2 står kvar öppna.
+
+Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

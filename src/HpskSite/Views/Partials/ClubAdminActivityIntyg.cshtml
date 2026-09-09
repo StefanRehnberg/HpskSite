@@ -897,8 +897,22 @@
             'rullande halvår, inte ett kalenderår, så siffran är en utgångspunkt och inget svar.';
     }
 
+    /// Hamtar utkastet — REGISTERFALTEN — for en medlem.
+    ///
+    /// ⚠️⚠️ SKICKAR ALLTID SIDANS KLUBB. Utan `clubId` faller servern tillbaka pa medlemmens
+    /// PRIMARKLUBB, och da byggs dokumentet i fel forenings namn.
+    ///
+    /// Det var ingen teori. I prod 2026-09-09: en forfragan stalld till Falkenbergs PK (2607)
+    /// oppnades pa Falkenbergs sida, men medlemmens `primaryClubId` var 2614 (Varberg) — och
+    /// intyget skapades med Varbergs organisationsnummer och foreningsnamn, pa en handling till
+    /// Polismyndigheten. Forfragan stangdes inte, eftersom serverns klubbkontroll vagrade koppla
+    /// den till ett intyg i en annan klubb — den kontrollen raddade situationen men var for tyst.
+    ///
+    /// Klubben som utfardar ar den vars adminsida man star pa. Den ar ocksa den som forfragan
+    /// stalldes till, eftersom arendelistan ar klubbskopad.
     async function loadDraft(memberId, year) {
         var url = '/umbraco/surface/Foreningsintyg/GetIntygDraft?memberId=' + encodeURIComponent(memberId) +
+                  '&clubId=' + encodeURIComponent(clubId) +
                   (year ? '&year=' + encodeURIComponent(year) : '');
         try {
             var r = await fetch(url, { credentials: 'same-origin' });
@@ -921,7 +935,9 @@
         var fd = new FormData();
         fd.append('__RequestVerificationToken', meToken());
         fd.append('MemberId', window._intygMemberId);
-        fd.append('ClubId', _draftClubId || 0);
+        // ⚠️ Sidans klubb som reserv, ALDRIG 0. En nolla far servern att falla tillbaka pa
+        // medlemmens primarklubb — och da utfardas intyget i fel forenings namn. Se `loadDraft`.
+        fd.append('ClubId', _draftClubId || clubId);
         fd.append('ActivityYear', getVal('memberActivityYear') || new Date().getFullYear());
         fd.append('Purpose', getVal('fiPurpose'));
         fd.append('Notes', getVal('fiNotes'));
@@ -1049,13 +1065,45 @@
         var box = document.getElementById('aiIssueSuccess');
         if (!box) return;
 
+        // ⚠️⚠️ FARGEN MASTE FOLJA UTFALLET. En gron ruta med en OBS-text i lases som "klart" —
+        // och det var precis vad som hande i prod 2026-09-09: intyget skapades i FEL KLUBBS namn,
+        // forfragan lag kvar som obehandlad, och anvandaren sag gront och gick vidare.
+        //
+        // `requestMismatch` betyder att forfragan pekade pa en annan medlem eller en annan klubb.
+        // Da ar dokumentet nastan sakert utfardat i fel forenings namn — pa en handling till
+        // Polismyndigheten — och rutan ska vara ROD.
+        var bad = !!j.requestMismatch;
+        box.className = bad ? 'alert alert-danger' : 'alert alert-success';
+        var icon = box.querySelector('.alert-heading i');
+        if (icon) icon.className = bad ? 'bi bi-exclamation-triangle-fill me-1' : 'bi bi-check-circle me-1';
+
         var name = document.getElementById('aiMemberName');
         var who = name && name.textContent ? name.textContent : 'medlemmen';
 
-        document.getElementById('aiSuccessTitle').textContent =
-            'Föreningsintyget för ' + who + ' är utfärdat.';
+        document.getElementById('aiSuccessTitle').textContent = bad
+            ? 'Intyget skapades — men det gick INTE att koppla till förfrågan.'
+            : 'Föreningsintyget för ' + who + ' är utfärdat.';
 
         var body = 'Intyget är sparat som det ser ut nu och kan skrivas ut igen oförändrat.';
+
+        if (bad) {
+            // ⚠️ Sag vad som ar fel OCH vad som ska goras. Det troliga felet — dokumentet i fel
+            // klubbs namn — ar inte nagot anvandaren kan gissa sig till ur "kunde inte kopplas".
+            document.getElementById('aiSuccessBody').innerHTML =
+                'Förfrågan tillhör en <strong>annan medlem eller en annan klubb</strong> än det ' +
+                'intyg som just skapades. Förfrågan står därför kvar som obehandlad.<br>' +
+                '<strong>Kontrollera intyget innan du använder det</strong> — det kan vara ' +
+                'utfärdat i fel förenings namn. Ligger fel klubb på det: ta bort det i listan ' +
+                'nedan och gör om utfärdandet från förfrågan.';
+            var printBad = document.getElementById('aiSuccessPrint');
+            if (printBad && j.data && j.data.printUrl) printBad.href = j.data.printUrl;
+            document.getElementById('aiSuccessBack').classList.remove('d-none');
+            var ib = document.getElementById('aiIssueBody');
+            if (ib) ib.classList.add('d-none');
+            box.classList.remove('d-none');
+            box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
 
         // ⚠️ TEXTEN FÖLJER SERVERN, INTE LÄGET. En tidigare version nämnde förfrågan bara när
         // `_focusRequest` var satt, alltså bara i ärendeläge — men även FRITT läge postar en
