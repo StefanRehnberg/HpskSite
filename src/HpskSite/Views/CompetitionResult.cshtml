@@ -568,7 +568,7 @@
 
                         // Use the MAX series count across all shooters in this class so that
                         // shooters with missing series rows still align with the header
-                        // (missing cells render as 0 in the body below).
+                        // (missing cells render empty in the body below).
                         const maxSeriesCount = classGroup.shooters.length > 0
                             ? Math.max(0, ...classGroup.shooters.map(s => (s.results || []).length))
                             : 0;
@@ -664,9 +664,10 @@
                                 html += `<th class="subtotal-col" style="width:${totalPct}%">${label}</th>`;
                             });
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
-                            const seriesCount = maxSeriesCount;
-
-                            if (hasFinalsRound && seriesCount >= totalSeriesCount) {
+                            // showFinals is decided once per class above — the body below reads the
+                            // same flag, so a shooter who never reached the final can never shift
+                            // the header's Tot/F-columns out from under their own cells.
+                            if (showFinals) {
                                 for (let i = 1; i <= qualificationSeriesCount; i++) {
                                     html += `<th style="width:${seriesPct}%">${i}</th>`;
                                 }
@@ -675,7 +676,7 @@
                                     html += `<th style="width:${seriesPct}%">F${i}</th>`;
                                 }
                             } else {
-                                for (let i = 1; i <= seriesCount; i++) {
+                                for (let i = 1; i <= seriesColCount; i++) {
                                     html += `<th style="width:${seriesPct}%">${i}</th>`;
                                 }
                             }
@@ -741,21 +742,24 @@
                                     }
                                     html += `<td class="text-center subtotal-col">${groupTotal}</td>`;
                                 });
-                            } else if (hasFinalsRound && seriesScores.length >= totalSeriesCount) {
+                            } else if (showFinals) {
+                                // The class shows a final, so EVERY row must emit the same cells:
+                                // qualification series, the mid Tot, then one cell per final series.
+                                // A shooter who did not reach the final gets empty final cells —
+                                // never 0, which reads as "sköt och fick noll".
                                 for (let i = 0; i < qualificationSeriesCount; i++) {
-                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : 0}</td>`;
+                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : ''}</td>`;
                                 }
                                 qualificationScore = seriesScores.slice(0, qualificationSeriesCount).reduce((sum, s) => sum + s.score, 0);
                                 html += `<td class="text-center"><strong>${qualificationScore}</strong></td>`;
                                 for (let i = qualificationSeriesCount; i < totalSeriesCount; i++) {
-                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : 0}</td>`;
+                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : ''}</td>`;
                                 }
                             } else {
                                 // Iterate up to seriesColCount (max across shooters) so cells line up
-                                // with the header. Shooters who are missing a series get 0 in that slot.
+                                // with the header. Shooters missing a series get an empty slot.
                                 for (let i = 0; i < seriesColCount; i++) {
-                                    const s = i < seriesScores.length ? seriesScores[i].score : 0;
-                                    html += `<td class="text-center">${s}</td>`;
+                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : ''}</td>`;
                                 }
                             }
 
@@ -765,15 +769,16 @@
                             `;
 
                             if (classHasShootOff) {
-                                // Show each round's total separated by " / ". Empty cell for
-                                // shooters who weren't part of a shoot-off in this class.
+                                // Show each round's total separated by " / ". Truly empty cell for
+                                // shooters who weren't part of a shoot-off in this class — a dash
+                                // reads as a recorded result.
                                 const rounds = Array.isArray(shooter.shootOffRoundTotals) ? shooter.shootOffRoundTotals : [];
                                 if (rounds.length > 0) {
                                     const tip = rounds.map((t, i) => `Runda ${i + 1}: ${t}`).join(', ');
                                     const display = rounds.join(' / ');
                                     html += `<td class="text-center" title="${tip}"><strong>${display}</strong></td>`;
                                 } else {
-                                    html += `<td class="text-center text-muted">—</td>`;
+                                    html += `<td class="text-center"></td>`;
                                 }
                             }
 
@@ -1174,7 +1179,7 @@
                                 const tip = rounds.map((t, i) => 'Runda ' + (i + 1) + ': ' + t).join(', ');
                                 html += `<td class="text-center" title="${tip}"><strong>${rounds.join(' / ')}</strong></td>`;
                             } else {
-                                html += `<td class="text-center text-muted">—</td>`;
+                                html += `<td class="text-center"></td>`;
                             }
                         }
                         if (faltAwardingMedals) {
