@@ -15,6 +15,7 @@ using Umbraco.Extensions;
 using HpskSite.Services;
 using HpskSite.Models;
 using HpskSite.Models.Firearms;
+using HpskSite.Services.Firearms;
 
 namespace HpskSite.Controllers
 {
@@ -383,6 +384,41 @@ namespace HpskSite.Controllers
             projectsActive = 0,
             projectsArchived = 0,
             configsInProjects = 0
+        };
+
+        /// <summary>En rad ur <c>ForeningsintygRequest</c>, grupperad per klubb och status.</summary>
+        private class IntygRequestRow
+        {
+            public int ClubId { get; set; }
+            public string Status { get; set; } = "";
+            public int Cnt { get; set; }
+            public int Cnt30d { get; set; }
+            public DateTime? Oldest { get; set; }
+        }
+
+        /// <summary>En rad ur <c>MemberCertificateIssue</c> — det UTFÄRDADE dokumentet.</summary>
+        private class IntygDocRow
+        {
+            public int ClubId { get; set; }
+            public bool HasSnapshot { get; set; }
+            public int Cnt { get; set; }
+            public int CntThisYear { get; set; }
+        }
+
+        /// <summary>Zero-valued föreningsintygsstatistik — default och no-table-fallback.</summary>
+        private static object ZeroForeningsintygStats() => new
+        {
+            pending = 0,
+            oldestPendingDays = (int?)null,
+            issued = 0,
+            rejected = 0,
+            withdrawn = 0,
+            requestsTotal = 0,
+            requests30d = 0,
+            documentsTotal = 0,
+            documentsThisYear = 0,
+            documentsLogOnly = 0,
+            clubsWithRequests = 0
         };
 
         /// <summary>Zero-valued vapenregister stats — default and no-table fallback.</summary>
@@ -774,6 +810,7 @@ namespace HpskSite.Controllers
                     object styrelseStats = ZeroStyrelseStats();
                     object faltkonfigStats = ZeroFaltkonfigStats();
                     object firearmStats = ZeroFirearmStats();
+                    object foreningsintygStats = ZeroForeningsintygStats();
 
                     using (var db = _databaseFactory.CreateDatabase())
                     {
@@ -1149,6 +1186,77 @@ namespace HpskSite.Controllers
                             };
                         }
                         catch { /* Firearm table not present — keep zero defaults */ }
+
+                        // ── Föreningsintyg ────────────────────────────────────────────────────
+                        //
+                        // ⚠️ TVÅ OLIKA SAKER, som inte får slås ihop: en FÖRFRÅGAN är medlemmens
+                        // begäran (och bär statusen), ett DOKUMENT är det utfärdade intyget i
+                        // `MemberCertificateIssue`. Talen skiljer sig legitimt — ett dokument kan
+                        // föras in för hand utan förfrågan, och en förfrågan kan avslås utan att
+                        // något dokument skapas. Ett gemensamt "antal föreningsintyg" hade varit
+                        // fel oavsett vilket av dem det räknade.
+                        try
+                        {
+                            var reqRows = db.Fetch<IntygRequestRow>(
+                                @"SELECT ClubId, Status, COUNT(*) AS Cnt,
+                                         SUM(CASE WHEN CreatedAt >= @0 THEN 1 ELSE 0 END) AS Cnt30d,
+                                         MIN(CreatedAt) AS Oldest
+                                    FROM ForeningsintygRequest
+                                   GROUP BY ClubId, Status", thirtyDaysAgo);
+
+                            // Demoklubben räknas inte, som överallt annars på den här sidan.
+                            var reqLive = reqRows.Where(r => !excludedClubIds.Contains(r.ClubId)).ToList();
+
+                            // ⚠️ Statusmängden kommer ur konstanterna, aldrig ur en literal här.
+                            // En ny status (som `Aterkallad`, tillagd 2026-09-09) skulle annars
+                            // tyst falla ur varje siffra.
+                            bool IsOpen(IntygRequestRow r) =>
+                                ForeningsintygRequestStatus.Open.Contains(r.Status, StringComparer.Ordinal);
+
+                            int CountOf(string status) => reqLive
+                                .Where(r => string.Equals(r.Status, status, StringComparison.Ordinal))
+                                .Sum(r => r.Cnt);
+
+                            var open = reqLive.Where(IsOpen).ToList();
+
+                            // Äldsta obesvarade i DAGAR. Det är den siffra som säger om ärendena
+                            // faktiskt hanteras — ett antal ensamt kan vara tre färska eller tre
+                            // som legat en månad.
+                            var oldest = open.Select(r => r.Oldest).Where(d => d.HasValue)
+                                             .Select(d => d!.Value).DefaultIfEmpty().Min();
+                            int? oldestDays = open.Count > 0 && oldest != default
+                                ? (int)Math.Floor((DateTime.Now - oldest).TotalDays)
+                                : null;
+
+                            var docRows = db.Fetch<IntygDocRow>(
+                                @"SELECT ClubId,
+                                         CASE WHEN Snapshot IS NULL THEN 0 ELSE 1 END AS HasSnapshot,
+                                         COUNT(*) AS Cnt,
+                                         SUM(CASE WHEN YEAR(IssuedDate) = @0 THEN 1 ELSE 0 END) AS CntThisYear
+                                    FROM MemberCertificateIssue
+                                   GROUP BY ClubId, CASE WHEN Snapshot IS NULL THEN 0 ELSE 1 END",
+                                DateTime.Now.Year);
+                            var docLive = docRows.Where(r => !excludedClubIds.Contains(r.ClubId)).ToList();
+
+                            foreningsintygStats = new
+                            {
+                                pending = open.Sum(r => r.Cnt),
+                                oldestPendingDays = oldestDays,
+                                issued = CountOf(ForeningsintygRequestStatus.Utfardad),
+                                rejected = CountOf(ForeningsintygRequestStatus.Avslagen),
+                                withdrawn = CountOf(ForeningsintygRequestStatus.Aterkallad),
+                                requestsTotal = reqLive.Sum(r => r.Cnt),
+                                requests30d = reqLive.Sum(r => r.Cnt30d),
+                                documentsTotal = docLive.Sum(r => r.Cnt),
+                                documentsThisYear = docLive.Sum(r => r.CntThisYear),
+                                // ⚠️ Utan snapshot kan dokumentet inte återges — det är en ren
+                                // logganteckning (eller utfärdat innan snapshot fanns). Att räkna
+                                // dem som utskrivbara intyg vore ett falskt tal.
+                                documentsLogOnly = docLive.Where(r => !r.HasSnapshot).Sum(r => r.Cnt),
+                                clubsWithRequests = reqLive.Select(r => r.ClubId).Distinct().Count()
+                            };
+                        }
+                        catch { /* ForeningsintygRequest saknas — nolldefault kvar */ }
                     }
 
                     // ── 5. Training stairs (Skyttetrappan) — in-memory ──────────
@@ -1421,6 +1529,7 @@ namespace HpskSite.Controllers
                         styrelse = styrelseStats,
                         faltkonfig = faltkonfigStats,
                         firearms = firearmStats,
+                        foreningsintyg = foreningsintygStats,
                         aiChat = BuildAiChatStats()
                     };
                 }

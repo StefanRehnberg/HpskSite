@@ -834,6 +834,71 @@
             </div>
         </div>
 
+        <!-- Section L: Föreningsintyg -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-file-earmark-text me-2"></i>Föreningsintyg</h5>
+        @*
+            ⚠️ TVÅ OLIKA SAKER PÅ SAMMA SEKTION, och rubrikerna måste hålla dem åt: en FÖRFRÅGAN är
+            medlemmens begäran och bär statusen; ett DOKUMENT är det utfärdade intyget. Talen
+            skiljer sig legitimt — ett dokument kan föras in för hand utan förfrågan, och ett
+            avslag skapar inget dokument. Ett gemensamt "antal föreningsintyg" hade varit fel
+            oavsett vilket av dem det räknade.
+        *@
+        <p class="text-muted small mb-2">
+            <i class="bi bi-info-circle me-1"></i>Förfrågningar är medlemmarnas begäran; dokument är
+            de utfärdade intygen. Talen skiljer sig — ett avslag skapar inget dokument, och ett
+            dokument kan föras in för hand utan förfrågan.
+        </p>
+        <div class="row g-3 mb-4">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Obesvarade förfrågningar
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Förfrågningar som väntar på klubbens svar. Åldern på den äldsta säger om ärendena faktiskt hanteras — tre färska och tre en månad gamla är samma siffra men helt olika lägen."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFiPending">—</h2>
+                        <small class="text-muted" id="statFiPendingSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Utfärdade</h6>
+                        <h2 class="card-title mb-1" id="statFiIssued">—</h2>
+                        <small class="text-muted" id="statFiIssuedSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-secondary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Avslagna och återkallade
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Avslag är klubbens beslut och kräver ett skäl. Återkallade är medlemmens eget tillbakadragande — de sker automatiskt när medlemmen tar bort vapnet förfrågan gäller."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFiRejected">—</h2>
+                        <small class="text-muted" id="statFiRejectedSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Utfärdade dokument
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Intygsdokument i registret. Ett dokument utan sparad kopia (snapshot) kan inte skrivas ut igen — det är en ren logganteckning, eller utfärdat innan kopian började sparas."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statFiDocs">—</h2>
+                        <small class="text-muted" id="statFiDocsSub"></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -1550,6 +1615,41 @@
                 ? (Math.round(fw.clubFirearms / fw.total * 100) + '% av totalen · ' + fw.clubsWithFirearms + (fw.clubsWithFirearms === 1 ? ' klubb' : ' klubbar'))
                 : 'inga vapen ännu';
             document.getElementById('statFwLoanable').textContent = fw.loanableClubFirearms;
+        }
+
+        // Section L: Föreningsintyg
+        if (d.foreningsintyg) {
+            const fi = d.foreningsintyg;
+            document.getElementById('statFiPending').textContent = fi.pending;
+
+            // ⚠️ Åldern bara när det FINNS något obesvarat. "äldsta 0 dagar" på en tom kö läses som
+            // att något ligger och väntar.
+            document.getElementById('statFiPendingSub').textContent = fi.pending > 0
+                ? (fi.oldestPendingDays === null
+                    ? 'väntar på klubbens svar'
+                    // "äldsta 0 dagar" är sant men läses som ett trasigt tal. Noll dagar betyder
+                    // att allt som väntar kom in i dag, och det är den upplysningen som är värd
+                    // något.
+                    : fi.oldestPendingDays === 0
+                        ? 'inkom i dag'
+                        : 'äldsta ' + fi.oldestPendingDays + (fi.oldestPendingDays === 1 ? ' dag' : ' dagar'))
+                : 'inget väntar';
+
+            document.getElementById('statFiIssued').textContent = fi.issued;
+            document.getElementById('statFiIssuedSub').textContent =
+                fi.requestsTotal + ' förfrågningar totalt · ' + fi.requests30d + ' senaste 30 dagarna';
+
+            // De två slagen SUMMERAS i talet men särskiljs under det: de betyder olika saker
+            // (klubbens beslut kontra medlemmens tillbakadragande), och ett gemensamt tal utan den
+            // uppdelningen skulle läsas som att klubben nekat alla.
+            document.getElementById('statFiRejected').textContent = fi.rejected + fi.withdrawn;
+            document.getElementById('statFiRejectedSub').textContent =
+                fi.rejected + ' avslagna · ' + fi.withdrawn + ' återkallade';
+
+            document.getElementById('statFiDocs').textContent = fi.documentsTotal;
+            document.getElementById('statFiDocsSub').textContent =
+                fi.documentsThisYear + ' i år' +
+                (fi.documentsLogOnly > 0 ? ' · ' + fi.documentsLogOnly + ' utan sparad kopia' : '');
         }
 
         // Section I: Styrelsearbete

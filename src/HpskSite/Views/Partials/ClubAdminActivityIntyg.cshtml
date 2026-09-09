@@ -440,6 +440,13 @@
                                 Räknas för <strong>det förbund som anges på intyget</strong>, inte medlemmens
                                 hela vapeninnehav.
                             </div>
+                            @*
+                                ⚠️ Fylls ur medlemmens register när ärendet öppnas — INTE bakom
+                                Hämta, eftersom räkningen inte kräver någon avkryptering. Noten
+                                nedan säger varifrån talet kommer och om medlemmen ändrat sitt
+                                register efter att förfrågan skickades.
+                            *@
+                            <div id="fiAntalVapenNote" class="small mt-1 d-none"></div>
                         </div>
                     </div>
 
@@ -766,6 +773,8 @@
         Object.keys(ISSUE_CHECKS).forEach(function (id) { setChk(id, false); });
         Object.keys(ISSUE_TEXTS).forEach(function (id) { setVal(id, ''); });
         setVal('fiAntalVapen', '');
+        var anBox = document.getElementById('fiAntalVapenNote');
+        if (anBox) { anBox.innerHTML = ''; anBox.classList.add('d-none'); }
         // ⚠️ Förbundet nollställs till SPSF, inte till tomt. Modellens default är SPSF, och ett
         // tomt val hade postat en tom sträng — vilket lämnar blankettens enda tillåtna markering
         // omarkerad.
@@ -1487,6 +1496,9 @@
             // I FRITT läge: säg att ett ärende finns, innan någon går runt det.
             showOpenRequestNotice(j.requests);
 
+            // Byte av forfragan maste rakna om noten: talen ar per forfragan.
+            sel.onchange = applyReqCount;
+
             sel.innerHTML = j.requests.map(function (q) {
                 var bits = [q.firearmAlias || ('Vapen ' + q.firearmId), q.kind];
                 if (q.forbund) bits.push(q.forbund);
@@ -1497,9 +1509,62 @@
                 ? ''
                 : '(' + j.requests.length + ' f\u00f6rfr\u00e5gningar)';
             box.classList.remove('d-none');
+
+            // ⚠️ Antalet fylls HÄR, inte i `fetchFirearmData`. Räkningen kräver ingen
+            // avkryptering, så den hör inte bakom Hämta — och låg den där skrevs blankettens rad
+            // ut TOM varje gång utfärdaren inte tryckte på knappen.
+            _reqCounts = {};
+            j.requests.forEach(function (q) { _reqCounts[String(q.id)] = q; });
+            applyReqCount();
         } catch (e) {
             // Tyst. Rutan är en genväg; utfärdaren kan alltid skriva in uppgifterna för hand.
         }
+    }
+
+    /// Förfrågningarna som ligger i väljaren, per id — så antalet kan fyllas om vid byte.
+    var _reqCounts = {};
+
+    /// Fyller blankettens rad "antal vapen sedan tidigare" ur den VALDA förfrågan.
+    ///
+    /// ⚠️ TVÅ TAL, OCH DE FÅR SÄGA EMOT VARANDRA. `antalDeklarerat` är vad medlemmen bekräftade när
+    /// hen skickade förfrågan; `antalNu` är vad registret säger i dag. Har medlemmen lagt in eller
+    /// tagit bort ett vapen efteråt skiljer de sig — och då ska utfärdaren SE det och välja, inte
+    /// få ett av talen tyst insatt. Det är hen som skriver under siffran.
+    ///
+    /// ⚠️ Fältet skrivs bara när det är TOMT. Utfärdaren kan ha rättat för hand, och en omräkning
+    /// vid byte av förfrågan får inte kasta det.
+    function applyReqCount() {
+        var sel = document.getElementById('fiFirearmRequest');
+        var note = document.getElementById('fiAntalVapenNote');
+        if (!sel || !note) return;
+
+        var q = _reqCounts[String(sel.value)];
+        if (!q) { note.innerHTML = ''; note.classList.add('d-none'); return; }
+
+        var dek = (typeof q.antalDeklarerat === 'number') ? q.antalDeklarerat : null;
+        var nu = (typeof q.antalNu === 'number') ? q.antalNu : null;
+
+        if (!getVal('fiAntalVapen') && dek !== null) setVal('fiAntalVapen', dek);
+        else if (!getVal('fiAntalVapen') && nu !== null) setVal('fiAntalVapen', nu);
+
+        var html;
+        if (dek === null) {
+            // Äldre förfrågningar, skapade innan bekräftelsen fanns. Registret är då det enda vi
+            // har — och det ska sägas, inte döljas bakom ett tal som ser bekräftat ut.
+            html = '<span class="text-muted">Medlemmen har inte bekräftat något antal (förfrågan ' +
+                   'skapades innan den frågan fanns). Registret säger <strong>' + nu +
+                   '</strong> i dag.</span>';
+        } else if (nu !== null && nu !== dek) {
+            html = '<span class="text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>' +
+                   'Medlemmen bekräftade <strong>' + dek + '</strong> vid ansökan, men registret ' +
+                   'säger <strong>' + nu + '</strong> i dag. Kontrollera med medlemmen vilket som ' +
+                   'gäller innan du skriver under.</span>';
+        } else {
+            html = '<span class="text-muted">Bekräftat av medlemmen vid ansökan, och registret ' +
+                   'säger samma i dag.</span>';
+        }
+        note.innerHTML = html;
+        note.classList.remove('d-none');
     }
 
     async function fetchFirearmData() {

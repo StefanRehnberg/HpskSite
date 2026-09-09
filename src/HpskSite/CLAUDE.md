@@ -5972,6 +5972,107 @@ prods läge — bra för varningstestet, men det betyder att en `RemoveFirearm`-
 `IsActive = 1` först, och städningen sätta det tillbaka. Ett test som utgår från att ett fixturvapen
 är aktivt mäter ingenting.
 
+#### Antalet vapen sedan tidigare — medlemmen bekräftar, servern räknar (2026-09-09)
+
+Rapporterat: *"det saknas en uppgift om hur många vapen sökanden har … det borde medlemmen bifoga
+med ansökan om intyget. Kolla för säkerhets skull att jag har rätt."*
+
+**Kontrollerat, och han hade rätt på det som betyder mest — men inte om formuläret.**
+`AntalVapenSedanTidigare` fanns i modellen, som fält på utfärdandeskärmen, och skrivs ut i
+blankettens rad *"Sökanden har sedan tidigare ___ st skjutvapen … i den verksamhet som bedrivs av
+det förbund som anges ovan"*. Förbundsskopad, med det sökta vapnet uteslutet.
+
+**Det som saknades var att någonting FYLLDE den.** Talet kom bara om utfärdaren tryckte **Hämta** —
+gjorde de inte det skrevs raden ut **tom**, och ingenting hindrade det.
+
+**⚠️⚠️ OCH ANTALET KRÄVER INGEN AVKRYPTERING — det hörde alltså aldrig bakom Hämta.**
+`CountHeldInFederation` läser bara klartextkolumner (`AcquisitionStatus` + relationen
+`FirearmFederation`). Hämta finns för att lämna ut fabrikat/modell/kaliber, och den skriver en rad i
+medlemmens läslogg; att RÄKNA vapen är inte att titta på dem. Antalet fylls nu ur
+`GetIntygFirearmRequests` så snart ärendet öppnas, utan loggrad.
+
+**⚠️ MEDLEMMEN SKRIVER INTE IN NÅGON SIFFRA — och det var där jag inte höll med.** Förslaget var att
+medlemmen bifogar antalet. En inskriven siffra är en avskrift av något registret redan kan svara på,
+och den skulle tyst kunna köra över registret. Servern räknar; medlemmen **bekräftar att registret är
+komplett för förbundet**. Spärr vid ansökan (Stefans beslut), samma linje som spärren på medlemmens
+egna fält: uppgifter bara medlemmen kan åtgärda stoppas där, inte hos klubben som inte kan göra något.
+
+**⚠️⚠️ SIFFRAN ÄR BARA SÅ KOMPLETT SOM MEDLEMMENS REGISTER, och det är den verkliga luckan.** Mätt i
+prod 2026-09-09: Torbjörn Andreasson har 8 aktiva vapen, 6 innehav, varav **4** räknas för SPSF — och
+ett av dem (`Manurhin MR38`) bär **inget förbund alls** och räknas därför i ingen siffra. Klubben
+skulle skriva under "4" utan att veta vad som utelämnats. Därför listas vapen utan förbund **vid
+namn** i ansökningsrutan; en siffra kan inte visa det.
+
+**⚠️ TVÅ TAL PÅ UTFÄRDANDESKÄRMEN, OCH DE FÅR SÄGA EMOT VARANDRA.** `antalDeklarerat` är vad
+medlemmen bekräftade vid ansökan; `antalNu` är vad registret säger i dag. Har medlemmen ändrat sitt
+register efteråt **sägs det, i rött** — aldrig ett av talen tyst insatt. Det är utfärdaren som
+skriver under. En äldre förfrågan utan bekräftelse säger också det, i stället för att visa registrets
+tal som om det vore bekräftat.
+
+**⚠️ Bekräftelsen NOLLSTÄLLS vid varje omräkning** (byte av förbund eller vapen). Bekräftade
+medlemmen "2 vapen inom SPSF" och byter förbund gäller krysset ett annat påstående än det som
+skickas — och det är ett intygande till en myndighet. Samma fälla som notis-kryssrutan som läckte
+mellan ärenden.
+
+**⚠️⚠️ ANVÄND INTE `IssueForeningsintygRequest.IsTrueFlag` I EN BEKRÄFTELSEGRIND.** Den svarar
+**true** på ett tomt värde, med flit: där gäller notis-kryssrutan, där utelämnat ska betyda "ja,
+meddela medlemmen". För en bekräftelse är defaulten precis fel. **Mätt: grinden släppte igenom en
+förfrågan utan bekräftelse på första försöket**, och det var just den återanvändningen — verifieringen
+fångade det, inte kompilatorn. En hjälpare vars default är "ja" hör inte i en grind vars default måste
+vara "nej". Parametern är ändå en **sträng**, eftersom `"1"`/`"0"` inte binder till `bool` i
+ASP.NET Core.
+
+**Operatörssteg:** kör `Migrations/add-vapenrakning-to-foreningsintyg-request.sql` — **FÖRE
+deployen.** NPoco genererar `SET AntalVapenSedanTidigare = …` på varje uppdatering av en förfrågan så
+snart POCO:n bär egenskaperna, så utan kolumnerna faller varje statusändring, varje avslag och varje
+utfärdande. Körd i dev 2026-09-09; **EJ körd i prod.**
+
+**Verifierat i dev, med återställning:** rutan räknade 1 vapen inom SPSF med det sökta uteslutet och
+namngav `ZZV Utan forbund` som saknar förbund · bytet till Skyttesportförbundet gav 0 och nollställde
+krysset · servern nekade både utelämnad flagga och `"0"` och släppte igenom `"1"` · förfrågan lagrade
+`Antal = 1` med tidsstämpel · utfärdandeskärmen förifyllde 1 **utan Hämta** med noten "bekräftat …
+och registret säger samma i dag" · efter att ett tredje vapen fått förbund blev noten röd:
+*"Medlemmen bekräftade 1 vid ansökan, men registret säger 2 i dag."*
+
+⚠️ **Fixturfälla:** medlemmens vapengarderob i dev är full av `IsActive = 0`-rester från tidigare
+körningar, och fixturmedlemmen saknade de fem personuppgifterna — så **Skicka-knappen var avstängd av
+den ÄLDRE spärren** och den nya klientgrinden gick aldrig att nå. Servergrinden är den som ska mätas;
+klientgrinden kräver att profilen först fylls (och återställs).
+
+⚠️ **Rättad felläsning:** en första prodmätning svarade `0` för samtliga medlemmar, vilket såg ut som
+att räkningen var trasig. Det var **mojibake i min egen SQL-fil** — `sqlcmd -i` läser den som ANSI, så
+ö:et i `Svenska Pistolskytteförbundet` matchade aldrig. **Skriv aldrig en svensk stränglitteral i en
+`.sql` som körs med `-i`**; slå upp värdet med en ASCII-`LIKE` i stället.
+
+#### Föreningsintyg på Statistik-fliken (2026-09-09)
+
+`/admin-page` → Statistik, sektion L, intill Vapenregister. Fyra kort: obesvarade förfrågningar (med
+**åldern på den äldsta** — ett antal ensamt kan vara tre färska eller tre som legat en månad),
+utfärdade, avslagna + återkallade, och utfärdade dokument.
+
+**⚠️ EN FÖRFRÅGAN OCH ETT DOKUMENT ÄR TVÅ OLIKA SAKER och slås aldrig ihop.** Förfrågan är medlemmens
+begäran och bär statusen; dokumentet är intyget i `MemberCertificateIssue`. Talen skiljer sig
+legitimt — ett avslag skapar inget dokument, och ett dokument kan föras in för hand utan förfrågan.
+Ett gemensamt "antal föreningsintyg" hade varit fel oavsett vilket av dem det räknade, så sektionen
+säger skillnaden i klartext ovanför korten.
+
+**⚠️ Avslagna och återkallade summeras i talet men särskiljs under det.** De betyder olika saker —
+klubbens beslut kontra medlemmens tillbakadragande — och ett gemensamt tal utan uppdelningen läses
+som att klubben nekat alla.
+
+**⚠️ Statusmängden kommer ur `ForeningsintygRequestStatus`, aldrig ur en literal i frågan.** En ny
+status (som `Aterkallad`) skulle annars tyst falla ur varje siffra.
+
+**⚠️ Dokument utan snapshot räknas separat** ("utan sparad kopia"). De kan inte skrivas ut igen och är
+rena logganteckningar; att räkna dem som utskrivbara intyg vore ett falskt tal. Prod har sex sådana
+(Tomelilla, utfärdade innan snapshot fanns).
+
+Demoklubben exkluderas som överallt annars på sidan, och båda frågorna ligger i try/catch så en
+saknad tabell ger nolldefault i stället för att ta ner hela statistiksidan.
+
+Verifierat i webbläsaren mot dev: 1 obesvarad ("inkom i dag"), 0 utfärdade, 15 förfrågningar totalt,
+14 avslagna + 0 återkallade, 2 dokument varav 2 utan sparad kopia — samtliga stämmer med SQL.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

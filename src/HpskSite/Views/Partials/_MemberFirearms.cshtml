@@ -315,6 +315,34 @@
                     </div>
                 </div>
 
+                @*
+                    ⚠️ BLANKETTENS EGEN RAD: "Sökanden har sedan tidigare ___ st skjutvapen för
+                    målskjutning i den verksamhet som bedrivs av det förbund som anges ovan."
+
+                    Antalet fylldes tidigare bara om klubben tryckte Hämta på utfärdandeskärmen —
+                    gjorde de inte det skrevs raden ut TOM, och ingenting hindrade det. Och siffran
+                    är bara så komplett som medlemmens EGET register, så det är medlemmen som måste
+                    svara för den; klubben skriver bara under.
+
+                    ⚠️ MEDLEMMEN SKRIVER INTE IN NÅGON SIFFRA. Servern räknar ur registret, och
+                    medlemmen bekräftar att registret är komplett. En inskriven siffra vore en
+                    avskrift av något registret redan kan svara på — och skulle tyst kunna köra över
+                    det.
+                *@
+                <div class="mb-3" id="fwReqCountWrap">
+                    <div class="border rounded p-3 bg-body-tertiary">
+                        <div class="small fw-semibold mb-1">Antal vapen du har sedan tidigare</div>
+                        <div id="fwReqCount" class="small text-muted">Räknar…</div>
+                        <div id="fwReqCountMissing" class="small mt-2 d-none"></div>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" id="fwReqCountConfirm">
+                            <label class="form-check-label small" for="fwReqCountConfirm">
+                                Jag bekräftar att mitt vapenregister är komplett för det här förbundet.
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="mb-3">
                     <label class="form-label small" for="fwReqVapengrupp">Vapengrupp / skytteform</label>
                     <input type="text" class="form-control" id="fwReqVapengrupp" name="fwReqVapengrupp" autocomplete="off" maxlength="200"
@@ -895,6 +923,7 @@
         }).join('');
 
         syncReqFirearm();
+        loadReqCount();
         bootstrap.Modal.getOrCreateInstance(document.getElementById('fwReqModal')).show();
     }
 
@@ -990,6 +1019,7 @@
     /// Speglar det VALDA vapnet i de fält som beror på det. Körs vid öppning OCH vid byte — annars
     /// bär formuläret förra vapnets vapengrupp och kan erbjuda en förnyelse av ett planerat vapen.
     function syncReqFirearm() {
+        loadReqCount();
         var id = document.getElementById('fwReqFirearm').value;
         var f = (state.firearms || []).find(function (x) { return String(x.id) === String(id); });
         if (!f) return;
@@ -1005,6 +1035,63 @@
 
         var lbl = document.querySelector('label[for=fwReqForny]');
         if (lbl) lbl.classList.toggle('text-muted', !held);
+    }
+
+    /// Läser antalet vapen medlemmen har sedan tidigare inom det valda förbundet.
+    ///
+    /// ⚠️ BEROR PÅ BÅDE FÖRBUNDET OCH DET VALDA VAPNET, så den körs vid öppning och vid varje byte
+    /// av båda. Blanketten säger "sedan tidigare" — det sökta vapnet räknas bort, vilket spelar
+    /// roll vid en förnyelse där vapnet redan innehas.
+    ///
+    /// ⚠️ BEKRÄFTELSEN NOLLSTÄLLS VID VARJE OMRÄKNING. Bekräftade medlemmen "2 vapen inom SPSF" och
+    /// byter sedan förbund, gäller krysset ett annat påstående än det som skickas — och det är ett
+    /// intygande till en myndighet. Samma fälla som notis-kryssrutan som läckte mellan ärenden.
+    ///
+    /// ⚠️ VAPEN UTAN FÖRBUND RÄKNAS I INGENTING, och det syns inte i en siffra. De listas därför
+    /// vid namn: en medlem som glömt sätta förbund på ett innehav skulle annars underrapportera
+    /// till Polisen utan att kunna se det. Mätt i prod 2026-09-09: ett aktivt innehav bar inget
+    /// förbund alls.
+    async function loadReqCount() {
+        var box = document.getElementById('fwReqCount');
+        var miss = document.getElementById('fwReqCountMissing');
+        var chk = document.getElementById('fwReqCountConfirm');
+        if (!box) return;
+
+        chk.checked = false;
+        var forbund = document.getElementById('fwReqForbund').value || '';
+        var firearmId = document.getElementById('fwReqFirearm').value || 0;
+
+        box.textContent = 'Räknar…';
+        miss.classList.add('d-none');
+
+        try {
+            var r = await fetch('/umbraco/surface/Firearm/GetMyFirearmCount?forbund=' +
+                                encodeURIComponent(forbund) + '&excludeFirearmId=' +
+                                encodeURIComponent(firearmId), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) { box.textContent = j.message || 'Kunde inte räkna vapnen.'; return; }
+
+            // ⚠️ Skriv ut FÖRBUNDET i klartext. "Du har 2 vapen sedan tidigare" är fel påstående —
+            // siffran gäller ett förbunds verksamhet, inte hela innehavet.
+            box.innerHTML = 'Klubben kommer att uppge att du sedan tidigare har <strong>' +
+                j.antal + ' vapen</strong> inom ' + esc(j.forbund) + '.' +
+                (Number(firearmId) > 0
+                    ? ' <span class="text-muted">Vapnet den här förfrågan gäller räknas inte med.</span>'
+                    : '');
+
+            if (j.utanForbund && j.utanForbund.length) {
+                miss.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0">' +
+                    '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                    (j.utanForbund.length === 1
+                        ? 'Ett av dina vapen saknar förbund och räknas därför inte: '
+                        : j.utanForbund.length + ' av dina vapen saknar förbund och räknas därför inte: ') +
+                    j.utanForbund.map(function (f) { return '<strong>' + esc(f.alias) + '</strong>'; }).join(', ') +
+                    '. Hör de hit? Fyll i förbund på vapnet innan du skickar förfrågan.</div>';
+                miss.classList.remove('d-none');
+            }
+        } catch (e) {
+            box.textContent = 'Kunde inte räkna vapnen.';
+        }
     }
 
     /// Ingången till intygsflödet. Den andra vägen är avstängd med en förklaring när garderoben
@@ -1032,6 +1119,14 @@
         var clubSel = document.getElementById('fwReqClub');
         if (!clubSel.value) { showReqError('V\u00e4lj en klubb.'); return; }
 
+        // ⚠️ Klientgrinden är en HJÄLP, inte kontrollen. Servern vägrar en obekräftad räkning —
+        // formuläret kan ha legat öppet i en flik, och en avstängd knapp är ingen spärr.
+        if (!document.getElementById('fwReqCountConfirm').checked) {
+            showReqError('Bekräfta antalet vapen du har sedan tidigare — klubben måste uppge det ' +
+                         'på intyget.');
+            return;
+        }
+
         var kind = document.querySelector('input[name=fwReqKind]:checked').value;
         var btn = document.getElementById('fwReqSend');
         btn.disabled = true;
@@ -1041,7 +1136,10 @@
             kind: kind,
             forbund: document.getElementById('fwReqForbund').value,
             vapengrupp: document.getElementById('fwReqVapengrupp').value,
-            message: document.getElementById('fwReqMessage').value
+            message: document.getElementById('fwReqMessage').value,
+            // ⚠️ "1", inte true: parametern är en STRÄNG på servern just för att "1"/"0" inte
+            // binder till bool i ASP.NET Core. Se `RequestIntyg`.
+            antalVapenBekraftat: '1'
         });
         btn.disabled = false;
         if (!j.success) {
@@ -1067,6 +1165,7 @@
     });
     document.addEventListener('change', function (ev) {
         if (ev.target && ev.target.id === 'fwReqFirearm') syncReqFirearm();
+        if (ev.target && ev.target.id === 'fwReqForbund') loadReqCount();
         // ⚠️ Klubbytet MÅSTE spegla sig i noten. Utan detta står förra klubbens namn — och
         // "utsedd/ej utsedd" — kvar under en väljare som pekar på en annan klubb.
         if (ev.target && ev.target.id === 'fwReqClub') syncReqClub();

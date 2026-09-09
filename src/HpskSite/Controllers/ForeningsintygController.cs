@@ -786,6 +786,22 @@ namespace HpskSite.Controllers
                         r.Forbund,
                         r.VapengruppSkytteform,
                         createdAt = r.CreatedAt.ToString("yyyy-MM-dd"),
+
+                        // ⚠️ ANTALET KRÄVER INGEN AVKRYPTERING och hör därför INTE bakom Hämta.
+                        // `CountHeldInFederation` läser bara klartextkolumner, så blankettens rad
+                        // kan fyllas så snart ärendet öppnas. En loggrad ska betyda att någon
+                        // faktiskt tittade på medlemmens vapenuppgifter, och att räkna dem är inte
+                        // att titta på dem. Tidigare fylldes raden bara om utfärdaren tryckte
+                        // Hämta — gjorde de inte det skrevs den ut TOM.
+                        //
+                        // TVÅ tal, med flit: `antalDeklarerat` är vad medlemmen bekräftade när
+                        // förfrågan skickades, `antalNu` är vad registret säger i dag. Skiljer de
+                        // sig har medlemmen ändrat sitt register efteråt, och det ska SÄGAS —
+                        // aldrig väljas tyst.
+                        antalDeklarerat = r.AntalVapenSedanTidigare,
+                        antalBekraftat = r.AntalVapenBekraftat,
+                        antalNu = _firearms.CountHeldInFederation(
+                            r.MemberId, r.Forbund, excludeFirearmId: r.FirearmId),
                     })
                     .ToList();
 

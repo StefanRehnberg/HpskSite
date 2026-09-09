@@ -383,7 +383,11 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RequestIntyg(
-            int clubId, int firearmId, string kind, string? forbund, string? vapengrupp, string? message)
+            int clubId, int firearmId, string kind, string? forbund, string? vapengrupp, string? message,
+            // ⚠️ STRÄNG, inte bool. "1"/"0" binder INTE till bool i ASP.NET Core — värdet faller
+            // tyst tillbaka på default, och en obekräftad räkning hade då sluppit förbi spärren.
+            // Fjärde gången den fällan slår till i den här kodbasen; se `IsTrueFlag`.
+            string? antalVapenBekraftat = null)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
@@ -424,8 +428,22 @@ namespace HpskSite.Controllers
                 });
             }
 
+            // ⚠️⚠️ ANVÄND INTE `IssueForeningsintygRequest.IsTrueFlag` HÄR. Den svarar **true** på ett
+            // tomt värde, med flit: där gäller den notis-kryssrutan, där utelämnat ska betyda "ja,
+            // meddela medlemmen" så en äldre klient inte tystar beskedet.
+            //
+            // För en BEKRÄFTELSE är den defaulten precis fel: utelämnat måste betyda "inte
+            // bekräftat", annars slipper en klient som inte skickar fältet förbi spärren. Mätt
+            // 2026-09-09 — grinden släppte igenom en förfrågan utan bekräftelse på första försöket,
+            // och det var just den här återanvändningen. En hjälpare vars default är "ja" hör inte
+            // i en grind vars default måste vara "nej".
+            var bekraftat = (antalVapenBekraftat ?? "").Trim();
+            bool antalOk = bekraftat.Equals("1", StringComparison.Ordinal)
+                || bekraftat.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || bekraftat.Equals("on", StringComparison.OrdinalIgnoreCase);
+
             var (requestId, error) = _requests.Create(
-                memberId, clubId, kind, firearmId, forbund ?? "", vapengrupp, message);
+                memberId, clubId, kind, firearmId, forbund ?? "", vapengrupp, message, antalOk);
 
             if (error is not null) return Json(new { success = false, message = error });
 
@@ -441,6 +459,57 @@ namespace HpskSite.Controllers
             }
 
             return Json(new { success = true, requestId, message = "Förfrågan är skickad till klubben." });
+        }
+
+        /// <summary>
+        /// Antalet vapen medlemmen har SEDAN TIDIGARE inom ett förbund — blankettens egen rad,
+        /// räknad för medlemmen själv innan hen skickar förfrågan.
+        ///
+        /// <para><b>⚠️ INGEN AVKRYPTERING, INGEN LOGGRAD.</b> Räkningen läser bara
+        /// klartextkolumner (`AcquisitionStatus` + relationen `FirearmFederation`), så den behöver
+        /// inte gå genom <c>RevealDetailsAsync</c>. Det är också varför utfärdandeskärmen kan visa
+        /// antalet utan att någon tryckt Hämta: en loggrad ska betyda att någon faktiskt tittade på
+        /// medlemmens vapenuppgifter, och att räkna dem är inte att titta på dem.</para>
+        ///
+        /// <para><b>⚠️ Medlemmens EGEN endpoint.</b> Den svarar bara för den inloggade medlemmen —
+        /// det finns med flit ingen väg för någon annan att räkna en medlems innehav.</para>
+        ///
+        /// <para><b>⚠️ Vapen UTAN förbund räknas i ingenting</b>, och det syns inte i en siffra.
+        /// Därför returneras de separat: en medlem som glömt sätta förbund på ett innehav skulle
+        /// annars underrapportera till Polisen utan att kunna se det. Mätt i prod 2026-09-09: ett
+        /// aktivt innehav bar inget förbund alls.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyFirearmCount(string? forbund, int excludeFirearmId = 0)
+        {
+            var memberId = await CurrentMemberIdAsync();
+            if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var fb = (forbund ?? "").Trim();
+            if (fb.Length == 0)
+                return Json(new { success = false, message = "Välj ett förbund först." });
+
+            try
+            {
+                var antal = _firearms.CountHeldInFederation(
+                    memberId, fb, excludeFirearmId: excludeFirearmId > 0 ? excludeFirearmId : null);
+
+                // Innehav som inte bär något förbund alls. `Planerat` räknas inte här — ett vapen
+                // medlemmen ännu inte äger hör inte till "sedan tidigare" oavsett förbund.
+                var utanForbund = _firearms.GetForScope(FirearmScope.Member(memberId))
+                    .Where(f => f.AcquisitionStatus == FirearmAcquisitionStatus.Innehas
+                                && f.Id != excludeFirearmId
+                                && f.Federations.Count == 0)
+                    .Select(f => new { f.Id, f.Alias })
+                    .ToList();
+
+                return Json(new { success = true, forbund = fb, antal, utanForbund });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetMyFirearmCount failed for member {MemberId}", memberId);
+                return Json(new { success = false, message = "Kunde inte räkna vapnen." });
+            }
         }
 
         /// <summary>Medlemmens egna förfrågningar, med klubbens svar.</summary>

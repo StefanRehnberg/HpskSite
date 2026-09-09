@@ -78,6 +78,29 @@ namespace HpskSite.Services.Firearms
         public DateTime? HandledAt { get; set; }
         public string? HandlerNote { get; set; }
         public int? IssuedIntygId { get; set; }
+
+        /// <summary>
+        /// Blankettens rad "Sökanden har sedan tidigare ___ st skjutvapen … i den verksamhet som
+        /// bedrivs av det förbund som anges ovan", räknad vid ANSÖKNINGSTILLFÄLLET.
+        ///
+        /// <para><b>⚠️ SERVERN RÄKNAR, KLIENTEN BEKRÄFTAR.</b> Antalet postas aldrig — det är en
+        /// avskrift av något registret redan kan svara på, och en inskriven siffra som tyst kör
+        /// över registret är lika illa som ingen siffra.</para>
+        ///
+        /// <para><b>⚠️ En SNAPSHOT, inte en spegel.</b> Lägger medlemmen in ett vapen dagen efter
+        /// ska klubben SE att antalet ändrats, inte få det tyst uppdaterat under sig.</para>
+        /// </summary>
+        public int? AntalVapenSedanTidigare { get; set; }
+
+        /// <summary>
+        /// När medlemmen bekräftade att registret är komplett för förbundet.
+        ///
+        /// <para><b>⚠️ NULL = inte bekräftat, och det är ett eget tillstånd.</b> Noll vapen sedan
+        /// tidigare är ett giltigt och vanligt svar — det FÖRSTA vapnet — så en nolla i
+        /// antalskolumnen får inte kunna läsas som "medlemmen svarade inte".</para>
+        /// </summary>
+        public DateTime? AntalVapenBekraftatAt { get; set; }
+
         public DateTime CreatedAt { get; set; }
 
         // Visningsfält, inte kolumner.
@@ -92,6 +115,9 @@ namespace HpskSite.Services.Firearms
         [Ignore] public string KindLabel => ForeningsintygRequestKind.Label(Kind);
         [Ignore] public string StatusLabel => ForeningsintygRequestStatus.Label(Status);
         [Ignore] public bool IsOpen => ForeningsintygRequestStatus.Open.Contains(Status, StringComparer.Ordinal);
+
+        /// <summary>Medlemmen har bekräftat vapenräkningen.</summary>
+        [Ignore] public bool AntalVapenBekraftat => AntalVapenBekraftatAt.HasValue;
     }
 
     /// <summary>
@@ -129,7 +155,8 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         public (int RequestId, string? Error) Create(
             int memberId, int clubId, string kind, int firearmId,
-            string forbund, string? vapengrupp, string? message)
+            string forbund, string? vapengrupp, string? message,
+            bool antalVapenBekraftat = false)
         {
             if (memberId <= 0 || clubId <= 0) return (0, "Ogiltig medlem eller klubb.");
             if (!ForeningsintygRequestKind.IsValid(kind)) return (0, "Ogiltig typ av förfrågan.");
@@ -164,6 +191,25 @@ namespace HpskSite.Services.Firearms
             if (duplicate > 0)
                 return (0, "Du har redan en obehandlad förfrågan för det här vapnet.");
 
+            // ⚠️⚠️ SPÄRR: medlemmen måste bekräfta vapenräkningen (Stefans beslut 2026-09-09).
+            //
+            // Blanketten kräver antalet vapen sökanden har sedan tidigare inom förbundet, och det
+            // fylldes tidigare bara om klubben tryckte Hämta — gjorde de inte det skrevs raden ut
+            // TOM. Antalet är dessutom bara så komplett som medlemmens EGET register, och det är
+            // medlemmen som vet om det är komplett. Klubben skriver under siffran; medlemmen svarar
+            // för den.
+            //
+            // Samma linje som spärren på medlemmens egna fält: uppgifter bara medlemmen kan
+            // åtgärda ska stoppas HÄR, inte upptäckas av klubben som inte kan göra något.
+            if (!antalVapenBekraftat)
+                return (0, "Bekräfta antalet vapen du har sedan tidigare innan du skickar " +
+                           "förfrågan — klubben måste uppge det på intyget.");
+
+            // ⚠️ RÄKNAS PÅ SERVERN, aldrig postat. Förbundsskopat, och det SÖKTA vapnet räknas
+            // bort: blanketten säger "sedan tidigare", vilket spelar roll vid en förnyelse där
+            // vapnet redan innehas och annars hade räknats som ett av de tidigare.
+            var antal = _firearms.CountHeldInFederation(memberId, fb, excludeFirearmId: firearmId);
+
             var row = new ForeningsintygRequest
             {
                 MemberId = memberId,
@@ -174,6 +220,8 @@ namespace HpskSite.Services.Firearms
                 VapengruppSkytteform = Trim(vapengrupp, 200),
                 MemberMessage = Trim(message, 1000),
                 Status = ForeningsintygRequestStatus.Ny,
+                AntalVapenSedanTidigare = antal,
+                AntalVapenBekraftatAt = DateTime.Now,
                 CreatedAt = DateTime.Now,
             };
             db.Insert(row);

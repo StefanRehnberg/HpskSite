@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace HpskSite.Models
@@ -384,10 +384,17 @@ namespace HpskSite.Models
 
         // ── Föreningsintyget gäller (vapnet) — INTYGSFÄLT ────────────
         //
-        // Inget av det här finns i registret. Kedjans punkt 5 (krypterat vapeninnehav) är den enda
-        // vägen dit, och när den byggs måste ett vapen bära VILKET FÖRBUNDS VERKSAMHET det används
-        // i — blanketten skopar antalet till "det förbund som anges ovan", och samma vapen kan
-        // lagligen användas i flera förbunds grenar. Alltså en relation, inte en kolumn.
+        // ⚠️ RÄTTAD 2026-09-09: kommentaren här sa "inget av det här finns i registret", vilket
+        // beskrev läget FÖRE punkt 5 (krypterat vapeninnehav) och fas 3. Fabrikat, modell, kaliber,
+        // piplängd OCH antalet vapen sedan tidigare hämtas nu ur registret via
+        // `FetchIntygFirearmData` — förbundsskopat, med det sökta vapnet uteslutet.
+        //
+        // De är ändå INTYGSFÄLT: registret är inte en myndighetskälla, utfärdaren kan rätta för
+        // hand, och det är hen som skriver under. Hämtningen är ett förslag, inte ett faktum.
+        //
+        // Förbundskravet som kommentaren förutsåg blev verklighet: `FirearmFederation` är en
+        // RELATION per vapen, eftersom blanketten skopar antalet till "det förbund som anges ovan"
+        // och samma vapen lagligen kan användas i flera förbunds grenar.
 
         /// <summary>Pistol / Revolver / Kulgevär / Hagelgevär / Annat.</summary>
         public string Vapentyp { get; set; } = "";
