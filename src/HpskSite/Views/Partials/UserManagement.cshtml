@@ -1,4 +1,4 @@
-@using Umbraco.Cms.Web.Website.Controllers
+﻿@using Umbraco.Cms.Web.Website.Controllers
 @inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @{
     // This partial handles user management UI
@@ -293,12 +293,14 @@
                                 <input type="text" class="form-control" id="personNumber" name="personNumber">
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="memberSince" class="form-label">Medlem sedan</label>
-                                <input type="text" class="form-control" id="memberSince" name="memberSince">
-                            </div>
-                        </div>
+                        @*
+                            ⚠️ HÄR LÅG "MEDLEM SEDAN" PÅ MEDLEMMEN. Borttaget — se den utförliga
+                            kommentaren i ClubAdminPanel.cshtml. Uppgiften hör till ett
+                            KLUBBMEDLEMSKAP (en medlem kan tillhöra flera klubbar med olika tid i
+                            var och en) och sätts per klubb under Klubbmedlemskap på klubbens egen
+                            medlemsdialog. Sajtadmin administrerar inte en enskild klubbs
+                            medlemsregister.
+                        *@
                     </div>
 
                     <div class="row">
@@ -772,10 +774,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Initialize Flatpickr date picker
-    flatpickr('#memberSince', {
-        locale: 'sv',
-        dateFormat: 'Y-m-d'
-    });
+    // ⚠️ Ingen datumväljare här längre: fältet är borttaget. Klubbmedlemskapets
+    // "Medlem sedan" har sin egen väljare i ClubAdminPanel.cshtml.
+
 });
 
 function updateSortIndicators() {
@@ -1234,7 +1235,6 @@ function showAddUserModal() {
     document.getElementById('postalCode').value = '';
     document.getElementById('city').value = '';
     document.getElementById('personNumber').value = '';
-    document.getElementById('memberSince').value = '';
 
     // Hide delete button for new members
     document.getElementById('deleteMemberBtn').style.display = 'none';
@@ -1341,7 +1341,6 @@ function editUser(userId) {
                 document.getElementById('postalCode').value = member.postalCode || '';
                 document.getElementById('city').value = member.city || '';
                 document.getElementById('personNumber').value = member.personNumber || '';
-                document.getElementById('memberSince').value = member.memberSince || '';
                 document.getElementById('isApproved').checked = member.isApproved;
 
                 // Hard delete is site-admin only (it purges the person + all data across every
@@ -1578,7 +1577,8 @@ function saveMember() {
     formData.append('postalCode', document.getElementById('postalCode').value);
     formData.append('city', document.getElementById('city').value);
     formData.append('personNumber', document.getElementById('personNumber').value);
-    formData.append('memberSince', document.getElementById('memberSince').value);
+    // ⚠️ Fältet är borttaget — se markupen. Skickas INTE, så `SaveMember` lämnar egenskapen
+    // orörd i stället för att nollställa den vid varje sparning.
     formData.append('primaryClubId', memberData.primaryClubId);
     formData.append('isApproved', memberData.isApproved);
 

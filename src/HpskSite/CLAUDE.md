@@ -6131,6 +6131,79 @@ kvar i gula rutan som *"Väntar på medlemmen: …"* med brickan 1 · loggraden 
 0` (dev saknar SMTP) och kvittot sa just att mejlet inte gick fram · andra öppningen förifyllde texten
 · ett avslaget ärende (52) nekades · *Skriv intyget* fungerar på ärendet. Fixturen raderad.
 
+#### "Medlem sedan" hör till KLUBBMEDLEMSKAPET — omarbetningen (2026-09-09)
+
+Stefan: *"fältet medlem sedan på medlemmen måste göras om, det fungerar inte eftersom man kan va
+medlem i flera klubbar och ha olika tid i var klubb"*, och senare: *"vi kan aldrig fylla i Medlem
+sedan datum för en medlem när den registrerar sig … det är hur länge hen varit medlem i respektive
+klubb"*.
+
+**⚠️⚠️ MEDLEM SEDAN FÅR ALDRIG HÄRLEDAS.** Ett registreringsdatum på pistol.nu säger ingenting om
+när någon blev medlem i klubben — medlemskapet föregår ofta sajten med decennier. Uppgiften kan bara
+komma från en människa som vet: klubben (eller medlemmen). Att seeda den från en registrering vore en
+påhittad uppgift på en handling till Polismyndigheten.
+
+**Den konkreta buggen: TVÅ FÄLT MED SAMMA ETIKETT I SAMMA DIALOG.** Klubbadmins medlemsdialog bar
+*"Medlem sedan"* på **medlemmen** (`editMemberMemberSince`) 28 rader ovanför *"Medlem sedan"* under
+**Klubbmedlemskap** (`editMembershipMemberSince`). Klubbadmin kunde inte se vilket som gällde, och
+fyllde man det övre hamnade datumet där intyget bara läser som sista reserv. Sajtadmins
+`UserManagement.cshtml` bar samma fält. **Båda är borttagna.**
+
+**⚠️ ATT TA BORT ETT FÄLT UR EN DIALOG KAN NOLLSTÄLLA DATAT.** `SaveMember` hade
+`string memberSince = ""` som default och skrev `SetValue("memberSince", memberSince ?? "")`
+villkorslöst — så med fältet borta hade **varje sparning tömt egenskapen**, alltså tappat den enda
+uppgift som finns för de medlemmar som ännu inte har ett klubbmedlemskap med datum. Parametern är nu
+`string?` med `null` som default och skrivningen villkorad: **sätt bara det som skickades**, samma
+regel som `UpdateProfile` redan följde (det är därför borttagningen av `birthDate`/`gender` var
+ofarlig). Mätt: en riktig sparning genom dialogen lämnade `1997-11-30` orört.
+
+**Datumväljaren flyttade med.** Klubbfältet — det intyget faktiskt läser — var ett vanligt textfält
+utan flatpickr, tvärtemot husregeln. `initEditMemberDatePicker` pekar nu på det, med
+`maxDate: 'today'` (man kan inte ha varit medlem sedan ett framtida datum).
+
+**PROD, mätt 2026-09-09 (och två av talen motsäger en tidigare anteckning):**
+
+| | |
+|---|---|
+| Medlemmar totalt | 883 |
+| …med en `ClubMembership`-rad | **317** |
+| (medlem, klubb)-par som SKA finnas enligt klubbegenskaperna | **910** |
+| …som saknar rad | **595** |
+| Medlemskap utan `MemberSince` | 43 |
+| Fall där reserven faktiskt används | **6** |
+| Fall där båda är satta och **säger emot varandra** | **6** |
+
+⚠️ **Tabellen täcker bara 36 % av medlemmarna**, så reserven kan INTE släppas förrän raderna finns —
+då blir blankettens rad tom för de flesta. Och gapet krympte inte av sig självt:
+**självregistreringen skapar ingen medlemskapsrad** (kontrollerat — raderna kommer bara från
+medlemsimporten och klubbadmins medlemskapsdialog).
+
+⚠️ **De 6 motsägelserna är INTE artefakter.** Jag misstänkte att medlemskapsdatumen bara var radens
+skapandedatum — **fel: 0 av 317 sammanfaller med `CreatedDate`**. Det är riktiga uppgifter, och båda
+kan vara sanna om olika saker: medlem 1078 har medlemskapet `2026-01-13` (Varberg PK) och egenskapen
+`1997-05-01`. Det ÄR Stefans invändning i data. Medlemskapsdatumet vinner, eftersom det är det
+klubbspecifika faktum blanketten frågar efter.
+
+**ORDNINGEN ÄR BÄRANDE — släpp inte reserven först:**
+
+1. ✅ **Ta bort fältet på medlemmen** ur båda dialogerna, med skrivvägen skyddad. *(Gjort.)*
+2. ⏳ **Backfilla raderna** — `Migrations/backfill-clubmembership-from-club-properties.sql`.
+   Additivt, idempotent, `@Apply = 0` som standard (dry run). Skapar relationen ur `primaryClubId` +
+   `memberClubIds` och sätter `MemberSince` **bara** där en människa redan skrivit ett datum i den
+   gamla egenskapen; annars NULL. Skriver aldrig över ett satt datum.
+   **Dry run mot prod: 595 rader att skapa, 35 av dem får ett datum, 560 NULL, plus 6 befintliga
+   rader som fylls.** (Dev: 112 / 3 / 109 / 1.)
+3. ⏳ **Skapa raden vid registrering och godkännande**, med `MemberSince` NULL. Relationen finns;
+   datumet är okänt och ska förbli okänt tills klubben fyller i.
+4. ⏳ **Släpp reservläsningen** i `ForeningsintygDocumentService.FillMembershipStart` och
+   `UserProfile.cshtml` — **först efter steg 2**.
+5. ⏳ Städa `MemberMergeService`s `memberSince`-rad och egenskapen i importmappningen.
+
+**Vem fyller i de 560 tomma?** Klubben, i medlemsdialogen under Klubbmedlemskap — och prompten finns
+redan: utfärdandeskärmen listar *"Har varit medlem kontinuerligt sedan datum"* som ett saknat
+**klubbfält** med gul triangel, och medlemmens egen ruta säger "Din klubb behöver fylla i". Ingen
+siffra hittas på, och ingen klubb tvingas gissa.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

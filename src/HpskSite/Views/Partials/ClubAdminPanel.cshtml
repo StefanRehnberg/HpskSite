@@ -1472,12 +1472,22 @@
                                 <div class="invalid-feedback" id="editMemberPersonNumberError">Ogiltigt personnummer. Använd formatet ÅÅÅÅMMDD-XXXX</div>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editMemberMemberSince" class="form-label">Medlem sedan</label>
-                                <input type="text" class="form-control" id="editMemberMemberSince" name="memberSince" placeholder="ÅÅÅÅ-MM-DD">
-                            </div>
-                        </div>
+                        @*
+                            ⚠️⚠️ HÄR LÅG ETT ANDRA "MEDLEM SEDAN" — på MEDLEMMEN — 28 rader ovanför
+                            det riktiga under Klubbmedlemskap. Två fält med samma etikett i samma
+                            dialog, och klubbadmin kunde inte se vilket som gällde.
+
+                            "Medlem sedan" är ett faktum om ett KLUBBMEDLEMSKAP, inte om det delade
+                            inloggningskontot: en medlem kan tillhöra flera klubbar och ha olika tid
+                            i var och en. Ett fält på medlemmen kan bara hålla ett datum, alltså kan
+                            det aldrig vara sant för mer än en klubb. Fältet finns per klubb under
+                            Klubbmedlemskap (`editMembershipMemberSince`), scopat till den här
+                            klubbens sida — och det är det föreningsintyget läser.
+
+                            Prod bär 6 fall där de två säger emot varandra, t.ex. medlemskapet
+                            2026-01-13 (Varberg PK) mot egenskapen 1997-05-01. Båda är sanna om
+                            olika saker; bara den klubbspecifika hör på intyget.
+                        *@
                     </div>
 
                     <div id="editMemberPnrIncompleteFlag" class="alert alert-warning py-1 px-2 small" style="display:none;">
@@ -4739,7 +4749,6 @@ function populateEditMemberForm(member) {
     document.getElementById('editMemberPostalCode').value = member.postalCode || '';
     document.getElementById('editMemberCity').value = member.city || '';
     document.getElementById('editMemberPersonNumber').value = member.personNumber || '';
-    document.getElementById('editMemberMemberSince').value = member.memberSince || '';
     document.getElementById('editMemberIsApproved').checked = member.isApproved;
 
     // Person-level pnr flag (person data itself is edited by the member on Min sida).
@@ -5094,7 +5103,10 @@ async function saveEditClubMember() {
     formData.append('postalCode', document.getElementById('editMemberPostalCode').value);
     formData.append('city', document.getElementById('editMemberCity').value);
     formData.append('personNumber', document.getElementById('editMemberPersonNumber').value);
-    formData.append('memberSince', document.getElementById('editMemberMemberSince').value);
+    // ⚠️ `memberSince` SKICKAS INTE LÄNGRE. Fältet på medlemmen är borttaget (se kommentaren i
+    // markupen), och `SaveMember` skriver egenskapen bara när fältet faktiskt kommer med.
+    // Skickade vi tom sträng här skulle varje sparning NOLLSTÄLLA det gamla värdet — alltså
+    // tappa den enda uppgift som finns för medlemmar utan klubbmedlemskap med datum.
     formData.append('primaryClubId', document.getElementById('editMemberPrimaryClub').value);
     formData.append('isApproved', document.getElementById('editMemberIsApproved').checked);
     // Note: person-level expansion fields (birthDate, guardians, etc.) are edited by the
@@ -5231,7 +5243,12 @@ function initEditMemberDatePicker() {
     if (editMemberSincePicker) {
         editMemberSincePicker.destroy();
     }
-    editMemberSincePicker = flatpickr('#editMemberMemberSince', {
+    // ⚠️ VÄLJAREN FLYTTAD till klubbmedlemskapets "Medlem sedan". Den satt på det borttagna
+    // medlemsfältet; klubbfältet — det som föreningsintyget faktiskt läser — var ett vanligt
+    // textfält utan väljare, tvärtemot husregeln att datum alltid går via flatpickr.
+    //
+    // `maxDate: 'today'` är rätt här: man kan inte ha varit medlem sedan ett framtida datum.
+    editMemberSincePicker = flatpickr('#editMembershipMemberSince', {
         locale: 'sv',
         dateFormat: 'Y-m-d',
         allowInput: true,

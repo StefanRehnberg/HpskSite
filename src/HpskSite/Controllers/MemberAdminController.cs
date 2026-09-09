@@ -795,7 +795,14 @@ namespace HpskSite.Controllers
             string postalCode = "",
             string city = "",
             string personNumber = "",
-            string memberSince = "",
+            // ⚠️⚠️ NULL SOM DEFAULT, inte "". Fältet är borttaget ur båda medlemsdialogerna, så
+            // det kommer inte längre med i posten — och med "" som default hade varje sparning
+            // skrivit tom sträng över det gamla värdet. Det är den enda uppgift som finns för
+            // medlemmar som ännu inte har ett klubbmedlemskap med datum, och föreningsintygets
+            // reservläsning hänger på den tills omarbetningen är klar.
+            //
+            // Samma regel som `UpdateProfile` redan följer: sätt bara det som skickades.
+            string? memberSince = null,
             int? primaryClubId = null,
             string additionalClubIds = "",
             string precisionShooterClass = "",
@@ -906,7 +913,8 @@ namespace HpskSite.Controllers
                     member.SetValue("postalCode", postalCode ?? "");
                     member.SetValue("city", city ?? "");
                     member.SetValue("personNumber", personNumber ?? "");
-                    member.SetValue("memberSince", memberSince ?? "");
+                    // ⚠️ Bara när fältet FAKTISKT skickades. Se parameterns kommentar.
+                    if (memberSince != null) member.SetValue("memberSince", memberSince);
                     member.SetValue("primaryClubId", primaryClubId);
                     member.SetValue("memberClubIds", string.Join(",", additionalClubIdList));
                     // Only update shooter class if explicitly provided (prevents clearing on general profile updates)
@@ -1016,7 +1024,8 @@ namespace HpskSite.Controllers
                     newMember.SetValue("postalCode", postalCode ?? "");
                     newMember.SetValue("city", city ?? "");
                     newMember.SetValue("personNumber", personNumber ?? "");
-                    newMember.SetValue("memberSince", memberSince ?? "");
+                    // En NY medlem har inget att förlora, men håll formen lika: tomt = skriv inte.
+                    if (memberSince != null) newMember.SetValue("memberSince", memberSince);
                     newMember.SetValue("primaryClubId", primaryClubId);
                     newMember.SetValue("memberClubIds", string.Join(",", additionalClubIdList));
                     newMember.SetValue("precisionShooterClass", precisionShooterClass ?? "");
