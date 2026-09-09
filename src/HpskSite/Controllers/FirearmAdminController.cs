@@ -1,6 +1,7 @@
 ﻿using HpskSite.Services;
 using HpskSite.Models.Firearms;
 using HpskSite.Services.Firearms;
+using HpskSite.Services.Mail;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -30,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly FirearmService _firearms;
         private readonly ForeningsintygRequestService _requests;
         private readonly ForeningsintygNotificationService _intygNotifications;
+        private readonly MailReplyService _mailReplies;
         private readonly FirearmBookingService _bookings;
         private readonly Umbraco.Cms.Core.Security.IMemberManager _memberManager;
         private readonly Umbraco.Cms.Core.Services.IMemberService _memberService;
@@ -52,6 +54,7 @@ namespace HpskSite.Controllers
             FirearmService firearms,
             ForeningsintygRequestService requests,
             ForeningsintygNotificationService intygNotifications,
+            MailReplyService mailReplies,
             FirearmBookingService bookings,
             Umbraco.Cms.Core.Security.IMemberManager memberManager,
             Umbraco.Cms.Core.Services.IMemberService memberService,
@@ -67,6 +70,7 @@ namespace HpskSite.Controllers
             _firearms = firearms;
             _requests = requests;
             _intygNotifications = intygNotifications;
+            _mailReplies = mailReplies;
             _bookings = bookings;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -482,6 +486,10 @@ namespace HpskSite.Controllers
 
             var rows = _requests.GetForClub(clubId, openOnly);
 
+            // ⚠️ EN FRÅGA FÖR HELA KLUBBEN, aldrig ett uppslag per rad. Inkorgen renderar alla
+            // öppna ärenden på en gång, och N+1 här är precis vad som gjorde fakturasidan 12 s lång.
+            var replies = _mailReplies.LatestPerThreadForClub(MailThreadKind.Foreningsintyg, clubId);
+
             return Json(new
             {
                 success = true,
@@ -509,15 +517,37 @@ namespace HpskSite.Controllers
                     // förfrågan), men de som skapades innan den regeln fanns ligger kvar.
                     firearmRemoved = !r.FirearmIsActive,
                     handledAt = r.HandledAt?.ToString("yyyy-MM-dd"),
+
+                    // ⚠️⚠️ "MEDLEMMEN HAR SVARAT" ÄR HÄRLETT, INTE EN FJÄRDE STATUS.
+                    //
+                    // Ett svar räknas bara när det är NYARE än klubbens senaste begäran. Ber
+                    // klubben om mer efter att medlemmen svarat vänder raden tillbaka till "Väntar
+                    // på medlemmen" — vilket är rätt, och vad en lagrad flagga hade gjort fel utan
+                    // att någon märkte det. Svarsraden ÄR belägget (jfr lärdomen att en avisering
+                    // behöver en skickat-logg, inte en omräknad slutsats).
+                    //
+                    // ⚠️ HandledAt saknas på äldre rader. Då räknas ett svar alltid som nytt —
+                    // hellre en rad som säger "svarat" en gång för mycket än ett svar som ligger
+                    // osett i ett ärende ingen tittar på igen.
+                    memberReply = replies.TryGetValue(r.Id, out var mr)
+                                  && (r.HandledAt is null || mr.CreatedAt > r.HandledAt.Value)
+                        ? new
+                        {
+                            body = mr.Body,
+                            at = mr.CreatedAt.ToString("yyyy-MM-dd HH:mm"),
+                        }
+                        : null,
                 }),
             });
         }
 
         /// <summary>Klubbens statusändring på en förfrågan.</summary>
+        /// <param name="replyToClub">Se <see cref="RequestIntygCompletion"/>. Sträng, inte bool.</param>
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetIntygRequestStatus(
-            int clubId, int requestId, string status, string? note, string? notifyMember)
+            int clubId, int requestId, string status, string? note, string? notifyMember,
+            string? replyToClub)
         {
             if (!await _adminAuth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
@@ -569,7 +599,9 @@ namespace HpskSite.Controllers
                 {
                     req.FirearmAlias ??= _firearms.GetById(req.FirearmId)?.Alias;
                     notified = await _intygNotifications
-                        .NotifyMemberOfDecisionAsync(req, issued: false, note: note);
+                        .NotifyMemberOfDecisionAsync(req, issued: false, note: note,
+                            actingMemberId: await CurrentMemberIdAsync(),
+                            replyToClub: IsExplicitlyTrue(replyToClub));
                 }
             }
 
@@ -605,8 +637,18 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
+        /// <param name="replyToClub">
+        /// Vart medlemmens svar ska gå om hen svarar i mejlklienten i stället för i appen.
+        /// Utelämnat eller <c>"0"</c> = handläggaren själv (standard: hen är den som väntar på
+        /// svaret). <c>"1"</c> = klubbens kontaktadress.
+        ///
+        /// <para><b>⚠️ STRÄNG, inte <c>bool</c>.</b> ASP.NET Cores bool-bindning godtar bara
+        /// "true"/"false" — <c>"1"</c> faller tyst tillbaka på default. Den fällan har kostat tre
+        /// rundor i den här kodbasen (klubbvapnens <c>writeDetails</c>, notiskryssrutan,
+        /// vapenräkningens bekräftelse).</para>
+        /// </param>
         public async Task<IActionResult> RequestIntygCompletion(
-            int clubId, int requestId, string? note)
+            int clubId, int requestId, string? note, string? replyToClub)
         {
             if (!await _adminAuth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
@@ -640,7 +682,12 @@ namespace HpskSite.Controllers
             if (err is not null) return Json(new { success = false, message = err });
 
             req.FirearmAlias ??= _firearms.GetById(req.FirearmId)?.Alias;
-            var notified = await _intygNotifications.NotifyMemberOfCompletionRequestAsync(req, reason);
+
+            // ⚠️ `IsTrueFlag` duger INTE här — den svarar true på ett utelämnat värde, med flit
+            // (notiskryssrutan ska mejla när inget skickas). Standardläget för svarsadressen är
+            // motsatt: handläggaren, inte klubben. Se `IsExplicitlyTrue`.
+            var notified = await _intygNotifications.NotifyMemberOfCompletionRequestAsync(
+                req, reason, actor, IsExplicitlyTrue(replyToClub));
 
             return Json(new
             {
@@ -666,6 +713,23 @@ namespace HpskSite.Controllers
         private static bool IsTrueFlag(string? v)
         {
             if (string.IsNullOrWhiteSpace(v)) return true;
+            var t = v.Trim();
+            return t.Equals("1", StringComparison.Ordinal)
+                || t.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || t.Equals("on", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Som <see cref="IsTrueFlag"/> men <b>utelämnat värde betyder NEJ</b>.
+        ///
+        /// <para><b>⚠️ ANVÄND ALDRIG <see cref="IsTrueFlag"/> DÄR STANDARDLÄGET ÄR NEJ.</b> Den är
+        /// skriven för notiskryssrutan, där ett utelämnat värde ska betyda "ja, meddela medlemmen".
+        /// För svarsadressen är standardläget handläggaren, alltså <c>false</c>. Samma
+        /// återanvändning släppte en gång igenom en vapenräkning utan bekräftelse.</para>
+        /// </summary>
+        private static bool IsExplicitlyTrue(string? v)
+        {
+            if (string.IsNullOrWhiteSpace(v)) return false;
             var t = v.Trim();
             return t.Equals("1", StringComparison.Ordinal)
                 || t.Equals("true", StringComparison.OrdinalIgnoreCase)

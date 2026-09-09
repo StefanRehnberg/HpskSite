@@ -1,0 +1,169 @@
+@model HpskSite.Controllers.MailReplyPageModel
+@{
+    Layout = null;
+}
+@*
+    Svarssidan — /svara/{token}. Chromelös, ingen inloggning.
+
+    ⚠️ INMATNINGSYTA, ALDRIG EN LÄSYTA. Den som har länken kan svara i medlemmens namn, så sidan
+    visar bara det medlemmen redan fått i sitt mejl: klubbens fråga och vapnets alias. Lägg aldrig
+    till en vapenuppgift, ett personnummer eller någon annan känslig uppgift här — vill man visa
+    mer hör det bakom inloggning på Min sida.
+
+    ⚠️ Stilarna är inline i sidan, som på de andra chromelösa sidorna. Sidan ska fungera när
+    theme.css inte hunnit uppdateras (en gammal theme.css har redan en gång gjort en yta ostylad),
+    och den ska kunna öppnas på en telefon med dålig täckning utan att vänta på en extern fil.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>@(Model.Found ? Model.Heading : "Länken gäller inte")</title>
+    <style>
+        :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#0d6efd; --ok:#198754; --warn:#997404; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--ink); background: #f3f4f6; margin: 0; padding: 24px;
+            font-size: 16px; line-height: 1.6;
+        }
+        .sheet {
+            max-width: 620px; margin: 24px auto; background:#fff; border-radius: 14px;
+            box-shadow: 0 6px 24px rgba(0,0,0,.08); padding: 32px 28px;
+        }
+        .club { font-size: 15px; color: var(--muted); margin: 0 0 4px; }
+        h1 { font-size: 23px; margin: 0 0 18px; line-height: 1.3; }
+        .ask {
+            background:#fffbeb; border:1px solid #fde68a; border-left: 4px solid #f59e0b;
+            border-radius: 8px; padding: 14px 16px; margin: 0 0 22px;
+        }
+        .ask-label { font-size: 13px; text-transform: uppercase; letter-spacing:.04em;
+                     color: var(--warn); font-weight: 700; margin: 0 0 6px; }
+        .ask p { margin: 0; white-space: pre-wrap; }
+        label { display:block; font-weight: 600; margin: 0 0 8px; }
+        textarea {
+            width: 100%; font: inherit; color: inherit; padding: 12px 14px;
+            border: 1px solid var(--line); border-radius: 10px; min-height: 160px; resize: vertical;
+        }
+        textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+        .hint { color: var(--muted); font-size: 14px; margin: 8px 0 20px; }
+        .btn {
+            display:inline-block; font: inherit; font-weight: 600; cursor:pointer;
+            border: 1px solid var(--accent); background: var(--accent); color:#fff;
+            padding: 13px 26px; border-radius: 10px; font-size: 16px;
+        }
+        .ok-box {
+            background:#e8f5ec; border:1px solid #b7e0c4; color:#14683d;
+            border-radius: 12px; padding: 20px 22px; margin: 0 0 18px;
+        }
+        .ok-box strong { display:block; font-size: 18px; margin-bottom: 6px; }
+        .err-box {
+            background:#fdecea; border:1px solid #f5c2c0; color:#8f2c26;
+            border-radius: 10px; padding: 14px 16px; margin: 0 0 18px;
+        }
+        .closed-box {
+            background:#f3f4f6; border:1px solid var(--line); color: var(--muted);
+            border-radius: 10px; padding: 16px 18px; margin: 0 0 18px;
+        }
+        .foot { color: var(--muted); font-size: 13px; margin-top: 26px;
+                border-top: 1px solid var(--line); padding-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="sheet">
+    @if (!Model.Found)
+    {
+        @*
+            ⚠️ EN OGILTIG, MANIPULERAD OCH UTGÅNGEN LÄNK SER LIKADANA UT. Skillnaden är bara
+            användbar för den som gissar. Men texten måste säga vad medlemmen ska GÖRA i stället —
+            "länken gäller inte" utan nästa steg är en återvändsgränd.
+        *@
+        <h1>Länken gäller inte längre</h1>
+        <p>
+            Svarslänken i mejlet har antingen gått ut eller hör inte till ett ärende som är öppet.
+            Länkar i den här typen av mejl är giltiga i cirka två månader.
+        </p>
+        <p>
+            Du kan fortfarande nå din klubb — svara på mejlet du fick, eller logga in på
+            <a href="/">pistol.nu</a> och titta under <em>Min sida</em>.
+        </p>
+    }
+    else if (Model.Saved)
+    {
+        <p class="club">@Model.ClubName</p>
+        @*
+            ⚠️ LOVA INTE ATT ETT MEJL GICK FRAM. Aviseringen till handläggaren är best-effort och
+            kan misslyckas (trasig SMTP, saknad adress) långt efter att svaret sparats — sidan vet
+            inte utfallet, och ett kvitto som påstår det ändå är exakt den lögn den här kodbasen
+            fått rätta två gånger förut (Betalningsbekräftelse, påminnelseräknaren).
+            Det som ALLTID är sant är att svaret ligger på förfrågan. Säg bara det.
+        *@
+        <div class="ok-box">
+            <strong>Tack, ditt svar är skickat.</strong>
+            Svaret ligger nu på din förfrågan, där klubben ser det tillsammans med det de bad om.
+            Du behöver inte göra något mer.
+        </div>
+        <p class="hint">
+            Du kan stänga den här sidan. Behöver du skicka något mer kan du använda samma länk i
+            mejlet igen.
+        </p>
+    }
+    else
+    {
+        <p class="club">@Model.ClubName</p>
+        <h1>@Model.Heading</h1>
+
+        @if (Model.Error is not null)
+        {
+            <div class="err-box">@Model.Error</div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Model.FirearmLabel))
+        {
+            <p>Ärendet gäller <strong>@Model.FirearmLabel</strong>.</p>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Model.RequestNote))
+        {
+            <div class="ask">
+                <p class="ask-label">Det här bad klubben om</p>
+                <p>@Model.RequestNote</p>
+            </div>
+        }
+
+        @if (!Model.AcceptsReply)
+        {
+            <div class="closed-box">@Model.ClosedExplanation</div>
+        }
+        else
+        {
+            @* ⚠️ Ingen antiforgery-token: sidan är publik och har ingen session att binda den
+               till. Skyddet är den signerade, tidsbegränsade länken. Se controllern. *@
+            <form method="post" action="/svara/@Uri.EscapeDataString(Model.Token)">
+                <label for="body">Ditt svar till @Model.ClubName</label>
+                <textarea id="body" name="body" maxlength="@Model.MaxLength"
+                          autocomplete="off" required
+                          placeholder="Skriv vad du har gjort, eller fråga om något är oklart.">@Model.Draft</textarea>
+                <p class="hint">
+                    Har du fyllt i uppgifterna räcker det att skriva det. Klubben ser ditt svar
+                    direkt på din förfrågan.
+                </p>
+                <button type="submit" class="btn">Skicka svaret</button>
+            </form>
+        }
+    }
+
+        <p class="foot">
+            @* Namnet visas för att medlemmen ska kunna se att länken hör till HEN — en länk som
+               vidarebefordrats till fel person ska gå att upptäcka. *@
+            @if (Model.Found && !string.IsNullOrWhiteSpace(Model.MemberName))
+            {
+                <text>Svaret registreras för @Model.MemberName. </text>
+            }
+            Skickat via pistol.nu
+        </p>
+    </div>
+</body>
+</html>

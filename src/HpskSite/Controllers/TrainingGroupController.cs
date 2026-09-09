@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -9,6 +9,7 @@ using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Cms.Core.Security;
 using Microsoft.Extensions.Logging;
 using HpskSite.Services;
+using HpskSite.Services.Mail;
 using HpskSite.Models.ViewModels.Training;
 
 namespace HpskSite.Controllers
@@ -21,6 +22,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly ClubService _clubService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly ILogger<TrainingGroupController> _logger;
 
         public TrainingGroupController(
@@ -36,6 +38,7 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             ClubService clubService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             ILogger<TrainingGroupController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -45,6 +48,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _clubService = clubService;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _logger = logger;
         }
 
@@ -274,7 +278,8 @@ namespace HpskSite.Controllers
 
                                 _ = _emailService.SendTrainingGroupTrainerAddedAsync(
                                     memberEmail, member.Name ?? "", group?.Name ?? "",
-                                    otherTrainerNames, startDate, clubName);
+                                    otherTrainerNames, startDate, clubName,
+                                    _replyContacts.ForClub(group?.ClubId ?? 0));
                             }
                             else
                             {
@@ -284,7 +289,8 @@ namespace HpskSite.Controllers
 
                                 _ = _emailService.SendTrainingGroupMemberAddedAsync(
                                     memberEmail, member.Name ?? "", group?.Name ?? "",
-                                    trainerNames, startDate, clubName);
+                                    trainerNames, startDate, clubName,
+                                    _replyContacts.ForClub(group?.ClubId ?? 0));
                             }
                         }
                     }
@@ -570,9 +576,13 @@ namespace HpskSite.Controllers
 
                     try
                     {
+                        // ⚠️ HÄR är svaret på ett mejl RÄTT väg, inte svara-i-appen. Ett
+                        // gruppmeddelande från tränaren är ett SAMTAL, inte ett ärende — och
+                        // svaret ska gå till tränaren som skrev det.
                         await _emailService.SendTrainingGroupMessageAsync(
                             member.Email, member.Name ?? "", senderName,
-                            group.Name, subject, message);
+                            group.Name, subject, message,
+                            _replyContacts.ForMember(senderId));
                         sentCount++;
                     }
                     catch (Exception emailEx)

@@ -9,6 +9,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using HpskSite.Models.ViewModels;
 using HpskSite.Services;
 using Microsoft.AspNetCore.Hosting;
@@ -29,6 +30,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly IWebHostEnvironment _webHostEnvironment;
         private readonly IMemberManager _memberManager;
         private readonly MemberDataPurgeService _purgeService;
@@ -49,6 +51,7 @@ namespace HpskSite.Controllers
             IMemberGroupService memberGroupService,
             AdminAuthorizationService authService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             IWebHostEnvironment webHostEnvironment,
             IMemberManager memberManager,
             MemberDataPurgeService purgeService,
@@ -62,6 +65,7 @@ namespace HpskSite.Controllers
             _authService = authService;
             _umbracoContextAccessor = umbracoContextAccessor;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _webHostEnvironment = webHostEnvironment;
             _memberManager = memberManager;
             _purgeService = purgeService;
@@ -989,7 +993,10 @@ namespace HpskSite.Controllers
                             member.SetValue("autoLoginTokenExpiry", tokenExpiry.ToString("o"));
                             _memberService.Save(member);
 
-                            await _emailService.SendApprovalNotificationAsync(email, member.Name, autoLoginToken);
+                            // Beskedet kommer från KLUBBEN — svaret ska dit, inte till sajtägaren.
+                            await _emailService.SendApprovalNotificationAsync(
+                                email, member.Name, autoLoginToken,
+                                _replyContacts.ForMembersOwnClub(member));
                             Console.WriteLine($"Approval email sent to {email}");
                         }
                         catch (Exception emailEx)
@@ -1569,7 +1576,8 @@ namespace HpskSite.Controllers
                     await _emailService.SendApprovalNotificationAsync(
                         member.Email,
                         memberName,
-                        autoLoginToken
+                        autoLoginToken,
+                        _replyContacts.ForMembersOwnClub(member)
                     );
                     Console.WriteLine($"[ApproveMember] Approval email sent successfully to: {member.Email}");
 
@@ -1654,9 +1662,12 @@ namespace HpskSite.Controllers
                 // Send rejection email before deleting
                 try
                 {
+                    // ⚠️ ETT AVSLAG ÄR DÄR SVARSADRESSEN BETYDER MEST. "Varför?" är det självklara
+                    // svaret, och den frågan kan bara klubben besvara.
                     await _emailService.SendRejectionNotificationAsync(
                         member.Email,
                         member.Name,
+                        _replyContacts.ForMembersOwnClub(member),
                         reason
                     );
                 }
@@ -1781,6 +1792,7 @@ namespace HpskSite.Controllers
                         member.Email,
                         memberName,
                         invitationToken,
+                        _replyContacts.ForMembersOwnClub(member),
                         clubName
                     );
                     invitationSuccess = true;

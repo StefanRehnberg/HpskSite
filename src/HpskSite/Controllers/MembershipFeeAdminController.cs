@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.DataProtection;
+﻿using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
@@ -11,6 +11,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using HpskSite.Services;
 
 namespace HpskSite.Controllers
@@ -30,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly ClubService _clubService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly IDataProtector _protector;
         private readonly ILogger<MembershipFeeAdminController> _logger;
 
@@ -50,6 +52,7 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             ClubService clubService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             IDataProtectionProvider dataProtectionProvider,
             ILogger<MembershipFeeAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -61,6 +64,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _clubService = clubService;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
             _logger = logger;
         }
@@ -232,8 +236,12 @@ namespace HpskSite.Controllers
                 var payUrl = BuildPayUrl(charge.Id);
                 try
                 {
+                    // ⚠️ Svaret hör till KLUBBEN, som är den som kräver avgiften. Ett vanligt svar
+                    // på ett avgiftskrav är "jag har flyttat, vill avsluta medlemskapet" — och det
+                    // är klubbens kassör som kan göra något med det.
                     await _emailService.SendMembershipFeeRequestAsync(
-                        charge.MemberEmail!, charge.MemberName ?? "medlem", clubName, year, charge.Amount, payUrl);
+                        charge.MemberEmail!, charge.MemberName ?? "medlem", clubName, year, charge.Amount, payUrl,
+                        _replyContacts.ForClub(clubId));
                     sent++;
                 }
                 catch (Exception ex)

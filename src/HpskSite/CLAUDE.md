@@ -7408,6 +7408,149 @@ keys (System.Text.Json camelCases output) and never passes strings through inlin
 (use id-only handlers). Spec: `Documentation/BOARD_WORK_PHASE1_TERMS.md`, `_PHASE2_MEETINGS.md`,
 `_PHASE3_GOVERNANCE.md`. KB: `KnowledgeBase/docs/styrelsearbete.md`. Marketed on /om-pistol-nu (Årshjul shot).
 
+## ⚠️⚠️ VARJE MEJL MÅSTE VÄLJA VART ETT SVAR TAR VÄGEN (2026-09-09)
+
+Rapporterat: en medlem som ombetts komplettera sin föreningsintygsförfrågan svarade på mejlet så
+fort hen fixat uppgifterna — men mejlet kom från `admin@pistol.nu`, så svaret nådde sajtägaren och
+inte klubben, och klubben satt kvar med *"Väntar på medlemmen"*.
+
+**Felet var inte i Föreningsintyg. Det var i kärnvägen, och det gällde alla ~35 mejltyper.**
+`EmailService.SendEmailAsync` satte bara `From` och **aldrig någon `Reply-To`**. Ett enda ställe på
+hela sajten satte en svarsadress: klubbutskicken (`SendHtmlEmailAsync`).
+
+### Två fixar, och de är KOMPLEMENT — inte alternativ
+
+| Vad medlemmen gör | Var det landar |
+|---|---|
+| Trycker **Svara klubben** i mejlet | strukturerat i ärendet, status flippar, handläggaren aviseras |
+| Trycker **Svara** i sitt e-postprogram ändå | rätt människas inkorg — inte sajtägarens |
+
+Bygger man bara det första kvarstår ursprungsfelet för alla som ändå gör som de brukar. Bygger man
+bara det andra får klubben ett mejl men ärendet vet fortfarande ingenting.
+
+### ⚠️ `replyTo` HAR INGET STANDARDVÄRDE, med flit
+
+Kärnvägens parameter är obligatorisk. **Ge den aldrig ett default** — då blir "glömde välja"
+omöjligt att skilja från "valde sajtens adress", och kompilatorn är det enda som kan tvinga fram
+beslutet. Är sajtägaren rätt mottagare skriver man `MailReplyTo.SiteAdmin`, uttryckligen.
+`MailReplyTo.NoReply` finns för lösenordsmejl och liknande, och skriver ut i fotnoten att mejlet
+inte går att svara på — så ingen väntar på svar från en obevakad brevlåda.
+
+### ⚠️ SVARSADRESSEN ÄR MOTPARTEN I SAMTALET, inte alltid klubben
+
+| Mejlets riktning | Reply-To |
+|---|---|
+| Klubben → medlemmen (beslut, komplettering, avgift, inbjudan) | handläggaren, annars klubbens kontakt |
+| Medlemmen → klubbens funktionärer (ny förfrågan, certifieringsbegäran) | **medlemmen** |
+| Arrangören → deltagare (betalkrav, kvitto) | tävlingens arrangör |
+| Sajten → någon (lösenord, kontolåsning) | `SiteAdmin` eller `NoReply`, uttryckligen |
+
+Att alltid välja klubben hade flyttat problemet ett steg. Den ansvarige som läser *"Kalle har begärt
+ett föreningsintyg"* vill svara Kalle.
+
+### ⚠️ ALLA FYRA SÄNDVÄGAR MÅSTE GÅ GENOM `ApplyEnvelope`
+
+`EmailService` bygger `MailMessage` på **fyra** ställen (kärnvägen, `SendHtmlEmailAsync`,
+Swish-QR-mejlet med sin bilaga, testaccess-förfrågan). Alla fyra saknade `Reply-To`. Lägger du till
+en femte: anropa `ApplyEnvelope` + `AppendReplyFooter`.
+
+### ⚠️ From-ADRESSEN ÄNDRAS ALDRIG
+
+Mätt 2026-09-09: `pistol.nu` har `v=spf1 include:spf.simply.com -all` och DMARC `p=reject`. En
+klubbs egen adress i `From` studsar hos varje mottagare som kontrollerar. Bara **visningsnamnet**
+(`Vetlanda PK via Pistol.nu`) och `Reply-To` speglar avsändaren.
+
+### ⚠️ `ForCompetitionOrganiser` bär BÅDA VÄRDFORMERNA
+
+En tävling arrangeras av en KLUBB (`clubId` satt) eller av KRETSEN själv (`clubId` tomt,
+`regionalFederation` satt) — ett SM är den senare. En upplösning som bara läser `clubId` hamnar på
+sajtens adress för varje kretsarrangerad tävling. Samma fälla har den här kodbasen gått i **fyra
+gånger** på behörighetssidan.
+
+### ⚠️ `ForMembersOwnClub` går via `MemberClubService.GetPrimaryClubId`
+
+`primaryClubId` är en **STRÄNG**-egenskap. `GetValue<int>` konverterar inte utan ger tyst **0**,
+vilket här hade betytt "ingen klubb" och skickat svaret till sajtens adress. Samma fälla gav varje
+walk-in-anmälan `clubId=0`.
+
+### Fotnoten är inte dekoration
+
+Varje mejl bär en rad som säger vart ett svar hamnar. `Reply-To` respekteras av alla vanliga
+klienter men mottagaren SER den inte, och den som undrar "når det här någon?" ska kunna läsa svaret
+i mejlet.
+
+### Medlemmens svar: `/svara/{token}`
+
+`MailReply` är **medvetet generisk** (`ThreadKind` + `ThreadRefId`). Föreningsintyget är först, men
+certifieringskön, banläggargodkännandet och bemanningsförfrågan har samma form — ett ärende med ett
+öppet tillstånd som väntar på motparten. Föreningsintyg-specifikt hade betytt fyra bygganden.
+
+- **⚠️ TILLSTÅNDET GENERALISERAS INTE.** Tjänsten lagrar svaret och svarar på "finns det ett svar
+  nyare än X". Vad det BETYDER avgör varje yta själv — ett gemensamt "ärendet har svar" över olika
+  tillståndsmaskiner hade tvingat in fel semantik i den ena.
+- **⚠️ "Medlemmen har svarat" är HÄRLETT, inte en fjärde status.** Ett svar räknas bara när det är
+  nyare än klubbens senaste begäran, så en ny begäran vänder raden tillbaka till gult av sig själv.
+  En lagrad flagga hade behövt skrivas om på två ställen, och en missad skrivning är en tyst lögn.
+- **⚠️ Sidan är en INMATNINGSYTA, aldrig en läsyta.** Ingen inloggning (samma modell som
+  `/medlemsavgift/{token}` — en äldre medlem ska kunna svara ur mejlet), så den visar bara det
+  medlemmen redan fått i sitt mejl. **Skriv aldrig en vapenuppgift eller ett personnummer där.**
+- Token är tidsbegränsad till **60 dagar** — en medlem kan behöva veckor på sig att skaffa något
+  klubben bett om, och en kortare livslängd gör länken till en återvändsgränd i just det fall den
+  finns för.
+- **⚠️ Ogiltig, manipulerad och utgången länk ser likadana ut** — skillnaden är bara användbar för
+  den som gissar. Men sidan säger vad medlemmen ska göra i stället.
+
+### ⚠️ Klubbadmin väljer svarsadress VID VARJE TILLFÄLLE
+
+Radioknappar i kompletteringsdialogen, standard = handläggaren (hen är bevisligen vid tangentbordet
+och väntar på svaret). **Ingen sparad inställning och ingen `localStorage`:** ett dolt förval som
+ändrats för två månader sedan är precis den sortens tysta tillstånd som gör att man skickar fel utan
+att märka det. Valet **nollställs vid varje öppning** — annars läcker förra ärendets val vidare, och
+den som en gång valde klubbadressen slutar TYST få svaren själv (exakt vad notis-kryssrutan gjorde).
+
+### ⚠️ `IsTrueFlag` DUGER INTE FÖR EN GRIND VARS DEFAULT ÄR NEJ
+
+`FirearmAdminController.IsTrueFlag` svarar **true** på ett utelämnat värde, med flit — notis­kryss­rutan
+ska mejla när inget skickas. Svarsadressens standard är motsatt. `IsExplicitlyTrue` finns för det.
+Samma återanvändning släppte en gång igenom en vapenräkning utan bekräftelse. Och båda tar en
+**sträng**: ASP.NET Cores bool-bindning godtar bara `"true"`/`"false"`, så `"1"` faller tyst tillbaka
+på default — tredje gången den fällan slår till i den här kodbasen.
+
+### ⛔ INKOMMANDE MAIL ÄR MEDVETET INTE BYGGT
+
+Riktig tvåvägskommunikation — en signerad ärendeadress (`svar-fi142-a7f3@pistol.nu`) vars svar landar
+i ärendet — är utrett och **skjutet**, inte förbisett.
+
+**Förutsättningarna finns** (undersökt 2026-09-09): Simply.com stödjer catch-all och obegränsade
+alias, och en MX på en subdomän (`svar.pistol.nu`) är DNS-mässigt oberoende av `pistol.nu`:s egen
+MX. Plus-adressering är **odokumenterad** men ointressant — en catch-all fångar alla okända
+lokaldelar ändå.
+
+**Transporten var aldrig den dyra delen.** Det som återstår är tolkningen, och den blev inte
+billigare av att transporten löstes:
+- **Citatklippning** — `Den 9 sep skrev…`, `-----Ursprungligt meddelande-----`, `>`-rader, Outlooks
+  `divRplyFwdMsg`. Inget bibliotek gör det perfekt; rårmailet måste sparas.
+- **Autosvar** (`Auto-Submitted: auto-replied`) — filtreras de inte flippar statusen på ett svar
+  ingen människa skrivit.
+- **Bilagor** — en medlem *kommer* bifoga foto av licensen. Antingen krypterad lagring eller ett
+  uttryckligt avvisande; att tyst slänga är sämsta utfallet och en GDPR-yta.
+- **Avsändarverifiering** — token säger vilket ärende, `From` säger vem. Skickar medlemmen från
+  jobbmailen måste raden landa som *obekräftad avsändare*, aldrig mejla vapenuppgifter tillbaka.
+- **Bouncelooper** — ett studsat mail till svarsadressen får aldrig generera ett autosvar.
+
+**Ny kostnad som undersökningen la till:** MailKit finns inte i projektet (nytt paket + en hosted
+service, som kör vid **varje** appstart — samma fälla som notisbaslinjen); catch-allen kan inte ligga
+på `pistol.nu` självt (varje felstavning mot hela domänen hamnar då i en brevlåda); och DMARC saknar
+`sp=`, så subdomänen ärver `p=reject` — ska svarsadressen kvittera *"tack, ditt svar nådde klubben"*
+krävs egen DKIM för den.
+
+**⚠️ Och den bärande konflikten:** det finns bara **EN** `Reply-To` som klienterna respekterar. En
+ärendeadress och en människa går inte att kombinera i samma mejl. Så länge `Reply-To` pekar på rätt
+människa är inkommande mail ett räddningsnät, inte en nödvändighet.
+
+Bygg det bara som just det: ta emot, lägg i ärendet, kvittera. Inte som en ersättning för
+svara-i-appen.
+
 ## Radåtgärder: när en knapprad ska bli en meny (2026-08-24)
 
 **Gränsen: 3 eller fler kontroller synliga på en typisk rad → EN `Åtgärder`-meny.** Det är där

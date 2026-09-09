@@ -1,7 +1,8 @@
-using Umbraco.Cms.Core;
+﻿using Umbraco.Cms.Core;
 using System.Collections.Concurrent;
 using System.Globalization;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.PropertyEditors;
@@ -21,6 +22,7 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly InvoiceAuditService _auditService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly ClubService _clubService;
         private readonly Umbraco.Cms.Core.Cache.AppCaches _appCaches;
 
@@ -31,6 +33,7 @@ namespace HpskSite.Services
             IMemberService memberService,
             InvoiceAuditService auditService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             ClubService clubService,
             Umbraco.Cms.Core.Cache.AppCaches appCaches)
         {
@@ -42,6 +45,7 @@ namespace HpskSite.Services
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
             _auditService = auditService ?? throw new ArgumentNullException(nameof(auditService));
             _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
+            _replyContacts = replyContacts;
             _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
         }
 
@@ -1449,7 +1453,11 @@ namespace HpskSite.Services
                     billedAmount: billed,
                     actualAmount: actual,
                     paymentMethod: paymentMethod,
-                    reference: displayReference);
+                    reference: displayReference,
+                    // ⚠️ ARRANGÖREN, via båda värdformerna. En bekräftelse föder "beloppet
+                    // stämmer inte" och "jag betalade två gånger" — frågor bara arrangören kan
+                    // svara på, och på ett SM är arrangören KRETSEN, inte en klubb.
+                    replyTo: _replyContacts.ForCompetitionOrganiser(competitionId));
 
                 await _auditService.LogAsync(
                     invoiceId: invoice.Id,

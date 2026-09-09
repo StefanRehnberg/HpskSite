@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Models;
@@ -9,6 +9,7 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using HpskSite.Services;
 using Microsoft.Extensions.Logging;
 using Umbraco.Extensions;
@@ -32,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly PaymentService _paymentService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly ClubService _clubService;
         private readonly InvoiceAuditService _auditService;
         private readonly ConsolidatedInvoiceService _consolidatedService;
@@ -50,6 +52,7 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             PaymentService paymentService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             ClubService clubService,
             InvoiceAuditService auditService,
             ConsolidatedInvoiceService consolidatedService,
@@ -61,6 +64,7 @@ namespace HpskSite.Controllers
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
             _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
             _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
+            _replyContacts = replyContacts;
             _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
             _auditService = auditService ?? throw new ArgumentNullException(nameof(auditService));
             _consolidatedService = consolidatedService ?? throw new ArgumentNullException(nameof(consolidatedService));
@@ -1277,6 +1281,9 @@ namespace HpskSite.Controllers
                     invoiceNumber,
                     normalizedSwishNumber,
                     message,
+                    // ⚠️ Svaret hör till ARRANGÖREN, och `ForCompetitionOrganiser` bär BÅDA
+                    // värdformerna — en kretsarrangerad tävling har inget `clubId`.
+                    _replyContacts.ForCompetitionOrganiser(competitionId),
                     customMessage: null,
                     bgNumber: mailPayee.BgNumber,   // bankgiro alternative in the mail body
                     payeeName: mailPayee.Name);
@@ -1425,6 +1432,7 @@ namespace HpskSite.Controllers
                     invoiceNumber,
                     normalizedSwishNumber,
                     message,
+                    _replyContacts.ForCompetitionOrganiser(competitionId),
                     customMessage: null,
                     bgNumber: mailPayee.BgNumber,   // bankgiro alternative in the mail body
                     payeeName: mailPayee.Name);

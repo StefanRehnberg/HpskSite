@@ -1,5 +1,6 @@
 using HpskSite.CompetitionTypes.Faltskytte.Models;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -366,8 +367,12 @@ namespace HpskSite.Services
                         ?? picked.Name ?? "Banläggare";
                     var requesterName = ResolveMemberName(viewerMemberId)
                         ?? requester?.Name ?? "En användare";
+                    // ⚠️ Svaret går till den som BEGÄRDE godkännandet. Banläggaren som läser
+                    // förfrågan vill ofta svara "ändra station 4 först" — och i dag är
+                    // godkänn/avslå de enda vägarna, så mejlsvaret är hela dialogen.
                     await _emailService.SendFaltkonfigApprovalRequestAsync(
-                        picked.Email, pickedName, requesterName, config.Name, config.Description, config.Id);
+                        picked.Email, pickedName, requesterName, config.Name, config.Description, config.Id,
+                        MailReplyTo.To(requester?.Email, requesterName));
                 }
             }
             catch (Exception ex)

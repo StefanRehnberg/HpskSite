@@ -12,6 +12,7 @@ using Umbraco.Cms.Core.Models.Membership;
 using Microsoft.AspNetCore.Identity;
 using System.Security.Claims;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using HpskSite.Shared.Models;
 using HpskSite.Services;
 using HpskSite.CompetitionTypes.Precision.Services;
@@ -31,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IContentService _contentService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly ClubService _clubService;
         private readonly AppCaches _appCaches; // PHASE 4: Added for caching
         private readonly IWebHostEnvironment _webHostEnvironment;
@@ -55,6 +57,7 @@ namespace HpskSite.Controllers
             SignInManager<MemberIdentityUser> signInManager,
             IContentService contentService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             ClubService clubService,
             IWebHostEnvironment webHostEnvironment,
             IShooterStatisticsService statisticsService,
@@ -72,6 +75,7 @@ namespace HpskSite.Controllers
             _databaseFactory = databaseFactory;
             _contentService = contentService;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _clubService = clubService;
             _appCaches = appCaches; // PHASE 4: Store for caching
             _webHostEnvironment = webHostEnvironment;
@@ -478,7 +482,8 @@ namespace HpskSite.Controllers
                 try
                 {
                     await _emailService.SendQuickCreateWelcomeEmailAsync(
-                        request.Email.Trim(), fullName, creatorName, clubName, tempPassword);
+                        request.Email.Trim(), fullName, creatorName, clubName, tempPassword,
+                        _replyContacts.ForMembersOwnClub(member));
                 }
                 catch (Exception)
                 {
@@ -610,7 +615,9 @@ namespace HpskSite.Controllers
                     try
                     {
                         // Send confirmation email to user
-                        await _emailService.SendRegistrationConfirmationToUserAsync(email, fullName, clubNameForEmail);
+                        await _emailService.SendRegistrationConfirmationToUserAsync(
+                            email, fullName, clubNameForEmail,
+                            _replyContacts.ForMembersOwnClub(member));
 
                         // Look up club and regional admins if a club was selected
                         List<string>? notifiedClubAdminNames = null;
@@ -1544,7 +1551,9 @@ namespace HpskSite.Controllers
 
                 try
                 {
-                    await _emailService.SendApprovalNotificationAsync(member.Email, memberName, autoLoginToken);
+                    await _emailService.SendApprovalNotificationAsync(
+                        member.Email, memberName, autoLoginToken,
+                        _replyContacts.ForMembersOwnClub(member));
                     Console.WriteLine($"[QuickApprove] Approval email sent to: {member.Email}");
 
                     // Send confirmation to admin

@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using HpskSite.Services.Mail;
 
 namespace HpskSite.Services
 {
@@ -119,7 +120,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(_adminEmail, subject, body);
+            await SendEmailAsync(_adminEmail, subject, body, MailReplyTo.To(memberEmail, memberName));
         }
 
         /// <summary>
@@ -183,7 +184,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(_adminEmail, subject, body);
+            await SendEmailAsync(_adminEmail, subject, body, MailReplyTo.To(memberEmail, memberName));
         }
 
         /// <summary>
@@ -220,7 +221,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(adminEmail, subject, body);
+            await SendEmailAsync(adminEmail, subject, body, MailReplyTo.To(memberEmail, memberName));
         }
 
         /// <summary>
@@ -285,13 +286,14 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(adminEmail, subject, body);
+            await SendEmailAsync(adminEmail, subject, body, MailReplyTo.To(memberEmail, memberName));
         }
 
         /// <summary>
         /// Send email confirmation to user after registration
         /// </summary>
-        public async Task SendRegistrationConfirmationToUserAsync(string memberEmail, string memberName, string clubName)
+        public async Task SendRegistrationConfirmationToUserAsync(string memberEmail, string memberName, string clubName,
+            MailReplyTo replyTo)
         {
             var subject = "Välkommen till Pistol.nu - Registrering mottagen";
             var body = $@"
@@ -310,14 +312,15 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
         /// Send welcome email for quick-created members (created by admin at competition).
         /// Includes temporary password.
         /// </summary>
-        public async Task SendQuickCreateWelcomeEmailAsync(string memberEmail, string memberName, string creatorName, string clubName, string tempPassword)
+        public async Task SendQuickCreateWelcomeEmailAsync(string memberEmail, string memberName, string creatorName, string clubName, string tempPassword,
+            MailReplyTo replyTo)
         {
             var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
             var subject = "Ditt konto på Pistol.nu har skapats";
@@ -337,14 +340,15 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
         /// Send email when a member's registration is approved
         /// Includes auto-login token for one-click login
         /// </summary>
-        public async Task SendApprovalNotificationAsync(string memberEmail, string memberName, string autoLoginToken)
+        public async Task SendApprovalNotificationAsync(string memberEmail, string memberName, string autoLoginToken,
+            MailReplyTo replyTo)
         {
             var subject = "Ditt Pistol.nu-konto har godkänts!";
 
@@ -397,13 +401,14 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
         /// Send email when a member's registration is rejected
         /// </summary>
-        public async Task SendRejectionNotificationAsync(string memberEmail, string memberName, string? reason = null)
+        public async Task SendRejectionNotificationAsync(string memberEmail, string memberName, MailReplyTo replyTo,
+            string? reason = null)
         {
             var subject = "Angående din Pistol.nu-registrering";
             var body = $@"
@@ -417,14 +422,15 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
         /// Send invitation email to member to set their password
         /// Includes invitation token for password setup
         /// </summary>
-        public async Task SendMemberInvitationAsync(string memberEmail, string memberName, string invitationToken, string clubName = "din klubb")
+        public async Task SendMemberInvitationAsync(string memberEmail, string memberName, string invitationToken,
+            MailReplyTo replyTo, string clubName = "din klubb")
         {
             var subject = "Du har blivit inbjuden till Pistol.nu!";
 
@@ -476,7 +482,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -487,7 +493,8 @@ namespace HpskSite.Services
             List<string> clubAdminEmails,
             string newMemberName,
             string addedByName,
-            string clubName)
+            string clubName,
+            MailReplyTo replyTo)
         {
             if (clubAdminEmails == null || !clubAdminEmails.Any())
             {
@@ -510,7 +517,7 @@ namespace HpskSite.Services
             {
                 try
                 {
-                    await SendEmailAsync(email, subject, body);
+                    await SendEmailAsync(email, subject, body, replyTo);
                 }
                 catch (Exception ex)
                 {
@@ -634,7 +641,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(recipientEmail, subject, body);
+            await SendEmailAsync(recipientEmail, subject, body, MailReplyTo.To(memberEmail, memberName));
         }
 
         /// <summary>
@@ -664,7 +671,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(_adminEmail, subject, body);
+            await SendEmailAsync(_adminEmail, subject, body, MailReplyTo.To(requestorEmail, contactPerson));
         }
 
         /// <summary>
@@ -674,7 +681,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task SendFaltkonfigApprovalRequestAsync(
             string toEmail, string toName, string requestedByName, string configName,
-            string? configDescription, int configId)
+            string? configDescription, int configId, MailReplyTo replyTo)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
@@ -727,7 +734,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(toEmail, subject, body);
+            await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
         /// <summary>Notify a member that a site admin has granted them full access to ALL course
@@ -782,7 +789,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(toEmail, subject, body);
+            await SendEmailAsync(toEmail, subject, body, MailReplyTo.SiteAdmin);
         }
 
         /// <summary>
@@ -792,7 +799,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task SendCertificationRequestSubmittedAsync(
             string toEmail, string toName, string requesterName, string candidateName,
-            string certificationTypeLabel, string clubName)
+            string certificationTypeLabel, string clubName, MailReplyTo replyTo)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
@@ -825,7 +832,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(toEmail, subject, body);
+            await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -834,7 +841,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task SendCertificationRequestDecisionAsync(
             string toEmail, string toName, string candidateName, string certificationTypeLabel,
-            bool approved, string? note)
+            bool approved, string? note, MailReplyTo replyTo)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
@@ -871,7 +878,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(toEmail, subject, body);
+            await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -887,7 +894,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> SendForeningsintygRequestSubmittedAsync(
             string toEmail, string toName, string memberName, string kindLabel,
-            string firearmLabel, string clubName)
+            string firearmLabel, string clubName, MailReplyTo replyTo)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
@@ -924,7 +931,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            return await SendEmailAsync(toEmail, subject, body);
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -991,7 +998,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            return await SendEmailAsync(toEmail, subject, body);
+            return await SendEmailAsync(toEmail, subject, body, MailReplyTo.SiteAdmin);
         }
 
         /// <summary>
@@ -1002,7 +1009,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> SendForeningsintygRequestDecisionAsync(
             string toEmail, string toName, string clubName, string firearmLabel,
-            bool issued, string? note)
+            bool issued, string? note, MailReplyTo replyTo)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
@@ -1046,7 +1053,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            return await SendEmailAsync(toEmail, subject, body);
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -1065,7 +1072,8 @@ namespace HpskSite.Services
         /// något utan att veta.</para>
         /// </summary>
         public async Task<bool> SendForeningsintygCompletionRequestAsync(
-            string toEmail, string toName, string clubName, string firearmLabel, string note)
+            string toEmail, string toName, string clubName, string firearmLabel, string note,
+            MailReplyTo replyTo, string? replyUrl = null)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
@@ -1078,6 +1086,24 @@ namespace HpskSite.Services
             var safeClub = System.Web.HttpUtility.HtmlEncode(clubName);
             var safeFirearm = System.Web.HttpUtility.HtmlEncode(firearmLabel);
             var safeNote = System.Web.HttpUtility.HtmlEncode(note ?? "");
+
+            // ⚠️ SVARA-I-APPEN ÄR HELA POÄNGEN MED MEJLET, inte en extra länk. Medlemmen svarade
+            // förut på mejlet — som kom från sajtens adress — och klubben satt kvar med "Väntar på
+            // medlemmen" medan svaret låg hos sajtägaren. Knappen leder till ett fält där svaret
+            // hamnar PÅ förfrågan, byter status och aviserar handläggaren.
+            //
+            // ⚠️ SAKNAS LÄNKEN SÄGS DET, i stället för att raden tystnar. Utan den meningen står
+            // medlemmen med ett mejl som ber om något och ingen anvisning om hur hen svarar.
+            var replyBlock = string.IsNullOrWhiteSpace(replyUrl)
+                ? "<p>Hör av dig till styrelsen om något är oklart.</p>"
+                : $@"<p style=""margin:22px 0;"">
+        <a href=""{replyUrl}"" style=""display:inline-block;background:#0d6efd;color:#ffffff;
+           padding:12px 22px;text-decoration:none;border-radius:6px;font-weight:bold;"">
+            Svara klubben
+        </a>
+    </p>
+    <p style=""font-size:13px;color:#555;"">Knappen öppnar ett fält där du kan skriva till klubben.
+       Ditt svar hamnar direkt på din förfrågan, så den som handlägger den ser det.</p>";
 
             const string subject = "Din förfrågan om föreningsintyg behöver kompletteras";
 
@@ -1100,12 +1126,66 @@ namespace HpskSite.Services
        uppgifterna kan klubben skriva intyget.</p>
     <p>Personuppgifter fyller du i under <em>Min sida → Profil</em>. Uppgifter om vapnet ändrar du
        under <em>Min sida → Vapen</em>.</p>
-    <p>Hör av dig till styrelsen om något är oklart.</p>
+    {replyBlock}
     <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
 </body>
 </html>";
 
-            return await SendEmailAsync(toEmail, subject, body);
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
+        }
+
+        /// <summary>
+        /// Medlemmen har svarat på en kompletteringsbegäran — säg det till den som väntar.
+        ///
+        /// <para><b>⚠️ SVARET STÅR I MEJLET, inte bara bakom en länk.</b> Handläggaren ska kunna
+        /// läsa det i inkorgen och avgöra om det räcker; att tvinga ett inloggat sidbesök för en
+        /// mening är precis den friktion som gör att ärendet ligger kvar.</para>
+        ///
+        /// <para>Returnerar om mejlet FAKTISKT gick ut. Ett kvitto som påstår att handläggaren
+        /// aviserats om ett svar hen aldrig fick lämnar medlemmen väntande en andra gång.</para>
+        /// </summary>
+        public async Task<bool> SendForeningsintygMemberReplyAsync(
+            string toEmail, string toName, string memberName, string clubName,
+            string firearmLabel, string replyBody, MailReplyTo replyTo)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning(
+                    "SendForeningsintygMemberReplyAsync skipped — no email address for {Name}", toName);
+                return false;
+            }
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeMember = System.Web.HttpUtility.HtmlEncode(memberName);
+            var safeClub = System.Web.HttpUtility.HtmlEncode(clubName);
+            var safeFirearm = System.Web.HttpUtility.HtmlEncode(firearmLabel);
+            var safeBody = System.Web.HttpUtility.HtmlEncode(replyBody ?? "")
+                .Replace("\r\n", "\n").Replace("\n", "<br/>");
+
+            var subject = $"{memberName} har svarat om sitt föreningsintyg";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p><strong>{safeMember}</strong> har svarat på {safeClub}s begäran om komplettering för
+       <strong>{safeFirearm}</strong>.</p>
+    <p><strong>Medlemmens svar:</strong></p>
+    <blockquote style=""border-left:3px solid #0d6efd; margin:10px 0; padding:5px 10px; color:#555;"">
+        {safeBody}
+    </blockquote>
+    <p>Svaret ligger också på förfrågan under <em>Klubbadministration → Föreningsintyg</em>, där du
+       kan skriva intyget eller be om mer.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -1126,16 +1206,22 @@ namespace HpskSite.Services
 
             try
             {
+                // ⚠️ Går genom SAMMA kuvert som allt annat. Metoden hade sin egen Reply-To-hantering
+                // och var länge det ENDA stället på sajten som satte en svarsadress; parametrarna
+                // finns kvar för anroparna, men beslutet uttrycks nu som ett MailReplyTo.
+                var replyTo = string.IsNullOrWhiteSpace(replyToEmail)
+                    ? (string.IsNullOrWhiteSpace(fromDisplayName)
+                        ? MailReplyTo.SiteAdmin
+                        : MailReplyTo.FromClub(fromDisplayName, null))
+                    : MailReplyTo.To(replyToEmail, replyToName,
+                        string.IsNullOrWhiteSpace(fromDisplayName) ? null : $"{fromDisplayName} via Pistol.nu");
+
                 using var message = new MailMessage();
-                message.From = new MailAddress(_fromAddress, string.IsNullOrWhiteSpace(fromDisplayName) ? _fromName : fromDisplayName);
+                ApplyEnvelope(message, replyTo);
                 message.To.Add(toEmail);
                 message.Subject = subject;
-                message.Body = htmlBody;
+                message.Body = AppendReplyFooter(htmlBody, replyTo);
                 message.IsBodyHtml = true;
-                if (!string.IsNullOrWhiteSpace(replyToEmail))
-                {
-                    try { message.ReplyToList.Add(new MailAddress(replyToEmail, replyToName ?? "")); } catch { /* bad reply-to → skip */ }
-                }
 
                 using var smtpClient = new SmtpClient(_smtpHost, _smtpPort)
                 {
@@ -1167,6 +1253,110 @@ namespace HpskSite.Services
             await SendHtmlEmailAsync(_adminEmail, "[Kopia] " + subject, note + htmlBody);
         }
 
+        // ── Kuvertet: From, Reply-To och fotnoten ───────────────────────────────────────────────
+        //
+        // ⚠️⚠️ ALLA FYRA SÄNDVÄGAR I DEN HÄR FILEN MÅSTE GÅ GENOM `ApplyEnvelope`. Det finns fyra
+        //    ställen som bygger ett `MailMessage` själva (kärnvägen, SendHtmlEmailAsync,
+        //    Swish-QR-mejlet med sin bilaga, och testaccess-förfrågan). Fram till 2026-09-09 satte
+        //    alla fyra bara `From` och ingen `Reply-To` — och därför gick VARJE svar på VARJE mejl
+        //    appen skickar till admin@pistol.nu, där ingen på klubben såg det. Lägger du till en
+        //    femte sändväg: anropa den här.
+
+        /// <summary>
+        /// Sätter avsändare och svarsadress på ett meddelande.
+        ///
+        /// <para><b>⚠️ From-ADRESSEN ÄR ALLTID SAJTENS.</b> <c>pistol.nu</c> har SPF <c>-all</c> och
+        /// DMARC <c>p=reject</c>, så en klubbs egen adress i <c>From</c> studsar hos varje mottagare
+        /// som kontrollerar. Bara visningsnamnet och <c>Reply-To</c> speglar den verkliga
+        /// avsändaren.</para>
+        /// </summary>
+        private void ApplyEnvelope(MailMessage message, MailReplyTo replyTo)
+        {
+            var display = string.IsNullOrWhiteSpace(replyTo?.FromDisplayName)
+                ? _fromName
+                : replyTo!.FromDisplayName!;
+            message.From = new MailAddress(_fromAddress, display);
+
+            var target = ResolveReplyAddress(replyTo);
+            if (target is null) return;
+
+            // ⚠️ En ogiltig adress får inte fälla utskicket. Mejlet utan Reply-To är sämre än
+            // inget mejl — men bara marginellt, och beskedet är det viktiga.
+            try { message.ReplyToList.Add(new MailAddress(target.Value.Email, target.Value.Name)); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Ogiltig svarsadress {Email} — mejlet skickas utan Reply-To.",
+                    target.Value.Email);
+            }
+        }
+
+        /// <summary>
+        /// Den faktiska svarsadressen, eller null när mejlet inte ska ha någon.
+        ///
+        /// <para><c>SiteAdmin</c> löses upp här därför att bara <c>EmailService</c> känner
+        /// <c>Email:AdminEmail</c>. Är den inte konfigurerad blir det ingen <c>Reply-To</c> —
+        /// samma utfall som före det här arbetet, men nu loggat.</para>
+        /// </summary>
+        private (string Email, string Name)? ResolveReplyAddress(MailReplyTo? replyTo)
+        {
+            var r = replyTo ?? MailReplyTo.SiteAdmin;
+
+            switch (r.Kind)
+            {
+                case MailReplyTo.ReplyKind.NoReply:
+                    return null;
+
+                case MailReplyTo.ReplyKind.Address:
+                    return (r.Email, r.Name);
+
+                default:
+                    if (string.IsNullOrWhiteSpace(_adminEmail))
+                    {
+                        _logger.LogDebug("Email:AdminEmail är inte konfigurerad — inget Reply-To sattes.");
+                        return null;
+                    }
+                    return (_adminEmail, string.IsNullOrWhiteSpace(r.Name) ? _fromName : r.Name);
+            }
+        }
+
+        /// <summary>
+        /// Skriver in en rad före <c>&lt;/body&gt;</c> som säger vart ett svar hamnar.
+        ///
+        /// <para><b>⚠️ RADEN ÄR INTE DEKORATION.</b> <c>Reply-To</c> respekteras av alla vanliga
+        /// klienter, men mottagaren SER den inte — och den som undrar "når det här någon?" ska
+        /// kunna läsa svaret i mejlet. För <c>NoReply</c> säger raden det rakt ut, så ingen sitter
+        /// och väntar på svar från en obevakad brevlåda.</para>
+        ///
+        /// <para>Kropparna i den här filen är hela <c>&lt;html&gt;</c>-dokument, så raden fogas in
+        /// före den SISTA <c>&lt;/body&gt;</c>. Saknas taggen läggs den sist — då blir det fult i
+        /// stället för borta.</para>
+        /// </summary>
+        private string AppendReplyFooter(string htmlBody, MailReplyTo? replyTo)
+        {
+            var r = replyTo ?? MailReplyTo.SiteAdmin;
+            var target = ResolveReplyAddress(r);
+
+            string text;
+            if (target is null)
+            {
+                text = "Det här mejlet går inte att svara på.";
+            }
+            else
+            {
+                var who = WebUtility.HtmlEncode(
+                    string.IsNullOrWhiteSpace(target.Value.Name) ? target.Value.Email : target.Value.Name);
+                var addr = WebUtility.HtmlEncode(target.Value.Email);
+                text = $"Svarar du på det här mejlet går svaret till {who} ({addr}).";
+            }
+
+            var footer =
+                "<hr style=\"border:none;border-top:1px solid #e5e7eb;margin:22px 0 10px;\"/>"
+                + "<p style=\"font-size:12px;color:#6b7280;margin:0;\">" + text + "</p>";
+
+            var idx = htmlBody.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+            return idx < 0 ? htmlBody + footer : htmlBody.Insert(idx, footer);
+        }
+
         /// <summary>
         /// Core method to send an email
         /// </summary>
@@ -1176,8 +1366,16 @@ namespace HpskSite.Services
         /// but callers that record "email sent" in an audit trail MUST check the return value.
         /// Assuming success here is what made Betalningshistorik claim "Betalningsbekräftelse
         /// skickad" for confirmations that never went out.
+        ///
+        /// <para><b>⚠️⚠️ <paramref name="replyTo"/> HAR INGET STANDARDVÄRDE, med flit.</b> Varje
+        /// mejltyp MÅSTE välja vart ett svar ska landa, och kompilatorn är det enda som kan tvinga
+        /// fram valet. Ge den aldrig ett default: då blir "glömde välja" omöjligt att skilja från
+        /// "valde sajtens adress", och det är precis den tystnaden som gjorde att en medlems svar
+        /// på en kompletteringsbegäran aldrig nådde klubben. Är sajtägaren rätt mottagare skriver
+        /// du <c>MailReplyTo.SiteAdmin</c> — uttryckligen.</para>
         /// </remarks>
-        private async Task<bool> SendEmailAsync(string toEmail, string subject, string htmlBody, string? bccEmail = null)
+        private async Task<bool> SendEmailAsync(string toEmail, string subject, string htmlBody,
+            MailReplyTo replyTo, string? bccEmail = null)
         {
             // If SMTP is not configured, log and return
             if (string.IsNullOrEmpty(_smtpHost))
@@ -1190,7 +1388,7 @@ namespace HpskSite.Services
             {
                 using (var message = new MailMessage())
                 {
-                    message.From = new MailAddress(_fromAddress, _fromName);
+                    ApplyEnvelope(message, replyTo);
                     message.To.Add(toEmail);
                     if (!string.IsNullOrWhiteSpace(bccEmail)
                         && !string.Equals(bccEmail, toEmail, StringComparison.OrdinalIgnoreCase))
@@ -1198,7 +1396,7 @@ namespace HpskSite.Services
                         message.Bcc.Add(bccEmail);
                     }
                     message.Subject = subject;
-                    message.Body = htmlBody;
+                    message.Body = AppendReplyFooter(htmlBody, replyTo);
                     message.IsBodyHtml = true;
 
                     using (var smtpClient = new SmtpClient(_smtpHost, _smtpPort))
@@ -1333,7 +1531,7 @@ namespace HpskSite.Services
                 </body>
                 </html>";
 
-            await SendEmailAsync(_adminEmail, subject, body);
+            await SendEmailAsync(_adminEmail, subject, body, MailReplyTo.To(reporterEmail, reporterName));
         }
 
         /// <summary>
@@ -1413,7 +1611,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, MailReplyTo.NoReply);
         }
 
         /// <summary>
@@ -1488,7 +1686,7 @@ namespace HpskSite.Services
 
             // Copy the site admin so they get a real-time feed of lockouts (the admin sees the
             // member address in the To header). BCC keeps the admin address off the member's copy.
-            await SendEmailAsync(memberEmail, subject, body, _adminEmail);
+            await SendEmailAsync(memberEmail, subject, body, MailReplyTo.SiteAdmin, _adminEmail);
         }
 
         /// <summary>
@@ -1526,6 +1724,11 @@ namespace HpskSite.Services
 
         /// <summary>
         /// Send Swish QR code payment email with inline image attachment
+        ///
+        /// <para><b>⚠️ Egen sändväg</b> (bilagan kräver det), men samma kuvert som allt annat —
+        /// se <c>ApplyEnvelope</c>. Svaret hör till ARRANGÖREN: den som får ett betalkrav svarar
+        /// "jag har betalat via bankgiro" eller "jag ska inte vara med", och det är inte sajtägaren
+        /// som kan göra något med det.</para>
         /// </summary>
         public async Task SendSwishQRCodeEmailAsync(
             string memberEmail,
@@ -1537,6 +1740,7 @@ namespace HpskSite.Services
             string invoiceNumber,
             string swishNumber,
             string invoiceMessage,
+            MailReplyTo replyTo,
             string? customMessage = null,
             string? bgNumber = null,
             string? payeeName = null)
@@ -1700,10 +1904,10 @@ namespace HpskSite.Services
             {
                 using (var message = new MailMessage())
                 {
-                    message.From = new MailAddress(_fromAddress, _fromName);
+                    ApplyEnvelope(message, replyTo);
                     message.To.Add(memberEmail);
                     message.Subject = subject;
-                    message.Body = body;
+                    message.Body = AppendReplyFooter(body, replyTo);
                     message.IsBodyHtml = true;
 
                     // Create inline attachment for QR code
@@ -1778,12 +1982,17 @@ namespace HpskSite.Services
 
             try
             {
+                // ⚠️ Svaret går till MEDLEMMEN, inte till sajtens egen adress. Mejlet är en
+                // förfrågan om testaccess, och sajtägaren som läser det vill svara den som frågade
+                // — inte sig själv.
+                var replyTo = MailReplyTo.To(memberEmail, memberName);
+
                 using (var message = new MailMessage())
                 {
-                    message.From = new MailAddress(_fromAddress, _fromName);
+                    ApplyEnvelope(message, replyTo);
                     message.To.Add(_adminEmail);
                     message.Subject = subject;
-                    message.Body = body;
+                    message.Body = AppendReplyFooter(body, replyTo);
                     message.IsBodyHtml = true;
 
                     using (var smtpClient = new SmtpClient(_smtpHost, _smtpPort))
@@ -1812,7 +2021,8 @@ namespace HpskSite.Services
             string groupName,
             string trainerNames,
             string startDate,
-            string clubName)
+            string clubName,
+            MailReplyTo replyTo)
         {
             var subject = $"Du har lagts till i tr\u00e4ningsgruppen {groupName}";
             var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
@@ -1858,7 +2068,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -1872,7 +2082,8 @@ namespace HpskSite.Services
             string groupName,
             string otherTrainerNames,
             string startDate,
-            string clubName)
+            string clubName,
+            MailReplyTo replyTo)
         {
             var subject = $"Du är nu tränare för träningsgruppen {groupName}";
             var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
@@ -1918,7 +2129,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -1931,7 +2142,8 @@ namespace HpskSite.Services
             string levelBadge,
             int stepNumber,
             string stepDescription,
-            string approverName)
+            string approverName,
+            MailReplyTo replyTo)
         {
             var subject = $"Steg godk\u00e4nt: {levelName} - Steg {stepNumber}";
             var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
@@ -1975,7 +2187,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -1987,7 +2199,8 @@ namespace HpskSite.Services
             string senderName,
             string groupName,
             string messageSubject,
-            string messageBody)
+            string messageBody,
+            MailReplyTo replyTo)
         {
             var subject = $"[{groupName}] {messageSubject}";
             var escapedBody = System.Net.WebUtility.HtmlEncode(messageBody).Replace("\n", "<br/>");
@@ -2014,7 +2227,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(recipientEmail, subject, body);
+            await SendEmailAsync(recipientEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -2073,7 +2286,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, MailReplyTo.SiteAdmin);
         }
 
         /// <summary>
@@ -2100,7 +2313,8 @@ namespace HpskSite.Services
             decimal billedAmount,
             decimal actualAmount,
             string paymentMethod,
-            string reference)
+            string reference,
+            MailReplyTo replyTo)
         {
             if (string.IsNullOrEmpty(_smtpHost))
             {
@@ -2167,7 +2381,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            return await SendEmailAsync(memberEmail, subject, body);
+            return await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>
@@ -2182,7 +2396,8 @@ namespace HpskSite.Services
             string clubName,
             int year,
             decimal amount,
-            string payUrl)
+            string payUrl,
+            MailReplyTo replyTo)
         {
             if (string.IsNullOrEmpty(_smtpHost))
             {
@@ -2225,7 +2440,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body);
+            await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
     }
 }

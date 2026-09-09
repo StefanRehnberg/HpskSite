@@ -11,6 +11,7 @@ using Umbraco.Cms.Core.Models;
 using Microsoft.Extensions.Logging;
 using HpskSite.Models.ViewModels.Training;
 using HpskSite.Services;
+using HpskSite.Services.Mail;
 
 namespace HpskSite.Controllers
 {
@@ -22,6 +23,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly TrainingGroupService _trainingGroupService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly MarkenLedgerService _markenLedger;
         private readonly TrainingBadgeCreditService _badgeCredit;
         private readonly ILogger<TrainingController> _logger;
@@ -40,6 +42,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             TrainingGroupService trainingGroupService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             MarkenLedgerService markenLedger,
             TrainingBadgeCreditService badgeCredit,
             ILogger<TrainingController> logger)
@@ -51,6 +54,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _trainingGroupService = trainingGroupService;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _markenLedger = markenLedger;
             _badgeCredit = badgeCredit;
             _logger = logger;
@@ -399,7 +403,10 @@ namespace HpskSite.Controllers
                             level?.Badge ?? "",
                             stepNumber,
                             step.Description,
-                            instructorName);
+                            instructorName,
+                            // Svaret går till den som godkände steget — hen är den skytten har en
+                            // fråga till, och den enda som kan rätta ett felaktigt godkännande.
+                            _replyContacts.ForMember(currentMemberData?.Id ?? 0));
                     }
                 }
                 catch (Exception emailEx)

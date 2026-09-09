@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -9,6 +9,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using HpskSite.Services;
 
 namespace HpskSite.Controllers
@@ -26,6 +27,7 @@ namespace HpskSite.Controllers
         private readonly CertificationService _certService;
         private readonly CertificationAuthorizationService _certAuth;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly ILogger<CertificationController> _logger;
 
         public CertificationController(
@@ -41,6 +43,7 @@ namespace HpskSite.Controllers
             CertificationService certService,
             CertificationAuthorizationService certAuth,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             ILogger<CertificationController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -51,6 +54,7 @@ namespace HpskSite.Controllers
             _certService = certService;
             _certAuth = certAuth;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _logger = logger;
         }
 
@@ -647,7 +651,7 @@ namespace HpskSite.Controllers
             if (!ok) return Json(new { success = false, message = msg });
 
             // Best-effort: notify the regional admins for the candidate's region.
-            try { await NotifyApproversOfRequestAsync(req.ClubId, candidateName, req.CertificationType, MemberDisplayName(current)); }
+            try { await NotifyApproversOfRequestAsync(req.ClubId, candidateName, req.CertificationType, MemberDisplayName(current), current.Id); }
             catch (Exception ex) { _logger.LogWarning(ex, "Failed to notify approvers of certification request {RequestId}", requestId); }
 
             return Json(new { success = true, requestId, message = $"Förfrågan om {CertificationTypes.DisplayName(req.CertificationType)} skickad för granskning." });
@@ -872,7 +876,12 @@ namespace HpskSite.Controllers
 
         /// <summary>Best-effort email to everyone who can approve the request — the regional
         /// admins for the candidate's region plus all site admins (deduped).</summary>
-        private async Task NotifyApproversOfRequestAsync(int clubId, string candidateName, string certType, string requesterName)
+        /// <param name="requesterMemberId">
+        /// Den som begärde. <b>Svaret går dit</b> — den kretsadmin som läser "NN har begärt en
+        /// certifiering" har en fråga till NN, inte till sajtägaren.
+        /// </param>
+        private async Task NotifyApproversOfRequestAsync(int clubId, string candidateName, string certType,
+            string requesterName, int requesterMemberId)
         {
             var region = GetRegionForClub(clubId);
             var roleGroup = string.IsNullOrEmpty(region) ? null : $"RegionalAdmin_{region}";
@@ -891,7 +900,8 @@ namespace HpskSite.Controllers
             foreach (var a in admins)
             {
                 await _emailService.SendCertificationRequestSubmittedAsync(
-                    a.Email!, MemberDisplayName(a), requesterName, candidateName, certLabel, clubName);
+                    a.Email!, MemberDisplayName(a), requesterName, candidateName, certLabel, clubName,
+                    _replyContacts.ForMember(requesterMemberId));
             }
         }
 
@@ -900,10 +910,13 @@ namespace HpskSite.Controllers
             var requester = request.RequestedByMemberId > 0 ? _memberService.GetById(request.RequestedByMemberId) : null;
             if (requester == null || string.IsNullOrEmpty(requester.Email)) return;
 
+            // Beslutet kommer från den som granskade. Ett avslag föder ett "varför?", och den
+            // frågan måste nå granskaren — inte sajtens adress.
             await _emailService.SendCertificationRequestDecisionAsync(
                 requester.Email!, MemberDisplayName(requester),
                 request.CandidateFullName, CertificationTypes.DisplayName(request.CertificationType),
-                approved, note);
+                approved, note,
+                _replyContacts.ForMember(request.ReviewedByMemberId ?? 0));
         }
 
         private async Task<bool> IsAuthorizedForAppointmentScope(string certType, string scopeId)

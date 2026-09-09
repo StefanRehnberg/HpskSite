@@ -1,4 +1,5 @@
-﻿using NPoco;
+﻿using HpskSite.Services.Mail;
+using NPoco;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Scoping;
 
@@ -28,6 +29,8 @@ namespace HpskSite.Services.Firearms
         private readonly FirearmAuthorizationService _auth;
         private readonly IMemberService _memberService;
         private readonly ClubService _clubs;
+        private readonly ReplyContactResolver _replyContacts;
+        private readonly MailReplyLinkService _replyLinks;
         private readonly IScopeProvider _scopeProvider;
         private readonly ILogger<ForeningsintygNotificationService> _logger;
 
@@ -36,6 +39,8 @@ namespace HpskSite.Services.Firearms
             FirearmAuthorizationService auth,
             IMemberService memberService,
             ClubService clubs,
+            ReplyContactResolver replyContacts,
+            MailReplyLinkService replyLinks,
             IScopeProvider scopeProvider,
             ILogger<ForeningsintygNotificationService> logger)
         {
@@ -43,6 +48,8 @@ namespace HpskSite.Services.Firearms
             _auth = auth;
             _memberService = memberService;
             _clubs = clubs;
+            _replyContacts = replyContacts;
+            _replyLinks = replyLinks;
             _scopeProvider = scopeProvider;
             _logger = logger;
         }
@@ -145,6 +152,15 @@ namespace HpskSite.Services.Firearms
 
             /// <summary>Klubben bad medlemmen komplettera. Ärendet lever — det är inget avslag.</summary>
             public const string Completion = "Komplettering";
+
+            /// <summary>
+            /// Medlemmen svarade i appen och handläggaren aviserades.
+            ///
+            /// <para><b>⚠️ Det är UTSKICKET till handläggaren som loggas här, inte svaret.</b>
+            /// Svaret självt är en rad i <c>MailReply</c>. Loggen svarar bara på frågan "gick
+            /// mejlet fram" — samma regel som för de andra sorterna.</para>
+            /// </summary>
+            public const string MemberReply = "MedlemSvarade";
         }
 
         private void LogNotify(int clubId, int? requestId, int? memberId, string email,
@@ -329,13 +345,19 @@ namespace HpskSite.Services.Firearms
                     .Where(x => !string.IsNullOrWhiteSpace(x.Email))
                     .ToList();
 
+                // ⚠️ SVARET GÅR TILL MEDLEMMEN, inte till klubben. Den ansvarige som läser "Kalle
+                // har begärt ett föreningsintyg" vill svara Kalle — inte sig själv, och inte
+                // klubbens egen brevlåda. Svarsadressen är motparten i samtalet.
+                var replyToMember = _replyContacts.ForMember(request.MemberId);
+
                 if (recipients.Count > 0)
                 {
                     foreach (var (name, toEmail, viewerId) in recipients)
                     {
                         var ok = await _email.SendForeningsintygRequestSubmittedAsync(
                             toEmail!, name, memberName,
-                            ForeningsintygRequestKind.Label(request.Kind), firearmLabel, clubName);
+                            ForeningsintygRequestKind.Label(request.Kind), firearmLabel, clubName,
+                            replyToMember);
                         LogNotify(request.ClubId, request.Id, viewerId, toEmail!,
                                   NotifyKind.NewRequest, ForeningsintygRequestKind.Label(request.Kind), ok);
                     }
@@ -353,7 +375,8 @@ namespace HpskSite.Services.Firearms
                 {
                     var ok = await _email.SendForeningsintygRequestSubmittedAsync(
                         club!.ContactEmail, clubName, memberName,
-                        ForeningsintygRequestKind.Label(request.Kind), firearmLabel, clubName);
+                        ForeningsintygRequestKind.Label(request.Kind), firearmLabel, clubName,
+                        replyToMember);
                     // MemberId = null: mejlet gick till klubbens adress, inte till en person.
                     LogNotify(request.ClubId, request.Id, null, club.ContactEmail,
                               NotifyKind.NewRequest, "klubbens kontaktadress (ingen mottagare)", ok);
@@ -380,8 +403,16 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         /// <returns><c>true</c> bara nar mejlet faktiskt gick ut. Kvittot pa skarmen laser det
         /// har vardet — inte anvandarens kryssruta — sa det aldrig kan lova ett mejl som fastnade.</returns>
+        /// <param name="actingMemberId">Den som handlägger. Standardsvarsadress — se <paramref name="replyToClub"/>.</param>
+        /// <param name="replyToClub">
+        /// <c>true</c> = svaret går till klubbens kontaktadress, <c>false</c> = till handläggaren.
+        /// <b>⚠️ Valet görs vid VARJE utskick</b>, inte i en sparad inställning: ett formellt
+        /// besked hör ofta till klubbens brevlåda medan en fråga om ett vapenärende hör till den som
+        /// sitter och väntar på svaret — och det beror på ärendet, inte på personen.
+        /// </param>
         public async Task<bool> NotifyMemberOfDecisionAsync(
-            ForeningsintygRequest request, bool issued, string? note)
+            ForeningsintygRequest request, bool issued, string? note,
+            int actingMemberId = 0, bool replyToClub = false)
         {
             try
             {
@@ -397,7 +428,8 @@ namespace HpskSite.Services.Firearms
                 var ok = await _email.SendForeningsintygRequestDecisionAsync(
                     toEmail!, ResolveMemberName(request.MemberId),
                     _clubs.GetClubById(request.ClubId)?.Name ?? "Klubben",
-                    FirearmLabel(request), issued, note);
+                    FirearmLabel(request), issued, note,
+                    _replyContacts.ForClubAdminChoice(actingMemberId, request.ClubId, replyToClub));
 
                 // ⚠️ Mottagaren ar MEDLEMMEN som begarde intyget, inte en ansvarig.
                 LogNotify(request.ClubId, request.Id, request.MemberId, toEmail!,
@@ -421,8 +453,11 @@ namespace HpskSite.Services.Firearms
         /// besked till medlemmen, och den som läser loggen i efterhand kan inte gissa vilket det
         /// var ur ett gemensamt "Beslut".</para>
         /// </summary>
+        /// <param name="actingMemberId">Den som begär kompletteringen. Standardsvarsadress.</param>
+        /// <param name="replyToClub">Se <see cref="NotifyMemberOfDecisionAsync"/>.</param>
         public async Task<bool> NotifyMemberOfCompletionRequestAsync(
-            ForeningsintygRequest request, string note)
+            ForeningsintygRequest request, string note,
+            int actingMemberId = 0, bool replyToClub = false)
         {
             try
             {
@@ -435,10 +470,18 @@ namespace HpskSite.Services.Firearms
                     return false;
                 }
 
+                // ⚠️ SVARSLÄNKEN ÄR VAD SOM GÖR STATUSEN SANN. Utan den kan medlemmen bara svara på
+                // mejlet, och då står "Väntar på medlemmen" kvar hur snabbt hen än kompletterar.
+                // Går länken inte att mynta säger mejlet det i stället för att tystna.
+                var replyUrl = _replyLinks.BuildUrl(
+                    MailThreadKind.Foreningsintyg, request.Id, request.ClubId, request.MemberId);
+
                 var ok = await _email.SendForeningsintygCompletionRequestAsync(
                     toEmail!, ResolveMemberName(request.MemberId),
                     _clubs.GetClubById(request.ClubId)?.Name ?? "Klubben",
-                    FirearmLabel(request), note);
+                    FirearmLabel(request), note,
+                    _replyContacts.ForClubAdminChoice(actingMemberId, request.ClubId, replyToClub),
+                    replyUrl);
 
                 LogNotify(request.ClubId, request.Id, request.MemberId, toEmail!,
                           NotifyKind.Completion, note, ok);
@@ -451,6 +494,103 @@ namespace HpskSite.Services.Firearms
                     request.MemberId, request.Id);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Medlemmen har svarat — säg det till den som väntar.
+        ///
+        /// <para><b>⚠️ HANDLÄGGAREN FÖRST, de utsedda som reserv.</b> Den som klickade "Begär
+        /// komplettering" är den som sitter och väntar på svaret; ett mejl till hela listan hade
+        /// gjort svaret till allas och ingens. Saknas handläggaren (äldre ärende, avgången ledamot)
+        /// går det till de utsedda enligt samma mejlinställning som en ny förfrågan.</para>
+        ///
+        /// <para><b>⚠️ Svaret går till MEDLEMMEN.</b> Den som läser "NN har svarat" vill svara NN.</para>
+        ///
+        /// <para>Returnerar antalet FAKTISKT skickade mejl. Noll betyder att ingen fick veta att
+        /// medlemmen svarat — och då ligger svaret bara i ärendet, vilket är bättre än före men
+        /// inte vad som utlovades.</para>
+        /// </summary>
+        public async Task<int> NotifyHandlerOfMemberReplyAsync(ForeningsintygRequest request, string replyBody)
+        {
+            var sent = 0;
+            try
+            {
+                var memberName = ResolveMemberName(request.MemberId);
+                var clubName = _clubs.GetClubById(request.ClubId)?.Name ?? "din klubb";
+                var replyToMember = _replyContacts.ForMember(request.MemberId);
+
+                var recipients = ResolveHandlerRecipients(request);
+                if (recipients.Count == 0)
+                {
+                    _logger.LogWarning(
+                        "Föreningsintygsförfrågan {Id}: medlemmen svarade men ingen kunde aviseras.",
+                        request.Id);
+                    return 0;
+                }
+
+                foreach (var (name, toEmail, memberId) in recipients)
+                {
+                    var ok = false;
+                    try
+                    {
+                        ok = await _email.SendForeningsintygMemberReplyAsync(
+                            toEmail, name, memberName, clubName, FirearmLabel(request),
+                            replyBody, replyToMember);
+                        if (ok) sent++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Kunde inte avisera {Name} om medlemssvar på förfrågan {Id}.", name, request.Id);
+                    }
+
+                    LogNotify(request.ClubId, request.Id, memberId, toEmail,
+                              NotifyKind.MemberReply, Cut(replyBody, 200), ok);
+                }
+            }
+            catch (Exception ex)
+            {
+                // ⚠️ Sväljer, som resten av tjänsten: svaret ÄR sparat när det här körs, och ett
+                // aviseringsfel får inte rapporteras som att svaret inte togs emot.
+                _logger.LogError(ex,
+                    "Kunde inte avisera om medlemssvar på förfrågan {Id}.", request.Id);
+            }
+            return sent;
+        }
+
+        /// <summary>
+        /// Vem som ska veta att medlemmen svarat: handläggaren, annars de utsedda, annars klubbens
+        /// kontaktadress. Samma reservtrappa som en ny förfrågan, av samma skäl — tystnad är det
+        /// sämsta utfallet.
+        /// </summary>
+        private List<(string Name, string Email, int? MemberId)> ResolveHandlerRecipients(ForeningsintygRequest request)
+        {
+            var list = new List<(string, string, int?)>();
+
+            if (request.HandledByMemberId is int handlerId && handlerId > 0)
+            {
+                var email = EmailOf(handlerId);
+                if (!string.IsNullOrWhiteSpace(email))
+                {
+                    list.Add((ResolveMemberName(handlerId), email!, handlerId));
+                    return list;
+                }
+            }
+
+            var settings = GetNotifySettings(request.ClubId);
+            foreach (var v in _auth.GetViewers(request.ClubId).Where(v => !v.IsDormant))
+            {
+                if (settings.TryGetValue(v.MemberId, out var on) && !on) continue;
+                var email = EmailOf(v.MemberId);
+                if (!string.IsNullOrWhiteSpace(email)) list.Add((v.Name, email!, v.MemberId));
+            }
+            if (list.Count > 0) return list;
+
+            var club = _clubs.GetClubById(request.ClubId);
+            if (!string.IsNullOrWhiteSpace(club?.ContactEmail))
+                list.Add((club!.Name ?? "Klubben", club.ContactEmail, null));
+
+            return list;
         }
 
         /// <summary>Aliaset, eller "vapnet" när förfrågan hämtats utan sina visningsfält.</summary>

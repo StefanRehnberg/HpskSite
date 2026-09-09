@@ -90,6 +90,14 @@
   @* ── STEG 1: ärendelistan ─────────────────────────────────────────────────────────────────── *@
   <div id="fiStepList">
 
+    @*
+        ⚠️ FRAMGÅNGSKVITTOT ÄR EN INLINE-NOTIS, ALDRIG `alert()`. En blockerande dialog har redan
+        en gång rapporterats som att "fliken frös", och — viktigare här — kvittot måste gå att LÄSA
+        I EFTERHAND: det säger om mejlet faktiskt gick fram och vart medlemmens svar hamnar. En
+        ruta som försvinner vid ett OK-klick kan inte göra det.
+    *@
+    <div id="fiNotice" class="alert d-none" role="status"></div>
+
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
         <div>
             <h5 class="mb-1">
@@ -448,6 +456,45 @@
                     Texten står i mejlet till medlemmen och som anteckning på förfrågan. Skriv vad
                     som saknas och var det fylls i.
                 </div>
+
+                @*
+                    Vart ett mejlSVAR hamnar.
+
+                    ⚠️ VALET GÖRS VID VARJE TILLFÄLLE, inte en gång i en inställning. Stefans
+                    begäran: en komplettering om ett vapenärende kan vara något man vill ha till sin
+                    egen inkorg, medan ett formellt besked hör till klubbens brevlåda — och det
+                    beror på ärendet, inte på personen. En sparad inställning hade tvingat ett svar
+                    för alla ärenden.
+
+                    ⚠️ INGEN LOKAL LAGRING av valet, med flit. Ett dolt förval som ändrats för två
+                    månader sedan är precis den sortens tysta tillstånd som gör att man skickar fel
+                    utan att märka det. Standardläget är handläggaren, varje gång.
+
+                    ⚠️ Rutan förklarar att det gäller MEJLSVAR. Medlemmen har en svara-knapp i
+                    mejlet som alltid landar i ärendet; det här är för den som ändå trycker Svara.
+                *@
+                <fieldset class="mt-3 pt-3 border-top">
+                    <legend class="form-label small mb-1">Om medlemmen svarar på mejlet</legend>
+                    <p class="form-text mt-0 mb-2">
+                        Mejlet har en <strong>Svara klubben</strong>-knapp som lägger svaret direkt
+                        på förfrågan. Trycker medlemmen i stället Svara i sitt e-postprogram går
+                        svaret hit:
+                    </p>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="fiCompReplyTo"
+                               id="fiCompReplyMe" value="0" checked>
+                        <label class="form-check-label" for="fiCompReplyMe">
+                            Till mig — jag handlägger ärendet
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="fiCompReplyTo"
+                               id="fiCompReplyClub" value="1">
+                        <label class="form-check-label" for="fiCompReplyClub">
+                            Till klubbens kontaktadress
+                        </label>
+                    </div>
+                </fieldset>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -1481,11 +1528,30 @@
         // `Open` med flit — förfrågan är fortfarande klubbens ärende, bara inte klubbens tur — men
         // utan den här raden ser den ut som ett obesvarat ärende ingen har rört, och nästa
         // funktionär börjar om från början. Anteckningen ÄR det som begärdes.
-        var waiting = r.status === 'UnderBehandling'
-            ? '<div class="small text-warning-emphasis mt-1">' +
-              '<i class="bi bi-hourglass-split me-1"></i>Väntar på medlemmen' +
-              (r.handlerNote ? ': ' + esc(r.handlerNote) : '') + '</div>'
-            : '';
+        //
+        // ⚠️⚠️ OCH DEN MÅSTE SLUTA LJUGA NÄR MEDLEMMEN SVARAT. Det var hela felrapporten:
+        // medlemmen kompletterade direkt, och klubben satt kvar med "Väntar på medlemmen" medan
+        // svaret låg i sajtägarens inkorg. Nu bär raden svaret, och den är GRÖN — det är klubbens
+        // tur igen, och en gul rad läses som "ingenting har hänt".
+        //
+        // ⚠️ `memberReply` är HÄRLETT på servern och satt bara när svaret är NYARE än klubbens
+        // senaste begäran. Ber klubben om mer efter svaret vänder raden tillbaka till gult av sig
+        // själv — läs aldrig av ett svar utan att jämföra med begäran.
+        var waiting = '';
+        if (r.memberReply) {
+            waiting = '<div class="small text-success-emphasis mt-1">' +
+                '<i class="bi bi-chat-left-text me-1"></i><strong>Medlemmen har svarat</strong> ' +
+                '<span class="text-muted">' + esc(r.memberReply.at) + '</span>' +
+                '<div class="fst-italic">”' + esc(r.memberReply.body) + '”</div>' +
+                (r.handlerNote
+                    ? '<div class="text-muted">Du bad om: ' + esc(r.handlerNote) + '</div>'
+                    : '') +
+                '</div>';
+        } else if (r.status === 'UnderBehandling') {
+            waiting = '<div class="small text-warning-emphasis mt-1">' +
+                '<i class="bi bi-hourglass-split me-1"></i>Väntar på medlemmen' +
+                (r.handlerNote ? ': ' + esc(r.handlerNote) : '') + '</div>';
+        }
         return '<tr>' +
             '<td class="small text-nowrap">' + esc(r.createdAt) + '</td>' +
             '<td><strong>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</strong>' +
@@ -1569,6 +1635,13 @@
         var err = document.getElementById('fiCompError');
         if (err) { err.textContent = ''; err.classList.add('d-none'); }
 
+        // ⚠️ VALET NOLLSTÄLLS VID VARJE ÖPPNING. Utan det läcker förra ärendets val vidare, och
+        // den som en gång valde klubbadressen slutar TYST få svaren själv. Exakt samma fälla som
+        // notis-kryssrutan gick i: den låg utanför nollställningskartan och blev kvar urkryssad
+        // för alla framtida ärenden.
+        var replyMe = document.getElementById('fiCompReplyMe');
+        if (replyMe) replyMe.checked = true;
+
         bootstrap.Modal.getOrCreateInstance(document.getElementById('fiCompModal')).show();
     }
 
@@ -1585,8 +1658,15 @@
             return;
         }
 
+        // ⚠️ SKICKAS SOM "1"/"0", och servern läser det som en STRÄNG. ASP.NET Cores
+        // bool-bindning godtar bara "true"/"false" — "1" faller tyst tillbaka på default, vilket
+        // här hade betytt att valet ignorerades utan att något sa ifrån.
+        var replyEl = document.querySelector('input[name="fiCompReplyTo"]:checked');
+        var replyToClub = replyEl && replyEl.value === '1' ? '1' : '0';
+
         var j = await post('/umbraco/surface/FirearmAdmin/RequestIntygCompletion', null,
-            { clubId: vapClubId(), requestId: _completionRequestId, note: note });
+            { clubId: vapClubId(), requestId: _completionRequestId, note: note,
+              replyToClub: replyToClub });
 
         if (!j.success) {
             err.textContent = j.message || 'Kunde inte skicka.';
@@ -1596,7 +1676,25 @@
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('fiCompModal')).hide();
         await loadRequests();
-        alert(j.message);
+
+        // ⚠️ FÄRGEN FÖLJER `notified`, inte `success`. Gick mejlet inte fram är klubben den enda
+        // som kan nå medlemmen, och en grön ruta hade fått dem att sluta leta.
+        fiNotice(j.notified ? 'success' : 'warning', j.message
+            + (j.notified
+                ? (replyToClub === '1'
+                    ? ' Svarar medlemmen på mejlet går svaret till klubbens kontaktadress.'
+                    : ' Svarar medlemmen på mejlet går svaret till dig.')
+                : ''));
+    }
+
+    /// Inline-kvitto ovanför ärendelistan. Se kommentaren vid `#fiNotice`.
+    function fiNotice(kind, text) {
+        var el = document.getElementById('fiNotice');
+        if (!el) return;
+        el.className = 'alert alert-' + kind;
+        el.textContent = text;
+        el.classList.remove('d-none');
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     /// Vägen till det utfärdade dokumentet — den enda åtgärd en behandlad rad bär.

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Models;
@@ -10,6 +10,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Services;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using HpskSite.Models.ViewModels;
 using Umbraco.Extensions;
 
@@ -26,6 +27,7 @@ namespace HpskSite.Controllers
         private readonly PaymentService _paymentService;
         private readonly InvoiceAuditService _auditService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly ClubService _clubService;
         private readonly IContentService _contentService;
         private readonly IMemberService _memberService;
@@ -64,6 +66,7 @@ namespace HpskSite.Controllers
             PaymentService paymentService,
             InvoiceAuditService auditService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             ClubService clubService,
             IContentService contentService,
             IMemberService memberService,
@@ -80,6 +83,7 @@ namespace HpskSite.Controllers
             _paymentService = paymentService;
             _auditService = auditService;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _clubService = clubService;
             _contentService = contentService;
             _memberService = memberService;
@@ -1357,6 +1361,8 @@ namespace HpskSite.Controllers
                     invoiceNumber,
                     swishNumber,
                     "Faktura skickad av administratör",  // invoiceMessage
+                    // ⚠️ Arrangören, via båda värdformerna — se ForCompetitionOrganiser.
+                    _replyContacts.ForCompetitionOrganiser(competitionId),
                     bgNumber: emailPayee.BgNumber,             // bankgiro alternative in the mail
                     payeeName: emailPayee.Name
                 );
@@ -1692,6 +1698,9 @@ namespace HpskSite.Controllers
                         invoiceNumber,
                         swishNumber,
                         qrMessage,        // Swish payment reference (matches the QR code)
+                        // ⚠️ replyTo ligger FÖRE customMessage i signaturen. `emailMessage` var
+                        // tidigare tionde positionsargument och skulle annars tyst hamna här.
+                        _replyContacts.ForCompetitionOrganiser(competitionId),
                         emailMessage,     // visible reminder note in the body
                         bgNumber: reminderPayee.BgNumber,
                         payeeName: reminderPayee.Name);
@@ -2040,6 +2049,7 @@ namespace HpskSite.Controllers
                     invoiceNumber,
                     swishNumber,
                     qrMessage,        // Swish payment reference (matches the QR code)
+                    _replyContacts.ForCompetitionOrganiser(competitionId),
                     emailMessage,     // visible reminder note in the body
                     bgNumber: testPayee.BgNumber,
                     payeeName: testPayee.Name);

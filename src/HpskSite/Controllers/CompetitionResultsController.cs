@@ -12,6 +12,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.Services.Mail;
 using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Common.Utilities;
 using HpskSite.CompetitionTypes.Precision.Models;
@@ -55,6 +56,7 @@ namespace HpskSite.Controllers
         private readonly SeriesCalculationService _seriesCalculationService;
         private readonly AdminAuthorizationService _adminAuthorizationService;
         private readonly EmailService _emailService;
+        private readonly ReplyContactResolver _replyContacts;
         private readonly ShootOffService _shootOffService;
         private readonly ParticipantStatusService _participantStatusService;
         private readonly StandardMedalMaterializationService _medalMaterialization;
@@ -77,6 +79,7 @@ namespace HpskSite.Controllers
             SeriesCalculationService seriesCalculationService,
             AdminAuthorizationService adminAuthorizationService,
             EmailService emailService,
+            ReplyContactResolver replyContacts,
             ShootOffService shootOffService,
             ParticipantStatusService participantStatusService,
             StandardMedalMaterializationService medalMaterialization)
@@ -95,6 +98,7 @@ namespace HpskSite.Controllers
             _seriesCalculationService = seriesCalculationService;
             _adminAuthorizationService = adminAuthorizationService;
             _emailService = emailService;
+            _replyContacts = replyContacts;
             _shootOffService = shootOffService;
             _participantStatusService = participantStatusService;
             _medalMaterialization = medalMaterialization;
@@ -815,7 +819,9 @@ namespace HpskSite.Controllers
                 var invitationClubName = _clubService.GetClubNameById(request.ClubId) ?? "din klubb";
                 try
                 {
-                    await _emailService.SendMemberInvitationAsync(email, fullName, invitationToken, invitationClubName);
+                    await _emailService.SendMemberInvitationAsync(
+                        email, fullName, invitationToken,
+                        _replyContacts.ForClub(request.ClubId), invitationClubName);
                     _logger.LogInformation("QuickRegisterShooter: Invitation email sent to {Email}", email);
                 }
                 catch (Exception ex)
@@ -849,7 +855,11 @@ namespace HpskSite.Controllers
                             var callerName = $"{callerData.GetValue<string>("firstName")} {callerData.GetValue<string>("lastName")}".Trim();
                             if (string.IsNullOrEmpty(callerName)) callerName = callerData.Name;
                             var clubName = _clubService.GetClubNameById(request.ClubId) ?? "Okänd klubb";
-                            await _emailService.SendMemberAddedByNonAdminAsync(clubAdminEmails, fullName, callerName, clubName);
+                            // ⚠️ Svaret går till DEN SOM LA TILL medlemmen, inte till klubben.
+                            // Klubbadmin som läser "NN har lagt till en medlem" har en fråga till NN.
+                            await _emailService.SendMemberAddedByNonAdminAsync(
+                                clubAdminEmails, fullName, callerName, clubName,
+                                MailReplyTo.To(callerData.Email, callerName));
                         }
                     }
                     catch (Exception ex)
