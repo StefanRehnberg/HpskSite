@@ -40,6 +40,11 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<FirearmUsageService>();
             builder.Services.AddScoped<ForeningsintygRequestService>();
 
+            // Aviseringarna kring en förfrågan. Egen tjänst för att "vem ska få mejlet" ska ha ETT
+            // svar — medlemssidan skapar förfrågan och adminsidan avgör den, och de två skulle
+            // annars bära var sin kopia av mottagarregeln.
+            builder.Services.AddScoped<ForeningsintygNotificationService>();
+
             // Kedjans punkt 6: bokning av lånevapen. Ett rent lager ovanpå registret.
             builder.Services.AddScoped<FirearmBookingService>();
 

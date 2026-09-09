@@ -1,4 +1,4 @@
-using HpskSite.Services;
+﻿using HpskSite.Services;
 using HpskSite.Models.Firearms;
 using HpskSite.Services.Firearms;
 using Microsoft.AspNetCore.Mvc;
@@ -29,6 +29,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly FirearmService _firearms;
         private readonly ForeningsintygRequestService _requests;
+        private readonly ForeningsintygNotificationService _intygNotifications;
         private readonly FirearmBookingService _bookings;
         private readonly Umbraco.Cms.Core.Security.IMemberManager _memberManager;
         private readonly Umbraco.Cms.Core.Services.IMemberService _memberService;
@@ -50,6 +51,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             FirearmService firearms,
             ForeningsintygRequestService requests,
+            ForeningsintygNotificationService intygNotifications,
             FirearmBookingService bookings,
             Umbraco.Cms.Core.Security.IMemberManager memberManager,
             Umbraco.Cms.Core.Services.IMemberService memberService,
@@ -64,6 +66,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _firearms = firearms;
             _requests = requests;
+            _intygNotifications = intygNotifications;
             _bookings = bookings;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -490,6 +493,12 @@ namespace HpskSite.Controllers
                     status = r.Status, statusLabel = r.StatusLabel, r.IsOpen,
                     createdAt = r.CreatedAt.ToString("yyyy-MM-dd"),
                     r.HandlerNote,
+                    // ⚠️ `issuedIntygId` är vad som skiljer "utfärdat" från "någon tryckte på en
+                    // knapp som hette Utfärdad". Under en period kunde inkorgen sätta statusen utan
+                    // att något dokument skapades, så det finns rader där de två går isär. Ytan
+                    // måste kunna säga det i stället för att visa dem som avklarade.
+                    r.IssuedIntygId,
+                    handledAt = r.HandledAt?.ToString("yyyy-MM-dd"),
                 }),
             });
         }
@@ -507,11 +516,41 @@ namespace HpskSite.Controllers
             if (req.ClubId != clubId)
                 return Json(new { success = false, message = "Förfrågan tillhör inte den här klubben" });
 
+            // ⚠️ "Utfärdad" KAN INTE SÄTTAS HÄRIFRÅN, och det är hela rättningen.
+            //
+            // Inkorgen hade en knapp märkt "Utfärdad" bredvid "Avslå". Klubbsekreteraren läste paret
+            // som ja/nej, tryckte ja — och fick en förfrågan markerad som klar utan att något intyg
+            // existerade. Statusen är nu en KONSEKVENS av att ett dokument skrevs
+            // (ForeningsintygController.IssueIntyg), aldrig ett eget påstående.
+            //
+            // Vägran namnger vägen framåt i stället för att bara neka: den som hamnar här har
+            // klickat på något som förr fungerade.
+            if (string.Equals(status?.Trim(), ForeningsintygRequestStatus.Utfardad, StringComparison.Ordinal))
+                return Json(new
+                {
+                    success = false,
+                    message = "Ett föreningsintyg blir utfärdat genom att du skriver det. " +
+                              "Använd \"Skriv intyget\" på förfrågan — statusen sätts då automatiskt."
+                });
+
             var actor = await CurrentMemberIdAsync();
             var err = _requests.SetStatus(requestId, status, actor, note);
-            return err is null
-                ? Json(new { success = true, message = "Status ändrad.", openCount = _requests.CountOpenForClub(clubId) })
-                : Json(new { success = false, message = err });
+            if (err is not null) return Json(new { success = false, message = err });
+
+            // Avslaget ska medlemmen få veta, med skälet. Ett avslag som bara syns för klubben blir
+            // ett supportärende, och medlemmen väntar på ett besked som aldrig kommer.
+            if (string.Equals(status?.Trim(), ForeningsintygRequestStatus.Avslagen, StringComparison.Ordinal))
+            {
+                req.FirearmAlias ??= _firearms.GetById(req.FirearmId)?.Alias;
+                await _intygNotifications.NotifyMemberOfDecisionAsync(req, issued: false, note: note);
+            }
+
+            return Json(new
+            {
+                success = true,
+                message = "Status ändrad.",
+                openCount = _requests.CountOpenForClub(clubId)
+            });
         }
 
         /// <summary>

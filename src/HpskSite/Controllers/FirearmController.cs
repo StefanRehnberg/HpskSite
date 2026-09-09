@@ -32,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly FirearmAuthorizationService _auth;
         private readonly FirearmUsageService _usage;
         private readonly ForeningsintygRequestService _requests;
+        private readonly ForeningsintygNotificationService _intygNotifications;
         private readonly FirearmBookingService _bookings;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
@@ -61,6 +62,7 @@ namespace HpskSite.Controllers
             FirearmAuthorizationService auth,
             FirearmUsageService usage,
             ForeningsintygRequestService requests,
+            ForeningsintygNotificationService intygNotifications,
             FirearmBookingService bookings,
             IMemberManager memberManager,
             IMemberService memberService,
@@ -74,6 +76,7 @@ namespace HpskSite.Controllers
             _auth = auth;
             _usage = usage;
             _requests = requests;
+            _intygNotifications = intygNotifications;
             _bookings = bookings;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -343,9 +346,20 @@ namespace HpskSite.Controllers
             var (requestId, error) = _requests.Create(
                 memberId, clubId, kind, firearmId, forbund ?? "", vapengrupp, message);
 
-            return error is null
-                ? Json(new { success = true, requestId, message = "Förfrågan är skickad till klubben." })
-                : Json(new { success = false, message = error });
+            if (error is not null) return Json(new { success = false, message = error });
+
+            // ⚠️ AVISERA KLUBBEN. Utan det här steget fanns förfrågan bara som en siffra inne på en
+            // adminflik som ingen har anledning att öppna — klubben fick veta det av medlemmen på
+            // skjutbanan, om alls. Aviseringen sväljer sina egna fel: raden är redan skapad, och ett
+            // SMTP-fel får inte se ut som att förfrågan misslyckades.
+            var created = _requests.GetById(requestId);
+            if (created is not null)
+            {
+                created.FirearmAlias = _firearms.GetById(firearmId)?.Alias;
+                await _intygNotifications.NotifyClubOfNewRequestAsync(created);
+            }
+
+            return Json(new { success = true, requestId, message = "Förfrågan är skickad till klubben." });
         }
 
         /// <summary>Medlemmens egna förfrågningar, med klubbens svar.</summary>

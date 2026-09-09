@@ -79,7 +79,7 @@
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#membersTab">Medlemmar</option>
-                    <option value="#clubActivityTab">Aktivitet</option>
+                    @* ⚠️ "Aktivitet" är BORTTAGET som menyval (2026-09-09) — se rälsen nedan. *@
                     <option value="#foreningsintygTab">Föreningsintyg</option>
                     <option value="#trainingGroupsTab">Träningsgrupper</option>
                     <option value="#certificationsTab">Certifieringar</option>
@@ -118,9 +118,24 @@
                 <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#membersTab" type="button" role="tab" aria-controls="membersTab" aria-selected="false">
                     <i class="bi bi-people me-2"></i>Medlemmar
                 </button>
-                @* Direkt efter Medlemmar: det ar dar arbetet borjar (valj en medlem) och dit
-                   medlemsmodalen lamnar over. *@
-                <button class="nav-link" id="clubActivity-tab" data-bs-toggle="tab" data-bs-target="#clubActivityTab" type="button" role="tab" aria-controls="clubActivityTab" aria-selected="false">
+                @*
+                    ⚠️⚠️ INTE ETT MENYVAL LÄNGRE — MEN ELEMENTET MÅSTE FINNAS KVAR (2026-09-09).
+
+                    Utfärdandeskärmen låg bakom ett eget menyval som hette "Aktivitet". En
+                    klubbsekreterare som letade "Föreningsintyg" hittade det menyvalet, klickade, och
+                    landade på inkorgen — medan blanketten låg bakom ett ord som inte har någon
+                    logisk koppling till uppgiften. Det fanns ingen väg mellan de två skärmarna i
+                    någon riktning. Skärmen nås nu bara från en förfrågan i inkorgen (steg 1 → 2).
+
+                    `d-none` i stället för borttagen, eftersom Bootstraps Tab behöver ett element att
+                    aktivera och partialens lazy-laddare binder på DENNA knapps `shown.bs.tab`. Tar
+                    du bort den blir utfärdandeskärmen onåbar — tyst, eftersom `openIntygScreen`
+                    bara kan larma om att sidan inte kunde öppnas.
+
+                    Lägg den inte tillbaka i menyn. Aktivitetsunderlaget är en del av utfärdandet,
+                    inte ett eget ärende.
+                *@
+                <button class="nav-link d-none" id="clubActivity-tab" data-bs-toggle="tab" data-bs-target="#clubActivityTab" type="button" role="tab" aria-controls="clubActivityTab" aria-selected="false" tabindex="-1" aria-hidden="true">
                     <i class="bi bi-clipboard-check me-2"></i>Aktivitet
                 </button>
                 @* ⚠️ FÖRENINGSINTYGET LIGGER I *MEDLEMMAR*, INTE I KLUBBEN (Stefans beslut
@@ -6173,10 +6188,17 @@ function showDpaStatusModal() {
         if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
     });
     // Keep the picker's value in sync when a tab is shown any other way.
+    //
+    // ⚠️ Bara panes som FINNS i väljaren. Utfärdandeskärmen (#clubActivityTab) är inget menyval —
+    // den nås från en förfrågan — och att sätta `sel.value` till något som inte finns bland
+    // optionerna nollar väljaren, så mobilanvändaren står plötsligt på "Välj sektion" utan att ha
+    // valt något. Sektionen man kom FRÅN ska stå kvar.
     document.querySelectorAll('#adminTabs [data-bs-toggle="tab"]').forEach(function (b) {
         b.addEventListener('shown.bs.tab', function (e) {
             var target = e.target.getAttribute('data-bs-target');
-            if (target && sel.value !== target) sel.value = target;
+            if (!target || sel.value === target) return;
+            if (!sel.querySelector('option[value="' + target + '"]')) return;
+            sel.value = target;
         });
     });
 })();

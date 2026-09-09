@@ -27,6 +27,7 @@ namespace HpskSite.Controllers
         private readonly MemberActivitySummaryService _activitySummary;
         private readonly FirearmService _firearms;
         private readonly ForeningsintygRequestService _firearmRequests;
+        private readonly ForeningsintygNotificationService _intygNotifications;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
@@ -45,6 +46,7 @@ namespace HpskSite.Controllers
             MemberActivitySummaryService activitySummary,
             FirearmService firearms,
             ForeningsintygRequestService firearmRequests,
+            ForeningsintygNotificationService intygNotifications,
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
             IMemberManager memberManager,
@@ -57,6 +59,7 @@ namespace HpskSite.Controllers
             _activitySummary = activitySummary;
             _firearms = firearms;
             _firearmRequests = firearmRequests;
+            _intygNotifications = intygNotifications;
             _authorizationService = authorizationService;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -341,10 +344,57 @@ namespace HpskSite.Controllers
                     "Föreningsintyg {Id} utfärdat för medlem {MemberId} (klubb {ClubId}) av {IssuerId}",
                     entry.Id, req.MemberId, clubId, current.Id);
 
+                // ── Stäng förfrågan i SAMMA handling som utfärdandet ──────────────────────────
+                //
+                // ⚠️ DET HÄR ÄR HELA POÄNGEN MED FÖRFRÅGANS STATUS. Tidigare satte en egen knapp i
+                // inkorgen status till "Utfärdad" utan att något dokument fanns, medan utfärdandet
+                // här lämnade förfrågan öppen. Statusen kunde alltså ljuga åt båda hållen. Nu är
+                // "Utfärdad" en KONSEKVENS av att ett intyg skrevs, aldrig ett eget påstående, och
+                // `IssuedIntygId` pekar på dokumentet som bevisar det.
+                //
+                // ⚠️ Medlem OCH klubb kontrolleras. Utan det kunde ett påhittat requestId stänga en
+                // annan medlems ärende — och medlemmen skulle få ett besked om ett intyg som inte
+                // gäller hen.
+                bool requestClosed = false;
+                if (req.RequestId > 0)
+                {
+                    var openRequest = _firearmRequests.GetById(req.RequestId);
+                    if (openRequest is null || openRequest.MemberId != req.MemberId || openRequest.ClubId != clubId)
+                    {
+                        _logger.LogWarning(
+                            "Föreningsintyg {Id}: förfrågan {RequestId} matchar inte medlem {MemberId}/klubb {ClubId} — lämnas orörd.",
+                            entry.Id, req.RequestId, req.MemberId, clubId);
+                    }
+                    else
+                    {
+                        var statusError = _firearmRequests.SetStatus(
+                            req.RequestId, ForeningsintygRequestStatus.Utfardad, current.Id,
+                            string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim(),
+                            entry.Id);
+
+                        if (statusError is null)
+                        {
+                            requestClosed = true;
+                            openRequest.FirearmAlias ??= _firearms.GetById(openRequest.FirearmId)?.Alias;
+                            await _intygNotifications.NotifyMemberOfDecisionAsync(openRequest, issued: true, note: null);
+                        }
+                        else
+                        {
+                            // ⚠️ Intyget ÄR utfärdat och sparat. Ett fel här får inte se ut som att
+                            // utfärdandet misslyckades — det loggas, och inkorgen visar ärendet som
+                            // fortfarande öppet, vilket är det ärliga tillståndet.
+                            _logger.LogError(
+                                "Föreningsintyg {Id} utfärdat men förfrågan {RequestId} kunde inte stängas: {Error}",
+                                entry.Id, req.RequestId, statusError);
+                        }
+                    }
+                }
+
                 return Json(new
                 {
                     success = true,
                     message = "Föreningsintyget är utfärdat.",
+                    requestClosed,
                     data = new { entry.Id, printUrl = $"/foreningsintyg/{entry.Id}" }
                 });
             }

@@ -30,6 +30,20 @@ namespace HpskSite.Models
         /// <summary>Året aktivitetsunderlaget visades för. Påverkar inga fält på blanketten.</summary>
         public int ActivityYear { get; set; }
 
+        /// <summary>
+        /// Förfrågan som utfärdandet besvarar. 0 = klubben skriver ett intyg utan förfrågan.
+        ///
+        /// <para><b>⚠️ Det här är en ARBETSFLÖDESPEKARE, inte ett registerfält.</b> Den bär inga
+        /// uppgifter till dokumentet — den säger bara vilket ärende som ska stängas. Servern
+        /// kontrollerar att förfrågan tillhör samma medlem och samma klubb innan den rörs, så ett
+        /// påhittat id kan inte stänga någon annans ärende.</para>
+        ///
+        /// <para><b>⚠️ Fältet finns för att de två halvorna INTE hängde ihop.</b> Att utfärda ett
+        /// intyg lämnade förfrågan öppen, och att klicka "Utfärdad" i inkorgen skapade inget
+        /// dokument. Tillståndet kunde alltså ljuga åt båda hållen. Ta inte bort kopplingen.</para>
+        /// </summary>
+        public int RequestId { get; set; }
+
         /// <summary>Loggradens ändamål. Tomt blir "Vapenlicens".</summary>
         public string? Purpose { get; set; }
 

@@ -875,6 +875,114 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Tell the club that a member has asked for a föreningsintyg.
+        ///
+        /// <para><b>⚠️ Utan det här mejlet fanns ingen avisering alls.</b> Förfrågan syntes bara som
+        /// en siffra inne på den flik mottagaren skulle behöva besöka för att upptäcka att det fanns
+        /// något att besöka. Klubbsekreteraren fick i praktiken höra det på skjutbanan.</para>
+        ///
+        /// <para><b>⚠️ Inga vapenuppgifter i mejlet.</b> Aliaset är medlemmens eget klartextnamn på
+        /// vapnet; fabrikat, kaliber och modell är krypterade och läses genom grinden med en
+        /// loggrad. Ett mejl är en okontrollerad kopia och får aldrig bära dem.</para>
+        /// </summary>
+        public async Task SendForeningsintygRequestSubmittedAsync(
+            string toEmail, string toName, string memberName, string kindLabel,
+            string firearmLabel, string clubName)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("SendForeningsintygRequestSubmittedAsync skipped — no email address for {Name}", toName);
+                return;
+            }
+
+            var subject = $"Ny förfrågan om föreningsintyg: {memberName}";
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeMember = System.Web.HttpUtility.HtmlEncode(memberName);
+            var safeKind = System.Web.HttpUtility.HtmlEncode(kindLabel);
+            var safeFirearm = System.Web.HttpUtility.HtmlEncode(firearmLabel);
+            var safeClub = System.Web.HttpUtility.HtmlEncode(clubName);
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .notice {{ color: #666; font-size: 13px; margin-top: 10px; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p><strong>{safeMember}</strong> har begärt ett föreningsintyg av {safeClub}.</p>
+    <p>Det gäller <strong>{safeKind}</strong> — {safeFirearm}.</p>
+    <p>Logga in på pistol.nu, gå till klubbens <em>Administration</em> och välj
+       <strong>Föreningsintyg</strong> i menyn. Där ligger förfrågan med knappen
+       <em>Skriv intyget</em>, som öppnar blanketten med medlemmens uppgifter och
+       aktivitetsunderlag ifyllda.</p>
+    <p class=""notice"">Du får det här mejlet för att du är utsedd till föreningsintygsansvarig i
+       klubben. Beslutet att utfärda fattas av styrelsen.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Tell the member what the club decided about their föreningsintyg request.
+        ///
+        /// <para><b>⚠️ Ett avslag måste bära sitt skäl.</b> Utan det blir avslaget ett supportärende
+        /// till klubben och medlemmen har ingen väg vidare.</para>
+        /// </summary>
+        public async Task SendForeningsintygRequestDecisionAsync(
+            string toEmail, string toName, string clubName, string firearmLabel,
+            bool issued, string? note)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("SendForeningsintygRequestDecisionAsync skipped — no email address for {Name}", toName);
+                return;
+            }
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeClub = System.Web.HttpUtility.HtmlEncode(clubName);
+            var safeFirearm = System.Web.HttpUtility.HtmlEncode(firearmLabel);
+            var subject = issued
+                ? "Ditt föreningsintyg är utfärdat"
+                : "Din förfrågan om föreningsintyg har avslagits";
+
+            var safeNote = string.IsNullOrWhiteSpace(note)
+                ? ""
+                : $"<blockquote style=\"border-left:3px solid #ccc; margin:10px 0; padding:5px 10px; color:#555;\">{System.Web.HttpUtility.HtmlEncode(note)}</blockquote>";
+
+            var statusLine = issued
+                ? $"{safeClub} har utfärdat ett föreningsintyg för <strong>{safeFirearm}</strong>."
+                : $"{safeClub} har avslagit din förfrågan om föreningsintyg för <strong>{safeFirearm}</strong>.";
+
+            var nextStep = issued
+                ? @"<p>Intyget finns under <em>Min sida → Mina vapen</em>. Klubben lämnar ut det
+                     undertecknade originalet — hör av dig till styrelsen om hur ni gör det.</p>"
+                : "<p>Hör av dig till styrelsen om du har frågor om beslutet.</p>";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p>{statusLine}</p>
+    {safeNote}
+    {nextStep}
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
+        /// <summary>
         /// Send a single formatted HTML email through the site SMTP, but presented as coming from a
         /// club/region (display name) with replies routed to their own address. Lets clubs without
         /// Brevo still send nice HTML member mail. From address stays the authenticated site address

@@ -21,11 +21,33 @@
 @await Html.PartialAsync("_MemberActivitySummary")
 
 @*
+    ── STEG 2 AV FÖRENINGSINTYGSFLÖDET ────────────────────────────────────────────────────────────
+
+    ⚠️ SIDAN HAR TVÅ LÄGEN, och skillnaden är hela poängen med ombyggnaden 2026-09-09.
+
+    **Fokuserat läge** (`hpskOpenIntygFor`) — hit kommer man från knappen "Skriv intyget" på en
+    förfrågan i inkorgen. Medlemslistan, klubbinställningen och sidrubriken göms; kvar står EN
+    medlem, EN förfrågan och blanketten, öppen. Utfärdandet stänger förfrågan.
+
+    **Fritt läge** — "Skriv ett intyg utan förfrågan" i inkorgen. Medlemslistan visas, man väljer
+    medlem, och därefter är skärmen densamma. Ingen förfrågan stängs.
+
+    ⚠️ MENYVALET "Aktivitet" ÄR BORTTAGET UR RÄLSEN (Stefans beslut 2026-09-09). En klubbsekreterare
+    som letade "Föreningsintyg" hittade det, klickade, och landade på inkorgen — men blanketten låg
+    bakom ett ANNAT menyval som hette "Aktivitet". Det fanns ingen logik i det, och ingen väg mellan
+    de två skärmarna i någon riktning. Rälsknappen finns kvar som `d-none` enbart för att Bootstraps
+    flikmekanik behöver ett element att aktivera; lägg den inte tillbaka i menyn.
+*@
+
+@*
     Klubbens inställning för vad som räknas som aktivitet. Ligger HÄR och inte på Inställningar-fliken
     (Stefans val 2026-09-01): den ändrar vad siffrorna på den här sidan betyder, och en inställning
     som styr ett tal hör intill talet.
+
+    ⚠️ Göms i fokuserat läge. Den är en årsinställning för klubben och ska inte konkurrera om platsen
+    högst upp med ett ärende någon står och handlägger.
 *@
-<div class="card mb-3">
+<div class="card mb-3" id="aiSettingsCard">
     <div class="card-header py-2">
         <strong><i class="bi bi-sliders me-2"></i>Vad räknas som aktivitet</strong>
     </div>
@@ -40,7 +62,54 @@
     </div>
 </div>
 
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+@*
+    ── Fokusraden ──────────────────────────────────────────────────────────────────────────────────
+
+    Renderas bara i fokuserat läge. Tillbaka-länken är den enda vägen ut, och den MÅSTE finnas: en
+    skärm man bara kan nå men inte lämna är hur en användare hamnar i "vad har jag gjort nu".
+*@
+<div id="aiFocusBar" class="d-none mb-3">
+    <button type="button" class="btn btn-link px-0 mb-2" id="aiBackToInbox">
+        <i class="bi bi-arrow-left me-1"></i>Tillbaka till förfrågningarna
+    </button>
+    <div class="card border-primary">
+        <div class="card-body py-2">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="flex-grow-1">
+                    <h5 class="mb-1" id="aiFocusTitle">Skriv föreningsintyg</h5>
+                    <div class="small text-muted" id="aiFocusMeta"></div>
+                </div>
+                @*
+                    ⚠️ Avslå ligger HÄR, i det som öppnas, och inte som en jämnstark knapp intill
+                    "Skriv intyget" i inkorgen. Ett avslag är undantaget, inte hälften av valet —
+                    samma regel som redan är dokumenterad i repot (commit c4191c8: fyra knappar i
+                    fyra färger där bara en var steget).
+                *@
+                <button type="button" class="btn btn-outline-danger btn-sm d-none" id="aiRejectBtn">
+                    <i class="bi bi-x-circle me-1"></i>Avslå förfrågan
+                </button>
+            </div>
+            <div id="aiRejectBox" class="d-none mt-2 pt-2 border-top">
+                <label class="form-label small mb-1" for="aiRejectReason">
+                    <strong>Skäl för avslaget</strong> — medlemmen får det i ett mejl.
+                </label>
+                <textarea id="aiRejectReason" class="form-control form-control-sm" rows="2"
+                          placeholder="t.ex. Aktiviteten uppfyller inte kravet i 5 § ännu."></textarea>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" class="btn btn-danger btn-sm" id="aiRejectConfirm">
+                        Avslå och meddela medlemmen
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="aiRejectCancel">
+                        Avbryt
+                    </button>
+                </div>
+                <div id="aiRejectMsg" class="small mt-2"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3" id="aiPageHeader">
     <div>
         <h5 class="mb-1"><i class="bi bi-clipboard-check me-2"></i>Aktivitet &amp; Intyg</h5>
         <p class="text-muted small mb-0" style="max-width:60ch;">
@@ -53,7 +122,12 @@
 
 <div class="row g-3">
     @* ── Master: medlemslistan ───────────────────────────────────── *@
-    <div class="col-lg-4">
+    @*
+        ⚠️ Göms i fokuserat läge, och det är avsiktligt: förfrågan säger redan vem det gäller. En
+        medlemslista intill blanketten är en väg att klicka sig till FEL PERSON mitt i ett dokument
+        som ska undertecknas till Polisen — en risk, inte en bekvämlighet.
+    *@
+    <div class="col-lg-4" id="aiMasterCol">
         <div class="card ai-member-card">
             <div class="card-header py-2">
                 <label for="aiMemberFilter" class="form-label small text-muted mb-1">Sök medlem</label>
@@ -72,7 +146,9 @@
     </div>
 
     @* ── Detalj: den valda medlemmen ─────────────────────────────── *@
-    <div class="col-lg-8">
+    @* ⚠️ Bredden byts i JS när medlemslistan göms (col-lg-8 → col-12). Läggs en tredje klass till
+       här måste `setFocusMode` känna till den, annars blir kolumnen kvar på 8/12 med tom yta. *@
+    <div class="col-lg-8" id="aiDetailCol">
         @* Tomt läge. En sida som öppnar med två tomma kort ser trasig ut; den här rutan säger vad
            som förväntas av användaren i stället. *@
         <div class="card" id="aiEmptyState">
@@ -121,9 +197,32 @@
                 är UNDERLAG intill rutorna, den sätter dem aldrig. Formuläret bär bara INTYGSFÄLT;
                 registerfälten byggs om på servern vid utfärdandet och kan inte postas härifrån.
             *@
-            <div class="card mb-3">
+            @*
+                Kvittot efter ett utfärdande.
+
+                ⚠️ ETT INLINE-KVITTO, ALDRIG EN alert(). Tidigare försvann knapparna bara och ett ord
+                dök upp — vilket är precis vad som fick klubbsekreteraren att undra vad han gjort.
+                Notisen står kvar, säger vad som hände och bär vägen vidare. (En blockerande dialog är
+                dessutom en känd fälla i den här kodbasen: minnet reported-freeze-was-a-blocking-dialog.)
+            *@
+            <div id="aiIssueSuccess" class="alert alert-success d-none">
+                <h6 class="alert-heading mb-1"><i class="bi bi-check-circle me-1"></i><span id="aiSuccessTitle"></span></h6>
+                <p class="small mb-2" id="aiSuccessBody"></p>
+                <div class="d-flex flex-wrap gap-2">
+                    <a class="btn btn-sm btn-primary" id="aiSuccessPrint" href="#" target="_blank" rel="noopener">
+                        <i class="bi bi-printer me-1"></i>Skriv ut intyget
+                    </a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="aiSuccessBack">
+                        <i class="bi bi-arrow-left me-1"></i>Tillbaka till förfrågningarna
+                    </button>
+                </div>
+            </div>
+
+            <div class="card mb-3" id="aiIssueCard">
                 <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <strong><i class="bi bi-pencil-square me-2"></i>Utfärda föreningsintyg</strong>
+                    @* ⚠️ Göms i fokuserat läge — där är blanketten öppen från början, och en knapp
+                       som heter "Dölj formuläret" på det man kom hit för att göra är en fälla. *@
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="aiToggleIssue">
                         Visa formuläret
                     </button>
@@ -452,7 +551,13 @@
                 </div>
                 <div class="card-body">
                     <div id="memberIntygList" class="mb-3 small text-muted">Laddar…</div>
-                    <div class="border-top pt-3">
+                    @*
+                        ⚠️ Göms i fokuserat läge. Att erbjuda "registrera ett utfärdat intyg utan att
+                        skapa dokumentet" intill blanketten är två vägar till samma mål där bara en
+                        producerar handlingen — och den som är osäker väljer den enklare. Blocket
+                        finns kvar för klubben som efterregistrerar ur en gammal papperspärm.
+                    *@
+                    <div class="border-top pt-3" id="aiManualLogBlock">
                         <div class="small text-muted mb-2">Registrera ett utfärdat intyg (utan att skapa dokumentet)</div>
                         <div class="row g-2 align-items-end">
                             <div class="col-md-3">
@@ -877,6 +982,22 @@
         Object.keys(ISSUE_TEXTS).forEach(function (id) { fd.append(ISSUE_TEXTS[id], getVal(id)); });
         var antal = getVal('fiAntalVapen');
         if (String(antal).trim() !== '') fd.append('AntalVapenSedanTidigare', antal);
+
+        // ⚠️ FÖRFRÅGAN SOM UTFÄRDANDET BESVARAR. Det här fältet är vad som binder de två halvorna
+        // ihop: servern stänger förfrågan och länkar dokumentet i SAMMA handling. Utan det var
+        // "Utfärdad" i inkorgen ett eget påstående som kunde ljuga åt båda hållen — en stängd
+        // förfrågan utan intyg, eller ett intyg med förfrågan kvar öppen.
+        //
+        // Läses ur VÄLJAREN, inte ur `_focusRequest`: utfärdaren kan ha bytt vapen i rullgardinen,
+        // och då är det valet som gäller.
+        //
+        // ⚠️ Villkoret är väljarens VÄRDE, aldrig rutans synlighet. En första version läste
+        // `d-none` på `#fiFirearmFetch` och postade därför 0 så snart utkastet råkade gömma rutan
+        // efter att förfrågningarna hunnit fylla den — intyget utfärdades och förfrågan låg kvar
+        // öppen, utan ett felmeddelande. `loadFirearmRequests` tömmer `innerHTML` när det inte
+        // finns någon förfrågan, så ett tomt värde är det ärliga svaret på "ingen förfrågan".
+        var reqSel = document.getElementById('fiFirearmRequest');
+        fd.append('RequestId', (reqSel && reqSel.value) ? reqSel.value : 0);
         return fd;
     }
 
@@ -950,13 +1071,247 @@
                     var j = await r.json();
                     if (!j.success) { alert(j.message || 'Kunde inte utfärda intyget.'); return; }
                     if (typeof loadMemberIntyg === 'function') loadMemberIntyg(window._activityMemberId);
-                    window.open(j.data.printUrl, '_blank', 'noopener');
+                    showIssueSuccess(j);
                 } catch (e) {
                     alert('Ett fel uppstod.');
                 } finally {
                     issue.disabled = false;
                 }
             });
+        }
+    }
+
+    // ── Fokuserat läge: EN förfrågan, EN medlem, blanketten öppen ─────────────────────────────
+    //
+    // ⚠️ `_focusRequest` är null i fritt läge, och den skillnaden styr allt nedan. Blanda den inte
+    // ihop med väljaren `#fiFirearmRequest`: den senare är vad som POSTAS (utfärdaren kan byta
+    // vapen), den förra är vilket ÄRENDE skärmen öppnades för.
+    var _focusRequest = null;
+
+    /// Visar kvittot efter ett utfärdande.
+    ///
+    /// ⚠️ `requestClosed` kommer från SERVERN och är inte en gissning. Utfärdandet kan lyckas medan
+    /// stängningen av förfrågan misslyckas (servern loggar det), och då MÅSTE texten säga att
+    /// ärendet ligger kvar — annars tror utfärdaren att det är avklarat och medlemmen väntar.
+    function showIssueSuccess(j) {
+        var box = document.getElementById('aiIssueSuccess');
+        if (!box) return;
+
+        var name = document.getElementById('aiMemberName');
+        var who = name && name.textContent ? name.textContent : 'medlemmen';
+
+        document.getElementById('aiSuccessTitle').textContent =
+            'Föreningsintyget för ' + who + ' är utfärdat.';
+
+        var body = 'Intyget är sparat som det ser ut nu och kan skrivas ut igen oförändrat.';
+        if (_focusRequest) {
+            body += j.requestClosed
+                ? ' Förfrågan är avslutad och medlemmen har fått ett mejl.'
+                : ' OBS: förfrågan kunde inte avslutas automatiskt och ligger kvar som obehandlad.';
+        }
+        document.getElementById('aiSuccessBody').textContent = body;
+
+        var print = document.getElementById('aiSuccessPrint');
+        if (print && j.data && j.data.printUrl) print.href = j.data.printUrl;
+
+        document.getElementById('aiSuccessBack').classList.toggle('d-none', !_focusRequest);
+
+        // Blanketten fälls ihop: arbetet är gjort, och ett ifyllt formulär kvar på skärmen inbjuder
+        // till att trycka Utfärda igen.
+        var issueBody = document.getElementById('aiIssueBody');
+        if (issueBody && _focusRequest) issueBody.classList.add('d-none');
+
+        box.classList.remove('d-none');
+        box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    /// Slår om mellan de två lägena. Allt som hör till STEG 1 göms i fokuserat läge.
+    function setFocusMode(on) {
+        var toggles = [
+            ['aiSettingsCard', on],
+            ['aiPageHeader', on],
+            ['aiMasterCol', on],
+            ['aiToggleIssue', on],
+            ['aiManualLogBlock', on],
+            ['aiEmptyState', on]
+        ];
+        toggles.forEach(function (t) {
+            var el = document.getElementById(t[0]);
+            if (el) el.classList.toggle('d-none', t[1]);
+        });
+
+        var bar = document.getElementById('aiFocusBar');
+        if (bar) bar.classList.toggle('d-none', !on);
+
+        // Detaljkolumnen tar hela bredden när listan är borta.
+        var col = document.getElementById('aiDetailCol');
+        if (col) {
+            col.classList.toggle('col-lg-8', !on);
+            col.classList.toggle('col-12', on);
+        }
+
+        // ⚠️ Blanketten öppnas i fokuserat läge. Det är hela poängen: knappen hette "Skriv intyget",
+        // så det som ska stå på skärmen är blanketten — inte ännu en knapp som visar den.
+        var body = document.getElementById('aiIssueBody');
+        if (body && on) body.classList.remove('d-none');
+
+        var success = document.getElementById('aiIssueSuccess');
+        if (success) success.classList.add('d-none');
+
+        var rejectBox = document.getElementById('aiRejectBox');
+        if (rejectBox) rejectBox.classList.add('d-none');
+    }
+
+    /// Öppnar blanketten för EN förfrågan. Anropas av inkorgen (steg 1).
+    ///
+    /// `req` bär `{ id, memberId, memberName, firearmAlias, kindLabel, forbund, createdAt, memberMessage }`
+    /// — allt inkorgen redan har, så skärmen kan namnge ärendet utan ett extra anrop.
+    window.hpskOpenIntygFor = async function (req, openReject) {
+        if (!req || !req.memberId) return;
+        _focusRequest = req;
+
+        await load();
+        setFocusMode(true);
+        // ⚠️ Inväntas. `select()` laddar utkastet FÖRE förfrågningarna av ett bärande skäl (se dess
+        // egen kommentar); förväljs förfrågan innan dess är det en no-op på en tom väljare.
+        await select(Number(req.memberId));
+
+        document.getElementById('aiFocusTitle').textContent =
+            'Skriv föreningsintyg för ' + (req.memberName || ('medlem ' + req.memberId));
+
+        var bits = [];
+        if (req.kindLabel) bits.push(req.kindLabel);
+        if (req.firearmAlias) bits.push(req.firearmAlias);
+        if (req.forbund) bits.push(req.forbund);
+        if (req.createdAt) bits.push('inkom ' + req.createdAt);
+        var meta = document.getElementById('aiFocusMeta');
+        meta.textContent = bits.join(' · ');
+        if (req.memberMessage) {
+            meta.textContent += '';
+            var note = document.createElement('div');
+            note.className = 'fst-italic mt-1';
+            note.textContent = '”' + req.memberMessage + '”';
+            meta.appendChild(note);
+        }
+
+        document.getElementById('aiRejectBtn').classList.remove('d-none');
+
+        var sel = document.getElementById('fiFirearmRequest');
+        if (sel) {
+            var match = Array.prototype.some.call(sel.options, function (o) {
+                return String(o.value) === String(req.id);
+            });
+            if (match) sel.value = String(req.id);
+        }
+
+        // Öppnad via "Avslå förfrågan" i inkorgens Åtgärder-meny: samma skärm, men med
+        // avslagsrutan framme. EN avslagsväg i hela flödet, så skälkravet inte kan glida isär.
+        if (openReject) {
+            document.getElementById('aiRejectBox').classList.remove('d-none');
+            document.getElementById('aiRejectReason').focus();
+        }
+
+        document.getElementById('aiFocusBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    /// Öppnar sidan i FRITT läge — klubben skriver ett intyg utan att en förfrågan finns.
+    /// Medlemslistan visas, och ingen förfrågan stängs vid utfärdandet.
+    window.hpskOpenIntygFree = async function () {
+        _focusRequest = null;
+        await load();
+        setFocusMode(false);
+        var bar = document.getElementById('aiPageHeader');
+        if (bar) bar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    /// Tillbaka till inkorgen. Bootstraps flikmekanik gör resten; inkorgen läser om sig själv på
+    /// `shown.bs.tab`, så en nyss stängd förfrågan är borta ur listan när man kommer fram.
+    function backToInbox() {
+        _focusRequest = null;
+        setFocusMode(false);
+        var btn = document.getElementById('foreningsintyg-tab');
+        if (btn && window.bootstrap) window.bootstrap.Tab.getOrCreateInstance(btn).show();
+        else if (btn) btn.click();
+    }
+
+    function wireFocus() {
+        var back = document.getElementById('aiBackToInbox');
+        if (back && !back.dataset.wired) { back.dataset.wired = '1'; back.addEventListener('click', backToInbox); }
+
+        var sback = document.getElementById('aiSuccessBack');
+        if (sback && !sback.dataset.wired) { sback.dataset.wired = '1'; sback.addEventListener('click', backToInbox); }
+
+        var rej = document.getElementById('aiRejectBtn');
+        if (rej && !rej.dataset.wired) {
+            rej.dataset.wired = '1';
+            rej.addEventListener('click', function () {
+                document.getElementById('aiRejectBox').classList.remove('d-none');
+                document.getElementById('aiRejectReason').focus();
+            });
+        }
+
+        var cancel = document.getElementById('aiRejectCancel');
+        if (cancel && !cancel.dataset.wired) {
+            cancel.dataset.wired = '1';
+            cancel.addEventListener('click', function () {
+                document.getElementById('aiRejectBox').classList.add('d-none');
+                document.getElementById('aiRejectMsg').innerHTML = '';
+            });
+        }
+
+        var confirmBtn = document.getElementById('aiRejectConfirm');
+        if (confirmBtn && !confirmBtn.dataset.wired) {
+            confirmBtn.dataset.wired = '1';
+            confirmBtn.addEventListener('click', doReject);
+        }
+    }
+
+    /// Avslaget. ⚠️ INLINE, inte prompt()/alert() — en blockerande dialog har redan en gång
+    /// rapporterats som att "fliken frös" (minnet reported-freeze-was-a-blocking-dialog), och
+    /// skälet ska kunna läsas och rättas innan det skickas.
+    async function doReject() {
+        if (!_focusRequest) return;
+        var reason = (getVal('aiRejectReason') || '').trim();
+        var msg = document.getElementById('aiRejectMsg');
+
+        if (!reason) {
+            msg.innerHTML = '<span class="text-danger">Skriv ett skäl — medlemmen ser det, och ett ' +
+                            'avslag utan förklaring lämnar hen utan väg vidare.</span>';
+            return;
+        }
+
+        var btn = document.getElementById('aiRejectConfirm');
+        btn.disabled = true;
+        msg.innerHTML = '<span class="text-muted">Skickar…</span>';
+
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', meToken());
+            fd.append('clubId', clubId);
+            fd.append('requestId', _focusRequest.id);
+            fd.append('status', 'Avslagen');
+            fd.append('note', reason);
+
+            var r = await fetch('/umbraco/surface/FirearmAdmin/SetIntygRequestStatus',
+                                { method: 'POST', body: fd, credentials: 'same-origin' });
+            // TEXT först: ett antiforgery-avslag är ett tomt 400, och r.json() kastar då ett
+            // SyntaxError som gömmer statuskoden.
+            var t = await r.text();
+            var j = null;
+            try { j = JSON.parse(t); } catch (e) { j = null; }
+            if (!j) j = { success: false, message: 'Oväntat svar från servern (' + r.status + ').' };
+
+            if (!j.success) {
+                msg.innerHTML = '<span class="text-danger">' + hpskEsc(j.message || 'Kunde inte avslå.') + '</span>';
+                return;
+            }
+            msg.innerHTML = '<span class="text-success">Förfrågan är avslagen och medlemmen har fått ' +
+                            'skälet i ett mejl.</span>';
+            setTimeout(backToInbox, 1200);
+        } catch (e) {
+            msg.innerHTML = '<span class="text-danger">Ett fel uppstod.</span>';
+        } finally {
+            btn.disabled = false;
         }
     }
 
@@ -982,11 +1337,25 @@
         render();
         loadActivity(memberId, null);
         if (typeof loadMemberIntyg === 'function') loadMemberIntyg(memberId);
-        // ⚠️ Utkastet MÅSTE läsas om vid medlemsbyte. Annars ligger förra medlemmens guldmärkeskryss
-        // och ort kvar i formuläret, och nästa utfärdande skulle bära dem — på ett dokument som är
-        // en handling till en myndighet.
-        loadDraft(memberId, null);
-        loadFirearmRequests(memberId);
+
+        // ⚠️⚠️ ORDNINGEN ÄR BÄRANDE, INTE EN OPTIMERING. `loadDraft` anropar `resetIssueForm`, som
+        // GÖMMER hämtarutan (`#fiFirearmFetch`) — och `loadFirearmRequests` är det som visar den.
+        // Startades de parallellt avgjorde vilket svar som kom sist om rutan syntes eller inte.
+        //
+        // Följden var värre än ett skönhetsfel: `collectIssuePayload` läser förfrågan ur väljaren i
+        // rutan, så när utkastet råkade svara sist postades RequestId 0 — intyget utfärdades men
+        // förfrågan låg kvar öppen, tyst, vilket är precis den halva som skulle lagas. Mätt i
+        // webbläsaren 2026-09-09: förvalt värde 66, rutan gömd.
+        //
+        // ⚠️ Utkastet MÅSTE ändå läsas om vid medlemsbyte: annars ligger förra medlemmens
+        // guldmärkeskryss och ort kvar i formuläret, på ett dokument som är en handling till en
+        // myndighet. Det är alltså inte en kandidat att ta bort — det ska köras FÖRE.
+        //
+        // Returnerar ett promise så `hpskOpenIntygFor` kan invänta laddningen innan den förväljer
+        // förfrågan. Justera aldrig en väntetid här i stället för ordningen.
+        return loadDraft(memberId, null).then(function () {
+            return loadFirearmRequests(memberId);
+        });
     }
 
     // ── Fas 3: vapenuppgifterna ur medlemmens register ───────────────────────────────────────
@@ -1094,6 +1463,7 @@
     async function load() {
         wire();
         wireIssue();
+        wireFocus();
         if (!_loaded) {
             try {
                 var r = await fetch('/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + clubId,

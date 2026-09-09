@@ -1,4 +1,4 @@
-@*
+﻿@*
     Vapen & lånevapen — klubbens flik.
 
     Fyra delar, i den ordningen: BEHÖRIGHETEN (vem får läsa medlemmarnas vapeninnehav),
@@ -45,12 +45,65 @@
     svarade olika på samma fönster. Panelen inkluderar därför partialen EN gång, utanför sina
     tab-pane-wrappers, och partialen skriver ut båda panelerna själv.
 *@
+@*
+    ── STEG 1 AV FÖRENINGSINTYGSFLÖDET: ÄRENDELISTAN ──────────────────────────────────────────────
+
+    ⚠️ EN DÖRR, TVÅ STEG (omgjort 2026-09-09). Sidan bar tidigare behörighetskortet plus inkorgen,
+    och blanketten låg bakom ett ANNAT menyval ("Aktivitet"). En klubbsekreterare som letade
+    "Föreningsintyg" hittade det, klickade — och möttes av två jämnstarka knappar, "Utfärdad" och
+    "Avslå", där ingen av dem öppnade en blankett. "Utfärdad" satte bara en statusrad, så han
+    markerade ärendet klart utan att något intyg existerade och trodde att han förstört något.
+
+    Nu: den här sidan är listan över ärenden. Varje öppen förfrågan har EN primärknapp som öppnar
+    utfärdandeskärmen (`ClubAdminActivityIntyg`, steg 2) med medlem, vapen och förfrågan förvalda.
+    Utfärdandet där stänger förfrågan. Det finns ingen knapp här som sätter "Utfärdad" — servern
+    vägrar det numera också (se FirearmAdminController.SetIntygRequestStatus).
+
+    ⚠️ Behörighetskortet ligger SIST och hopfällt. Det är något styrelsen rör en gång om året och
+    ska inte konkurrera om platsen högst upp med det dagliga arbetet — samma kritik som redan står
+    skriven längre ner i den här filen om inställningskortet mitt på klubbvapensidan.
+*@
 <div class="tab-pane fade" id="foreningsintygTab">
-    @* ── Behörigheten ───────────────────────────────────────────────────────────────────────── *@
-    <div class="card mb-4" id="vapViewerCard">
+
+    @* ── Intygsinkorgen: ärendena, det första man ser ──────────────────────────────────────── *@
+    <div class="card mb-4">
         <div class="card-body">
-            <h5 class="card-title d-flex align-items-center mb-3">
-                <i class="bi bi-shield-lock text-primary me-2"></i>
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                <div>
+                    <h5 class="card-title mb-1">
+                        <i class="bi bi-inbox text-primary me-2"></i>Föreningsintyg
+                        <span class="badge bg-primary ms-1 d-none" id="vapReqBadge">0</span>
+                    </h5>
+                    <p class="text-muted small mb-0" style="max-width:62ch;">
+                        När en medlem ska söka licens för ett vapen begär hen ett föreningsintyg av
+                        klubben. Förfrågan hamnar här, och du skriver intyget genom att öppna den.
+                    </p>
+                </div>
+                @*
+                    ⚠️ En SEKUNDÄR väg, med flit. Normalfallet är att medlemmen begär intyget, och en
+                    lika stark knapp här hade inbjudit till att gå runt förfrågan — då stängs den
+                    aldrig och medlemmen får inget besked.
+                *@
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        data-vap-action="req-free">
+                    <i class="bi bi-pencil me-1"></i>Skriv ett intyg utan förfrågan
+                </button>
+            </div>
+            <div id="vapReqBody">
+                <div class="text-muted small">Laddar…</div>
+            </div>
+        </div>
+    </div>
+
+    @* ── Behörigheten: en årsinställning, hopfälld ─────────────────────────────────────────── *@
+    <details class="card mb-4" id="vapViewerCard">
+        <summary class="card-header py-2" style="cursor:pointer;list-style:none;">
+            <strong><i class="bi bi-shield-lock text-primary me-2"></i>Vem får läsa medlemmarnas
+            vapeninnehav?</strong>
+            <span class="small text-muted ms-1" id="vapViewerSummary"></span>
+        </summary>
+        <div class="card-body">
+            <h5 class="card-title d-flex align-items-center mb-3 visually-hidden">
                 Vem får läsa medlemmarnas vapeninnehav?
             </h5>
 
@@ -82,22 +135,7 @@
                 </div>
             </div>
         </div>
-    </div>
-
-    @* ── Intygsinkorgen ─────────────────────────────────────────────────────────────────────── *@
-    @* Ligger FÖRE vapenlistan: en obehandlad förfrågan är arbete som väntar, en vapenlista är
-       uppslagsdata. *@
-    <div class="card mb-4">
-        <div class="card-body">
-            <h5 class="card-title mb-3">
-                <i class="bi bi-inbox text-primary me-2"></i>Förfrågningar om föreningsintyg
-                <span class="badge bg-primary ms-1 d-none" id="vapReqBadge">0</span>
-            </h5>
-            <div id="vapReqBody">
-                <div class="text-muted small">Laddar…</div>
-            </div>
-        </div>
-    </div>
+    </details>
 
 </div>
 
@@ -593,6 +631,32 @@
 
         var railWarn = document.getElementById('firearmsRailWarning');
         if (railWarn) railWarn.classList.toggle('d-none', !(state.unstaffed || state.noBoardRegistered));
+
+        // Sammanfattningen i den HOPFÄLLDA rubriken. ⚠️ Kortet är ett `<details>` sedan 2026-09-09,
+        // så svaret på "vem kan läsa?" måste synas UTAN att någon fäller ut det — annars är
+        // hopfällningen en gömning. Är rollen obesatt står det i klartext, med en varningsfärg:
+        // klubben kan då inte fylla i vapenuppgifterna på ett intyg.
+        // ⚠️ Fäll UT kortet när rollen är obesatt. Det är det enda läget där inställningen är
+        // dagens arbete i stället för en årsfråga — utan någon utsedd kan inget intyg skrivas, och
+        // då ska åtgärden ligga framme. Bara en gång per sidladdning, annars går kortet inte att
+        // fälla ihop medan man läser (`load()` körs om efter varje ändring).
+        var card = document.getElementById('vapViewerCard');
+        if (card && !card.dataset.autoOpened && (state.unstaffed || state.noBoardRegistered)) {
+            card.dataset.autoOpened = '1';
+            card.open = true;
+        }
+
+        var sum = document.getElementById('vapViewerSummary');
+        if (sum) {
+            var active = (state.viewers || []).filter(function (v) { return !v.IsDormant && !v.isDormant; });
+            if (!active.length) {
+                sum.className = 'small text-danger ms-1';
+                sum.textContent = '— ingen är utsedd';
+            } else {
+                sum.className = 'small text-muted ms-1';
+                sum.textContent = '— ' + active.map(function (v) { return v.Name || v.name; }).join(', ');
+            }
+        }
     }
 
     async function load() {
@@ -684,14 +748,16 @@
             await loadClubFirearms();
             return;
         }
-        if (action === 'req-issue') {
-            await setRequestStatus(btn.getAttribute('data-request-id'), 'Utfardad');
+        // ── Steg 1 → steg 2 ────────────────────────────────────────────────────────────────────
+        //
+        // ⚠️ HÄR FANNS 'req-issue', SOM SATTE STATUS TILL "Utfardad" UTAN ATT SKAPA NÅGOT INTYG.
+        // Den är borttagen med flit, och servern vägrar numera den statusen härifrån. Utfärdandet
+        // sker i blanketten; statusen följer av det. Lägg inte tillbaka en genväg.
+        if (action === 'req-open' || action === 'req-reject') {
+            openIntygScreen(btn.getAttribute('data-request-id'), action === 'req-reject');
             return;
         }
-        if (action === 'req-reject') {
-            await setRequestStatus(btn.getAttribute('data-request-id'), 'Avslagen');
-            return;
-        }
+        if (action === 'req-free') { openIntygScreen(null, false); return; }
 
         if (action === 'remove') {
             var mid = btn.getAttribute('data-member-id');
@@ -1057,10 +1123,20 @@
         }
     }
 
+    /// Ärendelistan.
+    ///
+    /// ⚠️ ETT KORT PER ÖPPEN FÖRFRÅGAN, MED EN PRIMÄRKNAPP. Formen är vald mot den tidigare
+    /// tabellraden, som bar två jämnstarka knappar — "Utfärdad" och "Avslå". Ett sådant par läses
+    /// som ja/nej, och det var precis feltolkningen som fick en klubbsekreterare att markera ett
+    /// ärende klart utan att skriva något intyg. Nu står nästa steg i klartext på knappen.
+    ///
+    /// Behandlade ärenden fälls ihop: de är historik, och en lista som växer i oändlighet slutar
+    /// vara en lista (samma regel som valvets "visa klara i dag").
     function renderRequests() {
         var body = document.getElementById('vapReqBody');
         var list = (reqState && reqState.requests) || [];
         var open = list.filter(function (r) { return r.isOpen; });
+        var done = list.filter(function (r) { return !r.isOpen; });
 
         var badge = document.getElementById('vapReqBadge');
         if (badge) {
@@ -1068,68 +1144,133 @@
             badge.classList.toggle('d-none', open.length === 0);
         }
 
-        if (list.length === 0) {
-            body.innerHTML = '<p class="text-muted small mb-0">Inga f\u00f6rfr\u00e5gningar.</p>';
+        // ⚠️ Namnge vem som kan läsa vapenuppgifterna. Kan den inloggade inte det ska det stå
+        // här i stället för att en knapp nekas längre fram.
+        var names = (reqState && reqState.viewerNames) || [];
+        var html = names.length
+            ? '<p class="small text-muted"><i class="bi bi-shield-lock me-1"></i>Vapenuppgifterna kan ' +
+              'läsas av <strong>' + esc(names.join(', ')) + '</strong>.</p>'
+            : '<div class="alert alert-warning small">Ingen är utsedd till föreningsintygsansvarig, ' +
+              'så vapenuppgifterna kan inte läsas. Utse någon under ' +
+              '<em>Vem får läsa medlemmarnas vapeninnehav?</em> längre ner.</div>';
+
+        if (open.length === 0) {
+            html += '<div class="text-center text-muted py-4">' +
+                '<i class="bi bi-inbox display-6 d-block mb-2"></i>' +
+                '<p class="mb-0 small">Inga obehandlade förfrågningar just nu.</p></div>';
+        } else {
+            html += '<div class="list-group mb-3">';
+            open.forEach(function (r) { html += openRequestCard(r); });
+            html += '</div>';
+        }
+
+        if (done.length) {
+            html += '<details><summary class="small text-muted" style="cursor:pointer;">' +
+                'Behandlade förfrågningar (' + done.length + ')</summary>' +
+                '<div class="table-responsive mt-2"><table class="table table-sm align-middle">' +
+                '<thead><tr><th>Inkom</th><th>Medlem</th><th>Vapen</th><th>Status</th>' +
+                '<th>Anteckning</th></tr></thead><tbody>';
+            done.forEach(function (r) {
+                html += '<tr class="opacity-75">' +
+                    '<td class="small">' + esc(r.createdAt) + '</td>' +
+                    '<td>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</td>' +
+                    '<td class="small">' + esc(r.firearmAlias) + '</td>' +
+                    '<td>' + doneStatusCell(r) + '</td>' +
+                    '<td class="small text-muted">' + esc(r.handlerNote || '') + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table></div></details>';
+        }
+
+        body.innerHTML = html;
+    }
+
+    /// ⚠️ "Utfärdad" utan ett `issuedIntygId` är ett tillstånd som INTE BORDE KUNNA FINNAS — och som
+    /// finns, eftersom den gamla knappen kunde sätta statusen utan att något dokument skapades. Att
+    /// visa sådana rader som avklarade gömmer att medlemmen aldrig fick sitt intyg. Servern vägrar
+    /// numera statusen härifrån, så nya rader kan inte hamna här.
+    function doneStatusCell(r) {
+        if (r.status === 'Utfardad' && !r.issuedIntygId) {
+            return '<span class="badge bg-warning text-dark" title="Statusen sattes med den gamla ' +
+                   'knappen. Inget intygsdokument skapades.">' +
+                   '<i class="bi bi-exclamation-triangle me-1"></i>Markerad utfärdad — ' +
+                   'intyg saknas</span>';
+        }
+        return '<span class="badge bg-secondary">' + esc(r.statusLabel) + '</span>';
+    }
+
+    /// Kortet för en öppen förfrågan.
+    ///
+    /// ⚠️ Knapparna bär ett ID, aldrig medlemmens namn eller vapnets alias. Ett onclick byggt av
+    /// användartext är samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt" — och
+    /// aliaset här är medlemmens eget fritextnamn på vapnet.
+    function openRequestCard(r) {
+        var bits = [];
+        if (r.kindLabel) bits.push(esc(r.kindLabel));
+        if (r.firearmAlias) bits.push(esc(r.firearmAlias));
+        if (r.forbund) bits.push(esc(r.forbund));
+        if (r.createdAt) bits.push('inkom ' + esc(r.createdAt));
+
+        return '<div class="list-group-item">' +
+            '<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">' +
+                '<div class="flex-grow-1" style="min-width:0;">' +
+                    '<div class="fw-semibold">' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</div>' +
+                    '<div class="small text-muted">' + bits.join(' · ') + '</div>' +
+                    (r.memberMessage
+                        ? '<div class="small text-muted fst-italic mt-1">”' + esc(r.memberMessage) + '”</div>'
+                        : '') +
+                '</div>' +
+                '<div class="d-flex align-items-center gap-1 flex-shrink-0">' +
+                    '<button type="button" class="btn btn-primary btn-sm" ' +
+                        'data-vap-action="req-open" data-request-id="' + r.id + '">' +
+                        'Skriv intyget <i class="bi bi-arrow-right ms-1"></i></button>' +
+                    '<div class="dropdown">' +
+                        '<button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" ' +
+                            'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' ' +
+                            'aria-expanded="false" aria-label="Fler åtgärder"></button>' +
+                        '<ul class="dropdown-menu dropdown-menu-end">' +
+                            '<li><button class="dropdown-item text-danger" type="button" ' +
+                                'data-vap-action="req-reject" data-request-id="' + r.id + '">' +
+                                '<i class="bi bi-x-circle me-2"></i>Avslå förfrågan' +
+                                '</button></li>' +
+                        '</ul>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }
+
+    /// Går till steg 2 — utfärdandeskärmen.
+    ///
+    /// ⚠️ Skärmen ligger i en ANNAN flikpanel (`#clubActivityTab`, partialen
+    /// ClubAdminActivityIntyg). Rälsknappen dit är `d-none` sedan menyvalet togs bort, men
+    /// ELEMENTET MÅSTE FINNAS KVAR: Bootstraps Tab behöver något att aktivera, och panelens
+    /// lazy-laddare binder på dess `shown.bs.tab`. Tas knappen bort blir steg 2 onåbart.
+    function openIntygScreen(requestId, openReject) {
+        var req = requestId
+            ? ((reqState && reqState.requests) || []).find(function (x) {
+                  return String(x.id) === String(requestId);
+              })
+            : null;
+
+        if (requestId && !req) {
+            alert('Förfrågan kunde inte hittas. Ladda om sidan.');
             return;
         }
 
-        // ⚠️ Namnge vem som kan läsa vapenuppgifterna. Kan den inloggade inte det ska det stå
-        // här i stället för att en knapp nekas längre fram.
-        var names = (reqState.viewerNames || []);
-        var html = names.length
-            ? '<p class="small text-muted"><i class="bi bi-shield-lock me-1"></i>Vapenuppgifterna kan ' +
-              'l\u00e4sas av <strong>' + esc(names.join(', ')) + '</strong>.</p>'
-            : '<div class="alert alert-warning small">Ingen \u00e4r utsedd till f\u00f6reningsintygsansvarig, ' +
-              's\u00e5 vapenuppgifterna kan inte l\u00e4sas. Utse n\u00e5gon i rutan ovan.</div>';
-
-        html += '<div class="table-responsive"><table class="table table-sm align-middle">' +
-            '<thead><tr><th>Inkom</th><th>Medlem</th><th>Vapen</th><th>Typ</th><th>F\u00f6rbund</th>' +
-            '<th>Status</th><th class="text-end"></th></tr></thead><tbody>';
-
-        list.forEach(function (r) {
-            html += '<tr' + (r.isOpen ? '' : ' class="opacity-75"') + '>' +
-                '<td class="small">' + esc(r.createdAt) + '</td>' +
-                '<td>' + esc(r.memberName || ('Medlem ' + r.memberId)) + '</td>' +
-                '<td>' + esc(r.firearmAlias) +
-                (r.firearmWeaponClass ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' +
-                    esc(r.firearmWeaponClass) + '</span>' : '') + '</td>' +
-                '<td class="small">' + esc(r.kindLabel) + '</td>' +
-                '<td class="small">' + esc(r.forbund) + '</td>' +
-                '<td><span class="badge ' + (r.isOpen ? 'bg-primary' : 'bg-secondary') + '">' +
-                esc(r.statusLabel) + '</span></td>' +
-                '<td class="text-end">';
-            if (r.isOpen) {
-                html += '<button type="button" class="btn btn-sm btn-outline-success me-1" ' +
-                    'data-vap-action="req-issue" data-request-id="' + r.id + '">Utf\u00e4rdad</button>' +
-                    '<button type="button" class="btn btn-sm btn-outline-danger" ' +
-                    'data-vap-action="req-reject" data-request-id="' + r.id + '">Avsl\u00e5</button>';
-            } else if (r.handlerNote) {
-                html += '<span class="small text-muted">' + esc(r.handlerNote) + '</span>';
-            }
-            html += '</td></tr>';
-            if (r.memberMessage)
-                html += '<tr' + (r.isOpen ? '' : ' class="opacity-75"') + '><td></td>' +
-                    '<td colspan="6" class="small text-muted fst-italic">' +
-                    esc(r.memberMessage) + '</td></tr>';
-        });
-
-        body.innerHTML = html + '</tbody></table></div>';
-    }
-
-    async function setRequestStatus(requestId, status) {
-        var note = null;
-        if (status === 'Avslagen') {
-            // ⚠️ Ett avslag KRÄVER ett skäl — servern vägrar utan. Ett avslag utan förklaring
-            // blir ett supportärende och medlemmen har ingen väg vidare.
-            note = prompt('Varf\u00f6r avsl\u00e5s f\u00f6rfr\u00e5gan? Medlemmen ser skälet.');
-            if (note === null) return;
-            if (!note.trim()) { alert('Ange ett sk\u00e4l.'); return; }
+        var tabBtn = document.getElementById('clubActivity-tab');
+        if (!tabBtn || !window.hpskOpenIntygFor) {
+            alert('Utfärdandesidan kunde inte öppnas. Ladda om sidan.');
+            return;
         }
-        var j = await post('/umbraco/surface/FirearmAdmin/SetIntygRequestStatus', null, {
-            clubId: vapClubId(), requestId: requestId, status: status, note: note || ''
-        });
-        if (!j.success) { alert(j.message || 'Kunde inte \u00e4ndra status.'); return; }
-        await loadRequests();
+
+        bootstrap.Tab.getOrCreateInstance(tabBtn).show();
+
+        // Panelen måste vara synlig innan dess script mäter något — därför på nästa tick.
+        setTimeout(function () {
+            if (req) window.hpskOpenIntygFor(req, !!openReject);
+            else window.hpskOpenIntygFree();
+        }, 0);
     }
 
     // ── Klubbens lånevapenregler ─────────────────────────────────────────────────────────────

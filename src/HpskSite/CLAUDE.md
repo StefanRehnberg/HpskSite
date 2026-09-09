@@ -5460,6 +5460,117 @@ raderar det i sitt `finally`, med en SQL-städning som sista utpost.
 Adds C# → **full ombyggnad**. Ingen doctype-egenskap, ingen Umbraco-nod.
 **Fildeploy av KB:** `KnowledgeBase/docs/foreningsintyg.md` (ny) + `aktivitetssammanstallning.md`.
 
+### ⚠️⚠️ EN DÖRR, TVÅ STEG — flödet hängde inte ihop (2026-09-09)
+
+Rapporterat i klartext: klubbsekreteraren fick höra på skjutbanan att en medlem begärt ett
+föreningsintyg, gick in på klubbens adminsida, klickade **Föreningsintyg** i menyn, såg **två
+jämnstarka knappar** — *Utfärdad* och *Avslå* — gissade att det inte var avslå han skulle trycka på,
+tryckte den andra, och ingenting hände utom att knapparna byttes mot ordet *Utfärdad*. Han trodde att
+han förstört något och vågade inte använda sajten igen.
+
+Han gjorde exakt vad ytan bad om. **Fyra fel, och tre av dem var strukturella:**
+
+1. **Ingen aviserade någon.** `ForeningsintygRequestService.Create` skickade ingenting — förfrågan
+   fanns bara som en siffra inne på den flik mottagaren skulle behöva besöka för att upptäcka att det
+   fanns något att besöka.
+2. **"Utfärdad" var ett STATUSORD bredvid ett VERB.** Perfekt particip intill imperativ läses som
+   ja/nej. Klicket satte bara en statusrad.
+3. **⚠️ DE TVÅ HALVORNA HÄNGDE INTE IHOP, INTE ENS I KODEN.** Inkorgen låg i
+   `ClubAdminFirearms.cshtml`, blanketten i `ClubAdminActivityIntyg.cshtml`, under **två olika
+   menyval**. Att utfärda ett intyg stängde inte förfrågan (`IssueIntyg` rörde aldrig något
+   `requestId`), och att klicka "Utfärdad" skapade inget dokument och fyllde aldrig `IssuedIntygId`.
+   **Tillståndet kunde ljuga åt båda hållen**, och ingen väg ledde från den ena skärmen till den andra.
+4. **Menyvalet hette "Aktivitet".** Det beskriver underlaget, inte arbetet. Den som letade
+   "Föreningsintyg" hittade det — och landade på fel av två skärmar.
+
+**Formen nu: EN dörr, TVÅ steg.** Inte en sammanslagen sida — det var den fråga Stefan ställde, och
+den var rätt: staplade man de två blev det behörighetskortet + inkorgen + aktivitetsinställningen +
+medlemslistan + 1228 rader blankett på en skärm.
+
+- **Steg 1 — `#foreningsintygTab` (ärendelistan).** Kort sida. Ett kort per öppen förfrågan med **EN**
+  primärknapp, *Skriv intyget →*. Behandlade ärenden hopfällda. Behörighetskortet flyttat SIST och
+  hopfällt (`<details>`), med de utseddas namn i den hopfällda rubriken — det är en årsinställning och
+  ska inte konkurrera om platsen högst upp med dagligt arbete.
+- **Steg 2 — `#clubActivityTab` (en förfrågan, en skärm).** Fokusrad med tillbaka-länk och ärendet
+  namngivet, medlemmen, aktivitetsunderlaget, blanketten **öppen**, `Utfärda` sist. Medlemslistan,
+  klubbinställningen, sidrubriken, formulärtoggeln och den manuella intygsloggen göms
+  (`setFocusMode`), och detaljkolumnen går `col-lg-8` → `col-12`.
+- **Fritt läge** (`Skriv ett intyg utan förfrågan`) ger tillbaka exakt den gamla skärmen. Ingen
+  förfrågan stängs.
+
+Nettot är att sekreteraren ser **mindre** åt gången än förut, inte mer.
+
+**⚠️⚠️ "UTFÄRDAD" ÄR NUMERA EN KONSEKVENS, ALDRIG ETT PÅSTÅENDE.**
+`IssueForeningsintygRequest.RequestId` (arbetsflödespekare, **inget registerfält** — se DTO:ns egen
+varning) får `IssueIntyg` att stänga förfrågan och fylla `IssuedIntygId` i **samma handling** som
+dokumentet skrivs. Och `FirearmAdminController.SetIntygRequestStatus` **VÄGRAR** statusen
+`Utfardad` med ett meddelande som pekar på *Skriv intyget*. Lägg inte tillbaka en genväg.
+- Medlem OCH klubb kontrolleras innan förfrågan rörs — annars kunde ett påhittat `requestId` stänga
+  någon annans ärende, och medlemmen fått besked om ett intyg som inte gäller hen. **Mätt:** utfärdande
+  för medlem 8881 med medlem 8315:s förfrågan → förfrågan orörd, `requestClosed: false`.
+- **⚠️ Utfärdandet får inte rapporteras som misslyckat om bara STÄNGNINGEN faller.** Intyget är sparat.
+  Felet loggas, svaret bär `requestClosed: false`, och kvittot på skärmen säger då att ärendet ligger
+  kvar som obehandlat. Ett tyst "klart" här är exakt den bugg som lagades.
+- `GetIntygRequests` exponerar `issuedIntygId`, och inkorgen visar **"Markerad utfärdad — intyg
+  saknas"** på rader där de två går isär. Sådana rader FINNS (den gamla knappen kunde skapa dem); att
+  visa dem som avklarade gömmer att medlemmen aldrig fick något intyg.
+
+**Aviseringarna: `ForeningsintygNotificationService`** — egen tjänst så "vem ska få mejlet" har ETT
+svar (medlemssidan skapar förfrågan, adminsidan avgör den; två kopior av mottagarregeln glider isär).
+Mottagare är klubbens utsedda föreningsintygsansvariga; har klubben ingen går mejlet till klubbens
+kontaktadress, **eftersom det är just då ingen kan hantera ärendet**. Sväljer sina egna fel — raden
+ligger redan i databasen och ett SMTP-fel får inte se ut som att förfrågan misslyckades.
+⚠️ **Aldrig en vapenuppgift i ett mejl** — bara aliaset, medlemmens eget klartextnamn. Fabrikat,
+modell och kaliber är krypterade och läses genom grinden med en loggrad; ett mejl kringgår båda.
+
+**⚠️ `prompt()` och `alert()` är borta ur avslaget.** Skälet skrivs i en inline-ruta som går att läsa
+och rätta innan den skickas, och kvittot efter ett utfärdande är en **notis som står kvar** — inte
+knappar som försvinner. En blockerande dialog har redan en gång rapporterats som att "fliken frös"
+(minnet `reported-freeze-was-a-blocking-dialog`), och en försvinnande knapp är vad som fick
+sekreteraren att undra vad han gjort. **EN avslagsväg** i hela flödet, så skälkravet inte kan glida isär.
+
+**⚠️⚠️ RÄLSKNAPPEN `#clubActivity-tab` ÄR `d-none` — MEN ELEMENTET MÅSTE FINNAS KVAR.** Bootstraps Tab
+behöver något att aktivera, och partialens lazy-laddare binder på DESS `shown.bs.tab`. Tar du bort
+knappen blir steg 2 onåbart, och `openIntygScreen` kan bara larma om att sidan inte gick att öppna.
+Lägg den inte tillbaka i menyn.
+- Mobilväljarens `shown.bs.tab`-sync sätter bara värden som FINNS bland optionerna. Utan det nollades
+  väljaren när utfärdandeskärmen visades, så mobilanvändaren stod plötsligt på "Välj sektion".
+
+**⚠️⚠️ ORDNINGEN I `select()` ÄR BÄRANDE, INTE EN OPTIMERING — och kapplöpningen var tyst.**
+`loadDraft` → `resetIssueForm` **gömmer** hämtarutan `#fiFirearmFetch`; `loadFirearmRequests`
+**visar** den. Startade parallellt avgjorde vilket svar som kom sist om rutan syntes. Följden var inte
+ett skönhetsfel: `collectIssuePayload` läste förfrågan ur den rutan, så när utkastet råkade svara sist
+postades `RequestId 0` — **intyget utfärdades och förfrågan låg kvar öppen, utan felmeddelande**,
+alltså precis den halva som skulle lagas. Mätt i webbläsaren: förvalt värde 66, rutan gömd. `select()`
+returnerar nu ett promise och kör utkastet FÖRE förfrågningarna; `hpskOpenIntygFor` inväntar det.
+**Justera aldrig en väntetid här i stället för ordningen.**
+- Och payloaden läser numera väljarens **VÄRDE**, aldrig rutans synlighet. `loadFirearmRequests` tömmer
+  `innerHTML` när ingen förfrågan finns, så ett tomt värde är det ärliga svaret på "ingen förfrågan".
+
+**Verifierat i webbläsaren på klubb 2604** genom att bygga tillståndet och återställa det:
+förfrågan `Ny` → *Skriv intyget* → fokusläge (medlemslista/inställning/rubrik/toggle/manuell logg
+gömda, `col-12`, blankett öppen, förfrågan förvald) → utfärda → **SQL: `Status = Utfardad`,
+`IssuedIntygId = 45`**, intyg 45 med snapshot, kvittot säger "Förfrågan är avslutad" → avslag utan
+skäl nekas inline, med skäl skrivs `HandlerNote` och skärmen återgår till inkorgen → fritt läge ger
+tillbaka medlemslistan (29 medlemmar) och postar `RequestId 0`. Kontrollprov: en rad satt till
+`Utfardad` med `IssuedIntygId NULL` visas som *"Markerad utfärdad — intyg saknas"* medan den riktiga
+visas som *"Utfärdad"* — så påståendet kan falla. Servern vägrade `Utfardad` även med blanksteg runt;
+`UnderBehandling` gick igenom (ångra fungerar). Enda konsolfelet är det kända
+`ckeditor-duplicated-modules` på klubbsidan. **Dev återställt: 14 rader, alla `Avslagen`, noll
+fixturrester, intygsloggen tillbaka på 2 rader.**
+
+⚠️ **Fälla i verifieringen, inte i produkten:** `sqlcmd -i` mot en UTF-8-skriven `.sql` läste
+`Svenska Pistolskytteförbundet` som mojibake och det såg ut som ett renderingsfel i inkorgen. En
+känd-god rad i samma tabell var korrekt — **jämför alltid mot befintlig data innan du tror på ett
+teckenfel**. Reparerades genom att kopiera värdet ur rad 52 i SQL.
+
+**Ej byggt, medvetet:** push-notis (mejlet räcker som första steg) och en väg för medlemmen att se
+ärendets läge utöver den befintliga listan på Min sida.
+
+**Operatörssteg:** inga. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod. Adds C# → **full
+ombyggnad**. **Fildeploy av KB:** `foreningsintyg.md`, `aktivitetssammanstallning.md`,
+`vapen-klubbadmin.md`.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att
