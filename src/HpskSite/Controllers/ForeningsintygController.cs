@@ -143,11 +143,30 @@ namespace HpskSite.Controllers
                 if (memberId == 0) return Json(new { success = false, message = "Intyget hittades inte." });
 
                 var member = _memberService.GetById(memberId);
-                int clubId = 0;
-                if (member != null) int.TryParse(member.GetValue<string>("primaryClubId") ?? "", out clubId);
 
+                // ⚠️⚠️ NÅGON AV MEDLEMMENS KLUBBAR, inte bara primärklubben.
+                //
+                // Grinden låg på `primaryClubId` ensamt och låste därmed ut den klubb som faktiskt
+                // utfärdade dokumentet. Prod 2026-09-09 visar precis det: medlemmens primärklubb är
+                // Varberg (2614) medan intyget utfärdades av Falkenbergs PK (2607) — Falkenbergs
+                // klubbadmin kunde alltså inte ta bort ett felaktigt intyg i sin EGEN förenings namn.
+                // Det syntes inte, eftersom sajtadmin släpps igenom ändå.
+                //
+                // Samma rättelse som `DenyIfCannotReadMemberAsync` fick samma dag; `GetAllClubIds`
+                // är husets enda svar på "vilka klubbar tillhör medlemmen".
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                bool isClubAdmin = clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId);
+                bool isClubAdmin = false;
+                if (!isSiteAdmin)
+                {
+                    foreach (var candidateClubId in _memberClubs.GetAllClubIds(member))
+                    {
+                        if (candidateClubId > 0 && await _authorizationService.IsClubAdminForClub(candidateClubId))
+                        {
+                            isClubAdmin = true;
+                            break;
+                        }
+                    }
+                }
                 if (!isSiteAdmin && !isClubAdmin)
                     return Json(new { success = false, message = "Åtkomst nekad" });
 

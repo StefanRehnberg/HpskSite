@@ -1395,7 +1395,8 @@
 
         var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
             '<thead><tr><th>Inkom</th><th>Medlem</th><th>Vapen</th><th>Typ</th>' +
-            '<th>Status</th><th>Anteckning</th></tr></thead><tbody>';
+            '<th>Status</th><th>Anteckning</th><th class="text-end">Intyget</th>' +
+            '</tr></thead><tbody>';
         done.forEach(function (r) {
             html += '<tr>' +
                 '<td class="small text-nowrap">' + esc(r.createdAt) + '</td>' +
@@ -1404,6 +1405,7 @@
                 '<td class="small">' + esc(r.kindLabel) + '</td>' +
                 '<td>' + doneStatusCell(r) + '</td>' +
                 '<td class="small text-muted">' + esc(r.handlerNote || '') + '</td>' +
+                '<td class="text-end text-nowrap">' + doneIntygCell(r) + '</td>' +
                 '</tr>';
         });
         body.innerHTML = html + '</tbody></table></div>';
@@ -1452,6 +1454,33 @@
                 '</div>' +
             '</td>' +
         '</tr>';
+    }
+
+    /// Vägen till det utfärdade dokumentet — den enda åtgärd en behandlad rad bär.
+    ///
+    /// ⚠️ RADEN VAR HELT DÖD FRAM TILL 2026-09-09. Tabellen hade sex kolumner och ingen åtgärd,
+    /// så ett utfärdat intyg gick inte att läsa, skriva ut eller kontrollera härifrån — enda vägen
+    /// var utfärdandeskärmen med rätt medlem vald och den manuella intygsloggen längst ner, alltså
+    /// precis den sortens gömda väg hela ombyggnaden handlade om. Rapporterat ur prod med orden
+    /// "det går inte att klicka på något på raden, ingen knapp".
+    ///
+    /// Kommentaren ovanför tabellen hävdade att behandlade rader inte bär någon åtgärd. Det gäller
+    /// ett AVSLAG — där finns inget dokument att visa — men inte ett utfärdat intyg. Därför är
+    /// kolumnen smal och namngiven ("Intyget") i stället för en tom åtgärdskolumn.
+    ///
+    /// ⚠️ Länken bär ett ID, aldrig medlemsnamnet eller vapnets alias. Aliaset är medlemmens eget
+    /// fritextnamn på vapnet, och ett attribut byggt av användartext är samma lucka som gav
+    /// kodexekvering i Fältskyttes "lägg till skytt".
+    function doneIntygCell(r) {
+        if (r.issuedIntygId) {
+            return '<a class="btn btn-outline-secondary btn-sm" ' +
+                   'href="/foreningsintyg/' + r.issuedIntygId + '" target="_blank" rel="noopener" ' +
+                   'title="Öppna intyget för läsning och utskrift">' +
+                   '<i class="bi bi-printer me-1"></i>Öppna</a>';
+        }
+        // Ett avslag har inget dokument. Ett bindestreck säger det; en avstängd knapp hade sett ut
+        // som något som gick sönder.
+        return '<span class="text-muted small">—</span>';
     }
 
     /// ⚠️ "Utfärdad" utan ett `issuedIntygId` är ett tillstånd som INTE BORDE KUNNA FINNAS — och som

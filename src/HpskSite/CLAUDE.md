@@ -5799,6 +5799,58 @@ till Falkenbergs PK** och bör tas bort; förfrågningarna 1 och 2 står kvar ö
 
 Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.
 
+#### En behandlad rad var helt död — ingen väg till dokumentet (2026-09-09)
+
+Rapporterat direkt efter deployen: *"det finns inget sätt att se intyget eller skriva ut det,
+sektionen Behandlade förfrågningar har en rad med intyget men det går inte att klicka på något på
+raden, ingen knapp."*
+
+Tabellen hade sex kolumner och **ingen åtgärdskolumn alls**. Enda vägen till ett utfärdat intyg var
+utfärdandeskärmen med rätt medlem vald och den manuella intygsloggen längst ner — alltså precis den
+sortens gömda väg hela ombyggnaden handlade om.
+
+⚠️ **Kommentaren ovanför tabellen hävdade att behandlade rader inte bär någon åtgärd**, och att en
+enda tabell därför hade behövt "en åtgärdskolumn som är tom på nästan varje rad". Det gäller ett
+**AVSLAG** — där finns inget dokument att visa — men inte ett utfärdat intyg. Antagandet var alltså
+sant för hälften av raderna och gjorde den andra hälften oanvändbar. Kolumnen heter därför **"Intyget"**
+och inte "Åtgärder": ett avslag får ett bindestreck, som säger att det inte finns något att öppna, i
+stället för en avstängd knapp som ser ut som något som gick sönder.
+
+`doneIntygCell(r)` länkar till `/foreningsintyg/{issuedIntygId}` i ny flik. ⚠️ Länken bär ett **ID**,
+aldrig medlemsnamnet eller vapnets alias — aliaset är medlemmens eget fritextnamn på vapnet, och ett
+attribut byggt av användartext är samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt".
+
+**⚠️ `DeleteIntyg` grindade fortfarande på `primaryClubId` — samma familj som läsgrinden, hittad i
+samma svep.** Prod visar följden svart på vitt: medlemmens primärklubb är Varberg (2614) medan
+intyget utfärdades av Falkenbergs PK (2607), så **Falkenbergs klubbadmin kunde inte ta bort ett
+felaktigt intyg i sin egen förenings namn**. Det syntes inte, eftersom sajtadmin släpps igenom ändå.
+Grinden går nu via `GetAllClubIds`, som `DenyIfCannotReadMemberAsync` redan gör.
+
+**Prodläget, läst 2026-09-09 (endast läsning):**
+- **Intyg 9** = det rätta. Medlem 1078, `ClubId 2607` Falkenbergs PK, snapshot, och förfrågan 2 är
+  `Utfardad` med `IssuedIntygId 9`. Deploytestet höll.
+- **Intyg 8** = det felaktiga. `ClubId 2614` Varberg PK, snapshot 1985 tecken — ett riktigt dokument
+  i fel förenings namn — och **kopplat till ingen förfrågan alls** (`IssuedIntygId = 8` ger noll
+  rader). ⚠️ **Därför syns det ingenstans i ärendelistorna, varken hos Varberg eller Falkenberg** —
+  de listorna visar förfrågningar, inte intyg. Rapporterat som *"jag ser inget Intyg 8 på Varbergs
+  sida"*, och det är korrekt beteende givet datat. Enda ytorna är medlemmens egen intygslogg och
+  `/foreningsintyg/8` direkt.
+- Förfrågan 1 (Torbjörn Andreasson, Falkenberg) står kvar öppen — den utan personnummer.
+- Tomelillas intyg 1, 3–7 saknar snapshot och är alltså "Endast logg" (utfärdade innan snapshot fanns).
+
+**Verifierat i dev, med återställning:** kolumnen "Intyget" renderas, avslagna rader visar `—`, ett
+utfärdande gav en synlig **Öppna**-knapp mot `/foreningsintyg/59`, och den adressen svarade 200 med
+dokumentet i *Haaplinge GoAss* namn och `Ref FI-59`. ⚠️ En sökning efter strängen `UTKAST` i svaret
+träffar — men bara **CSS-regeln** `.sheet.draft::before`; klassen sätts inte på ett utfärdat intyg.
+Ett påstående om vattenstämpeln måste alltså läsa klassen, inte texten. Fixturen raderad (14
+förfrågningar, alla `Avslagen`, 2 intyg — utgångsläget).
+
+**⚠️ INTE BYGGT, och det är en fråga och inte ett förbiseende:** att ta bort ett intyg **från raden**.
+Ett borttaget dokument lämnar förfrågan `Utfardad` med ett danglande `IssuedIntygId`, vilket renderas
+som *"Markerad utfärdad — intyg saknas"* — alltså det trasiga tillstånd `doneStatusCell` finns för att
+larma om. Ett "gör om utfärdandet" behöver därför **öppna förfrågan igen** i samma handling, och det
+är en serverändring med ett beslut i sig. Lägg inte in en radera-knapp där utan den halvan.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att
