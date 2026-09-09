@@ -4993,11 +4993,12 @@ på EXAKT ett ställe.** De behölls med flit, så `loadMemberIntyg` / `addMembe
 element med samma id gör det andra dött för `getElementById`. Sviten assertar att var container finns
 i precis ett exemplar.
 
-**⚠️ `window._activityMemberId` är sidans medlemsval — INTE `_editMemberId`.** Sedan intygsloggen
-flyttade betyder de två olika saker ("medlemmen fliken står på" vs "medlemmen redigeringsmodalen står
-på"). Läses fel **skrivs intyget på en annan person än den skärmen visar**, och det syns inte. Det är
-enda skälet sviten har ett skrivande påstående: den sätter `_editMemberId` till en ANNAN medlem och
-kontrollerar serversidan att intyget landade på den som visas.
+**⚠️ `window._intygMemberId`** (hette `_activityMemberId` fram till uppdelningen 2026-09-09) är
+den medlem UTFÄRDANDESKÄRMEN står på — INTE `_editMemberId` (medlemsmodalen) och inte
+`_caMemberId` (aktivitetsytan). Läses fel **skrivs intyget på en annan person än den skärmen
+visar**, och det syns inte. Det är enda skälet sviten har ett skrivande påstående: den sätter
+`_editMemberId` till en ANNAN medlem och kontrollerar serversidan att intyget landade på den
+som visas.
 
 **⚠️ Medlemsmodalen nämner inte det här arbetet över huvud taget (Stefans beslut 2026-09-01).** En
 första utsåga lämnade en "Öppna Aktivitet & Intyg"-knapp där som överlämning; den är borttagen
@@ -5006,7 +5007,11 @@ tillbaka — modalen ska inte antyda att intygsarbetet börjar där. Sviten asse
 funktionerna är `undefined` och att ingen knapp i modalen nämner sidan; en kvarglömd genväg mot en
 borttagen funktion är tyst död kod.
 
-⚠️ Sidans dubbelinit-guard är en **egen flagga** (`window.__activityIntygPageInit`), inte "finns
+⚠️ **`hpskOpenActivityForMember` FINNS IGEN sedan 2026-09-09** — men exporterad av den nya
+`ClubAdminMemberActivity.cshtml`, och anropad från UTFÄRDANDESKÄRMEN ("Se medlemmens aktivitet
+i stället"), aldrig från medlemsmodalen. Regeln ovan gäller alltså fortfarande modalen.
+
+⚠️ Sidans dubbelinit-guard är en **egen flagga** (`window.__activityIntygPageInit` pa utfardandeskarmen, `window.__clubMemberActivityInit` pa aktivitetsytan), inte "finns
 funktionen X?" — den pekade tidigare på den exporterade ingången, och när ingången togs bort blev
 guarden tyst alltid falsk, alltså ingen guard alls.
 
@@ -5460,7 +5465,7 @@ raderar det i sitt `finally`, med en SQL-städning som sista utpost.
 Adds C# → **full ombyggnad**. Ingen doctype-egenskap, ingen Umbraco-nod.
 **Fildeploy av KB:** `KnowledgeBase/docs/foreningsintyg.md` (ny) + `aktivitetssammanstallning.md`.
 
-### ⚠️⚠️ EN DÖRR, TVÅ STEG — flödet hängde inte ihop (2026-09-09)
+### ⚠️⚠️ EN DÖRR, TVÅ STEG — och Aktivitet är en EGEN yta (2026-09-09)
 
 Rapporterat i klartext: klubbsekreteraren fick höra på skjutbanan att en medlem begärt ett
 föreningsintyg, gick in på klubbens adminsida, klickade **Föreningsintyg** i menyn, såg **två
@@ -5483,24 +5488,50 @@ Han gjorde exakt vad ytan bad om. **Fyra fel, och tre av dem var strukturella:**
 4. **Menyvalet hette "Aktivitet".** Det beskriver underlaget, inte arbetet. Den som letade
    "Föreningsintyg" hittade det — och landade på fel av två skärmar.
 
-**Formen nu: EN dörr, TVÅ steg.** Inte en sammanslagen sida — det var den fråga Stefan ställde, och
-den var rätt: staplade man de två blev det behörighetskortet + inkorgen + aktivitetsinställningen +
-medlemslistan + 1228 rader blankett på en skärm.
+### ⚠️⚠️ MELLANVERSIONEN SOM UNDERKÄNDES — läs det här innan du "förenklar" igen
 
-- **Steg 1 — `#foreningsintygTab` (ärendelistan).** Kort sida. Ett kort per öppen förfrågan med **EN**
-  primärknapp, *Skriv intyget →*. Behandlade ärenden hopfällda. Behörighetskortet flyttat SIST och
-  hopfällt (`<details>`), med de utseddas namn i den hopfällda rubriken — det är en årsinställning och
-  ska inte konkurrera om platsen högst upp med dagligt arbete.
-- **Steg 2 — `#clubActivityTab` (en förfrågan, en skärm).** Fokusrad med tillbaka-länk och ärendet
-  namngivet, medlemmen, aktivitetsunderlaget, blanketten **öppen**, `Utfärda` sist. Medlemslistan,
-  klubbinställningen, sidrubriken, formulärtoggeln och den manuella intygsloggen göms
-  (`setFocusMode`), och detaljkolumnen går `col-lg-8` → `col-12`.
-- **Fritt läge** (`Skriv ett intyg utan förfrågan`) ger tillbaka exakt den gamla skärmen. Ingen
-  förfrågan stängs.
+Första lagningen tog bort menyvalet **Aktivitet** helt, flyttade blanketten till en fokuserad skärm
+och gömde aktivitetsytan bakom knappen *"Skriv ett intyg utan förfrågan"* inne på Föreningsintyg.
+Stefans dom: *"Inte bra UX, vi kan inte gömma aktivitet bakom en knapp som inte säger något om att
+där finns aktivitet."* Han hade rätt, och felet är värt att kunna känna igen:
 
-Nettot är att sekreteraren ser **mindre** åt gången än förut, inte mer.
+- **Att läsa en medlems aktivitet är en EGEN uppgift** — inför ett styrelsemöte, eller för att se
+  vilka som är på väg att bli inaktiva. Den frågan har inget med ett licensärende att göra.
+- **En hel funktion får inte ligga bakom en knapp vars text handlar om något annat.** Det var samma
+  fel som det gamla "Aktivitet" var, **spegelvänt**: rätt skärm bakom fel ord.
+- **Borttagandet behövdes aldrig för att laga Göstas problem.** Det som lagade det var punkt 1–3
+  ovan (avisering, statusen som konsekvens, och att inkorgen leder till blanketten). Menyvalet var
+  ett extra steg jag tog som bröt en separat, legitim uppgift.
 
-**⚠️⚠️ "UTFÄRDAD" ÄR NUMERA EN KONSEKVENS, ALDRIG ETT PÅSTÅENDE.**
+### Formen nu: uppdelning efter FRÅGA, inte efter skärm
+
+| Menyval | Fråga | Panel | Partial |
+|---|---|---|---|
+| **Aktivitet** | Hur aktiv är den här medlemmen? | `#clubActivityTab` | `ClubAdminMemberActivity.cshtml` |
+| **Föreningsintyg** | Hantera det här licensärendet | `#foreningsintygTab` | `ClubAdminFirearms` (steg 1) + `ClubAdminActivityIntyg` (steg 2) |
+
+- **Aktivitet är en REN LÄSYTA:** medlemslista med aktivitetsdagar-badge, aktivitetssammanställning,
+  klubbens inställning *"vad räknas som aktivitet"*. **Ingen utfärdandeblankett.** En sekundär,
+  namngiven brygga (*"Skriv föreningsintyg för NN"*) leder till ärendet.
+- **Föreningsintyg bär BÅDA stegen i SAMMA panel:** `#fiStepList` (ärendelistan, ett kort per öppen
+  förfrågan med **EN** primärknapp *Skriv intyget →*) och `#fiStepIssue` (blanketten). Behandlade
+  ärenden hopfällda; behörighetskortet sist och hopfällt (`<details>`) med de utseddas namn i
+  rubriken — det är en årsinställning och ska inte konkurrera om platsen högst upp.
+- **`openIntygScreen` växlar STEG, inte flik.** En mellanversion växlade Bootstrap-flik till en egen
+  panel och behövde därför en `d-none`-rälsknapp enbart för att Tab måste ha något att aktivera.
+  Den knappen är borta — konstruktionen var lätt att råka ta bort och dess felläge var att steg 2
+  blev onåbart.
+
+**⚠️ `showIssueStep()` MÅSTE ändå aktivera `#foreningsintygTab`.** Från inkorgen är panelen redan
+aktiv och anropet är en no-op, men aktivitetsytans brygga ligger i en ANNAN panel. Utan
+flikväxlingen togs `d-none` bort medan panelen fortfarande var `display:none`: **knappen ledde till
+en tom skärm.** Mätt i webbläsaren — `offsetParent === null` på ett element vars `d-none` var borta.
+
+**⚠️ LÄRDOM FÖR VERIFIERINGEN: `!classList.contains('d-none')` är INTE "synlig".** Det påståendet var
+grönt på en osynlig sida och hade släppt igenom buggen ovan. Mät `offsetParent` (eller geometrin).
+
+### ⚠️⚠️ "UTFÄRDAD" ÄR EN KONSEKVENS, ALDRIG ETT PÅSTÅENDE
+
 `IssueForeningsintygRequest.RequestId` (arbetsflödespekare, **inget registerfält** — se DTO:ns egen
 varning) får `IssueIntyg` att stänga förfrågan och fylla `IssuedIntygId` i **samma handling** som
 dokumentet skrivs. Och `FirearmAdminController.SetIntygRequestStatus` **VÄGRAR** statusen
@@ -5509,14 +5540,28 @@ dokumentet skrivs. Och `FirearmAdminController.SetIntygRequestStatus` **VÄGRAR*
   någon annans ärende, och medlemmen fått besked om ett intyg som inte gäller hen. **Mätt:** utfärdande
   för medlem 8881 med medlem 8315:s förfrågan → förfrågan orörd, `requestClosed: false`.
 - **⚠️ Utfärdandet får inte rapporteras som misslyckat om bara STÄNGNINGEN faller.** Intyget är sparat.
-  Felet loggas, svaret bär `requestClosed: false`, och kvittot på skärmen säger då att ärendet ligger
-  kvar som obehandlat. Ett tyst "klart" här är exakt den bugg som lagades.
-- `GetIntygRequests` exponerar `issuedIntygId`, och inkorgen visar **"Markerad utfärdad — intyg
+  Felet loggas, svaret bär `requestClosed: false`, och kvittot säger då att ärendet ligger kvar som
+  obehandlat. Ett tyst "klart" här är exakt den bugg som lagades.
+- `GetIntygRequests` exponerar `issuedIntygId`, och listan visar **"Markerad utfärdad — intyg
   saknas"** på rader där de två går isär. Sådana rader FINNS (den gamla knappen kunde skapa dem); att
   visa dem som avklarade gömmer att medlemmen aldrig fick något intyg.
 
-**Aviseringarna: `ForeningsintygNotificationService`** — egen tjänst så "vem ska få mejlet" har ETT
-svar (medlemssidan skapar förfrågan, adminsidan avgör den; två kopior av mottagarregeln glider isär).
+**⚠️ KVITTOTS TEXT FÖLJER SERVERN, INTE LÄGET.** En version nämnde förfrågan bara när `_focusRequest`
+var satt, alltså bara i ärendeläge — men även FRITT läge postar en förfrågan när medlemmen har en
+öppen (payloaden läser vapenväljaren, som `loadFirearmRequests` fyllt). Följden var att förfrågan
+avslutades **tyst**. Kvittot läser numera `j.requestClosed`.
+- Samma fynd gav notisen **"Den här medlemmen har en obehandlad förfrågan"** i fritt läge, med en
+  knapp till ärendet. Utan den kunde klubben gå runt ett ärende utan att veta att det fanns — och
+  ärendevägen bär medlemmens meddelande och vilket vapen det gäller, alltså information som är BORTA
+  om man går runt den. Notisen renderas ALDRIG i ärendeläge (där är man i förfrågan), och båda
+  riktningarna är mätta så påståendet kan falla.
+- `window.hpskFindIntygRequest` finns för att notisen behöver LISTANS bild av förfrågan; den lilla
+  endpoint skärmen själv läser bär bara vapen och förbund, så en egen sammansättning hade saknat fält.
+
+### Aviseringarna
+
+**`ForeningsintygNotificationService`** — egen tjänst så "vem ska få mejlet" har ETT svar
+(medlemssidan skapar förfrågan, adminsidan avgör den; två kopior av mottagarregeln glider isär).
 Mottagare är klubbens utsedda föreningsintygsansvariga; har klubben ingen går mejlet till klubbens
 kontaktadress, **eftersom det är just då ingen kan hantera ärendet**. Sväljer sina egna fel — raden
 ligger redan i databasen och ett SMTP-fel får inte se ut som att förfrågan misslyckades.
@@ -5529,12 +5574,28 @@ knappar som försvinner. En blockerande dialog har redan en gång rapporterats s
 (minnet `reported-freeze-was-a-blocking-dialog`), och en försvinnande knapp är vad som fick
 sekreteraren att undra vad han gjort. **EN avslagsväg** i hela flödet, så skälkravet inte kan glida isär.
 
-**⚠️⚠️ RÄLSKNAPPEN `#clubActivity-tab` ÄR `d-none` — MEN ELEMENTET MÅSTE FINNAS KVAR.** Bootstraps Tab
-behöver något att aktivera, och partialens lazy-laddare binder på DESS `shown.bs.tab`. Tar du bort
-knappen blir steg 2 onåbart, och `openIntygScreen` kan bara larma om att sidan inte gick att öppna.
-Lägg den inte tillbaka i menyn.
-- Mobilväljarens `shown.bs.tab`-sync sätter bara värden som FINNS bland optionerna. Utan det nollades
-  väljaren när utfärdandeskärmen visades, så mobilanvändaren stod plötsligt på "Välj sektion".
+### ⚠️ ID-GRÄNSEN mellan de två ytorna
+
+Båda panelerna finns i DOM:en samtidigt, och **två element med samma id gör det andra DÖTT för
+`getElementById`**.
+- Aktivitetsytan: `ca*`, `caActivitySummary`, `caActivityYear`, `caRangeCheckInSwitch`, `_caMemberId`.
+- Utfärdandeskärmen: `ai*`, `fi*`, `memberActivitySummary`, `memberActivityYear`, `memberIntygList`,
+  `newIntyg*`, `_intygMemberId`.
+- **Mätt:** alla 25 id:n förekommer exakt en gång, och ett svep över hela sidan hittar **noll**
+  dubblerade id:n — inte bara bland mina.
+
+**⚠️ `window._intygMemberId` (döptes om från `_activityMemberId`)** är den medlem UTFÄRDANDESKÄRMEN
+står på — inte `_editMemberId` (medlemsmodalen) och inte `_caMemberId` (aktivitetsytan). Namnet
+beskrev fel yta efter uppdelningen, och ett namn som pekar på fel yta är precis hur ett intyg hamnar
+på fel person. `loadMemberIntyg` / `addMemberIntyg` / `deleteMemberIntyg` i `ClubAdminPanel.cshtml`
+läser samma variabel.
+
+**`_MemberAvatar.cshtml` är nu den enda avatarbyggaren** (`hpskMemberAvatar` / `hpskMemberFullName`,
+klassen `.hpsk-avatar`). Den låg i två kopior när ytorna delades, och byggaren bär ett XSS-skydd:
+`onerror="this.remove()"` i stället för en JS-literal med medlemmens initial — HTML-escapen hjälper
+inte där, eftersom `&#039;` avkodas till `'` inne i attributet. Två kopior av ett skydd är två
+chanser att tappa det. **Aktivitetssammanställningen delas likaså** genom `_MemberActivitySummary`,
+i två olika behållare; dess inre id:n är sekvensgenererade, så två behållare är säkert.
 
 **⚠️⚠️ ORDNINGEN I `select()` ÄR BÄRANDE, INTE EN OPTIMERING — och kapplöpningen var tyst.**
 `loadDraft` → `resetIssueForm` **gömmer** hämtarutan `#fiFirearmFetch`; `loadFirearmRequests`
@@ -5547,29 +5608,31 @@ returnerar nu ett promise och kör utkastet FÖRE förfrågningarna; `hpskOpenIn
 - Och payloaden läser numera väljarens **VÄRDE**, aldrig rutans synlighet. `loadFirearmRequests` tömmer
   `innerHTML` när ingen förfrågan finns, så ett tomt värde är det ärliga svaret på "ingen förfrågan".
 
-**Verifierat i webbläsaren på klubb 2604** genom att bygga tillståndet och återställa det:
-förfrågan `Ny` → *Skriv intyget* → fokusläge (medlemslista/inställning/rubrik/toggle/manuell logg
-gömda, `col-12`, blankett öppen, förfrågan förvald) → utfärda → **SQL: `Status = Utfardad`,
-`IssuedIntygId = 45`**, intyg 45 med snapshot, kvittot säger "Förfrågan är avslutad" → avslag utan
-skäl nekas inline, med skäl skrivs `HandlerNote` och skärmen återgår till inkorgen → fritt läge ger
-tillbaka medlemslistan (29 medlemmar) och postar `RequestId 0`. Kontrollprov: en rad satt till
-`Utfardad` med `IssuedIntygId NULL` visas som *"Markerad utfärdad — intyg saknas"* medan den riktiga
-visas som *"Utfärdad"* — så påståendet kan falla. Servern vägrade `Utfardad` även med blanksteg runt;
-`UnderBehandling` gick igenom (ångra fungerar). Enda konsolfelet är det kända
-`ckeditor-duplicated-modules` på klubbsidan. **Dev återställt: 14 rader, alla `Avslagen`, noll
-fixturrester, intygsloggen tillbaka på 2 rader.**
+### Verifierat i webbläsaren på klubb 2604, med återställning
+
+Rälsen bär både **Aktivitet** och **Föreningsintyg**. Aktivitetsytan: 29 medlemmar, badge på alla 29
+(bulkfrågan), 27 med aktivitet, valdes en medlem → 9 aktivitetsdagar / 11 tävlingar med vapengrupps-
+och grenfilter, årsväljare 2026+2025, inställningen läst — **och ingen utfärdandeblankett i den
+panelen**. Bryggan → panelen växlar, steg 2 **verkligen synligt**, medlemmen förvald.
+Ärendelistan → *Skriv intyget* → ärendeläge (fokusrad med medlemmens meddelande, väljare/toggle/
+manuell logg gömda, blankett öppen, Utfärda klickbar, förfrågan förvald) → utfärda → **SQL:
+`Status = Utfardad`, `IssuedIntygId = 47`**, intyg 47 med snapshot, kvittot säger "Förfrågan är
+avslutad". Tillbaka → listan synlig och omläst, ärendet kvar. Fritt läge → väljare med 30 alternativ,
+tomt läge, `_intygMemberId = 0`; efter val visas notisen om det öppna ärendet, och dess knapp växlar
+till ärendeläge med meddelandet med. Enda konsolfelet är det kända `ckeditor-duplicated-modules` på
+klubbsidan. **Dev återställt: 14 rader, alla `Avslagen`, noll fixturrester, intygsloggen på 2 rader.**
 
 ⚠️ **Fälla i verifieringen, inte i produkten:** `sqlcmd -i` mot en UTF-8-skriven `.sql` läste
-`Svenska Pistolskytteförbundet` som mojibake och det såg ut som ett renderingsfel i inkorgen. En
+`Svenska Pistolskytteförbundet` som mojibake och det såg ut som ett renderingsfel i listan. En
 känd-god rad i samma tabell var korrekt — **jämför alltid mot befintlig data innan du tror på ett
 teckenfel**. Reparerades genom att kopiera värdet ur rad 52 i SQL.
 
 **Ej byggt, medvetet:** push-notis (mejlet räcker som första steg) och en väg för medlemmen att se
 ärendets läge utöver den befintliga listan på Min sida.
 
-**Operatörssteg:** inga. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod. Adds C# → **full
-ombyggnad**. **Fildeploy av KB:** `foreningsintyg.md`, `aktivitetssammanstallning.md`,
-`vapen-klubbadmin.md`.
+**Operatörssteg:** inga. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod. Backend-delen adds C#
+→ **full ombyggnad**; uppdelningen av ytorna är **enbart vyer** och kan fildeployas.
+**Fildeploy av KB:** `foreningsintyg.md`, `aktivitetssammanstallning.md`, `vapen-klubbadmin.md`.
 
 ### Fas 2 och 3 (inte byggda)
 

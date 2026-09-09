@@ -1,0 +1,454 @@
+@*
+    Klubbens AKTIVITETSYTA — menyvalet "Aktivitet" under Medlemmar.
+
+    ⚠️⚠️ EGEN YTA SEDAN 2026-09-09, och skälet är värt att läsa innan någon slår ihop dem igen.
+
+    Aktiviteten låg tidigare i samma panel som utfärdandeblanketten, under menyvalet "Aktivitet".
+    Det gjorde att en klubbsekreterare som letade "Föreningsintyg" hittade menyvalet med det namnet,
+    klickade — och landade på inkorgen, medan blanketten låg bakom ett ord som inte har någon
+    logisk koppling till uppgiften.
+
+    Första försöket att laga det tog bort menyvalet "Aktivitet" helt och gömde ytan bakom knappen
+    "Skriv ett intyg utan förfrågan" inne på Föreningsintyg. **Det var fel, och underkändes.** Att
+    läsa en medlems aktivitet är en EGEN uppgift — inför ett styrelsemöte, eller för att se vilka
+    som är på väg att bli inaktiva — och en hel funktion får inte ligga bakom en knapp vars text
+    handlar om något annat. Det var samma fel som "Aktivitet" var, spegelvänt: rätt skärm bakom
+    fel ord.
+
+    Uppdelningen går därför efter FRÅGA, inte efter skärm:
+      • "Aktivitet" (den här ytan)  — hur aktiv är den här medlemmen?
+      • "Föreningsintyg"            — hantera det här licensärendet (inkorg + blankett)
+
+    ⚠️ INGEN UTFÄRDANDEBLANKETT HÄR. Aktiviteten visas ÄVEN inne i utfärdandeskärmen, eftersom
+    beslutet behöver underlaget intill kryssrutorna — men genom SAMMA renderare
+    (`_MemberActivitySummary`), i en egen behållare. Två beräkningar av samma siffra blir två svar
+    som får säga emot varandra, och här är svaret ett myndighetsunderlag.
+
+    ⚠️ EGNA ID:N (`ca*` / `caActivitySummary` / `caActivityYear`). Utfärdandeskärmen bär `ai*` och
+    `memberActivitySummary`. Två element med samma id på samma sida gör det andra DÖTT för
+    `getElementById` — och båda panelerna finns i DOM:en samtidigt.
+*@
+@await Html.PartialAsync("_MemberActivitySummary")
+@await Html.PartialAsync("_MemberAvatar")
+
+@*
+    Klubbens inställning för vad som räknas som aktivitet. Ligger HÄR och inte på Inställningar-fliken
+    (Stefans val 2026-09-01): den ändrar vad siffrorna på den här sidan betyder, och en inställning
+    som styr ett tal hör intill talet.
+*@
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <strong><i class="bi bi-sliders me-2"></i>Vad räknas som aktivitet</strong>
+    </div>
+    <div class="card-body py-2">
+        <div class="form-check form-switch mb-1">
+            <input class="form-check-input" type="checkbox" role="switch" id="caRangeCheckInSwitch" disabled>
+            <label class="form-check-label" for="caRangeCheckInSwitch">
+                Räkna <strong>incheckning på klubbens skjutbana</strong> som aktivitet
+            </label>
+        </div>
+        <div id="caRangeCheckInHint" class="small text-muted">Laddar…</div>
+    </div>
+</div>
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+        <h5 class="mb-1"><i class="bi bi-clipboard-check me-2"></i>Aktivitet</h5>
+        <p class="text-muted small mb-0" style="max-width:62ch;">
+            Medlemmens träning, tävlingar och närvaro under ett verksamhetsår, med hur starkt
+            underlaget är för varje post. Det här är underlaget styrelsen utgår från när klubben
+            utfärdar ett <strong>Föreningsintyg</strong> — och det klubben läser för att se vilka
+            som är aktiva.
+        </p>
+    </div>
+</div>
+
+<div class="row g-3">
+    @* ── Master: medlemslistan ───────────────────────────────────── *@
+    <div class="col-lg-4">
+        <div class="card ca-member-card">
+            <div class="card-header py-2">
+                <label for="caMemberFilter" class="form-label small text-muted mb-1">Sök medlem</label>
+                <input type="search" class="form-control form-control-sm" id="caMemberFilter"
+                       placeholder="Namn eller e-post" autocomplete="off"
+                       aria-controls="caMemberList">
+                @* Antalet står alltid framme: ett filter som tyst gömmer medlemmar är vad som
+                   skapar "min medlem är borta". *@
+                <div class="small text-muted mt-1" id="caMemberCount" aria-live="polite"></div>
+            </div>
+            <div class="list-group list-group-flush ca-member-list" id="caMemberList" role="listbox"
+                 aria-label="Klubbens medlemmar">
+                <div class="list-group-item text-muted small">Laddar medlemmar…</div>
+            </div>
+        </div>
+    </div>
+
+    @* ── Detalj: den valda medlemmen ─────────────────────────────── *@
+    <div class="col-lg-8">
+        @* Tomt läge. En sida som öppnar med ett tomt kort ser trasig ut; den här rutan säger vad
+           som förväntas av användaren i stället. *@
+        <div class="card" id="caEmptyState">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-person-lines-fill display-5 text-muted d-block mb-3"></i>
+                <h6 class="mb-2">Välj en medlem i listan</h6>
+                <p class="text-muted small mb-0" style="max-width:44ch; margin:0 auto;">
+                    Då visas medlemmens aktivitet för valt verksamhetsår.
+                </p>
+            </div>
+        </div>
+
+        <div id="caDetail" class="d-none">
+            <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+                @* Avataren till vänster om namn och e-post. align-items-center på just den här
+                   raden, inte -end: bilden ska ligga mitt för de två textraderna. *@
+                <div class="d-flex align-items-center gap-2">
+                    @* ⚠️ En BEHÅLLARE, inte avataren själv. Fylls med innerHTML — hade select()
+                       satt outerHTML skulle id:t försvinna med första bytet och nästa medlem få
+                       ingen avatar alls. *@
+                    <span id="caMemberAvatar" class="d-inline-flex"></span>
+                    <div>
+                        <h6 class="mb-0" id="caMemberName"></h6>
+                        <span class="small text-muted" id="caMemberMeta"></span>
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label small text-muted mb-0" for="caActivityYear">Verksamhetsår</label>
+                    <select id="caActivityYear" class="form-select form-select-sm" style="width:8rem;"></select>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <strong><i class="bi bi-list-check me-2"></i>Aktivitet</strong>
+                </div>
+                <div class="card-body">
+                    <div id="caActivitySummary" class="small text-muted">Laddar…</div>
+                </div>
+            </div>
+
+            @*
+                Bryggan till ärendet. Den finns för att den som läser aktiviteten ibland vill agera
+                på den — men den är SEKUNDÄR och namnger vart den leder. Normalvägen till ett intyg
+                är fortfarande medlemmens egen förfrågan i inkorgen under Föreningsintyg.
+            *@
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="caGoToIntyg">
+                    <i class="bi bi-shield-lock me-1"></i>Skriv föreningsintyg för
+                    <span id="caGoToIntygName"></span>
+                </button>
+                <span class="small text-muted">
+                    Öppnar Föreningsintyg med den här medlemmen förvald.
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function clubMemberActivityPage() {
+    // ⚠️ Egen flagga, inte "finns funktionen X?". En guard som pekar på en exporterad funktion blir
+    // tyst alltid falsk den dag funktionen tas bort — alltså ingen guard alls.
+    if (window.__clubMemberActivityInit) return;
+    window.__clubMemberActivityInit = true;
+
+    var _members = [];
+    var _loaded = false;
+    var _activityDays = null;      // medlems-id → aktivitetsdagar, EN bulkfråga för hela klubben
+    var _activityDaysYear = '';
+
+    // CSS i runtime, inte som top-level <style> (minnet razor-partial-styles).
+    (function injectStyles() {
+        if (document.getElementById('ca-styles')) return;
+        var css = [
+            '.ca-member-list { max-height: 60vh; overflow-y: auto; }',
+            '.ca-member-list .list-group-item-action { cursor: pointer; }',
+            '.ca-member-list .active { background-color: var(--bs-primary-bg-subtle); color: inherit; border-color: var(--bs-border-color); }',
+            // ⚠️ Dubbelt at-tecken krävs här. Ett ENSAMT at-tecken i en Razor-vy tolkas som början
+            // på ett C#-uttryck även inne i ett <script> (minnet razor-literal-at-in-script) — och
+            // att skriva den felaktiga formen i kommentaren som varnar för den räckte en gång för
+            // att spräcka vyn: klubbsidan svarade 200 anonymt men saknade hela adminpanelen
+            // inloggad.
+            '@@media (min-width: 992px) { .ca-member-card { position: sticky; top: 1rem; } }'
+        ].join('\n');
+        var el = document.createElement('style');
+        el.id = 'ca-styles';
+        el.textContent = css;
+        document.head.appendChild(el);
+    })();
+
+    function esc(s) { return hpskEsc(s == null ? '' : String(s)); }
+    function fullName(m) { return window.hpskMemberFullName(m); }
+
+    function render() {
+        var box = document.getElementById('caMemberList');
+        var countBox = document.getElementById('caMemberCount');
+        if (!box) return;
+
+        var q = (document.getElementById('caMemberFilter').value || '').trim().toLowerCase();
+        var shown = q
+            ? _members.filter(function (m) {
+                  return (fullName(m) + ' ' + (m.email || '')).toLowerCase().indexOf(q) >= 0;
+              })
+            : _members;
+
+        countBox.textContent = _members.length
+            ? (q ? 'Visar ' + shown.length + ' av ' + _members.length + ' medlemmar'
+                 : _members.length + ' medlemmar')
+            : '';
+
+        if (!_members.length) {
+            box.innerHTML = '<div class="list-group-item text-muted small">Klubben har inga medlemmar att visa.</div>';
+            return;
+        }
+        if (!shown.length) {
+            box.innerHTML = '<div class="list-group-item text-muted small">Ingen medlem matchar sökningen.</div>';
+            return;
+        }
+
+        box.innerHTML = shown.map(function (m) {
+            var active = String(m.id) === String(window._caMemberId);
+            // Aktivitetsdagar för året, som en badge till höger. ⚠️ Siffran kommer ur EN bulkfråga
+            // för hela klubben — inte en sammanställning per medlem, vilket hade blivit tre källor
+            // gånger hela rostern. Saknas den ännu (hämtningen är parallell) visas ingen badge alls
+            // hellre än en nolla, som läses som "ingen aktivitet".
+            var days = _activityDays ? _activityDays[String(m.id)] : undefined;
+            var badge = (days === undefined || days === null)
+                ? ''
+                : '<span class="badge rounded-pill ' +
+                  (days > 0 ? 'bg-primary-subtle text-primary-emphasis' : 'bg-secondary-subtle text-secondary-emphasis') +
+                  ' ms-2 flex-shrink-0" title="' + days + ' aktivitetsdagar ' + esc(_activityDaysYear) + '">' +
+                  days + '</span>';
+
+            return '<button type="button" role="option" aria-selected="' + (active ? 'true' : 'false') + '"' +
+                   ' class="list-group-item list-group-item-action py-2' + (active ? ' active' : '') + '"' +
+                   ' data-ca-member-id="' + esc(m.id) + '">' +
+                   '<span class="d-flex justify-content-between align-items-center gap-2">' +
+                   // min-width:0 på textblocket är vad som gör text-truncate verksamt inuti en flex —
+                   // utan det växer raden i stället för att kapa namnet, och badgen trycks ut.
+                   '<span class="d-flex align-items-center gap-2" style="min-width:0;">' +
+                   window.hpskMemberAvatar(m) +
+                   '<span class="text-truncate">' +
+                   '<span class="d-block text-truncate">' + esc(fullName(m)) + '</span>' +
+                   (m.email ? '<span class="small text-muted d-block text-truncate">' + esc(m.email) + '</span>' : '') +
+                   '</span></span>' + badge + '</span>' +
+                   '</button>';
+        }).join('');
+    }
+
+    // ⚠️ Medlemsvalet går via data-attribut och en delegerad lyssnare, aldrig genom att bygga ett
+    // onclick av medlemmens namn. Samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt".
+    function wire() {
+        var box = document.getElementById('caMemberList');
+        if (box && !box.dataset.wired) {
+            box.dataset.wired = '1';
+            box.addEventListener('click', function (e) {
+                var btn = e.target.closest('[data-ca-member-id]');
+                if (btn) select(Number(btn.dataset.caMemberId));
+            });
+        }
+        var filter = document.getElementById('caMemberFilter');
+        if (filter && !filter.dataset.wired) {
+            filter.dataset.wired = '1';
+            filter.addEventListener('input', render);
+        }
+        var year = document.getElementById('caActivityYear');
+        if (year && !year.dataset.wired) {
+            year.dataset.wired = '1';
+            year.addEventListener('change', function () {
+                if (window._caMemberId) loadActivity(window._caMemberId, year.value);
+                // Badgarna gäller ett år — byts året måste de räknas om, annars visar listan
+                // förra årets siffror intill det nya årets sammanställning.
+                loadActivityDays();
+            });
+        }
+        var go = document.getElementById('caGoToIntyg');
+        if (go && !go.dataset.wired) {
+            go.dataset.wired = '1';
+            go.addEventListener('click', function () {
+                if (!window._caMemberId) return;
+                // ⚠️ Lämnar över MEDLEMS-ID:T, inget mer. Utfärdandeskärmen läser själv fram
+                // utkastet och eventuella öppna förfrågningar — hade den här sidan skickat med
+                // uppgifter hade det varit en andra källa till samma sak.
+                if (window.hpskOpenIntygForMember) {
+                    window.hpskOpenIntygForMember(window._caMemberId);
+                } else {
+                    alert('Föreningsintygssidan kunde inte öppnas. Ladda om sidan.');
+                }
+            });
+        }
+    }
+
+    async function loadActivity(memberId, year) {
+        var d = await window.hpskLoadActivitySummary('caActivitySummary', memberId, year);
+        if (!d) return;
+        // Arsvaljaren fylls UR svaret, sa den aldrig erbjuder ett tomt ar eller saknar det ar
+        // datat ligger pa.
+        window.hpskFillActivityYears(document.getElementById('caActivityYear'), d.years, d.data.year);
+    }
+
+    function select(memberId) {
+        window._caMemberId = memberId;
+        var m = _members.find(function (x) { return String(x.id) === String(memberId); });
+
+        document.getElementById('caEmptyState').classList.add('d-none');
+        document.getElementById('caDetail').classList.remove('d-none');
+        document.getElementById('caMemberName').textContent = m ? fullName(m) : ('Medlem ' + memberId);
+        document.getElementById('caMemberMeta').textContent = m && m.email ? m.email : '';
+        document.getElementById('caGoToIntygName').textContent = m ? fullName(m) : ('medlem ' + memberId);
+
+        // ⚠️ Avataren måste sättas även när medlemmen INTE hittades i listan (m är null): annars
+        // står förra medlemmens bild kvar intill det nya namnet, vilket är värre än ingen bild.
+        var av = document.getElementById('caMemberAvatar');
+        if (av) av.innerHTML = window.hpskMemberAvatar(m || { id: memberId }, 'hpsk-avatar-lg');
+
+        // Nollstall arsvaljaren mellan medlemmar: annars far nasta medlem forra medlemmens ar
+        // forvalt, och sammanstallningen ser tom ut for ett ar hen inte har data pa.
+        var year = document.getElementById('caActivityYear');
+        if (year) year.innerHTML = '';
+
+        render();
+        loadActivity(memberId, null);
+    }
+
+    /// Förväljer en medlem utifrån (används när utfärdandeskärmen lämnar över hit).
+    window.hpskOpenActivityForMember = async function (memberId) {
+        await load();
+        select(Number(memberId));
+    };
+
+    async function load() {
+        wire();
+        if (!_loaded) {
+            try {
+                var r = await fetch('/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + clubId,
+                                    { credentials: 'same-origin' });
+                var j = await r.json();
+                _members = (j.success ? (j.data || []) : []).slice().sort(function (a, b) {
+                    return fullName(a).localeCompare(fullName(b), 'sv');
+                });
+                _loaded = true;
+            } catch (e) {
+                document.getElementById('caMemberList').innerHTML =
+                    '<div class="list-group-item text-danger small">Kunde inte ladda medlemmar.</div>';
+                return;
+            }
+        }
+        render();
+        loadActivityDays();
+        loadRangeCheckInSetting();
+    }
+
+    /// Inställningen "räkna incheckning på banan som aktivitet".
+    ///
+    /// ⚠️ Switchen är AVSTÄNGD tills servern svarat, och förblir avstängd när förutsättningen saknas
+    /// — doctype-egenskapen eller en länkad skjutbana. En klickbar switch som inte kan sparas är
+    /// sämre än en låst med en förklaring intill.
+    async function loadRangeCheckInSetting() {
+        var sw = document.getElementById('caRangeCheckInSwitch');
+        var hint = document.getElementById('caRangeCheckInHint');
+        if (!sw || !hint) return;
+
+        try {
+            var r = await fetch('/umbraco/surface/Foreningsintyg/GetRangeCheckInSetting?clubId=' +
+                                encodeURIComponent(clubId), { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) { hint.textContent = j.message || 'Kunde inte läsa inställningen.'; return; }
+
+            sw.checked = !!j.enabled;
+
+            if (!j.propertyExists) {
+                sw.disabled = true;
+                hint.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-1"></i>' +
+                    'Egenskapen <code>' + hpskEsc(j.propertyAlias) + '</code> saknas på klubb-doctypen. ' +
+                    'En sajtadministratör behöver lägga till den (True/False) i backoffice innan ' +
+                    'inställningen kan sparas.';
+                return;
+            }
+            if (!j.hasLinkedRange && !j.enabled) {
+                sw.disabled = true;
+                hint.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-1"></i>' +
+                    'Klubben har ingen länkad skjutbana. Länka en bana under <strong>Skjutbanor</strong> ' +
+                    'först — utan den finns inga incheckningar att räkna.';
+                return;
+            }
+
+            sw.disabled = false;
+            hint.innerHTML = j.enabled
+                ? '<i class="bi bi-info-circle me-1"></i>Incheckningar på klubbens ' +
+                  (j.rangeCount === 1 ? 'bana' : j.rangeCount + ' banor') + ' räknas som aktivitet. ' +
+                  'En incheckning som beskriver samma tillfälle som en tävling eller ett träningspass ' +
+                  'samma dag visas men räknas inte dubbelt.'
+                : '<i class="bi bi-info-circle me-1"></i>Incheckningar räknas inte. Slå på om klubben ' +
+                  'vill att ett besök på banan ska räknas som aktivitet även när inget resultat loggats.';
+
+            if (!sw.dataset.wired) {
+                sw.dataset.wired = '1';
+                sw.addEventListener('change', async function () {
+                    var want = sw.checked;
+                    sw.disabled = true;
+                    try {
+                        var fd = new FormData();
+                        fd.append('__RequestVerificationToken', meToken());
+                        fd.append('clubId', clubId);
+                        fd.append('enabled', want);
+                        var res = await fetch('/umbraco/surface/Foreningsintyg/SetRangeCheckInSetting',
+                                              { method: 'POST', body: fd, credentials: 'same-origin' });
+                        var d = await res.json();
+                        if (!d.success) {
+                            sw.checked = !want;          // rulla tillbaka: servern sparade inte
+                            alert(d.message || 'Kunde inte spara inställningen.');
+                        } else if (window._caMemberId) {
+                            // Inställningen ändrar vad siffrorna betyder — läs om det som visas.
+                            var y = document.getElementById('caActivityYear');
+                            loadActivity(window._caMemberId, (y && y.value) || null);
+                            loadActivityDays();
+                        }
+                    } catch (e) {
+                        sw.checked = !want;
+                        alert('Ett fel uppstod.');
+                    } finally {
+                        await loadRangeCheckInSetting();
+                    }
+                });
+            }
+        } catch (e) {
+            hint.textContent = 'Kunde inte läsa inställningen.';
+        }
+    }
+
+    /// Aktivitetsdagar för hela klubben i EN fråga.
+    ///
+    /// ⚠️ Hämtas SEPARAT och EFTER medlemslistan, aldrig som ett villkor för att visa den. Räkningen
+    /// slår tre källor för hela rostern; vore listan beroende av den skulle sidan stå tom under den
+    /// tiden. Badgen dyker upp när svaret kommer, och en medlem utan svar får ingen badge alls —
+    /// hellre ingen siffra än en nolla, som läses som "ingen aktivitet".
+    async function loadActivityDays() {
+        try {
+            var y = document.getElementById('caActivityYear');
+            var year = (y && y.value) || new Date().getFullYear();
+            var r = await fetch('/umbraco/surface/Foreningsintyg/GetClubActivityDays?clubId=' +
+                                encodeURIComponent(clubId) + '&year=' + encodeURIComponent(year),
+                                { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) return;
+            _activityDays = j.data || {};
+            _activityDaysYear = String(j.year);
+            render();
+        } catch (e) {
+            // Badgen är en bekvämlighet. Ett fel här får inte röra medlemslistan.
+        }
+    }
+
+    // Lazy: sidan slar tre kallor per medlem och ska inte kora forr an fliken oppnas.
+    // Ralsknappen renderas FORE innehallspanelen i dokumentet, sa den finns redan nar det har
+    // korr — ingen vantan pa DOMContentLoaded behovs.
+    (function bindTab() {
+        var btn = document.getElementById('clubActivity-tab');
+        if (btn) { btn.addEventListener('shown.bs.tab', function () { load(); }); return; }
+        document.addEventListener('DOMContentLoaded', function () {
+            var b = document.getElementById('clubActivity-tab');
+            if (b) b.addEventListener('shown.bs.tab', function () { load(); });
+        });
+    })();
+})();
+</script>

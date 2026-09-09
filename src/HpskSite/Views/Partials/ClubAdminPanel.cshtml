@@ -79,7 +79,7 @@
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#membersTab">Medlemmar</option>
-                    @* ⚠️ "Aktivitet" är BORTTAGET som menyval (2026-09-09) — se rälsen nedan. *@
+                    <option value="#clubActivityTab">Aktivitet</option>
                     <option value="#foreningsintygTab">Föreningsintyg</option>
                     <option value="#trainingGroupsTab">Träningsgrupper</option>
                     <option value="#certificationsTab">Certifieringar</option>
@@ -119,23 +119,23 @@
                     <i class="bi bi-people me-2"></i>Medlemmar
                 </button>
                 @*
-                    ⚠️⚠️ INTE ETT MENYVAL LÄNGRE — MEN ELEMENTET MÅSTE FINNAS KVAR (2026-09-09).
+                    ⚠️ AKTIVITET ÄR ETT EGET MENYVAL, och det ska det förbli (2026-09-09).
 
-                    Utfärdandeskärmen låg bakom ett eget menyval som hette "Aktivitet". En
-                    klubbsekreterare som letade "Föreningsintyg" hittade det menyvalet, klickade, och
-                    landade på inkorgen — medan blanketten låg bakom ett ord som inte har någon
-                    logisk koppling till uppgiften. Det fanns ingen väg mellan de två skärmarna i
-                    någon riktning. Skärmen nås nu bara från en förfrågan i inkorgen (steg 1 → 2).
+                    Panelen bakom det är numera en RENA LÄSYTA (`ClubAdminMemberActivity.cshtml`):
+                    medlemslista, aktivitetssammanställning och klubbens aktivitetsinställning.
+                    Utfärdandeblanketten ligger INTE här längre — den flyttade till panelen
+                    `#foreningsintygTab`, tillsammans med inkorgen, eftersom de hör till samma
+                    uppgift.
 
-                    `d-none` i stället för borttagen, eftersom Bootstraps Tab behöver ett element att
-                    aktivera och partialens lazy-laddare binder på DENNA knapps `shown.bs.tab`. Tar
-                    du bort den blir utfärdandeskärmen onåbar — tyst, eftersom `openIntygScreen`
-                    bara kan larma om att sidan inte kunde öppnas.
-
-                    Lägg den inte tillbaka i menyn. Aktivitetsunderlaget är en del av utfärdandet,
-                    inte ett eget ärende.
+                    ⚠️ Ett mellansteg tog bort det här menyvalet helt och gömde aktivitetsytan bakom
+                    knappen "Skriv ett intyg utan förfrågan" inne på Föreningsintyg. Det underkändes,
+                    och skälet är värt att komma ihåg: att läsa en medlems aktivitet är en EGEN
+                    uppgift (inför ett styrelsemöte, eller för att se vilka som är på väg att bli
+                    inaktiva), och en hel funktion får inte ligga bakom en knapp vars text handlar
+                    om något annat. Det var samma fel som det gamla "Aktivitet" var, spegelvänt:
+                    rätt skärm bakom fel ord.
                 *@
-                <button class="nav-link d-none" id="clubActivity-tab" data-bs-toggle="tab" data-bs-target="#clubActivityTab" type="button" role="tab" aria-controls="clubActivityTab" aria-selected="false" tabindex="-1" aria-hidden="true">
+                <button class="nav-link" id="clubActivity-tab" data-bs-toggle="tab" data-bs-target="#clubActivityTab" type="button" role="tab" aria-controls="clubActivityTab" aria-selected="false">
                     <i class="bi bi-clipboard-check me-2"></i>Aktivitet
                 </button>
                 @* ⚠️ FÖRENINGSINTYGET LIGGER I *MEDLEMMAR*, INTE I KLUBBEN (Stefans beslut
@@ -413,9 +413,11 @@
             @await Html.PartialAsync("ClubDocumentAdmin")
         </div>
 
-        <!-- Aktivitet & Intyg Tab -->
+        <!-- Aktivitet Tab -->
+        @* ⚠️ Ren LÄSYTA. Utfärdandeblanketten (`ClubAdminActivityIntyg`) monteras i
+           `#foreningsintygTab` av `ClubAdminFirearms`, inte här — se kommentaren vid rälsknappen. *@
         <div class="tab-pane fade" id="clubActivityTab">
-            @await Html.PartialAsync("ClubAdminActivityIntyg")
+            @await Html.PartialAsync("ClubAdminMemberActivity")
         </div>
 
         <!-- Training Groups Tab -->
@@ -6189,10 +6191,10 @@ function showDpaStatusModal() {
     });
     // Keep the picker's value in sync when a tab is shown any other way.
     //
-    // ⚠️ Bara panes som FINNS i väljaren. Utfärdandeskärmen (#clubActivityTab) är inget menyval —
-    // den nås från en förfrågan — och att sätta `sel.value` till något som inte finns bland
-    // optionerna nollar väljaren, så mobilanvändaren står plötsligt på "Välj sektion" utan att ha
-    // valt något. Sektionen man kom FRÅN ska stå kvar.
+    // ⚠️ Bara panes som FINNS i väljaren. Att sätta `sel.value` till ett värde som inte finns bland
+    // optionerna NOLLAR väljaren, så mobilanvändaren står plötsligt på "Välj sektion" utan att ha
+    // valt något. Varje pane har ett menyval i dag, men en pane som visas programmatiskt (som
+    // utfärdandeskärmen gjorde i en mellanversion) får inte kunna tömma väljaren.
     document.querySelectorAll('#adminTabs [data-bs-toggle="tab"]').forEach(function (b) {
         b.addEventListener('shown.bs.tab', function (e) {
             var target = e.target.getAttribute('data-bs-target');
@@ -6703,10 +6705,10 @@ function loadMemberIntyg(memberId) {
         });
 }
 function addMemberIntyg() {
-    // ⚠️ _activityMemberId, INTE _editMemberId. Sedan intygsloggen flyttade till egen flik betyder
+    // ⚠️ _intygMemberId, INTE _editMemberId. Sedan intygsloggen flyttade till egen flik betyder
     // de två olika saker: den ena är "medlemmen fliken står på", den andra "medlemmen
     // redigeringsmodalen står på". Läses fel skrivs intyget på en annan person än den som visas.
-    var memberId = window._activityMemberId;
+    var memberId = window._intygMemberId;
     if (!memberId) { alert('Välj en medlem först.'); return; }
     var fd = new FormData();
     fd.append('__RequestVerificationToken', meToken());
@@ -6730,6 +6732,6 @@ function deleteMemberIntyg(id) {
     fd.append('__RequestVerificationToken', meToken());
     fd.append('id', id);
     fetch('/umbraco/surface/Foreningsintyg/DeleteIntyg', { method: 'POST', body: fd })
-        .then(function (r) { return r.json(); }).then(function () { loadMemberIntyg(window._activityMemberId); });
+        .then(function (r) { return r.json(); }).then(function () { loadMemberIntyg(window._intygMemberId); });
 }
 </script>

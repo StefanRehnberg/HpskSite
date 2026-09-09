@@ -54,16 +54,29 @@
     "Avslå", där ingen av dem öppnade en blankett. "Utfärdad" satte bara en statusrad, så han
     markerade ärendet klart utan att något intyg existerade och trodde att han förstört något.
 
-    Nu: den här sidan är listan över ärenden. Varje öppen förfrågan har EN primärknapp som öppnar
-    utfärdandeskärmen (`ClubAdminActivityIntyg`, steg 2) med medlem, vapen och förfrågan förvalda.
-    Utfärdandet där stänger förfrågan. Det finns ingen knapp här som sätter "Utfärdad" — servern
-    vägrar det numera också (se FirearmAdminController.SetIntygRequestStatus).
+    Nu ligger BÅDA stegen i den här panelen:
+      • `#fiStepList`  — ärendelistan (nedan)
+      • `#fiStepIssue` — utfärdandeskärmen (`ClubAdminActivityIntyg`, monterad sist här)
+
+    `openIntygScreen` växlar mellan dem. **Det är ingen flikväxling** — det var det i en första
+    version, via en `d-none`-rälsknapp som bara fanns för att Bootstrap behövde något att aktivera.
+    Den knappen är borta; inkorgen och blanketten hör till samma uppgift och ligger därför i samma
+    panel. Utfärdandet stänger förfrågan, och det finns ingen knapp här som sätter "Utfärdad" —
+    servern vägrar det numera också (se `FirearmAdminController.SetIntygRequestStatus`).
+
+    ⚠️ AKTIVITETEN HAR ETT EGET MENYVAL (`ClubAdminMemberActivity.cshtml`). Att läsa en medlems
+    aktivitet är en egen uppgift, och en första version som gömde den bakom knappen "Skriv ett
+    intyg utan förfrågan" underkändes — en hel funktion får inte ligga bakom en knapp vars text
+    handlar om något annat.
 
     ⚠️ Behörighetskortet ligger SIST och hopfällt. Det är något styrelsen rör en gång om året och
     ska inte konkurrera om platsen högst upp med det dagliga arbetet — samma kritik som redan står
     skriven längre ner i den här filen om inställningskortet mitt på klubbvapensidan.
 *@
 <div class="tab-pane fade" id="foreningsintygTab">
+
+  @* ── STEG 1: ärendelistan ─────────────────────────────────────────────────────────────────── *@
+  <div id="fiStepList">
 
     @* ── Intygsinkorgen: ärendena, det första man ser ──────────────────────────────────────── *@
     <div class="card mb-4">
@@ -136,6 +149,18 @@
             </div>
         </div>
     </details>
+
+  </div>@* /#fiStepList *@
+
+  @*
+      ── STEG 2: utfärdandeskärmen ────────────────────────────────────────────────────────────────
+
+      ⚠️ MONTERAD HÄR, i samma panel som listan, och inte i en egen flik. Partialen skriver ut
+      `#fiStepIssue` (hidden) själv och exporterar `hpskOpenIntygFor` / `hpskOpenIntygFree` /
+      `hpskOpenIntygForMember`. Flyttar du den till en egen panel återinför du den delning som var
+      hela felet: två skärmar för en uppgift, utan väg mellan dem.
+  *@
+  @await Html.PartialAsync("ClubAdminActivityIntyg")
 
 </div>
 
@@ -1242,10 +1267,11 @@
 
     /// Går till steg 2 — utfärdandeskärmen.
     ///
-    /// ⚠️ Skärmen ligger i en ANNAN flikpanel (`#clubActivityTab`, partialen
-    /// ClubAdminActivityIntyg). Rälsknappen dit är `d-none` sedan menyvalet togs bort, men
-    /// ELEMENTET MÅSTE FINNAS KVAR: Bootstraps Tab behöver något att aktivera, och panelens
-    /// lazy-laddare binder på dess `shown.bs.tab`. Tas knappen bort blir steg 2 onåbart.
+    /// ⚠️ SAMMA PANEL, bara ett annat steg. Skärmen är monterad längst ner i den här panelen och
+    /// döljer/visar sig via `#fiStepList` / `#fiStepIssue`. En tidigare version växlade Bootstrap-
+    /// flik till en egen panel, vilket krävde en `d-none`-rälsknapp som bara fanns för att Tab
+    /// behövde något att aktivera — en konstruktion som var lätt att råka ta bort och vars felläge
+    /// var att steg 2 blev onåbart.
     function openIntygScreen(requestId, openReject) {
         var req = requestId
             ? ((reqState && reqState.requests) || []).find(function (x) {
@@ -1258,20 +1284,30 @@
             return;
         }
 
-        var tabBtn = document.getElementById('clubActivity-tab');
-        if (!tabBtn || !window.hpskOpenIntygFor) {
+        if (!window.hpskOpenIntygFor) {
             alert('Utfärdandesidan kunde inte öppnas. Ladda om sidan.');
             return;
         }
 
-        bootstrap.Tab.getOrCreateInstance(tabBtn).show();
-
-        // Panelen måste vara synlig innan dess script mäter något — därför på nästa tick.
-        setTimeout(function () {
-            if (req) window.hpskOpenIntygFor(req, !!openReject);
-            else window.hpskOpenIntygFree();
-        }, 0);
+        if (req) window.hpskOpenIntygFor(req, !!openReject);
+        else window.hpskOpenIntygFree();
     }
+
+    // Utfärdandeskärmens tillbaka-knapp ber listan läsa om sig — en nyss stängd eller avslagen
+    // förfrågan ska vara borta ur listan när man kommer fram, inte ligga kvar som obehandlad.
+    // ⚠️ Explicit export. En `async function` deklarerad i ett block läcker INTE till global scope
+    // (Annex B:s hoisting gäller inte async), vilket redan kostat en felsökningsrunda i de två
+    // samlingsfaktura-partialerna.
+    window.hpskReloadIntygRequests = function () { loadRequests(); };
+
+    // Utfärdandeskärmens notis "den här medlemmen har redan ett ärende" behöver LISTANS bild av
+    // förfrågan (medlemmens meddelande, inkomstdatum, typ). Den lilla endpointen skärmen själv
+    // läser bär bara vapen och förbund, så en egen sammansättning där hade saknat fält.
+    window.hpskFindIntygRequest = function (requestId) {
+        return ((reqState && reqState.requests) || []).find(function (x) {
+            return String(x.id) === String(requestId);
+        }) || null;
+    };
 
     // ── Klubbens lånevapenregler ─────────────────────────────────────────────────────────────
     //

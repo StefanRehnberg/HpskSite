@@ -1,0 +1,91 @@
+@*
+    Medlemsavataren — EN klass, EN byggare, inkluderad av de partialer som behöver den.
+
+    ⚠️ FANNS I TVÅ KOPIOR OCH DELADES 2026-09-09, när Aktivitet och Föreningsintyg blev två ytor.
+    Byggaren bär ett XSS-skydd (se `onerror` nedan) och en fallback-regel; två kopior av den hade
+    varit två chanser att tappa antingen skyddet eller fallbacken, och båda felen är tysta.
+
+    Exporterar:
+      window.hpskMemberAvatar(member, extraClass)  — HTML för en avatar
+      window.hpskMemberFullName(member)            — "Förnamn Efternamn", eller "Medlem 123"
+
+    Samma form och samma fallback som klubbens medlemsregister (`ClubMembersDirectory`
+    `.member-avatar`). Slås de någon gång ihop är det EN klass som ska bli kvar — en andra
+    avatarstil gör att samma person ser olika ut på två sidor.
+
+    ⚠️ Inkluderas av PARTIALERNA SJÄLVA, aldrig av värdsidan (samma husregel som `_HtmlEscape`),
+    så den följer med koden som behöver den och kan inte glömmas när en partial monteras någon
+    annanstans.
+*@
+@await Html.PartialAsync("_HtmlEscape")
+
+<script>
+(function memberAvatarHelper() {
+    if (window.hpskMemberAvatar) return;
+
+    // CSS i runtime, inte som top-level <style> — ett sådant kan få vyn att 500:a i det här
+    // projektet (minnet razor-partial-styles).
+    (function injectStyles() {
+        if (document.getElementById('hpsk-avatar-styles')) return;
+        var css = [
+            '.hpsk-avatar { position: relative; width: 32px; height: 32px; border-radius: 50%;',
+            '  display: inline-flex; align-items: center; justify-content: center; font-size: 12px;',
+            '  font-weight: 700; color: #fff; background-color: var(--bs-primary);',
+            '  overflow: hidden; flex-shrink: 0; }',
+            // Bilden ligger OVANPÅ initialerna, absolut positionerad. Tas den bort av onerror syns
+            // de igen av sig själva — därför inte "bilden ersätter textinnehållet".
+            '.hpsk-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }',
+            '.hpsk-avatar-lg { width: 44px; height: 44px; font-size: 15px; }'
+        ].join('\n');
+        var el = document.createElement('style');
+        el.id = 'hpsk-avatar-styles';
+        el.textContent = css;
+        document.head.appendChild(el);
+    })();
+
+    function fullName(m) {
+        if (!m) return 'Medlem';
+        var n = ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
+        return n || ('Medlem ' + (m.id != null ? m.id : ''));
+    }
+
+    /// Initialer ur ett namn — första och SISTA ordets begynnelsebokstav, samma regel som
+    /// medlemsregistret. Mellannamn hoppas över med flit: "AH" är igenkännbart, "AJH" är det inte.
+    function initials(name) {
+        var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+        if (!parts.length) return '?';
+        var s = parts[0].charAt(0);
+        if (parts.length > 1) s += parts[parts.length - 1].charAt(0);
+        return s.toUpperCase();
+    }
+
+    /// Avataren. Bild om medlemmen har en, annars initialer.
+    ///
+    /// ⚠️ Alt-texten är TOM och bilden aria-hidden: namnet står i klartext direkt intill, så en
+    /// skärmläsare skulle annars läsa upp det två gånger. Avataren är dekor, inte information.
+    ///
+    /// ⚠️ Initialerna ligger ALLTID i spanen och bilden läggs ovanpå den. Faller bilden bort
+    /// (`onerror="this.remove()"`) syns initialerna av sig själva. En profilbild kan peka på media
+    /// som raderats, och utan fallbacken blir raden en trasig bildikon — vilket ser ut som ett fel
+    /// i listan snarare än en saknad bild.
+    ///
+    /// ⚠️⚠️ INGEN JS-LITERAL BYGGS I ATTRIBUTET. Ett `onerror` som skriver in initialen som en
+    /// strängliteral vore samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt": namnet
+    /// är användarens eget, och en initial som är ett fnutt avslutar literalen. HTML-escapen
+    /// hjälper inte — `&#039;` avkodas till `'` inne i attributet. `this.remove()` bär ingen
+    /// användartext alls.
+    function avatarHtml(m, extraClass) {
+        var name = fullName(m);
+        var cls = 'hpsk-avatar' + (extraClass ? ' ' + extraClass : '');
+        var ini = hpskEsc(initials(name));
+        var img = (m && m.profilePictureUrl)
+            ? '<img src="' + hpskEsc(m.profilePictureUrl) + '" alt="" onerror="this.remove()">'
+            : '';
+        return '<span class="' + cls + '" aria-hidden="true" title="' + hpskEsc(name) + '">' +
+               ini + img + '</span>';
+    }
+
+    window.hpskMemberAvatar = avatarHtml;
+    window.hpskMemberFullName = fullName;
+})();
+</script>

@@ -1,66 +1,45 @@
-@*
-    Aktivitet & Intyg — klubbens egen sida under Admin / Medlemmar.
+﻿@*
+    UTFÄRDANDESKÄRMEN för ett föreningsintyg — steg 2 inne i panelen `#foreningsintygTab`.
 
-    Låg tidigare som två utfällbara sektioner i medlemmens info-modal. Fel plats av två skäl: modalen
-    är till för att RÄTTA medlemsuppgifter, medan det här är ett återkommande arbete med ett eget
-    syfte (utfärda Föreningsintyg), och en modal ger ingen plats åt en lista man ska läsa och jämföra
-    i. Dessutom var arbetet oåtkomligt utan att först gå omvägen via en penna på en medlemsrad.
+    ⚠️⚠️ LÄS DET HÄR INNAN DU FLYTTAR NÅGOT AV DET.
 
-    Mönstret är master–detalj: medlemslistan står kvar till vänster medan underlaget läses till
-    höger, så klubbadmin kan gå igenom flera medlemmar utan att öppna och stänga något.
+    Skärmen låg tidigare i en EGEN flikpanel under menyvalet "Aktivitet", tillsammans med
+    medlemslistan och klubbens aktivitetsinställning. Följden var att en klubbsekreterare som letade
+    "Föreningsintyg" hittade menyvalet med det namnet, klickade — och landade på inkorgen, med två
+    jämnstarka knappar ("Utfärdad" / "Avslå") och ingen väg till någon blankett. Blanketten låg
+    bakom ett ord som inte har någon logisk koppling till uppgiften, och ingen väg ledde mellan de
+    två skärmarna i någon riktning.
 
-    ⚠️ Id:na `memberActivitySummary` / `memberActivityYear` / `memberIntygList` /
-    `newIntyg*` är MEDVETET desamma som modalen hade. De finns nu på EXAKT ett ställe, och de
-    befintliga laddarna (`loadMemberActivity`, `loadMemberIntyg`, `addMemberIntyg`) fortsätter
-    fungera oförändrade. Två element med samma id på samma sida gör det andra dött för
-    `getElementById` — därför är modalens block borttagna, inte kopierade.
+    Nu ligger inkorgen och blanketten i SAMMA panel, som två steg:
+      • `#fiStepList`  — ärendelistan (i `ClubAdminFirearms.cshtml`)
+      • `#fiStepIssue` — den här skärmen
 
-    Medlemsvalet bor i `window._activityMemberId`, inte i `_editMemberId`: den senare betyder "den
-    medlem redigeringsmodalen står på" och de två är nu olika saker.
+    `openIntygScreen` i ClubAdminFirearms växlar mellan dem. Det är alltså INGEN flikväxling längre,
+    och den tidigare `d-none`-rälsknappen som Bootstrap behövde är borta.
+
+    ⚠️ AKTIVITETEN HAR EN EGEN YTA (`ClubAdminMemberActivity.cshtml`, menyvalet "Aktivitet"). Att
+    läsa en medlems aktivitet är en egen uppgift och får inte ligga gömd bakom en knapp som handlar
+    om att skriva intyg — det försöket underkändes 2026-09-09. Aktiviteten visas ÄVEN här, eftersom
+    beslutet behöver underlaget intill kryssrutorna, men genom SAMMA renderare
+    (`_MemberActivitySummary`) i en egen behållare. Räkna den aldrig på nytt här.
+
+    ⚠️ ID-GRÄNSEN: den här ytan bär `ai*`, `fi*`, `memberActivitySummary`, `memberActivityYear`,
+    `memberIntygList` och `newIntyg*`. Aktivitetsytan bär `ca*`. Två element med samma id på samma
+    sida gör det andra DÖTT för `getElementById`, och BÅDA panelerna finns i DOM:en samtidigt.
+
+    ⚠️ `window._intygMemberId` är den medlem DEN HÄR skärmen står på — inte `_editMemberId`
+    (medlemsmodalen) och inte `_caMemberId` (aktivitetsytan). Läses fel skrivs intyget på en annan
+    person än den skärmen visar, och det syns inte. `loadMemberIntyg` / `addMemberIntyg` /
+    `deleteMemberIntyg` i ClubAdminPanel.cshtml läser samma variabel.
+
+    ⚠️ Kryssen i blanketten är styrelsens juridiska intygande. Aktiviteten intill dem är UNDERLAG
+    och sätter dem aldrig. Formuläret bär bara INTYGSFÄLT; registerfälten byggs om på servern vid
+    utfärdandet och kan inte postas härifrån.
 *@
 @await Html.PartialAsync("_MemberActivitySummary")
+@await Html.PartialAsync("_MemberAvatar")
 
-@*
-    ── STEG 2 AV FÖRENINGSINTYGSFLÖDET ────────────────────────────────────────────────────────────
-
-    ⚠️ SIDAN HAR TVÅ LÄGEN, och skillnaden är hela poängen med ombyggnaden 2026-09-09.
-
-    **Fokuserat läge** (`hpskOpenIntygFor`) — hit kommer man från knappen "Skriv intyget" på en
-    förfrågan i inkorgen. Medlemslistan, klubbinställningen och sidrubriken göms; kvar står EN
-    medlem, EN förfrågan och blanketten, öppen. Utfärdandet stänger förfrågan.
-
-    **Fritt läge** — "Skriv ett intyg utan förfrågan" i inkorgen. Medlemslistan visas, man väljer
-    medlem, och därefter är skärmen densamma. Ingen förfrågan stängs.
-
-    ⚠️ MENYVALET "Aktivitet" ÄR BORTTAGET UR RÄLSEN (Stefans beslut 2026-09-09). En klubbsekreterare
-    som letade "Föreningsintyg" hittade det, klickade, och landade på inkorgen — men blanketten låg
-    bakom ett ANNAT menyval som hette "Aktivitet". Det fanns ingen logik i det, och ingen väg mellan
-    de två skärmarna i någon riktning. Rälsknappen finns kvar som `d-none` enbart för att Bootstraps
-    flikmekanik behöver ett element att aktivera; lägg den inte tillbaka i menyn.
-*@
-
-@*
-    Klubbens inställning för vad som räknas som aktivitet. Ligger HÄR och inte på Inställningar-fliken
-    (Stefans val 2026-09-01): den ändrar vad siffrorna på den här sidan betyder, och en inställning
-    som styr ett tal hör intill talet.
-
-    ⚠️ Göms i fokuserat läge. Den är en årsinställning för klubben och ska inte konkurrera om platsen
-    högst upp med ett ärende någon står och handlägger.
-*@
-<div class="card mb-3" id="aiSettingsCard">
-    <div class="card-header py-2">
-        <strong><i class="bi bi-sliders me-2"></i>Vad räknas som aktivitet</strong>
-    </div>
-    <div class="card-body py-2">
-        <div class="form-check form-switch mb-1">
-            <input class="form-check-input" type="checkbox" role="switch" id="aiRangeCheckInSwitch" disabled>
-            <label class="form-check-label" for="aiRangeCheckInSwitch">
-                Räkna <strong>incheckning på klubbens skjutbana</strong> som aktivitet
-            </label>
-        </div>
-        <div id="aiRangeCheckInHint" class="small text-muted">Laddar…</div>
-    </div>
-</div>
+<div id="fiStepIssue" class="d-none">
 
 @*
     ── Fokusraden ──────────────────────────────────────────────────────────────────────────────────
@@ -109,59 +88,65 @@
     </div>
 </div>
 
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3" id="aiPageHeader">
-    <div>
-        <h5 class="mb-1"><i class="bi bi-clipboard-check me-2"></i>Aktivitet &amp; Intyg</h5>
-        <p class="text-muted small mb-0" style="max-width:60ch;">
-            Underlaget styrelsen utgår från när klubben utfärdar ett <strong>Föreningsintyg</strong>
-            för en vapenlicensansökan: medlemmens träning, tävlingar och närvaro under ett
-            verksamhetsår, med hur starkt underlaget är för varje post.
-        </p>
-    </div>
-</div>
-
-<div class="row g-3">
-    @* ── Master: medlemslistan ───────────────────────────────────── *@
+<div>
     @*
-        ⚠️ Göms i fokuserat läge, och det är avsiktligt: förfrågan säger redan vem det gäller. En
-        medlemslista intill blanketten är en väg att klicka sig till FEL PERSON mitt i ett dokument
-        som ska undertecknas till Polisen — en risk, inte en bekvämlighet.
+        Medlemsväljaren, som bara syns i FRITT läge (klubben skriver ett intyg utan att en förfrågan
+        kommit in). Kommer man hit från en förfrågan är medlemmen redan given, och då vore en
+        väljare en väg att klicka sig till FEL PERSON mitt i ett dokument som ska undertecknas till
+        Polisen — en risk, inte en bekvämlighet.
+
+        ⚠️ En SELECT och inte en medlemslista med avatarer. Listan hör på aktivitetsytan, där man
+        letar och jämför; här är valet redan gjort eller en engångshandling. En andra kopia av
+        listrenderaren hade dessutom varit en andra plats att tappa dess XSS-skydd på.
     *@
-    <div class="col-lg-4" id="aiMasterCol">
-        <div class="card ai-member-card">
-            <div class="card-header py-2">
-                <label for="aiMemberFilter" class="form-label small text-muted mb-1">Sök medlem</label>
-                <input type="search" class="form-control form-control-sm" id="aiMemberFilter"
-                       placeholder="Namn eller e-post" autocomplete="off"
-                       aria-controls="aiMemberList">
-                @* Antalet står alltid framme: ett filter som tyst gömmer medlemmar är vad som
-                   skapar "min medlem är borta". *@
-                <div class="small text-muted mt-1" id="aiMemberCount" aria-live="polite"></div>
-            </div>
-            <div class="list-group list-group-flush ai-member-list" id="aiMemberList" role="listbox"
-                 aria-label="Klubbens medlemmar">
-                <div class="list-group-item text-muted small">Laddar medlemmar…</div>
+    <div id="aiMemberPickWrap" class="card mb-3 d-none">
+        <div class="card-body py-2">
+            <label class="form-label small text-muted mb-1" for="aiMemberPick">
+                <strong>Vilken medlem gäller intyget?</strong>
+            </label>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <select id="aiMemberPick" class="form-select form-select-sm" style="max-width:28rem;">
+                    <option value="">Laddar medlemmar…</option>
+                </select>
+                <a class="small" href="#" id="aiSeeActivityLink">Se medlemmens aktivitet i stället</a>
             </div>
         </div>
     </div>
 
-    @* ── Detalj: den valda medlemmen ─────────────────────────────── *@
-    @* ⚠️ Bredden byts i JS när medlemslistan göms (col-lg-8 → col-12). Läggs en tredje klass till
-       här måste `setFocusMode` känna till den, annars blir kolumnen kvar på 8/12 med tom yta. *@
-    <div class="col-lg-8" id="aiDetailCol">
-        @* Tomt läge. En sida som öppnar med två tomma kort ser trasig ut; den här rutan säger vad
-           som förväntas av användaren i stället. *@
-        <div class="card" id="aiEmptyState">
-            <div class="card-body text-center py-5">
-                <i class="bi bi-person-lines-fill display-5 text-muted d-block mb-3"></i>
-                <h6 class="mb-2">Välj en medlem i listan</h6>
-                <p class="text-muted small mb-0" style="max-width:44ch; margin:0 auto;">
-                    Då visas medlemmens aktivitet för valt år och de föreningsintyg klubben
-                    redan utfärdat.
-                </p>
-            </div>
-        </div>
+    @*
+        ⚠️ "Den här medlemmen har redan ett ärende" — visas bara i FRITT läge.
 
+        Utan den kunde klubben gå runt en obehandlad förfrågan utan att veta att den fanns. Intyget
+        blir rätt och förfrågan avslutas ändå (payloaden läser vapenväljaren, som bär förfrågan),
+        men utfärdaren fick aldrig se att ett ärende stängdes — och den som begärde det väntade på
+        ett besked hen redan hunnit få. Ärendevägen bär dessutom medlemmens meddelande och vilket
+        vapen det gäller, alltså information som är BORTA om man går runt den.
+    *@
+    <div id="aiOpenRequestNotice" class="alert alert-primary d-none">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+                <strong><i class="bi bi-inbox me-1"></i>Den här medlemmen har en obehandlad
+                förfrågan.</strong>
+                <div class="small" id="aiOpenRequestMeta"></div>
+            </div>
+            <button type="button" class="btn btn-sm btn-primary" id="aiOpenRequestGo">
+                Öppna förfrågan i stället
+            </button>
+        </div>
+    </div>
+
+    @* Tomt läge — bara i fritt läge, innan en medlem valts. En skärm som öppnar med en tom blankett
+       ser trasig ut; den här rutan säger vad som förväntas i stället. *@
+    <div class="card" id="aiEmptyState">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-person-lines-fill display-5 text-muted d-block mb-3"></i>
+            <h6 class="mb-2">Välj en medlem ovanför</h6>
+            <p class="text-muted small mb-0" style="max-width:44ch; margin:0 auto;">
+                Då visas medlemmens aktivitet som underlag, tillsammans med blanketten och de
+                föreningsintyg klubben redan utfärdat.
+            </p>
+        </div>
+    </div>
         <div id="aiDetail" class="d-none">
             <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
                 @* Avataren till vänster om namn och e-post. align-items-center på just den här
@@ -590,161 +575,64 @@
     if (window.__activityIntygPageInit) return;
     window.__activityIntygPageInit = true;
 
+    // Medlemmarna behovs bara for FRITT lages valjare och for att kunna skriva ut namnet pa den
+    // medlem skarmen star pa. Ingen lista renderas har — den hor pa aktivitetsytan.
     var _members = [];
     var _loaded = false;
-    var _activityDays = null;      // medlems-id → aktivitetsdagar, EN bulkfråga för hela klubben
-    var _activityDaysYear = '';
-
-    // CSS i runtime, inte som top-level <style> — ett sådant kan få vyn att 500:a i det här
-    // projektet (minnet razor-partial-styles).
-    (function injectStyles() {
-        if (document.getElementById('ai-styles')) return;
-        var css = [
-            '.ai-member-list { max-height: 60vh; overflow-y: auto; }',
-            '.ai-member-list .list-group-item-action { cursor: pointer; }',
-            '.ai-member-list .active { background-color: var(--bs-primary-bg-subtle); color: inherit; border-color: var(--bs-border-color); }',
-            // ⚠️ Dubbelt at-tecken krävs här. Ett ENSAMT at-tecken i en Razor-vy tolkas som början
-            // på ett C#-uttryck även inne i ett <script> (minnet razor-literal-at-in-script) — och
-            // att skriva den felaktiga formen i kommentaren som varnar för den räckte för att
-            // spräcka vyn: klubbsidan svarade 200 anonymt men saknade hela adminpanelen inloggad.
-            '@@media (min-width: 992px) { .ai-member-card { position: sticky; top: 1rem; } }',
-            // Avatar. Samma form och samma fallback som klubbens medlemsregister
-            // (ClubMembersDirectory .member-avatar) — en andra avatarstil på samma sajt gör att
-            // samma person ser olika ut på två sidor. Egna klassnamn eftersom den partialen inte
-            // laddas här; flyttas de någon gång ihop är det EN klass som ska bli kvar.
-            '.ai-avatar { position: relative; width: 32px; height: 32px; border-radius: 50%;' +
-            '  display: inline-flex; align-items: center; justify-content: center; font-size: 12px;' +
-            '  font-weight: 700; color: #fff; background-color: var(--bs-primary);' +
-            '  overflow: hidden; flex-shrink: 0; }',
-            // Bilden ligger OVANPÅ initialerna. Tas den bort av onerror syns de igen — därav
-            // position: absolute i stället för att bilden ersätter textinnehållet.
-            '.ai-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }',
-            '.ai-avatar-lg { width: 44px; height: 44px; font-size: 15px; }'
-        ].join('\n');
-        var el = document.createElement('style');
-        el.id = 'ai-styles';
-        el.textContent = css;
-        document.head.appendChild(el);
-    })();
 
     function esc(s) { return hpskEsc(s == null ? '' : String(s)); }
-    function fullName(m) { return ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || ('Medlem ' + m.id); }
 
-    /// Initialer ur ett namn — första och SISTA ordets begynnelsebokstav, samma regel som
-    /// medlemsregistret. Mellannamn hoppas över med flit: "AH" är igenkännbart, "AJH" är det inte.
-    function initials(name) {
-        var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-        if (!parts.length) return '?';
-        var s = parts[0].charAt(0);
-        if (parts.length > 1) s += parts[parts.length - 1].charAt(0);
-        return s.toUpperCase();
-    }
+    // ⚠️ Delegerar till `_MemberAvatar`. Namnregeln (och avatarens XSS-skydd) fanns i tva kopior
+    // innan Aktivitet och Foreningsintyg blev tva ytor 2026-09-09; tva kopior av ett skydd ar tva
+    // chanser att tappa det.
+    function fullName(m) { return window.hpskMemberFullName(m); }
 
-    /// Avataren. Bild om medlemmen har en, annars initialer.
-    ///
-    /// ⚠️ Alt-texten är TOM och bilden aria-hidden: namnet står i klartext direkt intill, så en
-    /// skärmläsare skulle annars läsa upp det två gånger. Avataren är dekor, inte information.
-    ///
-    /// ⚠️ Initialerna ligger ALLTID i spanen och bilden läggs ovanpå den, absolut positionerad.
-    /// Faller bilden bort (`onerror="this.remove()"`) syns initialerna av sig själva. En profilbild
-    /// kan peka på media som raderats, och utan fallbacken blir raden en trasig bildikon — vilket
-    /// ser ut som ett fel i listan snarare än en saknad bild.
-    ///
-    /// ⚠️ INGEN JS-literal byggs i attributet. Ett `onerror` som skriver in initialen som en
-    /// strängliteral vore samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt": namnet
-    /// är användarens eget, och en initial som är ett fnutt avslutar literalen. `this.remove()` bär
-    /// ingen användartext alls.
-    function avatarHtml(m, extraClass) {
-        var name = fullName(m);
-        var cls = 'ai-avatar' + (extraClass ? ' ' + extraClass : '');
-        var ini = esc(initials(name));
-        var img = (m && m.profilePictureUrl)
-            ? '<img src="' + esc(m.profilePictureUrl) + '" alt="" onerror="this.remove()">'
-            : '';
-        return '<span class="' + cls + '" aria-hidden="true" title="' + esc(name) + '">' + ini + img + '</span>';
-    }
-
-    function render() {
-        var box = document.getElementById('aiMemberList');
-        var countBox = document.getElementById('aiMemberCount');
-        if (!box) return;
-
-        var q = (document.getElementById('aiMemberFilter').value || '').trim().toLowerCase();
-        var shown = q
-            ? _members.filter(function (m) {
-                  return (fullName(m) + ' ' + (m.email || '')).toLowerCase().indexOf(q) >= 0;
-              })
-            : _members;
-
-        countBox.textContent = _members.length
-            ? (q ? 'Visar ' + shown.length + ' av ' + _members.length + ' medlemmar'
-                 : _members.length + ' medlemmar')
-            : '';
-
+    /// Fyller FRITT lages medlemsvaljare.
+    function fillMemberPick() {
+        var sel = document.getElementById('aiMemberPick');
+        if (!sel) return;
         if (!_members.length) {
-            box.innerHTML = '<div class="list-group-item text-muted small">Klubben har inga medlemmar att visa.</div>';
+            sel.innerHTML = '<option value="">Klubben har inga medlemmar att visa</option>';
             return;
         }
-        if (!shown.length) {
-            box.innerHTML = '<div class="list-group-item text-muted small">Ingen medlem matchar sökningen.</div>';
-            return;
-        }
-
-        box.innerHTML = shown.map(function (m) {
-            var active = String(m.id) === String(window._activityMemberId);
-            // Aktivitetsdagar för året, som en badge till höger. ⚠️ Siffran kommer ur EN bulkfråga
-            // för hela klubben — inte en sammanställning per medlem, vilket hade blivit tre källor
-            // gånger hela rostern. Saknas den ännu (hämtningen är parallell) visas ingen badge alls
-            // hellre än en nolla, som läses som "ingen aktivitet".
-            var days = _activityDays ? _activityDays[String(m.id)] : undefined;
-            var badge = (days === undefined || days === null)
-                ? ''
-                : '<span class="badge rounded-pill ' +
-                  (days > 0 ? 'bg-primary-subtle text-primary-emphasis' : 'bg-secondary-subtle text-secondary-emphasis') +
-                  ' ms-2 flex-shrink-0" title="' + days + ' aktivitetsdagar ' + esc(_activityDaysYear) + '">' +
-                  days + '</span>';
-
-            return '<button type="button" role="option" aria-selected="' + (active ? 'true' : 'false') + '"' +
-                   ' class="list-group-item list-group-item-action py-2' + (active ? ' active' : '') + '"' +
-                   ' data-member-id="' + esc(m.id) + '">' +
-                   '<span class="d-flex justify-content-between align-items-center gap-2">' +
-                   // ⚠️ align-items-center, inte -start: avataren ska ligga mitt för namn+e-post.
-                   // min-width:0 på textblocket är vad som gör text-truncate verksamt inuti en flex —
-                   // utan det växer raden i stället för att kapa namnet, och badgen trycks ut.
-                   '<span class="d-flex align-items-center gap-2" style="min-width:0;">' +
-                   avatarHtml(m) +
-                   '<span class="text-truncate">' +
-                   '<span class="d-block text-truncate">' + esc(fullName(m)) + '</span>' +
-                   (m.email ? '<span class="small text-muted d-block text-truncate">' + esc(m.email) + '</span>' : '') +
-                   '</span></span>' + badge + '</span>' +
-                   '</button>';
+        sel.innerHTML = '<option value="">Välj medlem…</option>' + _members.map(function (m) {
+            var label = fullName(m) + (m.email ? ' · ' + m.email : '');
+            return '<option value="' + esc(m.id) + '">' + esc(label) + '</option>';
         }).join('');
     }
 
-    // ⚠️ Medlemsvalet gar via data-attribut och en delegerad lyssnare, aldrig genom att bygga ett
-    // onclick av medlemmens namn. Samma lucka som gav kodexekvering i Faltskyttes "lagg till skytt".
     function wire() {
-        var box = document.getElementById('aiMemberList');
-        if (box && !box.dataset.wired) {
-            box.dataset.wired = '1';
-            box.addEventListener('click', function (e) {
-                var btn = e.target.closest('[data-member-id]');
-                if (btn) select(Number(btn.dataset.memberId));
+        var pick = document.getElementById('aiMemberPick');
+        if (pick && !pick.dataset.wired) {
+            pick.dataset.wired = '1';
+            pick.addEventListener('change', function () {
+                if (pick.value) select(Number(pick.value));
             });
         }
-        var filter = document.getElementById('aiMemberFilter');
-        if (filter && !filter.dataset.wired) {
-            filter.dataset.wired = '1';
-            filter.addEventListener('input', render);
+
+        // Lanken till aktivitetsytan. Den finns for att "jag ville bara titta" ska ha en vag ut
+        // som inte kraver att man forst later blanketten ligga oppen.
+        var seeAct = document.getElementById('aiSeeActivityLink');
+        if (seeAct && !seeAct.dataset.wired) {
+            seeAct.dataset.wired = '1';
+            seeAct.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                var btn = document.getElementById('clubActivity-tab');
+                if (!btn) return;
+                bootstrap.Tab.getOrCreateInstance(btn).show();
+                if (window._intygMemberId && window.hpskOpenActivityForMember) {
+                    setTimeout(function () {
+                        window.hpskOpenActivityForMember(window._intygMemberId);
+                    }, 0);
+                }
+            });
         }
+
         var year = document.getElementById('memberActivityYear');
         if (year && !year.dataset.wired) {
             year.dataset.wired = '1';
             year.addEventListener('change', function () {
-                if (window._activityMemberId) loadActivity(window._activityMemberId, year.value);
-                // Badgarna gäller ett år — byts året måste de räknas om, annars visar listan
-                // förra årets siffror intill det nya årets sammanställning.
-                loadActivityDays();
+                if (window._intygMemberId) loadActivity(window._intygMemberId, year.value);
             });
         }
     }
@@ -973,7 +861,7 @@
     function collectIssuePayload() {
         var fd = new FormData();
         fd.append('__RequestVerificationToken', meToken());
-        fd.append('MemberId', window._activityMemberId);
+        fd.append('MemberId', window._intygMemberId);
         fd.append('ClubId', _draftClubId || 0);
         fd.append('ActivityYear', getVal('memberActivityYear') || new Date().getFullYear());
         fd.append('Purpose', getVal('fiPurpose'));
@@ -1051,7 +939,7 @@
             // av en egen fältlista skulle den förr eller senare visa något annat än det som
             // faktiskt utfärdas, och då är granskningen värre än ingen granskning.
             preview.addEventListener('click', function () {
-                if (!window._activityMemberId) { alert('Välj en medlem först.'); return; }
+                if (!window._intygMemberId) { alert('Välj en medlem först.'); return; }
                 submitPayloadToNewTab('/foreningsintyg/utkast', collectIssuePayload());
             });
         }
@@ -1060,7 +948,7 @@
         if (issue && !issue.dataset.wired) {
             issue.dataset.wired = '1';
             issue.addEventListener('click', async function () {
-                if (!window._activityMemberId) { alert('Välj en medlem först.'); return; }
+                if (!window._intygMemberId) { alert('Välj en medlem först.'); return; }
                 // Utfärdandet är en styrelseakt och går inte att ångra utan att raderas ur loggen.
                 if (!confirm('Utfärda föreningsintyg? Intyget sparas som det ser ut nu och kan skrivas ut igen oförändrat.')) return;
 
@@ -1070,7 +958,7 @@
                                         { method: 'POST', body: collectIssuePayload(), credentials: 'same-origin' });
                     var j = await r.json();
                     if (!j.success) { alert(j.message || 'Kunde inte utfärda intyget.'); return; }
-                    if (typeof loadMemberIntyg === 'function') loadMemberIntyg(window._activityMemberId);
+                    if (typeof loadMemberIntyg === 'function') loadMemberIntyg(window._intygMemberId);
                     showIssueSuccess(j);
                 } catch (e) {
                     alert('Ett fel uppstod.');
@@ -1081,11 +969,11 @@
         }
     }
 
-    // ── Fokuserat läge: EN förfrågan, EN medlem, blanketten öppen ─────────────────────────────
+    // ── Ärendeläge kontra fritt läge ──────────────────────────────────────────────────────────
     //
-    // ⚠️ `_focusRequest` är null i fritt läge, och den skillnaden styr allt nedan. Blanda den inte
-    // ihop med väljaren `#fiFirearmRequest`: den senare är vad som POSTAS (utfärdaren kan byta
-    // vapen), den förra är vilket ÄRENDE skärmen öppnades för.
+    // ⚠️ `_focusRequest` är null i FRITT läge (klubben skriver ett intyg utan förfrågan), och den
+    // skillnaden styr allt nedan. Blanda den inte ihop med väljaren `#fiFirearmRequest`: den senare
+    // är vad som POSTAS (utfärdaren kan byta vapen), den förra är vilket ÄRENDE skärmen öppnades för.
     var _focusRequest = null;
 
     /// Visar kvittot efter ett utfärdande.
@@ -1104,10 +992,16 @@
             'Föreningsintyget för ' + who + ' är utfärdat.';
 
         var body = 'Intyget är sparat som det ser ut nu och kan skrivas ut igen oförändrat.';
-        if (_focusRequest) {
-            body += j.requestClosed
-                ? ' Förfrågan är avslutad och medlemmen har fått ett mejl.'
-                : ' OBS: förfrågan kunde inte avslutas automatiskt och ligger kvar som obehandlad.';
+
+        // ⚠️ TEXTEN FÖLJER SERVERN, INTE LÄGET. En tidigare version nämnde förfrågan bara när
+        // `_focusRequest` var satt, alltså bara i ärendeläge — men även FRITT läge postar en
+        // förfrågan när medlemmen har en öppen (payloaden läser väljaren, som `loadFirearmRequests`
+        // fyllt). Följden var att förfrågan avslutades TYST: utfärdaren fick aldrig veta att ett
+        // ärende stängdes. Det är samma klass av tystnad som hela ombyggnaden handlar om.
+        if (j.requestClosed) {
+            body += ' Förfrågan är avslutad och medlemmen har fått ett mejl.';
+        } else if (_focusRequest) {
+            body += ' OBS: förfrågan kunde inte avslutas automatiskt och ligger kvar som obehandlad.';
         }
         document.getElementById('aiSuccessBody').textContent = body;
 
@@ -1119,41 +1013,74 @@
         // Blanketten fälls ihop: arbetet är gjort, och ett ifyllt formulär kvar på skärmen inbjuder
         // till att trycka Utfärda igen.
         var issueBody = document.getElementById('aiIssueBody');
-        if (issueBody && _focusRequest) issueBody.classList.add('d-none');
+        if (issueBody) issueBody.classList.add('d-none');
 
         box.classList.remove('d-none');
         box.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    /// Slår om mellan de två lägena. Allt som hör till STEG 1 göms i fokuserat läge.
-    function setFocusMode(on) {
-        var toggles = [
-            ['aiSettingsCard', on],
-            ['aiPageHeader', on],
-            ['aiMasterCol', on],
-            ['aiToggleIssue', on],
-            ['aiManualLogBlock', on],
-            ['aiEmptyState', on]
-        ];
-        toggles.forEach(function (t) {
-            var el = document.getElementById(t[0]);
-            if (el) el.classList.toggle('d-none', t[1]);
-        });
+    /// Notisen "den här medlemmen har redan ett ärende", bara i FRITT läge.
+    ///
+    /// ⚠️ Renderas ALDRIG i ärendeläge — där ÄR man i förfrågan, och en ruta som föreslår att man
+    /// öppnar den man redan står i är brus.
+    ///
+    /// Knappen slår upp förfrågan i listans egen data (`hpskFindIntygRequest`) i stället för att
+    /// bygga ett `req`-objekt här: listan bär medlemmens meddelande, inkomstdatum och typ, och en
+    /// andra sammansättning av samma sak hade varit fri att sakna fält.
+    function showOpenRequestNotice(requests) {
+        var box = document.getElementById('aiOpenRequestNotice');
+        if (!box) return;
 
-        var bar = document.getElementById('aiFocusBar');
-        if (bar) bar.classList.toggle('d-none', !on);
-
-        // Detaljkolumnen tar hela bredden när listan är borta.
-        var col = document.getElementById('aiDetailCol');
-        if (col) {
-            col.classList.toggle('col-lg-8', !on);
-            col.classList.toggle('col-12', on);
+        if (_focusRequest || !requests || !requests.length) {
+            box.classList.add('d-none');
+            return;
         }
 
-        // ⚠️ Blanketten öppnas i fokuserat läge. Det är hela poängen: knappen hette "Skriv intyget",
-        // så det som ska stå på skärmen är blanketten — inte ännu en knapp som visar den.
+        var q = requests[0];
+        var bits = [];
+        if (q.kind) bits.push(q.kind);
+        if (q.firearmAlias) bits.push(q.firearmAlias);
+        if (q.forbund) bits.push(q.forbund);
+        var extra = requests.length > 1 ? ' (och ' + (requests.length - 1) + ' till)' : '';
+        document.getElementById('aiOpenRequestMeta').textContent = bits.join(' · ') + extra;
+
+        var go = document.getElementById('aiOpenRequestGo');
+        go.onclick = function () {
+            var full = window.hpskFindIntygRequest && window.hpskFindIntygRequest(q.id);
+            if (full) window.hpskOpenIntygFor(full, false);
+            else alert('Förfrågan kunde inte läsas. Gå till listan och öppna den därifrån.');
+        };
+
+        box.classList.remove('d-none');
+    }
+
+    /// Slår om mellan ärendeläge (kom från en förfrågan) och fritt läge (välj medlem själv).
+    ///
+    /// ⚠️ Skillnaden är VEM SOM VALDE MEDLEMMEN, inte hur mycket som visas. I ärendeläget är
+    /// medlemmen given av förfrågan och väljaren göms — en väljare där är en väg att klicka sig
+    /// till fel person mitt i ett dokument som ska undertecknas till Polisen.
+    function setIssueMode(hasRequest) {
+        var t = [
+            ['aiFocusBar', !hasRequest],        // fokusraden: bara i ärendeläge
+            ['aiMemberPickWrap', hasRequest],   // väljaren: bara i fritt läge
+            ['aiRejectBtn', !hasRequest],       // avslå: bara ett ärende kan avslås
+            ['aiManualLogBlock', hasRequest]    // efterregistrering: inte mitt i ett ärende
+        ];
+        t.forEach(function (x) {
+            var el = document.getElementById(x[0]);
+            if (el) el.classList.toggle('d-none', x[1]);
+        });
+
+        // ⚠️ Blanketten är ÖPPEN i ärendeläge. Knappen hette "Skriv intyget", så det som ska stå på
+        // skärmen är blanketten — inte ännu en knapp som visar den. I fritt läge är den hopfälld,
+        // eftersom man kan ha kommit dit för att läsa loggen.
         var body = document.getElementById('aiIssueBody');
-        if (body && on) body.classList.remove('d-none');
+        var toggle = document.getElementById('aiToggleIssue');
+        if (body) body.classList.toggle('d-none', !hasRequest);
+        if (toggle) {
+            toggle.classList.toggle('d-none', hasRequest);
+            toggle.textContent = hasRequest ? 'Dölj formuläret' : 'Visa formuläret';
+        }
 
         var success = document.getElementById('aiIssueSuccess');
         if (success) success.classList.add('d-none');
@@ -1162,16 +1089,40 @@
         if (rejectBox) rejectBox.classList.add('d-none');
     }
 
-    /// Öppnar blanketten för EN förfrågan. Anropas av inkorgen (steg 1).
+    /// Visar steg 2 och gömmer ärendelistan.
+    ///
+    /// ⚠️⚠️ MÅSTE OCKSÅ AKTIVERA PANELEN `#foreningsintygTab`, och det är inte en detalj. Kommer man
+    /// från inkorgen är panelen redan aktiv och anropet är en no-op — men aktivitetsytans knapp
+    /// "Skriv föreningsintyg för NN" ligger i en ANNAN panel. Utan flikväxlingen tog `d-none` bort
+    /// sig, medan `#foreningsintygTab` fortfarande var `display:none`: knappen ledde till en TOM
+    /// SKÄRM. Mätt i webbläsaren 2026-09-09 — `offsetParent === null` på ett element vars
+    /// `d-none` var borta.
+    ///
+    /// ⚠️ Lärdomen för nästa verifiering: `!classList.contains('d-none')` är INTE "synlig". Ett
+    /// påstående om synlighet måste mäta `offsetParent` (eller geometrin), annars är det grönt på
+    /// en osynlig sida.
+    function showIssueStep() {
+        var tabBtn = document.getElementById('foreningsintyg-tab');
+        if (tabBtn && window.bootstrap && !document.getElementById('foreningsintygTab').classList.contains('active')) {
+            bootstrap.Tab.getOrCreateInstance(tabBtn).show();
+        }
+        var list = document.getElementById('fiStepList');
+        var issue = document.getElementById('fiStepIssue');
+        if (list) list.classList.add('d-none');
+        if (issue) issue.classList.remove('d-none');
+    }
+
+    /// Öppnar blanketten för EN förfrågan. Anropas av ärendelistan.
     ///
     /// `req` bär `{ id, memberId, memberName, firearmAlias, kindLabel, forbund, createdAt, memberMessage }`
-    /// — allt inkorgen redan har, så skärmen kan namnge ärendet utan ett extra anrop.
+    /// — allt listan redan har, så skärmen kan namnge ärendet utan ett extra anrop.
     window.hpskOpenIntygFor = async function (req, openReject) {
         if (!req || !req.memberId) return;
         _focusRequest = req;
 
         await load();
-        setFocusMode(true);
+        setIssueMode(true);
+        showIssueStep();
         // ⚠️ Inväntas. `select()` laddar utkastet FÖRE förfrågningarna av ett bärande skäl (se dess
         // egen kommentar); förväljs förfrågan innan dess är det en no-op på en tom väljare.
         await select(Number(req.memberId));
@@ -1187,14 +1138,11 @@
         var meta = document.getElementById('aiFocusMeta');
         meta.textContent = bits.join(' · ');
         if (req.memberMessage) {
-            meta.textContent += '';
             var note = document.createElement('div');
             note.className = 'fst-italic mt-1';
             note.textContent = '”' + req.memberMessage + '”';
             meta.appendChild(note);
         }
-
-        document.getElementById('aiRejectBtn').classList.remove('d-none');
 
         var sel = document.getElementById('fiFirearmRequest');
         if (sel) {
@@ -1204,34 +1152,56 @@
             if (match) sel.value = String(req.id);
         }
 
-        // Öppnad via "Avslå förfrågan" i inkorgens Åtgärder-meny: samma skärm, men med
-        // avslagsrutan framme. EN avslagsväg i hela flödet, så skälkravet inte kan glida isär.
+        // Öppnad via "Avslå förfrågan" i listans Åtgärder-meny: samma skärm, men med avslagsrutan
+        // framme. EN avslagsväg i hela flödet, så skälkravet inte kan glida isär.
         if (openReject) {
             document.getElementById('aiRejectBox').classList.remove('d-none');
             document.getElementById('aiRejectReason').focus();
         }
 
-        document.getElementById('aiFocusBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('fiStepIssue').scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
-    /// Öppnar sidan i FRITT läge — klubben skriver ett intyg utan att en förfrågan finns.
-    /// Medlemslistan visas, och ingen förfrågan stängs vid utfärdandet.
+    /// FRITT läge — klubben skriver ett intyg utan att en förfrågan finns. Ingen förfrågan stängs
+    /// vid utfärdandet (`collectIssuePayload` postar då RequestId 0).
     window.hpskOpenIntygFree = async function () {
         _focusRequest = null;
         await load();
-        setFocusMode(false);
-        var bar = document.getElementById('aiPageHeader');
-        if (bar) bar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setIssueMode(false);
+        showIssueStep();
+        // Ingen medlem forvald: tomma laget star kvar tills nagon valjs.
+        document.getElementById('aiEmptyState').classList.remove('d-none');
+        document.getElementById('aiDetail').classList.add('d-none');
+        var pick = document.getElementById('aiMemberPick');
+        if (pick) pick.value = '';
+        window._intygMemberId = 0;
+        document.getElementById('fiStepIssue').scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
-    /// Tillbaka till inkorgen. Bootstraps flikmekanik gör resten; inkorgen läser om sig själv på
-    /// `shown.bs.tab`, så en nyss stängd förfrågan är borta ur listan när man kommer fram.
+    /// Fritt läge med en medlem redan vald — bryggan från aktivitetsytans knapp
+    /// "Skriv föreningsintyg för NN".
+    window.hpskOpenIntygForMember = async function (memberId) {
+        if (!memberId) return;
+        _focusRequest = null;
+        await load();
+        setIssueMode(false);
+        showIssueStep();
+        var pick = document.getElementById('aiMemberPick');
+        if (pick) pick.value = String(memberId);
+        await select(Number(memberId));
+        document.getElementById('fiStepIssue').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    /// Tillbaka till ärendelistan. Listan läser om sig själv, så en nyss stängd förfrågan är borta
+    /// när man kommer fram.
     function backToInbox() {
         _focusRequest = null;
-        setFocusMode(false);
-        var btn = document.getElementById('foreningsintyg-tab');
-        if (btn && window.bootstrap) window.bootstrap.Tab.getOrCreateInstance(btn).show();
-        else if (btn) btn.click();
+        var issue = document.getElementById('fiStepIssue');
+        var list = document.getElementById('fiStepList');
+        if (issue) issue.classList.add('d-none');
+        if (list) list.classList.remove('d-none');
+        if (window.hpskReloadIntygRequests) window.hpskReloadIntygRequests();
+        if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function wireFocus() {
@@ -1315,8 +1285,14 @@
         }
     }
 
+    /// Byter medlem som skärmen står på.
+    ///
+    /// ⚠️ `window._intygMemberId` — INTE `_editMemberId` (medlemsmodalen) och inte `_caMemberId`
+    /// (aktivitetsytan). Läses fel skrivs intyget på en annan person än den skärmen visar, och det
+    /// syns inte. `addMemberIntyg` / `loadMemberIntyg` / `deleteMemberIntyg` i ClubAdminPanel.cshtml
+    /// läser samma variabel.
     function select(memberId) {
-        window._activityMemberId = memberId;
+        window._intygMemberId = memberId;
         var m = _members.find(function (x) { return String(x.id) === String(memberId); });
 
         document.getElementById('aiEmptyState').classList.add('d-none');
@@ -1327,14 +1303,13 @@
         // ⚠️ Avataren måste sättas även när medlemmen INTE hittades i listan (m är null): annars
         // står förra medlemmens bild kvar intill det nya namnet, vilket är värre än ingen bild.
         var av = document.getElementById('aiMemberAvatar');
-        if (av) av.innerHTML = avatarHtml(m || { id: memberId }, 'ai-avatar-lg');
+        if (av) av.innerHTML = window.hpskMemberAvatar(m || { id: memberId }, 'hpsk-avatar-lg');
 
         // Nollstall arsvaljaren mellan medlemmar: annars far nasta medlem forra medlemmens ar
         // forvalt, och sammanstallningen ser tom ut for ett ar hen inte har data pa.
         var year = document.getElementById('memberActivityYear');
         if (year) year.innerHTML = '';
 
-        render();
         loadActivity(memberId, null);
         if (typeof loadMemberIntyg === 'function') loadMemberIntyg(memberId);
 
@@ -1372,6 +1347,7 @@
 
         box.classList.add('d-none');
         sel.innerHTML = '';
+        showOpenRequestNotice(null);
 
         try {
             var r = await fetch('/umbraco/surface/Foreningsintyg/GetIntygFirearmRequests?memberId=' +
@@ -1380,6 +1356,9 @@
             // Ingen öppen förfrågan → ingen ruta. En hämtaknapp utan något att hämta är en
             // kontroll som inte gör något, vilket är sämre än ingen kontroll.
             if (!j.success || !(j.requests || []).length) return;
+
+            // I FRITT läge: säg att ett ärende finns, innan någon går runt det.
+            showOpenRequestNotice(j.requests);
 
             sel.innerHTML = j.requests.map(function (q) {
                 var bits = [q.firearmAlias || ('Vapen ' + q.firearmId), q.kind];
@@ -1407,7 +1386,7 @@
 
         var fd = new FormData();
         fd.append('__RequestVerificationToken', meToken());
-        fd.append('memberId', window._activityMemberId);
+        fd.append('memberId', window._intygMemberId);
         fd.append('requestId', sel.value);
 
         var j = null;
@@ -1474,125 +1453,16 @@
                 });
                 _loaded = true;
             } catch (e) {
-                document.getElementById('aiMemberList').innerHTML =
-                    '<div class="list-group-item text-danger small">Kunde inte ladda medlemmar.</div>';
-                return;
+                _members = [];
             }
         }
-        render();
-        loadActivityDays();
-        loadRangeCheckInSetting();
+        fillMemberPick();
     }
 
-    /// Inställningen "räkna incheckning på banan som aktivitet".
-    ///
-    /// ⚠️ Switchen är AVSTÄNGD tills servern svarat, och förblir avstängd när förutsättningen saknas
-    /// — doctype-egenskapen eller en länkad skjutbana. En klickbar switch som inte kan sparas är
-    /// sämre än en låst med en förklaring intill.
-    async function loadRangeCheckInSetting() {
-        var sw = document.getElementById('aiRangeCheckInSwitch');
-        var hint = document.getElementById('aiRangeCheckInHint');
-        if (!sw || !hint) return;
-
-        try {
-            var r = await fetch('/umbraco/surface/Foreningsintyg/GetRangeCheckInSetting?clubId=' +
-                                encodeURIComponent(clubId), { credentials: 'same-origin' });
-            var j = await r.json();
-            if (!j.success) { hint.textContent = j.message || 'Kunde inte läsa inställningen.'; return; }
-
-            sw.checked = !!j.enabled;
-
-            if (!j.propertyExists) {
-                sw.disabled = true;
-                hint.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-1"></i>' +
-                    'Egenskapen <code>' + hpskEsc(j.propertyAlias) + '</code> saknas på klubb-doctypen. ' +
-                    'En sajtadministratör behöver lägga till den (True/False) i backoffice innan ' +
-                    'inställningen kan sparas.';
-                return;
-            }
-            if (!j.hasLinkedRange && !j.enabled) {
-                sw.disabled = true;
-                hint.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-1"></i>' +
-                    'Klubben har ingen länkad skjutbana. Länka en bana under <strong>Skjutbanor</strong> ' +
-                    'först — utan den finns inga incheckningar att räkna.';
-                return;
-            }
-
-            sw.disabled = false;
-            hint.innerHTML = j.enabled
-                ? '<i class="bi bi-info-circle me-1"></i>Incheckningar på klubbens ' +
-                  (j.rangeCount === 1 ? 'bana' : j.rangeCount + ' banor') + ' räknas som aktivitet. ' +
-                  'En incheckning som beskriver samma tillfälle som en tävling eller ett träningspass ' +
-                  'samma dag visas men räknas inte dubbelt.'
-                : '<i class="bi bi-info-circle me-1"></i>Incheckningar räknas inte. Slå på om klubben ' +
-                  'vill att ett besök på banan ska räknas som aktivitet även när inget resultat loggats.';
-
-            if (!sw.dataset.wired) {
-                sw.dataset.wired = '1';
-                sw.addEventListener('change', async function () {
-                    var want = sw.checked;
-                    sw.disabled = true;
-                    try {
-                        var fd = new FormData();
-                        fd.append('__RequestVerificationToken', meToken());
-                        fd.append('clubId', clubId);
-                        fd.append('enabled', want);
-                        var res = await fetch('/umbraco/surface/Foreningsintyg/SetRangeCheckInSetting',
-                                              { method: 'POST', body: fd, credentials: 'same-origin' });
-                        var d = await res.json();
-                        if (!d.success) {
-                            sw.checked = !want;          // rulla tillbaka: servern sparade inte
-                            alert(d.message || 'Kunde inte spara inställningen.');
-                        } else if (window._activityMemberId) {
-                            // Inställningen ändrar vad siffrorna betyder — läs om det som visas.
-                            loadActivity(window._activityMemberId, getVal('memberActivityYear') || null);
-                            loadActivityDays();
-                        }
-                    } catch (e) {
-                        sw.checked = !want;
-                        alert('Ett fel uppstod.');
-                    } finally {
-                        await loadRangeCheckInSetting();
-                    }
-                });
-            }
-        } catch (e) {
-            hint.textContent = 'Kunde inte läsa inställningen.';
-        }
-    }
-
-    /// Aktivitetsdagar för hela klubben i EN fråga.
-    ///
-    /// ⚠️ Hämtas SEPARAT och EFTER medlemslistan, aldrig som ett villkor för att visa den. Räkningen
-    /// slår tre källor för hela rostern; vore listan beroende av den skulle sidan stå tom under den
-    /// tiden. Badgen dyker upp när svaret kommer, och en medlem utan svar får ingen badge alls —
-    /// hellre ingen siffra än en nolla, som läses som "ingen aktivitet".
-    async function loadActivityDays() {
-        try {
-            var year = getVal('memberActivityYear') || new Date().getFullYear();
-            var r = await fetch('/umbraco/surface/Foreningsintyg/GetClubActivityDays?clubId=' +
-                                encodeURIComponent(clubId) + '&year=' + encodeURIComponent(year),
-                                { credentials: 'same-origin' });
-            var j = await r.json();
-            if (!j.success) return;
-            _activityDays = j.data || {};
-            _activityDaysYear = String(j.year);
-            render();
-        } catch (e) {
-            // Badgen är en bekvämlighet. Ett fel här får inte röra medlemslistan.
-        }
-    }
-
-    // Lazy: sidan slar tre kallor per medlem och ska inte kora forr an fliken oppnas.
-    // Ralsknappen renderas FORE innehallspanelen i dokumentet, sa den finns redan nar det har
-    // korr — ingen vantan pa DOMContentLoaded behovs.
-    (function bindTab() {
-        var btn = document.getElementById('clubActivity-tab');
-        if (btn) { btn.addEventListener('shown.bs.tab', function () { load(); }); return; }
-        document.addEventListener('DOMContentLoaded', function () {
-            var b = document.getElementById('clubActivity-tab');
-            if (b) b.addEventListener('shown.bs.tab', function () { load(); });
-        });
-    })();
+    // ⚠️ INGEN LAZY-BINDNING PÅ EN EGEN FLIK LÄNGRE. Skärmen bor i panelen `#foreningsintygTab`
+    // och visas av `openIntygScreen` i ClubAdminFirearms — den anropar `hpskOpenIntygFor` /
+    // `hpskOpenIntygFree` / `hpskOpenIntygForMember`, som alla kallar `load()` själva. En
+    // `shown.bs.tab`-bindning här hade dessutom hämtat medlemsregistret varje gång någon bara
+    // ville läsa ärendelistan.
 })();
 </script>
