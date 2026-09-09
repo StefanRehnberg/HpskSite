@@ -172,8 +172,27 @@ namespace HpskSite.Controllers
 
                 _foreningsintygService.Delete(id);
 
+                // ⚠️⚠️ FÖRFRÅGAN MÅSTE ÖPPNAS IGEN — och det får inte ligga på anroparen att komma
+                // ihåg det. Utan den här raden lämnas förfrågan "Utfärdad" med ett danglande
+                // `IssuedIntygId`, vilket inkorgen renderar som "Markerad utfärdad — intyg saknas":
+                // statusen påstår att medlemmen fått ett intyg som inte finns. Det normala skälet
+                // att ta bort ett intyg är att det blev fel och ska skrivas om, alltså är arbetet
+                // ogjort och förfrågan obehandlad. Se `ReopenAfterIntygRemoved` för varför
+                // förfrågan aldrig RADERAS.
+                var reopened = _firearmRequests.ReopenAfterIntygRemoved(id, (await GetCurrentMemberDataAsync())?.Id ?? 0);
+
                 _logger.LogInformation("Föreningsintyg {Id} deleted", id);
-                return Json(new { success = true, message = "Föreningsintyg borttaget." });
+                return Json(new
+                {
+                    success = true,
+                    reopenedRequestIds = reopened,
+                    // Kvittot måste säga att ett ÄRENDE öppnades igen. Ett tyst "borttaget" får
+                    // utfärdaren att tro att hen måste börja om från medlemslistan.
+                    message = reopened.Count > 0
+                        ? "Intyget är borttaget. Förfrågan ligger nu som obehandlad igen, så du kan " +
+                          "skriva ett nytt intyg från den."
+                        : "Föreningsintyg borttaget."
+                });
             }
             catch (Exception ex)
             {

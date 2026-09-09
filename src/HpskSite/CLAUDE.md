@@ -5851,6 +5851,59 @@ som *"Markerad utfärdad — intyg saknas"* — alltså det trasiga tillstånd `
 larma om. Ett "gör om utfärdandet" behöver därför **öppna förfrågan igen** i samma handling, och det
 är en serverändring med ett beslut i sig. Lägg inte in en radera-knapp där utan den halvan.
 
+#### Ta bort ett felaktigt intyg — och förfrågan öppnas igen (2026-09-09)
+
+Stefans resonemang när funktionen begärdes: *"man bör kunna radera ett utfärdat intyg … hen kanske
+raderar intyget för att göra ett nytt om det blev fel på det första"*. Det avgör designen.
+
+**⚠️⚠️ ETT BORTTAGET DOKUMENT FÅR INTE LÄMNA FÖRFRÅGAN "UTFÄRDAD".** `ForeningsintygRequestService.ReopenAfterIntygRemoved`
+sätter tillbaka `Status = Ny`, nollar `IssuedIntygId`, `HandledByMemberId` och `HandledAt`, och
+skriver en anteckning som säger vad som hänt. Utan det står förfrågan kvar som utfärdad med en död
+länk — precis det tillstånd inkorgen larmar om med *"Markerad utfärdad — intyg saknas"*, och som den
+gamla knappen kunde skapa. Statusen skulle alltså påstå att medlemmen fått ett intyg som inte finns.
+
+**⚠️ FÖRFRÅGAN RADERAS ALDRIG — det var frågan som ställdes, och svaret är nej.** Alternativet
+"radera förfrågan också, eller fråga användaren" avvisades: förfrågan är **medlemmens begäran**, inte
+klubbens arbetsrad, och den bär medlemmens meddelande och vilket vapen det gäller. Raderas den finns
+inget att skriva det nya intyget FRÅN, och medlemmen får sin begäran struken utan att se det. Båda
+avsikterna täcks av samma beteende: blev intyget fel → skriv ett nytt från den återöppnade
+förfrågan; ska ärendet avvisas → avslagsvägen, som kräver ett skäl medlemmen kan läsa. Därför finns
+ingen valdialog — en fråga vars ena svar förstör medlemmens begäran är sämre än ett beteende som
+inte kan förlora något.
+
+**⚠️ Återöppningen sker i `DeleteIntyg`, inte hos anroparen.** Skrivvägen är EN, så en ny yta som
+raderar ett intyg kan inte glömma halvan — samma regel som `ApplyEventRegistrationFields` finns för.
+
+**Ytan:** `Öppna` är synlig, borttagningen ligger i radens meny — husregeln *synligt = steget du står
+på, menyn = allt annat*. Destruktivt sist, i rött, med utskriven text. ⚠️ `data-bs-popper-config`
+med `strategy: fixed` krävs: tabellen ligger i `.table-responsive`, vars overflow klipper menyn, och
+`data-bs-strategy` ignoreras TYST av Bootstrap — felet syns bara på sista raden.
+
+**⚠️ DIALOGEN SÄGER VAD SOM HÄNDER MED ÄRENDET, inte bara med dokumentet.** *"Ta bort intyget?"*
+lämnar utfärdaren utan svar på den enda fråga som betyder något — måste jag börja om från
+medlemslistan? Texten lovar att förfrågan kommer tillbaka och att medlemmens begäran inte försvinner.
+Här är `confirm()` rätt: handlingen är oåterkallelig och MÅSTE bekräftas (jämför avslaget, som är en
+inline-ruta eftersom skälet ska gå att läsa och rätta innan det skickas).
+
+**⚠️ Listan läses om FÖRE beskedet.** Utfärdaren ska se förfrågan ligga i den gula rutan igen när hen
+klickar OK — annars läses "obehandlad igen" som ett löfte utan täckning.
+
+**Verifierat i dev, hela varvet, med återställning:** utfärda → radmenyn `position: fixed`, röd, med
+texten → confirm-texten namnger medlemmen och lovar återöppningen → dokumentet borta → förfrågan 77
+`Ny`, `IssuedIntygId NULL`, `HandledBy/At` nollade, anteckningen på plats → gula rutan visar 1 igen
+och den utfärdade raden är borta → **ett nytt intyg utfärdat från samma förfrågan**, som då är
+`Utfardad` med `IssuedIntygId 61`. Fixturen raderad (14 förfrågningar, alla `Avslagen`, 2 intyg).
+
+**Prod 2026-09-09: intyg 8 är BORTTAGET** (godkänt av Stefan). Snapshotten sparades otrunkerad först.
+Efter-läget: intyg 1, 3–7 (Tomelilla, utan snapshot) och 9 (Falkenbergs PK, rätt), förfrågningarna
+orörda — 1 `Ny`, 2 `Utfardad → 9`.
+- ⚠️ **`PRINT` nollställer `@@ROWCOUNT`.** Skriptet skrev `SELECT @@ROWCOUNT` efter ett `PRINT` och
+  rapporterade därför `Borttagna 0` om en radering som faktiskt skedde. Läs `@@ROWCOUNT` direkt efter
+  satsen, eller lita på efter-läget — aldrig på en räknare bakom en `PRINT`.
+- ⚠️ **`sqlcmd` trunkerar NVARCHAR(MAX) vid 256 tecken.** En snapshot-säkerhetskopia måste köras med
+  `-y 0` till en fil, och `-y 0` är ömsesidigt uteslutande med BÅDE `-W` och `-h` — alltså en egen
+  körning utan dem.
+
 ### Fas 2 och 3 (inte byggda)
 
 - **Fas 2:** rullande sexmånadersfönster + §5/§6 som förslag med underlag. Kräver att

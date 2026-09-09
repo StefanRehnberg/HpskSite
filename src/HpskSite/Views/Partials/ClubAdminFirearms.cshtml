@@ -946,6 +946,8 @@
         }
         if (action === 'req-free') { openIntygScreen(null, false); return; }
 
+        if (action === 'intyg-remove') { await removeIssuedIntyg(btn); return; }
+
         // Behörighetsinställningen som modal, öppnad ur Åtgärder ELLER ur varningsraden.
         // ⚠️ `load()` körs om varje gång: en klubbadmin kan ha ändrat styrelsen sedan sidan
         // laddades, och en väljare som visar en avgången ledamot är sämre än en tom väljare.
@@ -1472,15 +1474,63 @@
     /// fritextnamn på vapnet, och ett attribut byggt av användartext är samma lucka som gav
     /// kodexekvering i Fältskyttes "lägg till skytt".
     function doneIntygCell(r) {
-        if (r.issuedIntygId) {
-            return '<a class="btn btn-outline-secondary btn-sm" ' +
-                   'href="/foreningsintyg/' + r.issuedIntygId + '" target="_blank" rel="noopener" ' +
-                   'title="Öppna intyget för läsning och utskrift">' +
-                   '<i class="bi bi-printer me-1"></i>Öppna</a>';
+        if (!r.issuedIntygId) {
+            // Ett avslag har inget dokument. Ett bindestreck säger det; en avstängd knapp hade sett
+            // ut som något som gick sönder.
+            return '<span class="text-muted small">—</span>';
         }
-        // Ett avslag har inget dokument. Ett bindestreck säger det; en avstängd knapp hade sett ut
-        // som något som gick sönder.
-        return '<span class="text-muted small">—</span>';
+
+        // ⚠️ Öppna är SYNLIG, borttagningen ligger i menyn — husregeln *synligt = steget du står
+        // på, menyn = allt annat*. Att läsa eller skriva ut intyget är det man gör; att riva upp
+        // ett utfärdat intyg är undantaget. Destruktivt sist, i rött, med utskriven text — aldrig
+        // en naken soptunna intill andra ikoner.
+        //
+        // ⚠️ `data-bs-popper-config` med strategy fixed: tabellen ligger i `.table-responsive`
+        // (overflow-x:auto), som klipper en absolut positionerad meny. `data-bs-strategy` ignoreras
+        // TYST av Bootstrap, och felet syns bara på sista raden.
+        return '<a class="btn btn-outline-secondary btn-sm me-1" ' +
+               'href="/foreningsintyg/' + r.issuedIntygId + '" target="_blank" rel="noopener" ' +
+               'title="Öppna intyget för läsning och utskrift">' +
+               '<i class="bi bi-printer me-1"></i>Öppna</a>' +
+               '<div class="dropdown d-inline-block">' +
+                   '<button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" ' +
+                       'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' ' +
+                       'aria-expanded="false" aria-label="Fler åtgärder"></button>' +
+                   '<ul class="dropdown-menu dropdown-menu-end">' +
+                       '<li><button class="dropdown-item text-danger" type="button" ' +
+                           'data-vap-action="intyg-remove" data-intyg-id="' + r.issuedIntygId + '" ' +
+                           'data-request-id="' + r.id + '">' +
+                           '<i class="bi bi-trash me-2"></i>Ta bort intyget…</button></li>' +
+                   '</ul>' +
+               '</div>';
+    }
+
+    /// Tar bort ett utfärdat intyg och öppnar förfrågan igen.
+    ///
+    /// ⚠️ DIALOGEN MÅSTE SÄGA VAD SOM HÄNDER MED ÄRENDET, inte bara med dokumentet. "Ta bort
+    /// intyget?" lämnar utfärdaren utan svar på den enda fråga som betyder något: måste jag börja
+    /// om från medlemslistan, eller finns förfrågan kvar? Servern öppnar den igen — se
+    /// `ReopenAfterIntygRemoved` — och texten lovar exakt det.
+    ///
+    /// ⚠️ MEDLEMMENS NAMN LÄSES UR RADEN, aldrig ur ett attribut. Ett `onclick` byggt av
+    /// användartext är samma lucka som gav kodexekvering i Fältskyttes "lägg till skytt", och
+    /// namnet går genom `confirm()` som text — inte som HTML — så det kan inte tolkas.
+    async function removeIssuedIntyg(btn) {
+        var intygId = btn.getAttribute('data-intyg-id');
+        var row = btn.closest('tr');
+        var namn = row ? row.children[1].textContent.trim() : 'medlemmen';
+
+        if (!confirm('Ta bort det utfärdade föreningsintyget för ' + namn + '?\n\n' +
+                     'Dokumentet raderas och förfrågan läggs tillbaka som obehandlad, så att du ' +
+                     'kan skriva ett nytt intyg från den. Medlemmens förfrågan försvinner inte.')) return;
+
+        var j = await post('/umbraco/surface/Foreningsintyg/DeleteIntyg', null, { id: intygId });
+        if (!j.success) { alert(j.message || 'Kunde inte ta bort intyget.'); return; }
+
+        // ⚠️ Läs om listan FÖRE beskedet. Utfärdaren ska se förfrågan ligga i den gula rutan igen
+        // när hen klickar OK — annars läses "obehandlad igen" som ett löfte utan täckning.
+        await loadRequests();
+        alert(j.message);
     }
 
     /// ⚠️ "Utfärdad" utan ett `issuedIntygId` är ett tillstånd som INTE BORDE KUNNA FINNAS — och som

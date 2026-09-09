@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using HpskSite.Models.Firearms;
 using NPoco;
 using Umbraco.Cms.Core.Services;
@@ -242,6 +242,53 @@ namespace HpskSite.Services.Firearms
                 "Föreningsintygsförfrågan {Id} satt till {Status} av medlem {Actor}.",
                 requestId, status, actorMemberId);
             return null;
+        }
+
+        /// <summary>
+        /// Öppnar varje förfrågan som pekade på ett nu BORTTAGET intyg, och returnerar deras id:n.
+        ///
+        /// <para><b>⚠️ ETT BORTTAGET DOKUMENT FÅR INTE LÄMNA FÖRFRÅGAN "UTFÄRDAD".</b> Statusen
+        /// skulle då påstå att medlemmen fått ett intyg som inte finns — precis det trasiga
+        /// tillstånd inkorgen larmar om med "Markerad utfärdad — intyg saknas", och som den gamla
+        /// knappen kunde skapa. Raderar man dokumentet är arbetet ogjort, alltså är förfrågan
+        /// obehandlad igen.</para>
+        ///
+        /// <para><b>⚠️ FÖRFRÅGAN RADERAS ALDRIG.</b> Den är medlemmens begäran, inte klubbens
+        /// arbetsrad. Det normala skälet att ta bort ett intyg är att det blev fel och ska skrivas
+        /// om — och då måste det finnas något att skriva om det FRÅN, med medlemmens meddelande och
+        /// vilket vapen det gäller. Ska ärendet i stället avvisas finns avslagsvägen, som kräver ett
+        /// skäl medlemmen kan läsa. En radering av förfrågan hade tagit bort båda möjligheterna och
+        /// dessutom varit osynlig för medlemmen.</para>
+        ///
+        /// <para><b>⚠️ `HandlerNote` SKRIVS ÖVER MED FLIT.</b> Den bar "intyget utfärdat"-spåret, och
+        /// det är inte längre sant. Den nya texten säger vad som hände, så nästa läsare inte tror
+        /// att förfrågan aldrig behandlats.</para>
+        /// </summary>
+        public List<int> ReopenAfterIntygRemoved(int intygId, int actorMemberId)
+        {
+            if (intygId <= 0) return new List<int>();
+
+            using var uow = _scopeProvider.CreateScope(autoComplete: true);
+            var db = uow.Database;
+
+            var ids = db.Fetch<int>(
+                "SELECT Id FROM ForeningsintygRequest WHERE IssuedIntygId = @0", intygId);
+            if (ids.Count == 0) return ids;
+
+            db.Execute(
+                @"UPDATE ForeningsintygRequest
+                     SET Status = @0, IssuedIntygId = NULL,
+                         HandledByMemberId = NULL, HandledAt = NULL, HandlerNote = @1
+                   WHERE IssuedIntygId = @2",
+                ForeningsintygRequestStatus.Ny,
+                "Det utfärdade intyget togs bort — förfrågan är obehandlad igen.",
+                intygId);
+
+            _logger.LogInformation(
+                "Föreningsintyg {IntygId} borttaget av medlem {Actor} — förfrågan {Requests} öppnad igen.",
+                intygId, actorMemberId, string.Join(", ", ids));
+
+            return ids;
         }
 
         /// <summary>Antal öppna förfrågningar — badgen på klubbens flik.</summary>
