@@ -640,19 +640,70 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var open = _requests.GetForClub(clubId, openOnly: true);
-            var (sent, error) = await _intygNotifications.SendPendingReminderAsync(clubId, open);
+            var (sent, recipients, error) = await _intygNotifications.SendPendingReminderAsync(clubId, open);
 
             if (error is not null) return Json(new { success = false, message = error });
+
+            // ⚠️⚠️ NAMNGE MOTTAGARNA, INKLUSIVE ADRESSEN. "Skickad till 1 person" tvingade oss att
+            // gräva i databasen för att ta reda på vilken brevlåda mejlet gick till — svaret var
+            // att det låg i skräpposten på en adress användaren inte läser. Står adressen på
+            // skärmen behövs ingen sådan utgrävning nästa gång.
+            var who = string.Join(", ", recipients.Select(r => $"{r.Name} ({r.Email})"));
 
             return Json(new
             {
                 success = true,
                 sent,
-                message = sent == 1
-                    ? "Påminnelse skickad till 1 person."
-                    : $"Påminnelse skickad till {sent} personer."
+                recipients = recipients.Select(r => new { r.Name, r.Email }),
+                message = (sent == 1
+                    ? "Påminnelse skickad till "
+                    : $"Påminnelse skickad till {sent} personer: ") + who
             });
         }
+
+        /// <summary>
+        /// Klubbens utskickslogg — vem som mejlades, till vilken adress, och om det lyckades.
+        ///
+        /// <para><b>Läsgrinden är den vanliga klubbadmingrinden.</b> Loggen bär medlemmarnas
+        /// e-postadresser, alltså inget en utomstående ska se — men den som administrerar klubben
+        /// ser redan medlemsregistret.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetIntygNotifyLog(int clubId, int take = 25)
+        {
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltig klubb" });
+            if (!await _adminAuth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var rows = _intygNotifications.GetNotifyLog(clubId, Math.Clamp(take, 1, 200));
+
+            return Json(new
+            {
+                success = true,
+                rows = rows.Select(r => new
+                {
+                    r.Id,
+                    r.RequestId,
+                    r.MemberId,
+                    // ⚠️ Namnet kan vara null när mejlet gick till klubbens kontaktadress i stället
+                    // för till en person — ytan måste kunna säga det i klartext.
+                    name = r.MemberName,
+                    r.Email,
+                    kind = KindLabel(r.Kind),
+                    r.Detail,
+                    r.Succeeded,
+                    sentAt = r.SentAt.ToString("yyyy-MM-dd HH:mm"),
+                }),
+            });
+        }
+
+        private static string KindLabel(string? kind) => (kind ?? "").Trim() switch
+        {
+            "NyForfragan" => "Ny förfrågan",
+            "Paminnelse" => "Påminnelse",
+            "Beslut" => "Beslut",
+            _ => kind ?? "",
+        };
 
         /// <summary>
         /// Får den inloggade hantera klubbens lånevapensbokningar — utlämning och återlämning?

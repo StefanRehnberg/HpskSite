@@ -272,6 +272,25 @@
                     <div class="small mt-1" id="fwReqClubNote"></div>
                 </div>
 
+                @*
+                    ⚠️ VAD SOM SAKNAS FÖR ATT INTYGET SKA GÅ ATT SKRIVA — sagt HÄR, vid ansökan.
+
+                    Rapporterat 2026-09-09: klubben öppnade blanketten för en medlem och möttes av
+                    "personnummer saknas", men medlemmen hade inte fått en aning om det när han
+                    skickade sin förfrågan. Ett ärende som måste stanna för att en uppgift fattas
+                    ska säga det när det skapas, inte veckor senare hos någon annan.
+
+                    ⚠️ Beror på KLUBBEN ("medlem sedan" bor på medlemskapet), så rutan hämtas om
+                    varje gång klubbvalet ändras — se `syncReqClub`.
+
+                    ⚠️ INGEN SPÄRR. Ett intyg kan utfärdas med luckor; medlemmen ska veta, inte
+                    hindras. En vägrad förfrågan är dessutom svårare att åtgärda än en som kommer
+                    fram med en anteckning om vad som fattas.
+                *@
+                <div class="mb-3 d-none" id="fwReqMissingWrap">
+                    <div class="alert alert-warning py-2 px-3 small mb-0" id="fwReqMissing"></div>
+                </div>
+
                 <div class="mb-3">
                     <label class="form-label small d-block">Vad gäller det?</label>
                     <div class="form-check">
@@ -899,6 +918,73 @@
               'till <strong>' + esc(c.name) + '</strong>. Klubben har ännu ingen utsedd ' +
               'föreningsintygsansvarig, så den går till klubbens kontaktadress — styrelsen kan utse ' +
               'någon när den kommit in.</span>';
+
+        // ⚠️ Bristlistan ar KLUBBSPECIFIK ("medlem sedan" bor pa medlemskapet), sa den hamtas om
+        // vid varje klubbyte — inte bara nar modalen oppnas.
+        loadReadiness(c.id);
+    }
+
+    /// Vad som saknas for att ett komplett intyg ska kunna skrivas.
+    ///
+    /// ⚠️ TVA HOGAR, med olika konsekvens:
+    ///   • `missingMine`  — medlemmens egna falt. SPARRAR forfragan (servern vagrar), for det ar
+    ///                      hen som kan ratta dem.
+    ///   • `missingClub`  — klubbens falt. VARNAR bara. En sparr dar hade betytt att medlemmen inte
+    ///                      kan fraga, klubben aldrig far veta, och ingenting hander.
+    ///
+    /// ⚠️ Knappen last har ar en BEKVAMLIGHET, aldrig kontrollen. Servern vagrar anda — formularet
+    /// kan ha legat oppet i en flik sedan innan profilen andrades.
+    async function loadReadiness(clubId) {
+        var wrap = document.getElementById('fwReqMissingWrap');
+        var box = document.getElementById('fwReqMissing');
+        var send = document.getElementById('fwReqSend');
+        if (!wrap || !box) return;
+
+        wrap.classList.add('d-none');
+        box.innerHTML = '';
+        if (send) { send.disabled = false; send.textContent = 'Skicka förfrågan'; }
+
+        if (!clubId) return;
+
+        var j = null;
+        try {
+            var r = await fetch('/umbraco/surface/Foreningsintyg/GetMyIntygReadiness?clubId=' +
+                                encodeURIComponent(clubId), { credentials: 'same-origin' });
+            j = await r.json();
+        } catch (e) {
+            // ⚠️ Tyst, och knappen lamnas OPPEN. Ett uppslagsfel far inte hindra en forfragan —
+            // servern har grinden, och den svarar med samma lista om nagot verkligen fattas.
+            return;
+        }
+        if (!j || !j.success) return;
+
+        var mine = j.missingMine || [];
+        var club = j.missingClub || [];
+        if (mine.length === 0 && club.length === 0) return;
+
+        var html = '';
+        if (mine.length) {
+            html += '<div><i class="bi bi-exclamation-triangle-fill me-1"></i>' +
+                    '<strong>Du behöver fylla i ' + (mine.length === 1 ? 'en uppgift' : mine.length + ' uppgifter') +
+                    ' först.</strong> Polisen identifierar sökanden på dem, så intyget kan inte ' +
+                    'skrivas utan dem.</div>' +
+                    '<ul class="mb-2 mt-1">' +
+                    mine.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') +
+                    '</ul>' +
+                    '<a href="/user-profile-page/#profil" class="btn btn-sm btn-warning">' +
+                    'Fyll i på Min sida → Profil</a>';
+            if (send) { send.disabled = true; send.textContent = 'Kan inte skickas än'; }
+        }
+        if (club.length) {
+            html += (mine.length ? '<hr class="my-2">' : '') +
+                    '<div class="text-muted"><i class="bi bi-info-circle me-1"></i>' +
+                    'Klubben behöver dessutom komplettera: <strong>' +
+                    club.map(esc).join(', ') + '</strong>. Det kan du inte göra själv — ' +
+                    'förfrågan går fram ändå, och klubben ser vad som fattas.</div>';
+        }
+
+        box.innerHTML = html;
+        wrap.classList.remove('d-none');
     }
 
     /// Speglar det VALDA vapnet i de fält som beror på det. Körs vid öppning OCH vid byte — annars
@@ -958,7 +1044,20 @@
             message: document.getElementById('fwReqMessage').value
         });
         btn.disabled = false;
-        if (!j.success) { showReqError(esc(j.message || 'Kunde inte skicka.')); return; }
+        if (!j.success) {
+            // ⚠️ Serverns bristlista visas som PUNKTER med en vag vidare. En enda lang mening med
+            // fem faltnamn i ar det svaraste sattet att lasa samma information.
+            if (j.missingFields && j.missingFields.length) {
+                showReqError('<strong>Du behöver fylla i följande först:</strong>' +
+                    '<ul class="mb-2 mt-1">' +
+                    j.missingFields.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') +
+                    '</ul><a href="/user-profile-page/#profil" class="btn btn-sm btn-warning">' +
+                    'Fyll i på Min sida → Profil</a>');
+                return;
+            }
+            showReqError(esc(j.message || 'Kunde inte skicka.'));
+            return;
+        }
         bootstrap.Modal.getOrCreateInstance(document.getElementById('fwReqModal')).hide();
         await load();
     }

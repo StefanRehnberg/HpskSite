@@ -375,6 +375,35 @@ namespace HpskSite.Controllers
             if (!_memberClubs.GetAllClubIds(member).Contains(clubId))
                 return Json(new { success = false, message = "Du kan bara begära intyg av en klubb du är medlem i." });
 
+            // ⚠️⚠️ SPÄRR: medlemmens egna uppgifter måste vara ifyllda (Stefans beslut 2026-09-09).
+            //
+            // Rapporterat: klubben öppnade blanketten för en medlem och möttes av "personnummer
+            // saknas" — men medlemmen hade inte fått en aning om det när han skickade förfrågan.
+            // Ärendet stannade hos någon som inte kunde åtgärda det.
+            //
+            // ⚠️ SERVERN ÄR GRINDEN, inte knappen. Formuläret kan ha legat öppet i en flik sedan
+            // innan profilen ändrades, och en avstängd knapp är ingen kontroll.
+            //
+            // ⚠️ BARA personuppgifterna. Klubbens fält (organisationsnummer, "medlem sedan",
+            // namnförtydligande) hör också till ett komplett intyg men kan inte rättas av
+            // medlemmen — en spärr på dem hade gjort det omöjligt att ens fråga, och klubben hade
+            // aldrig fått veta. Se `ForeningsintygDocumentService.MissingPersonalFields`.
+            var missing = ForeningsintygDocumentService.MissingPersonalFields(member);
+            if (missing.Count > 0)
+            {
+                return Json(new
+                {
+                    success = false,
+                    // Listan skickas separat så gränssnittet kan visa den som punkter med en väg
+                    // vidare, i stället för en enda lång mening.
+                    missingFields = missing,
+                    message = "Innan du kan begära ett föreningsintyg behöver du fylla i " +
+                              string.Join(", ", missing) +
+                              " på Min sida → Profil. Polisen identifierar sökanden på de " +
+                              "uppgifterna, så intyget kan inte skrivas utan dem."
+                });
+            }
+
             var (requestId, error) = _requests.Create(
                 memberId, clubId, kind, firearmId, forbund ?? "", vapengrupp, message);
 

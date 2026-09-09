@@ -125,6 +125,93 @@ namespace HpskSite.Services.Firearms
             public bool Enabled { get; set; }
         }
 
+        // ── Utskicksloggen ──────────────────────────────────────────────────────────────────────
+        //
+        // ⚠️⚠️ FINNS FÖR ATT VI INTE KUNDE SVARA PÅ FRÅGAN. När Stefan 2026-09-09 frågade om det
+        // första mejlet också gick till den andra ansvariga gick svaret bara att HÄRLEDA ur
+        // tidsstämpeln på en opt-out-rad. Det är ett resonemang, inte ett belägg — och hade någon
+        // ändrat något i mellantiden hade resonemanget blivit fel utan att någon märkt det.
+        //
+        // ⚠️ LOGGAR BÅDE LYCKADE OCH MISSLYCKADE. Ett misslyckat utskick är det viktigaste att
+        // kunna se i efterhand: det betyder att en medlem väntar på ett besked som aldrig kom.
+        //
+        // ⚠️ Skrivningen får ALDRIG fälla utskicket. Mejlet är redan skickat när vi kommer hit;
+        // ett loggfel loggas i apploggen och sväljs.
+        public static class NotifyKind
+        {
+            public const string NewRequest = "NyForfragan";
+            public const string Reminder = "Paminnelse";
+            public const string Decision = "Beslut";
+        }
+
+        private void LogNotify(int clubId, int? requestId, int? memberId, string email,
+                               string kind, string? detail, bool succeeded)
+        {
+            try
+            {
+                using var uow = _scopeProvider.CreateScope(autoComplete: true);
+                uow.Database.Execute(
+                    @"INSERT INTO ForeningsintygNotifyLog
+                          (ClubId, RequestId, MemberId, Email, Kind, Detail, Succeeded, SentAt)
+                      VALUES (@0, @1, @2, @3, @4, @5, @6, @7)",
+                    clubId, requestId, memberId, Cut(email, 255), kind, Cut(detail, 200),
+                    succeeded, DateTime.Now);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Kunde inte skriva utskicksloggen (klubb {ClubId}, {Kind}).", clubId, kind);
+            }
+        }
+
+        private static string Cut(string? v, int max)
+            => string.IsNullOrEmpty(v) ? "" : (v.Length <= max ? v : v[..max]);
+
+        /// <summary>Klubbens senaste utskick, nyast först. Tom lista om tabellen saknas.</summary>
+        public List<NotifyLogRow> GetNotifyLog(int clubId, int take = 25)
+        {
+            if (clubId <= 0) return new List<NotifyLogRow>();
+            try
+            {
+                using var uow = _scopeProvider.CreateScope(autoComplete: true);
+                var rows = uow.Database.Fetch<NotifyLogRow>(
+                    @"SELECT TOP (@1) Id, ClubId, RequestId, MemberId, Email, Kind, Detail,
+                             Succeeded, SentAt
+                        FROM ForeningsintygNotifyLog
+                       WHERE ClubId = @0
+                       ORDER BY SentAt DESC, Id DESC", clubId, take);
+
+                // Namnet loses upp har och lagras INTE i loggen: en medlem kan byta namn, och
+                // raden ska visa vem personen ar nu — adressen ar det som maste vara historisk.
+                foreach (var r in rows)
+                    if (r.MemberId is int mid && mid > 0) r.MemberName = ResolveMemberName(mid);
+
+                return rows;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Kunde inte läsa utskicksloggen för klubb {ClubId}.", clubId);
+                return new List<NotifyLogRow>();
+            }
+        }
+
+        [TableName("ForeningsintygNotifyLog")]
+        public class NotifyLogRow
+        {
+            public int Id { get; set; }
+            public int ClubId { get; set; }
+            public int? RequestId { get; set; }
+            public int? MemberId { get; set; }
+            public string Email { get; set; } = string.Empty;
+            public string Kind { get; set; } = string.Empty;
+            public string? Detail { get; set; }
+            public bool Succeeded { get; set; }
+            public DateTime SentAt { get; set; }
+
+            /// <summary>Visningsfält, inte en kolumn.</summary>
+            [Ignore] public string? MemberName { get; set; }
+        }
+
         /// <summary>
         /// Påminner klubbens ansvariga om att det finns obehandlade förfrågningar.
         ///
@@ -135,11 +222,20 @@ namespace HpskSite.Services.Firearms
         ///
         /// <para>Returnerar antalet mottagare, eller ett felmeddelande.</para>
         /// </summary>
-        public async Task<(int Sent, string? Error)> SendPendingReminderAsync(
-            int clubId, List<ForeningsintygRequest> openRequests)
+        /// <returns>
+        /// Antal lyckade utskick, MOTTAGARNA (namn + adress), och ett eventuellt felmeddelande.
+        ///
+        /// <para><b>⚠️ Mottagarna returneras för att ytan ska kunna NAMNGE dem.</b> "Skickad till 1
+        /// person" fick oss att gräva i databasen för att ta reda på vilken brevlåda mejlet gick
+        /// till — svaret var att det låg i skräpposten på en adress användaren inte läser. Står
+        /// adressen på skärmen behövs ingen sådan utgrävning.</para>
+        /// </returns>
+        public async Task<(int Sent, List<(string Name, string Email)> Recipients, string? Error)>
+            SendPendingReminderAsync(int clubId, List<ForeningsintygRequest> openRequests)
         {
+            var none = new List<(string, string)>();
             if (openRequests == null || openRequests.Count == 0)
-                return (0, "Det finns inga obehandlade förfrågningar att påminna om.");
+                return (0, none, "Det finns inga obehandlade förfrågningar att påminna om.");
 
             var club = _clubs.GetClubById(clubId);
             var clubName = club?.Name ?? "din klubb";
@@ -154,7 +250,7 @@ namespace HpskSite.Services.Firearms
             var recipients = _auth.GetViewers(clubId)
                 .Where(v => !v.IsDormant)
                 .Where(v => !settings.TryGetValue(v.MemberId, out var on) || on)
-                .Select(v => (v.Name, Email: EmailOf(v.MemberId)))
+                .Select(v => (v.Name, Email: EmailOf(v.MemberId), v.MemberId))
                 .Where(x => !string.IsNullOrWhiteSpace(x.Email))
                 .ToList();
 
@@ -163,33 +259,44 @@ namespace HpskSite.Services.Firearms
                 // ⚠️ Två olika orsaker, och de kräver olika åtgärd av den som klickade. Att svara
                 // "inga mottagare" på båda hade lämnat hen utan nästa steg.
                 var anyViewer = _auth.GetViewers(clubId).Any(v => !v.IsDormant);
-                return (0, anyViewer
+                return (0, none, anyViewer
                     ? "Ingen av de ansvariga har mejl påslaget, eller saknar e-postadress. " +
                       "Slå på mejl för minst en i listan ovan."
                     : "Klubben har ingen utsedd föreningsintygsansvarig att påminna.");
             }
 
             var sent = 0;
-            foreach (var (name, toEmail) in recipients)
+            var delivered = new List<(string, string)>();
+            var detail = openRequests.Count == 1 ? "1 väntande" : openRequests.Count + " väntande";
+
+            foreach (var (name, toEmail, viewerId) in recipients)
             {
+                var ok = false;
                 try
                 {
-                    // ⚠️ RAKNA BARA LYCKADE. Ytan rapporterar det har talet till anvandaren, och
-                    // dev sa "Paminnelse skickad till 1 person" medan loggen sa "Failed to send
-                    // email" — exakt den logn EmailService egen dokumentation varnar for.
-                    if (await _email.SendForeningsintygReminderAsync(
-                            toEmail!, name, clubName, openRequests.Count, oldest, names))
+                    // ⚠️ RÄKNA BARA LYCKADE. Ytan rapporterar det här talet till användaren, och
+                    // dev sa "Påminnelse skickad till 1 person" medan loggen sa "Failed to send
+                    // email" — exakt den lögn EmailService egen dokumentation varnar för.
+                    ok = await _email.SendForeningsintygReminderAsync(
+                        toEmail!, name, clubName, openRequests.Count, oldest, names);
+                    if (ok)
+                    {
                         sent++;
+                        delivered.Add((name, toEmail!));
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Kunde inte påminna {Name} i klubb {ClubId}.", name, clubId);
                 }
+                // ⚠️ Loggas OAVSETT utfall — ett misslyckat utskick är det viktigaste att kunna se
+                // i efterhand. RequestId är null: påminnelsen gäller flera ärenden på en gång.
+                LogNotify(clubId, null, viewerId, toEmail!, NotifyKind.Reminder, detail, ok);
             }
 
             return sent > 0
-                ? (sent, null)
-                : (0, "Påminnelsen kunde inte skickas. Kontrollera e-postinställningarna.");
+                ? (sent, delivered, null)
+                : (0, none, "Påminnelsen kunde inte skickas. Kontrollera e-postinställningarna.");
         }
 
         /// <summary>
@@ -215,17 +322,19 @@ namespace HpskSite.Services.Firearms
                 var recipients = _auth.GetViewers(request.ClubId)
                     .Where(v => !v.IsDormant)
                     .Where(v => !settings.TryGetValue(v.MemberId, out var on) || on)
-                    .Select(v => (v.Name, Email: EmailOf(v.MemberId)))
+                    .Select(v => (v.Name, Email: EmailOf(v.MemberId), v.MemberId))
                     .Where(x => !string.IsNullOrWhiteSpace(x.Email))
                     .ToList();
 
                 if (recipients.Count > 0)
                 {
-                    foreach (var (name, toEmail) in recipients)
+                    foreach (var (name, toEmail, viewerId) in recipients)
                     {
-                        await _email.SendForeningsintygRequestSubmittedAsync(
+                        var ok = await _email.SendForeningsintygRequestSubmittedAsync(
                             toEmail!, name, memberName,
                             ForeningsintygRequestKind.Label(request.Kind), firearmLabel, clubName);
+                        LogNotify(request.ClubId, request.Id, viewerId, toEmail!,
+                                  NotifyKind.NewRequest, ForeningsintygRequestKind.Label(request.Kind), ok);
                     }
                     return;
                 }
@@ -239,9 +348,12 @@ namespace HpskSite.Services.Firearms
                 // klubb att av misstag göra sig helt onåbar för förfrågningar.
                 if (!string.IsNullOrWhiteSpace(club?.ContactEmail))
                 {
-                    await _email.SendForeningsintygRequestSubmittedAsync(
+                    var ok = await _email.SendForeningsintygRequestSubmittedAsync(
                         club!.ContactEmail, clubName, memberName,
                         ForeningsintygRequestKind.Label(request.Kind), firearmLabel, clubName);
+                    // MemberId = null: mejlet gick till klubbens adress, inte till en person.
+                    LogNotify(request.ClubId, request.Id, null, club.ContactEmail,
+                              NotifyKind.NewRequest, "klubbens kontaktadress (ingen mottagare)", ok);
                     return;
                 }
 
@@ -279,10 +391,15 @@ namespace HpskSite.Services.Firearms
                     return false;
                 }
 
-                return await _email.SendForeningsintygRequestDecisionAsync(
+                var ok = await _email.SendForeningsintygRequestDecisionAsync(
                     toEmail!, ResolveMemberName(request.MemberId),
                     _clubs.GetClubById(request.ClubId)?.Name ?? "Klubben",
                     FirearmLabel(request), issued, note);
+
+                // ⚠️ Mottagaren ar MEDLEMMEN som begarde intyget, inte en ansvarig.
+                LogNotify(request.ClubId, request.Id, request.MemberId, toEmail!,
+                          NotifyKind.Decision, issued ? "Utfardad" : "Avslagen", ok);
+                return ok;
             }
             catch (Exception ex)
             {

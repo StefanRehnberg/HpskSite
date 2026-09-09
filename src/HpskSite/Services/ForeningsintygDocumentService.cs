@@ -304,7 +304,38 @@ namespace HpskSite.Services
         /// </summary>
         private static List<string> MissingRegisterFields(IMember member, ForeningsintygDocument doc)
         {
+            var missing = MissingPersonalFields(member);
+
+            if (string.IsNullOrWhiteSpace(doc.Organisationsnummer)) missing.Add("Organisationsnummer (klubben)");
+            if (string.IsNullOrWhiteSpace(doc.Skytteforening)) missing.Add("Skytteförening (klubben)");
+            if (string.IsNullOrWhiteSpace(doc.MedlemSedan)) missing.Add("Har varit medlem kontinuerligt sedan datum");
+            if (string.IsNullOrWhiteSpace(doc.Namnfortydligande)) missing.Add("Namnförtydligande (styrelsen)");
+
+            return missing;
+        }
+
+        /// <summary>
+        /// Blankettens PERSONUPPGIFTER som saknas — de fält MEDLEMMEN själv kan rätta.
+        ///
+        /// <para><b>⚠️ EGEN, PUBLIK METOD för att den är en GRIND, inte bara en visning.</b>
+        /// <c>FirearmController.RequestIntyg</c> vägrar en förfrågan när något av dessa fält är
+        /// tomt (Stefans beslut 2026-09-09), och gränssnittet visar samma lista. Vore det två
+        /// beräkningar skulle spärren och texten kunna säga olika saker — och den som blir stoppad
+        /// utan att listan stämmer har inget sätt att komma vidare.</para>
+        ///
+        /// <para><b>⚠️ BARA personuppgifterna, aldrig klubbens fält.</b> Organisationsnummer,
+        /// "medlem sedan" och namnförtydligande hör också till ett komplett intyg, men medlemmen
+        /// kan inte fylla i dem. En spärr på dem hade betytt att hen inte kan fråga, klubben aldrig
+        /// får veta, och ingenting händer — en återvändsgränd. De varnas det för i stället, och
+        /// förfrågan når klubben som är den som kan rätta dem.</para>
+        ///
+        /// <para>Tar bara <see cref="IMember"/>: ingen klubb, ingen styrelse, ingen databas — så
+        /// grinden kostar inget att köra på varje förfrågan.</para>
+        /// </summary>
+        public static List<string> MissingPersonalFields(IMember member)
+        {
             var missing = new List<string>();
+            if (member == null) return missing;
 
             foreach (var field in ForeningsintygFields.Personal)
             {
@@ -315,12 +346,6 @@ namespace HpskSite.Services
                 if (!ForeningsintygFields.HasUsableValue(field.Alias, value))
                     missing.Add(field.FormLabel);
             }
-
-            if (string.IsNullOrWhiteSpace(doc.Organisationsnummer)) missing.Add("Organisationsnummer (klubben)");
-            if (string.IsNullOrWhiteSpace(doc.Skytteforening)) missing.Add("Skytteförening (klubben)");
-            if (string.IsNullOrWhiteSpace(doc.MedlemSedan)) missing.Add("Har varit medlem kontinuerligt sedan datum");
-            if (string.IsNullOrWhiteSpace(doc.Namnfortydligande)) missing.Add("Namnförtydligande (styrelsen)");
-
             return missing;
         }
 

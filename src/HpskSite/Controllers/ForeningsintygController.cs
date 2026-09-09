@@ -267,6 +267,78 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Vad som saknas för att ett komplett föreningsintyg ska kunna skrivas — för DEN INLOGGADE
+        /// medlemmen, i en bestämd klubb.
+        ///
+        /// <para><b>⚠️ Finns för att medlemmen inte fick veta.</b> Rapporterat 2026-09-09: klubben
+        /// öppnade blanketten för Torbjörn Andreasson och möttes av "personnummer saknas" — men
+        /// Torbjörn hade inte fått en aning om det när han skickade sin förfrågan. Ett ärende som
+        /// måste stanna för att en uppgift fattas ska säga det <b>vid ansökan</b>, inte veckor
+        /// senare hos någon annan.</para>
+        ///
+        /// <para><b>⚠️ SAMMA BERÄKNING SOM UTFÄRDAREN SER.</b> Listan kommer ur
+        /// <c>BuildDraftAsync</c>s <c>SaknadeRegisterfalt</c> — inte ur en egen kontroll här. Två
+        /// beräkningar av "vad saknas" blir två svar som får säga emot varandra, och då är den
+        /// medlemmen ser den som inte spelar någon roll.</para>
+        ///
+        /// <para><b>Tar ingen memberId.</b> Den inloggade frågar om sig själv, så det finns ingen
+        /// parameter att peta på för att fråga om någon annan.</para>
+        ///
+        /// <para><b>⚠️ Klubbspecifikt.</b> "Har varit medlem kontinuerligt sedan" bor på
+        /// medlemskapet i EN klubb, så svaret skiljer sig mellan klubbar. Klienten måste hämta om
+        /// listan när klubbvalet ändras.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyIntygReadiness(int clubId)
+        {
+            try
+            {
+                var current = await GetCurrentMemberDataAsync();
+                if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var member = _memberService.GetById(current.Id);
+                if (member == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
+
+                // ⚠️ Klubben måste vara EN AV MEDLEMMENS. Utan kontrollen kunde en medlem läsa en
+                // främmande klubbs organisationsnummer och styrelsenamn ur svarets bristlista.
+                if (clubId <= 0 || !_memberClubs.IsMemberOfClub(member, clubId))
+                    return Json(new { success = false, message = "Du är inte medlem i den klubben." });
+
+                var doc = await _intygDocuments.BuildDraftAsync(current.Id, clubId, DateTime.Today.Year);
+                if (doc == null) return Json(new { success = false, message = "Kunde inte läsa uppgifterna." });
+
+                // ⚠️ UPPDELNINGEN ÄR STRUKTURELL, inte en strängmatchning på "(klubben)". Det som
+                // står bland blankettens PERSONUPPGIFTER är medlemmens att rätta; allt annat i
+                // bristlistan är klubbens eller styrelsens. En textmatchning hade tyst börjat lägga
+                // ett nytt fält i fel hög.
+                var personalLabels = ForeningsintygFields.Personal
+                    .Select(f => f.FormLabel)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                var missing = doc.SaknadeRegisterfalt ?? new List<string>();
+                var mine = missing.Where(m => personalLabels.Contains(m)).ToList();
+                var clubs = missing.Where(m => !personalLabels.Contains(m)).ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    // ⚠️ INGEN SPÄRR. `MissingRegisterFields` egen dokumentation säger det rakt ut:
+                    // ett intyg kan utfärdas med luckor. Medlemmen ska VETA, inte hindras — en
+                    // förfrågan som vägras är dessutom svårare att åtgärda än en som kommer fram
+                    // med en anteckning om vad som fattas.
+                    missingMine = mine,
+                    missingClub = clubs,
+                    ok = mine.Count == 0 && clubs.Count == 0,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetMyIntygReadiness failed for club {ClubId}", clubId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
         /// Utkastet till blanketten PM 551.24 — registerfälten ifyllda, intygsfälten tomma, plus
         /// listan över registerfält som saknas. Läsbar av samma krets som underlaget.
         /// </summary>
