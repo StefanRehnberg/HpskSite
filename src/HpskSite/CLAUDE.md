@@ -7516,6 +7516,42 @@ Samma återanvändning släppte en gång igenom en vapenräkning utan bekräftel
 **sträng**: ASP.NET Cores bool-bindning godtar bara `"true"`/`"false"`, så `"1"` faller tyst tillbaka
 på default — tredje gången den fällan slår till i den här kodbasen.
 
+### ⚠️⚠️ EN OKÖRD MIGRERING GJORDE VARJE SVARSLÄNK TYST DÖD (prod, 2026-09-09)
+
+Funktionen deployades utan att `create-mail-reply-table.sql` kördes. Felet syntes **inte** som ett
+fel — det syntes som ingenting:
+
+1. Kompletteringsmejlet gick ut med sin blå *Svara klubben*-knapp.
+2. Svarssidan öppnades **utan problem** — den läser bara `ForeningsintygRequest`.
+3. Medlemmen skrev sitt svar och tryckte Skicka.
+4. `MailReplyService.Add` föll på *Invalid object name 'MailReply'*, fångade undantaget och
+   returnerade ett felmeddelande.
+5. **Klubben hörde ingenting** och trodde att medlemmen tigit. Medlemmen visste att han svarat.
+
+Alltså exakt den tystnad hela funktionen byggdes för att ta bort, återinförd av ett glömt
+operatörssteg — och med den extra grymheten att de två parterna inte kunde se att de var oense.
+
+**Tre saker ändrades, och alla tre behövs:**
+
+- **`MailReplySchemaGuardHostedService`** larmar `LogCritical` en minut efter start när tabellen
+  saknas. ⚠️ **Saknad tabell är ALLTID ett larm här**, till skillnad från vapenvalvets nyckelvakt
+  som bara larmar när det finns data att förlora: den här funktionen skickar ut svarslänkar oavsett
+  tabellens existens, så det finns inget ofarligt "ännu inte migrerat"-läge. Och prod kör Serilog på
+  **Warning och uppåt**, så en Information-rad hade varit osynlig just där felet gör mest skada.
+- **`NotifyHandlerOfFailedReplyAsync`** mejlar klubben att medlemmen försökte — **med medlemmens
+  text**, eftersom mejlet då är enda kopian. ⚠️ Skickas BARA på `AddResult.SaveFailed`, aldrig på ett
+  valideringsfel: "Skriv ditt svar först" är medlemmens att åtgärda, och ett larm som lyser på det
+  slutar betyda något. Egen `NotifyKind.MemberReplyFailed`, så loggen kan skilja *"medlemmen
+  svarade"* från *"vi tappade medlemmens svar"* — det andra betyder att någon måste ringa.
+- **Medlemmens felmeddelande säger inte längre bara "försök igen".** Det vanligaste sparfelet är en
+  okörd migrering, och då kan hen trycka hur många gånger som helst utan att något ändras. ⚠️ **Ett
+  råd som inte kan hjälpa är värre än inget** — det flyttar skulden till den som inte kan göra
+  något. Texten säger nu att felet är vårt, att klubben aviseras, och att hen kan höra av sig direkt.
+
+**Lärdomen bortom den här funktionen:** när en migrering är ett separat operatörssteg och koden
+degraderar tyst, är det inte "graceful degradation" utan en tystnad. Bygg startkontrollen i samma
+omgång som tabellen.
+
 ### ⛔ INKOMMANDE MAIL ÄR MEDVETET INTE BYGGT
 
 Riktig tvåvägskommunikation — en signerad ärendeadress (`svar-fi142-a7f3@pistol.nu`) vars svar landar

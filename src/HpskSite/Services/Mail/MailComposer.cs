@@ -29,6 +29,10 @@ namespace HpskSite.Services.Mail
             // skyddet är trådsäkert. Samma livstid som EmailService, så den kan användas från
             // bakgrundstrådar utan ett scope.
             builder.Services.AddSingleton<MailReplyLinkService>();
+
+            // ⚠️ Startkontrollen är inte pynt. En okörd migrering gör varje redan utskickad
+            // svarslänk till en återvändsgränd, tyst — det hände i prod 2026-09-09.
+            builder.Services.AddHostedService<MailReplySchemaGuardHostedService>();
         }
     }
 }

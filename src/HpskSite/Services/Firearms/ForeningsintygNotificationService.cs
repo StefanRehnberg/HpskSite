@@ -161,6 +161,16 @@ namespace HpskSite.Services.Firearms
             /// mejlet fram" — samma regel som för de andra sorterna.</para>
             /// </summary>
             public const string MemberReply = "MedlemSvarade";
+
+            /// <summary>
+            /// Medlemmen försökte svara men svaret gick INTE att spara.
+            ///
+            /// <para><b>⚠️ EGEN SORT, inte <see cref="MemberReply"/>.</b> Den som läser loggen i
+            /// efterhand måste kunna skilja "medlemmen svarade" från "medlemmen försökte och vi
+            /// tappade det" — det andra betyder att det finns ett svar vi aldrig fick, och att
+            /// någon måste ringa.</para>
+            /// </summary>
+            public const string MemberReplyFailed = "MedlemSvarFel";
         }
 
         private void LogNotify(int clubId, int? requestId, int? memberId, string email,
@@ -554,6 +564,79 @@ namespace HpskSite.Services.Firearms
                 // aviseringsfel får inte rapporteras som att svaret inte togs emot.
                 _logger.LogError(ex,
                     "Kunde inte avisera om medlemssvar på förfrågan {Id}.", request.Id);
+            }
+            return sent;
+        }
+
+        /// <summary>
+        /// Medlemmen försökte svara men svaret gick inte att spara — säg det till klubben ändå.
+        ///
+        /// <para><b>⚠️⚠️ DET HÄR ÄR HELA POÄNGEN MED FUNKTIONEN, SPEGELVÄNT.</b> Utan den är ett
+        /// sparfel exakt den tystnad arbetet skulle ta bort: medlemmen har svarat och vet att hen
+        /// svarat, klubben tror att hen tiger, och ingen av dem kan se att de är oense. Hände i
+        /// prod 2026-09-09 (okörd migrering).</para>
+        ///
+        /// <para><b>⚠️ Mejlet bär medlemmens TEXT.</b> Svaret finns ingen annanstans — databasen
+        /// tog inte emot det. Utelämnas texten är det enda vi räddat att någon *försökte*, och då
+        /// måste klubben ringa och be hen upprepa sig. Med texten är ärendet i praktiken besvarat.</para>
+        ///
+        /// <para><b>⚠️ Svarsadressen är MEDLEMMEN</b>, precis som på det lyckade svaret — den som
+        /// läser vill kunna svara direkt.</para>
+        /// </summary>
+        public async Task<int> NotifyHandlerOfFailedReplyAsync(ForeningsintygRequest request, string replyBody)
+        {
+            var sent = 0;
+            try
+            {
+                var memberName = ResolveMemberName(request.MemberId);
+                var clubName = _clubs.GetClubById(request.ClubId)?.Name ?? "din klubb";
+                var replyToMember = _replyContacts.ForMember(request.MemberId);
+
+                var recipients = ResolveHandlerRecipients(request);
+                if (recipients.Count == 0)
+                {
+                    _logger.LogError(
+                        "Föreningsintygsförfrågan {Id}: medlemmens svar gick inte att spara OCH ingen "
+                        + "kunde aviseras. Svaret är förlorat: {Body}",
+                        request.Id, Cut(replyBody, 500));
+                    return 0;
+                }
+
+                foreach (var (name, toEmail, memberId) in recipients)
+                {
+                    var ok = false;
+                    try
+                    {
+                        ok = await _email.SendForeningsintygFailedReplyAsync(
+                            toEmail, name, memberName, clubName, FirearmLabel(request),
+                            replyBody, replyToMember);
+                        if (ok) sent++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Kunde inte avisera {Name} om TAPPAT medlemssvar på förfrågan {Id}.",
+                            name, request.Id);
+                    }
+
+                    LogNotify(request.ClubId, request.Id, memberId, toEmail,
+                              NotifyKind.MemberReplyFailed, Cut(replyBody, 200), ok);
+                }
+
+                if (sent == 0)
+                {
+                    // ⚠️ Sista utposten: gick inte ens mejlet ut finns svaret BARA i loggen.
+                    // Skriv ut det i klartext hellre än att låta det försvinna helt.
+                    _logger.LogError(
+                        "Föreningsintygsförfrågan {Id}: medlemssvar tappat och ingen avisering gick "
+                        + "fram. Svaret var: {Body}", request.Id, Cut(replyBody, 500));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Kunde inte hantera tappat medlemssvar på förfrågan {Id}. Svaret var: {Body}",
+                    request.Id, Cut(replyBody, 500));
             }
             return sent;
         }

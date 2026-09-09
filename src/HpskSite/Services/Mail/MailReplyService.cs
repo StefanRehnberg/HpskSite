@@ -79,22 +79,36 @@ namespace HpskSite.Services.Mail
         }
 
         /// <summary>
-        /// Sparar ett svar. Returnerar <c>(id, null)</c> vid lyckad skrivning, annars
-        /// <c>(0, felmeddelande)</c>.
+        /// Utfallet av ett sparförsök.
+        ///
+        /// <para><b>⚠️ ETT AVVISAT SVAR OCH ETT TAPPAT SVAR ÄR OLIKA SAKER.</b> "Skriv ditt svar
+        /// först" är medlemmens att åtgärda och ska inte störa någon annan; ett sparfel är VÅRT och
+        /// måste nå klubben, annars står medlemmen och trycker på en knapp som aldrig kommer att
+        /// fungera medan klubben tror att hen tiger. Anroparen kan inte skilja dem åt på
+        /// felsträngen — därför <see cref="SaveFailed"/>.</para>
+        /// </summary>
+        public sealed record AddResult(int Id, string? Error, bool SaveFailed)
+        {
+            /// <summary>Sparat, eller en slängd dubbelpostning — inget mer behöver göras.</summary>
+            public bool Ok => Error is null;
+        }
+
+        /// <summary>
+        /// Sparar ett svar.
         ///
         /// <para><b>⚠️ DUBBELPOSTNING SLÄNGS.</b> Samma medlem, samma ärende, samma text inom en
         /// minut är en andra tryckning på knappen eller en omladdning — inte ett andra svar. Utan
         /// spärren ser klubben två identiska svar och undrar vilket som gäller.</para>
         /// </summary>
-        public (int Id, string? Error) Add(string threadKind, int threadRefId, int clubId, int memberId, string body)
+        public AddResult Add(string threadKind, int threadRefId, int clubId, int memberId, string body)
         {
-            if (!MailThreadKind.IsValid(threadKind)) return (0, "Okänt ärendeslag.");
-            if (threadRefId <= 0 || memberId <= 0) return (0, "Ogiltigt ärende.");
+            if (!MailThreadKind.IsValid(threadKind)) return new AddResult(0, "Okänt ärendeslag.", false);
+            if (threadRefId <= 0 || memberId <= 0) return new AddResult(0, "Ogiltigt ärende.", false);
 
             var text = (body ?? "").Trim();
-            if (text.Length == 0) return (0, "Skriv ditt svar först.");
+            if (text.Length == 0) return new AddResult(0, "Skriv ditt svar först.", false);
             if (text.Length > MaxBodyLength)
-                return (0, $"Svaret är för långt (max {MaxBodyLength} tecken).");
+                return new AddResult(0, $"Svaret är för långt (max {MaxBodyLength} tecken).", false);
 
             try
             {
@@ -110,7 +124,7 @@ namespace HpskSite.Services.Mail
                     _logger.LogInformation(
                         "MailReply: dubbelpostning slängd för {Kind} {RefId} av medlem {MemberId}.",
                         threadKind, threadRefId, memberId);
-                    return (0, null);
+                    return new AddResult(0, null, false);
                 }
 
                 var row = new MailReply
@@ -123,7 +137,7 @@ namespace HpskSite.Services.Mail
                     CreatedAt = DateTime.Now,
                 };
                 uow.Database.Insert(row);
-                return (row.Id, null);
+                return new AddResult(row.Id, null, false);
             }
             catch (Exception ex)
             {
@@ -131,7 +145,41 @@ namespace HpskSite.Services.Mail
                 // låtit hen tro att klubben fått det.
                 _logger.LogError(ex, "MailReply: kunde inte spara svar på {Kind} {RefId}.",
                     threadKind, threadRefId);
-                return (0, "Svaret kunde inte sparas. Försök igen, eller kontakta klubben.");
+
+                // ⚠️ SÄG INTE "försök igen" SOM ENDA RÅD. Det vanligaste sparfelet är en okörd
+                // migrering, och då kan medlemmen trycka hur många gånger som helst utan att något
+                // ändras — ett råd som inte kan hjälpa är värre än inget, för det flyttar skulden
+                // till den som inte kan göra något. Klubben aviseras separat (se anroparen), och
+                // det ska texten säga så hen vet att någon fått veta.
+                return new AddResult(0,
+                    "Ditt svar kunde tyvärr inte sparas — det är ett fel hos oss, inte hos dig. "
+                    + "Klubben får ett meddelande om att du försökt. Du kan gärna prova igen om en "
+                    + "stund, eller höra av dig till klubben direkt.",
+                    true);
+            }
+        }
+
+        /// <summary>
+        /// Finns tabellen? Används av startkontrollen.
+        ///
+        /// <para><b>⚠️ Frågar SCHEMAT, inte innehållet.</b> En tom tabell och en saknad tabell är
+        /// helt olika tillstånd: det första är en normal ny miljö, det andra är en okörd migrering
+        /// som gör varje svarslänk i varje utskickat mejl till en återvändsgränd.</para>
+        /// </summary>
+        public bool TableExists()
+        {
+            try
+            {
+                using var uow = _scopeProvider.CreateScope(autoComplete: true);
+                return uow.Database.ExecuteScalar<int>(
+                    "SELECT CASE WHEN OBJECT_ID('dbo.MailReply','U') IS NULL THEN 0 ELSE 1 END") == 1;
+            }
+            catch (Exception ex)
+            {
+                // ⚠️ Kan vi inte fråga vet vi inte, och "vet inte" får inte rapporteras som "finns".
+                // Startkontrollen skiljer på de två.
+                _logger.LogDebug(ex, "MailReply: kunde inte kontrollera om tabellen finns.");
+                return false;
             }
         }
 

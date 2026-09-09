@@ -95,18 +95,28 @@ namespace HpskSite.Controllers
             if (!model.AcceptsReply)
                 return View(ViewPath, model);
 
-            var (id, error) = _replies.Add(
+            var result = _replies.Add(
                 target.ThreadKind, target.ThreadRefId, target.ClubId, target.MemberId, body ?? "");
 
-            if (error is not null)
+            if (!result.Ok)
             {
-                model.Error = error;
+                // ⚠️⚠️ ETT TAPPAT SVAR FÅR INTE VARA TYST MOT KLUBBEN. Det är samma tystnad hela
+                // funktionen byggdes för att ta bort, bara spegelvänd: medlemmen VET att hen svarat
+                // och klubben tror att hen tiger. Hände i prod 2026-09-09 (okörd migrering).
+                //
+                // ⚠️ Bara på SPARFEL, aldrig på ett valideringsfel. "Skriv ditt svar först" är
+                // medlemmens att åtgärda och ska inte mejla någon — annars blir larmet brus, och
+                // ett larm som alltid lyser slutar betyda något.
+                if (result.SaveFailed)
+                    await AfterFailedReplyAsync(target, (body ?? "").Trim());
+
+                model.Error = result.Error;
                 model.Draft = body ?? "";
                 return View(ViewPath, model);
             }
 
-            // id == 0 utan fel = dubbelpostning, redan sparad. Behandla som lyckad.
-            if (id > 0)
+            // Id == 0 utan fel = dubbelpostning, redan sparad. Behandla som lyckad.
+            if (result.Id > 0)
                 await AfterReplyAsync(target, (body ?? "").Trim());
 
             return Redirect($"/svara/{Uri.EscapeDataString(token)}?sparat=1");
@@ -148,6 +158,39 @@ namespace HpskSite.Controllers
                 // ⚠️ Sväljer. Svaret ÄR sparat; ett aviseringsfel får aldrig visa medlemmen ett
                 // felmeddelande som antyder att svaret inte togs emot.
                 _logger.LogError(ex, "Kunde inte avisera om svar på förfrågan {Id}.", target.ThreadRefId);
+            }
+        }
+
+        /// <summary>
+        /// Svaret gick inte att spara — se till att klubben ändå får veta, och att medlemmens text
+        /// inte försvinner.
+        ///
+        /// <para><b>⚠️ Sväljer allt.</b> Vi står redan i en felhantering; ett fel HÄR får inte
+        /// ersätta det felmeddelande medlemmen ska se med ett gult undantag.</para>
+        /// </summary>
+        private async Task AfterFailedReplyAsync(MailReplyTarget target, string body)
+        {
+            if (target.ThreadKind != MailThreadKind.Foreningsintyg) return;
+
+            try
+            {
+                var req = _intygRequests.GetById(target.ThreadRefId);
+                if (req is null)
+                {
+                    _logger.LogError(
+                        "Medlemssvar på föreningsintygsförfrågan {Id} kunde varken sparas eller "
+                        + "aviseras — förfrågan gick inte att läsa. Svaret var: {Body}",
+                        target.ThreadRefId, body);
+                    return;
+                }
+
+                await _intygNotifications.NotifyHandlerOfFailedReplyAsync(req, body);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Kunde inte avisera om TAPPAT svar på förfrågan {Id}. Svaret var: {Body}",
+                    target.ThreadRefId, body);
             }
         }
 

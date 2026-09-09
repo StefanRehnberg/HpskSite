@@ -473,12 +473,29 @@
                     ⚠️ Rutan förklarar att det gäller MEJLSVAR. Medlemmen har en svara-knapp i
                     mejlet som alltid landar i ärendet; det här är för den som ändå trycker Svara.
                 *@
-                <fieldset class="mt-3 pt-3 border-top">
-                    <legend class="form-label small mb-1">Om medlemmen svarar på mejlet</legend>
+                @*
+                    ⚠️ RUTAN OVANFÖR VALET FINNS FÖR ATT VALET INTE SKA MISSFÖRSTÅS. Stefan frågade
+                    2026-09-09 varför medlemmen "får ett val att svara klubben" när han valt att
+                    svaret skulle gå till honom. Det var inget fel i routningen — knappen lägger
+                    svaret på förfrågan och aviserar HANDLÄGGAREN (ResolveHandlerRecipients tar
+                    HandledByMemberId först och returnerar direkt) — men "Svara klubben" på en knapp
+                    han aldrig ser läser som ett andra mottagarval. Beskriv därför vad medlemmen
+                    FÅR SE, i stället för att lita på att han gissar rätt.
+                *@
+                <div class="alert alert-light border small mt-3 mb-2 py-2 px-3">
+                    <i class="bi bi-envelope-check me-1"></i>
+                    Medlemmen får en knapp <strong>”Svara klubben”</strong> i mejlet. Den lägger
+                    svaret direkt på förfrågan, <strong>och du får en notis</strong> — oavsett vad du
+                    väljer nedan. Det är den vanliga vägen.
+                </div>
+
+                <fieldset class="pt-2 border-top">
+                    <legend class="form-label small mb-1">
+                        Om medlemmen i stället svarar i sitt e-postprogram
+                    </legend>
                     <p class="form-text mt-0 mb-2">
-                        Mejlet har en <strong>Svara klubben</strong>-knapp som lägger svaret direkt
-                        på förfrågan. Trycker medlemmen i stället Svara i sitt e-postprogram går
-                        svaret hit:
+                        Trycker hen Svara i stället för att använda knappen hamnar svaret utanför
+                        förfrågan. Då går det hit:
                     </p>
                     <div class="form-check">
                         <input class="form-check-input" type="radio" name="fiCompReplyTo"

@@ -1189,6 +1189,63 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Medlemmen försökte svara men svaret gick inte att spara — säg det till klubben, och bär
+        /// medlemmens text.
+        ///
+        /// <para><b>⚠️ MEJLET ÄR DEN ENDA KOPIAN.</b> Databasen tog inte emot svaret, så texten
+        /// finns ingen annanstans. Skriv ut den i sin helhet — utan den vet klubben bara att någon
+        /// försökt och måste ringa och be medlemmen upprepa sig.</para>
+        ///
+        /// <para><b>⚠️ Säg vad klubben ska GÖRA.</b> Ett larm utan nästa steg blir en oro, inte en
+        /// åtgärd: svara medlemmen direkt (Reply-To är hen) och hör av dig till pistol.nu.</para>
+        /// </summary>
+        public async Task<bool> SendForeningsintygFailedReplyAsync(
+            string toEmail, string toName, string memberName, string clubName,
+            string firearmLabel, string replyBody, MailReplyTo replyTo)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning(
+                    "SendForeningsintygFailedReplyAsync skipped — no email address for {Name}", toName);
+                return false;
+            }
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeMember = System.Web.HttpUtility.HtmlEncode(memberName);
+            var safeFirearm = System.Web.HttpUtility.HtmlEncode(firearmLabel);
+            var safeBody = System.Web.HttpUtility.HtmlEncode(replyBody ?? "")
+                .Replace("\r\n", "\n").Replace("\n", "<br/>");
+
+            var subject = $"{memberName} försökte svara — svaret kunde inte sparas";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p><strong>{safeMember}</strong> försökte svara på er begäran om komplettering för
+       <strong>{safeFirearm}</strong>, men <strong>svaret kunde inte sparas hos oss</strong>.
+       Det är ett tekniskt fel på pistol.nu — inte något medlemmen gjort.</p>
+    <p><strong>Det här skrev medlemmen:</strong></p>
+    <blockquote style=""border-left:3px solid #dc3545; margin:10px 0; padding:5px 10px; color:#555;"">
+        {safeBody}
+    </blockquote>
+    <p><strong>Svaret syns INTE på förfrågan</strong> — det här mejlet är enda kopian, så spara det
+       tills ärendet är avgjort.</p>
+    <p>Du kan svara medlemmen direkt på det här mejlet. Hör gärna också av dig till pistol.nu så att
+       felet blir åtgärdat.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
+        }
+
+        /// <summary>
         /// Send a single formatted HTML email through the site SMTP, but presented as coming from a
         /// club/region (display name) with replies routed to their own address. Lets clubs without
         /// Brevo still send nice HTML member mail. From address stays the authenticated site address
