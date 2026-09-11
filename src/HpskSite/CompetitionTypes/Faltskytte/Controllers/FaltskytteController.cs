@@ -34,6 +34,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly FaltskytteShootOffService _shootOffService;
         private readonly IDataProtectionProvider _dataProtectionProvider;
         private readonly StandardMedalMaterializationService _medalMaterialization;
+        private readonly FaltskytteResultsBuilder _resultsBuilder;
+        private readonly FaltskytteResultArtifactService _resultArtifact;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -51,7 +53,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             UmbracoStartListRepository startListRepository,
             FaltskytteShootOffService shootOffService,
             IDataProtectionProvider dataProtectionProvider,
-            StandardMedalMaterializationService medalMaterialization)
+            StandardMedalMaterializationService medalMaterialization,
+            FaltskytteResultsBuilder resultsBuilder,
+            FaltskytteResultArtifactService resultArtifact)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -65,6 +69,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _shootOffService = shootOffService;
             _dataProtectionProvider = dataProtectionProvider;
             _medalMaterialization = medalMaterialization;
+            _resultsBuilder = resultsBuilder;
+            _resultArtifact = resultArtifact;
         }
 
         // ── Authorization helpers ───────────────────────────────────
@@ -229,34 +235,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new { success = true, config, scoringMode, maxReshoots });
         }
 
-        /// <summary>Parses the station config from competition, handling both old and new format.</summary>
-        /// <summary>Sort order for class names in result lists: C→B→A→R→M, then by level and variant.</summary>
-        private static int GetClassSortOrder(string className)
-        {
-            if (string.IsNullOrEmpty(className)) return 9999;
-            // Weapon group order
-            var weaponOrder = className[0] switch { 'C' => 100, 'L' => 200, 'B' => 300, 'A' => 400, 'R' => 500, 'M' => 600, _ => 800 };
-            // Sub-order within weapon group: class number, then variant
-            var sub = 0;
-            if (className.Contains("1")) sub = 10;
-            else if (className.Contains("2")) sub = 20;
-            else if (className.Contains("3")) sub = 30;
-            // Variant suffix
-            if (className.Contains("Dam")) sub += 1;
-            else if (className.Contains("Vet Y")) sub += 2;
-            else if (className.Contains("Vet \u00c4")) sub += 3;
-            else if (className.Contains("Vet")) sub += 2;
-            else if (className.Contains("Jun")) sub += 4;
-            // Merged classes (contain +) sort after their base
-            if (className.Contains("+")) sub += 5;
-            return weaponOrder + sub;
-        }
+        /// <summary>Sort order for class names in result lists. Regeln bor i
+        /// <see cref="FaltskytteResultsBuilder"/> — en andra kopia här skulle glida isär från
+        /// resultatlistans egen ordning.</summary>
+        private static int GetClassSortOrder(string className) =>
+            FaltskytteResultsBuilder.GetClassSortOrder(className);
 
-        private static FaltskytteCompetitionConfig ParseCompetitionConfig(Umbraco.Cms.Core.Models.IContent competition)
-        {
-            var configJson = competition.GetValue<string>("stationConfig");
-            return FaltskytteConfigParser.Parse(configJson);
-        }
+        /// <summary>Parses the station config from competition, handling both old and new format.</summary>
+        private static FaltskytteCompetitionConfig ParseCompetitionConfig(Umbraco.Cms.Core.Models.IContent competition) =>
+            FaltskytteResultsBuilder.ParseCompetitionConfig(competition);
 
         /// <summary>Gets station config for a specific weapon class and station number.</summary>
         private static FaltskytteStationConfig? GetStationForWeaponClass(
@@ -941,261 +928,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null)
-                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+                // ⚠️ Bygget bor i FaltskytteResultsBuilder, inte här. Särskjutningskortet och
+                // prisutdelningens resultatartefakt läser SAMMA ställning — räknades den om på
+                // andra sidan kunde ytorna säga olika saker om samma medalj, vilket är precis
+                // hur mästerskapskategori och skicklighetsklass har förväxlats förut.
+                var build = await _resultsBuilder.BuildAsync(competitionId, mergeConfig, subCompetitionOnly);
+                if (build.Results == null)
+                    return Json(new { success = false, message = build.Error ?? "Kunde inte bygga resultatlistan." });
 
-                var competitionConfig = ParseCompetitionConfig(competition);
-                // Tävlingstyp from the config first (the property is a stale-able mirror) —
-                // this decides Normalfält "32/22" vs Poängfält "54 p" scoring below.
-                var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
-                // For result display, use the first available weapon class config to determine station count.
-                // Stations marked IsShootOffOnly are NOT counted — they don't contribute to the qualification
-                // ranking and they're filtered out everywhere else (admin links, public station card).
-                var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
-                var stationCount = firstWcConfig?.Stations.Count(s => !s.IsShootOffOnly) ?? 0;
-                var shootOffOnlyStationNumbers = (firstWcConfig?.Stations
-                    .Where(s => s.IsShootOffOnly)
-                    .Select(s => s.Station)
-                    .ToHashSet()) ?? new HashSet<int>();
-
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-                var allResults = await db.FetchAsync<FaltskytteResultEntry>(
-                    "WHERE CompetitionId = @0 ORDER BY MemberId, StationNumber", competitionId);
-
-                // Belt-and-braces: even if any legacy FaltskytteResultEntry rows exist for a
-                // station that's now marked IsShootOffOnly, exclude them from the qualification
-                // totals. Shoot-off scores live in FaltskytteShootOffEntry.
-                if (shootOffOnlyStationNumbers.Count > 0)
-                    allResults = allResults.Where(r => !shootOffOnlyStationNumbers.Contains(r.StationNumber)).ToList();
-
-                if (!allResults.Any())
-                    return Json(new { success = false, message = "Inga resultat finns." });
-
-                // Get patrol members for name/club lookup
-                var patrols = await db.FetchAsync<FaltskyttePatrol>(
-                    "WHERE CompetitionId = @0", competitionId);
-                var patrolIds = patrols.Select(p => p.Id).ToList();
-                var allMembers = patrolIds.Any()
-                    ? await db.FetchAsync<FaltskyttePatrolMember>(
-                        $"WHERE PatrolId IN ({string.Join(",", patrolIds)})")
-                    : new List<FaltskyttePatrolMember>();
-                var memberLookup = allMembers
-                    .GroupBy(m => m.MemberId)
-                    .ToDictionary(g => g.Key, g => g.First());
-
-                // Build shooter results
-                var shooterResults = allResults
-                    .GroupBy(r => new { r.MemberId, r.ShootingClass })
-                    .Select(g =>
-                    {
-                        var memberId = g.Key.MemberId;
-                        var member = memberLookup.GetValueOrDefault(memberId);
-                        var stationResults = g.OrderBy(r => r.StationNumber)
-                            .Select(r => new FaltskytteStationResult
-                            {
-                                StationNumber = r.StationNumber,
-                                Hits = r.Hits,
-                                Figures = r.Figures,
-                                TiebreakerScore = r.TiebreakerScore
-                            }).ToList();
-
-                        var totalHits = stationResults.Sum(s => s.Hits);
-                        var totalFigures = stationResults.Sum(s => s.Figures);
-                        var totalPoints = stationResults.Sum(s => s.Points);
-                        var totalTiebreaker = stationResults.Where(s => s.TiebreakerScore.HasValue)
-                            .Sum(s => s.TiebreakerScore!.Value);
-
-                        return new FaltskytteShooterResult
-                        {
-                            MemberId = memberId,
-                            Name = member?.MemberName ?? "Okänd skytt",
-                            Club = HpskSite.Helpers.ClubNameHelper.Shorten(member?.ClubName ?? ""),
-                            ShootingClass = HpskSite.Models.ShootingClasses.GetById(g.Key.ShootingClass)?.Name
-                                ?? g.Key.ShootingClass,
-                            Stations = stationResults,
-                            TotalHits = totalHits,
-                            TotalFigures = totalFigures,
-                            TotalPoints = totalPoints,
-                            TotalTiebreakerScore = totalTiebreaker
-                        };
-                    }).ToList();
-
-                // Filter for sub-competition if requested
-                if (subCompetitionOnly)
-                {
-                    var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
-                    var subCompMemberIds = new HashSet<int>(
-                        registrations.Where(r => r.IsSubCompetition).Select(r => r.MemberId));
-                    shooterResults = shooterResults.Where(s => subCompMemberIds.Contains(s.MemberId)).ToList();
-                }
-
-                // Locate the competitionResult child node — used both for the sub-comp's
-                // own merge config / official flag and as a fallback when nothing was passed
-                // in. The node may not exist yet if results have never been published.
-                var resultPageNode = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-
-                // Build merge lookup from config (if provided)
-                var mergeLookup = new Dictionary<string, string>(); // source class → combined group name
-                if (string.IsNullOrEmpty(mergeConfig))
-                {
-                    // Sub-comp reads from its own slot on the competitionResult node;
-                    // main reads from the competition's mergeConfig (existing pattern).
-                    if (subCompetitionOnly)
-                    {
-                        mergeConfig = resultPageNode != null && resultPageNode.HasProperty("subCompetitionMergeConfig")
-                            ? resultPageNode.GetValue<string>("subCompetitionMergeConfig") ?? ""
-                            : "";
-                    }
-                    else
-                    {
-                        mergeConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
-                    }
-                }
-                if (!string.IsNullOrEmpty(mergeConfig))
-                {
-                    try
-                    {
-                        var mergeActions = Newtonsoft.Json.JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfig);
-                        if (mergeActions != null)
-                        {
-                            // Use union-find so multi-source merges (C2 Dam + C3 Dam + C Vet Y all → C2)
-                            // collapse into ONE combined group, matching the Precision fix.
-                            var unified = ClassMergingService.BuildMergeGroupLookup(mergeActions);
-                            foreach (var kv in unified)
-                                mergeLookup[kv.Key] = kv.Value;
-                        }
-                    }
-                    catch { /* ignore invalid merge config */ }
-                }
-
-                // Group by class (applying merge lookup) and rank
-                var isPoang = scoringMode.Equals("Poang", StringComparison.OrdinalIgnoreCase);
-                var tieBreaker = new Services.FaltskylteTieBreaker(isPoang);
-                var classGroups = shooterResults
-                    .GroupBy(s => mergeLookup.GetValueOrDefault(s.ShootingClass, s.ShootingClass))
-                    .Select(g => new FaltskytteClassGroup
-                    {
-                        ClassName = g.Key,
-                        Shooters = g.OrderByDescending(s => s, tieBreaker).ToList()
-                    })
-                    .OrderBy(g => GetClassSortOrder(g.ClassName))
-                    .ToList();
-
-                // Standard medals are calculated on whatever shooter set we have — for the
-                // Deltävling that's the (smaller) filtered subset, so 1/9 silver and 1/3 bronze
-                // quotas are computed over the Deltävling participants only. Gated on
-                // isAwardingStandardMedals AND !isClubOnly per BR-PS.1.3 (club competitions
-                // never award standard medals). When either gate fails the StandardMedal field
-                // on each shooter stays empty and the views drop the Std column.
-                var isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals");
-                var isClubOnly = competition.GetValue<bool>("isClubOnly");
-                var competitionScope = competition.GetValue<string>("competitionScope") ?? "";
-                // SHB 2026: standard medals are split per C-category at SM AND Landsdelsmästerskap
-                // (pre-existing hardcode; KrM/KM use the merged C grouping). Keep the SM-only split here
-                // because the StandardMedalService's `isChampionship` flag specifically gates the C-split.
-                var isSmOrLdm = competitionScope == CompetitionScopeHelper.SvensktMasterskap
-                             || competitionScope == CompetitionScopeHelper.Landsdelsmasterskap;
-                if (isAwardingStandardMedals && !isClubOnly)
-                {
-                    var medalService = new Services.FaltskytteStandardMedalService();
-                    medalService.CalculateStandardMedals(shooterResults, scoringMode, stationCount, isSmOrLdm);
-                }
-
-                // ── Särskjutning (championship-only, medal places 1–3) ──
-                // Replaces the old SM+LDM hardcode with the unified IsChampionshipScope helper
-                // (FR-205, applies to KrM and KM as well).
-                if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
-                {
-                    var competitionType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
-                    var comparer = FaltskytteShootOffService.ComparerFor(competitionType, scoringMode);
-                    var shootOffEntries = await _shootOffService.GetEntriesForCompetitionAsync(competitionId);
-                    var entriesByMember = shootOffEntries.ToLookup(e => e.MemberId);
-
-                    foreach (var classGroup in classGroups)
-                    {
-                        var tied = FaltskytteShootOffService.DetectTiedMedalGroups(
-                            classGroup.Shooters, scoringMode, competitionType);
-                        if (tied.Count == 0) continue;
-
-                        FaltskytteShootOffService.ApplyShootOffOverride(
-                            classGroup.Shooters, tied, entriesByMember, comparer);
-
-                        classGroup.TiedMedalGroups = tied;
-
-                        foreach (var g in tied)
-                        {
-                            if (!g.Resolved || g.Shooters.Count < 2) continue;
-                            var ordered = g.Shooters
-                                .Where(s => s.Rounds != null && s.Rounds.Count > 0)
-                                .ToList();
-                            if (ordered.Count < 2) continue;
-                            var medalNouns = FaltskytteShootOffService.MedalNounsForRange(g.FirstRank, g.LastRank);
-                            var parts = ordered.Select(s =>
-                            {
-                                var lastRound = s.Rounds.OrderByDescending(r => r.Round).First();
-                                return $"{s.Name} {lastRound.Display}";
-                            });
-                            classGroup.ShootOffNotes.Add(
-                                $"Särskjutning avgjorde {medalNouns}: {string.Join(" vs ", parts)}");
-                        }
-                    }
-                }
-
-                // Header metadata for the result-list printout / on-screen card —
-                // matches what the Precision result page surfaces (competition
-                // name, date, organiser, status).
-                var competitionName = competition.Name ?? competition.GetValue<string>("competitionName") ?? "";
-                var competitionDateValue = competition.GetValue<DateTime?>("competitionDate");
-                var competitionDateStr = competitionDateValue.HasValue
-                    ? competitionDateValue.Value.ToString("yyyy-MM-dd")
-                    : "";
-                var organizerClubId = competition.GetValue<int>("clubId");
-                var organizerName = organizerClubId > 0
-                    ? (_clubService.GetClubNameById(organizerClubId) ?? "")
-                    : "";
-
-                // IsOfficial reflects whichever flag is relevant for this payload:
-                //   sub-comp → resultPageNode.subCompetitionIsOfficial
-                //   main    → competition.faltskytteResultsOfficial
-                bool isOfficialForPayload;
-                if (subCompetitionOnly)
-                {
-                    isOfficialForPayload = resultPageNode != null
-                        && resultPageNode.HasProperty("subCompetitionIsOfficial")
-                        && resultPageNode.GetValue<bool>("subCompetitionIsOfficial");
-                }
-                else
-                {
-                    isOfficialForPayload = competition.HasProperty("faltskytteResultsOfficial")
-                        && competition.GetValue<bool>("faltskytteResultsOfficial");
-                }
-
-                var subCompetitionName = competition.HasProperty("subCompetitionName")
-                    ? competition.GetValue<string>("subCompetitionName") ?? ""
-                    : "";
-
-                return Json(new
-                {
-                    success = true,
-                    results = new FaltskylteFinalResults
-                    {
-                        CompetitionId = competitionId,
-                        UpdatedAt = DateTime.Now,
-                        IsOfficial = isOfficialForPayload,
-                        ScoringMode = scoringMode,
-                        StationCount = stationCount,
-                        Config = competitionConfig,
-                        ClassGroups = classGroups,
-                        CompetitionName = competitionName,
-                        CompetitionDate = competitionDateStr,
-                        OrganizerName = organizerName,
-                        IsSubCompetition = subCompetitionOnly,
-                        SubCompetitionName = subCompetitionName,
-                        IsAwardingStandardMedals = isAwardingStandardMedals && !isClubOnly
-                    }
-                });
+                return Json(new { success = true, results = build.Results });
             }
             catch (Exception ex)
             {
@@ -1250,7 +991,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 _logger.LogWarning("Competition {CompId} missing 'mergeConfig' property — merge config not saved. Add this property to the competition document type.", request.CompetitionId);
             }
 
-            return Json(new { success = true });
+            // Sammanslagningen ändrar vilka som tävlar mot vilka, alltså vem som får medalj.
+            var refreshed = await _resultArtifact.RefreshAsync(request.CompetitionId, "klassammanslagning sparad");
+            return Json(new { success = true, resultsRefreshed = refreshed });
         }
 
         // ── Särskjutning endpoints ──────────────────────────────────────────
@@ -1268,26 +1011,23 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (!await IsAuthorizedForCompetition(competitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                // Reuse the typed FaltskylteFinalResults built by GetFaltskytteResults so the
-                // detection + override logic stays in one place. We deserialize via Newtonsoft
-                // through a typed wrapper to dodge any camelCase/PascalCase JSON-casing fragility.
-                var resultsResponse = await GetFaltskytteResults(competitionId, null, subCompetitionOnly);
-                if (resultsResponse is not JsonResult jr || jr.Value == null)
-                    return resultsResponse;
+                // Samma bygge som resultatlistan, så kortet och listan aldrig kan vara oense om
+                // vilken strid som pågår.
+                var build = await _resultsBuilder.BuildAsync(competitionId, null, subCompetitionOnly);
+                if (build.Results == null)
+                    return Json(new { success = false, message = build.Error ?? "Kunde inte bygga resultatlistan." });
 
-                var raw = JsonConvert.SerializeObject(jr.Value);
-                var wrapper = JsonConvert.DeserializeObject<FaltskytteResultsWrapper>(raw,
-                    new JsonSerializerSettings { ContractResolver = new Newtonsoft.Json.Serialization.DefaultContractResolver() });
-                if (wrapper == null || !wrapper.success || wrapper.results == null)
-                    return jr;
-
-                var classGroups = wrapper.results.ClassGroups
-                    .Where(cg => cg.TiedMedalGroups != null && cg.TiedMedalGroups.Count > 0)
-                    .Select(cg => new
+                // ⚠️ JSON-FORMEN ÄR OFÖRÄNDRAD: `className` bär nu MÄSTERSKAPSKATEGORINS namn i
+                // stället för skicklighetsklassens. Kortets JS är därmed orörd — men den strid
+                // som visas är den som faktiskt avgör en medalj. Samma grepp som
+                // precisionsfamiljens GetShootOffStatus tog 2026-09-07.
+                var classGroups = build.Results.MedalCategoryTies
+                    .Where(t => t.Groups != null && t.Groups.Count > 0)
+                    .Select(t => new
                     {
-                        className = cg.ClassName,
-                        displayClassName = cg.DisplayClassName,
-                        groups = cg.TiedMedalGroups
+                        className = t.CategoryName,
+                        displayClassName = (string?)null,
+                        groups = t.Groups
                     })
                     .ToList<object>();
 
@@ -1298,14 +1038,6 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 _logger.LogError(ex, "GetFaltskytteShootOffStatus failed for competition {CompetitionId}", competitionId);
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
-        }
-
-        /// <summary>Typed wrapper for the GetFaltskytteResults Json() payload so we can pull out
-        /// TiedMedalGroups without dynamic property access.</summary>
-        private class FaltskytteResultsWrapper
-        {
-            public bool success { get; set; }
-            public FaltskylteFinalResults? results { get; set; }
         }
 
         [HttpGet]
@@ -1399,7 +1131,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     request.TiebreakerScore, request.PoangmalScores,
                     actingMemberId);
                 if (!ok) return Json(new { success = false, message = err ?? "Kunde inte spara." });
-                return Json(new { success = true });
+
+                // ⚠️ SÄRSKJUTNINGEN ÄR DET ENDA SOM AVGÖR EN MEDALJ, och prisutdelningssidan
+                // läser den SPARADE artefakten. Utan omräkningen här påstår den "särskjutning
+                // krävs" om en strid som just avgjorts — precisionsfamiljens motsvarande miss
+                // mättes på SSM 2026: artefakt 13:10, avgörande resultat 14:06.
+                var refreshed = await _resultArtifact.RefreshAsync(request.CompetitionId, "särskjutning sparad");
+                return Json(new
+                {
+                    success = true,
+                    resultsRefreshed = refreshed,
+                    message = refreshed
+                        ? null
+                        : "Skotten sparades, men resultatlistan kunde inte räknas om. "
+                          + "Klicka Uppdatera på resultatlistan innan prisutdelningen."
+                });
             }
             catch (Exception ex)
             {
@@ -1422,7 +1168,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                 var (ok, err) = await _shootOffService.DeleteEntryAsync(
                     request.CompetitionId, request.MemberId, request.ShootingClass, request.Round);
-                return Json(new { success = ok, message = err });
+                if (!ok) return Json(new { success = false, message = err });
+
+                // Samma skäl som vid sparningen: en borttagen runda gör en avgjord strid
+                // oavgjord igen, och artefakten måste följa med.
+                var refreshed = await _resultArtifact.RefreshAsync(request.CompetitionId, "särskjutning borttagen");
+                return Json(new { success = true, resultsRefreshed = refreshed });
             }
             catch (Exception ex)
             {
@@ -1485,6 +1236,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _contentService.Save(resultPage);
             _contentService.Publish(resultPage, new[] { "*" }, -1);
 
+            // ⚠️ FÖRST NU FINNS NODEN ATT SKRIVA ARTEFAKTEN PÅ. Publiceringen är den naturliga
+            // punkt där prislistan ska bli aktuell — den sker efter att alla stationer matats in
+            // och före ceremonin. Huvudlistan äger artefakten; deltävlingen har ingen egen
+            // prisutdelningssida och räknar därför inte om den.
+            var artifactRefreshed = false;
+            if (!request.IsSubCompetition)
+                artifactRefreshed = await _resultArtifact.RefreshAsync(request.CompetitionId, "resultatlista publicerad");
+
             // Phase 2 auto-trigger: notify registered shooters that results are published. Opt-in per
             // competition (autoNotifyParticipants, default off), main publish only, fire-and-forget.
             if (!request.IsSubCompetition && request.IsOfficial && competition.GetValue<bool>("autoNotifyParticipants"))
@@ -1503,7 +1262,31 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 }
             }
 
-            return Json(new { success = true });
+            return Json(new { success = true, resultsRefreshed = artifactRefreshed });
+        }
+
+        /// <summary>
+        /// Räknar om prisutdelningens resultatartefakt. Motsvarar precisionsfamiljens
+        /// "Uppdatera" — resultat som matas in efter publiceringen når annars aldrig prislistan.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RefreshResultArtifact([FromBody] CompetitionIdRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0)
+                return Json(new { success = false, message = "Ogiltig begäran." });
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var ok = await _resultArtifact.RefreshAsync(request.CompetitionId, "uppdaterad för hand");
+            return Json(new
+            {
+                success = ok,
+                message = ok
+                    ? null
+                    : "Kunde inte räkna om prisutdelningslistan. Publicera resultatlistan först, "
+                      + "eller kontrollera att det finns inmatade resultat."
+            });
         }
 
         /// <summary>

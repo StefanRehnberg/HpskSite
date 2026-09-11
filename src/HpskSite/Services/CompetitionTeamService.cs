@@ -1,4 +1,5 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
+using HpskSite.CompetitionTypes.Faltskytte.Models;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Springskytte.Models;
 using Umbraco.Cms.Core.Models;
@@ -775,7 +776,21 @@ namespace HpskSite.Services
             using var db = _databaseFactory.CreateDatabase();
 
             var isSpringskytte = competitionType == "Springskytte";
+            var isFaltskytte = competitionType is "Faltskytte" or "MagnumFalt";
             var resultGroups = new List<TeamResultGroup>();
+
+            // ⚠️ FÄLTSKYTTETS RADER LIGGER I EN EGEN TABELL MED EN EGEN FORM — träff och figur
+            // per STATION, inte skott per serie. Den delade koden nedan läser
+            // `PrecisionResultEntry` genom GetResultTableName, som för fältskytte föll tillbaka
+            // på precisionstabellen och därmed svarade NOLL poäng på varje lag. Tyst: laget
+            // fanns, det stod bara aldrig något i det.
+            //
+            // Lagtävling i fältskjutning finns i SHB: C.3.6.5.1 delar ut förbundets medaljer
+            // "inom var och en av vapengrupperna A, B, C, samt klasserna Damer C, Juniorer C,
+            // Veteraner C. I fältskjutning dessutom i vapengrupp R."
+            var faltContext = isFaltskytte
+                ? await LoadFaltskytteTeamContextAsync(db, competitionId, competitionType)
+                : null;
 
             // Springskytte range-master penalties/reductions live in their own ledger and are folded
             // into a shooter's total by SpringskytteController.ApplyTimeAdjustmentsAsync — the raw
@@ -888,6 +903,11 @@ namespace HpskSite.Services
                             IsRelay = teamWithMembers.Team.IsRelay
                         });
                     }
+                    else if (isFaltskytte && faltContext != null)
+                    {
+                        teamResults.Add(BuildFaltskytteTeamResult(
+                            teamWithMembers, coreMembers, rosterComplete, classGroup.Key, faltContext));
+                    }
                     else
                     {
                         // Standard: sum of individual scores over the first `numberOfSeries`
@@ -982,6 +1002,8 @@ namespace HpskSite.Services
                             ClubName = teamWithMembers.ClubName,
                             TotalScore = totalScore,
                             TotalXCount = totalXCount,
+                            // Precisionsfamiljens kedja, oförändrad: poäng, därefter X.
+                            TiebreakKey = new List<int> { totalScore, totalXCount },
                             MemberResults = memberResults,
                             IsComplete = allComplete && rosterComplete,
                             IsRelay = teamWithMembers.Team.IsRelay
@@ -989,7 +1011,8 @@ namespace HpskSite.Services
                     }
                 }
 
-                // Sort: Springskytte by time (lowest first), standard by score (highest first)
+                // Sort: Springskytte by time (lowest first), everything else by its own
+                // tiebreak key (higher is better in every position).
                 if (isSpringskytte)
                 {
                     teamResults = teamResults
@@ -1001,8 +1024,7 @@ namespace HpskSite.Services
                 {
                     teamResults = teamResults
                         .OrderBy(t => !t.IsComplete)
-                        .ThenByDescending(t => t.TotalScore)
-                        .ThenByDescending(t => t.TotalXCount)
+                        .ThenBy(t => t, TiebreakKeyComparer.Instance)
                         .ToList();
                 }
 
@@ -1475,6 +1497,168 @@ namespace HpskSite.Services
             return "Precision";
         }
 
+
+        // ── Lagtävling i fältskjutning (SHB C.3.6.5.1 + D.6.11.2.2) ────────────────────────
+
+        /// <summary>
+        /// Allt ett fältskyttelag behöver, hämtat EN gång för hela tävlingen.
+        ///
+        /// ⚠️ Inte per lagmedlem. Precisionsgrenen nedan gör en fråga per skytt, vilket är dyrt
+        /// men fungerar; fältskyttets rader är per STATION, så samma mönster hade blivit
+        /// medlemmar × stationer frågor på en sida arrangören öppnar mitt i en tävling.
+        /// </summary>
+        private sealed class FaltskytteTeamContext
+        {
+            /// <summary>Alla kvalificerande rader, grupperade per medlem.</summary>
+            public ILookup<int, FaltskytteResultEntry> RowsByMember { get; init; } = null!;
+
+            /// <summary>Stationsnumren i FALLANDE ordning — sista stationen först, som
+            /// särskiljningen räknar bakåt (D.6.11.2.2 punkt 3).</summary>
+            public List<int> StationsDescending { get; init; } = new();
+
+            /// <summary>Poängfält och magnumfält räknar poäng (träff + figurer); normalfält träff.</summary>
+            public bool UsesPoints { get; init; }
+        }
+
+        private async Task<FaltskytteTeamContext?> LoadFaltskytteTeamContextAsync(
+            IUmbracoDatabase db, int competitionId, string competitionType)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null) return null;
+
+                // ⚠️ Tävlingstypen läses ur KONFIGURATIONEN först. Egenskapen `scoringMode` är
+                // en spegel som bara synkas vid Anslut och kan vara inaktuell — läses den ensam
+                // scoras en poängfälttävling som normalfält, tyst.
+                var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig"));
+                var scoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode"));
+
+                // Särskjutningsstationer räknas ALDRIG in i lagresultatet. En särskjutning
+                // avgör en placering inom en omgång; att lägga den i totalen betalar en skytt
+                // två gånger för samma oavgjorda läge. Samma uteslutning som individuella
+                // listan gör.
+                var shootOffOnly = (config.WeaponConfigs.Values.FirstOrDefault()?.Stations
+                    .Where(s => s.IsShootOffOnly)
+                    .Select(s => s.Station)
+                    .ToHashSet()) ?? new HashSet<int>();
+
+                var rows = await db.FetchAsync<FaltskytteResultEntry>(
+                    "WHERE CompetitionId = @0 ORDER BY MemberId, StationNumber", competitionId);
+                if (shootOffOnly.Count > 0)
+                    rows = rows.Where(r => !shootOffOnly.Contains(r.StationNumber)).ToList();
+
+                return new FaltskytteTeamContext
+                {
+                    RowsByMember = rows.ToLookup(r => r.MemberId),
+                    StationsDescending = rows.Select(r => r.StationNumber).Distinct().OrderByDescending(n => n).ToList(),
+                    UsesPoints = string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase)
+                };
+            }
+            catch (Exception ex)
+            {
+                // Samma hållning som Springskyttes justeringsledger: ett läsfel får inte ta ner
+                // hela laglistan. Utan kontext hoppas fältgrenen över och lagen visas tomma,
+                // vilket är vad de var före den här fixen.
+                _logger.LogWarning(ex, "Kunde inte läsa fältskyttets lagunderlag för tävling {Comp}", competitionId);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Ett lags resultat i fältskjutning: summan av medlemmarnas individuella resultat,
+        /// med särskiljningskedjan ur SHB D.6.11.2.2 lagd i <see cref="TeamResult.TiebreakKey"/>.
+        /// </summary>
+        private static TeamResult BuildFaltskytteTeamResult(
+            TeamWithMembers teamWithMembers,
+            List<TeamMemberInfo> coreMembers,
+            bool rosterComplete,
+            string teamClass,
+            FaltskytteTeamContext ctx)
+        {
+            // ⚠️ RADERNA MÅSTE SKOPAS TILL LAGETS VAPENGRUPP. En skytt anmäld i både C2 och A2
+            // har rader i båda, och en oskopad summa hade lagt hens A-resultat i klubbens
+            // C-lag. Samma fälla som precisionsgrenen nålar med ScopeEntriesToTeamClass.
+            //
+            // Lånemängden används med flit: SHB C.3.6.5.1 låter en skytt ur en annan C-klass
+            // ingå i vapengruppslaget, och då är det hens resultat i DEN klassen som räknas.
+            var eligible = TeamClassHelper
+                .GetCompatibleIndividualClasses(teamClass, isSpringskytte: false)
+                .Select(ShootingClasses.NormalizeKey)
+                .ToHashSet();
+
+            var memberResults = new List<TeamMemberResult>();
+            int totalScore = 0, totalFigures = 0, totalTiebreak = 0;
+            var stationTotals = ctx.StationsDescending.ToDictionary(n => n, _ => 0);
+            bool allComplete = true;
+
+            foreach (var member in coreMembers)
+            {
+                var rows = ctx.RowsByMember[member.MemberId]
+                    .Where(r => eligible.Count == 0
+                             || eligible.Contains(ShootingClasses.NormalizeKey(r.ShootingClass)))
+                    .ToList();
+
+                if (rows.Count == 0)
+                {
+                    allComplete = false;
+                    memberResults.Add(new TeamMemberResult
+                    {
+                        MemberId = member.MemberId,
+                        Name = member.Name,
+                        HasResult = false
+                    });
+                    continue;
+                }
+
+                var hits = rows.Sum(r => r.Hits);
+                var figures = rows.Sum(r => r.Figures);
+                var score = ctx.UsesPoints ? hits + figures : hits;
+
+                totalScore += score;
+                totalFigures += figures;
+                totalTiebreak += rows.Sum(r => r.TiebreakerScore ?? 0);
+
+                // ⚠️ Återräkningen går på TRÄFF, inte på poäng — D.6.11.2.2 säger "sammanlagda
+                // träff på sista stationen" i BÅDA varianterna, alltså även i poängfält.
+                foreach (var r in rows)
+                    if (stationTotals.ContainsKey(r.StationNumber))
+                        stationTotals[r.StationNumber] += r.Hits;
+
+                memberResults.Add(new TeamMemberResult
+                {
+                    MemberId = member.MemberId,
+                    Name = member.Name,
+                    Score = score,
+                    XCount = figures,
+                    HasResult = true
+                });
+            }
+
+            // SHB D.6.11.2.2: totalen, därefter figurer, därefter poängmål, därefter träff på
+            // sista stationen och bakåt. Går de inte att skilja åt får lagen samma placering —
+            // vilket är precis vad en identisk nyckel betyder för konsumenten.
+            var key = new List<int> { totalScore, totalFigures, totalTiebreak };
+            key.AddRange(ctx.StationsDescending.Select(n => stationTotals[n]));
+
+            return new TeamResult
+            {
+                TeamId = teamWithMembers.Team.Id,
+                TeamName = teamWithMembers.Team.TeamName,
+                ClubName = teamWithMembers.ClubName,
+                TotalScore = totalScore,
+                // XCount bär figurerna, så varje befintlig yta som redan skriver ut
+                // "andrahandstalet" visar rätt siffra utan att veta om fältskytte.
+                TotalXCount = totalFigures,
+                TotalFigures = totalFigures,
+                TotalTiebreakerScore = totalTiebreak,
+                TiebreakKey = key,
+                MemberResults = memberResults,
+                IsComplete = allComplete && rosterComplete,
+                IsRelay = teamWithMembers.Team.IsRelay
+            };
+        }
         private string GetResultTableName(string competitionType)
         {
             return competitionType switch
@@ -1828,6 +2012,40 @@ namespace HpskSite.Services
         public List<string> ShootingClasses { get; set; } = new();
     }
 
+    /// <summary>
+    /// Jämför två lag på <see cref="TeamResult.TiebreakKey"/> — led för led, HÖGRE är bättre.
+    /// Sorterar alltså BÄST FÖRST.
+    ///
+    /// ⚠️ Nyckeln kan vara olika lång mellan grenar men aldrig inom en tävling; ett saknat led
+    /// läses som 0 i stället för att kasta, eftersom en krasch här hade tagit ner hela
+    /// laglistan för ett enda halvbyggt lag.
+    /// </summary>
+    internal sealed class TiebreakKeyComparer : IComparer<TeamResult>
+    {
+        public static readonly TiebreakKeyComparer Instance = new();
+
+        public int Compare(TeamResult? a, TeamResult? b)
+        {
+            if (ReferenceEquals(a, b)) return 0;
+            if (a == null) return 1;
+            if (b == null) return -1;
+
+            var ka = a.TiebreakKey;
+            var kb = b.TiebreakKey;
+            var len = Math.Max(ka.Count, kb.Count);
+            for (int i = 0; i < len; i++)
+            {
+                var va = i < ka.Count ? ka[i] : 0;
+                var vb = i < kb.Count ? kb[i] : 0;
+                if (va != vb) return vb.CompareTo(va); // fallande
+            }
+            return 0;
+        }
+
+        /// <summary>True när kedjan inte kan skilja lagen åt — de ska då dela placering.</summary>
+        public static bool Unseparated(TeamResult a, TeamResult b) => Instance.Compare(a, b) == 0;
+    }
+
     public class TeamResultGroup
     {
         public string TeamClass { get; set; } = "";
@@ -1845,6 +2063,27 @@ namespace HpskSite.Services
         public decimal? TotalTimeSeconds { get; set; }
         public List<TeamMemberResult> MemberResults { get; set; } = new();
         public bool IsComplete { get; set; }
+
+        /// <summary>
+        /// Särskiljningsnyckeln, i prioritetsordning, där HÖGRE är bättre i varje led.
+        ///
+        /// ⚠️ TVÅ SAKER LÄSER DEN: sorteringen här, och prisutdelningens fråga "går de här två
+        /// lagen att skilja åt?". Räknade konsumenten ut det själv skulle den behöva upprepa
+        /// grenens hela kedja — och fältskyttets är fyra led djup (SHB D.6.11.2.2), medan
+        /// precisionsfamiljens är två. En andra kopia av den kedjan är en andra chans att
+        /// utelämna ett led, och utfallet av det är fel MEDALJ.
+        ///
+        /// Precisionsfamiljen: [poäng, X]. Fältskytte: [träff/poäng, figurer, poängmål,
+        /// sista stationen, näst sista …]. Springskytte har ingen — den rankas på tid.
+        /// Lika nyckel = lagen kan inte skiljas åt och får samma placering.
+        /// </summary>
+        public List<int> TiebreakKey { get; set; } = new();
+
+        /// <summary>Sammanlagda träffade figurer. Bara fältskytte; 0 för övriga grenar.</summary>
+        public int TotalFigures { get; set; }
+
+        /// <summary>Sammanlagd poängmålssumma. Bara fältskytte; 0 för övriga grenar.</summary>
+        public int TotalTiebreakerScore { get; set; }
 
         /// <summary>
         /// True for stafett (relay) teams. Relay is scored on ONE elapsed clock per team

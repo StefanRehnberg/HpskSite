@@ -162,9 +162,24 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         /// shooters to enter the current round.</summary>
         public int? ShootOffNextRound { get; set; }
 
+        /// <summary>
+        /// Totalen när den INTE går att räkna ur skotten.
+        ///
+        /// ⚠️ SÄTTS BARA AV FÄLTSKYTTETS ARTEFAKTSKRIVARE. Fältskyttets radform är
+        /// träff/figur per station, inte skott per serie, så <see cref="Results"/> kan inte
+        /// bära poängen där — men prisutdelningen läser den här klassen. Alternativet vore
+        /// att hitta på en skottsträng som summerar rätt, alltså att ljuga om vad som sköts.
+        /// Precisionsfamiljen sätter den aldrig och är därmed oförändrad.
+        /// </summary>
+        public int? ScoreOverride { get; set; }
+
+        /// <summary>Andrahandstalet när det inte är innertior. För fältskytte: figurer
+        /// (normalfält) eller poängmålssumman (poängfält/magnum). Se <see cref="ScoreOverride"/>.</summary>
+        public int? XCountOverride { get; set; }
+
         // Calculated properties
-        public int TotalScore => Results.Sum(r => CalculateTotalFromShots(r.Shots));
-        public int TotalXCount => Results.Sum(r => CalculateXCountFromShots(r.Shots));
+        public int TotalScore => ScoreOverride ?? Results.Sum(r => CalculateTotalFromShots(r.Shots));
+        public int TotalXCount => XCountOverride ?? Results.Sum(r => CalculateXCountFromShots(r.Shots));
         public int SeriesCount => Results.Count;
         
         private static int CalculateTotalFromShots(string shotsJson)

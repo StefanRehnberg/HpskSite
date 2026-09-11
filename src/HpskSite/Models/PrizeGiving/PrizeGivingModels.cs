@@ -45,6 +45,29 @@ namespace HpskSite.Models.PrizeGiving
         /// </summary>
         public bool MedalsComputed { get; set; }
 
+        /// <summary>
+        /// Enheten för resultatets huvudtal, som den skrivs intill siffran: "p" för
+        /// precisionsfamiljen, "träff" för normalfält, "p" för poängfält och magnumfält.
+        ///
+        /// ⚠️ ETIKETTEN ÄR INTE KOSMETIK. Ett fältskytteresultat på 32 lästes som "32 p" på en
+        /// sida som räknar träffar — och en funktionär som läser upp fel enhet vid bordet låter
+        /// som om hen läser fel resultat.
+        /// </summary>
+        public string ScoreUnit { get; set; } = "p";
+
+        /// <summary>Enheten för andrahandstalet: "X" (innertior), "fig" (figurer) eller
+        /// "pmål" (poängmålssumman).</summary>
+        public string SecondaryUnit { get; set; } = "X";
+
+        /// <summary>
+        /// Lagets andrahandstal, som kan skilja sig från individens.
+        ///
+        /// ⚠️ I POÄNGFÄLT ÄR DE OLIKA. Individen särskiljs på poängmål (SHB D.6.11.2.1.2),
+        /// laget på sammanlagda träffade figurer (D.6.11.2.2.2 punkt 1). Att låta lagkortet
+        /// ärva individens etikett skrev alltså "pmål" över en figursiffra.
+        /// </summary>
+        public string TeamSecondaryUnit { get; set; } = "X";
+
         public List<PrecisionMedalCategoryAwards> Individual { get; set; } = new();
         public List<PrizeTeamGroup> Teams { get; set; } = new();
         public PrizeHonorarySection Honorary { get; set; } = new();

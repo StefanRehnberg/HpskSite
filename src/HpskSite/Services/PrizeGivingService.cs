@@ -1,4 +1,6 @@
 using HpskSite.CompetitionTypes.Common;
+using HpskSite.CompetitionTypes.Faltskytte.Models;
+using HpskSite.CompetitionTypes.Faltskytte.Services;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.Models.PrizeGiving;
 using Newtonsoft.Json;
@@ -42,17 +44,20 @@ namespace HpskSite.Services
         private readonly IContentService _contentService;
         private readonly CompetitionTeamService _teamService;
         private readonly ShootOffService _shootOffService;
+        private readonly FaltskytteShootOffService _faltShootOffService;
         private readonly ILogger<PrizeGivingService> _logger;
 
         public PrizeGivingService(
             IContentService contentService,
             CompetitionTeamService teamService,
             ShootOffService shootOffService,
+            FaltskytteShootOffService faltShootOffService,
             ILogger<PrizeGivingService> logger)
         {
             _contentService = contentService;
             _teamService = teamService;
             _shootOffService = shootOffService;
+            _faltShootOffService = faltShootOffService;
             _logger = logger;
         }
 
@@ -67,15 +72,17 @@ namespace HpskSite.Services
             if (competition == null) return null;
 
             var scope = competition.GetValue<string>("competitionScope") ?? "";
+            var competitionType = competition.GetValue<string>("competitionType") ?? "Precision";
             var model = new PrizeGivingModel
             {
                 CompetitionId = competitionId,
                 CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
-                CompetitionType = competition.GetValue<string>("competitionType") ?? "Precision",
+                CompetitionType = competitionType,
                 IsChampionship = ChampionshipCategory.IsChampionship(scope),
                 SelectedWeaponGroup = (weaponGroup ?? "").Trim(),
                 CanEdit = canEdit
             };
+            ApplyDisciplineLabels(model, competition);
 
             var resultNode = GetResultNode(competitionId);
             model.HasResultList = resultNode != null;
@@ -154,6 +161,34 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Grenens egna ord för resultatet, och om den har lagtävling.
+        ///
+        /// ⚠️ NORMALFÄLT RÄKNAR TRÄFF OCH FIGUR, poängfält och magnumfält räknar poäng och
+        /// poängmål. Samma delning som <c>FaltskytteResultArtifactService.FaltskytteScoreReader</c>
+        /// gör när talen SKRIVS — håll dem i takt, annars visar sidan en annan enhet än den
+        /// siffran räknades i. Scoringmode läses ur konfigurationen först: egenskapen på
+        /// tävlingen är en spegel som kan vara inaktuell.
+        /// </summary>
+        private static void ApplyDisciplineLabels(PrizeGivingModel model, IContent competition)
+        {
+            var isFalt = model.CompetitionType is "Faltskytte" or "MagnumFalt";
+            if (!isFalt) return;
+
+            var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig"));
+            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode"));
+            var usesPoints = model.CompetitionType == "MagnumFalt"
+                          || string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase);
+
+            model.ScoreUnit = usesPoints ? "p" : "träff";
+            // ⚠️ Lagets andrahandstal är FIGURER i båda varianterna — SHB D.6.11.2.2 sätter
+            // "största sammanlagda antalet träffade figurer" först i kedjan även i poängfält,
+            // där individen i stället särskiljs på poängmål. Lag och individ har alltså inte
+            // samma andra tal, och det är inte ett förbiseende.
+            model.SecondaryUnit = usesPoints ? "pmål" : "fig";
+            model.TeamSecondaryUnit = "fig";
+        }
+
+        /// <summary>
         /// Filtrerar på vapengrupp. En rad utan känd vapengrupp visas ALLTID — hellre en rad för
         /// mycket vid ett bord än en medalj som ingen ser.
         /// </summary>
@@ -203,10 +238,16 @@ namespace HpskSite.Services
                     // Lagsärskjutning är inte modellerad, så ett oskiljbart lagpar kan inte
                     // avgöras av systemet. Det ska sägas, inte gissas: C.4.3.1.11 pekar särskilt
                     // ut lagtävlingar som det som måste kontrolleras före prisutdelningen.
+                    //
+                    // ⚠️ FRÅGAN STÄLLS TILL GRENENS EGEN KEDJA, inte till poäng + X. Fältskyttets
+                    // kedja är fyra led djup (SHB D.6.11.2.2: figurer, poängmål, sista stationen
+                    // och bakåt), så ett tvåledat test hade flaggat lag som regelverket skiljer
+                    // åt — och en påstådd oavgjord medaljplats stoppar en ceremoni lika säkert
+                    // som en verklig. Nyckeln byggs där resultatet räknas; se
+                    // <see cref="TeamResult.TiebreakKey"/>.
                     var tied = ranked
                         .Where(t => t.TeamId != team.TeamId
-                                    && t.TotalScore == team.TotalScore
-                                    && t.TotalXCount == team.TotalXCount)
+                                    && TiebreakKeyComparer.Unseparated(t, team))
                         .ToList();
                     if (tied.Count > 0)
                     {
@@ -416,11 +457,18 @@ namespace HpskSite.Services
             // resultaten matas in, och en varning som alltid lyser slutar betyda något.
             try
             {
-                var entries = await _shootOffService.GetEntriesForCompetitionAsync(model.CompetitionId);
-                if (entries.Count > 0)
+                // ⚠️ FÄLTSKYTTE HAR EN EGEN SÄRSKJUTNINGSTABELL. Läses bara precisionsfamiljens
+                // svarar den tomt för en fälttävling, och vakten tiger just på den gren där den
+                // först behövdes.
+                var newest = model.CompetitionType is "Faltskytte" or "MagnumFalt"
+                    ? (await _faltShootOffService.GetEntriesForCompetitionAsync(model.CompetitionId))
+                        .Select(e => (DateTime?)e.LastModified).Max()
+                    : (await _shootOffService.GetEntriesForCompetitionAsync(model.CompetitionId))
+                        .Select(e => (DateTime?)e.LastModified).Max();
+
+                if (newest.HasValue)
                 {
-                    var newest = entries.Max(e => e.LastModified);
-                    if (newest > artifact.UpdatedAt)
+                    if (newest.Value > artifact.UpdatedAt)
                     {
                         model.Warnings.Insert(0,
                             $"Särskjutningsresultat matades in {newest:d MMM HH:mm}, efter att den här "

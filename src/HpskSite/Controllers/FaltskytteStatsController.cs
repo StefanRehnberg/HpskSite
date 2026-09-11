@@ -106,16 +106,19 @@ namespace HpskSite.Controllers
             return View("~/Views/FaltskytteStats.cshtml", model);
         }
 
-        private async Task<bool> IsStaffForCompetition(int competitionId)
-        {
-            if (await _auth.IsCurrentUserAdminAsync()) return true;
-            if (await _auth.IsCompetitionManager(competitionId)) return true;
-            if ((await _auth.GetManagedRegions()).Any()) return true;
-            var comp = _contentService.GetById(competitionId);
-            var clubId = comp?.GetValue<int>("clubId") ?? 0;
-            if (clubId > 0 && (await _auth.IsClubAdminForClub(clubId) || await _auth.IsSkjutledareForClub(clubId)))
-                return true;
-            return false;
-        }
+        /// <summary>
+        /// ⚠️ RÄTTAD 2026-09-11: den här metoden släppte in var och en som förvaltar NÅGON krets
+        /// (<c>GetManagedRegions().Any()</c>) på VARJE fältskyttetävling i landet, utan att
+        /// kontrollera att tävlingen hör till just den kretsen. Samma fel som
+        /// <c>FaltskytteController.IsAuthorizedForCompetition</c> bar fram till 2026-08-25.
+        ///
+        /// <c>HasCompetitionStaffAccessAsync</c> bär BÅDA värdformerna — klubbvärdad
+        /// (<c>clubId</c> satt) och kretsvärdad (<c>clubId</c> tomt, <c>regionalFederation</c>
+        /// satt, alltså SM-formen). En handskriven <c>clubId</c>-kontroll låser ut den
+        /// arrangerande kretsen från sin egen tävling, och det felet är gjort fyra gånger i den
+        /// här kodbasen.
+        /// </summary>
+        private Task<bool> IsStaffForCompetition(int competitionId) =>
+            _auth.HasCompetitionStaffAccessAsync(competitionId);
     }
 }

@@ -172,6 +172,12 @@ namespace HpskSite.Composers
             // uses a different result-entry shape (per-station hits/figures/poängmål)
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteShootOffService>();
 
+            // Fältskyttets resultatlista byggs EN gång — av resultatsidan, särskjutningskortet
+            // OCH prisutdelningens artefaktskrivare. Se klassens egen dokumentation för varför
+            // en andra beräkning på konsumentsidan är fel här.
+            builder.Services.AddScoped<FaltskytteResultsBuilder>();
+            builder.Services.AddScoped<FaltskytteResultArtifactService>();
+
             // Standalone Fältskytte station configurations (CRUD + sharing + secrecy gate)
             builder.Services.AddScoped<FaltskytteConfigurationService>();
 

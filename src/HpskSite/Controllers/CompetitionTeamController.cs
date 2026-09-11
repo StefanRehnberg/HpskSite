@@ -502,11 +502,21 @@ namespace HpskSite.Controllers
                     competitionId, competitionType, numberOfSeries);
 
                 var isSpringskytte = competitionType == "Springskytte";
+                var isFaltskytte = competitionType is "Faltskytte" or "MagnumFalt";
+
+                // ⚠️ KOLUMNRUBRIKERNA KOMMER FRÅN SERVERN, inte från en hårdkodning i vyn.
+                // Fältskyttets lagtotal är träffar (eller poäng i poängfält) och dess
+                // andrahandstal är figurer — "Poäng / X" över de siffrorna läses som ett
+                // felaktigt resultat, inte som en felaktig etikett.
+                var scoreLabel = isFaltskytte ? FaltskytteTeamScoreLabel(competitionId, competitionType) : "Poäng";
+                var secondaryLabel = isFaltskytte ? "Fig." : "X";
 
                 return Json(new
                 {
                     success = true,
                     isSpringskytte,
+                    scoreLabel,
+                    secondaryLabel,
                     classGroups = results.Select(g => new
                     {
                         teamClass = g.TeamClass,
@@ -525,6 +535,11 @@ namespace HpskSite.Controllers
                             isRelay = t.IsRelay,
                             members = t.MemberResults.Select(m => new
                             {
+                                // ⚠️ Id:t behövs för att en konsument ska kunna knyta raden till
+                                // en skytt. Två medlemmar i samma tävling kan heta likadant —
+                                // Håleskotten har två "Björn Larsson" — så en uppslagning på
+                                // NAMN dubbelräknar dem. Samma id som resultatlistan redan bär.
+                                memberId = m.MemberId,
                                 name = m.Name,
                                 score = m.Score,
                                 xCount = m.XCount,
@@ -636,6 +651,38 @@ namespace HpskSite.Controllers
         }
 
         #region Helpers
+
+        /// <summary>
+        /// "Träff" i normalfält, "Poäng" i poängfält och magnumfält.
+        ///
+        /// ⚠️ Läser tävlingstypen ur KONFIGURATIONEN först — egenskapen <c>scoringMode</c> är
+        /// en spegel som bara synkas vid Anslut. Samma upplösning som lagberäkningen använder,
+        /// annars kan rubriken och siffran under den komma från olika svar.
+        /// </summary>
+        private string FaltskytteTeamScoreLabel(int competitionId, string competitionType)
+        {
+            try
+            {
+                if (string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase))
+                    return "Poäng";
+
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                    return "Träff";
+                var comp = ctx.Content.GetById(competitionId);
+                if (comp == null) return "Träff";
+
+                var config = HpskSite.CompetitionTypes.Faltskytte.Models.FaltskytteConfigParser
+                    .Parse(comp.Value<string>("stationConfig"));
+                var mode = HpskSite.CompetitionTypes.Faltskytte.Models.FaltskytteScoringMode
+                    .Resolve(config, comp.Value<string>("scoringMode"));
+                return string.Equals(mode, "Poang", StringComparison.OrdinalIgnoreCase) ? "Poäng" : "Träff";
+            }
+            catch
+            {
+                // En oläsbar konfiguration får inte ta ner laglistan; normalfält är det vanliga.
+                return "Träff";
+            }
+        }
 
         private string GetCompetitionType(int competitionId)
         {

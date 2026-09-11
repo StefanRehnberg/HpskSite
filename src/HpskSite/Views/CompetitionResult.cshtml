@@ -216,6 +216,10 @@
        not the same competition as open sights. It also resolves both the class ID and the display
        NAME, which matters here because result rows carry the Name. *@
     @await Html.PartialAsync("~/Views/Partials/_ShootingClassesBootstrap.cshtml")
+    @* ⚠️ Lagtabellen nedan skrev lagnamn, klubbnamn och MEDLEMSNAMN rakt in i innerHTML.
+       Medlemmen sätter sitt eget namn, så det är samma lucka som redan rättats fyra gånger
+       i den här kodbasen. hpskEsc bor i EN partial; inkludera den, skriv ingen egen. *@
+    @await Html.PartialAsync("_HtmlEscape")
     <div class="container-fluid">
         <!-- Header -->
         <div class="d-flex justify-content-between align-items-center mb-4 no-print">
@@ -1235,7 +1239,7 @@
                     html += `
                         <div class="class-results-section">
                             <div class="class-header">
-                                ${group.teamClass} (${group.teams.length} lag)
+                                ${hpskEsc(group.teamClass)} (${group.teams.length} lag)
                             </div>
                             <table class="results-table">
                                 <thead>
@@ -1244,16 +1248,26 @@
                                         <th>Lag</th>
                                         <th>Förening</th>
                                         <th>Medlemmar</th>
-                                        ${data.isSpringskytte ? '<th>Total tid</th>' : '<th>Poäng</th><th>X</th>'}
+                                        ${data.isSpringskytte ? '<th>Total tid</th>' : `<th>${hpskEsc(data.scoreLabel || 'Poäng')}</th><th>${hpskEsc(data.secondaryLabel || 'X')}</th>`}
                                     </tr>
                                 </thead>
                                 <tbody>`;
 
+                    // ⚠️ Enheterna kommer från SERVERN. En hårdkodad "p"/"X" över en
+                    // fältskyttesiffra läses som ett felaktigt resultat, inte som en
+                    // felaktig etikett — samma skäl som kolumnrubrikerna ovan.
+                    const scoreLabel = data.scoreLabel || 'Poäng';
+                    const unitShort = scoreLabel === 'Träff' ? 'träff' : 'p';
+                    // Kolumnrubriken är versal och punkterad ("Fig."); inne i en parentes efter
+                    // ett namn är den en enhet och skrivs som en. "X" är en förkortning och
+                    // behåller sin versal.
+                    const secLabel = data.secondaryLabel || 'X';
+                    const secShort = secLabel === 'X' ? 'X' : secLabel.toLowerCase().replace(/\.$/, '');
                     group.teams.forEach(team => {
                         const membersHtml = team.members.map(m => {
-                            if (!m.hasResult) return `${m.name} (${m.status || 'Inget resultat'})`;
-                            if (data.isSpringskytte) return `${m.name} (${m.timeDisplay})`;
-                            return `${m.name} (${m.score}p${m.xCount > 0 ? ', ' + m.xCount + 'X' : ''})`;
+                            if (!m.hasResult) return `${hpskEsc(m.name)} (${hpskEsc(m.status || 'Inget resultat')})`;
+                            if (data.isSpringskytte) return `${hpskEsc(m.name)} (${hpskEsc(m.timeDisplay)})`;
+                            return `${hpskEsc(m.name)} (${m.score} ${hpskEsc(unitShort)}${m.xCount > 0 ? ', ' + m.xCount + ' ' + hpskEsc(secShort) : ''})`;
                         }).join('<br>');
 
                         const rankDisplay = team.rank > 0 ? team.rank : '-';
@@ -1261,8 +1275,8 @@
                         html += `
                                     <tr${!team.isComplete ? ' class="text-muted"' : ''}>
                                         <td class="text-center">${rankDisplay}</td>
-                                        <td><strong>${team.teamName}</strong></td>
-                                        <td>${team.clubName}</td>
+                                        <td><strong>${hpskEsc(team.teamName)}</strong></td>
+                                        <td>${hpskEsc(team.clubName)}</td>
                                         <td class="small">${membersHtml}</td>
                                         ${data.isSpringskytte
                                             ? `<td class="text-center"><strong>${team.totalTimeDisplay}</strong></td>`

@@ -37,6 +37,13 @@
                     <button class="btn btn-outline-info btn-sm" onclick="faltPrintResultList(event)">
                         <i class="bi bi-printer me-1"></i>Skriv ut
                     </button>
+                    @* ⚠️ Länken hör HÄR och inte i en egen sektion: prislistans enda verkliga
+                       felläge är att den är ÄLDRE än resultatlistan, och intill Uppdatera syns
+                       det beroendet. Samma placering som precisionsfamiljens. *@
+                    <a class="btn btn-outline-secondary btn-sm" href="/prisutdelning/@competitionId"
+                       target="_blank" rel="noopener" onclick="event.stopPropagation()">
+                        <i class="bi bi-award me-1"></i>Prisutdelningslistan
+                    </a>
                     <button class="btn btn-success btn-sm" id="faltPublishResultsBtn" style="display:none" onclick="faltPublishResults(true, event)">
                         <i class="bi bi-globe me-1"></i>Officiell
                     </button>
@@ -291,6 +298,20 @@ async function faltRefreshResults(event) {
             _faltLastResults = data.results;
         }
     } catch (e) { /* status sync is best-effort */ }
+
+    // ⚠️ Prisutdelningslistan läser den SPARADE artefakten, inte den här hämtningen. Utan
+    // skrivningen här blir resultat som matas in efter publiceringen aldrig synliga vid
+    // prisbordet — och funktionären har ingen rimlig väg att gissa att det är den här knappen
+    // som saknas. Motsvarar precisionsfamiljens "Uppdatera".
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        await fetch('/umbraco/surface/Faltskytte/RefreshResultArtifact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId: parseInt(compId, 10) })
+        });
+    } catch (e) { /* listan är uppdaterad på skärmen även om artefakten inte hann med */ }
+
     // Refresh the Särskjutning card after a result refresh.
     faltLoadShootOffStatus(false);
 }

@@ -1,4 +1,4 @@
-@using System.Globalization
+﻿@using System.Globalization
 @using HpskSite.Models.PrizeGiving
 @model HpskSite.Models.PrizeGiving.PrizeGivingModel
 @{
@@ -236,8 +236,8 @@
                                     }
                                 </div>
                                 <div class="pu-score">
-                                    <div class="fw-semibold">@a.TotalScore p</div>
-                                    <div class="small text-secondary">@a.XCount X</div>
+                                    <div class="fw-semibold">@a.TotalScore @Model.ScoreUnit</div>
+                                    <div class="small text-secondary">@a.XCount @Model.SecondaryUnit</div>
                                 </div>
                             </div>
                         }
@@ -300,8 +300,8 @@
                                         }
                                     </div>
                                     <div class="pu-score">
-                                        <div class="fw-semibold">@a.TotalScore p</div>
-                                        <div class="small text-secondary">@a.XCount X</div>
+                                        <div class="fw-semibold">@a.TotalScore @Model.ScoreUnit</div>
+                                        <div class="small text-secondary">@a.XCount @Model.TeamSecondaryUnit</div>
                                     </div>
                                 </div>
                             }
@@ -413,8 +413,8 @@
                                                     </div>
                                                 }
                                             </td>
-                                            <td class="text-end text-nowrap">@c.TotalScore p</td>
-                                            <td class="text-end text-secondary small text-nowrap">@c.XCount X</td>
+                                            <td class="text-end text-nowrap">@c.TotalScore @Model.ScoreUnit</td>
+                                            <td class="text-end text-secondary small text-nowrap">@c.XCount @Model.SecondaryUnit</td>
                                         </tr>
                                     }
                                     </tbody>

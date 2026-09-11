@@ -446,6 +446,39 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public List<FaltskytteShootOffRoundSummary> Rounds { get; set; } = new();
     }
 
+    /// <summary>
+    /// Medaljstriderna i EN mästerskapskategori ("C", "C Dam", "A", "B", "R" …).
+    ///
+    /// ⚠️ Kategorin är INTE skicklighetsklassen. C1, C2 och C3 tävlar om SAMMA medalj, så en
+    /// särskjutning som detekteras per klassgrupp pekar ut fel strid — och därmed fel medalj:
+    /// en tvåa i C3 kan vara trea i kategorin C. Resultatlistans grupper är fortfarande
+    /// skicklighetsklasser; det är bara medaljfrågan som ställs per kategori. Motsvarar
+    /// <c>PrecisionFinalResults.MedalCategoryTies</c>, som fick samma rättelse 2026-09-07.
+    /// </summary>
+    public class FaltskytteMedalCategoryTies
+    {
+        public string CategoryName { get; set; } = "";
+        public List<FaltskytteTiedMedalGroup> Groups { get; set; } = new();
+    }
+
+    /// <summary>
+    /// En färdig medaljställning i en mästerskapskategori: skyttarna i den ordning medaljerna
+    /// ska delas ut, efter att särskjutningen skrivit om den tiade delen.
+    ///
+    /// ⚠️ Ligger UTANFÖR <see cref="FaltskylteFinalResults"/> med flit. Den publika
+    /// resultatsidan hämtar hela payloaden vid varje laddning, och en andra kopia av varje
+    /// skytt i svaret vore ren vikt för en uppgift bara artefaktskrivaren har.
+    /// </summary>
+    public class FaltskytteCategoryStanding
+    {
+        public string CategoryName { get; set; } = "";
+        public string WeaponGroup { get; set; } = "";
+        /// <summary>Distinkta skyttar i kategorin — underlaget för medaljreduceringen (SHB C.3.4.1).</summary>
+        public int Participants { get; set; }
+        /// <summary>Medaljordningen. Samma objektreferenser som i klassgrupperna.</summary>
+        public List<FaltskytteShooterResult> Ordered { get; set; } = new();
+    }
+
     public class FaltskytteShootOffRoundSummary
     {
         public int Round { get; set; }
@@ -468,6 +501,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>Full per-weapon-class config (includes Förutsättningar, target groups, etc.)</summary>
         public FaltskytteCompetitionConfig Config { get; set; } = new();
         public List<FaltskytteClassGroup> ClassGroups { get; set; } = new();
+
+        /// <summary>
+        /// Oavgjorda och avgjorda medaljstrider per MÄSTERSKAPSKATEGORI.
+        ///
+        /// ⚠️ Här, och inte på <see cref="FaltskytteClassGroup.TiedMedalGroups"/>, eftersom
+        /// resultatlistans indelning (skicklighetsklasser) är en annan än medaljens. Den
+        /// publika fotnoten upprepas ändå under varje klasstabell en tiad skytt står i — låg
+        /// den bara på kategorin blev en avgjord särskjutning osynlig.
+        /// </summary>
+        public List<FaltskytteMedalCategoryTies> MedalCategoryTies { get; set; } = new();
+
         /// <summary>Competition name — surfaced so the result list / printout can show a proper header.</summary>
         public string CompetitionName { get; set; } = "";
         /// <summary>Competition date, formatted as YYYY-MM-DD by the server.</summary>
