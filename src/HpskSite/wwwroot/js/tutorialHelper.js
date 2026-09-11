@@ -69,11 +69,51 @@ const TutorialHelper = {
                         };
                         return acc;
                     }, {});
+                    this.markaNyaGuider();
                 } else {
                     console.error('Failed to load tutorials:', data.message);
                 }
             })
             .catch(error => console.error('Error loading tutorials:', error));
+    },
+
+    /* Sätter en siffra på menyposten "Guider" när medlemmen har osedda filmer.
+     *
+     * ⚠️⚠️ DRIVS AV SEDD-LOGGEN, inte av en jämförelse mot "senaste filmen".
+     *    Skillnaden är inte akademisk: en omräknad delta tänder om varje gång
+     *    referenspunkten nollställs, och hosted services kör även ~2 minuter efter
+     *    VARJE appstart. Samma fel har redan kostat oss en omgång felaktiga notiser.
+     *    `watchedTutorials` är en logg över vad medlemmen FAKTISKT sett — den kan
+     *    inte tända om av sig själv.
+     *
+     * ⚠️ Utloggad får ingen prick: GetWatchedTutorials svarar {success:false} utan
+     *    medlem, och att visa "5 nya" för någon som inte kan markera dem som sedda
+     *    vore en siffra som aldrig går ner.
+     *
+     * Notisen är MEDVETET ingen push. Tävlingsdagens notiser (start flyttad, patrull
+     * samlas, resultat publicerade) delar tillstånd med allt annat vi skickar; en
+     * marknadsföringsnotis som får någon att stänga av notiser kostar oss den
+     * kanalen just den morgon den behövs. Se diskussionen 2026-09-11.
+     */
+    markaNyaGuider: function () {
+        var bricka = document.getElementById('navGuiderNy');
+        if (!bricka) return;
+        var alla = Object.keys(this.tutorials || {});
+        if (!alla.length) return;
+
+        fetch('/umbraco/surface/Tutorial/GetWatchedTutorials')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.success) return;              // utloggad — ingen prick
+                var sedda = (d.watched || [])
+                    .filter(function (w) { return w && w.watched; })
+                    .map(function (w) { return w.id; });
+                var osedda = alla.filter(function (id) { return sedda.indexOf(id) === -1; });
+                if (!osedda.length) return;
+                bricka.textContent = osedda.length;
+                bricka.style.display = '';
+            })
+            .catch(function () { /* tyst: en utebliven prick är ofarlig */ });
     },
 
     // Open tutorial overlay (waits for tutorials to load if needed)

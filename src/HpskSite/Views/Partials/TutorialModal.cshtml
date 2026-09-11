@@ -30,6 +30,14 @@
                 <button class="btn btn-success btn-sm" id="markWatchedBtn">
                     <i class="bi bi-check-circle"></i> Markera som sedd
                 </button>
+                @* Vägen vidare till biblioteket. Guide-knapparna finns på femton ställen i
+                   sajten och öppnar var sin film — men innan den här raden fanns ledde ingen
+                   av dem vidare till /tutorials, och listsidan saknade dessutom menypost.
+                   Filmerna hittades alltså bara av den som redan stod på rätt sida.
+                   Den som nyss blivit hjälpt är den mest mottagliga för att det finns mer. *@
+                <a class="btn btn-outline-light btn-sm" href="/tutorials">
+                    Fler guider <i class="bi bi-arrow-right"></i>
+                </a>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="TutorialHelper.closeModal()">
                     Stäng
                 </button>

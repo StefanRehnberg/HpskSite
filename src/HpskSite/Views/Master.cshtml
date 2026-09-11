@@ -438,6 +438,20 @@
                                 <li><a class="dropdown-item" href="/traningsmatch/">Träningsmatch</a></li>
                                 <li><a class="dropdown-item" href="/siktbild">Siktbild</a></li>
                                 <li><a class="dropdown-item" href="/utbildning">Utbildning</a></li>
+                                @* ⚠️ /tutorials saknade menypost HELT fram till 2026-09-11. Femton
+                                   Guide-knappar i sajten öppnade var sin film, men biblioteket gick
+                                   inte att nå för den som aktivt letade efter det.
+                                   Pricken sätts av TutorialHelper.markaNyaGuider() när medlemmen har
+                                   osedda filmer — driven av sedd-loggen `watchedTutorials`, ALDRIG av
+                                   en omräkning mot "senaste filmen". Se notification-baseline-must-be-a-sent-log. *@
+                                <li>
+                                    <a class="dropdown-item d-flex align-items-center justify-content-between"
+                                       href="/tutorials" id="navGuiderLink">
+                                        <span>Guider</span>
+                                        <span class="badge rounded-pill bg-danger ms-2" id="navGuiderNy"
+                                              style="display:none;" title="Guider du inte sett"></span>
+                                    </a>
+                                </li>
                             </ul>
                         </li>
                         
