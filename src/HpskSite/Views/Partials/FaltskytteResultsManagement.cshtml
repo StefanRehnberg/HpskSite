@@ -18,6 +18,26 @@
 
 <div class="faltskytte-results-management" data-competition-id="@competitionId" data-result-page-url="@resultPageUrl">
 
+    @* ⚠️ Klasser och sammanslagning — samma sektion precisionsfamiljen fick 2026-09-08, och den
+       saknades här. Utan den syns det TILLÄMPADE läget ingenstans: sammanslagningen avgör vilka
+       skyttar som rankas mot varandra, men enda vägen till svaret var att öppna dialogen. Den
+       säger också varför en klass under fem deltagare står kvar, vilket var det Tomelilla PK:s
+       KM i R-fält inte fick veta. *@
+    <div class="card mb-3">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-0 d-inline"><i class="bi bi-intersect me-2"></i>Klasser och sammanslagning</h5>
+                    <div class="text-muted small mt-1" id="faltMergeSummary">Laddar…</div>
+                </div>
+                <button class="btn btn-outline-secondary btn-sm" onclick="faltShowMergeConfig(event)">
+                    <i class="bi bi-pencil me-1"></i>Ändra
+                </button>
+            </div>
+        </div>
+        <div class="card-body pt-2" id="faltMergeState"></div>
+    </div>
+
     <!-- Result List Card -->
     <div class="card mb-3">
         <div class="card-header" role="button" onclick="toggleFaltSection('faltResultBody', 'faltResultChevron')">
@@ -267,6 +287,75 @@ function toggleFaltSection(bodyId, chevronId) {
 var _faltMergeConfig = null; // Current merge config JSON string
 var _faltLastResults = null; // Last loaded results for printing
 
+// ── Klasser och sammanslagning: det TILLÄMPADE läget ────────────────────────────────────
+// Läser samma analys som dialogen (den returnerar både förslagen och den sparade konfigen),
+// så sektionen och dialogen inte kan säga emot varandra om vad som är sammanslaget.
+async function faltLoadMergeState() {
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    var summary = document.getElementById('faltMergeSummary');
+    var body = document.getElementById('faltMergeState');
+    if (!compId || !summary || !body) return;
+    try {
+        var resp = await fetch('/umbraco/surface/Faltskytte/AnalyzeFaltskytteMerges?competitionId=' + compId);
+        var data = await resp.json();
+        if (!data.success || !data.analysis) {
+            summary.textContent = '';
+            body.innerHTML = '<div class="text-muted small">Klasserna kunde inte läsas: ' + hpskEsc(data.message || 'okänt fel') + '</div>';
+            return;
+        }
+        var classes = data.analysis.classes || [];
+        if (classes.length === 0) {
+            summary.textContent = 'Inga resultat inmatade ännu.';
+            body.innerHTML = '';
+            return;
+        }
+        var applied = [];
+        try { applied = JSON.parse(data.savedConfig || '[]') || []; } catch (e) { }
+        var appliedMap = {};
+        applied.forEach(function (a) { if (a.sourceClass) appliedMap[a.sourceClass] = a.targetClass || ''; });
+        // ⚠️ Räkna bara de som STÅR KVAR under fem. En klass som slagits samman har inte längre
+        // frågan — att räkna den i varningssiffran läser som att sammanslagningen inte hjälpte.
+        var below = classes.filter(function (c) { return c.belowThreshold && !appliedMap[c.className]; });
+
+        summary.textContent = classes.length + ' klasser · ' +
+            (applied.length > 0 ? applied.length + ' sammanslagna' : 'ingen sammanslagning') + ' · ' +
+            below.length + ' under 5 deltagare';
+
+        var html = '<div class="d-flex flex-wrap gap-2">';
+        classes.forEach(function (c) {
+            var target = applied.filter(function (a) { return a.sourceClass === c.className; })[0];
+            var cls = target ? 'bg-success-subtle text-success-emphasis'
+                : c.belowThreshold ? 'bg-warning-subtle text-warning-emphasis'
+                : 'bg-secondary-subtle text-secondary-emphasis';
+            var extra = target ? ' → ' + hpskEsc(target.targetClass) : '';
+            html += '<span class="badge rounded-pill ' + cls + '">' +
+                hpskEsc(c.className) + ' (' + c.participantCount + ')' + extra + '</span>';
+        });
+        html += '</div>';
+
+        // ⚠️ Klasser under fem som INTE kan slås samman namnges med sitt skäl. Det var frågan
+        // arrangören inte fick svar på: "varför står R1 och R2 kvar var för sig?"
+        var blocked = below.filter(function (c) {
+            var isSource = applied.some(function (a) { return a.sourceClass === c.className; });
+            var isTarget = applied.some(function (a) { return a.targetClass === c.className; });
+            return !isSource && !isTarget && c.mergeBlockReason;
+        });
+        if (blocked.length > 0) {
+            html += '<ul class="small text-muted mt-2 mb-0">';
+            blocked.forEach(function (c) {
+                html += '<li><strong>' + hpskEsc(c.className) + '</strong>: ' + hpskEsc(c.mergeBlockReason) + '</li>';
+            });
+            html += '</ul>';
+        }
+        body.innerHTML = html;
+    } catch (e) {
+        console.error(e);
+        summary.textContent = '';
+        body.innerHTML = '<div class="text-muted small">Klasserna kunde inte läsas — nätverksfel.</div>';
+    }
+}
+document.addEventListener('DOMContentLoaded', function () { faltLoadMergeState(); });
+
 // Restore the iframe view in the result container after a merge-config UI session.
 function faltRestoreIframe() {
     var container = document.getElementById('faltResultContent');
@@ -331,12 +420,15 @@ async function faltShowMergeConfig(event) {
 
         if (mergeData.success && mergeData.analysis) {
             _faltMergeConfig = mergeData.savedConfig || null;
-            if (mergeData.analysis.suggestions && mergeData.analysis.suggestions.length > 0) {
-                faltShowMergeModal(mergeData.analysis, mergeData.savedConfig);
-            } else {
-                container.innerHTML = '<div class="alert alert-info m-3">Alla klasser har 5 eller fler deltagare — ingen sammanslagning behövs.</div>';
-                setTimeout(function() { faltRestoreIframe(); }, 1500);
-            }
+            // ⚠️ Panelen visas ALLTID, även utan förslag. Grenen som ersatte den med
+            // "Alla klasser har 5 eller fler deltagare" och stängde sig själv efter 1,5 s var
+            // både falsk och oläsbar: noll förslag betyder att inget MÅL är tillåtet, inte att
+            // ingen klass ligger under gränsen. Tomelilla PK:s KM i R-fält (R1 = 3, R2 = 4) läste
+            // det som att funktionen saknas i fältskytte. Klasstabellen med sin orsakskolumn ÄR
+            // svaret på frågan, och den får inte försvinna av sig själv.
+            faltShowMergeModal(mergeData.analysis, mergeData.savedConfig);
+        } else {
+            container.innerHTML = '<div class="alert alert-danger m-3">' + (mergeData.message || 'Kunde inte analysera klasserna.') + '</div>';
         }
     } catch (err) {
         container.innerHTML = '<div class="alert alert-danger">Nätverksfel.</div>';
@@ -344,49 +436,129 @@ async function faltShowMergeConfig(event) {
     }
 }
 
-function faltShowMergeModal(analysis, savedConfig) {
+// EN panelbyggare för både huvudlistan och deltävlingen. Den låg i två kopior som redan hade
+// glidit isär i formuleringar; med förslag, sparade val, orsaker och medaljreduktion i samma
+// tabell är två kopior två chanser att bara rätta den ena.
+function faltMergePanelBody(analysis, savedConfig, isSub) {
+    var checkClass = isSub ? 'falt-sub-merge-check' : 'falt-merge-check';
+    var targetClass = isSub ? 'falt-sub-merge-target' : 'falt-merge-target';
+
     var savedActions = [];
     if (savedConfig) try { savedActions = JSON.parse(savedConfig); } catch(e) {}
     var savedMap = {};
     savedActions.forEach(function(a) { savedMap[a.sourceClass] = a.targetClass; });
 
-    var html = '<div class="mb-3"><p class="small text-muted">Följande klasser har färre än 5 deltagare och kan slås samman:</p></div>';
-    analysis.suggestions.forEach(function(s) {
+    var suggestions = analysis.suggestions || [];
+    var below = (analysis.classes || []).filter(function(c) { return c.belowThreshold; });
+
+    var html = '';
+    if (suggestions.length > 0) {
+        html += '<div class="mb-3"><p class="small text-muted">Följande klasser har färre än 5 deltagare och kan slås samman:</p></div>';
+    } else if (below.length > 0) {
+        // ⚠️ Säg vilka klasserna ÄR och varför var och en står kvar. "Ingen sammanslagning är
+        // möjlig" utan skälet lämnar arrangören att leta efter en knapp som inte finns.
+        html += '<div class="alert alert-warning">' +
+            '<div class="fw-semibold mb-1"><i class="bi bi-info-circle me-1"></i>Ingen av klasserna under 5 deltagare kan slås samman</div>' +
+            '<ul class="mb-0 small">' +
+            below.map(function(c) {
+                return '<li><strong>' + hpskEsc(c.className) + '</strong> (' + c.participantCount +
+                    ' deltagare): ' + hpskEsc(c.mergeBlockReason || 'Ingen tillåten målklass finns i den här tävlingen.') + '</li>';
+            }).join('') +
+            '</ul></div>';
+    } else {
+        html += '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Alla klasser har 5 eller fler deltagare — ingen sammanslagning behövs.</div>';
+    }
+
+    suggestions.forEach(function(s) {
         var checked = savedMap[s.sourceClass] ? ' checked' : '';
         var targetVal = savedMap[s.sourceClass] || s.defaultTarget || '';
         var targetHtml = '';
         if (s.requiresAdminChoice && s.possibleTargets && s.possibleTargets.length > 0) {
-            targetHtml = '<select class="form-select form-select-sm d-inline-block falt-merge-target" data-source="' + s.sourceClass + '" style="width:auto">';
-            s.possibleTargets.forEach(function(t) {
-                targetHtml += '<option value="' + t + '"' + (t === targetVal ? ' selected' : '') + '>' + t + '</option>';
+            // ⚠️ Ett SPARAT mål som regelverket inte längre erbjuder måste ligga kvar i listan.
+            // Utan det faller webbläsaren tillbaka på första alternativet, kryssrutan står kvar
+            // ikryssad, och nästa sparning ändrar TYST vilka skyttar som tävlar mot varandra.
+            var opts = s.possibleTargets.slice();
+            var savedMissing = targetVal && opts.indexOf(targetVal) === -1;
+            if (savedMissing) opts.unshift(targetVal);
+            targetHtml = '<select class="form-select form-select-sm d-inline-block ' + targetClass + '" data-source="' + hpskEsc(s.sourceClass) + '" style="width:auto">';
+            opts.forEach(function(t) {
+                var label = (savedMissing && t === targetVal) ? t + ' (sparat val)' : t;
+                targetHtml += '<option value="' + hpskEsc(t) + '"' + (t === targetVal ? ' selected' : '') + '>' + hpskEsc(label) + '</option>';
             });
             targetHtml += '</select>';
         } else {
             targetHtml = '<strong>' + (s.defaultTarget || '') + '</strong>';
         }
         html += '<div class="form-check mb-2">' +
-            '<input class="form-check-input falt-merge-check" type="checkbox" value="' + s.sourceClass + '"' +
-            ' data-target="' + targetVal + '"' + checked + '>' +
+            '<input class="form-check-input ' + checkClass + '" type="checkbox" value="' + hpskEsc(s.sourceClass) + '"' +
+            ' data-target="' + hpskEsc(targetVal) + '"' + checked + '>' +
             '<label class="form-check-label">' +
-            '<strong>' + s.sourceClass + '</strong> (' + s.sourceCount + ' st) → ' + targetHtml +
-            '<br><small class="text-muted">' + s.reason + '</small></label></div>';
+            '<strong>' + hpskEsc(s.sourceClass) + '</strong> (' + s.sourceCount + ' st) → ' + targetHtml +
+            '<br><small class="text-muted">' + hpskEsc(s.reason) + '</small></label></div>';
     });
 
-    // Show classes info
-    html += '<div class="mt-3 small"><table class="table table-sm"><thead><tr><th>Klass</th><th>Antal</th><th>Medaljer</th></tr></thead><tbody>';
+    // Klasstabellen: antal, medaljreduktion och — kolumnen som saknades — vad som händer med
+    // klassen. Ett förslag, ett sparat mål, eller skälet till att den står kvar.
+    html += '<div class="mt-3 small"><table class="table table-sm align-middle">' +
+        '<thead><tr><th>Klass</th><th class="text-center">Antal</th><th>Medaljer</th><th>Sammanslagning</th></tr></thead><tbody>';
     analysis.classes.forEach(function(c) {
+        var sug = suggestions.filter(function(s) { return s.sourceClass === c.className; })[0];
+        // ⚠️ En klass kan vara MÅL i stället för källa — C1 med en enda skytt kan inte flyttas
+        // någonstans men kan ta emot veteranerna. Att skriva "ingen tillåten målklass finns" på
+        // den raden vore falskt: frågan gäller åt andra hållet.
+        var incoming = suggestions.filter(function(s) {
+            return (s.possibleTargets || []).indexOf(c.className) !== -1;
+        }).map(function(s) { return s.sourceClass; });
+        var takes = Object.keys(savedMap).filter(function(src) { return savedMap[src] === c.className; });
+
+        var mergeCell;
+        if (savedMap[c.className]) {
+            mergeCell = '<span class="text-success">→ ' + hpskEsc(savedMap[c.className]) + ' (sparat)</span>';
+        } else if (takes.length > 0) {
+            mergeCell = '<span class="text-success">tar emot ' + hpskEsc(takes.join(', ')) + '</span>';
+        } else if (sug) {
+            mergeCell = '<span class="text-primary">Kan slås samman med ' + hpskEsc(sug.defaultTarget || '') + '</span>';
+        } else if (incoming.length > 0) {
+            mergeCell = '<span class="text-muted">Kan ta emot ' + hpskEsc(incoming.join(', ')) + '</span>';
+        } else if (c.belowThreshold && c.mergeBlockReason) {
+            mergeCell = '<span class="text-muted">' + hpskEsc(c.mergeBlockReason) + '</span>';
+        } else {
+            mergeCell = '<span class="text-muted">—</span>';
+        }
         html += '<tr class="' + (c.belowThreshold ? 'table-warning' : '') + '">' +
-            '<td>' + c.className + '</td><td>' + c.participantCount + '</td><td>' + (c.medalImpact || 'Alla') + '</td></tr>';
+            '<td>' + hpskEsc(c.className) + '</td>' +
+            '<td class="text-center">' + c.participantCount + '</td>' +
+            '<td>' + hpskEsc(c.medalImpact || 'Alla') + '</td>' +
+            '<td>' + mergeCell + '</td></tr>';
     });
     html += '</tbody></table></div>';
 
-    var container = document.getElementById('faltResultContent');
-    container.innerHTML = '<div class="card"><div class="card-header"><strong>Sammanslagning av klasser</strong></div>' +
-        '<div class="card-body">' + html +
-        '<div class="d-flex gap-2 mt-3">' +
-        '<button class="btn btn-primary" onclick="faltApplyMerges()"><i class="bi bi-check-lg me-1"></i>Skapa med sammanslagning</button>' +
-        '<button class="btn btn-outline-secondary" onclick="faltSkipMerges()">Skapa utan sammanslagning</button>' +
+    return { html: html, hasSuggestions: suggestions.length > 0 };
+}
+
+// Kortet runt panelen. Knappen som SPARAR renderas bara när det finns något att spara — en
+// knapp som inte kan göra något läses som att sparningen inte fungerar.
+function faltRenderMergePanel(containerId, analysis, savedConfig, opts) {
+    var body = faltMergePanelBody(analysis, savedConfig, opts.isSub);
+    var buttons = '';
+    if (body.hasSuggestions) {
+        buttons += '<button class="btn btn-primary" onclick="' + opts.applyFn + '()"><i class="bi bi-check-lg me-1"></i>Spara sammanslagning</button>';
+    }
+    buttons += '<button class="btn btn-outline-secondary" onclick="' + opts.skipFn + '()">Skapa utan sammanslagning</button>';
+    buttons += '<button class="btn btn-link ms-auto" onclick="' + opts.closeFn + '()">Stäng</button>';
+
+    document.getElementById(containerId).innerHTML =
+        '<div class="card' + (opts.isSub ? ' m-3' : '') + '"><div class="card-header"><strong>' + opts.title + '</strong></div>' +
+        '<div class="card-body">' + body.html +
+        '<div class="d-flex gap-2 mt-3 align-items-center">' + buttons +
         '</div></div></div>';
+}
+
+function faltShowMergeModal(analysis, savedConfig) {
+    faltRenderMergePanel('faltResultContent', analysis, savedConfig, {
+        isSub: false, title: 'Sammanslagning av klasser',
+        applyFn: 'faltApplyMerges', skipFn: 'faltSkipMerges', closeFn: 'faltRestoreIframe'
+    });
 }
 
 window.faltApplyMerges = async function() {
@@ -400,29 +572,45 @@ window.faltApplyMerges = async function() {
     });
     _faltMergeConfig = actions.length > 0 ? JSON.stringify(actions) : null;
 
-    // Save merge config to competition
+    // ⚠️ SPARA ALLTID, även tomt. Grinden `if (_faltMergeConfig)` gjorde att den som kryssade
+    // UR allt inte kunde ta bort en sammanslagning — anropet uteblev, den gamla konfigurationen
+    // låg kvar, och dialogen stängdes som om valet gått igenom.
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
-    if (_faltMergeConfig) {
-        await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
-            body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: _faltMergeConfig })
-        });
-    }
+    if (!await faltSaveMergeConfig(compId, _faltMergeConfig || '', false)) return;
 
     faltRestoreIframe();
     await faltRefreshResults();
 };
 
+// ⚠️ Svaret KONTROLLERAS. Utan behörighet svarar servern `success:false`, och en ignorerad
+// respons stänger dialogen som om sammanslagningen sparats — vilket är oskiljbart från att
+// funktionen är trasig. Returnerar true bara när servern bekräftat skrivningen.
+async function faltSaveMergeConfig(compId, configJson, isSub) {
+    try {
+        var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        var resp = await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: configJson, isSubCompetition: !!isSub })
+        });
+        var data = await resp.json();
+        if (!data.success) {
+            alert('Sammanslagningen sparades inte: ' + (data.message || 'okänt fel.'));
+            return false;
+        }
+        faltLoadMergeState();
+        return true;
+    } catch (e) {
+        console.error(e);
+        alert('Sammanslagningen sparades inte — nätverksfel.');
+        return false;
+    }
+}
+
 window.faltSkipMerges = async function() {
     _faltMergeConfig = null;
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
-    // Clear saved merge config
-    await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
-        body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: '' })
-    });
+    if (!await faltSaveMergeConfig(compId, '', false)) return;
     faltRestoreIframe();
     await faltRefreshResults();
 };
@@ -1390,12 +1578,10 @@ async function faltShowSubMergeConfig(event) {
         var mergeData = await mergeResp.json();
         if (mergeData.success && mergeData.analysis) {
             _faltSubMergeConfig = mergeData.savedConfig || null;
-            if (mergeData.analysis.suggestions && mergeData.analysis.suggestions.length > 0) {
-                faltShowSubMergeModal(mergeData.analysis, mergeData.savedConfig);
-            } else {
-                container.innerHTML = '<div class="alert alert-info m-3">Alla klasser i deltävlingen har 5 eller fler deltagare — ingen sammanslagning behövs.</div>';
-                setTimeout(function() { faltRestoreSubIframe(); }, 1500);
-            }
+            // Samma regel som huvudlistan: panelen visas alltid, och klasstabellen säger varför.
+            faltShowSubMergeModal(mergeData.analysis, mergeData.savedConfig);
+        } else {
+            container.innerHTML = '<div class="alert alert-danger m-3">' + (mergeData.message || 'Kunde inte analysera klasserna.') + '</div>';
         }
     } catch (err) {
         container.innerHTML = '<div class="alert alert-danger m-3">Nätverksfel.</div>';
@@ -1404,47 +1590,10 @@ async function faltShowSubMergeConfig(event) {
 }
 
 function faltShowSubMergeModal(analysis, savedConfig) {
-    var savedActions = [];
-    if (savedConfig) try { savedActions = JSON.parse(savedConfig); } catch(e) {}
-    var savedMap = {};
-    savedActions.forEach(function(a) { savedMap[a.sourceClass] = a.targetClass; });
-
-    var html = '<div class="mb-3"><p class="small text-muted">Följande klasser har färre än 5 deltagare i deltävlingen och kan slås samman:</p></div>';
-    analysis.suggestions.forEach(function(s) {
-        var checked = savedMap[s.sourceClass] ? ' checked' : '';
-        var targetVal = savedMap[s.sourceClass] || s.defaultTarget || '';
-        var targetHtml = '';
-        if (s.requiresAdminChoice && s.possibleTargets && s.possibleTargets.length > 0) {
-            targetHtml = '<select class="form-select form-select-sm d-inline-block falt-sub-merge-target" data-source="' + s.sourceClass + '" style="width:auto">';
-            s.possibleTargets.forEach(function(t) {
-                targetHtml += '<option value="' + t + '"' + (t === targetVal ? ' selected' : '') + '>' + t + '</option>';
-            });
-            targetHtml += '</select>';
-        } else {
-            targetHtml = '<strong>' + (s.defaultTarget || '') + '</strong>';
-        }
-        html += '<div class="form-check mb-2">' +
-            '<input class="form-check-input falt-sub-merge-check" type="checkbox" value="' + s.sourceClass + '"' +
-            ' data-target="' + targetVal + '"' + checked + '>' +
-            '<label class="form-check-label">' +
-            '<strong>' + s.sourceClass + '</strong> (' + s.sourceCount + ' st) → ' + targetHtml +
-            '<br><small class="text-muted">' + s.reason + '</small></label></div>';
+    faltRenderMergePanel('faltSubCompResultContent', analysis, savedConfig, {
+        isSub: true, title: 'Sammanslagning av klasser (deltävling)',
+        applyFn: 'faltApplySubMerges', skipFn: 'faltSkipSubMerges', closeFn: 'faltRestoreSubIframe'
     });
-
-    html += '<div class="mt-3 small"><table class="table table-sm"><thead><tr><th>Klass</th><th>Antal</th><th>Medaljer</th></tr></thead><tbody>';
-    analysis.classes.forEach(function(c) {
-        html += '<tr class="' + (c.belowThreshold ? 'table-warning' : '') + '">' +
-            '<td>' + c.className + '</td><td>' + c.participantCount + '</td><td>' + (c.medalImpact || 'Alla') + '</td></tr>';
-    });
-    html += '</tbody></table></div>';
-
-    var container = document.getElementById('faltSubCompResultContent');
-    container.innerHTML = '<div class="card m-3"><div class="card-header"><strong>Sammanslagning av klasser (deltävling)</strong></div>' +
-        '<div class="card-body">' + html +
-        '<div class="d-flex gap-2 mt-3">' +
-        '<button class="btn btn-primary" onclick="faltApplySubMerges()"><i class="bi bi-check-lg me-1"></i>Skapa med sammanslagning</button>' +
-        '<button class="btn btn-outline-secondary" onclick="faltSkipSubMerges()">Skapa utan sammanslagning</button>' +
-        '</div></div></div>';
 }
 
 window.faltApplySubMerges = async function() {
@@ -1457,11 +1606,7 @@ window.faltApplySubMerges = async function() {
     });
     var configJson = actions.length > 0 ? JSON.stringify(actions) : '';
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
-    await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
-        body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: configJson, isSubCompetition: true })
-    });
+    if (!await faltSaveMergeConfig(compId, configJson, true)) return;
     _faltSubMergeConfig = configJson;
     faltRestoreSubIframe();
     await faltRefreshSubResults();
@@ -1469,11 +1614,7 @@ window.faltApplySubMerges = async function() {
 
 window.faltSkipSubMerges = async function() {
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
-    await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
-        body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: '', isSubCompetition: true })
-    });
+    if (!await faltSaveMergeConfig(compId, '', true)) return;
     _faltSubMergeConfig = null;
     faltRestoreSubIframe();
     await faltRefreshSubResults();

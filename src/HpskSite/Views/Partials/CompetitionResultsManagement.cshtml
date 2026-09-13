@@ -979,6 +979,11 @@ function renderMergeModal(classes, suggestions, applied) {
             }
 
             tdMerge.innerHTML = mergeHtml;
+        } else if (cls.belowThreshold && cls.mergeBlockReason) {
+            // ⚠️ Säg VARFÖR klassen står kvar. Ett tankstreck på en gulmarkerad rad läser som
+            // att sammanslagningen inte fungerar; skälet (klass 1-spärren, eller att den enda
+            // tillåtna målklassen inte finns i tävlingen) är ett svar arrangören kan agera på.
+            tdMerge.innerHTML = `<span class="text-muted small">${escapeHtml(cls.mergeBlockReason)}</span>`;
         } else {
             tdMerge.innerHTML = '<span class="text-muted">—</span>';
         }
@@ -1575,6 +1580,11 @@ async function loadMergeState() {
             const sg = suggestionMap[c.className];
             mergeCell = `<span class="text-muted small" title="${escapeAttr(sg.reason)}">`
                 + `kan slås samman med <em>${escapeHtml(sg.target)}</em></span>`;
+        } else if (c.belowThreshold && c.mergeBlockReason) {
+            // ⚠️ En klass under fem utan förslag fick tidigare ett tankstreck, alltså samma
+            // cell som en klass där frågan inte ens uppstår. Skälet är det som gör skillnad
+            // mellan "funktionen gör ingenting" och "regeln tillåter ingenting här".
+            mergeCell = `<span class="text-muted small">${escapeHtml(c.mergeBlockReason)}</span>`;
         } else {
             mergeCell = '<span class="text-muted">—</span>';
         }

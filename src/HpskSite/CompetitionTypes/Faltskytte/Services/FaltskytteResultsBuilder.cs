@@ -170,8 +170,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         MemberId = memberId,
                         Name = member?.MemberName ?? "Okänd skytt",
                         Club = HpskSite.Helpers.ClubNameHelper.Shorten(member?.ClubName ?? ""),
-                        ShootingClass = HpskSite.Models.ShootingClasses.GetById(g.Key.ShootingClass)?.Name
-                            ?? g.Key.ShootingClass,
+                        ShootingClass = HpskSite.Models.ShootingClasses.ToCanonicalName(g.Key.ShootingClass),
                         Stations = stationResults,
                         TotalHits = totalHits,
                         TotalFigures = totalFigures,

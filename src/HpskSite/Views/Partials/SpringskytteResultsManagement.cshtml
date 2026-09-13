@@ -202,6 +202,24 @@
 
     @if (!isStationPage)
     {
+    @* Klasser och sammanslagning (SHB L.2.3.1). Springskyttet hade ingen sammanslagning alls
+       fram till 2026-09-12, så en åldersklass med två deltagare rankades alltid för sig utan
+       att något på skärmen sa att arrangören FÅR slå samman den. Sektionen visar det
+       tillämpade läget och — för varje klass under fem som ändå inte kan slås samman —
+       skälet, så "ingen sammanslagning" aldrig förväxlas med "funktionen saknas". *@
+    <div class="card mt-4" id="springMergeSection">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <span class="fw-bold"><i class="bi bi-intersect me-1"></i>Klasser och sammanslagning</span>
+                <div class="text-muted small mt-1" id="springMergeSummary">Läser klasser…</div>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="springShowMergeConfig(event)">
+                <i class="bi bi-pencil me-1"></i>Ändra
+            </button>
+        </div>
+        <div class="card-body pt-2" id="springMergeState"></div>
+    </div>
+
     <!-- Results List Section -->
     <div class="card mt-4" id="springResultsListSection">
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -372,6 +390,10 @@
     .spring-c-recent-item:hover { background-color: var(--bs-tertiary-bg); }
 </style>
 
+@* hpskEsc() — klassnamn och etiketter renderas i innerHTML nedan. Inkluderas av PARTIALEN
+   själv, samma husregel som överallt annars, och dubbelinkludering är ofarlig. *@
+@await Html.PartialAsync("_HtmlEscape")
+
 <script>
 // Format Springskytte age class with age span (e.g. "H 50" → "H 50-59")
 function formatAgeSpan(cls) {
@@ -424,6 +446,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (springTimingMode) { springTimeInit(); return; }   // timing role has its own pane + data
     springLoadShooters();
     springLoadResultsList();
+    // Klass- och sammanslagningspanelen: egen hämtning, eftersom klasserna och deras
+    // deltagarantal finns även på en tävling som ännu inte har någon resultatlista.
+    if (document.getElementById('springMergeSection')) springLoadMergeState();
     // Auto-load Deltävling results when the section is present (subCompetitionName configured)
     if (document.getElementById('springSubResultsListSection')) {
         springLoadSubResultsList();
@@ -2206,6 +2231,212 @@ function springResultsPost(action) {
         body: JSON.stringify(springCompetitionId)
     }).then(r => r.json());
 }
+
+// ── Klasser och sammanslagning (SHB L.2.3.1) ────────────────────────────────────────────
+// ⚠️ Springskyttets regel är EN ANNAN än precisionsfamiljens: här slås ÅLDERSklasser samman,
+// ungdoms- och juniorklasserna aldrig, och gränsen för "samma förutsättningar" går vid
+// stödhandsrätten (65 år). Servern äger reglerna — den här filen ritar bara svaret.
+
+// Etiketten för en klassnyckel "C|H 50" → "C · H 50-59".
+function springKeyLabel(key) {
+    const parts = String(key || '').split('|');
+    const weapon = parts[0] || '';
+    const age = parts.length > 1 ? parts[1] : '';
+    // En sammanslagen etikett ("H 50+H 60") bär flera klasser och får inte köras genom
+    // åldersspannsformateringen, som beskriver EN klass.
+    return weapon + ' · ' + (age.includes('+') ? age : formatAgeSpan(age));
+}
+
+async function springLoadMergeState() {
+    const summary = document.getElementById('springMergeSummary');
+    const body = document.getElementById('springMergeState');
+    if (!summary || !body) return;
+    try {
+        const data = await fetch(`/umbraco/surface/Springskytte/AnalyzeSpringskytteMerges?competitionId=${springCompetitionId}`).then(r => r.json());
+        if (!data.success || !data.analysis) {
+            summary.textContent = '';
+            body.innerHTML = '<div class="text-muted small">Klasserna kunde inte läsas: ' + hpskEsc(data.message || 'okänt fel') + '</div>';
+            return;
+        }
+        const classes = data.analysis.classes || [];
+        if (!classes.length) {
+            summary.textContent = 'Inga resultat inmatade ännu.';
+            body.innerHTML = '';
+            return;
+        }
+        let applied = [];
+        try { applied = JSON.parse(data.savedConfig || '[]') || []; } catch (e) { }
+        const appliedMap = {};
+        applied.forEach(a => { if (a.sourceKey) appliedMap[a.sourceKey] = a.targetKey || ''; });
+        const below = classes.filter(c => c.belowThreshold && !appliedMap[c.key]);
+
+        summary.textContent = classes.length + ' klasser · ' +
+            (applied.length ? applied.length + ' sammanslagna' : 'ingen sammanslagning') + ' · ' +
+            below.length + ' under 5 deltagare';
+
+        let html = '<div class="d-flex flex-wrap gap-2">';
+        classes.forEach(c => {
+            const target = appliedMap[c.key];
+            const cls = target ? 'bg-success-subtle text-success-emphasis'
+                : c.belowThreshold ? 'bg-warning-subtle text-warning-emphasis'
+                : 'bg-secondary-subtle text-secondary-emphasis';
+            html += '<span class="badge rounded-pill ' + cls + '">' + hpskEsc(springKeyLabel(c.key)) +
+                ' (' + c.participantCount + ')' + (target ? ' → ' + hpskEsc(springKeyLabel(target)) : '') + '</span>';
+        });
+        html += '</div>';
+
+        const blocked = below.filter(c => c.mergeBlockReason && !applied.some(a => a.targetKey === c.key));
+        if (blocked.length) {
+            html += '<ul class="small text-muted mt-2 mb-0">';
+            blocked.forEach(c => {
+                html += '<li><strong>' + hpskEsc(springKeyLabel(c.key)) + '</strong>: ' + hpskEsc(c.mergeBlockReason) + '</li>';
+            });
+            html += '</ul>';
+        }
+        body.innerHTML = html;
+    } catch (e) {
+        console.error(e);
+        summary.textContent = '';
+        body.innerHTML = '<div class="text-muted small">Klasserna kunde inte läsas — nätverksfel.</div>';
+    }
+}
+
+async function springShowMergeConfig(event) {
+    if (event) event.stopPropagation();
+    const body = document.getElementById('springMergeState');
+    if (!body) return;
+    body.innerHTML = '<div class="py-2"><div class="spinner-border spinner-border-sm"></div> Analyserar klasser…</div>';
+    let data;
+    try {
+        data = await fetch(`/umbraco/surface/Springskytte/AnalyzeSpringskytteMerges?competitionId=${springCompetitionId}`).then(r => r.json());
+    } catch (e) {
+        body.innerHTML = '<div class="alert alert-danger mb-0">Nätverksfel.</div>';
+        return;
+    }
+    if (!data.success || !data.analysis) {
+        body.innerHTML = '<div class="alert alert-danger mb-0">' + hpskEsc(data.message || 'Kunde inte analysera klasserna.') + '</div>';
+        return;
+    }
+    springRenderMergePanel(data.analysis, data.savedConfig || '');
+}
+
+function springRenderMergePanel(analysis, savedConfig) {
+    const body = document.getElementById('springMergeState');
+    const suggestions = analysis.suggestions || [];
+    const classes = analysis.classes || [];
+    let saved = [];
+    try { saved = JSON.parse(savedConfig || '[]') || []; } catch (e) { }
+    const savedMap = {};
+    saved.forEach(a => { if (a.sourceKey) savedMap[a.sourceKey] = a.targetKey || ''; });
+    const below = classes.filter(c => c.belowThreshold);
+
+    let html = '';
+    if (suggestions.length) {
+        html += '<p class="small text-muted">Arrangören avgör (SHB L.2.3.1). Kryssa i de klasser som ska slås samman och välj målklass:</p>';
+    } else if (below.length) {
+        html += '<div class="alert alert-warning"><div class="fw-semibold mb-1">' +
+            '<i class="bi bi-info-circle me-1"></i>Ingen av klasserna under 5 deltagare kan slås samman</div><ul class="mb-0 small">' +
+            below.map(c => '<li><strong>' + hpskEsc(springKeyLabel(c.key)) + '</strong> (' + c.participantCount +
+                ' deltagare): ' + hpskEsc(c.mergeBlockReason || 'Ingen tillåten målklass finns i den här tävlingen.') + '</li>').join('') +
+            '</ul></div>';
+    } else {
+        html += '<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Alla klasser har 5 eller fler deltagare — ingen sammanslagning behövs.</div>';
+    }
+
+    suggestions.forEach(s => {
+        const targetVal = savedMap[s.sourceKey] || '';
+        // ⚠️ Ett sparat mål som inte längre erbjuds måste ligga kvar i listan, annars byter
+        // nästa sparning tyst målklass — och därmed vem som tävlar mot vem.
+        const opts = (s.possibleTargets || []).slice();
+        const savedMissing = targetVal && opts.indexOf(targetVal) === -1;
+        if (savedMissing) opts.unshift(targetVal);
+        let sel = '<select class="form-select form-select-sm d-inline-block spring-merge-target" data-source="' + hpskEsc(s.sourceKey) + '" style="width:auto">';
+        sel += '<option value="">— välj målklass —</option>';
+        opts.forEach(t => {
+            const label = springKeyLabel(t) + (savedMissing && t === targetVal ? ' (sparat val)' : '');
+            sel += '<option value="' + hpskEsc(t) + '"' + (t === targetVal ? ' selected' : '') + '>' + hpskEsc(label) + '</option>';
+        });
+        sel += '</select>';
+        html += '<div class="form-check mb-2">' +
+            '<input class="form-check-input spring-merge-check" type="checkbox" value="' + hpskEsc(s.sourceKey) + '"' +
+            (targetVal ? ' checked' : '') + '>' +
+            '<label class="form-check-label"><strong>' + hpskEsc(springKeyLabel(s.sourceKey)) + '</strong> (' +
+            s.sourceCount + ' st) → ' + sel +
+            '<br><small class="text-muted">' + hpskEsc(s.reason) + '</small></label></div>';
+    });
+
+    html += '<div class="mt-3 small"><table class="table table-sm align-middle"><thead><tr>' +
+        '<th>Klass</th><th class="text-center">Antal</th><th>Sammanslagning</th></tr></thead><tbody>';
+    classes.forEach(c => {
+        const sug = suggestions.filter(s => s.sourceKey === c.key)[0];
+        const takes = Object.keys(savedMap).filter(k => savedMap[k] === c.key);
+        const canTake = suggestions.filter(s => (s.possibleTargets || []).indexOf(c.key) !== -1).map(s => springKeyLabel(s.sourceKey));
+        let cell;
+        if (savedMap[c.key]) cell = '<span class="text-success">→ ' + hpskEsc(springKeyLabel(savedMap[c.key])) + ' (sparat)</span>';
+        else if (takes.length) cell = '<span class="text-success">tar emot ' + hpskEsc(takes.map(springKeyLabel).join(', ')) + '</span>';
+        else if (sug) cell = '<span class="text-primary">Kan slås samman (välj målklass ovan)</span>';
+        else if (canTake.length) cell = '<span class="text-muted">Kan ta emot ' + hpskEsc(canTake.join(', ')) + '</span>';
+        else if (c.belowThreshold && c.mergeBlockReason) cell = '<span class="text-muted">' + hpskEsc(c.mergeBlockReason) + '</span>';
+        else cell = '<span class="text-muted">—</span>';
+        html += '<tr class="' + (c.belowThreshold ? 'table-warning' : '') + '">' +
+            '<td>' + hpskEsc(springKeyLabel(c.key)) + '</td>' +
+            '<td class="text-center">' + c.participantCount + '</td>' +
+            '<td>' + cell + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+
+    html += '<div class="d-flex gap-2 mt-2 align-items-center">';
+    if (suggestions.length) html += '<button class="btn btn-primary btn-sm" onclick="springApplyMerges()"><i class="bi bi-check-lg me-1"></i>Spara sammanslagning</button>';
+    html += '<button class="btn btn-outline-secondary btn-sm" onclick="springClearMerges()">Ingen sammanslagning</button>';
+    html += '<button class="btn btn-link btn-sm ms-auto" onclick="springLoadMergeState()">Stäng</button>';
+    html += '</div>';
+
+    body.innerHTML = html;
+}
+
+// ⚠️ Svaret KONTROLLERAS, och tomt sparas lika gärna som ifyllt: en dialog som stänger sig
+// utan att ha sparat är oskiljbar från en trasig funktion, och utan den tomma sparningen går
+// en sammanslagning inte att ta bort.
+async function springSaveMergeConfig(configJson) {
+    try {
+        const resp = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteMergeConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || '' },
+            body: JSON.stringify({ competitionId: springCompetitionId, mergeConfig: configJson })
+        });
+        const data = await resp.json();
+        if (!data.success) { alert('Sammanslagningen sparades inte: ' + (data.message || 'okänt fel.')); return false; }
+        return true;
+    } catch (e) {
+        console.error(e);
+        alert('Sammanslagningen sparades inte — nätverksfel.');
+        return false;
+    }
+}
+
+window.springApplyMerges = async function () {
+    const actions = [];
+    let missingTarget = false;
+    document.querySelectorAll('.spring-merge-check:checked').forEach(cb => {
+        const src = cb.value;
+        const sel = document.querySelector('.spring-merge-target[data-source="' + src + '"]');
+        const target = sel ? sel.value : '';
+        if (target) actions.push({ sourceKey: src, targetKey: target });
+        else missingTarget = true;
+    });
+    // En ikryssad rad utan målklass är ett ofullständigt val, inte ett val att inte slå samman.
+    if (missingTarget) { alert('Välj en målklass för varje ikryssad klass.'); return; }
+
+    if (!await springSaveMergeConfig(actions.length ? JSON.stringify(actions) : '')) return;
+    await springLoadMergeState();
+    await springLoadResultsList();
+};
+
+window.springClearMerges = async function () {
+    if (!await springSaveMergeConfig('')) return;
+    await springLoadMergeState();
+    await springLoadResultsList();
+};
 
 async function springLoadResultsList() {
     try {

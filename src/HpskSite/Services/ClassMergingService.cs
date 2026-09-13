@@ -18,6 +18,18 @@ namespace HpskSite.Services
         public int ParticipantCount { get; set; }
         public bool BelowThreshold { get; set; }
         public string MedalImpact { get; set; } = "";
+
+        /// <summary>
+        /// Varför den här klassen ligger under fem deltagare och ÄNDÅ inte kan slås samman.
+        /// Tom sträng när klassen har fem eller fler deltagare, eller när det finns ett förslag.
+        ///
+        /// ⚠️ Fanns inte förut, och frånvaron var hela felet i Tomelilla PK:s KM i R-fält
+        /// (tävling 4900, R1 = 3 st och R2 = 4 st): noll förslag renderades som "Alla klasser
+        /// har 5 eller fler deltagare", vilket var falskt. "Inga förslag" och "inga klasser
+        /// under gränsen" är två olika svar, och skillnaden avgör om arrangören ska leta vidare
+        /// efter en knapp som inte finns.
+        /// </summary>
+        public string MergeBlockReason { get; set; } = "";
     }
 
     public class MergeSuggestion
@@ -94,6 +106,21 @@ namespace HpskSite.Services
 
             // Remove duplicate bidirectional suggestions (e.g. A2→A3 and A3→A2)
             DeduplicateBidirectionalSuggestions(analysis.Suggestions);
+
+            // Varje klass under gränsen som INTE fick ett förslag får i stället en orsak.
+            // Dedupliceringen körs först: den kvarvarande halvan av ett par bär förslaget,
+            // och den bortplockade halvan är inte blockerad — den är målet.
+            var involved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in analysis.Suggestions)
+            {
+                involved.Add(s.SourceClass);
+                foreach (var t in s.PossibleTargets) involved.Add(t);
+            }
+            foreach (var cls in analysis.Classes.Where(c => c.BelowThreshold))
+            {
+                if (involved.Contains(cls.ClassName)) continue;
+                cls.MergeBlockReason = GetBlockReason(cls.ClassName, classCounts, allowR23Merge);
+            }
 
             return analysis;
         }
@@ -453,7 +480,86 @@ namespace HpskSite.Services
             return null;
         }
 
+        /// <summary>
+        /// Svarar på "varför står den här klassen kvar trots färre än fem deltagare?".
+        /// Formuleras för arrangören vid resultatbordet, inte för utvecklaren: den nämner
+        /// klassen, regeln och — när det är den verkliga orsaken — vilken partnerklass som
+        /// saknas i just den här tävlingen.
+        /// </summary>
+        private static string GetBlockReason(string className, Dictionary<string, int> classCounts, bool allowR23Merge)
+        {
+            var weaponGroup = GetWeaponGroup(className);
+            var label = WeaponGroupLabel(weaponGroup);
+
+            // ⚠️ Magnum prövas FÖRE klass 1-spärren. M1–M9 är olika VAPEN (SA/DA revolver, olika
+            // kalibrar), inte kompetensnivåer — "M1" är alltså inte "klass 1", och att svara
+            // med klass 1-regeln där vore ett kategorifel i klartext på arrangörens skärm.
+            if (weaponGroup == "M")
+                return "Magnum saknar klassindelning — sammanslagning tillämpas inte.";
+
+            if (IsClass1(className))
+                return "Klass 1 slås aldrig samman med en annan klass (SHB D.2.3).";
+
+            if (string.IsNullOrEmpty(weaponGroup))
+                return "Klassen känns inte igen, så ingen sammanslagning kan föreslås.";
+
+            if (weaponGroup == "R" && !allowR23Merge)
+                return "Klass 2 och 3 i vapengrupp R slås bara samman i fältskjutning och militär snabbmatch.";
+
+            if (IsJuniorClass(className) || IsVetYClass(className) || IsVetAClass(className))
+                return $"Det finns ingen öppen klass eller Dam-klass i vapengrupp {label} att slå samman med i den här tävlingen.";
+
+            var level = GetCompetenceLevel(className);
+            if (level is 1 or 2 or 3)
+            {
+                // Räkna upp de mål regeln HADE tillåtit, så arrangören ser att det är
+                // tävlingens deltagarfält som saknar dem — inte att funktionen är trasig.
+                var candidates = AllowedTargetsFor(className, weaponGroup, level.Value);
+                if (candidates.Count == 1)
+                    return $"Klassen {candidates[0]} finns inte i den här tävlingen att slå samman med.";
+                return $"Ingen av klasserna {string.Join(", ", candidates)} finns i den här tävlingen att slå samman med.";
+            }
+
+            return $"Ingen klass i vapengrupp {label} som den här klassen får slås samman med finns i tävlingen.";
+        }
+
+        /// <summary>
+        /// De målklasser regeln tillåter för en klass på nivå 1–3, oavsett om de finns i
+        /// tävlingen. Används bara för att formulera orsakstexten — förslagen byggs av
+        /// <see cref="BuildSuggestion"/>, och de två får inte glida isär.
+        /// </summary>
+        private static List<string> AllowedTargetsFor(string className, string weaponGroup, int level)
+        {
+            var targets = new List<string>();
+            if (IsDamClass(className))
+            {
+                targets.Add($"{weaponGroup}{level}");                       // prio 1: samma nivå, öppen
+                if (level != 1)                                            // nivå 1 får aldrig korsa nivå
+                {
+                    var other = level == 2 ? 3 : 2;
+                    targets.Add($"{weaponGroup}{other}");
+                    targets.Add($"{weaponGroup}{other} Dam");
+                }
+                return targets;
+            }
+
+            var otherLevel = level == 2 ? 3 : 2;
+            targets.Add(FormatLevelName(weaponGroup, otherLevel));
+            if (weaponGroup is "C" or "L")
+                targets.Add($"{weaponGroup}{otherLevel} Dam");
+            return targets;
+        }
+
         // ── Helpers ─────────────────────────────────────────────────
+
+        private static string WeaponGroupLabel(string weaponGroup) => weaponGroup switch
+        {
+            "A_Opt" => "A Opt",
+            "A_M" => "AM",
+            "A_P" => "AP",
+            "A_G" => "AG",
+            _ => weaponGroup
+        };
 
         private static List<string> GetOpenClassTargets(string weaponGroup, Dictionary<string, int> classCounts)
         {
@@ -513,7 +619,15 @@ namespace HpskSite.Services
         {
             // Mirrors the original intent (class 1 never merges) but now uses
             // GetCompetenceLevel so it also catches "A Opt 1".
+            //
+            // ⚠️ DAM-KLASSEN PÅ NIVÅ 1 ÄR INTE SAMMA SAK som den öppna klass 1. Spärren i
+            // FR-102 gäller att KORSA kompetensnivå; specens tabell (§4) ger uttryckligen
+            // "Dam C 1 → C 1" som prioritet 1. Utan undantaget här returnerade
+            // BuildSuggestion null redan innan BuildWeaponGroupCLSuggestion hann köras, och
+            // dess level==1-gren var död kod — en ensam Dam C 1-skytt fick aldrig något
+            // förslag, tvärtemot både SHB och vår egen spec.
             return GetCompetenceLevel(className) == 1
+                && !IsDamClass(className)
                 && !className.Contains("Vet")
                 && !className.Contains("Jun");
         }

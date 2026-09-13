@@ -1111,6 +1111,67 @@
             return configs;
         }
 
+        // Fältskyttets motsvarighet till crFlattenByWeaponGroup. Egen funktion, inte en gren i
+        // den precisionens: raderna har en annan form (stationer, inga serier) och en ANNAN
+        // rangordning — normalfält träff → figurer → poängmål, poängfält poäng → poängmål. Att
+        // sortera fältskytte på precisionens nycklar hade gett en trovärdig men felaktig ordning.
+        //
+        // Samma löfte som där: det är en VY. Varje rad skriver ut sin klass OCH sin officiella
+        // placering i klassen, så listan aldrig kan läsas som ett resultat.
+        function faltFlattenByWeaponGroup(classGroups, isPoang) {
+            const keys = s => isPoang
+                ? [s.totalPoints || 0, s.totalTiebreakerScore || 0, 0]
+                : [s.totalHits || 0, s.totalFigures || 0, s.totalTiebreakerScore || 0];
+
+            const byCode = new Map();
+            const notesByCode = new Map();
+            (classGroups || []).forEach(group => {
+                const code = crGroupWeaponCode(group);
+                if (!byCode.has(code)) byCode.set(code, []);
+                // Serverns ordning INOM gruppen är den officiella placeringen — läs av den innan
+                // något sorteras om.
+                (group.shooters || []).forEach((shooter, idx) => {
+                    byCode.get(code).push(Object.assign({}, shooter, {
+                        __officialClassName: shooter.shootingClass || group.className || '',
+                        __officialPlace: idx + 1,
+                        __sortKeys: keys(shooter)
+                    }));
+                });
+                if (Array.isArray(group.shootOffNotes) && group.shootOffNotes.length) {
+                    if (!notesByCode.has(code)) notesByCode.set(code, []);
+                    notesByCode.get(code).push(...group.shootOffNotes);
+                }
+            });
+
+            const out = [];
+            for (const [code, shooters] of byCode) {
+                shooters.sort((a, b) => {
+                    for (let i = 0; i < a.__sortKeys.length; i++) {
+                        if (b.__sortKeys[i] !== a.__sortKeys[i]) return b.__sortKeys[i] - a.__sortKeys[i];
+                    }
+                    return 0;
+                });
+                // Lika på ALLA nycklar delar placering. Den officiella särskiljningen bortom dem
+                // är särskjutning, alltså ett beslut servern äger — den här listan hittar inte på
+                // en egen ordning för skyttar den inte kan skilja ärligt.
+                let pos = 0, prev = null;
+                shooters.forEach((s, i) => {
+                    const same = prev && prev.every((v, k) => v === s.__sortKeys[k]);
+                    if (!same) { pos = i + 1; prev = s.__sortKeys; }
+                    s.__flatPos = pos;
+                    s.__flatClassLabel = `${s.__officialClassName} · ${s.__officialPlace}`;
+                });
+                out.push({
+                    className: `Vapengrupp ${crWeaponGroupLabel(code)}`,
+                    shooters,
+                    shootOffNotes: notesByCode.get(code) || [],
+                    __isFlat: true
+                });
+            }
+            out.sort((a, b) => a.className.localeCompare(b.className, 'sv'));
+            return out;
+        }
+
         async function loadFaltskytteResults(container) {
             try {
                 const response = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}${subQs}`);
@@ -1127,7 +1188,15 @@
                 const faltAwardingMedals = results.isAwardingStandardMedals === true;
                 let html = '';
 
-                results.classGroups.forEach(group => {
+                // Växeln erbjuds bara när minst en vapengrupp bär mer än en klassgrupp — annars är
+                // de två vyerna identiska och kontrollen gör ingenting.
+                const faltFlattenable = crFlattenableGroups(results.classGroups);
+                html += crViewToggleHtml(faltFlattenable);
+                const faltGroups = (crFlatMode && faltFlattenable)
+                    ? faltFlattenByWeaponGroup(results.classGroups, isPoang)
+                    : results.classGroups;
+
+                faltGroups.forEach(group => {
                     // Show admin-overridden display name when present, fall back to auto.
                     const displayName = group.displayClassName || group.className || '';
                     // Per-class "Sär" column only when at least one shooter has shoot-off rounds.
@@ -1157,10 +1226,10 @@
                         const isCurrentUser = shooter.name === currentUserName;
                         const rowClass = isCurrentUser ? 'table-info fw-bold' : '';
                         html += `<tr class="${rowClass}">
-                            <td class="text-center">${idx + 1}</td>
+                            <td class="text-center">${group.__isFlat ? shooter.__flatPos : idx + 1}</td>
                             <td>${shooter.name}</td>
                             <td>${shooter.club}</td>
-                            <td class="text-center">${shooter.shootingClass}</td>`;
+                            <td class="text-center">${group.__isFlat ? shooter.__flatClassLabel : shooter.shootingClass}</td>`;
 
                         for (let i = 1; i <= results.stationCount; i++) {
                             const st = shooter.stations.find(s => s.stationNumber === i);

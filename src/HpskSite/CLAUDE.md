@@ -884,6 +884,132 @@ lists; needs a temporary Administrators grant for the site-admin page — see th
 
 **Umbraco Setup:** `competitionResult` document type needs `mergeConfig` property (Textarea).
 
+### ⚠️⚠️ "INGA FÖRSLAG" ÄR INTE "INGA KLASSER UNDER FEM" (2026-09-12)
+
+Tomelilla PK om sitt **klubbmästerskap i R-fält** (tävling 4900, R1 = 3 deltagare och R2 = 4):
+*"När vi hade Klubbmästerskap i precision hittade jag hur jag kunde göra en resultatlista och
+inte en för C1 och en för C2. Igår hade vi Klubbmästerskap R fält. Jag kan inte hitta hur man
+gör där. Saknas det?"*
+
+Funktionen saknades inte. **Ytan ljög.** Båda klasserna låg under gränsen, men ingen kunde slås
+samman — R1 av klass 1-spärren, R2 för att det inte finns någon R3 i tävlingen — och
+fältskyttets dialog renderade noll förslag som **"Alla klasser har 5 eller fler deltagare —
+ingen sammanslagning behövs"** och stängde sig själv efter 1,5 sekunder. Ett falskt påstående,
+för snabbt för att hinna läsas.
+
+**Regeln som avgör: `ClassInfo.MergeBlockReason`.** Varje klass under fem som INTE får ett
+förslag bär nu skälet i klartext, byggt av `ClassMergingService.GetBlockReason` — klass 1-spärren,
+magnum utan klassindelning, R2↔R3 bara i fält/milsnabb, eller vilken partnerklass som saknas i
+just den här tävlingen. Renderas på **tre** ytor: fältskyttets panel, precisionsfamiljens
+sammanslagningsdialog och dess "Klasser och sammanslagning"-sektion.
+- ⚠️ **Magnum prövas FÖRE klass 1** i `GetBlockReason`: M1–M9 är olika VAPEN, inte
+  kompetensnivåer, så "M1 är klass 1" vore ett kategorifel i klartext på arrangörens skärm.
+- ⚠️ En klass kan vara **MÅL** i stället för källa. C1 med en enda skytt kan inte flyttas men kan
+  ta emot veteranerna; ytorna skriver "Kan ta emot …" där, aldrig "ingen tillåten målklass finns".
+- Skälet sätts EFTER dedupliceringen och bara för klasser som varken är källa eller mål i något
+  förslag — annars hade den bortplockade halvan av ett par sett blockerad ut.
+
+### ⚠️ DAM-KLASSEN PÅ NIVÅ 1 VAR DÖD KOD (rättat 2026-09-12)
+
+`IsClass1` svarade true även för `"C1 Dam"`, så `BuildSuggestion` returnerade null innan
+`BuildWeaponGroupCLSuggestion` hann köras — och dess `level == 1`-gren var **oåtkomlig**. En
+ensam Dam C 1-skytt fick alltså aldrig något förslag, tvärtemot både SHB F.2.3:s tabell (*Dam C
+1 → C 1*) och vår egen spec. Spärren i FR-102 gäller att **korsa kompetensnivå**, inte att
+flytta damklassen till den öppna klassen på samma nivå. `Dam C 1 → C 2` är fortfarande omöjligt.
+
+### Fältskyttets Resultat-flik fick "Klasser och sammanslagning" (2026-09-12)
+
+Samma sektion precisionsfamiljen fick 2026-09-08, och den saknades i fältskyttet: det
+TILLÄMPADE läget syntes ingenstans, trots att sammanslagningen avgör vilka skyttar som rankas
+mot varandra. Brickor per klass (sammanslagen / under fem / över fem), en **Ändra**-knapp som
+öppnar dialogen, och blockerade klasser med sitt skäl. Räknar bara klasser som STÅR KVAR under
+fem — en sammanslagen klass i varningssiffran läser som att sammanslagningen inte hjälpte.
+
+**Tre tysta fel i samma dialog, alla åtgärdade:**
+- ⚠️⚠️ **Avkryssning kunde inte ta bort en sammanslagning.** `if (_faltMergeConfig)` gjorde att
+  sparningen aldrig anropades när allt kryssats ur; den gamla konfigurationen låg kvar och
+  dialogen stängdes som om valet gått igenom. **Spara alltid, även tomt.**
+- ⚠️ **Svaret kontrollerades inte.** Utan behörighet svarar servern `success:false`, och en
+  ignorerad respons är oskiljbar från en trasig funktion. `faltSaveMergeConfig` är nu enda
+  sparvägen och larmar.
+- ⚠️ **Ett sparat mål som regelverket inte längre erbjuder skrevs tyst om.** Dev bar
+  `C Vet Ä → C Vet Y` (den borttagna Vet-kaskaden); dropdownen föll tillbaka på första
+  alternativet medan kryssrutan stod kvar ikryssad, så nästa sparning bytte målklass — alltså
+  vem som tävlar mot vem. Saknade mål läggs nu först i listan märkta **"(sparat val)"**.
+
+Servern **vägrar och namnger egenskapen** när `mergeConfig` saknas på doctypen, i stället för att
+logga en varning och svara `success: true`.
+
+**Panelen byggs av EN funktion** (`faltMergePanelBody` + `faltRenderMergePanel`) som både
+huvudlistan och deltävlingen renderar — de låg i två kopior som redan hunnit glida isär.
+
+### Resultatlistan per vapengrupp — nu även i fältskytte (2026-09-12)
+
+Växeln **"Per klass / Alla klasser i vapengruppen"** (byggd för precisionsfamiljen 2026-08-28)
+gäller nu fältskyttets publika lista också. Det är svaret på det Tomelilla egentligen ville ha —
+en gemensam läsning — utan att röra vem som får medalj: varje rad skriver ut sin klass OCH sin
+officiella placering i den (`R2 · 1`).
+- **`faltFlattenByWeaponGroup` är en EGEN funktion**, inte en gren i precisionens: raderna har en
+  annan form (stationer, inga serier) och en annan rangordning — **normalfält träff → figurer →
+  poängmål, poängfält poäng → poängmål**. Att sortera fältskytte på precisionens nycklar hade
+  gett en trovärdig men felaktig ordning.
+- Lika på ALLA nycklar delar placering; bortom dem avgör särskjutning, som servern äger.
+- Växeln erbjuds bara när minst en vapengrupp bär mer än en klassgrupp.
+
+### Springskytte: klassammanslagning byggd (2026-09-12)
+
+Fram till nu fanns ingen sammanslagning alls i springskyttet — en åldersklass med två deltagare
+rankades alltid för sig, utan att något sa att arrangören FÅR slå samman den.
+
+**⚠️⚠️ EGEN REGELVÄRLD, EGEN MOTOR.** `SpringskytteClassMergingService`, aldrig en gren i
+`ClassMergingService`: precisionsfamiljen och fältskyttet slår samman KOMPETENSklasser (1/2/3)
+med en absolut klass 1-spärr, medan springskyttet inte har några kompetensklasser alls
+(L.2.5–L.2.7 "Ej tillämpligt") och i stället slår samman ÅLDERSklasser. Samma ord, olika sak —
+en delad motor gör varje framtida rättelse i den ena till ett tyst beteendebyte i den andra.
+
+**Regeln, ordagrant ur SHB 2026 L.2.3.1** (verifierad ur PDF:en, behöver inte utredas igen):
+> *"Om deltagarantalet i någon klass understiger fem (5) äger tävlingsledningen rätt att
+> sammanslå åldersklasser med samma förutsättningar. Detta gäller ej D jun/H jun, D 15/H 15 och
+> D 18/H 18."*
+
+Tre saker följer direkt ur meningen och styr implementationen:
+1. **"äger tävlingsledningen RÄTT att"** → systemet föreslår, tillämpar aldrig. `RequiresAdminChoice`
+   är ALLTID true och det finns inget förvalt mål — ett förval hade lästs som förbundets
+   rekommendation.
+2. **"med samma förutsättningar"** → den enda förutsättning som skiljer springskyttets
+   åldersklasser åt i SHB är **stödhanden**: L.2.12.1 ger D 65/H 65 och D 70/H 70 rätt att
+   använda stödhand på alla stationer. Gränsen går alltså vid 65, och en sammanslagning får inte
+   korsa den. Allt annat (sju varv, fem skott per station) är lika för alla.
+3. **Undantaget gäller åt BÅDA håll** — de sex ungdoms-/juniorklasserna är varken källa eller mål.
+   ⚠️ Meningen går att läsa på två sätt (aldrig alls, eller aldrig D mot H av just de åldrarna);
+   koden följer den **strängare**, som är säker under båda. Ett otillåtet förslag ändrar
+   placeringar och medaljer i en publicerad lista; ett uteblivet kostar ett samtal till förbundet.
+
+**⚠️ Nyckeln är (vapengrupp, åldersklass)** — `"C|H 50"` — exakt formen bägge resultatvägarna
+redan grupperar på, så sammanslagningen är ett uppslag och inte en ny gruppering fri att glida
+från den riktiga. `"H 50"` ensamt hade träffat både A och C, och springskyttet publicerar per
+vapengrupp.
+
+**⚠️ BÅDA resultatvägarna läser samma uppslag**: den live-beräknade `GetSpringskytteResults` och
+den lagrade snapshotten i `CalculateSpringskytteFinalResults`. Läste de olika konfigurationer
+skulle den publicerade listan gruppera annorlunda än den arrangören just tittade på när hen
+tryckte Publicera. Verifierat i dev (5626): live gav `Vapengrupp C - D 21+H 21 (6)` och
+`resultData` samma sträng.
+
+**Lagras i competition-egenskapen `mergeConfig`** — samma egenskap fältskyttet använder, men med
+en EGEN form (`sourceKey`/`targetKey`). En tävling har en gren, så de kan inte krocka; läses en
+annan grens form hit blir fälten null, raderna filtreras bort och uppslaget blir tomt i stället
+för att gruppera fel. Testat explicit.
+
+**Okända klasssträngar erbjuds aldrig.** Dev bär tomma värden och `"vuxen-tvahand"` — vi kan inte
+påstå att en klass vi inte känner igen har "samma förutsättningar" som någon annan.
+
+**Stafett är utanför** (L.2.3.2 har ingen sammanslagningsregel).
+
+**Tester:** `SpringskytteClassMergingServiceTests` 22/22 · `ClassMergingBlockReasonTests` 8/8
+(**A/B: 6 av 8 faller när orsakstexterna tas bort, 2 när Dam-undantaget tas bort**) ·
+`ClassMergingServiceTests` 35/35 oförändrade.
+
 ### Sub-competition (Deltävling) Result Lists ✅ COMPLETE (2026-05-17)
 **Overview:** When a competition has `subCompetitionName` set, the admin Resultat tab renders a second result-list card for the Deltävling subset (shooters with `isSubCompetition=true` on their registration). The Deltävling list publishes independently from the main list and gets its own public **Visa resultat** button on the competition page.
 

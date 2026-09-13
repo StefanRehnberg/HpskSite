@@ -440,17 +440,21 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var tieBreaker = new SpringskytteTieBreaker();
                 shooterResults.Sort(tieBreaker);
 
-                // Group by WeaponClass + AgeGenderClass
+                // Group by WeaponClass + AgeGenderClass — via arrangörens sammanslagning (SHB
+                // L.2.3.1). Uppslaget viker ihop nycklar; utan sparad konfiguration är det tomt
+                // och grupperingen är exakt den den alltid har varit.
+                var mergeLookup = ReadSpringskytteMergeLookup(competition);
                 var classGroups = shooterResults
-                    .GroupBy(s => $"{s.WeaponClass}|{s.AgeGenderClass}")
+                    .GroupBy(s => GroupKeyFor(s, mergeLookup))
                     .Select(g =>
                     {
                         var sorted = g.OrderBy(s => s, tieBreaker).ToList();
+                        var parts = g.Key.Split('|');
                         return new
                         {
-                            weaponClass = sorted.First().WeaponClass,
-                            ageGenderClass = sorted.First().AgeGenderClass,
-                            className = $"Vapengrupp {sorted.First().WeaponClass} - {sorted.First().AgeGenderClass}",
+                            weaponClass = parts[0],
+                            ageGenderClass = parts.Length > 1 ? parts[1] : sorted.First().AgeGenderClass,
+                            className = $"Vapengrupp {parts[0]} - {(parts.Length > 1 ? parts[1] : sorted.First().AgeGenderClass)}",
                             shooters = sorted.Select((s, idx) => new
                             {
                                 rank = s.Status == null && s.TotalTimeSeconds.HasValue ? idx + 1 : 0,
@@ -713,6 +717,127 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         // `isOfficial` is kept in sync as "at least one class is public", so every existing consumer
         // (competition page button, Resultat link, live board badge) keeps working unchanged.
 
+        // ── Klassammanslagning (SHB L.2.3.1) ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Arrangörens sparade sammanslagning, som ett uppslag nyckel → gemensamt gruppnamn.
+        /// Tomt uppslag = grupperingen är exakt den den alltid varit.
+        ///
+        /// ⚠️ Lagras i competition-egenskapen <c>mergeConfig</c>, samma egenskap fältskyttet
+        /// använder — men med en EGEN form (<c>sourceKey</c>/<c>targetKey</c>, alltså par av
+        /// vapengrupp och åldersklass). En tävling har en gren, så de kan inte krocka; och
+        /// läses en annan grens form hit blir fälten null, raderna filtreras bort och
+        /// uppslaget blir tomt i stället för att gruppera fel.
+        /// </summary>
+        private Dictionary<string, string> ReadSpringskytteMergeLookup(Umbraco.Cms.Core.Models.IContent? competition)
+        {
+            try
+            {
+                var raw = competition != null && competition.HasProperty("mergeConfig")
+                    ? competition.GetValue<string>("mergeConfig")
+                    : null;
+                if (string.IsNullOrWhiteSpace(raw)) return new Dictionary<string, string>();
+                var actions = JsonConvert.DeserializeObject<List<SpringskytteClassMergeAction>>(raw);
+                return SpringskytteClassMergingService.BuildMergeGroupLookup(actions);
+            }
+            catch (Exception ex)
+            {
+                // En trasig konfiguration får inte ta ner resultatlistan — den grupperas då
+                // som osammanslagen, vilket är synligt för arrangören, till skillnad från ett
+                // undantag mitt i beräkningen.
+                _logger.LogWarning(ex, "Kunde inte läsa springskyttets mergeConfig för tävling {CompetitionId}", competition?.Id);
+                return new Dictionary<string, string>();
+            }
+        }
+
+        /// <summary>Gruppnyckeln för en skytt, efter arrangörens eventuella sammanslagning.</summary>
+        private static string GroupKeyFor(SpringskytteShooterResult s, Dictionary<string, string> mergeLookup)
+        {
+            var key = SpringskytteClassMergingService.MakeKey(s.WeaponClass, s.AgeGenderClass);
+            return mergeLookup.TryGetValue(key, out var merged) ? merged : key;
+        }
+
+        /// <summary>
+        /// Analyserar klasserna inför en sammanslagning: deltagarantal, förslag och — för varje
+        /// klass under fem som ändå inte kan slås samman — skälet.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> AnalyzeSpringskytteMerges(int competitionId)
+        {
+            try
+            {
+                if (!await HasCompetitionAccess(competitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var entries = await db.FetchAsync<SpringskytteResultEntry>(
+                    "WHERE CompetitionId = @0", competitionId);
+
+                // En deltagare = en distinkt medlem i (vapengrupp, åldersklass). En skytt kan
+                // starta i både A och C, och är då två deltagare i den här räkningen — det är
+                // två starter och två resultatlistor.
+                var counts = entries
+                    .GroupBy(e => new { e.MemberId, e.WeaponClass, e.AgeGenderClass })
+                    .Select(g => g.Key)
+                    .GroupBy(k => new { k.WeaponClass, k.AgeGenderClass })
+                    .Select(g => new SpringskytteClassCount
+                    {
+                        WeaponClass = g.Key.WeaponClass ?? "",
+                        AgeGenderClass = g.Key.AgeGenderClass ?? "",
+                        ParticipantCount = g.Count()
+                    })
+                    .ToList();
+
+                var analysis = new SpringskytteClassMergingService().Analyze(counts);
+                var savedConfig = competition.HasProperty("mergeConfig")
+                    ? competition.GetValue<string>("mergeConfig") ?? ""
+                    : "";
+
+                return Json(new { success = true, analysis, savedConfig });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error analyzing Springskytte merges for CompetitionId={CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod vid analysen." });
+            }
+        }
+
+        /// <summary>Sparar arrangörens val. Tom sträng rensar.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveSpringskytteMergeConfig([FromBody] SaveSpringskytteMergeConfigRequest request)
+        {
+            try
+            {
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                // ⚠️ VÄGRA när egenskapen saknas. SetValue på en saknad egenskap är en TYST
+                // no-op, så ett "sparat" som inte sparades är oskiljbart från en trasig funktion.
+                if (!competition.HasProperty("mergeConfig"))
+                    return Json(new { success = false, message = "Egenskapen 'mergeConfig' saknas på dokumenttypen competition — sammanslagningen kan inte sparas förrän den läggs till." });
+
+                competition.SetValue("mergeConfig", request.MergeConfig ?? "");
+                _contentService.Save(competition);
+                _contentService.Publish(competition, new[] { "*" }, -1);
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving Springskytte merge config for CompetitionId={CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Ett fel uppstod vid sparandet." });
+            }
+        }
+
         /// <summary>
         /// The weapon classes whose results are public. Falls back to "every class that has results" for a
         /// legacy node published before per-class publishing existed, so nothing that was public goes dark.
@@ -874,15 +999,23 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var tieBreaker = new SpringskytteTieBreaker();
                 shooterResults.Sort(tieBreaker);
 
-                // Build final results grouped by weapon class + age/gender class
+                // Build final results grouped by weapon class + age/gender class.
+                // ⚠️ SAMMA uppslag som den live-beräknade listan ovan. Läste de två olika
+                // konfigurationer skulle den publicerade listan gruppera annorlunda än den
+                // arrangören just tittade på när hen tryckte Publicera.
+                var mergeLookupForFinal = ReadSpringskytteMergeLookup(compForMedals);
                 var classGroups = shooterResults
-                    .GroupBy(s => $"{s.WeaponClass}|{s.AgeGenderClass}")
+                    .GroupBy(s => GroupKeyFor(s, mergeLookupForFinal))
                     .Select(g =>
                     {
                         var sorted = g.OrderBy(s => s, tieBreaker).ToList();
+                        var parts = g.Key.Split('|');
+                        var ageLabel = parts.Length > 1 ? parts[1] : sorted.First().AgeGenderClass;
                         return new SpringskytteClassGroup
                         {
-                            ClassName = $"Vapengrupp {sorted.First().WeaponClass} - {SpringskytteClasses.FormatWithAgeSpan(sorted.First().AgeGenderClass)}",
+                            // En sammanslagen etikett ("H 50+H 60") får inte köras genom
+                            // åldersspannsformateringen — den skriver ut spannet för EN klass.
+                            ClassName = $"Vapengrupp {parts[0]} - {(ageLabel.Contains('+') ? ageLabel : SpringskytteClasses.FormatWithAgeSpan(ageLabel))}",
                             Shooters = sorted
                         };
                     })

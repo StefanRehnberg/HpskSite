@@ -123,7 +123,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                             return new FaltskytteShooterResult
                             {
                                 MemberId = g.Key.MemberId,
-                                ShootingClass = g.Key.ShootingClass,
+                                // ⚠️ KANONISKT NAMN, inte radens råa värde. Raden lagrar Id-formen
+                                // ("C_Vet_A") medan `mergeConfig` bär namnformen ("C Vet Ä"), så
+                                // uppslaget nedan missade tyst för VARJE klass där de skiljer sig —
+                                // alltså alla veteran-, dam-, junior- och optikklasser.
+                                ShootingClass = HpskSite.Models.ShootingClasses.ToCanonicalName(g.Key.ShootingClass),
                                 Stations = stationResults,
                                 TotalHits = stationResults.Sum(s => s.Hits),
                                 TotalFigures = stationResults.Sum(s => s.Figures),
@@ -145,13 +149,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                             var actions = Newtonsoft.Json.JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeJson);
                             if (actions != null)
                             {
-                                foreach (var a in actions)
-                                {
-                                    var combined = ClassMergingService.GetCombinedClassName(a.SourceClass, a.TargetClass);
-                                    mergeLookup[a.SourceClass] = combined;
-                                    if (!mergeLookup.ContainsKey(a.TargetClass))
-                                        mergeLookup[a.TargetClass] = combined;
-                                }
+                                // ⚠️ SAMMA union-find som resultatlistan. Den parvisa varianten här
+                                // gav flera källor mot samma mål var sitt kombinerade namn och lät
+                                // sista skrivningen vinna på målklassen — alltså en annan gruppering
+                                // (och andra placeringar) i statistiken än i den publicerade listan.
+                                foreach (var kv in ClassMergingService.BuildMergeGroupLookup(actions))
+                                    mergeLookup[kv.Key] = kv.Value;
                             }
                         }
                         catch { /* ignore invalid merge config */ }

@@ -892,7 +892,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var classCounts = filteredResults
                     .GroupBy(r => new { r.MemberId, r.ShootingClass })
                     .Select(g => g.Key)
-                    .GroupBy(k => HpskSite.Models.ShootingClasses.GetById(k.ShootingClass)?.Name ?? k.ShootingClass)
+                    .GroupBy(k => HpskSite.Models.ShootingClasses.ToCanonicalName(k.ShootingClass))
                     .ToDictionary(g => g.Key, g => g.Count());
 
                 var service = new ClassMergingService();
@@ -969,26 +969,28 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     resultPageNode = _contentService.Create("Resultat", competition.Id, "competitionResult");
                     resultPageNode.SetValue("resultType", "Final Results");
                 }
-                if (resultPageNode.HasProperty("subCompetitionMergeConfig"))
+                // ⚠️ VÄGRA och namnge egenskapen. `SetValue` på en saknad egenskap är en TYST
+                // no-op, så det gamla beteendet — logga en varning och svara `success: true` —
+                // rapporterade en sparning som aldrig hände och var borta vid nästa laddning.
+                if (!resultPageNode.HasProperty("subCompetitionMergeConfig"))
                 {
-                    resultPageNode.SetValue("subCompetitionMergeConfig", request.MergeConfig ?? "");
-                    _contentService.Save(resultPageNode);
-                    _contentService.Publish(resultPageNode, new[] { "*" }, -1);
+                    _logger.LogWarning("competitionResult node for comp {CompId} missing 'subCompetitionMergeConfig' property — Deltävling merge config not saved.", request.CompetitionId);
+                    return Json(new { success = false, message = "Egenskapen 'subCompetitionMergeConfig' saknas på dokumenttypen competitionResult — deltävlingens sammanslagning kan inte sparas förrän den läggs till." });
                 }
-                else
-                {
-                    _logger.LogWarning("competitionResult node for comp {CompId} missing 'subCompetitionMergeConfig' property — Deltävling merge config not saved. Add this property to the competitionResult document type.", request.CompetitionId);
-                }
-            }
-            else if (competition.HasProperty("mergeConfig"))
-            {
-                competition.SetValue("mergeConfig", request.MergeConfig ?? "");
-                _contentService.Save(competition);
-                _contentService.Publish(competition, new[] { "*" }, -1);
+                resultPageNode.SetValue("subCompetitionMergeConfig", request.MergeConfig ?? "");
+                _contentService.Save(resultPageNode);
+                _contentService.Publish(resultPageNode, new[] { "*" }, -1);
             }
             else
             {
-                _logger.LogWarning("Competition {CompId} missing 'mergeConfig' property — merge config not saved. Add this property to the competition document type.", request.CompetitionId);
+                if (!competition.HasProperty("mergeConfig"))
+                {
+                    _logger.LogWarning("Competition {CompId} missing 'mergeConfig' property — merge config not saved.", request.CompetitionId);
+                    return Json(new { success = false, message = "Egenskapen 'mergeConfig' saknas på dokumenttypen competition — sammanslagningen kan inte sparas förrän den läggs till." });
+                }
+                competition.SetValue("mergeConfig", request.MergeConfig ?? "");
+                _contentService.Save(competition);
+                _contentService.Publish(competition, new[] { "*" }, -1);
             }
 
             // Sammanslagningen ändrar vilka som tävlar mot vilka, alltså vem som får medalj.
