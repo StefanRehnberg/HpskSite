@@ -411,5 +411,107 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
         }
+
+        // ── Station images ───────────────────────────────────────────────
+        // The configurator's photo buttons used to post to
+        // Faltskytte/UploadTargetGroupImage, which authorizes on a competition
+        // id. A standalone configuration has no competition, so every upload
+        // came back success=false and the picture silently never appeared.
+        // These two endpoints cover the configurator's other two hosts:
+        // a saved configuration (edit rights decide) and the competition
+        // wizard, where nothing is saved yet and the image is parked in the
+        // uploading member's own draft folder.
+
+        /// <summary>Stores a station/figure photo for a standalone configuration.</summary>
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> UploadStationImage(IFormFile file, int configurationId, string weaponClass, int stationNumber, int groupNumber)
+        {
+            try
+            {
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+
+                var config = await _configService.GetByIdAsync(configurationId);
+                if (config == null) return Json(new { success = false, message = "Konfigurationen hittades inte." });
+
+                if (!await _configService.CanEditAsync(config, viewerId))
+                    return Json(new { success = false, message = "Du har inte rättighet att ändra denna konfiguration." });
+
+                return SaveStationImage(file, Path.Combine("faltkonfig", configurationId.ToString()),
+                    weaponClass, stationNumber, groupNumber);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading station image for configuration {Id}", configurationId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Stores a station/figure photo while the competition wizard is still
+        /// running, i.e. before there is a competition or configuration to hang
+        /// it on. Scoped to the uploading member so two users drafting at the
+        /// same time cannot overwrite each other.
+        /// </summary>
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> UploadDraftStationImage(IFormFile file, string weaponClass, int stationNumber, int groupNumber)
+        {
+            try
+            {
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+
+                return SaveStationImage(file, Path.Combine("faltkonfig", "utkast", viewerId.Value.ToString()),
+                    weaponClass, stationNumber, groupNumber);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading draft station image");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Shared validation + write for the two upload endpoints above.
+        /// <paramref name="relativeDir"/> is the folder under wwwroot/images.
+        /// Callers must have checked authorization first.
+        /// </summary>
+        private IActionResult SaveStationImage(IFormFile file, string relativeDir, string weaponClass, int stationNumber, int groupNumber)
+        {
+            if (file == null || file.Length == 0)
+                return Json(new { success = false, message = "Ingen fil vald." });
+
+            if (file.Length > 5 * 1024 * 1024)
+                return Json(new { success = false, message = "Filen är för stor (max 5 MB)." });
+
+            var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp")
+                return Json(new { success = false, message = "Endast JPG, PNG eller WebP." });
+
+            var wc = SanitizeForFileName(weaponClass);
+            var fileName = $"st{stationNumber}_{wc}_tg{groupNumber}{ext}";
+
+            var fullDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", relativeDir);
+            Directory.CreateDirectory(fullDir);
+
+            using (var stream = new FileStream(Path.Combine(fullDir, fileName), FileMode.Create))
+            {
+                file.CopyTo(stream);
+            }
+
+            var imageUrl = "/images/" + relativeDir.Replace('\\', '/') + "/" + fileName;
+            _logger.LogInformation("Uploaded station image: {Url}", imageUrl);
+            return Json(new { success = true, imageUrl });
+        }
+
+        /// <summary>Keeps a client-supplied weapon class from escaping the image folder.</summary>
+        private static string SanitizeForFileName(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "x";
+            var cleaned = new string(value.Where(char.IsLetterOrDigit).ToArray());
+            return cleaned.Length == 0 ? "x" : cleaned;
+        }
     }
 }

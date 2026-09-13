@@ -1528,30 +1528,67 @@ function faltCfgChooseFigPhoto(stationNum, wc, tgIdx, fIdx) {
 
 // ─── Image upload / remove ──────────────────────────────────────────
 
+// Uploads one photo and returns its URL, or null if it could not be stored.
+// The configurator runs in three hosts and only one of them has a competition
+// to hang the image on, so the endpoint has to be picked per host — posting a
+// competition id that does not exist made the server refuse the upload and the
+// picture never appeared anywhere.
+async function faltCfgUploadStationImage(file, stationNum, wc, groupNumber) {
+    var url, formData = new FormData();
+    formData.append('file', file);
+    formData.append('weaponClass', wc);
+    formData.append('stationNumber', stationNum);
+    formData.append('groupNumber', groupNumber);
+
+    var compId = faltCfgGetCompetitionId();
+    if (faltCfgIsStandaloneEditor()) {
+        if (!window._faltCfgConfigurationId) {
+            alert('Kunde inte ladda upp bilden: konfigurationen saknar id.');
+            return null;
+        }
+        url = '/umbraco/surface/FaltskytteConfiguration/UploadStationImage';
+        formData.append('configurationId', window._faltCfgConfigurationId);
+    } else if (compId) {
+        url = '/umbraco/surface/Faltskytte/UploadTargetGroupImage';
+        formData.append('competitionId', compId);
+    } else {
+        // Wizard: no competition exists yet, park it in the member's draft folder.
+        url = '/umbraco/surface/FaltskytteConfiguration/UploadDraftStationImage';
+    }
+
+    try {
+        var resp = await fetch(url, { method: 'POST', body: formData });
+        if (!resp.ok) {
+            alert('Kunde inte ladda upp bilden (serverfel ' + resp.status + ').');
+            return null;
+        }
+        var data = await resp.json();
+        if (!data.success) {
+            alert('Kunde inte ladda upp bilden: ' + (data.message || 'Okänt fel'));
+            return null;
+        }
+        return data.imageUrl;
+    } catch (err) {
+        console.error(err);
+        alert('Nätverksfel vid uppladdning av bilden.');
+        return null;
+    }
+}
+
 async function faltCfgUploadGroupImage(inputEl, stationNum, wc, tgIdx) {
     var file = inputEl.files[0];
     if (!file) return;
 
-    var compId = faltCfgGetCompetitionId() || ('temp_' + Date.now());
-    var formData = new FormData();
-    formData.append('file', file);
-    formData.append('competitionId', compId);
-    formData.append('weaponClass', wc);
-    formData.append('stationNumber', stationNum);
-    formData.append('groupNumber', tgIdx + 1);
-    try {
-        var resp = await fetch('/umbraco/surface/Faltskytte/UploadTargetGroupImage', { method: 'POST', body: formData });
-        var data = await resp.json();
-        if (data.success) {
-            var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
-            if (station && station.targetGroups[tgIdx]) {
-                station.targetGroups[tgIdx].imageUrl = data.imageUrl;
-            }
-            faltCfgMarkDirty(wc, stationNum);
-            faltCfgExpandedStation = stationNum;
-            renderActiveTab();
-        }
-    } catch(e) { console.error(e); }
+    var imageUrl = await faltCfgUploadStationImage(file, stationNum, wc, tgIdx + 1);
+    if (!imageUrl) return;
+
+    var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
+    if (station && station.targetGroups[tgIdx]) {
+        station.targetGroups[tgIdx].imageUrl = imageUrl;
+    }
+    faltCfgMarkDirty(wc, stationNum);
+    faltCfgExpandedStation = stationNum;
+    renderActiveTab();
 }
 
 function faltCfgRemoveGroupImage(stationNum, wc, tgIdx) {
@@ -1605,32 +1642,16 @@ async function faltCfgUploadFigImage2(inputEl, stationNum, wc, tgIdx, fIdx) {
     var file = inputEl.files[0];
     if (!file) return;
 
-    var compId = faltCfgGetCompetitionId() || ('temp_' + Date.now());
+    var imageUrl = await faltCfgUploadStationImage(file, stationNum, wc, (tgIdx + 1) * 100 + (fIdx + 1));
+    if (!imageUrl) return;
 
-    var formData = new FormData();
-    formData.append('file', file);
-    formData.append('competitionId', compId);
-    formData.append('weaponClass', wc);
-    formData.append('stationNumber', stationNum);
-    formData.append('groupNumber', (tgIdx + 1) * 100 + (fIdx + 1));
-
-    try {
-        var resp = await fetch('/umbraco/surface/Faltskytte/UploadTargetGroupImage', {
-            method: 'POST',
-            body: formData
-        });
-        if (!resp.ok) return;
-        var data = await resp.json();
-        if (data.success) {
-            var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
-            if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
-                station.targetGroups[tgIdx].figures[fIdx].imageUrl = data.imageUrl;
-            }
-            faltCfgMarkDirty(wc, stationNum);
-            faltCfgExpandedStation = stationNum;
-            renderActiveTab();
-        }
-    } catch(err) { console.error(err); }
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
+    if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
+        station.targetGroups[tgIdx].figures[fIdx].imageUrl = imageUrl;
+    }
+    faltCfgMarkDirty(wc, stationNum);
+    faltCfgExpandedStation = stationNum;
+    renderActiveTab();
 }
 
 // ─── Simple mode ────────────────────────────────────────────────────

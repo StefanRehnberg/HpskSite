@@ -1811,7 +1811,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var fullDir = Path.Combine(Directory.GetCurrentDirectory(), dir);
                 Directory.CreateDirectory(fullDir);
 
-                var fileName = $"st{stationNumber}_{weaponClass}_tg{groupNumber}{ext}";
+                // weaponClass comes from the client — keep it from escaping the folder.
+                var wcSafe = new string((weaponClass ?? "").Where(char.IsLetterOrDigit).ToArray());
+                if (wcSafe.Length == 0) wcSafe = "x";
+                var fileName = $"st{stationNumber}_{wcSafe}_tg{groupNumber}{ext}";
                 var filePath = Path.Combine(fullDir, fileName);
 
                 using (var stream = new FileStream(filePath, FileMode.Create))
