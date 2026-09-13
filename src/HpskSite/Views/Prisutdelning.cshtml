@@ -300,7 +300,9 @@
                                         }
                                     </div>
                                     <div class="pu-score">
-                                        <div class="fw-semibold">@a.TotalScore @Model.ScoreUnit</div>
+                                        @* Lagens tal räknas live och bär tävlingens nuvarande enhet —
+                                           individens kommer ur artefakten och kan bära en annan. *@
+                                        <div class="fw-semibold">@a.TotalScore @Model.TeamScoreUnit</div>
                                         <div class="small text-secondary">@a.XCount @Model.TeamSecondaryUnit</div>
                                     </div>
                                 </div>

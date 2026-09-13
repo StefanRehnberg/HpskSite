@@ -272,6 +272,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 _contentService.Publish(competition, new[] { "*" }, -1);
 
                 _logger.LogInformation("Saved Fältskytte station config for competition {CompId}", request.CompetitionId);
+
+                // ⚠️ KONFIGURATIONEN BÄR TÄVLINGSTYPEN, och byter den mellan normalfält och
+                // poängfält ändras VARJE tal i resultatlistan (poäng = träff + figurer). En
+                // redan skriven artefakt ser lika färsk ut som förut men står i fel enhet —
+                // det var så prisutdelningen kom att visa "46 p" över en träffsumma. Därför
+                // räknas listan om här, precis som vid klassammanslagning. Best-effort:
+                // RefreshAsync gör ingenting när tävlingen inte har någon resultatlista.
+                await _resultArtifact.RefreshAsync(request.CompetitionId, "stationskonfiguration sparad");
+
                 return Json(new { success = true, message = "Stationskonfiguration sparad." });
             }
             catch (Exception ex)

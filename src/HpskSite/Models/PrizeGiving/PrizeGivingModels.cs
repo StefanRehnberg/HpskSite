@@ -68,6 +68,17 @@ namespace HpskSite.Models.PrizeGiving
         /// </summary>
         public string TeamSecondaryUnit { get; set; } = "X";
 
+        /// <summary>
+        /// Lagens huvudtal-enhet.
+        ///
+        /// ⚠️ SKILD FRÅN <see cref="ScoreUnit"/> MED FLIT. Individens tal läses ur den sparade
+        /// resultatartefakten och bär DEN listans enhet; lagens tal räknas fram live vid varje
+        /// sidladdning och bär tävlingens nuvarande. Är artefakten räknad före ett byte mellan
+        /// normalfält och poängfält är de två olika — och då ska korten säga olika saker, för
+        /// talen ÄR räknade olika. Sidan larmar samtidigt om att listan behöver räknas om.
+        /// </summary>
+        public string TeamScoreUnit { get; set; } = "p";
+
         public List<PrecisionMedalCategoryAwards> Individual { get; set; } = new();
         public List<PrizeTeamGroup> Teams { get; set; } = new();
         public PrizeHonorarySection Honorary { get; set; } = new();

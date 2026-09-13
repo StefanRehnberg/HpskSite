@@ -82,7 +82,9 @@ namespace HpskSite.Services
                 SelectedWeaponGroup = (weaponGroup ?? "").Trim(),
                 CanEdit = canEdit
             };
-            ApplyDisciplineLabels(model, competition);
+            // Grenens enheter som de ser ut NU. Lagkorten räknas live och ska ha de här; för
+            // individens tal är de bara en reserv — artefakten bär sina egna, se nedan.
+            var liveVariant = ApplyDisciplineLabels(model, competition);
 
             var resultNode = GetResultNode(competitionId);
             model.HasResultList = resultNode != null;
@@ -110,6 +112,31 @@ namespace HpskSite.Services
 
             model.ResultsUpdatedAt = artifact.UpdatedAt;
             model.MedalsComputed = artifact.MedalAwardsComputed;
+
+            // ⚠️ TALEN OCH ENHETEN KOMMER UR SAMMA KÄLLA. Artefakten bär sedan 2026-09-13 de
+            // enheter den räknades i, och de vinner över tävlingens nuvarande konfiguration:
+            // siffran i kortet är artefaktens, alltså måste etiketten också vara det. En
+            // artefakt skriven före det fältet säger ingenting, och då gäller konfigurationen
+            // som förr.
+            if (!string.IsNullOrWhiteSpace(artifact.ScoreUnit)) model.ScoreUnit = artifact.ScoreUnit!;
+            if (!string.IsNullOrWhiteSpace(artifact.SecondaryUnit)) model.SecondaryUnit = artifact.SecondaryUnit!;
+
+            // ⚠️ OCH NÄR DE SKILJER SIG ÄR LISTAN INAKTUELL. Byter en fälttävling från
+            // normalfält till poängfält ändras varje tal i resultatlistan (poäng = träff +
+            // figurer), men artefakten ser lika färsk ut som förut. Det är exakt det läge som
+            // visade "46 p / 19 pmål" i prislistan där resultatlistan visade "65 p / 22 pm":
+            // talen var träff och figurer, räknade före bytet.
+            if (liveVariant != null
+                && !string.IsNullOrWhiteSpace(artifact.ScoringVariant)
+                && !string.Equals(artifact.ScoringVariant, liveVariant, StringComparison.OrdinalIgnoreCase))
+            {
+                var wasPoints = string.Equals(artifact.ScoringVariant, "Poang", StringComparison.OrdinalIgnoreCase);
+                model.Warnings.Insert(0,
+                    $"Resultatlistan räknades som {(wasPoints ? "poängfält" : "normalfält")} "
+                    + $"({artifact.ScoreUnit}/{artifact.SecondaryUnit}), men tävlingen räknas nu som "
+                    + $"{(wasPoints ? "normalfält" : "poängfält")}. Talen nedan är alltså inte de som gäller — "
+                    + "klicka Uppdatera på fliken Resultat och ladda om sidan.");
+            }
 
             // ── Individuella medaljer ────────────────────────────────────────────────
             var allAwards = artifact.MedalAwards ?? new List<PrecisionMedalCategoryAwards>();
@@ -152,7 +179,8 @@ namespace HpskSite.Services
                 model.SelectedWeaponGroup);
 
             // ── Hederspriser ─────────────────────────────────────────────────────────
-            model.Honorary = BuildHonorary(competition, resultNode, artifact, scope, model.SelectedWeaponGroup);
+            model.Honorary = BuildHonorary(competition, resultNode, artifact, scope,
+                model.SelectedWeaponGroup, model.ScoreUnit);
 
             // ── Varningar som gör ceremonin osäker ───────────────────────────────────
             await AddIntegrityWarningsAsync(model, competition, resultNode, artifact);
@@ -169,10 +197,14 @@ namespace HpskSite.Services
         /// siffran räknades i. Scoringmode läses ur konfigurationen först: egenskapen på
         /// tävlingen är en spegel som kan vara inaktuell.
         /// </summary>
-        private static void ApplyDisciplineLabels(PrizeGivingModel model, IContent competition)
+        /// <returns>
+        /// "Poang" eller "Normal" för fältskyttefamiljen — räknesättet som gäller NU — och null
+        /// för grenar som bara har ett. Anroparen jämför det mot artefaktens egna enheter.
+        /// </returns>
+        private static string? ApplyDisciplineLabels(PrizeGivingModel model, IContent competition)
         {
             var isFalt = model.CompetitionType is "Faltskytte" or "MagnumFalt";
-            if (!isFalt) return;
+            if (!isFalt) return null;
 
             var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig"));
             var scoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode"));
@@ -180,12 +212,18 @@ namespace HpskSite.Services
                           || string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase);
 
             model.ScoreUnit = usesPoints ? "p" : "träff";
+            // ⚠️ LAGKORTEN RÄKNAS LIVE, inte ur artefakten (CalculateTeamResultsAsync), så de
+            // bär alltid tävlingens NUVARANDE enhet. Individens tal kan komma ur en artefakt
+            // som räknades i den andra — då ska korten säga olika, för de ÄR olika.
+            model.TeamScoreUnit = model.ScoreUnit;
             // ⚠️ Lagets andrahandstal är FIGURER i båda varianterna — SHB D.6.11.2.2 sätter
             // "största sammanlagda antalet träffade figurer" först i kedjan även i poängfält,
             // där individen i stället särskiljs på poängmål. Lag och individ har alltså inte
             // samma andra tal, och det är inte ett förbiseende.
             model.SecondaryUnit = usesPoints ? "pmål" : "fig";
             model.TeamSecondaryUnit = "fig";
+
+            return usesPoints ? FaltskytteScoringMode.Poang : FaltskytteScoringMode.Normal;
         }
 
         /// <summary>
@@ -299,7 +337,8 @@ namespace HpskSite.Services
             IContent? resultNode,
             PrecisionFinalResults artifact,
             string scope,
-            string selectedWeaponGroup)
+            string selectedWeaponGroup,
+            string scoreUnit)
         {
             var section = new PrizeHonorarySection
             {
@@ -374,7 +413,7 @@ namespace HpskSite.Services
                     });
                 }
 
-                MarkBoundaryTie(category);
+                MarkBoundaryTie(category, scoreUnit);
                 section.Categories.Add(category);
             }
 
@@ -388,7 +427,7 @@ namespace HpskSite.Services
         /// annars med lottning. Det spelar bara roll där gränsen går: två som står lika mitt i
         /// listan får båda ett pris, och att be funktionären lotta där vore påhittat arbete.
         /// </summary>
-        private static void MarkBoundaryTie(PrizeHonoraryCategory category)
+        private static void MarkBoundaryTie(PrizeHonoraryCategory category, string scoreUnit)
         {
             if (category.Count <= 0 || category.Count >= category.Candidates.Count) return;
 
@@ -404,7 +443,9 @@ namespace HpskSite.Services
             if (!spansBoundary) return;
 
             var names = string.Join(", ", tied.Select(c => c.Name));
-            var note = $"Står lika på {last.TotalScore} p ({tied.Count} skyttar: {names}) och delar den sista "
+            // ⚠️ Enheten är GRENENS, inte "p". Ett normalfältsresultat på 32 träff skrivet
+            // "32 p" läses som ett annat resultat — samma fälla som medaljkortens etiketter.
+            var note = $"Står lika på {last.TotalScore} {scoreUnit} ({tied.Count} skyttar: {names}) och delar den sista "
                      + "hederspriseplatsen. Ordningen avgörs av särskjutning för dem som deltagit i en sådan, "
                      + "annars genom lottning (SHB D.6.11.2).";
             foreach (var c in tied) c.TieNote = note;

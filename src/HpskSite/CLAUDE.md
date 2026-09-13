@@ -4408,6 +4408,57 @@ oavgjorda, alla sju mästerskapskategorier och fem lagklasser intakta.
 
 Adds C# → full ombyggnad. Ingen SQL, ingen doctype-egenskap.
 
+### ⚠️⚠️ ENHETEN MÅSTE RESA MED SIFFRAN — prisutdelningen i fältskytte (2026-09-13)
+
+Rapporterat med två skärmbilder från ett **klubbmästerskap i R-fält**: resultatlistan visade
+`65 p / 22 pm`, `60 / 9`, `57 / 26` — prisutdelningssidan visade `46 p / 19 pmål`,
+`41 / 19`, `38 / 19` för samma tre skyttar. Ordningen stämde, talen gjorde det inte.
+
+**Talen var TRÄFF och FIGURER, märkta som poäng och poängmål.** I poängfält är poängen
+`träff + figurer` (46 + 19 = 65) och andrahandstalet poängmålssumman — så prislistan visade
+normalfältets två tal under poängfältets två etiketter.
+
+**Orsaken är formen, inte en felräkning: talet och etiketten kom ur SKILDA KÄLLOR.**
+`PrizeGivingService` läser talen ur den SPARADE artefakten (med flit — medaljerna ska spegla
+den lista arrangören kontrollerat) men räknade fram etiketten på nytt ur tävlingens
+**nuvarande** konfiguration. De två kan inte hållas i takt över tid: artefakten står still,
+konfigurationen kan ändras. Så fort tävlingen blir poängfält efter att listan räknats, eller en
+fältkonfiguration byter `_scoringMode`, står den gamla siffran under den nya enheten — tyst.
+
+**`PrecisionFinalResults` bär nu `ScoreUnit`, `SecondaryUnit` och `ScoringVariant`**, skrivna av
+`FaltskytteResultArtifactService.BuildArtifact` ur samma `FaltskytteScoreReader` som räknar
+talen. Prisutdelningen **föredrar artefaktens enheter** och faller tillbaka på konfigurationen
+bara för artefakter skrivna före fälten (null = säger ingenting). Precisionsfamiljen lämnar dem
+null; där finns bara ett räknesätt.
+- **⚠️ `ScoringVariant` finns för att artefakten ska kunna AVSLÖJA att den är inaktuell.** Skiljer
+  den sig från tävlingens nuvarande räknesätt är VARJE tal i listan räknat på ett annat sätt,
+  och ingenting annat i artefakten säger det — den ser lika färsk ut som förut. Varningen läggs
+  först bland `Warnings` och pekar på Uppdatera.
+- **⚠️ `TeamScoreUnit` är SKILD från `ScoreUnit`, med flit.** Lagens tal räknas LIVE vid varje
+  sidladdning (`CalculateTeamResultsAsync`) och bär tävlingens nuvarande enhet; individens kommer
+  ur artefakten. Är artefakten räknad före ett byte ska korten säga olika saker — för talen ÄR
+  räknade olika. (Lagens andrahandstal är figurer i BÅDA varianterna, D.6.11.2.2.2 punkt 1 —
+  det var redan rätt.)
+- **⚠️ Hederspriskortets "Står lika på N p" var hårdkodad** och skrev "p" över en träffsumma i
+  normalfält. Tar grenens enhet nu.
+- **Orsaken täppt:** `SaveStationConfig` anropar `RefreshAsync` — konfigurationen bär
+  tävlingstypen, så ett byte där måste räkna om listan, precis som klassammanslagningen gör.
+  Tävlingens egen `scoringMode`-egenskap kan fortfarande ändras via tävlingsredigeringen, och
+  det är vad varningen finns för.
+
+**⚠️ FÄLLA SOM KOSTADE EN RUNDA: `sed -i` på en .cs-fil med svensk text.** Den infogade texten
+kodades cp1252 av skalet, och en enda ogiltig UTF-8-byte i en fil **utan BOM** får Roslyn att
+falla tillbaka på systemets kodsida för HELA filen — alltså blev varje svensk sträng i den
+mojibake (`"trÃ¤ff"`), utan kompileringsfel. 338 .cs-filer i projektet saknar BOM och klarar sig
+bara för att de är ren UTF-8. **Skriv svensk text med redigeringsverktyget, aldrig via sed eller
+heredoc.**
+
+Verifierat: 6/6 `FaltskytteScoreReaderTests` (talet och enheten prövas som ett PAR, i båda
+varianterna). **A/B: 3 av 6 faller** när `Primary` alltid returnerar träff. Regression:
+`FaltskytteShootOffServiceTests` 24/24.
+
+Adds C# → full ombyggnad. Ingen SQL, ingen doctype-egenskap.
+
 ### ⚠️ Publiceringstillståndet: EN form, ETT ordpar, EN rubrikordning (2026-09-08)
 
 Rapporterat: *"Märket 'Preliminär' ser ut som en knapp och det är genomgående ett UX-problem på

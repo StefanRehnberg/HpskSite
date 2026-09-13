@@ -110,7 +110,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         // ── Översättningen ───────────────────────────────────────────────────────
 
-        internal static PrecisionFinalResults BuildArtifact(IContent competition, FaltskytteResultsBuildResult build)
+        /// <summary>Publik för att kunna A/B-provas: samma indata i normalfält och poängfält
+        /// måste ge olika tal OCH olika enheter. Se FaltskytteScoreReaderTests.</summary>
+        public static PrecisionFinalResults BuildArtifact(IContent competition, FaltskytteResultsBuildResult build)
         {
             var results = build.Results!;
             var competitionType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
@@ -127,7 +129,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     .SelectMany(cg => cg.Shooters)
                     .Select(s => s.MemberId)
                     .Distinct()
-                    .Count()
+                    .Count(),
+
+                // ⚠️ ENHETERNA SKRIVS IN I ARTEFAKTEN, inte bara talen. Prisutdelningen räknade
+                // förut fram etiketten på nytt ur tävlingens konfiguration medan siffran kom
+                // härifrån — två källor som glider isär så fort räknesättet ändras efter att
+                // listan räknats. Se PrecisionFinalResults.ScoreUnit.
+                ScoreUnit = scoring.PrimaryUnit,
+                SecondaryUnit = scoring.SecondaryUnit,
+                ScoringVariant = scoring.Variant
             };
 
             if (!ChampionshipCategory.IsChampionship(scope)) return artifact;
@@ -283,7 +293,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// vad "lika" betyder. Glider de isär skulle prisutdelningen visa ett annat tal än det
         /// striden avgjordes på.
         /// </summary>
-        internal sealed class FaltskytteScoreReader
+        public sealed class FaltskytteScoreReader
         {
             private readonly bool _usesPoints;
 
@@ -304,6 +314,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             /// <summary>Enheten för <see cref="Secondary"/>.</summary>
             public string SecondaryUnit => _usesPoints ? "pmål" : "fig";
+
+            /// <summary>Räknesättet talen räknades med, som det skrivs in i artefakten:
+            /// "Poang" eller "Normal". Se <see cref="PrecisionFinalResults.ScoringVariant"/>.</summary>
+            public string Variant => _usesPoints ? FaltskytteScoringMode.Poang : FaltskytteScoringMode.Normal;
         }
     }
 }

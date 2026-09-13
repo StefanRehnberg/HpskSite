@@ -322,6 +322,37 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         /// <summary>Antal distinkta skyttar med minst en serie i tävlingen. Underlaget för
         /// hederspristaket i SHB C.3.4.2 ("minst en fjärdedel av de i tävlingen deltagande").</summary>
         public int ParticipantCount { get; set; }
+
+        /// <summary>
+        /// Enheten talen i den HÄR artefakten räknades i: "p" (precision, poängfält, magnumfält)
+        /// eller "träff" (normalfält).
+        ///
+        /// ⚠️ ENHETEN MÅSTE RESA MED SIFFRAN. Prisutdelningssidan läser talen härifrån men
+        /// räknade tidigare fram etiketten på nytt ur tävlingens konfiguration. De två källorna
+        /// kan inte hållas i takt över tid: så fort artefakten är äldre än en ändring av
+        /// tävlingens räknesätt skrivs "46 p" över en träffsumma, och en funktionär som läser
+        /// upp det vid bordet låter som om hen läser fel resultat — inte fel etikett. Mätt
+        /// 2026-09-13: prislistan sa "46 p / 19 pmål" där resultatlistan sa "65 p / 22 pm".
+        ///
+        /// Null i artefakter skrivna före det här fältet — läsaren faller då tillbaka på
+        /// tävlingens konfiguration, precis som förr.
+        /// </summary>
+        public string? ScoreUnit { get; set; }
+
+        /// <summary>Enheten för andrahandstalet: "X" (innertior), "fig" (figurer) eller "pmål".
+        /// Se <see cref="ScoreUnit"/>.</summary>
+        public string? SecondaryUnit { get; set; }
+
+        /// <summary>
+        /// Räknesättet talen räknades med: "Poang" eller "Normal" för fältskyttefamiljen, null
+        /// för precisionsfamiljen (som bara har ett).
+        ///
+        /// ⚠️ Finns för att artefakten ska kunna AVSLÖJA att den är inaktuell. Byter tävlingen
+        /// från normalfält till poängfält ändras varje tal i listan, men ingenting annat i
+        /// artefakten säger det — den ser lika färsk ut som förut. Prisutdelningen jämför det
+        /// här värdet med tävlingens nuvarande och larmar när de skiljer sig.
+        /// </summary>
+        public string? ScoringVariant { get; set; }
     }
 
     /// <summary>Medaljörerna i EN mästerskapskategori ("C", "C Dam", "A", "B" ...).</summary>
