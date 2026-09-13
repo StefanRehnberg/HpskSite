@@ -156,6 +156,13 @@
     color: var(--bs-secondary-color);
 }
 
+/* Grannmånadens dagar visar sina händelser men ska fortfarande läsas som utanför månaden.
+   Dämpas med opacity, inte med en egen textfärg — färgtoken mot .has-events ljusa bakgrund
+   blir olässbar i mörkt läge. */
+.calendar-day.other-month.has-events {
+    opacity: 0.75;
+}
+
 .calendar-day.has-events {
     background-color: var(--bs-primary-bg-subtle);
     border-color: var(--bs-primary);
@@ -440,14 +447,26 @@ function switchView(view) {
     localStorage.setItem('clubCalendarView', view);
 }
 
+// Datumnyckel yyyy-MM-dd ur LOKAL tid. `new Date(...).toISOString()` går via UTC och flyttar
+// en svensk midnatt till dagen innan — händelsen hamnade då i fel ruta.
+function localDateKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// API:t skickar datumet som "2026-10-03T00:00:00" (utan tidszon). Ta de tio första tecknen rakt
+// av när formatet är sådant, annars gå via en lokal Date.
+function eventDateKey(event) {
+    const raw = event.date;
+    if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+    return localDateKey(new Date(raw));
+}
+
 // Helper function to get events for a specific month
 function getEventsForMonth(year, month) {
     if (!window.calendarEvents) return [];
 
-    return window.calendarEvents.filter(event => {
-        const eventDate = new Date(event.date);
-        return eventDate.getFullYear() === year && eventDate.getMonth() === month;
-    });
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+    return window.calendarEvents.filter(event => eventDateKey(event).startsWith(prefix));
 }
 
 // Helper function to group events by date
@@ -455,8 +474,8 @@ function groupEventsByDate(events) {
     const grouped = {};
 
     events.forEach(event => {
-        const eventDate = new Date(event.date);
-        const dateKey = eventDate.toISOString().split('T')[0];
+        const dateKey = eventDateKey(event);
+        const eventDate = new Date(dateKey + 'T00:00:00');
 
         if (!grouped[dateKey]) {
             grouped[dateKey] = {
@@ -747,85 +766,82 @@ function renderCalendar() {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const daysInPrevMonth = new Date(year, month, 0).getDate();
 
-    const today = new Date();
-    const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
-
     let html = '';
 
     // Previous month days
     for (let i = firstDay - 1; i > 0; i--) {
-        html += `<div class="calendar-day other-month">${daysInPrevMonth - i + 1}</div>`;
+        html += renderDayCell(new Date(year, month - 1, daysInPrevMonth - i + 1), true);
     }
 
     // Current month days
     for (let day = 1; day <= daysInMonth; day++) {
-        // Build date string without timezone conversion (avoid off-by-one errors)
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-        const dayEvents = window.calendarEvents?.filter(e => {
-            const eventDate = new Date(e.date).toISOString().split('T')[0];
-            return eventDate === dateStr;
-        }) || [];
-
-        const isToday = isCurrentMonth && day === today.getDate();
-        const hasEvents = dayEvents.length > 0;
-
-        // Check if this day is in the past
-        const currentDayDate = new Date(year, month, day);
-        const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        const isPastDate = currentDayDate < todayDate;
-
-        let classNames = 'calendar-day';
-        if (isToday) classNames += ' today';
-        if (hasEvents) classNames += ' has-events';
-        if (isPastDate) classNames += ' past-date';
-
-        html += `<div class="${classNames}" data-date="${dateStr}" onclick="showDayEvents('${dateStr}')">`;
-        html += `<div class="calendar-day-number">${day}</div>`;
-        html += `<div class="calendar-day-events">`;
-
-        // ⚠️ VARJE HÄNDELSE ÄR SIN EGEN LÄNK. Rapporterat flera gånger som "kalendern är trasig":
-        // man klickar på händelsen i rutan, dagen fälls ut LÄNGRE NER på sidan utanför blickfånget,
-        // och slutsatsen blir att inget hände. Namnet i rutan ser ut som en länk, så det ska vara
-        // en länk — `stopPropagation` hindrar att dagen fälls ut samtidigt.
-        //
-        // Klick på dagrutan men UTANFÖR en händelse beter sig oförändrat (showDayEvents), och det
-        // är enda vägen in för en händelse utan egen sida — därför är det fortfarande en div då.
-        dayEvents.slice(0, 2).forEach(event => {
-            const color = eventTypeColors[event.eventType] || eventTypeColors.default;
-            const mand = event.isMandatory
-                ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" title="Obligatorisk"></i>'
-                : '';
-            const label = event.name || event.type;
-            const title = `${event.isMandatory ? 'Obligatorisk: ' : ''}${label}`;
-            const inner = `<span class="event-dot" style="background-color: ${color}"></span>${mand}${label}`;
-
-            html += event.url
-                ? `<a class="event-item-preview event-preview-link" href="${event.url}" title="${title}" onclick="event.stopPropagation()">${inner}</a>`
-                : `<div class="event-item-preview" title="${title}">${inner}</div>`;
-        });
-
-        if (dayEvents.length > 2) {
-            html += `<div class="event-item-preview text-muted small">+${dayEvents.length - 2} mer</div>`;
-        }
-
-        html += `</div></div>`;
+        html += renderDayCell(new Date(year, month, day), false);
     }
 
     // Next month days
     const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
     for (let day = 1; day <= totalCells - firstDay - daysInMonth; day++) {
-        html += `<div class="calendar-day other-month">${day}</div>`;
+        html += renderDayCell(new Date(year, month + 1, day), true);
     }
 
     document.getElementById('calendarDays').innerHTML = html;
 }
 
+// En dagruta ser likadan ut oavsett om dagen tillhör månaden man tittar på eller är en
+// utfyllnadsdag från grannmånaden. ⚠️ Utfyllnadsdagarna renderades tidigare som en naken siffra
+// utan datum, klick eller händelser — en klubbtävling den 3/10 syntes därför som en TOM ruta i
+// septembervyn, och slutsatsen blev att kalendern tappat bort tävlingen.
+function renderDayCell(date, otherMonth) {
+    const dateStr = localDateKey(date);
+    const dayEvents = window.calendarEvents?.filter(e => eventDateKey(e) === dateStr) || [];
+
+    const now = new Date();
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const isToday = date.getTime() === todayDate.getTime();
+    const isPastDate = date.getTime() < todayDate.getTime();
+    const hasEvents = dayEvents.length > 0;
+
+    let classNames = 'calendar-day';
+    if (otherMonth) classNames += ' other-month';
+    if (isToday) classNames += ' today';
+    if (hasEvents) classNames += ' has-events';
+    if (isPastDate) classNames += ' past-date';
+
+    let html = `<div class="${classNames}" data-date="${dateStr}" onclick="showDayEvents('${dateStr}')">`;
+    html += `<div class="calendar-day-number">${date.getDate()}</div>`;
+    html += `<div class="calendar-day-events">`;
+
+    // ⚠️ VARJE HÄNDELSE ÄR SIN EGEN LÄNK. Rapporterat flera gånger som "kalendern är trasig":
+    // man klickar på händelsen i rutan, dagen fälls ut LÄNGRE NER på sidan utanför blickfånget,
+    // och slutsatsen blir att inget hände. Namnet i rutan ser ut som en länk, så det ska vara
+    // en länk — `stopPropagation` hindrar att dagen fälls ut samtidigt.
+    //
+    // Klick på dagrutan men UTANFÖR en händelse beter sig oförändrat (showDayEvents), och det
+    // är enda vägen in för en händelse utan egen sida — därför är det fortfarande en div då.
+    dayEvents.slice(0, 2).forEach(event => {
+        const color = eventTypeColors[event.eventType] || eventTypeColors.default;
+        const mand = event.isMandatory
+            ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" title="Obligatorisk"></i>'
+            : '';
+        const label = event.name || event.type;
+        const title = `${event.isMandatory ? 'Obligatorisk: ' : ''}${label}`;
+        const inner = `<span class="event-dot" style="background-color: ${color}"></span>${mand}${label}`;
+
+        html += event.url
+            ? `<a class="event-item-preview event-preview-link" href="${event.url}" title="${title}" onclick="event.stopPropagation()">${inner}</a>`
+            : `<div class="event-item-preview" title="${title}">${inner}</div>`;
+    });
+
+    if (dayEvents.length > 2) {
+        html += `<div class="event-item-preview text-muted small">+${dayEvents.length - 2} mer</div>`;
+    }
+
+    html += `</div></div>`;
+    return html;
+}
+
 function showDayEvents(dateStr) {
-    const dayEvents = window.calendarEvents?.filter(e => {
-        const eventDate = new Date(e.date).toISOString().split('T')[0];
-        return eventDate === dateStr;
-    }) || [];
+    const dayEvents = window.calendarEvents?.filter(e => eventDateKey(e) === dateStr) || [];
 
     const eventsList = document.getElementById('eventsList');
     const selectedDayEvents = document.getElementById('selectedDayEvents');
