@@ -202,6 +202,13 @@ namespace HpskSite.Controllers
                 classCode = c.ClassCode,
                 classLabel = RecordClassRegistry.GetClassDisplayName(c.ClassCode),
                 totalScore = c.TotalScore,
+                secondaryScore = c.SecondaryScore,
+                secondaryLabel = RecordClassRegistry.GetSecondaryLabel(c.Discipline),
+                scoreUnit = RecordClassRegistry.GetScoreUnit(c.Discipline),
+                // Färdigformaterat med enheten på. Vyerna visar denna i stället för att sätta
+                // ihop tal och etikett själva — "285 / 300" respektive "42 träff (25 figurer)".
+                scoreDisplay = RecordClassRegistry.FormatScore(c.Discipline, c.ChampionType, c.TotalScore, c.SecondaryScore),
+                // 0 = grenen har inget fast tak (fältskytte).
                 maxScore = RecordClassRegistry.GetMaxScore(c.Discipline, c.ChampionType),
                 competitionName = c.CompetitionName ?? "",
                 competitionDate = c.CompetitionDate?.ToString("yyyy-MM-dd"),
@@ -428,6 +435,7 @@ namespace HpskSite.Controllers
                 totalScore = r.TotalScore,
                 seriesCount = r.SeriesCount,
                 maxScore = RecordClassRegistry.GetMaxScore(r.Discipline, r.RecordType),
+                scoreDisplay = RecordClassRegistry.FormatScore(r.Discipline, r.RecordType, r.TotalScore, null),
                 recordDate = r.RecordDate.ToString("yyyy-MM-dd"),
                 competitionName = r.CompetitionName ?? "",
                 holderMemberId = r.HolderMemberId,

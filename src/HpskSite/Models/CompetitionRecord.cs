@@ -13,19 +13,25 @@ namespace HpskSite.Models
         public const string Region = "Region";
     }
 
+    /// <summary>
+    /// Grenkoderna. Samma strängar som tävlingstyperna i <see cref="CompetitionTypes"/>, så att en
+    /// rekord-/mästarrad går att matcha mot en tävling utan översättningstabell.
+    ///
+    /// ⚠️ Att stå här betyder bara att grenen FINNS. Om den kan bära rekord, mästare eller båda
+    /// avgörs av <see cref="RecordClassRegistry"/> — fältskytte har mästare men inga rekord.
+    /// </summary>
     public static class RecordDisciplines
     {
         public const string Precision = "Precision";
+        public const string Standardpistol = "Standardpistol";
+        public const string Sportpistol = "Sportpistol";
         public const string MagnumPrecision = "MagnumPrecision";
         public const string Milsnabb = "Milsnabb";
+        public const string Faltskytte = "Faltskytte";
 
-        public static string DisplayName(string discipline) => discipline switch
-        {
-            Precision => "Precisionsskjutning",
-            MagnumPrecision => "Magnumprecision",
-            Milsnabb => "Militär snabbmatch",
-            _ => discipline
-        };
+        /// <summary>Visningsnamnet kommer ur grenkatalogen — en okänd kod visas som sig själv.</summary>
+        public static string DisplayName(string discipline)
+            => RecordClassRegistry.Get(discipline)?.DisplayName ?? discipline;
     }
 
     public static class RecordTypes

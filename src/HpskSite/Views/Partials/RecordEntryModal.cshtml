@@ -26,12 +26,14 @@
                 <div class="row mb-3">
                     <div class="col-md-6">
                         <label class="form-label">Disciplin *</label>
+                        @* Grenarna renderas ur RecordClassRegistry. Handskriven låg den och
+                           erbjöd Standardpistol och Sportpistol som registret inte kände till:
+                           tom klasslista och nekat sparande, utan att något sa varför. *@
                         <select class="form-select" id="reDiscipline-@reInstance">
-                            <option value="Precision">Precisionsskjutning</option>
-                            <option value="MagnumPrecision">Magnumprecision</option>
-                            <option value="Standardpistol">Standardpistol</option>
-                            <option value="Sportpistol">Sportpistol</option>
-                            <option value="Milsnabb">Militär snabbmatch</option>
+                            @foreach (var d in HpskSite.Models.RecordClassRegistry.All.Where(x => x.SupportsRecords))
+                            {
+                                <option value="@d.Id">@d.DisplayName</option>
+                            }
                         </select>
                     </div>
                     <div class="col-md-6">
@@ -132,17 +134,18 @@
     var bsModal = null;
     var fpDate = null;
 
-    var combos = {
-        'Precision-Individual': { classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA'], series: 10, max: 500 },
-        'Precision-Team':       { classes: ['A','B','C','C_Dam','C_Jun','C_Vet'],          series: 7,  max: 350 },
-        'MagnumPrecision-Individual': { classes: ['M1','M2','M3','M4','M5','M6','M7'],     series: 6,  max: 300 },
-        'MagnumPrecision-Team':       { classes: ['M1','M2','M3','M4','M5','M6','M7'],     series: 6,  max: 300 },
-        'Milsnabb-Individual':  { classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA','R'], series: 12, max: 600 },
-        'Milsnabb-Team':        { classes: ['A','B','C','C_Dam','C_Jun','C_Vet','R'],         series: 12, max: 600 }
-    };
+    // Ur RecordClassRegistry — kopiera aldrig hit klasslistorna igen.
+    var registry = @Html.Raw(HpskSite.Models.RecordClassRegistry.RecordCombosJson);
+    var combos = {};
+    registry.forEach(function (d) {
+        d.types.forEach(function (t) {
+            combos[d.id + '-' + t.type] = {
+                classes: t.classes, series: t.series, max: t.max, ceiling: t.ceiling,
+                scoreUnit: d.scoreUnit
+            };
+        });
+    });
 
-    var classLabels = { 'C_Dam':'C Dam', 'C_Jun':'C Jun', 'C_VetY':'C Vet Y', 'C_VetA':'C Vet Ä', 'C_Vet':'C Vet' };
-    function classLabel(c) { return classLabels[c] || c; }
 
     function getToken() {
         var e = document.querySelector('input[name="__RequestVerificationToken"]');
@@ -163,7 +166,7 @@
         if (!combo) return;
         var sel = el('reClass');
         sel.innerHTML = combo.classes.map(function (c) {
-            return '<option value="' + c + '">' + classLabel(c) + '</option>';
+            return '<option value="' + c.code + '">' + c.label + '</option>';
         }).join('');
         el('reScore').setAttribute('max', String(combo.max));
         el('reScoreHelp').textContent = 'Max möjligt: ' + combo.max + ' (' + combo.series + ' serier × 50p).';

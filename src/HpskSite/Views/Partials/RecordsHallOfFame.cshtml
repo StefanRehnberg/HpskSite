@@ -168,26 +168,25 @@
     var allRecords = [];
     var currentRecordType = 'Individual';
 
-    // Hardcoded to mirror the server-side RecordClassRegistry.AllCombos
-    var combos = [
-        { discipline: 'Precision',         disciplineLabel: 'Precisionsskjutning',  recordType: 'Individual',
-          classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA'], series: 10, max: 500, icon: 'bi-bullseye' },
-        { discipline: 'Precision',         disciplineLabel: 'Precisionsskjutning',  recordType: 'Team',
-          classes: ['A','B','C','C_Dam','C_Jun','C_Vet'],          series: 7,  max: 350, icon: 'bi-bullseye' },
-        { discipline: 'MagnumPrecision',   disciplineLabel: 'Magnumprecision',      recordType: 'Individual',
-          classes: ['M1','M2','M3','M4','M5','M6','M7'],           series: 6,  max: 300, icon: 'bi-bullseye' },
-        { discipline: 'MagnumPrecision',   disciplineLabel: 'Magnumprecision',      recordType: 'Team',
-          classes: ['M1','M2','M3','M4','M5','M6','M7'],           series: 6,  max: 300, icon: 'bi-bullseye' },
-        { discipline: 'Milsnabb',          disciplineLabel: 'Militär snabbmatch',   recordType: 'Individual',
-          classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA','R'], series: 12, max: 600, icon: 'bi-stopwatch' },
-        { discipline: 'Milsnabb',          disciplineLabel: 'Militär snabbmatch',   recordType: 'Team',
-          classes: ['A','B','C','C_Dam','C_Jun','C_Vet','R'],      series: 12, max: 600, icon: 'bi-stopwatch' }
-    ];
+    // Grenkatalogen kommer ur RecordClassRegistry — handkopiera den ALDRIG hit igen.
+    // Det var så disciplinlistan och klasslistorna hann glida isär från servern.
+    var registry = @Html.Raw(HpskSite.Models.RecordClassRegistry.RecordCombosJson);
 
-    var classLabels = {
-        'C_Dam': 'C Dam', 'C_Jun': 'C Jun', 'C_VetY': 'C Vet Y',
-        'C_VetA': 'C Vet Ä', 'C_Vet': 'C Vet'
-    };
+    // Platt (gren × typ), samma form som vyn renderade förut.
+    var combos = [];
+    registry.forEach(function (d) {
+        d.types.forEach(function (t) {
+            combos.push({
+                discipline: d.id, disciplineLabel: d.label, icon: d.icon,
+                recordType: t.type, classes: t.classes, series: t.series, max: t.max
+            });
+        });
+    });
+
+    var classLabels = {};
+    combos.forEach(function (c) {
+        c.classes.forEach(function (cl) { classLabels[cl.code] = cl.label; });
+    });
     function classLabel(c) { return classLabels[c] || c; }
 
     function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
@@ -254,21 +253,24 @@
     }
 
     function renderHero() {
-        var disciplines = ['Precision', 'MagnumPrecision', 'Milsnabb'];
-        var labels = { 'Precision': 'Precisionsskjutning', 'MagnumPrecision': 'Magnumprecision', 'Milsnabb': 'Militär snabbmatch' };
-        var icons  = { 'Precision': 'bi-bullseye',         'MagnumPrecision': 'bi-bullseye',     'Milsnabb': 'bi-stopwatch' };
+        var disciplines = registry.map(function (d) { return d.id; });
+        var labels = {}, icons = {};
+        registry.forEach(function (d) { labels[d.id] = d.label; icons[d.id] = d.icon; });
+
+        // Hjältebandet blir smalt med många grenar — tre per rad.
+        var heroCol = 'col-md-4';
 
         var html = disciplines.map(function (d) {
             var r = bestIndividualForDiscipline(d);
             if (!r) {
-                return '<div class="col-md-4">'
+                return '<div class="' + heroCol + '">'
                      + '<div class="records-hero-card">'
                      + '<div class="records-hero-discipline"><i class="bi ' + icons[d] + ' me-1"></i>' + escapeHtml(labels[d]) + '</div>'
                      + '<div class="records-hero-score text-muted">—</div>'
                      + '<div class="records-hero-meta">Inget rekord ännu</div>'
                      + '</div></div>';
             }
-            return '<div class="col-md-4">'
+            return '<div class="' + heroCol + '">'
                  + '<div class="records-hero-card has-record">'
                  + '<div class="records-hero-discipline"><i class="bi ' + icons[d] + ' me-1"></i>' + escapeHtml(labels[d]) + '</div>'
                  + '<div><span class="records-hero-score">' + r.totalScore + '</span><span class="records-hero-max"> / ' + r.maxScore + '</span></div>'
@@ -288,7 +290,8 @@
     function renderGrids() {
         var html = '';
         combos.filter(function (c) { return c.recordType === currentRecordType; }).forEach(function (c) {
-            var rows = c.classes.map(function (classCode) {
+            var rows = c.classes.map(function (cl) {
+                var classCode = cl.code;
                 var r = findRecord(c.discipline, c.recordType, classCode);
                 if (!r) {
                     return '<tr class="empty-row">'

@@ -29,7 +29,18 @@ namespace HpskSite.Models
         /// <summary>Class code from RecordClassRegistry.</summary>
         public string ClassCode { get; set; } = "";
 
+        /// <summary>
+        /// Resultatet i grenens egen enhet: poäng för seriegrenarna, TRÄFF för fältskytte.
+        /// Enheten står i <see cref="RecordClassRegistry.GetScoreUnit"/> och måste följa med
+        /// talet till varje yta — se <see cref="RecordClassRegistry.FormatScore"/>.
+        /// </summary>
         public int TotalScore { get; set; }
+
+        /// <summary>
+        /// Grenens andra tal, när den har ett: fältskyttets FIGURER. Null för seriegrenarna.
+        /// Etiketten kommer ur <see cref="RecordClassRegistry.GetSecondaryLabel"/>.
+        /// </summary>
+        public int? SecondaryScore { get; set; }
 
         public string? CompetitionName { get; set; }
 

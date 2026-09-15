@@ -84,7 +84,7 @@
 }
 .reigning-champions-card table.champ-table .col-year { width: 60px; font-weight: 600; }
 .reigning-champions-card table.champ-table .col-class { width: 90px; color: var(--bs-secondary-color); }
-.reigning-champions-card table.champ-table .col-score { width: 70px; text-align: right; font-weight: 600; }
+.reigning-champions-card table.champ-table .col-score { width: 130px; text-align: right; font-weight: 600; }
 .reigning-champions-card table.champ-table .col-club { color: var(--bs-secondary-color); }
 .reigning-champions-card table.champ-table .col-actions { width: 36px; text-align: right; overflow: visible; }
 .reigning-champions-card .champ-empty { color: var(--bs-secondary-color); font-style: italic; }
@@ -129,7 +129,19 @@
 
     function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
     function getToken() { var e = document.querySelector('input[name="__RequestVerificationToken"]'); return e ? e.value : ''; }
-    var classOrder = { 'A':1, 'B':2, 'C':3, 'C_Dam':4, 'C_Jun':5, 'C_VetY':6, 'C_VetA':7, 'C_Vet':8, 'R':9, 'M1':10, 'M2':11, 'M3':12, 'M4':13, 'M5':14, 'M6':15, 'M7':16 };
+    // Ordningen — både grenarnas och klassernas — kommer ur RecordClassRegistry.
+    // Handskriven missade den varje klass som lades till (M8, M9, A Opt).
+    var registry = @Html.Raw(HpskSite.Models.RecordClassRegistry.ChampionCombosJson);
+    var classOrder = {};
+    var disciplineOrder = [];
+    registry.forEach(function (d) {
+        disciplineOrder.push(d.id);
+        d.types.forEach(function (t) {
+            t.classes.forEach(function (c) {
+                if (classOrder[c.code] === undefined) classOrder[c.code] = Object.keys(classOrder).length + 1;
+            });
+        });
+    });
 
     function load() {
         var loading = card.querySelector('.champ-loading');
@@ -185,11 +197,16 @@
             sections[key].rows.push(r);
         });
         var orderedKeys = [];
-        ['Precision', 'MagnumPrecision', 'Milsnabb'].forEach(function (d) {
+        disciplineOrder.forEach(function (d) {
             ['Individual', 'Team'].forEach(function (t) {
                 var k = d + '|' + t;
                 if (sections[k]) orderedKeys.push(k);
             });
+        });
+        // En gren registret inte känner till (äldre rad) hamnar sist i stället för att
+        // tyst försvinna — en mästare som inte visas läses som att ingen kröntes.
+        Object.keys(sections).forEach(function (k) {
+            if (orderedKeys.indexOf(k) < 0) orderedKeys.push(k);
         });
         return orderedKeys.map(function (k) { return sections[k]; });
     }
@@ -207,7 +224,7 @@
              + '<td class="col-class" title="' + escapeHtml(r.classLabel) + '">' + escapeHtml(r.classLabel) + '</td>'
              + '<td title="' + escapeHtml(displayName) + '">' + escapeHtml(displayName) + '</td>'
              + '<td class="col-club" title="' + escapeHtml(clubName) + '">' + escapeHtml(clubName) + '</td>'
-             + '<td class="col-score">' + r.totalScore + '</td>'
+             + '<td class="col-score" title="' + escapeHtml(r.scoreDisplay || String(r.totalScore)) + '">' + escapeHtml(r.scoreDisplay || String(r.totalScore)) + '</td>'
              + (canEdit ? '<td class="col-actions">' + actionsCell + '</td>' : '')
              + '</tr>';
     }
@@ -298,7 +315,7 @@
                     var compMeta = [r.competitionName, r.competitionDate].filter(function (x) { return x; }).map(escapeHtml).join(' · ');
                     return '<tr>'
                          + '<td><strong>' + r.year + '</strong></td>'
-                         + '<td>' + r.totalScore + ' <small class="text-muted">/ ' + r.maxScore + '</small></td>'
+                         + '<td>' + escapeHtml(r.scoreDisplay || (r.totalScore + ' / ' + r.maxScore)) + '</td>'
                          + '<td>' + holder + '</td>'
                          + '<td>' + compMeta + '</td>'
                          + '</tr>';

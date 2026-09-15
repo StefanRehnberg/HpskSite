@@ -64,6 +64,14 @@ namespace HpskSite.Services
         public async Task<(bool Success, int RecordId, string? Message)> CreateAsync(
             CreateRecordRequest req, int actingMemberId)
         {
+            // Ett rekord förutsätter att grenen skjuts i samma form varje gång. Fältskytte gör
+            // inte det (ny bana varje tävling) och har därför mästare men inga rekord — se
+            // RecordClassRegistry. Grindas här, inte bara i vyn.
+            if (!RecordClassRegistry.SupportsRecords(req.Discipline))
+            {
+                return (false, 0, $"{RecordDisciplines.DisplayName(req.Discipline)} kan inte ha rekord — banan är inte densamma två gånger. Registrera en mästare i stället.");
+            }
+
             // Validate against the registry — class must be valid for the discipline+type.
             if (!RecordClassRegistry.IsValid(req.Discipline, req.RecordType, req.ClassCode))
             {

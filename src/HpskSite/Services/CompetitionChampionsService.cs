@@ -83,12 +83,25 @@ namespace HpskSite.Services
             if (req == null) return (false, 0, "Ogiltig begäran.");
             if (req.Year < 1900 || req.Year > 2200) return (false, 0, "Ogiltigt år.");
 
+            if (!RecordClassRegistry.SupportsChampions(req.Discipline))
+                return (false, 0, $"{RecordDisciplines.DisplayName(req.Discipline)} finns inte som gren för mästartitlar.");
+
             if (!RecordClassRegistry.IsValid(req.Discipline, req.ChampionType, req.ClassCode))
                 return (false, 0, $"Klassen {req.ClassCode} finns inte för {RecordDisciplines.DisplayName(req.Discipline)} {RecordTypes.DisplayName(req.ChampionType)}.");
 
-            var maxScore = RecordClassRegistry.GetMaxScore(req.Discipline, req.ChampionType);
-            if (req.TotalScore < 0 || req.TotalScore > maxScore)
-                return (false, 0, $"Poäng {req.TotalScore} är utanför giltigt intervall [0, {maxScore}].");
+            // Taket är seriemodellens max där en sådan finns, annars grenens öppna tak —
+            // fältskyttets träff har inget fast max eftersom antalet stationer varierar.
+            var ceiling = RecordClassRegistry.GetScoreCeiling(req.Discipline, req.ChampionType);
+            var unit = RecordClassRegistry.GetScoreUnit(req.Discipline);
+            if (req.TotalScore < 0 || req.TotalScore > ceiling)
+                return (false, 0, $"Resultatet {req.TotalScore} {unit} är utanför giltigt intervall [0, {ceiling}].");
+
+            // Det andra talet (fältskyttets figurer) tas bara emot av grenar som har ett,
+            // och kan aldrig vara fler än träffarna.
+            var secondaryLabel = RecordClassRegistry.GetSecondaryLabel(req.Discipline);
+            var secondaryScore = secondaryLabel == null ? null : req.SecondaryScore;
+            if (secondaryScore.HasValue && (secondaryScore.Value < 0 || secondaryScore.Value > req.TotalScore))
+                return (false, 0, $"Antal {secondaryLabel} ({secondaryScore.Value}) måste ligga mellan 0 och antalet {unit} ({req.TotalScore}).");
 
             if (string.IsNullOrWhiteSpace(req.HolderName))
                 return (false, 0, "Skytt eller lagnamn måste anges.");
@@ -115,6 +128,7 @@ namespace HpskSite.Services
                 ChampionType = req.ChampionType,
                 ClassCode = req.ClassCode,
                 TotalScore = req.TotalScore,
+                SecondaryScore = secondaryScore,
                 CompetitionName = req.CompetitionName,
                 CompetitionDate = req.CompetitionDate,
                 HolderMemberId = req.HolderMemberId,
@@ -153,6 +167,10 @@ namespace HpskSite.Services
         public string ChampionType { get; set; } = "";
         public string ClassCode { get; set; } = "";
         public int TotalScore { get; set; }
+
+        /// <summary>Fältskyttets figurer. Ignoreras för grenar som saknar ett andra tal.</summary>
+        public int? SecondaryScore { get; set; }
+
         public string? CompetitionName { get; set; }
         public DateTime? CompetitionDate { get; set; }
         public int? HolderMemberId { get; set; }
