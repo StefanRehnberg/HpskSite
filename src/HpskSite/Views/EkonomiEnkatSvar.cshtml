@@ -3,6 +3,8 @@
 @{
     Layout = null;
     var hjalpare = Model.Where(r => r.VillHjalpaTill).ToList();
+    var raderat = ViewData["Raderat"] as int? ?? 0;
+    var fel = ViewData["Fel"] as string;
 }
 @*
     /ekonomifragor/svar — svaren, tyngsta bakgrunden först. Sajtadmin bara.
@@ -58,6 +60,17 @@
         .empty { background: var(--surface); border: 1px dashed var(--rule); padding: 28px;
                  text-align: center; color: var(--ink-faint); }
         a { color: var(--accent); }
+
+        /* Destruktivt: rött, med utskriven text, och sist i kortet — aldrig en naken soptunna
+           bland de andra uppgifterna. Husregeln för radåtgärder. */
+        .card footer { border-top: 1px solid var(--rule-soft); padding-top: 10px;
+                       display: flex; justify-content: flex-end; }
+        .del { font: inherit; font-size: 13px; color: #9B2C2C; background: none;
+               border: 1px solid #E3BDBD; border-radius: 3px; padding: 4px 12px; cursor: pointer; }
+        .del:hover { background: #F9EBEB; }
+        .notice { padding: 12px 16px; font-size: 14px; }
+        .notice.ok { background: var(--accent-bg); border-left: 3px solid var(--accent); }
+        .notice.bad { background: #F9EBEB; border-left: 3px solid #9B2C2C; color: #9B2C2C; }
     </style>
 </head>
 <body>
@@ -70,6 +83,22 @@
             <a href="/ekonomifragor">Öppna formuläret</a>
         </p>
     </header>
+
+    @if (raderat > 0)
+    {
+        <div class="notice ok">
+            Svar @raderat är borttaget. Innehållet ligger kvar i serverloggen som enda kopia —
+            sök på <strong>Ekonomienkät: svar @raderat raderat</strong> om det behöver läsas tillbaka.
+        </div>
+    }
+    @if (fel == "saknas")
+    {
+        <div class="notice bad">Svaret fanns inte längre — någon annan kan ha hunnit ta bort det.</div>
+    }
+    @if (fel == "misslyckades")
+    {
+        <div class="notice bad">Svaret kunde inte tas bort. Felet ligger i serverloggen.</div>
+    }
 
     @if (Model.Count == 0)
     {
@@ -149,10 +178,52 @@
                         }
                     </p>
                 }
+
+                @*
+                    ⚠️ TOKEN PER FORMULÄR — en `@@Html.AntiForgeryToken()` någon annanstans på sidan
+                    POSTAS INTE. Webbläsaren skickar bara fält som ligger inuti det formulär som
+                    submittas, så en sidnivåtoken hade gett ett tomt 400 på varje radering.
+
+                    ⚠️⚠️ NAMNET GÅR VIA ETT DATA-ATTRIBUT, ALDRIG IN I EN JS-LITERAL I ATTRIBUTET.
+                    En första version byggde `confirm('... från @@r.Namn ...')` direkt i `onsubmit`.
+                    Razor HTML-kodar `'` till `&#39;` — men entiteter avkodas INNE i attributvärdet
+                    innan JS parsar det, så ett namn med apostrof bryter ut ur literalen. Och namnet
+                    kommer från ett ÖPPET, oautentiserat formulär medan sidan bara läses av
+                    SAJTADMIN: alltså lagrad XSS från vem som helst mot den högsta behörigheten.
+                    Femte instansen av samma lucka i kodbasen (Fältskyttes "lägg till skytt",
+                    startlisteredigeraren, styrelsens removeRole, avatarens onerror).
+                    Attributvärdet är säkert eftersom det aldrig tolkas som kod.
+
+                    ⚠️ Bekräftelsedialogen är rätt här och inte en inline-notis: raderingen är
+                    oåterkallelig i gränssnittet och MÅSTE bekräftas. Den namnger vem svaret kom
+                    från — "Ta bort svaret?" räcker inte när korten ser likadana ut.
+                *@
+                <footer>
+                    <form method="post" action="/ekonomifragor/radera" class="del-form"
+                          data-namn="@(string.IsNullOrWhiteSpace(r.Namn) ? "en anonym svarande" : r.Namn)">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="id" value="@r.Id" />
+                        <button type="submit" class="del">Ta bort svaret</button>
+                    </form>
+                </footer>
             </article>
         }
     }
 
 </div>
+
+<script>
+    // Bekräftelsen byggs HÄR, ur data-attributet — aldrig i en JS-literal inne i markupen.
+    // Se kommentaren vid formuläret för varför.
+    document.querySelectorAll('form.del-form').forEach(function (f) {
+        f.addEventListener('submit', function (e) {
+            var namn = f.dataset.namn || 'en anonym svarande';
+            if (!confirm('Ta bort svaret från ' + namn + '?\n\n'
+                       + 'Det går inte att ångra här. Texten sparas i serverloggen.')) {
+                e.preventDefault();
+            }
+        });
+    });
+</script>
 </body>
 </html>

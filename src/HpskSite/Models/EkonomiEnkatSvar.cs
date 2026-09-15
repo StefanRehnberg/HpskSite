@@ -84,6 +84,33 @@ namespace HpskSite.Models
             "F11" => SvarF11,
             _ => null,
         };
+
+        /// <summary>
+        /// Skriver svaret på en fråga, slaget upp på frågans id.
+        ///
+        /// <para><b>⚠️ Finns för att ta bort en PARALLELL LISTA.</b> Utan den måste varje skrivväg
+        /// räkna upp <c>SvarF1 = …, SvarF2 = …</c> för hand, och en sådan uppräkning glider isär
+        /// från <see cref="EkonomiEnkat.Fragor"/> så fort en fråga läggs till. Exakt den formen
+        /// kostade två misslyckade proddeployer när <c>SvarF8</c> glömdes i migreringens
+        /// guardlista.</para>
+        /// </summary>
+        public void SetSvar(string fragaId, string? varde)
+        {
+            switch (fragaId)
+            {
+                case "F1": SvarF1 = varde; break;
+                case "F2": SvarF2 = varde; break;
+                case "F3": SvarF3 = varde; break;
+                case "F4": SvarF4 = varde; break;
+                case "F5": SvarF5 = varde; break;
+                case "F6": SvarF6 = varde; break;
+                case "F7": SvarF7 = varde; break;
+                case "F8": SvarF8 = varde; break;
+                case "F9": SvarF9 = varde; break;
+                case "F10": SvarF10 = varde; break;
+                case "F11": SvarF11 = varde; break;
+            }
+        }
     }
 
     /// <summary>Alternativen och frågorna på <c>/ekonomifragor</c>, på ett ställe.</summary>
