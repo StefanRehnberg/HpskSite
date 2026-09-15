@@ -282,7 +282,56 @@ const main = async () => {
     lw = sState.loanWeapons || {};
     ok('lånet syns på skyttens kort', lw.myBookingId > 0);
     eq('ett vapen är nu upptaget', lw.occupied, 1);
+
+    // ── Lånet EFTER anmälan ────────────────────────────────────────────────────────────────────
+    //
+    // ⚠️ `occupied` räknar DAGEN, `bookedForEvent` räknar TILLFÄLLET. Det är den senare
+    // vapenansvarig plockar fram vapen efter, och de två går isär så fort klubben har något
+    // annat bokat samma dag. Ett påstående mot fel av dem hade varit grönt i just det fall
+    // siffran spelar roll.
+    eq('vapenansvarigs siffra räknas på tillfället', lw.bookedForEvent, 1);
+    ok('plocklistan bär vem det gäller',
+       (lw.bookings || []).length === 1 && !!lw.bookings[0].memberName,
+       JSON.stringify(lw.bookings));
+
+    // Ångrat lån: anmälan står kvar, vapnet släpps.
+    let setLoan = await json('/umbraco/surface/ClubEvent/SetLoanWeapon',
+      { eventId: evId, loanWeapon: false, loanFirearmId: 0 });
+    ok('lånet går att avboka utan att anmälan rörs', setLoan.success, setLoan.message);
+    sState = await api(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${evId}`);
+    lw = sState.loanWeapons || {};
+    eq('vapnet är släppt', lw.myBookingId, 0);
+    eq('siffran följer med ned', lw.bookedForEvent, 0);
+    eq('anmälan står kvar', sState.me && sState.me.signedUp, true);
+
+    // ⚠️ Att man behöver låna inser man oftast EFTER anmälan. Utan den här vägen är enda
+    // utvägen att avboka hela anmälan och göra om den.
+    setLoan = await json('/umbraco/surface/ClubEvent/SetLoanWeapon',
+      { eventId: evId, loanWeapon: true, loanFirearmId: 0 });
+    ok('lånet går att boka i efterhand', setLoan.success, setLoan.message);
+    sState = await api(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${evId}`);
+    lw = sState.loanWeapons || {};
+    ok('det efterbokade lånet syns', lw.myBookingId > 0);
+
+    // ⚠️ AVBOKAD ANMÄLAN MÅSTE SLÄPPA VAPNET. Överlever lånet avbokningen står vapenansvarig
+    // med ett framplockat vapen till någon som inte kommer — och platsen är tagen från någon
+    // som gör det.
+    const cancelled = await json('/umbraco/surface/ClubEvent/Cancel', { eventId: evId });
+    ok('anmälan går att avboka', cancelled.success, cancelled.message);
+    ok('avbokningen berättar att lånet släpptes', !!cancelled.loanMessage, cancelled.loanMessage);
+    sState = await api(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${evId}`);
+    lw = sState.loanWeapons || {};
+    eq('inget vapen står kvar bokat på tillfället', lw.bookedForEvent, 0);
+    eq('dagens fönster är fritt igen', lw.occupied, 0);
+
+    // Tillbaka till utgångsläget inför valvet.
+    up = await json('/umbraco/surface/ClubEvent/SignUp',
+      { eventId: evId, note: '', loanWeapon: true, loanFirearmId: 0 });
+    ok('anmälan med platsbokning går att göra om', up.success, up.message);
+    sState = await api(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${evId}`);
+    lw = sState.loanWeapons || {};
     const poolBookingId = lw.myBookingId;
+    ok('lånet är på plats inför valvet', poolBookingId > 0);
 
     // ── Valvet ─────────────────────────────────────────────────────────────────────────────────
     section('Valvet');

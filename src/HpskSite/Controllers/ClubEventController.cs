@@ -148,7 +148,7 @@ namespace HpskSite.Controllers
                         signedUpAt = r.SignedUpAt?.ToString("yyyy-MM-dd HH:mm")
                     })
                     : null,
-                loanWeapons = BuildLoanWeaponState(ctx, me),
+                loanWeapons = BuildLoanWeaponState(ctx, me, canManage),
             });
         }
 
@@ -167,8 +167,14 @@ namespace HpskSite.Controllers
         /// något.</b> Övergången från "vilket som helst" till "just mitt vapen" sker utan att någon
         /// bestämmer den — hen börjar bara bry sig — så formuläret minns i stället för att fråga
         /// vilket läge man är i.</para>
+        ///
+        /// <para><b>⚠️ Läget måste kunna läsas EFTER anmälan.</b> <c>myBookingId</c> och
+        /// <c>bookedForEvent</c> gäller den här händelsen, inte dagen: skytten ska kunna se om hen
+        /// kryssade i rutan, och vapenansvarig hur många vapen som ska plockas fram. Dagsfönstrets
+        /// <c>occupied</c> svarar på en annan fråga (finns det plats kvar) och duger inte till
+        /// någondera.</para>
         /// </summary>
-        private object? BuildLoanWeaponState(ClubEventContext ctx, int memberId)
+        private object? BuildLoanWeaponState(ClubEventContext ctx, int memberId, bool canManage)
         {
             if (ctx.IsRegionOwned) return null;
 
@@ -187,9 +193,15 @@ namespace HpskSite.Controllers
             var from = day;
             var to = day.AddDays(1).AddSeconds(-1);
 
+            // Lånen som hör till DEN HÄR händelsen. En läsning, två svar: skyttens eget lån och
+            // vapenansvarigs plocklista.
+            var forEvent = _bookings
+                .GetForOccasion(clubId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
+                .Where(b => b.IsActive)
+                .ToList();
+
             var mine = memberId > 0
-                ? _bookings.GetForOccasion(clubId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
-                    .FirstOrDefault(b => b.MemberId == memberId && b.IsActive)
+                ? forEvent.FirstOrDefault(b => b.MemberId == memberId)
                 : null;
 
             var taken = _bookings.BookedFirearmIds(clubId, from, to);
@@ -205,6 +217,22 @@ namespace HpskSite.Controllers
                 myBookingId = mine?.Id ?? 0,
                 myNumber = mine?.ClubWeaponNumber,
                 myWishNumber = mine?.WishedWeaponNumber,
+                // Siffran vapenansvarig plockar efter: bokade lånevapen på just det här tillfället.
+                bookedForEvent = forEvent.Count,
+                // ⚠️ VEM som lånar visas bara för den som håller i tillfället. Anmälningslistan är
+                // öppen för klubbens medlemmar, och att där skylta med vem som inte har eget vapen
+                // är en annan uppgift än den listan finns för.
+                bookings = canManage
+                    ? forEvent.Select(b => new
+                    {
+                        id = b.Id,
+                        memberName = b.MemberName,
+                        // Numret som GÄLLER nu: tilldelat om det finns, annars önskat. Tomt =
+                        // platsbokning, ett vapen vilket som helst — det avgörs i valvet.
+                        number = b.ClubWeaponNumber,
+                        statusLabel = b.StatusLabel,
+                    }).ToList()
+                    : null,
                 usualFirearmId = usual ?? 0,
                 usualNumber = usual is int u ? _firearms.GetById(u)?.ClubWeaponNumber : null,
                 // ⚠️ Är det vanliga vapnet redan taget den kvällen ska det sägas VID BOKNINGEN,
@@ -292,11 +320,114 @@ namespace HpskSite.Controllers
 
             // A member may withdraw themselves; a functionary may withdraw anyone on their event.
             int target = request?.MemberId > 0 ? request.MemberId : me;
-            if (target != me && !await _participation.CanManageAsync(ctx, me))
+            bool canManage = await _participation.CanManageAsync(ctx, me);
+            if (target != me && !canManage)
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             var (ok, msg) = await _participation.CancelAsync(ctx.EventId, target, me);
-            return Json(new { success = ok, message = msg ?? "Anmälan avbokad." });
+            if (!ok) return Json(new { success = false, message = msg });
+
+            // ⚠️ AVBOKNINGEN MÅSTE SLÄPPA VAPNET. Anmälan och lånet gjordes som EN handling, och
+            // överlever lånet avbokningen står vapenansvarig med ett framplockat vapen till någon
+            // som inte kommer — samtidigt som platsen är tagen från någon som gör det.
+            var loanMessage = ReleaseLoanOnCancel(ctx, target, me, canManage);
+
+            return Json(new { success = true, loanMessage, message = "Anmälan avbokad." });
+        }
+
+        /// <summary>
+        /// Släpper medlemmens lånevapen på tillfället när anmälan avbokas.
+        ///
+        /// <para><b>⚠️ Ett UTLÄMNAT vapen släpps inte.</b> Det ligger fysiskt hos medlemmen och
+        /// måste återlämnas i valvet — försvinner bokningen tappar klubben spåret till vem som har
+        /// det. Då säger beskedet det i stället.</para>
+        /// </summary>
+        private string? ReleaseLoanOnCancel(ClubEventContext ctx, int memberId, int actorId, bool actorIsStaff)
+        {
+            if (ctx.IsRegionOwned || ctx.OwnerId <= 0) return null;
+
+            var mine = _bookings
+                .GetForOccasion(ctx.OwnerId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
+                .FirstOrDefault(b => b.MemberId == memberId && b.IsActive);
+            if (mine == null) return null;
+
+            if (mine.IsOut)
+                return "⚠️ Anmälan är avbokad, men lånevapnet är utlämnat — lämna tillbaka det i valvet.";
+
+            var error = _bookings.Cancel(mine.Id, actorId, actorIsStaff, "Anmälan till evenemanget avbokad.");
+            return error is null
+                ? "Lånevapnet är avbokat."
+                : "⚠️ Anmälan är avbokad, men lånevapnet gick inte att släppa: " + error;
+        }
+
+        /// <summary>
+        /// Lägger till eller tar bort lånevapnet EFTER anmälan.
+        /// POST /umbraco/surface/ClubEvent/SetLoanWeapon
+        ///
+        /// <para><b>⚠️ Följer <c>cancelOpen</c>, inte <c>signupOpen</c>.</b> Att man inser att man
+        /// behöver låna — eller att man inte gör det — händer typiskt efter sista anmälningsdag,
+        /// och en spärr där hade bara gett vapenansvarig fel siffra att plocka efter.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetLoanWeapon([FromBody] SignUpRequest request)
+        {
+            int me = await CurrentMemberIdAsync();
+            if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            if (ctx.IsRegionOwned || ctx.OwnerId <= 0)
+                return Json(new { success = false, message = "Lånevapen hör till en klubb, inte till kretsens evenemang." });
+            if (!ClubEventParticipationService.IsCancelOpen(ctx))
+                return Json(new { success = false, message = "Evenemanget har passerat." });
+
+            // Lånet hänger på anmälan. Ett vapen bokat av någon som inte står på listan är precis
+            // det vapenansvarig inte kan reda ut i valvet.
+            var roster = await _participation.BuildRosterAsync(ctx);
+            var mineRow = roster.Rows.FirstOrDefault(r => r.MemberId == me);
+            if (mineRow == null || mineRow.SignedUpAt == null || mineRow.Cancelled)
+                return Json(new { success = false, message = "Anmäl dig först, så kan du boka lånevapen." });
+
+            var existing = _bookings
+                .GetForOccasion(ctx.OwnerId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
+                .FirstOrDefault(b => b.MemberId == me && b.IsActive);
+
+            if (request?.LoanWeapon != true)
+            {
+                if (existing == null) return Json(new { success = true, loanMessage = "Du har inget lånevapen bokat." });
+                if (existing.IsOut)
+                    return Json(new { success = false, message = "Vapnet är utlämnat och måste återlämnas i valvet." });
+
+                var cancelError = _bookings.Cancel(existing.Id, me, false, "Behövde inget lånevapen.");
+                return cancelError is null
+                    ? Json(new { success = true, loanMessage = "Lånevapnet är avbokat." })
+                    : Json(new { success = false, message = cancelError });
+            }
+
+            if (existing != null)
+                return Json(new { success = true, loanMessage = "Du har redan ett lånevapen bokat." });
+
+            var day = (ctx.EventDate ?? DateTime.Now).Date;
+            var (_, error) = _bookings.Create(new HpskSite.Services.Firearms.FirearmBookingRequest
+            {
+                MemberId = me,
+                ClubId = ctx.OwnerId,
+                FirearmId = request.LoanFirearmId > 0 ? request.LoanFirearmId : null,
+                OccasionKind = HpskSite.Services.Firearms.FirearmOccasionKind.Event,
+                OccasionId = ctx.EventId,
+                From = day,
+                To = day.AddDays(1).AddSeconds(-1),
+                Source = HpskSite.Services.Firearms.FirearmBookingSource.Web,
+            });
+
+            return error is null
+                ? Json(new
+                {
+                    success = true,
+                    loanMessage = request.LoanFirearmId > 0 ? "Vapnet är reserverat." : "Ett vapen är reserverat åt dig.",
+                })
+                : Json(new { success = false, message = error });
         }
 
         // ── Functionary: roll-call ────────────────────────────────────
