@@ -1,0 +1,396 @@
+@using HpskSite.Models
+@{
+    Layout = null;
+    var tack = ViewData["Tack"] as bool? ?? false;
+    var fel = ViewData["Fel"] as string;
+
+    // ⚠️ ÅTERFYLL VID FEL. Utan det här förlorar den som skrivit sju svar och missat bakgrundsvalet
+    // allt hen skrivit — och hen skriver det inte en andra gång. Formuläret är långt nog att det är
+    // den troligaste orsaken till att ett svar aldrig kommer in.
+    var posted = Context.Request.HasFormContentType ? Context.Request.Form : null;
+    string Posted(string name) => posted?[name].ToString() ?? "";
+    bool PostedRadio(string name, string value) => posted?[name].ToString() == value;
+}
+@*
+    /ekonomifragor — den öppna sidan där medlemmar med redovisningskompetens svarar på frågorna
+    inför ombyggnaden av betalningar och bokföring. Direktlänken mejlas ut till medlemmarna.
+
+    ⚠️ SJÄLVSTÄNDIG SIDA, Layout = null och egna stilar. Den är INTE beroende av theme.css — en
+    kampanjsida som mejlas ut får inte kunna stå ostylad för att en statisk fil missades i en
+    deploy (det har hänt). Allt som behövs för att sidan ska hålla ligger i filen.
+
+    ⚠️ KOMPETENSFRÅGAN LIGGER FÖRST och är enda obligatoriska fältet. Svaren ska VÄGAS, inte
+    räknas — utan bakgrunden per svar går vägningen inte att göra i efterhand.
+
+    ⚠️ TONEN ÄR LUGNANDE I INGRESSEN. En stor del av medlemmarna är datorovana och otrygga, och
+    ett mejl om bokföring och verifikationer läses annars som att något är fel med klubbens
+    ekonomi. Sidan måste säga motsatsen med en gång.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Kan du redovisning? Vi behöver din hjälp – Pistol.nu</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@@400;500&family=IBM+Plex+Sans:wght@@400;500;600&family=IBM+Plex+Serif:wght@@500;600&display=swap">
+    <style>
+        :root {
+            --paper: #F6F7F3; --surface: #FFFFFF; --ink: #1B2320; --ink-soft: #5C645F;
+            --ink-faint: #868D88; --rule: #D9DDD5; --rule-soft: #E8EBE5;
+            --accent: #2F6B4F; --accent-bg: #EAF1EC; --flag: #8C5312; --flag-bg: #F7EFE4;
+            --stripe: #F1F4EE; --danger: #9B2C2C; --danger-bg: #F9EBEB;
+            --sans: "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+            --serif: "IBM Plex Serif", Georgia, serif;
+            --mono: "IBM Plex Mono", Consolas, monospace;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: var(--paper); color: var(--ink);
+            font-family: var(--sans); font-size: 16px; line-height: 1.6;
+            padding-inline: 20px; padding-block: 36px 72px;
+        }
+        .sheet { max-width: 47rem; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+
+        .brand { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
+                 text-transform: uppercase; color: var(--accent); text-decoration: none; }
+        h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(27px, 5vw, 36px);
+             line-height: 1.15; margin: 10px 0 0; text-wrap: balance; }
+        .standfirst { font-size: 17px; color: var(--ink-soft); margin: 14px 0 0; max-width: 40rem; }
+
+        .calm { background: var(--accent-bg); border-left: 3px solid var(--accent);
+                padding: 14px 18px; margin-top: 18px; }
+        .calm p { margin: 0; max-width: 38rem; }
+
+        section { display: flex; flex-direction: column; gap: 14px; }
+        h2 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0;
+             padding-bottom: 8px; border-bottom: 2px solid var(--accent); text-wrap: balance; }
+        h3 { font-size: 15px; margin: 0; font-weight: 600; }
+        p { margin: 0; max-width: 40rem; }
+
+        ol.flow { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+        ol.flow li { counter-increment: step; display: grid; grid-template-columns: 2.1rem 1fr;
+                     gap: 14px; padding-block: 10px; border-top: 1px solid var(--rule-soft); }
+        ol.flow li:first-child { border-top: none; padding-top: 0; }
+        ol.flow li::before { content: counter(step); font-family: var(--mono); font-size: 12px;
+            color: var(--accent); background: var(--accent-bg); border-radius: 2px;
+            text-align: center; padding: 2px 0; line-height: 1.5; height: fit-content; }
+
+        .flagbox { background: var(--flag-bg); border-left: 3px solid var(--flag); padding: 14px 18px; }
+        .flagbox .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+                          text-transform: uppercase; color: var(--flag); display: block; margin-bottom: 4px; }
+        .flagbox p { max-width: 38rem; }
+
+        .scroll { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 26rem; }
+        caption { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+                  text-transform: uppercase; color: var(--ink-faint); padding-bottom: 8px; }
+        th, td { text-align: left; padding: 7px 12px 7px 0; vertical-align: top; }
+        thead th { font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em;
+                   text-transform: uppercase; color: var(--ink-faint); font-weight: 400;
+                   border-bottom: 1px solid var(--rule); }
+        tbody tr { border-bottom: 1px solid var(--rule-soft); }
+        tbody tr:nth-child(even) { background: var(--stripe); }
+        td.num, th.num { text-align: right; font-family: var(--mono);
+                         font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: 0; }
+        .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+        .receipt { background: var(--surface); border: 1px solid var(--rule); padding: 18px 20px;
+                   max-width: 24rem; font-size: 13.5px; }
+        .receipt .org { font-family: var(--serif); font-weight: 600; font-size: 15px; }
+        .receipt .sub { font-size: 11.5px; color: var(--ink-faint); font-family: var(--mono);
+                        display: block; margin-bottom: 10px; }
+        .receipt .rows { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px;
+                         border-block: 1px solid var(--rule-soft); padding-block: 10px; }
+        .receipt .rows span:nth-child(odd) { color: var(--ink-faint); font-size: 12px; }
+        .receipt .total { display: flex; justify-content: space-between; font-weight: 600;
+                          margin-top: 10px; }
+        .receipt .note { font-size: 11.5px; color: var(--ink-soft); margin: 8px 0 0; }
+
+        /* ── Formulär ── */
+        fieldset { border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+        legend { padding: 0; font-weight: 600; font-size: 16px; }
+        .hint { font-size: 14px; color: var(--ink-soft); max-width: 38rem; }
+        .choices { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--rule);
+                   background: var(--surface); }
+        .choice { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px;
+                  border-top: 1px solid var(--rule-soft); cursor: pointer; }
+        .choice:first-child { border-top: none; }
+        .choice:hover { background: var(--stripe); }
+        .choice input { margin: 4px 0 0; flex: none; width: 17px; height: 17px; accent-color: var(--accent); }
+        .choice span { font-size: 15px; }
+
+        label.field { display: flex; flex-direction: column; gap: 5px; font-size: 14.5px; }
+        label.field .lbl { font-weight: 600; }
+        input[type=text], input[type=email], textarea {
+            font-family: var(--sans); font-size: 15px; color: var(--ink);
+            background: var(--surface); border: 1px solid var(--rule); border-radius: 2px;
+            padding: 9px 11px; width: 100%; line-height: 1.5;
+        }
+        textarea { min-height: 5.5rem; resize: vertical; }
+        input:focus-visible, textarea:focus-visible, button:focus-visible, .choice:focus-within {
+            outline: 2px solid var(--accent); outline-offset: 1px;
+        }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+        .q { display: flex; flex-direction: column; gap: 8px; padding-block: 18px;
+             border-top: 1px solid var(--rule); }
+        .q:first-of-type { border-top: none; padding-top: 4px; }
+        .q-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+        .q-id { font-family: var(--mono); font-size: 13px; color: var(--accent); font-weight: 500; }
+        .q-title { font-weight: 600; font-size: 16.5px; }
+        .costly { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em;
+                  text-transform: uppercase; color: var(--flag); border: 1px solid var(--flag);
+                  border-radius: 2px; padding: 1px 6px; white-space: nowrap; }
+        .q p { font-size: 14.5px; color: var(--ink-soft); }
+
+        .check { display: flex; gap: 12px; align-items: flex-start; background: var(--surface);
+                 border: 1px solid var(--rule); padding: 14px 16px; cursor: pointer; }
+        .check input { margin: 3px 0 0; flex: none; width: 17px; height: 17px; accent-color: var(--accent); }
+
+        button.send { font-family: var(--sans); font-size: 16px; font-weight: 600; color: #fff;
+                      background: var(--accent); border: none; border-radius: 2px;
+                      padding: 14px 26px; cursor: pointer; align-self: flex-start; }
+        button.send:hover { filter: brightness(1.08); }
+
+        .error { background: var(--danger-bg); border-left: 3px solid var(--danger);
+                 padding: 12px 16px; color: var(--danger); font-size: 15px; }
+
+        .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+        .gdpr { font-size: 13px; color: var(--ink-faint); max-width: 38rem; }
+        footer { border-top: 1px solid var(--rule); padding-top: 18px; font-size: 13px;
+                 color: var(--ink-faint); }
+        footer a { color: var(--accent); }
+
+        .tack { background: var(--surface); border: 1px solid var(--accent); padding: 28px 30px; }
+        .tack h1 { margin-top: 0; }
+
+        @@media (max-width: 560px) {
+            .grid2 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="sheet">
+
+@if (tack)
+{
+    <div class="tack">
+        <a class="brand" href="/">Pistol.nu</a>
+        <h1>Tack — det här hjälper på riktigt.</h1>
+        <p class="standfirst">
+            Ditt svar är sparat. Vi läser alla svar innan vi bygger, och hör av oss om vi behöver
+            fråga något mer. Du behöver inte göra något mer.
+        </p>
+        <p style="margin-top:16px"><a href="/">Tillbaka till Pistol.nu</a></p>
+    </div>
+}
+else
+{
+    <header>
+        <a class="brand" href="/">Pistol.nu</a>
+        <h1>Kan du redovisning? Vi behöver en halvtimme av din tid.</h1>
+        <p class="standfirst">
+            Vi bygger in ekonomihantering i Pistol.nu, så att en klubb ska kunna sköta sin bokföring
+            på ett ställe. Innan vi bygger vill vi veta att vi tänkt rätt — och det är sju frågor vi
+            inte kan besvara själva.
+        </p>
+        <div class="calm">
+            <p>
+                <strong>Ingenting är fel med någon klubbs ekonomi.</strong> Det här är ett utvecklingsarbete,
+                inte ett ärende. Arbetar du inte med redovisning kan du lugnt lämna sidan — då är det
+                inte dig vi letar efter den här gången.
+            </p>
+        </div>
+    </header>
+
+    @if (!string.IsNullOrEmpty(fel))
+    {
+        <div class="error">@fel</div>
+    }
+
+    <form method="post" action="/ekonomifragor/svara">
+        @Html.AntiForgeryToken()
+
+        @* Honungsfälla: osynlig för människor, ifylld av robotar. Se controllern. *@
+        <div class="hp" aria-hidden="true">
+            <label>Webbplats<input type="text" name="webbplats" tabindex="-1" autocomplete="off" /></label>
+        </div>
+
+        <section>
+            <h2>Först: vilken bakgrund har du?</h2>
+            <p class="hint">
+                Vi väger svaren efter bakgrund i stället för att räkna dem — ett svar från någon som
+                arbetar med redovisning till vardags väger tyngre än många välmenande. Därför är det
+                här enda fältet vi behöver ha ifyllt.
+            </p>
+            <fieldset>
+                <legend class="visually-hidden" style="position:absolute;left:-9999px">Din bakgrund</legend>
+                <div class="choices">
+                    @foreach (var k in EkonomiEnkat.Kompetenser)
+                    {
+                        <label class="choice">
+                            <input type="radio" name="kompetens" value="@k.Key" required
+                                   checked="@PostedRadio("kompetens", k.Key)" />
+                            <span>@k.Label</span>
+                        </label>
+                    }
+                </div>
+            </fieldset>
+            <label class="field">
+                <span class="lbl">Om du valde ”Annat” — berätta kort</span>
+                <input type="text" name="kompetensFritext" maxlength="200" value="@Posted("kompetensFritext")" />
+            </label>
+        </section>
+
+        <section>
+            <h2>Så tänker vi att det ska fungera</h2>
+            <p>
+                En förening tar betalt för sina egna aktiviteter — tävlingsanmälningar, träningskvällar,
+                kurser. Nästan allt betalas med Swish, i förskott. I dag skapar systemet en faktura för
+                varje anmälan. Vi vill sluta med det, eftersom det aldrig uppstår någon fordran att
+                bevaka, och i stället registrera <strong>mottagna betalningar</strong> och utfärda
+                <strong>kvitto</strong>.
+            </p>
+            <ol class="flow">
+                <li><p>Deltagaren anmäler sig på webbplatsen och ser avgiften.</p></li>
+                <li><p>En Swish-QR visas med belopp och ett kort referensmeddelande.</p></li>
+                <li><p>Deltagaren betalar till föreningens Swishnummer.</p></li>
+                <li><p>Kassören jämför inkomna betalningar mot deltagarlistan och bekräftar manuellt.</p></li>
+                <li><p>Först vid bekräftelsen räknas pengarna som mottagna — och först då utfärdas kvitto.</p></li>
+            </ol>
+            <div class="flagbox">
+                <span class="label">Viktig begränsning</span>
+                <p>
+                    Vi har <strong>ingen teknisk koppling till Swish</strong>. Systemet skapar bara
+                    betalbilden och får ingen återkoppling om att pengarna kommit in. Bekräftelsen är
+                    därför alltid en mänsklig avstämning. Vi vill inte utfärda kvitto på pengar
+                    föreningen inte sett.
+                </p>
+            </div>
+        </section>
+
+        <section>
+            <h2>Raden vi vill registrera</h2>
+            <p>
+                Varje bekräftad betalning blir en rad som aldrig ändras — en rättelse görs som en ny rad
+                med motsatt belopp. Raden bär verifikationsnummer, betaldatum, belopp, motpart, vad det
+                avser, ändamål, betalsätt, referensen ur betalningen, vem som bekräftade och kvittonummer.
+            </p>
+            <div class="scroll">
+                <table>
+                    <caption>Exempel — träningskväll 14 oktober 2026, avgift 100 kr</caption>
+                    <thead>
+                        <tr><th>Ver.nr</th><th>Datum</th><th>Motpart</th><th>Betalsätt</th><th>Kvittonr</th><th class="num">Belopp</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td class="mono">2026-0412</td><td class="mono">2026-10-12</td><td>Anna Bergström</td><td>Swish</td><td class="mono">K-2026-0388</td><td class="num">100,00</td></tr>
+                        <tr><td class="mono">2026-0413</td><td class="mono">2026-10-13</td><td>Karl Nyberg</td><td>Swish</td><td class="mono">K-2026-0389</td><td class="num">100,00</td></tr>
+                        <tr><td class="mono">2026-0414</td><td class="mono">2026-10-14</td><td>Ingrid Falk</td><td>Kontant</td><td class="mono">K-2026-0390</td><td class="num">100,00</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>Under varje rad ligger en kontering</h3>
+            <p>
+                Bokföringen sker med dubbel bokföring mot en kontoplan, så att föreningen kan ta fram
+                både resultat- och balansräkning och avsluta året. Föreningen ska också kunna bokföra
+                sådant som inte kommer från systemet — ett kvitto från järnhandeln, en hyra, ett
+                bidrag — med kvittot bifogat som bild.
+            </p>
+            <div class="scroll">
+                <table>
+                    <caption>Verifikation 2026-0412</caption>
+                    <thead><tr><th>Konto</th><th>Benämning</th><th class="num">Debet</th><th class="num">Kredit</th></tr></thead>
+                    <tbody>
+                        <tr><td class="mono">1930</td><td>Bankkonto</td><td class="num">100,00</td><td class="num">—</td></tr>
+                        <tr><td class="mono">3110</td><td>Deltagaravgifter</td><td class="num">—</td><td class="num">100,00</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="hint">Kontonumren är exempel — vilken kontoplan vi ska följa är fråga F6.</p>
+
+            <h3>Kvittot deltagaren får</h3>
+            <div class="receipt">
+                <span class="org">Exempel Pistolskytteklubb</span>
+                <span class="sub">Org.nr 802000-0000 · Banvägen 1, 123 45 Ort</span>
+                <div class="rows">
+                    <span>Kvittonummer</span><span class="mono">K-2026-0388</span>
+                    <span>Datum</span><span class="mono">2026-10-12</span>
+                    <span>Betalare</span><span>Anna Bergström</span>
+                    <span>Avser</span><span>Träningskväll 2026-10-14</span>
+                    <span>Betalsätt</span><span>Swish</span>
+                </div>
+                <div class="total"><span>Att betala</span><span class="mono">100,00 kr</span></div>
+                <p class="note">Föreningen är inte momsregistrerad — moms ingår ej.</p>
+            </div>
+        </section>
+
+        <section>
+            <h2>Frågorna</h2>
+            <p class="hint">
+                Svara på det du kan och hoppa över resten — ett svar på en enda fråga är värdefullt.
+                Tre av dem är märkta <em>dyra att ändra</em>: de avgör hur varje rad ser ut redan från
+                första betalningen, och ändras svaret senare måste levande bokföringsdata räknas om.
+            </p>
+
+            @foreach (var f in EkonomiEnkat.Fragor)
+            {
+                <div class="q">
+                    <div class="q-head">
+                        <span class="q-id">@f.Id</span>
+                        <span class="q-title">@f.Rubrik</span>
+                        @if (f.Dyr)
+                        {
+                            <span class="costly">Dyr att ändra</span>
+                        }
+                    </div>
+                    <p>@f.Text</p>
+                    <textarea name="svar@(f.Id)" aria-label="Svar på @f.Id">@Posted("svar" + f.Id)</textarea>
+                </div>
+            }
+
+            <label class="field">
+                <span class="lbl">Något annat vi borde tänka på?</span>
+                <textarea name="ovrigt">@Posted("ovrigt")</textarea>
+            </label>
+        </section>
+
+        <section>
+            <h2>Om du vill att vi hör av oss</h2>
+            <p class="hint">Allt här är frivilligt. Du kan svara helt anonymt.</p>
+            <div class="grid2">
+                <label class="field"><span class="lbl">Namn</span><input type="text" name="namn" maxlength="150" value="@Posted("namn")" /></label>
+                <label class="field"><span class="lbl">E-post</span><input type="email" name="epost" maxlength="200" value="@Posted("epost")" /></label>
+            </div>
+            <label class="field"><span class="lbl">Klubb</span><input type="text" name="klubb" maxlength="150" value="@Posted("klubb")" /></label>
+
+            <label class="check">
+                <input type="checkbox" name="villHjalpaTill" value="true" checked="@(Posted("villHjalpaTill") != "")" />
+                <span>
+                    <strong>Jag skulle kunna tänka mig att titta på det färdiga bygget.</strong><br />
+                    Vi söker någon som kan säga till om det blir fel innan det används av riktiga klubbar.
+                </span>
+            </label>
+
+            <p class="gdpr">
+                Vi sparar det du fyller i för att kunna utforma ekonomifunktionerna, och raderar svaren
+                när arbetet är klart. Lämnar du namn eller e-post använder vi dem bara för att kunna
+                ställa en följdfråga. Vill du få ditt svar borttaget, hör av dig så tar vi bort det.
+            </p>
+
+            <button type="submit" class="send">Skicka mitt svar</button>
+        </section>
+    </form>
+}
+
+    <footer>
+        <p>Pistol.nu — <a href="/">tillbaka till startsidan</a></p>
+    </footer>
+
+</div>
+</body>
+</html>

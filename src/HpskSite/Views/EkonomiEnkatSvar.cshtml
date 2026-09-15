@@ -1,0 +1,150 @@
+@model List<HpskSite.Models.EkonomiEnkatSvar>
+@using HpskSite.Models
+@{
+    Layout = null;
+    var hjalpare = Model.Where(r => r.VillHjalpaTill).ToList();
+}
+@*
+    /ekonomifragor/svar — svaren, tyngsta bakgrunden först. Sajtadmin bara.
+
+    ⚠️ SORTERAD PÅ TYNGD, ALDRIG PÅ ANTAL. Listan finns för att kunna läsa de svar som väger
+    tyngst först. Den ska aldrig läsas som en omröstning — tre samstämmiga föreningskassörer
+    avgör inte en fråga som en auktoriserad redovisningskonsult besvarat annorlunda.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Svar på ekonomifrågorna</title>
+    <style>
+        :root {
+            --paper: #F6F7F3; --surface: #fff; --ink: #1B2320; --ink-soft: #5C645F;
+            --ink-faint: #868D88; --rule: #D9DDD5; --rule-soft: #E8EBE5;
+            --accent: #2F6B4F; --accent-bg: #EAF1EC; --flag: #8C5312;
+            --sans: "Segoe UI", Helvetica, Arial, sans-serif;
+            --mono: Consolas, "Courier New", monospace;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans);
+               font-size: 15px; line-height: 1.55; padding-inline: 20px; padding-block: 32px 64px; }
+        .sheet { max-width: 58rem; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
+        h1 { font-size: 26px; margin: 0; }
+        .sub { color: var(--ink-soft); margin: 6px 0 0; }
+        .tallies { display: flex; flex-wrap: wrap; gap: 10px; }
+        .tally { background: var(--surface); border: 1px solid var(--rule); padding: 8px 14px; }
+        .tally .n { font-family: var(--mono); font-size: 19px; font-weight: 600; }
+        .tally .l { font-size: 12px; color: var(--ink-faint); text-transform: uppercase;
+                    letter-spacing: 0.05em; }
+        .warn { background: #F7EFE4; border-left: 3px solid var(--flag); padding: 12px 16px;
+                font-size: 14px; }
+        .card { background: var(--surface); border: 1px solid var(--rule); padding: 18px 20px;
+                display: flex; flex-direction: column; gap: 12px; }
+        .card header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline;
+                       border-bottom: 1px solid var(--rule-soft); padding-bottom: 10px; }
+        .who { font-weight: 600; }
+        .badge { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em;
+                 background: var(--accent-bg); color: var(--accent); padding: 2px 8px; }
+        .badge.help { background: #FBF3E3; color: var(--flag); }
+        .when { font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
+                margin-left: auto; }
+        .a { display: grid; grid-template-columns: 3rem 1fr; gap: 12px; padding-block: 7px;
+             border-top: 1px solid var(--rule-soft); }
+        .a:first-of-type { border-top: none; }
+        .a .id { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+        .a .txt { white-space: pre-wrap; }
+        .contact { font-size: 13.5px; color: var(--ink-soft); }
+        .empty { background: var(--surface); border: 1px dashed var(--rule); padding: 28px;
+                 text-align: center; color: var(--ink-faint); }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+<div class="sheet">
+
+    <header>
+        <h1>Svar på ekonomifrågorna</h1>
+        <p class="sub">
+            @Model.Count svar, tyngsta bakgrunden först.
+            <a href="/ekonomifragor">Öppna formuläret</a>
+        </p>
+    </header>
+
+    @if (Model.Count == 0)
+    {
+        <div class="empty">Inga svar än.</div>
+    }
+    else
+    {
+        <div class="tallies">
+            @foreach (var k in EkonomiEnkat.Kompetenser)
+            {
+                @if (Model.Any(r => r.Kompetens == k.Key))
+                {
+                    <div class="tally">
+                        <div class="n">@Model.Count(r => r.Kompetens == k.Key)</div>
+                        <div class="l">@k.Label</div>
+                    </div>
+                }
+            }
+            @if (hjalpare.Count > 0)
+            {
+                <div class="tally"><div class="n">@hjalpare.Count</div><div class="l">vill granska bygget</div></div>
+            }
+        </div>
+
+        <div class="warn">
+            <strong>Väg, räkna inte.</strong> Siffrorna ovan säger hur många som svarat, inte vad som
+            är rätt. Går svaren isär på F1, F2 eller F6 är det yrkeskompetensen som avgör — och står
+            det fortfarande och väger, fråga en redovisningskonsult i stället för att ta majoriteten.
+        </div>
+
+        @foreach (var r in Model)
+        {
+            <article class="card">
+                <header>
+                    <span class="who">@(string.IsNullOrWhiteSpace(r.Namn) ? "Anonymt svar" : r.Namn)</span>
+                    <span class="badge">@r.KompetensLabel</span>
+                    @if (r.VillHjalpaTill)
+                    {
+                        <span class="badge help">Vill granska bygget</span>
+                    }
+                    <span class="when">@r.SkapadDatum.ToString("yyyy-MM-dd HH:mm")</span>
+                </header>
+
+                @foreach (var f in EkonomiEnkat.Fragor)
+                {
+                    @if (!string.IsNullOrWhiteSpace(r.SvarFor(f.Id)))
+                    {
+                        <div class="a">
+                            <span class="id" title="@f.Rubrik">@f.Id</span>
+                            <span class="txt">@r.SvarFor(f.Id)</span>
+                        </div>
+                    }
+                }
+                @if (!string.IsNullOrWhiteSpace(r.Ovrigt))
+                {
+                    <div class="a"><span class="id">Övr</span><span class="txt">@r.Ovrigt</span></div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(r.Epost) || !string.IsNullOrWhiteSpace(r.Klubb))
+                {
+                    <p class="contact">
+                        @if (!string.IsNullOrWhiteSpace(r.Epost))
+                        {
+                            <a href="mailto:@r.Epost">@r.Epost</a>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(r.Klubb))
+                        {
+                            <span> · @r.Klubb</span>
+                        }
+                    </p>
+                }
+            </article>
+        }
+    }
+
+</div>
+</body>
+</html>
