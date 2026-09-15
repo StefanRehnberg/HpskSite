@@ -38,6 +38,9 @@ namespace HpskSite.Models
         public string? SvarF6 { get; set; }
         public string? SvarF7 { get; set; }
         public string? SvarF8 { get; set; }
+        public string? SvarF9 { get; set; }
+        public string? SvarF10 { get; set; }
+        public string? SvarF11 { get; set; }
         public string? Ovrigt { get; set; }
 
         /// <summary>Vill vara med och granska bygget — den som svarar är bästa kandidaten.</summary>
@@ -76,6 +79,9 @@ namespace HpskSite.Models
             "F6" => SvarF6,
             "F7" => SvarF7,
             "F8" => SvarF8,
+            "F9" => SvarF9,
+            "F10" => SvarF10,
+            "F11" => SvarF11,
             _ => null,
         };
     }
@@ -90,16 +96,37 @@ namespace HpskSite.Models
         public const string KompetensKassor       = "kassor";
         public const string KompetensAnnat        = "annat";
 
-        /// <summary>Nyckel → etikett, i den ordning de visas.</summary>
-        public static readonly (string Key, string Label)[] Kompetenser =
+        public const string GruppForening = "I föreningslivet";
+        public const string GruppYrke     = "I yrket";
+        public const string GruppOvrigt   = "";
+
+        /// <summary>
+        /// Nyckel → etikett, i den ordning de visas.
+        ///
+        /// <para><b>⚠️ TVÅ GRUPPER, INTE EN RANGSTEGE.</b> Alternativen låg först i fallande
+        /// prestige (auktoriserad överst, kassör näst sist), och en sådan lista läses som en
+        /// rangordning även utan ett ord om saken — position ett betyder "bäst". Det ger samma
+        /// incitament att ta i som den borttagna vikttexten gjorde. Grupperade blir
+        /// föreningsrollerna en egen, jämbördig kategori i stället för botten av en stege.</para>
+        ///
+        /// <para>Föreningsgruppen står först för att den är det vanligaste svaret bland medlemmar
+        /// — vanligast först är dessutom vanlig formulärhygien.</para>
+        /// </summary>
+        public static readonly (string Key, string Label, string Grupp)[] Kompetenser =
         {
-            (KompetensAuktoriserad, "Auktoriserad revisor eller redovisningskonsult"),
-            (KompetensKonsult,      "Arbetar med redovisning eller bokföring i yrket"),
-            (KompetensRevisor,      "Förtroendevald revisor i en förening"),
-            (KompetensEkonom,       "Ekonom, men inte med redovisning som specialitet"),
-            (KompetensKassor,       "Kassör eller motsvarande i en förening"),
-            (KompetensAnnat,        "Annat"),
+            (KompetensKassor,       "Kassör eller motsvarande i en förening",        GruppForening),
+            (KompetensRevisor,      "Förtroendevald revisor i en förening",          GruppForening),
+            (KompetensKonsult,      "Arbetar med redovisning eller bokföring i yrket", GruppYrke),
+            (KompetensAuktoriserad, "Auktoriserad revisor eller redovisningskonsult", GruppYrke),
+            (KompetensEkonom,       "Ekonom, men inte med redovisning som specialitet", GruppYrke),
+            (KompetensAnnat,        "Annat",                                          GruppOvrigt),
         };
+
+        /// <summary>Grupperna i visningsordning, tom sträng sist och utan rubrik.</summary>
+        public static IEnumerable<(string Grupp, (string Key, string Label, string Grupp)[] Val)> KompetensGrupper =>
+            new[] { GruppForening, GruppYrke, GruppOvrigt }
+                .Select(g => (Grupp: g, Val: Kompetenser.Where(k => k.Grupp == g).ToArray()))
+                .Where(x => x.Val.Length > 0);
 
         public static bool IsValid(string? key) =>
             !string.IsNullOrWhiteSpace(key) && Kompetenser.Any(k => k.Key == key);
@@ -109,7 +136,14 @@ namespace HpskSite.Models
 
         /// <summary>
         /// Sorteringsvikt. Yrkesverksam redovisningskompetens först — det är den som kan svara på
-        /// kvittoserien, periodiseringen och kontoplanen.
+        /// nummerserierna, periodiseringen och kontoplanen.
+        ///
+        /// <para><b>⚠️ RANGORDNINGEN FÅR ALDRIG STÅ PÅ FORMULÄRET.</b> En tidigare version förklarade
+        /// för den svarande att yrkesfolk väger tyngre än "många välmenande", vilket gav två skäl att
+        /// överdriva sin bakgrund: att bli tagen på allvar, och att slippa känna att ens tid var
+        /// bortkastad. Fältet finns för att få en SANN bild — en text som förstör precis det den
+        /// samlar in är sämre än inget fält alls. Vikten är dessutom inte densamma på alla frågor:
+        /// på praktikfrågorna (F6, F7) är en föreningskassörs svar ofta det mest användbara.</para>
         /// </summary>
         public static int TyngdFor(string? key) => key switch
         {
@@ -121,7 +155,19 @@ namespace HpskSite.Models
             _                     => 1,
         };
 
-        /// <summary>Frågorna, i dokumentets ordning. Id:t är också formulärfältets namn.</summary>
+        /// <summary>
+        /// Frågorna, i dokumentets ordning. Id:t är också formulärfältets namn.
+        ///
+        /// <para><b>⚠️ VARJE FRÅGA MÅSTE KLARA TESTET "ändrar svaret vad vi bygger?"</b> Är svaret
+        /// redan känt är det ett KRAV och hör i backloggen, inte här. Att fråga om något vi ändå
+        /// måste göra ger ett "ja, det behövs" som inte flyttar en kodrad — och tränger ut de frågor
+        /// som gör det. Så föll en första omgång revisorsfrågor bort (oföränderlighet, ändringslogg,
+        /// bankavstämning, revisorns läsrätt): allt sant, inget av det en fråga.</para>
+        ///
+        /// <para><b>Dyr att ändra</b> = svaret bestämmer formen på varje rad, eller kontostrukturen,
+        /// redan från första kronan. Ändras det senare måste levande bokföringsdata räknas om, och
+        /// uppgifter som aldrig sparades går inte att rekonstruera.</para>
+        /// </summary>
         public static readonly (string Id, string Rubrik, bool Dyr, string Text)[] Fragor =
         {
             ("F1", "Nummerserier — hur ska de delas upp?", true,
@@ -136,42 +182,45 @@ namespace HpskSite.Models
             ("F2", "Ska raden bära ett intäktsdatum skilt från betaldatumet?", true,
              "En avgift betalas ibland i förskott för en aktivitet som ligger senare — ibland efter " +
              "årsskiftet, till exempel en tävlingsanmälan i december för en tävling i maj. Behöver vi " +
-             "registrera aktivitetens datum separat för att kunna periodisera, och finns det en gräns " +
-             "under vilken det saknar betydelse för en förening av den här storleken?"),
+             "registrera aktivitetens datum separat för att kunna periodisera? Vi är mest hjälpta av en " +
+             "regel vi kan koda: vid vilket belopp eller vilken omfattning ska en förskottsbetald avgift " +
+             "periodiseras, och när kan den bokföras rakt av?"),
 
-            ("F3", "Godtas raden som verifikation?", false,
-             "Tillsammans med kontoutdraget och kvittokopian — saknas någon uppgift i raden ovan, eller " +
-             "är någon av dem överflödig?"),
+            ("F3", "En rättelse som upptäcks efter fastställt bokslut — var bokförs den?", true,
+             "Vi låser året när årsmötet fastställt resultat- och balansräkningen; ingenting ska kunna " +
+             "ändras i efterhand. Frågan är vad låset ska släppa igenom. Upptäcks ett fel efter " +
+             "fastställandet — bokförs rättelsen i det gamla året, som då måste kunna öppnas, eller i " +
+             "det innevarande? Svaret avgör om ett låst år ska tillåta skrivningar över huvud taget, " +
+             "vilket är mycket svårt att ändra i efterhand."),
 
-            ("F4", "Momsraden på kvittot", false,
-             "Vi utgår från att deltagaravgifter i en allmännyttig ideell idrottsförening är momsfria och " +
-             "att kvittot därför inte redovisar moms. I dag skriver systemet raden \"Föreningen är inte " +
-             "momsregistrerad — moms ingår ej\" på alla föreningars kvitton. Bör det i stället vara en " +
-             "uppgift varje förening anger själv, och vad gäller för en förening som är momsregistrerad " +
-             "för annan verksamhet, som kiosk eller sponsring?"),
+            ("F4", "Kontoplan, avskrivningar och ändamålsbestämda medel", true,
+             "Vi tänker använda BAS-kontoplanen i den version som passar ideella föreningar. " +
+             "Kontoplanen bestämmer varje kontering vi någonsin skriver, så den behöver vara rätt från " +
+             "början — vilken vill du se? " +
+             "En klubb äger dessutom saker som ska synas i balansräkningen: klubbstuga, kulfångsvall, " +
+             "klubbvapen, gräsklippare. Hur bör vi hantera avskrivningar, och var går gränsen för vad " +
+             "som får kostnadsföras direkt? " +
+             "Och: många klubbar har öronmärkta medel — en banfond, en ungdomsfond. Ska de redovisas " +
+             "som ändamålsbestämt eget kapital eller som en avsättning?"),
 
-            ("F5", "Vad behöver den som faktureras — en klubb eller en krets?", false,
-             "Två fall med samma form. En klubb anmäler trettio av sina medlemmar till en tävling och " +
-             "betalar för dem i efterhand. Och en krets fakturerar varje år en avgift till alla klubbar " +
-             "i kretsen. I båda uppstår åtagandet före betalningen. Räcker en specifikation med belopp, " +
-             "förfallodatum och vad som ingår — eller vill du se en faktura i egentlig mening? I så fall: " +
-             "vilka uppgifter måste den bära, och behöver fakturanumren vara en obruten serie per " +
-             "utställande förening?"),
+            ("F5", "Bokslutsform och deklaration", false,
+             "Vi tänker avsluta året med förenklat årsbokslut — vår bild är att årsredovisning krävs " +
+             "först över storleksgränser som en klubb av den här storleken inte når. Stämmer det? " +
+             "Och är en förening som vår skyldig att lämna inkomstdeklaration? I så fall: räcker det " +
+             "att vi tar fram siffrorna som underlag, eller förväntar du dig att systemet lämnar in dem?"),
 
-            ("F6", "Kontoplan, avskrivningar och bokslutsform", true,
-             "Vi tänker använda BAS-kontoplanen i den version som passar ideella föreningar, och avsluta " +
-             "året med förenklat årsbokslut — vår bild är att årsredovisning krävs först över " +
-             "storleksgränser en klubb av den här storleken inte når. Stämmer det? Kontoplanen bestämmer " +
-             "varje kontering vi någonsin skriver, så den behöver vara rätt från början. " +
-             "En klubb äger dessutom saker som ska synas i balansräkningen — klubbstuga, kulfångsvall, " +
-             "klubbvapen, gräsklippare: hur bör vi hantera avskrivningar, och var går gränsen för vad " +
-             "som får kostnadsföras direkt? Och: är en förening som vår skyldig att lämna " +
-             "inkomstdeklaration?"),
+            ("F6", "Spårbarhet — vad behöver du för att kunna granska utan att be om komplettering?", false,
+             "Vi bygger så att varje bokföringspost bär sin verifikation och sitt underlag, och så att " +
+             "inget kan ändras i efterhand. Det vi inte kan läsa oss till är vad som gör granskningen " +
+             "smidig i praktiken: vad behöver du kunna följa från en bokföringspost bakåt till " +
+             "kvittot och framåt till raden på kontoutdraget? Finns det uppgifter du regelmässigt " +
+             "tvingas efterfråga när du granskar en förening?"),
 
-            ("F7", "Arkivering och byte av system", false,
-             "Räkenskapsinformation ska bevaras i läsbar form i sju år. Om bokföringen ligger hos oss — " +
-             "vad behöver föreningen kunna ta ut, och i vilken form? Och åt andra hållet: en klubb som " +
-             "byter till oss mitt i ett år behöver få in sina ingående balanser. Är SIE-import rätt väg?"),
+            ("F7", "Kontantkassa — vad krävs av en ideell förening?", false,
+             "Klubbens kiosk på tävlingsdagen tar kontanter, och ibland betalas en anmälningsavgift " +
+             "kontant vid disken. Vad gäller för en ideell förening i fråga om kassaregister, och vad " +
+             "behöver dokumenteras vid dagsavslut och insättning för att du ska godta hanteringen? " +
+             "Svaret avgör om vi bygger stöd för kontanter alls eller om vi ska avråda från dem."),
 
             ("F8", "Pengar som bara passerar genom föreningen", false,
              "Klubben samlar in licensavgifter från sina medlemmar och betalar dem vidare till förbundet. " +
@@ -179,6 +228,29 @@ namespace HpskSite.Models
              "skickas vidare, och alltså aldrig går över resultaträkningen som en intäkt — så att " +
              "årsmötet inte får ett uppblåst resultat. Är det rätt hanterat, och finns det andra poster " +
              "av samma slag vi borde tänka på?"),
+
+            ("F9", "Vad behöver den som faktureras — en klubb eller en krets?", false,
+             "Två fall med samma form. En klubb anmäler trettio av sina medlemmar till en tävling och " +
+             "betalar för dem i efterhand. Och en krets fakturerar varje år en avgift till alla klubbar " +
+             "i kretsen. I båda uppstår åtagandet före betalningen. Räcker en specifikation med belopp, " +
+             "förfallodatum och vad som ingår — eller vill du se en faktura i egentlig mening? I så fall: " +
+             "vilka uppgifter måste den bära, och behöver fakturanumren vara en obruten serie per " +
+             "utställande förening?"),
+
+            ("F10", "Vad måste stå på kvittot om föreningen ÄR momsregistrerad?", false,
+             "Vi utgår från att deltagaravgifter i en allmännyttig ideell idrottsförening är momsfria, " +
+             "och att uppgiften ska anges per förening i stället för som i dag, där systemet skriver " +
+             "\"Föreningen är inte momsregistrerad\" på allas kvitton. Det vi behöver veta är vad " +
+             "kvittot måste bära för en förening som ÄR momsregistrerad för annan verksamhet — " +
+             "momssats, momsbelopp, registreringsnummer — och om deltagaravgiften då ska särredovisas " +
+             "från det momspliktiga."),
+
+            ("F11", "Arkivering och byte av system", false,
+             "Räkenskapsinformation ska bevaras i läsbar form i sju år. Om bokföringen ligger hos oss — " +
+             "vad behöver föreningen kunna ta ut, och i vilken form, för att kravet ska vara uppfyllt " +
+             "oberoende av att vår tjänst finns kvar? Och åt andra hållet: en klubb som byter till oss " +
+             "mitt i ett år behöver få in sina ingående balanser och gärna tidigare verifikationer. " +
+             "Är SIE-import rätt väg, eller finns det en praxis du hellre ser?"),
         };
     }
 }

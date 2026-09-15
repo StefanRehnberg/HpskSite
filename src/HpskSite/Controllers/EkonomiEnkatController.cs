@@ -51,7 +51,8 @@ namespace HpskSite.Controllers
         public IActionResult Svara(
             string kompetens, string? kompetensFritext, string? namn, string? epost, string? klubb,
             string? svarF1, string? svarF2, string? svarF3, string? svarF4,
-            string? svarF5, string? svarF6, string? svarF7, string? svarF8, string? ovrigt,
+            string? svarF5, string? svarF6, string? svarF7, string? svarF8,
+            string? svarF9, string? svarF10, string? svarF11, string? ovrigt,
             bool villHjalpaTill = false, string? webbplats = null)
         {
             // ⚠️ HONUNGSFÄLLA. `webbplats` är ett dolt fält som en människa aldrig ser och därför
@@ -68,7 +69,11 @@ namespace HpskSite.Controllers
 
             // Ett svar utan innehåll är inte ett svar. Utan den här spärren fylls tabellen med
             // tomma rader från den som klickade sig fram av nyfikenhet.
-            var svar = new[] { svarF1, svarF2, svarF3, svarF4, svarF5, svarF6, svarF7, svarF8, ovrigt };
+            var svar = new[]
+            {
+                svarF1, svarF2, svarF3, svarF4, svarF5, svarF6,
+                svarF7, svarF8, svarF9, svarF10, svarF11, ovrigt,
+            };
             if (svar.All(string.IsNullOrWhiteSpace) && !villHjalpaTill)
             {
                 ViewData["Fel"] = "Skriv något i minst en fråga — eller kryssa i att du vill vara med och granska.";
@@ -84,7 +89,8 @@ namespace HpskSite.Controllers
                 Klubb            = Trim(klubb, 150),
                 SvarF1 = Trim(svarF1), SvarF2 = Trim(svarF2), SvarF3 = Trim(svarF3),
                 SvarF4 = Trim(svarF4), SvarF5 = Trim(svarF5), SvarF6 = Trim(svarF6),
-                SvarF7 = Trim(svarF7), SvarF8 = Trim(svarF8), Ovrigt = Trim(ovrigt),
+                SvarF7 = Trim(svarF7), SvarF8 = Trim(svarF8), SvarF9 = Trim(svarF9),
+                SvarF10 = Trim(svarF10), SvarF11 = Trim(svarF11), Ovrigt = Trim(ovrigt),
                 VillHjalpaTill   = villHjalpaTill,
                 SkapadDatum      = DateTime.Now,
             };
@@ -96,10 +102,18 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                // ⚠️ Säg att det inte gick. Ett tyst fel här betyder att någon lagt en halvtimme på
-                // ett svar som aldrig kom fram — och hen skriver det inte en andra gång.
-                _logger.LogError(ex, "Kunde inte spara ekonomienkätssvar.");
-                ViewData["Fel"] = "Svaret kunde tyvärr inte sparas. Hör gärna av dig direkt i stället.";
+                // ⚠️ SÄG ATT FELET ÄR VÅRT, OCH ATT TEXTEN FINNS KVAR. Ett tyst fel här betyder att
+                // någon lagt en halvtimme på ett svar som aldrig kom fram — och hen skriver det inte
+                // en andra gång. Det vanligaste sparfelet är en okörd migrering, och då hjälper det
+                // inte att trycka igen: ett råd som inte kan hjälpa flyttar bara skulden till den som
+                // inte kan göra något. Formuläret återfylls ur Request.Form, så svaret står kvar på
+                // skärmen — det ska stå i meddelandet, annars laddar hen om sidan och förlorar det.
+                _logger.LogError(ex, "Kunde inte spara ekonomienkätssvar (bakgrund {Kompetens}).", kompetens);
+                ViewData["Fel"] =
+                    "Svaret kunde inte sparas, och felet är vårt — inte något du gjort. "
+                    + "Det du skrivit står kvar i formuläret nedan, så ladda inte om sidan. "
+                    + "Prova gärna Skicka en gång till; går det fortfarande inte, "
+                    + "mejla texten till admin@pistol.nu så lägger vi in den.";
                 return View("~/Views/EkonomiEnkat.cshtml");
             }
 

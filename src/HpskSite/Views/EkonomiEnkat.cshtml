@@ -115,6 +115,12 @@
         .hint { font-size: 14px; color: var(--ink-soft); max-width: 38rem; }
         .choices { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--rule);
                    background: var(--surface); }
+        /* Grupprubriken är avsiktligt liten och neutral — den ska skilja kategorierna åt,
+           inte se ut som en rangordning mellan dem. */
+        .choice-group { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+                        text-transform: uppercase; color: var(--ink-faint);
+                        margin: 14px 0 5px; }
+        .choice-group:first-of-type { margin-top: 0; }
         .choice { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px;
                   border-top: 1px solid var(--rule-soft); cursor: pointer; }
         .choice:first-child { border-top: none; }
@@ -222,23 +228,46 @@ else
 
         <section>
             <h2>Först: vilken bakgrund har du?</h2>
+            @*
+                ⚠️ BERÄTTA ALDRIG HUR SVAREN VÄGS. En tidigare version sa att den som arbetar med
+                redovisning väger tyngre än "många välmenande". Det gav två skäl att överdriva sin
+                bakgrund — att bli tagen på allvar, och att slippa känna att den tid man lägger är
+                bortkastad — och fältet finns för att få en SANN bild. En text som förstör precis
+                det den samlar in är sämre än inget fält alls.
+
+                Ramen är i stället att olika bakgrunder är rätt för olika frågor, vilket är sant:
+                en kassör som skött kiosken i tjugo år svarar bättre på F7 än en konsult gör.
+            *@
             <p class="hint">
-                Vi väger svaren efter bakgrund i stället för att räkna dem — ett svar från någon som
-                arbetar med redovisning till vardags väger tyngre än många välmenande. Därför är det
-                här enda fältet vi behöver ha ifyllt.
+                Frågorna nedan är olika till sin natur. Några är regelfrågor, andra handlar om hur det
+                faktiskt går till i en klubb — och där är en kassörs erfarenhet mer värd än en revisors.
+                Vi frågar för att kunna läsa ditt svar i rätt ljus, aldrig för att sortera bort någon.
+                <strong>Alla svar läses.</strong>
+            </p>
+            <p class="hint">
+                Välj det som ligger närmast din vardag. Ett svar från någon som beskriver sin bakgrund
+                rätt är mer användbart för oss än ett från någon som tar i — det är enda skälet vi
+                behöver ha fältet ifyllt.
             </p>
             <fieldset>
                 <legend class="visually-hidden" style="position:absolute;left:-9999px">Din bakgrund</legend>
-                <div class="choices">
-                    @foreach (var k in EkonomiEnkat.Kompetenser)
+                @foreach (var grupp in EkonomiEnkat.KompetensGrupper)
+                {
+                    @if (!string.IsNullOrEmpty(grupp.Grupp))
                     {
-                        <label class="choice">
-                            <input type="radio" name="kompetens" value="@k.Key" required
-                                   checked="@PostedRadio("kompetens", k.Key)" />
-                            <span>@k.Label</span>
-                        </label>
+                        <div class="choice-group">@grupp.Grupp</div>
                     }
-                </div>
+                    <div class="choices">
+                        @foreach (var k in grupp.Val)
+                        {
+                            <label class="choice">
+                                <input type="radio" name="kompetens" value="@k.Key" required
+                                       checked="@PostedRadio("kompetens", k.Key)" />
+                                <span>@k.Label</span>
+                            </label>
+                        }
+                    </div>
+                }
             </fieldset>
             <label class="field">
                 <span class="lbl">Om du valde ”Annat” — berätta kort</span>
@@ -333,8 +362,10 @@ else
             <h2>Frågorna</h2>
             <p class="hint">
                 Svara på det du kan och hoppa över resten — ett svar på en enda fråga är värdefullt.
-                Tre av dem är märkta <em>dyra att ändra</em>: de avgör hur varje rad ser ut redan från
-                första betalningen, och ändras svaret senare måste levande bokföringsdata räknas om.
+                Fyra av dem är märkta <em>dyra att ändra</em>. De har en sak gemensamt: svaret bestämmer
+                formen på varje bokförd rad, eller kontostrukturen, redan innan den första kronan kommer
+                in. Ändras det senare måste levande bokföringsdata räknas om, och uppgifter vi aldrig
+                sparade går inte att rekonstruera i efterhand.
             </p>
 
             @foreach (var f in EkonomiEnkat.Fragor)
