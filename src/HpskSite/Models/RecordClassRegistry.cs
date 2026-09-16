@@ -116,10 +116,32 @@ namespace HpskSite.Models
                 // Resultatet är träff, med figurer som särskiljare.
                 IndividualSeries = 0,
                 TeamSeries = 0,
+                ScoreLabel = "Antal träff",
                 ScoreUnit = "träff",
                 ScoreUnitPlural = "träff",
                 SecondaryLabel = "figurer",
                 OpenScoreCap = 120,
+                IndividualClasses = WithRevolverIndividual,
+                TeamClasses = WithRevolverTeam
+            },
+            new RecordDisciplineDefinition
+            {
+                Id = RecordDisciplines.Poangfalt,
+                DisplayName = "Poängfält",
+                Icon = "bi-signpost-split",
+                // Samma skäl som fältskyttet: banan är ny varje gång, alltså mästare men inga rekord.
+                SupportsRecords = false,
+                SupportsChampions = true,
+                IndividualSeries = 0,
+                TeamSeries = 0,
+                // ⚠️ Poängfältet har ETT tal — poäng — och ingen särskiljare. Normalfältet har två
+                // (träff med figurer som särskiljare). Det är hela skälet att de är skilda grenar
+                // här: ett tal ur den ena under den andras etikett är en tyst lögn.
+                ScoreLabel = "Poäng",
+                ScoreUnit = "poäng",
+                ScoreUnitPlural = "poäng",
+                SecondaryLabel = null,
+                OpenScoreCap = 240,
                 IndividualClasses = WithRevolverIndividual,
                 TeamClasses = WithRevolverTeam
             }
@@ -176,6 +198,9 @@ namespace HpskSite.Models
 
         /// <summary>Etikett för det andra talet ("figurer"), eller null när grenen bara har ett.</summary>
         public static string? GetSecondaryLabel(string? discipline) => Get(discipline)?.SecondaryLabel;
+
+        /// <summary>Fältetiketten för resultatet — "Total poäng" / "Antal träff" / "Poäng".</summary>
+        public static string GetScoreLabel(string? discipline) => Get(discipline)?.ScoreLabel ?? "Total poäng";
 
         /// <summary>
         /// Resultatet som en färdig sträng med enheten på — "285 / 300" för en seriegren,
@@ -257,6 +282,7 @@ namespace HpskSite.Models
                 id = d.Id,
                 label = d.DisplayName,
                 icon = d.Icon,
+                scoreLabel = d.ScoreLabel,
                 scoreUnit = d.ScoreUnitPlural,
                 secondaryLabel = d.SecondaryLabel,
                 types = new[] { RecordTypes.Individual, RecordTypes.Team }.Select(t => new
@@ -298,6 +324,9 @@ namespace HpskSite.Models
 
         /// <summary>Antal serier för lag. 0 = grenen har ingen seriemodell.</summary>
         public int TeamSeries { get; init; }
+
+        /// <summary>Fältetiketten för resultatet i inmatningsformulären.</summary>
+        public string ScoreLabel { get; init; } = "Total poäng";
 
         /// <summary>Enheten i singular, för hjälptexter.</summary>
         public string ScoreUnit { get; init; } = "poäng";

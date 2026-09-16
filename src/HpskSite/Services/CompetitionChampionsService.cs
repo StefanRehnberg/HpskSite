@@ -96,8 +96,8 @@ namespace HpskSite.Services
             if (req.TotalScore < 0 || req.TotalScore > ceiling)
                 return (false, 0, $"Resultatet {req.TotalScore} {unit} är utanför giltigt intervall [0, {ceiling}].");
 
-            // Det andra talet (fältskyttets figurer) tas bara emot av grenar som har ett,
-            // och kan aldrig vara fler än träffarna.
+            // Det andra talet (fältskyttets figurer) tas bara emot av grenar som har ett —
+            // poängfältet har bara poängen — och kan aldrig vara fler än träffarna.
             var secondaryLabel = RecordClassRegistry.GetSecondaryLabel(req.Discipline);
             var secondaryScore = secondaryLabel == null ? null : req.SecondaryScore;
             if (secondaryScore.HasValue && (secondaryScore.Value < 0 || secondaryScore.Value > req.TotalScore))

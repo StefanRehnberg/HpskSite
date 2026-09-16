@@ -29,6 +29,18 @@ namespace HpskSite.Models
         public const string Milsnabb = "Milsnabb";
         public const string Faltskytte = "Faltskytte";
 
+        /// <summary>
+        /// Fältskytte skjutet som POÄNGFÄLT. Egen gren här, inte en flagga på
+        /// <see cref="Faltskytte"/>: de två räknas olika (normalfält = träff med figurer som
+        /// särskiljare, poängfält = poäng med poängmålssumman som särskiljare), och enheten måste
+        /// resa med talet. En flagga hade krävt en ny kolumn och en läsning till på varje yta —
+        /// och ett tal ur databasen under fel enhet är en tyst lögn.
+        /// ⚠️ Till skillnad från de andra koderna motsvarar den här INGEN egen tävlingstyp:
+        /// en poängfältstävling har <c>competitionType = "Faltskytte"</c> och
+        /// <c>scoringMode = "Poang"</c>.
+        /// </summary>
+        public const string Poangfalt = "Poangfalt";
+
         /// <summary>Visningsnamnet kommer ur grenkatalogen — en okänd kod visas som sig själv.</summary>
         public static string DisplayName(string discipline)
             => RecordClassRegistry.Get(discipline)?.DisplayName ?? discipline;

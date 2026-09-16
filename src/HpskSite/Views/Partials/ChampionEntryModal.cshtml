@@ -55,8 +55,8 @@
                         <select class="form-select" id="ceClass-@ceInstance"></select>
                     </div>
                     <div class="col-md-3">
-                        @* Etiketten följer grenens enhet — poäng för seriegrenarna, träff för
-                           fältskytte. Ett tal ur databasen under fel enhet är en tyst lögn. *@
+                        @* Etiketten följer grenens enhet — poäng för seriegrenarna och poängfält,
+                           träff för normalfält. Ett tal ur databasen under fel enhet är en tyst lögn. *@
                         <label class="form-label" id="ceScoreLabel-@ceInstance">Total poäng *</label>
                         <input type="number" class="form-control" id="ceScore-@ceInstance" min="0" step="1">
                         <small class="form-text text-muted" id="ceScoreHelp-@ceInstance"></small>
@@ -64,7 +64,6 @@
                     <div class="col-md-3" id="ceSecondaryWrap-@ceInstance" style="display:none;">
                         <label class="form-label" id="ceSecondaryLabel-@ceInstance">Figurer</label>
                         <input type="number" class="form-control" id="ceSecondary-@ceInstance" min="0" step="1">
-                        <small class="form-text text-muted">Särskiljaren. Kan inte vara fler än träffarna.</small>
                     </div>
                 </div>
 
@@ -144,7 +143,8 @@
         d.types.forEach(function (t) {
             combos[d.id + '-' + t.type] = {
                 classes: t.classes, series: t.series, max: t.max, ceiling: t.ceiling,
-                scoreUnit: d.scoreUnit, secondaryLabel: d.secondaryLabel
+                scoreLabel: d.scoreLabel, scoreUnit: d.scoreUnit,
+                secondaryLabel: d.secondaryLabel
             };
         });
     });
@@ -169,15 +169,13 @@
             return '<option value="' + c.code + '">' + escapeHtml(c.label) + '</option>';
         }).join('');
 
+        // Etiketten kommer ur grenkatalogen — "Total poäng" / "Antal träff".
+        el('ceScoreLabel').textContent = (combo.scoreLabel || 'Total poäng') + ' *';
         el('ceScore').setAttribute('max', String(combo.ceiling));
-        if (combo.max > 0) {
-            el('ceScoreLabel').textContent = 'Total poäng *';
-            el('ceScoreHelp').textContent = 'Max möjligt: ' + combo.max + ' (' + combo.series + ' serier × 50p).';
-        } else {
-            // Ingen seriemodell: fältskyttet har inget fast tak — antalet stationer varierar.
-            el('ceScoreLabel').textContent = 'Antal ' + combo.scoreUnit + ' *';
-            el('ceScoreHelp').textContent = 'Fältskytte har inget fast max — antalet stationer varierar.';
-        }
+        // Seriegrenarna har ett fast tak värt att skriva ut; fältgrenarna har inget.
+        el('ceScoreHelp').textContent = combo.max > 0
+            ? 'Max möjligt: ' + combo.max + ' (' + combo.series + ' serier × 50p).'
+            : '';
 
         // Det andra talet finns bara för grenar som har ett (fältskyttets figurer).
         var secWrap = document.getElementById('ceSecondaryWrap-' + instance);
@@ -330,7 +328,7 @@
         var notes = el('ceNotes').value.trim() || null;
 
         if (isNaN(year) || year < 1900 || year > 2200) { showErr('Ange ett giltigt år.'); return; }
-        if (isNaN(score)) { showErr('Ange ' + (combo.max > 0 ? 'total poäng' : 'antal ' + (combo.scoreUnit || 'träff')) + '.'); return; }
+        if (isNaN(score)) { showErr('Ange ' + (combo.scoreLabel || 'Total poäng').toLowerCase() + '.'); return; }
         if (secondary !== null && (isNaN(secondary) || secondary < 0 || secondary > score)) {
             showErr('Antal ' + combo.secondaryLabel + ' måste ligga mellan 0 och antalet ' + combo.scoreUnit + '.');
             return;
