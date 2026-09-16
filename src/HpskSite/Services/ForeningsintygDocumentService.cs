@@ -29,6 +29,7 @@ namespace HpskSite.Services
         private readonly BoardRoleService _boardRoles;
         private readonly MarkenLedgerService _marken;
         private readonly StandardMedalLedgerService _standardMedals;
+        private readonly MarkenCompetitionSeriesSync _compSeriesSync;
         private readonly ILogger<ForeningsintygDocumentService> _logger;
 
         public ForeningsintygDocumentService(
@@ -38,6 +39,7 @@ namespace HpskSite.Services
             BoardRoleService boardRoles,
             MarkenLedgerService marken,
             StandardMedalLedgerService standardMedals,
+            MarkenCompetitionSeriesSync compSeriesSync,
             ILogger<ForeningsintygDocumentService> logger)
         {
             _memberService = memberService;
@@ -46,6 +48,7 @@ namespace HpskSite.Services
             _boardRoles = boardRoles;
             _marken = marken;
             _standardMedals = standardMedals;
+            _compSeriesSync = compSeriesSync;
             _logger = logger;
         }
 
@@ -263,6 +266,21 @@ namespace HpskSite.Services
             }
 
             int year = latest.Year;
+
+            // ⚠️ RECONCILE FÖRE LÄSNING. Serien som belägger datumet kan bära en föråldrad
+            // `Qualifies`: en tävlingsserie vars resultat rättats, en handinlagd serie vars krav
+            // flyttats av ett personnummer som kom senare, eller — som 2026-09-16 — av att
+            // åldersavdraget för 65+ var felläst. Varje annan märkesyta rekonciljerar på läsning,
+            // men den här gjorde det inte, så intyget kunde vila på en serie som inte längre
+            // kvalificerar utan att något sa ifrån. Best effort: ett misslyckande får inte fälla
+            // utkastet, det gör bara datumet lika gammalt som det var förut.
+            try { await _compSeriesSync.SyncMemberYearAsync(memberId, year); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Föreningsintyg: kunde inte rekonciljera medlem {MemberId}:s serier för {Year} före skjutprovsdatumet",
+                    memberId, year);
+            }
 
             var precision = await _marken.GetVerifiedQualifyingPrecisionAsync(memberId, year);
 

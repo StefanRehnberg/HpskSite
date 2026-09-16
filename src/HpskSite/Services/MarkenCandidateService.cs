@@ -134,7 +134,7 @@ namespace HpskSite.Services
             if (birthYear <= 0)
                 return baseNote + " — födelseår saknas, inga åldersavdrag.";
             if (ageThisYear >= 66)
-                return "Silverkrav per serie (A 38 / B 39 / C 40) – fyllde 65 år föregående år (SHB 5.1.2.2).";
+                return "Guldkrav − 2 poäng/serie (A 41 / B 43 / C 44) – fyllde 65 år föregående år.";
             if (ageThisYear >= 56)
                 return "Guldkrav − 1 poäng/serie (A 42 / B 44 / C 45) – fyllde 55 år föregående år.";
             return baseNote + ".";

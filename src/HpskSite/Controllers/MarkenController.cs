@@ -351,7 +351,7 @@ namespace HpskSite.Controllers
         /// Whether the current member's birth year is derivable from their <c>personNumber</c>. The
         /// quick-submit flow uses this to decide whether to ask for the personnummer before submitting
         /// a precision Guldserie — age drives the reduced Guld krav (−1/serie from the year after 55,
-        /// silverkrav from the year after 65). GET /umbraco/surface/Marken/GetMyBirthYearStatus
+        /// −2/serie from the year after 65). GET /umbraco/surface/Marken/GetMyBirthYearStatus
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetMyBirthYearStatus()
@@ -2029,6 +2029,11 @@ namespace HpskSite.Controllers
                         weaponGroup = s.WeaponGroup,
                         score = s.Total,
                         threshold = s.Threshold,
+                        // The unreduced guldkrav for the weapon group. A series whose threshold is lower
+                        // than this only counts thanks to an age concession — the club admin signing the
+                        // underlying evidence must be able to see that, since a 40 in weapon group C reads
+                        // as a failed guldserie to anyone who knows the ordinary krav.
+                        baseThreshold = Marken.GuldPerSeriesBase(s.WeaponGroup ?? ""),
                         qualifies = s.Qualifies,
                         status = s.Status,
                         counts = s.CountsTowardGuldfodring,

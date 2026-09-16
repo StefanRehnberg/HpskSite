@@ -1,4 +1,5 @@
 using HpskSite.Services;
+using Microsoft.Extensions.Caching.Memory;
 using Moq;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Models.PublishedContent;
@@ -22,6 +23,20 @@ namespace HpskSite.Tests
     /// </summary>
     public class ClubServiceTests
     {
+        /// <summary>
+        /// ⚠️ EN EGEN, TOM CACHE PER TEST — aldrig en delad, och aldrig null.
+        ///
+        /// <para>Hela klassen låg död i månader: <c>ClubService</c> fick en <see cref="IMemoryCache"/>
+        /// som prestandafix och fixturen fortsatte skicka <c>null</c>, så varje test kastade
+        /// <c>NullReferenceException</c> på metodens FÖRSTA rad (<c>_cache.TryGetValue</c>) — före all
+        /// produktionslogik. 15 test rapporterade rött utan att mäta någonting alls.</para>
+        ///
+        /// <para>Cachen måste dessutom vara TOM per test: <c>ClubService</c> cachar även null-svar för
+        /// att slippa slå upp en klubb som inte finns om och om igen, så en delad instans skulle låta
+        /// ett tidigare test avgöra nästa tests utfall.</para>
+        /// </summary>
+        private static IMemoryCache FreshCache() => new MemoryCache(new MemoryCacheOptions());
+
         // ============ GetClubNameById Tests ============
 
         [Fact]
@@ -44,7 +59,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -66,7 +81,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -94,7 +109,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -124,7 +139,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -146,7 +161,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -168,7 +183,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -206,7 +221,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubById(clubId);
@@ -233,7 +248,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubById(clubId);
@@ -266,7 +281,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubById(clubId);
@@ -336,7 +351,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -374,7 +389,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);
@@ -400,7 +415,7 @@ namespace HpskSite.Tests
             mockUmbracoContextAccessor.Setup(uca => uca.TryGetUmbracoContext(out It.Ref<IUmbracoContext>.IsAny))
                 .Returns(false);
 
-            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, null);
+            var clubService = new ClubService(mockUmbracoContextAccessor.Object, mockContentService.Object, FreshCache());
 
             // Act
             var result = clubService.GetClubNameById(clubId);

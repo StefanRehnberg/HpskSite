@@ -301,11 +301,76 @@ namespace HpskSite.Services
                 deleted++;
             }
 
+            updated += await ReconcileHandEnteredThresholdsAsync(db, ids, year, birthYears);
+
             var result = new SyncResult(inserted, updated, deleted);
             if (result.Changed)
                 _logger.LogInformation("Marken competition-series sync {Result} for {Count} member(s), year {Year}",
                     result, ids.Count, year);
             return result;
+        }
+
+        /// <summary>
+        /// Recompute <c>Threshold</c> and <c>Qualifies</c> on HAND-ENTERED precision series.
+        ///
+        /// <para>
+        /// ⚠️ A competition series is reconciled on every read, but a hand-submitted or backlog-entered
+        /// one froze its threshold at insert time and was never looked at again. Three things move that
+        /// threshold after the fact: a personnummer arriving (0 → a real birth year), the shooter
+        /// crossing 56 or 66, and a correction to the rule itself. The 2026-09-16 correction to the 65+
+        /// concession is exactly the third case — without this pass, Torbjörn Andreasson's series from
+        /// competitions would say "krav 44" while his hand-entered one from the same year still said 40.
+        /// </para>
+        ///
+        /// <para>
+        /// ⚠️ Pistolskyttemärkets precision series ONLY. An Elit proof series lives in the same table
+        /// with <c>BadgeFamily = Elit</c> and is judged against Elit brons (45), not the guldkrav —
+        /// rewriting its threshold here would silently re-grade someone's Elit evidence.
+        /// </para>
+        ///
+        /// <para>Never touches <c>CountsTowardGuldfodring</c> or <c>Status</c>: those are a functionary's
+        /// decisions, and this pass is about the arithmetic only.</para>
+        /// </summary>
+        private async Task<int> ReconcileHandEnteredThresholdsAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            List<int> ids, int year, Dictionary<int, int> birthYears)
+        {
+            List<MarkenSeries> rows;
+            try
+            {
+                rows = new List<MarkenSeries>();
+                foreach (var chunk in Chunk(ids, 1000))
+                    rows.AddRange(await db.FetchAsync<MarkenSeries>(
+                        @"WHERE MemberId IN (@0) AND [Year] = @1 AND SourceResultId IS NULL
+                           AND SeriesType = @2 AND BadgeFamily = @3",
+                        chunk, year, Marken.SeriesTypePrecision, Marken.FamilyPistolskytte));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Marken hand-entered threshold reconcile could not read its rows");
+                return 0;
+            }
+
+            int changed = 0;
+            foreach (var s in rows)
+            {
+                if (string.IsNullOrWhiteSpace(s.WeaponGroup)) continue;
+                int threshold = Marken.PrecisionThreshold(
+                    s.WeaponGroup, year, birthYears.GetValueOrDefault(s.MemberId));
+                bool qualifies = s.Total >= threshold;
+                if (s.Threshold == threshold && s.Qualifies == qualifies) continue;
+
+                _logger.LogInformation(
+                    "Marken series {Id} (member {MemberId}, {Group} {Total} p) threshold {Old} → {New}, qualifies {WasQ} → {IsQ}",
+                    s.Id, s.MemberId, s.WeaponGroup, s.Total, s.Threshold, threshold, s.Qualifies, qualifies);
+
+                s.Threshold = threshold;
+                s.Qualifies = qualifies;
+                s.UpdatedAt = DateTime.Now;
+                await db.UpdateAsync(s);
+                changed++;
+            }
+            return changed;
         }
 
         /// <summary>

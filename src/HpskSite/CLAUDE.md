@@ -3245,12 +3245,82 @@ tabellen under punkt 1) säger **Brons 32/33/34, Silver 38/39/40, Guld 43/45/46*
 siffrorna är **C-kolumnen läst nedåt** — ett lätt misstag i den PDF-utvunna layouten, och alla C-värden i
 sammanfattningen var riktiga. Att följa dem hade sänkt A-guldkravet från 43 till 34 och retroaktivt
 kvalificerat mängder av serier; märkestilldelning är enkelriktad. Koden matchar källan.
-- **Åldersavdragen:** 55+ → −1 p/serie (implementerat, matchar källan). 65+ → källan har TVÅ
-  bestämmelser: −2 p/serie (5.1.1, under tabellen) och *"Skytt som ett föregående år fyllt 65 år
-  erhåller inteckning efter att ha uppfyllt fordringarna för pistolskyttemärket i silver"* (5.1.2.2,
-  som handlar just om årtalsmärken). Guldfodringen ÄR årtalsmärkesinteckningen, så koden följer 5.1.2.2
-  (silvertabellen) — den mer specifika bestämmelsen, och den mer generösa. Medvetet val, dokumenterat här
-  eftersom −2 vore en rimlig läsning av 5.1.1 ensam.
+- **⚠️⚠️ ÅLDERSAVDRAGEN ÄR EN POÄNGREDUKTION PÅ GULDKRAVET, ALDRIG EN ANNAN KRAVNIVÅ** (rättat
+  2026-09-16). Källan, ordagrant: *"Reducerade krav för äldre skyttar som föregående år fyllt 55 år
+  gäller 1 poäng mindre per serie, och för personer som ett föregående år fyllt 65 år, 2 poäng mindre
+  per serie."* Alltså **55+ → guldkrav −1** (A 42 / B 44 / C 45) och **65+ → guldkrav −2**
+  (A 41 / B 43 / C 44).
+  - Koden läste tidigare 5.1.2.2 (*"erhåller inteckning efter att ha uppfyllt fordringarna för
+    pistolskyttemärket i silver"*) som att hela **silvertabellen** gällde för 65+, alltså C 40 i
+    stället för 44. Följden var inte akademisk: Torbjörn Andreasson (Falkenbergs PK, f. 1960) stod
+    med **15 godkända guldserier på 40–46 p** i klubbadminens Märken-detaljer, alltså i det underlag
+    en styrelse skriver under ett **föreningsintyg för vapenlicens** på. Mätt i prod: 8 medlemmar,
+    185 serier. Efter rättelsen tappar 62 av dem sin kvalificering; **ingen signerad guldfodring
+    faller** (den enda som vilade på eftergiften, medlem 4627 f. 1959, klarar 44-kravet med 45/45/44/44
+    i C plus 43 i B).
+  - **⚠️ 55/65 HAR INGET MED VETERANKLASSERNA ATT GÖRA.** Veteran yngre börjar det år skytten fyller
+    **60**, veteran äldre det år hen fyller **70**. En 62-åring är veteran yngre och får −1, inte −2.
+    Härled aldrig märkeströsklen ur en tävlingsklass, och kalla den aldrig "veteranavdrag".
+  - **⚠️ `Documentation/MARKEN_SYSTEM.md` BAR BÅDA LÄSNINGARNA SAMTIDIGT** — tabellen i §6 sa
+    `55+ (−1) | 65+ (−2)` medan prosan i §6.3 sa silverfordringarna, två avsnitt isär, och koden följde
+    prosan. **När två halvor av en spec säger emot varandra vinner den med siffrorna.** Prosan är
+    rättad och bär nu varningen.
+  - **⚠️ Ytan visade aldrig att en eftergift var i spel.** `MarkenCandidateService.Part1ThresholdNote`
+    fanns och skickades som `part1Note`, men bara **skyttens egen sida** renderade den
+    (`UserProfile.cshtml`); klubbadminens Detaljer-modal — ytan där intygsunderlaget signeras — gjorde
+    det inte. Modalen renderar den nu, och varje serierad som klarar kravet BARA tack vare avdraget
+    bär brickan **ålderseftergift** (`baseThreshold` i `allPrecisionSeries` bär det oreducerade
+    guldkravet). En rad som säger `C: 40 (krav 40)` läser annars som en underkänd guldserie för var och
+    en som vet att C kräver 46.
+
+### ⚠️ EN HANDINLAGD SERIE FRÖS SITT KRAV VID INMATNINGEN (rättat 2026-09-16)
+
+Tävlingsserier rekonciljeras vid varje läsning, men en handinskickad eller klubbliggar-inlagd serie
+skrev sin `Threshold`/`Qualifies` en gång och tittade aldrig på dem igen. **Tre saker flyttar
+tröskeln i efterhand:** ett personnummer som kommer senare (0 → riktigt födelseår), att skytten
+passerar 56 eller 66, och en rättelse av regeln själv. Alla tre är tysta.
+
+Torbjörn bar beviset: hans tävlingsserier 2026 stod på `krav 40` medan hans handinlagda från
+2026-07-28 stod på `krav 46` — samma skytt, samma år, två olika krav på samma skärm, för att
+personnumret kom in mellan de två tillfällena. Här blev det strängare; åt andra hållet hade ett
+för LÅGT krav blivit stående.
+
+`MarkenCompetitionSeriesSync.ReconcileHandEnteredThresholdsAsync` räknar om dem i samma pass.
+- ⚠️ **Bara `BadgeFamily = Pistolskytte` och `SeriesType = Precision`.** En Elit-provserie ligger i
+  samma tabell och bedöms mot Elit brons (45), inte guldkravet — att skriva om dess tröskel här vore
+  att tyst omvärdera någons Elit-bevis.
+- ⚠️ **Rör aldrig `CountsTowardGuldfodring` eller `Status`** — funktionärens beslut, inte aritmetik.
+- Varje ändring loggas med gammalt och nytt värde, så en rättelse går att följa i efterhand.
+
+**Verifierat 37/37 `hpsk-verify/marken-alderseftergift-verify.mjs`**, två körningar i rad. Sviten
+sätter ett personnummer på ett testkonto, skapar fyra serier (46/44/43/40 i C) med **avsiktligt
+föråldrad tröskel 40 och alla markerade godkända** — precis det rapporterade tillståndet — och mäter
+sedan både API:t, DATABASEN och den renderade modalen. **A/B mot silverläsningen: 12 av 37 faller**,
+exakt de påståenden som beskriver felet (40 och 43 blir godkända guldserier igen).
+- **⚠️ Kontrollprovet är en ANNAN MEDLEM utan personnummer, inte samma medlem med numret raderat.**
+  Att ta bort raden i `umbracoPropertyData` tömmer inte Umbracos medlemscache, så
+  `_memberService.GetById` svarar med det gamla numret och tröskeln står kvar på 44 — vilket läser
+  som ett produktfel. Utan kontrollprovet kunde hela sviten dessutom vara grön av att tröskeln
+  hårdkodats till 44.
+- **⚠️ Modalens synlighet mäts som GEOMETRI, inte `isVisible()` eller en klass.** `#memberMarkenDetailModal`
+  ligger INUTI `#clubAdmin`, som är `display:none` tills Administration-fliken öppnats — en modal där
+  bär `.show`, och `innerText` svarar med hela sitt innehåll, medan utbredningen är noll. Sviten
+  klickar därför den YTTRE fliken först och väntar på att panelen får bredd. Mätt: tio
+  textpåståenden var gröna på en modal ingen kunde se.
+- ⚠️ `EnteredByMemberId` är NOT NULL på `MarkenSeries` — en INSERT utan den faller, och `sqlcmd` utan
+  `-b` exitar 0 på felet.
+
+**Bifynd på riktig dev-data:** rekoncilieringen rättade **14 av medlem 1078:s 16 handinlagda serier**
+vid första körningen. Hen saknar personnummer, alltså fullt guldkrav, men rader bar reducerade
+trösklar frusna från ett tillfälle då ett personnummer fanns. De två övriga rörde den inte — "skriv
+bara när något skiljer sig" fungerar.
+
+**⚠️ Och föreningsintyget rekonciljerade INTE alls.** `ForeningsintygDocumentService.DeriveSkjutprovAsync`
+läser `GetVerifiedQualifyingPrecisionAsync` för att härleda *"datum då fordringarna senast uppfylldes"* —
+alltså skjutprovsdatumet på en handling till Polismyndigheten — och gjorde det rakt mot liggaren. Varje
+annan märkesyta synkar på läsning, men intyget kunde utfärdas innan någon öppnat Märken-fliken för det
+året, och vilade då på en serie som inte längre kvalificerar. Den anropar nu `SyncMemberYearAsync`
+först, best effort.
 
 **Operatörssteg:** kör `Migrations/add-source-and-counts-to-markenseries.sql` **(körd i prod
 2026-08-28)** och därefter `Migrations/add-sourcetable-to-markenseries.sql` — den senare backfillar
@@ -3269,6 +3339,70 @@ kan tillhöra vilken krets som helst, så en klubb-/kretsadmin nekas, ingen synk
 propageringspåståendena faller medan koden är hel.
 Regression: marken-witness-date 79/79, resultlist-flatten 38/38, märkes- och kvalifikationstabellerna
 oförändrade före/efter (6/6). Dev: 186 materialiserade precisionsserier + 12 Duellserier.
+
+### ⚠️ De röda testerna var inte brus — ett av dem beskrev en riktig regression (2026-09-16)
+
+22 röda påståenden gicks igenom en och en. **Inget av dem berodde på dagens märkesändring** (mätt:
+varje svit gav samma utfall på en `git stash`-ad och ombyggd baseline), men de bar tre olika fel och
+ett av dem var en tyst produktförlust.
+
+**⚠️⚠️ `_ForeningsintygFieldMarkers` slutade nämna "Medlem sedan" — och ingen märkte det.**
+Uppslaget var `form.querySelector('[name="<alias>"]')` följt av ett tyst `if (!input) return;`. När
+profilens "Medlem sedan" 2026-09-09 gick från EN readonly-input till EN RAD PER MEDLEMSKAP föll
+fältet ur `clubMissing`, så rutan **"Din klubb behöver fylla i: …"** slutade nämna det och den gula
+triangeln försvann. Det var medlemmens ENDA signal om att klubben inte fyllt i medlemskapsdatumet
+som hens föreningsintyg kräver — och den här filen påstod samtidigt att signalen fanns.
+- **`[data-fi-field]` är den andra uppslagsformen:** ett block som inte ÄR en input deklarerar sig
+  själv och bär sitt värde i `data-fi-value` (tom sträng = saknas). Profilens block använder den.
+- **⚠️ INGET `name=` på det blocket.** Ett namngivet fält serialiseras av `saveProfile` och skrivs
+  tillbaka till medlemsegenskapen `memberSince` — den delade uppgiften som medvetet togs bort, just
+  för att den inte kan vara sann för mer än en klubb.
+- **`assertCoverage` gör nästa bortfall högljutt.** Ett katalogfält som varken har en input eller ett
+  `[data-fi-field]` försvinner ur BÅDA listorna, alltså rapporteras som "allt är ifyllt" när sanningen
+  är "vi tittade inte". Det loggar nu en `console.warn` och returneras som `result.uncovered`.
+
+**`ClubServiceTests` — 15 test som mätte NOLL.** `ClubService` fick en `IMemoryCache` som
+prestandafix; fixturen fortsatte skicka `null`, så varje test kastade `NullReferenceException` på
+metodens FÖRSTA rad, före all produktionslogik. De rapporterade rött i månader utan att pröva
+någonting. ⚠️ Cachen måste vara **tom per test** — `ClubService` cachar även null-svar, så en delad
+instans låter ett tidigare test avgöra nästa.
+
+**`TeamClassHelperTests.StandardDisciplines_AreUntouched` — föråldrat påstående.** Det väntade
+`[C1,C2,C3]` för `GetCompatibleIndividualClasses("C Öppen")`; inlåningsregeln för öppna
+vapengruppslag (2026-09-07) lägger till Dam/Vet/Jun. ⚠️ Rättat OCH kompletterat med
+`OppetVapengruppslag_LanarIn_MenDefinierasAvSinEgenKlass`: utan ett påstående om den **definierande**
+mängden hade en ändring som la låneklasserna i `IndividualClasses` — vilket kodens egen varning
+förbjuder — passerat helt omätt.
+
+**Två kopior av `TrainingScoreEntry`, den ena utan diakriter.** `HpskSite.Shared/Models/` (BOM-lös)
+sa `"Tavling"`/`"Traning"` där `HpskSite/Models/ViewModels/TrainingScoring/` (med BOM) sa
+`"Tävling"`/`"Träning"`. Filerna var i övrigt byte-identiska — alltså en riktad ASCII-ifiering, precis
+sed/heredoc-fällan. Den levande typen är den delade; ViewModels-kopian refererades av ingen och är
+**borttagen** (byggde grönt, vilket är beviset). Den kvarvarande filen har fått en BOM.
+
+**⚠️⚠️ OCH SVITERNA MÄTTE MINDRE ÄN DE PÅSTOD.** `foreningsintyg-verify` rapporterade 78/82 —
+men kraschade mitt i på en selektor från före uppdelningen 2026-09-09 och hoppade därmed över
+**74 påståenden**. Efter rättning: **156/156**. `activity-summary-verify` likaså, 99 → **105/105**.
+Tre orsaker, alla samma familj:
+- **Prefixen skiljer ytorna åt:** `ca*` = Aktivitet (ren läsyta), `ai*`/`fi*` = utfärdandeskärmen.
+  Medlemsvalet är `data-ca-member-id` på den ena och en `<select>` (`#aiMemberPick`) på den andra;
+  `#aiMemberList` finns inte längre. Nyckeln heter `_caMemberId` respektive `_intygMemberId`.
+- **⚠️ BÅDA sviterna tog FÖRSTA BÄSTA `/klubbar/`-länk på startsidan** — alltså en godtycklig klubb,
+  medan varje påstående handlade om medlem 1078 i klubb 2604. Mätt: väljaren fylldes med en ANNAN
+  klubbs medlemmar (id 9004–9048) och "medlemmen finns inte" läste som ett produktfel. **Länken får
+  inte avgöra; destinationen måste** — båda letar nu rätt sida via `#vapPanel[data-club-id]`. Samma
+  läxa som "mät destinationen, inte adressen" i lanevapen-verify.
+- **Ett påstående krokade på FRÅNVARON av `hpskOpenActivityForMember`**, som medvetet återinfördes
+  2026-09-09 (exporterad av aktivitetsytan, anropad från utfärdandeskärmen). Regeln gäller
+  MODALENS genväg, inte funktionen.
+
+**`marken-compseries-sync-verify` jämförde två olika frågor:** ligans antal (som räknar `Qualifies`)
+mot ett SQL `COUNT(*)` av alla materialiserade rader. Medlem 8819 har 28 rader varav en är
+`C 45 (krav 46)` — det dokumenterade Elit-bevisfallet — alltså 27 mot 28. 58/59 → **62/62**.
+
+**Efter allt:** enhetstesten **952/952** (från 934 gröna / 17 röda), och
+`marken-alderseftergift` 37/37 · `marken-compseries-sync` 62/62 · `foreningsintyg` 156/156 ·
+`activity-summary` 105/105.
 
 ### Resultatlistan kan läsas per klass ELLER per vapengrupp (2026-08-28)
 

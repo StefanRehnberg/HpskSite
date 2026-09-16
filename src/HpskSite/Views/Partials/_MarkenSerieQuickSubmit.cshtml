@@ -41,7 +41,7 @@
                         <input type="text" class="form-control form-control-sm" id="mqsPersonNumber" placeholder="ÅÅÅÅMMDD-XXXX">
                         <div class="form-text">
                             Behövs för att räkna ut rätt guldkrav — äldre skyttar har reducerade krav
-                            (−1&nbsp;p/serie från året efter du fyllt 55, silverkrav från året efter du fyllt 65).
+                            (−1&nbsp;p/serie från året efter du fyllt 55, −2&nbsp;p/serie från året efter du fyllt 65).
                             Sparas på din profil. Lämna tomt för att skicka in utan åldersavdrag.
                         </div>
                     </div>
@@ -158,15 +158,13 @@ function mqsOpen(o) {
 }
 
 // Gold (precision) threshold per weapon group, age-adjusted — mirrors Marken.PrecisionThreshold
-// (Guld A43/B45/C46/R46; 55+ → −1/serie; 65+ → silverkrav A38/B39/C40/R40). birthYear 0 = no concession.
+// (Guld A43/B45/C46/R46; 55+ → −1 p/serie; 65+ → −2 p/serie). birthYear 0 = no concession.
 function mqsGuldThreshold(group, birthYear) {
     const guld = { A: 43, B: 45, C: 46, R: 46 };
-    const silver = { A: 38, B: 39, C: 40, R: 40 };
     const g = guld[group] != null ? guld[group] : 46;
-    const s = silver[group] != null ? silver[group] : 40;
     if (birthYear && birthYear > 0) {
         const age = new Date().getFullYear() - birthYear;
-        if (age >= 66) return s;      // 65+ inteckning → silverkrav
+        if (age >= 66) return g - 2;  // 65+ → −2/serie
         if (age >= 56) return g - 1;  // 55+ → −1/serie
     }
     return g;

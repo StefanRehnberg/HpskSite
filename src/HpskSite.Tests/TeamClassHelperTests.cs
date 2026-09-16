@@ -181,8 +181,42 @@ namespace HpskSite.Tests
             var cDam = TeamClassHelper.GetCompatibleIndividualClasses("C Dam", isSpringskytte: false);
             Assert.Equal(new[] { "C1_Dam", "C2_Dam", "C3_Dam" }, cDam);
 
+            // ⚠️ Ett ÖPPET vapengruppslag LÅNAR IN ur vapengruppens övriga klasser (SHB, lagtävling).
+            // Det här påståendet väntade sig [C1,C2,C3] och var rött sedan låneregeln byggdes
+            // 2026-09-07 — alltså ett test som beskrev ett beteende produkten medvetet lämnat.
             var cOpen = TeamClassHelper.GetCompatibleIndividualClasses("C Öppen", isSpringskytte: false);
-            Assert.Equal(new[] { "C1", "C2", "C3" }, cOpen);
+            Assert.Equal(
+                new[] { "C1", "C2", "C3", "C1_Dam", "C2_Dam", "C3_Dam", "C_Vet_Y", "C_Vet_A", "C_Jun" },
+                cOpen);
+        }
+
+        /// <summary>
+        /// ⚠️ De två mängderna är INTE samma fråga, och skillnaden avgör om ett lag är giltigt.
+        ///
+        /// <para><b>Kompatibel</b> = vem som får GÅ MED. <b>Definierande</b> = vem som gör laget till
+        /// ett öppet C-lag: villkoret "minst en deltagare i laget deltar i den aktuella klassen" gör
+        /// att tre inlånade damklassade skyttar inte bildar ett öppet C-lag.</para>
+        ///
+        /// <para>Skrevs samtidigt som förväntan ovan rättades: fanns bara det kompatibla påståendet
+        /// hade en ändring som la låneklasserna i <c>IndividualClasses</c> (vilket kodens egen varning
+        /// förbjuder, eftersom en tävling med bara damklasser då börjar erbjuda ett tomt öppet lag)
+        /// passerat helt omätt.</para>
+        /// </summary>
+        [Fact]
+        public void OppetVapengruppslag_LanarIn_MenDeFinierasAvSinEgenKlass()
+        {
+            var borrowed = TeamClassHelper.GetCompatibleIndividualClasses("C Öppen", isSpringskytte: false);
+            var defining = TeamClassHelper.GetDefiningIndividualClasses("C Öppen", isSpringskytte: false);
+
+            Assert.Equal(new[] { "C1", "C2", "C3" }, defining);
+            Assert.All(defining, c => Assert.Contains(c, borrowed));
+            Assert.Contains("C1_Dam", borrowed);
+            Assert.DoesNotContain("C1_Dam", defining);
+
+            // Klasslagen lånar INTE — att låna in en öppen-C-skytt i ett damlag är inte det omvända.
+            Assert.Equal(
+                TeamClassHelper.GetCompatibleIndividualClasses("C Dam", isSpringskytte: false),
+                TeamClassHelper.GetDefiningIndividualClasses("C Dam", isSpringskytte: false));
         }
     }
 }

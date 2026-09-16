@@ -67,6 +67,26 @@
         return true;
     }
 
+    // ⚠️ ETT FÄLT BEHÖVER INGEN INPUT FÖR ATT KUNNA SAKNAS.
+    //
+    // Uppslaget var bara `[name="<alias>"]` med ett tyst `if (!input) return;`. Den 2026-09-09 byttes
+    // profilens "Medlem sedan" från EN readonly-input till EN RAD PER MEDLEMSKAP (en medlem kan
+    // tillhöra flera klubbar och ha olika tid i var och en) — och då föll fältet tyst ur `clubMissing`.
+    // Följden: rutan "Din klubb behöver fylla i: …" slutade nämna Medlem sedan, och den gula triangeln
+    // försvann, alltså medlemmens ENDA signal om att klubben inte fyllt i datumet hens föreningsintyg
+    // kräver. Ingenting sa ifrån; `_ForeningsintygFieldMarkers` såg fortfarande ut att täcka katalogen.
+    //
+    // Därför finns `[data-fi-field]` som andra uppslagsform: ett block som inte ÄR en input deklarerar
+    // sig själv, och bär sitt värde i `data-fi-value` (tom sträng = saknas). Ett fält som varken har en
+    // input eller ett sådant block är fortfarande ett tyst bortfall — se `assertCoverage` nedan.
+    function locate(form, alias) {
+        var input = form.querySelector('[name="' + alias + '"]');
+        if (input) return { value: input.value, label: form.querySelector('label[for="' + input.id + '"]') || input.closest('.mb-3')?.querySelector('label') };
+        var block = form.querySelector('[data-fi-field="' + alias + '"]');
+        if (block) return { value: block.getAttribute('data-fi-value') || '', label: block.querySelector('label, .form-label') };
+        return null;
+    }
+
     function decorate(formId) {
         var form = document.getElementById(formId);
         if (!form) return { missing: [] };
@@ -75,14 +95,13 @@
         var clubMissing = [];   // klubbens, som hen bara ska känna till
 
         FIELDS.forEach(function (f) {
-            var input = form.querySelector('[name="' + f.alias + '"]');
-            if (!input) return;
+            var found = locate(form, f.alias);
+            if (!found) return;
 
-            var filled = hasUsableValue(f.alias, input.value);
+            var filled = hasUsableValue(f.alias, found.value);
             if (!filled && f.required) (f.clubManaged ? clubMissing : missing).push(f.label);
 
-            var label = form.querySelector('label[for="' + input.id + '"]')
-                     || input.closest('.mb-3')?.querySelector('label');
+            var label = found.label;
             if (!label) return;
 
             // Idempotent: markeringen ritas om varje gang funktionen kors.
@@ -155,8 +174,22 @@
         box.innerHTML = html;
     }
 
+    // ⚠️ ETT TYST BORTFALL ÄR VÄRRE ÄN EN SAKNAD MARKERING. Ett katalogfält som varken har en input
+    // eller ett `[data-fi-field]`-block försvinner ur BÅDA listorna — alltså rapporteras det som
+    // "allt är ifyllt" när sanningen är "vi tittade inte". Det var precis vad som hände med
+    // Medlem sedan, och det upptäcktes av en verifieringssvit, inte av ytan. Namnge det i stället.
+    function assertCoverage(formId) {
+        var form = document.getElementById(formId);
+        if (!form) return [];
+        var gone = FIELDS.filter(function (f) { return !locate(form, f.alias); }).map(function (f) { return f.alias; });
+        if (gone.length) console.warn('[foreningsintyg] fält i katalogen som formuläret "' + formId +
+            '" inte visar: ' + gone.join(', ') + ' — de räknas varken som ifyllda eller saknade.');
+        return gone;
+    }
+
     window.hpskMarkForeningsintygFields = function (formId, legendContainerId) {
         var result = decorate(formId);
+        result.uncovered = assertCoverage(formId);
         if (legendContainerId) renderLegend(legendContainerId, result);
         return result;
     };

@@ -860,7 +860,26 @@
                                             markeringen säger det i stället för att be medlemmen om
                                             något hen inte kan göra.
                                         *@
-                                        <div class="mb-3">
+                                        @*
+                                            ⚠️ `data-fi-field` / `data-fi-value` är hur det HÄR blocket
+                                            fortfarande syns för föreningsintygsmarkeringen trots att
+                                            det inte längre är EN input. Utan dem föll Medlem sedan
+                                            tyst ur "Din klubb behöver fylla i: …" när fältet blev en
+                                            rad per medlemskap — medlemmens enda signal om att klubben
+                                            inte fyllt i datumet.
+
+                                            ⚠️ INGET `name=`. Ett namngivet fält här skulle serialiseras
+                                            av `saveProfile` och skrivas tillbaka till medlemsegenskapen
+                                            `memberSince` — den delade uppgiften som medvetet togs bort
+                                            2026-09-09, just för att den inte kan vara sann för mer än
+                                            en klubb.
+
+                                            Saknas räknas det när medlemmen inte har något medlemskap
+                                            alls, ELLER när någon av klubbarna saknar datum: intyget
+                                            utfärdas per klubb, så en enda lucka är en lucka.
+                                        *@
+                                        <div class="mb-3" data-fi-field="memberSince"
+                                             data-fi-value="@(mySinceRows.Count > 0 && mySinceRows.All(r => !string.IsNullOrEmpty(r.Since)) ? "ja" : "")">
                                             <label class="form-label">Medlem sedan</label>
                                             @if (mySinceRows.Count == 0)
                                             {

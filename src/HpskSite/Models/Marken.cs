@@ -1,4 +1,4 @@
-namespace HpskSite.Models
+﻿namespace HpskSite.Models
 {
     /// <summary>
     /// Domain constants and rule helpers for Märken (marksmanship proficiency badges, SHB kap 5).
@@ -207,14 +207,8 @@ namespace HpskSite.Models
             _ => 46
         };
 
-        private static int SilverPerSeries(string group) => group switch
-        {
-            "A" => 38,
-            "B" => 39,
-            "C" => 40,
-            "R" => 40,
-            _ => 40
-        };
+        // Silverfordringarna (A 38 / B 39 / C 40) står i samma tabell men används INTE här:
+        // åldersavdraget för 65+ är −2 p/serie, inte "silverkravet". Se PrecisionThreshold.
 
         /// <summary>Series required for a Guldfodring precision part (SHB 5.1.1.1 pt 1: 3 precisionsserier).</summary>
         public const int GuldfodringPrecisionSeriesRequired = 3;
@@ -249,18 +243,33 @@ namespace HpskSite.Models
 
         /// <summary>
         /// Per-series points required for the precision part of a Guldfodring, applying the
-        /// age concessions (SHB 5.1.1.1 + 5.1.2.2), using the calendar-year rule
-        /// (D.2.8: ålder = tävlingsår − födelseår):
-        ///   • turned 65 the previous year (ageThisYear ≥ 66) → Silver requirements (the 65+ inteckning rule)
+        /// age concessions, using the calendar-year rule (D.2.8: ålder = tävlingsår − födelseår).
+        ///
+        /// <para>SHB kap 5, "Reducerade krav" under fordringstabellen, ordagrant: <i>"Reducerade krav för
+        /// äldre skyttar som föregående år fyllt 55 år gäller 1 poäng mindre per serie, och för personer
+        /// som ett föregående år fyllt 65 år, 2 poäng mindre per serie."</i></para>
+        ///
+        ///   • turned 65 the previous year (ageThisYear ≥ 66) → Guld − 2 / serie
         ///   • turned 55 the previous year (ageThisYear ≥ 56) → Guld − 1 / serie
         ///   • otherwise → Guld
+        ///
+        /// <para>⚠️ 55/65 HAR INGET MED VETERANKLASSERNA ATT GÖRA. Veteran yngre börjar det år skytten
+        /// fyller 60 och veteran äldre det år hen fyller 70; märkesreduktionen har sina egna gränser.
+        /// Härled därför aldrig den här tröskeln ur en skytts tävlingsklass, och beskriv den aldrig
+        /// som "veteranavdrag" — en 62-åring är veteran yngre men får −1 p, inte −2.</para>
+        ///
+        /// <para>⚠️ Det är en POÄNGREDUKTION på guldkravet, inte en annan kravNIVÅ. Koden läste tidigare
+        /// 5.1.2.2 ("erhåller inteckning efter att ha uppfyllt fordringarna … i silver") som att hela
+        /// silvertabellen gällde, vilket sänkte C-kravet till 40 i stället för 44 — en 40-poängsserie
+        /// stod då som godkänd guldserie i underlaget till ett föreningsintyg. Rättat 2026-09-16.</para>
+        ///
         /// When birthYear is unknown (0), no concession is applied (full Guld requirement — fail safe).
         /// </summary>
         public static int PrecisionThreshold(string weaponGroup, int year, int birthYear)
         {
             int ageThisYear = birthYear > 0 ? year - birthYear : 0;
             if (birthYear > 0 && ageThisYear >= 66)
-                return SilverPerSeries(weaponGroup);
+                return GuldPerSeries(weaponGroup) - 2;
             if (birthYear > 0 && ageThisYear >= 56)
                 return GuldPerSeries(weaponGroup) - 1;
             return GuldPerSeries(weaponGroup);

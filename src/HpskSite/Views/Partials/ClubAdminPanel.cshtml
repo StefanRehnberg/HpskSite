@@ -2585,6 +2585,7 @@ function renderMemberMarkenDetail(data) {
         <h6 class="text-muted">Guldfodring ${year}</h6>
         <div class="card border-warning-subtle mb-2"><div class="card-body py-2">
             ${partLine('Precisionsdel (3 godkända guldserier)', part1, `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} serier`)}
+            ${gf.part1Note ? `<div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>${escapeMedalHtml(gf.part1Note)}</div>` : ''}
             ${seriesRows ? `<ul class="small text-muted mt-1 mb-1">${seriesRows}</ul>` : ''}
             <hr class="my-2">
             ${partLine('Snabbskyttedel (3 godkända snabbserier)', part2, gf.part2ViaFalt ? escapeMedalHtml(gf.part2Detail || 'fältmedalj') : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} serier`)}
@@ -2625,9 +2626,19 @@ function renderMarkenSeriesLedger(list, canSign, memberId, name) {
         // `counts` is undefined on the legacy bestSeries shape; only an explicit false means excluded.
         const excluded = s.counts === false;
         const pending = s.status && s.status !== 'Verified';
+        // ⚠️ Badgen sätts bara på en rad som klarar kravet ENBART tack vare åldersavdraget — alltså
+        // poäng under det ordinarie guldkravet. `C: 40 (krav 40)` är en korrekt rad och läser ändå som
+        // en underkänd guldserie för var och en som vet att C kräver 46, och den här listan är
+        // underlaget till ett föreningsintyg. En rad som klarar det ORDINARIE kravet får ingen badge:
+        // den behöver ingen förklaring, och en bricka på varenda rad slutar betyda något.
+        const reducedPass = s.baseThreshold != null && s.score != null
+            && s.score < s.baseThreshold && s.qualifies !== false;
         const flags = (excluded ? ' <span class="badge bg-secondary">räknas inte</span>' : '')
             + (pending ? ' <span class="badge bg-warning text-dark">väntar på validering</span>' : '')
-            + (s.qualifies === false ? ' <span class="badge bg-light text-dark border">under kravet</span>' : '');
+            + (s.qualifies === false ? ' <span class="badge bg-light text-dark border">under kravet</span>' : '')
+            + (reducedPass
+                ? ` <span class="badge bg-light text-dark border" title="Ordinarie guldkrav i vapengrupp ${escapeMedalAttr(s.weaponGroup || '')} är ${s.baseThreshold} p — den här serien räknas tack vare skyttens åldersavdrag">ålderseftergift</span>`
+                : '');
         let actions = '';
         if (canSign && s.id) {
             actions += ` <a href="#" class="text-decoration-none ms-2" title="${excluded ? 'Räkna med serien igen' : 'Räkna inte den här serien mot guldfodringen'}"

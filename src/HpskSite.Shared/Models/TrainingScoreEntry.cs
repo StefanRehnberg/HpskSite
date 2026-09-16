@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace HpskSite.Shared.Models
@@ -251,7 +251,11 @@ namespace HpskSite.Shared.Models
         /// </summary>
         public string GetSummary()
         {
-            var type = IsCompetition ? "Tavling" : "Traning";
+            // ⚠️ Stod som "Tavling"/"Traning" — diakriterna hade strippats ur EN av två identiska
+            // kopior av den här klassen, vilket bara ett enhetstest märkte. Filen saknade BOM, och en
+            // sed/heredoc-runda över svensk text i en BOM-lös .cs är precis så det går till.
+            // Filen har nu en BOM. Skriv aldrig svensk text här med sed eller heredoc.
+            var type = IsCompetition ? "Tävling" : "Träning";
             return $"{TrainingDate:yyyy-MM-dd} - {type} - {WeaponClass}-Vapen - {SeriesCount} serier - {TotalScore}p ({XCount} X)";
         }
     }
