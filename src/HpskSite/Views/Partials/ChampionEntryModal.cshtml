@@ -58,8 +58,10 @@
                         @* Etiketten följer grenens enhet — poäng för seriegrenarna och poängfält,
                            träff för normalfält. Ett tal ur databasen under fel enhet är en tyst lögn. *@
                         <label class="form-label" id="ceScoreLabel-@ceInstance">Total poäng *</label>
+                        @* Ingen hjälptext om "max möjligt" — antalet serier är arrangörens val och
+                           skiljer sig mellan klubbar, så en utskriven maxpoäng är ett påstående vi
+                           inte kan stå för. *@
                         <input type="number" class="form-control" id="ceScore-@ceInstance" min="0" step="1">
-                        <small class="form-text text-muted" id="ceScoreHelp-@ceInstance"></small>
                     </div>
                     <div class="col-md-3" id="ceSecondaryWrap-@ceInstance" style="display:none;">
                         <label class="form-label" id="ceSecondaryLabel-@ceInstance">Figurer</label>
@@ -172,10 +174,6 @@
         // Etiketten kommer ur grenkatalogen — "Total poäng" / "Antal träff".
         el('ceScoreLabel').textContent = (combo.scoreLabel || 'Total poäng') + ' *';
         el('ceScore').setAttribute('max', String(combo.ceiling));
-        // Seriegrenarna har ett fast tak värt att skriva ut; fältgrenarna har inget.
-        el('ceScoreHelp').textContent = combo.max > 0
-            ? 'Max möjligt: ' + combo.max + ' (' + combo.series + ' serier × 50p).'
-            : '';
 
         // Det andra talet finns bara för grenar som har ett (fältskyttets figurer).
         var secWrap = document.getElementById('ceSecondaryWrap-' + instance);

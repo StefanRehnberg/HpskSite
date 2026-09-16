@@ -58,8 +58,10 @@
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Total poäng *</label>
+                        @* Ingen hjälptext om "max möjligt" — antalet serier är arrangörens val och
+                           skiljer sig mellan klubbar, så en utskriven maxpoäng är ett påstående vi
+                           inte kan stå för. *@
                         <input type="number" class="form-control" id="reScore-@reInstance" min="0" step="1">
-                        <small class="form-text text-muted" id="reScoreHelp-@reInstance"></small>
                     </div>
                 </div>
 
@@ -169,7 +171,6 @@
             return '<option value="' + c.code + '">' + c.label + '</option>';
         }).join('');
         el('reScore').setAttribute('max', String(combo.max));
-        el('reScoreHelp').textContent = 'Max möjligt: ' + combo.max + ' (' + combo.series + ' serier × 50p).';
 
         // Individual vs Team field visibility
         document.getElementById('reIndividual-' + instance).style.display = (t === 'Individual') ? '' : 'none';
