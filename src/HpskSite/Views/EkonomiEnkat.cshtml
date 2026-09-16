@@ -395,11 +395,24 @@ else
                 den hopfällda rubriken nedan, där det säger något användaren behöver veta.
             *@
             <h2>De viktigaste frågorna</h2>
+            @*
+                ⚠️⚠️ SÄG ALDRIG ATT ETT FELAKTIGT SVAR BLIR DYRT FÖR OSS.
+                Brickan hette först "Dyr att ändra" och ingressen förklarade att ett sent ändrat svar
+                tvingar fram omräkning av levande bokföring. Avsikten var att visa vad som betyder
+                mest. Utfallet blev det motsatta: en revisor som svarade på sex frågor hoppade över
+                exakt de tre märkta, och skrev efteråt "anledningen till att jag inte svarade på några
+                är för att jag vet att om jag säger fel där kan det bli dyrt för er sedan".
+                Vi gjorde alltså de frågor vi mest behöver svar på till de skrämmande.
+                Samma familj som ursäkten "jag kan inte ge raka svar": det som fattas är TILLÅTELSEN
+                — först att svara "det beror på", nu att gissa. Ansvaret för vad vi bygger ligger
+                hos oss, och det måste stå på sidan.
+            *@
             <p class="hint">
-                De här bestämmer formen på varje bokförd rad, eller kontostrukturen, redan innan
-                den första kronan kommer in. Ändras svaret senare måste levande bokföring räknas om, och
-                uppgifter vi aldrig sparade går inte att rekonstruera. <strong>Svara på den du kan mest
-                om och hoppa över resten.</strong>
+                De här betyder mest för oss, och det är här vi står mest still.
+                <strong>Du kan inte säga fel.</strong> Vi väger flera svar mot varandra och stämmer av
+                med en redovisningskonsult innan vi bygger — en gissning med ett resonemang bakom är
+                mer värd för oss än ett uteblivet svar. <strong>Svara på den du kan mest om och hoppa
+                över resten.</strong>
             </p>
 
             @*
@@ -415,7 +428,8 @@ else
                     <div class="q-head">
                         <span class="q-id">@nr</span>
                         <span class="q-title">@f.Rubrik</span>
-                        <span class="costly">Dyr att ändra</span>
+                        @* Se varningen ovan: brickan får aldrig lägga risken på den som svarar. *@
+                        <span class="costly">Här står vi mest still</span>
                     </div>
                     <p>@f.Text</p>
                     <textarea name="svar@(f.Id)" aria-label="Svar på fråga @nr">@Posted("svar" + f.Id)</textarea>

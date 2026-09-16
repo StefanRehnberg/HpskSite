@@ -198,9 +198,17 @@ namespace HpskSite.Models
         /// som gör det. Så föll en första omgång revisorsfrågor bort (oföränderlighet, ändringslogg,
         /// bankavstämning, revisorns läsrätt): allt sant, inget av det en fråga.</para>
         ///
-        /// <para><b>Dyr att ändra</b> = svaret bestämmer formen på varje rad, eller kontostrukturen,
-        /// redan från första kronan. Ändras det senare måste levande bokföringsdata räknas om, och
+        /// <para><b><c>Dyr</c> = svaret bestämmer formen på varje rad, eller kontostrukturen, redan
+        /// från första kronan.</b> Ändras det senare måste levande bokföringsdata räknas om, och
         /// uppgifter som aldrig sparades går inte att rekonstruera.</para>
+        ///
+        /// <para><b>⚠️⚠️ MEN SÄG DET ALDRIG TILL DEN SOM SVARAR.</b> Brickan hette "Dyr att ändra"
+        /// och ingressen förklarade konsekvensen. En revisor som svarade på sex frågor hoppade då
+        /// över exakt de tre märkta: <i>"om jag säger fel där kan det bli dyrt för er sedan"</i>.
+        /// Vi gjorde de frågor vi mest behöver svar på till de skrämmande. Flaggan styr numera bara
+        /// vilka frågor som visas öppet; på skärmen heter den <i>"Här står vi mest still"</i> och
+        /// ingressen säger uttryckligen att man inte kan säga fel. Fältnamnet <c>Dyr</c> är kvar
+        /// eftersom det beskriver vår risk, inte den svarandes.</para>
         /// </summary>
         public static readonly (string Id, string Rubrik, bool Dyr, string Text)[] Fragor =
         {
