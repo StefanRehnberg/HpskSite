@@ -63,6 +63,15 @@
         .calm { background: var(--accent-bg); border-left: 3px solid var(--accent);
                 padding: 14px 18px; margin-top: 18px; }
         .calm p { margin: 0; max-width: 38rem; }
+        .depends { background: var(--surface); border: 2px solid var(--accent);
+                   padding: 16px 20px; margin-top: 14px; }
+        .depends p { margin: 0; max-width: 38rem; }
+        /* Resten av frågorna, hopfällda. Rubriken står alltid kvar — sortera, göm inte. */
+        details.rest { border-top: 1px solid var(--rule); padding-top: 16px; margin-top: 4px; }
+        details.rest > summary { cursor: pointer; font-weight: 600; font-size: 16px;
+                                 color: var(--accent); list-style: revert; }
+        details.rest > summary::marker { color: var(--accent); }
+        details.rest .hint { margin-top: 6px; }
 
         section { display: flex; flex-direction: column; gap: 14px; }
         h2 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0;
@@ -198,17 +207,36 @@ else
 {
     <header>
         <a class="brand" href="/">Pistol.nu</a>
-        <h1>Kan du redovisning? Vi behöver en halvtimme av din tid.</h1>
+        <h1>Kan du redovisning? Då kan du hjälpa oss.</h1>
         <p class="standfirst">
             Vi bygger in ekonomihantering i Pistol.nu, så att en klubb ska kunna sköta sin bokföring
-            på ett ställe. Innan vi bygger vill vi veta att vi tänkt rätt — och det är sju frågor vi
-            inte kan besvara själva.
+            på ett ställe. <strong>Vi ersätter bokföringsprogrammet — vi matar det inte.</strong>
+            Innan vi bygger vill vi veta att vi tänkt rätt.
+            <strong>Det räcker gott med ett svar på en enda fråga.</strong>
         </p>
         <div class="calm">
             <p>
                 <strong>Ingenting är fel med någon klubbs ekonomi.</strong> Det här är ett utvecklingsarbete,
                 inte ett ärende. Arbetar du inte med redovisning kan du lugnt lämna sidan — då är det
                 inte dig vi letar efter den här gången.
+            </p>
+        </div>
+
+        @*
+            ⚠️⚠️ DEN HÄR RUTAN ÄR SIDANS VIKTIGASTE TEXT — ta inte bort den.
+            Det första riktiga svaret (per mejl, 2026-09-16) inleddes med en ursäkt: "ingen av
+            frågorna är egentligen bara att säga det är ett svar" och "tyvärr kan jag inte ge rakare
+            svar än såhär". Han var nära att inte skriva alls — och de som kände likadant men inte
+            var lika generösa stängde fliken i stället. Formuläret sa ingenstans att "det beror på"
+            är ett fullgott svar, och det är sannolikt en del av förklaringen till att de första
+            besökarna inte skickade in något.
+        *@
+        <div class="depends">
+            <p>
+                <strong>&rdquo;Det beror på hur föreningen gör&rdquo; är ett fullgott svar.</strong>
+                Flera av frågorna nedan har inget facit — de är val varje förening fattar. Säg då
+                <em>vad</em> det beror på, så bygger vi ett val i stället för att gissa åt er. Det är
+                precis den sortens svar vi behöver mest.
             </p>
         </div>
     </header>
@@ -359,30 +387,65 @@ else
         </section>
 
         <section>
-            <h2>Frågorna</h2>
+            @*
+                ⚠️ INGET ANTAL I RUBRIKEN. Den sa "De fyra viktigaste" när frågorna blivit tre — en
+                handskriven siffra glider så fort listan ändras, och en sida som räknar fel på sitt
+                eget innehåll är svår att lita på i övrigt. En uträknad siffra löser driften men
+                skriver "De 3 viktigaste", vilket läser som maskingenererat. Talet hör hemma i
+                den hopfällda rubriken nedan, där det säger något användaren behöver veta.
+            *@
+            <h2>De viktigaste frågorna</h2>
             <p class="hint">
-                Svara på det du kan och hoppa över resten — ett svar på en enda fråga är värdefullt.
-                Fyra av dem är märkta <em>dyra att ändra</em>. De har en sak gemensamt: svaret bestämmer
-                formen på varje bokförd rad, eller kontostrukturen, redan innan den första kronan kommer
-                in. Ändras det senare måste levande bokföringsdata räknas om, och uppgifter vi aldrig
-                sparade går inte att rekonstruera i efterhand.
+                De här bestämmer formen på varje bokförd rad, eller kontostrukturen, redan innan
+                den första kronan kommer in. Ändras svaret senare måste levande bokföring räknas om, och
+                uppgifter vi aldrig sparade går inte att rekonstruera. <strong>Svara på den du kan mest
+                om och hoppa över resten.</strong>
             </p>
 
-            @foreach (var f in EkonomiEnkat.Fragor)
+            @*
+                ⚠️ NUMRET PÅ SKÄRMEN ÄR POSITIONEN, inte lagringsnyckeln `f.Id`. En fråga som tas bort
+                lämnar en lucka i id-serien (F8 är borttagen), och att visa id:t hade gett läsaren
+                "F9, F10, F11" utan förklaring. Se varningen vid `EkonomiEnkat.Fragor`.
+            *@
+            @{ var nr = 0; }
+            @foreach (var f in EkonomiEnkat.Fragor.Where(x => x.Dyr))
             {
+                nr++;
                 <div class="q">
                     <div class="q-head">
-                        <span class="q-id">@f.Id</span>
+                        <span class="q-id">@nr</span>
                         <span class="q-title">@f.Rubrik</span>
-                        @if (f.Dyr)
-                        {
-                            <span class="costly">Dyr att ändra</span>
-                        }
+                        <span class="costly">Dyr att ändra</span>
                     </div>
                     <p>@f.Text</p>
-                    <textarea name="svar@(f.Id)" aria-label="Svar på @f.Id">@Posted("svar" + f.Id)</textarea>
+                    <textarea name="svar@(f.Id)" aria-label="Svar på fråga @nr">@Posted("svar" + f.Id)</textarea>
                 </div>
             }
+
+            @*
+                ⚠️ Hopfällt, inte borttaget — och rubriken står alltid kvar med antalet i klartext.
+                Sidan fick noll svar från de första besökarna, och elva långa frågor på rad är den
+                troligaste förklaringen: den som kan svara ser en kväll framför sig, inte en stund.
+                Att gömma dem helt vore däremot att slänga sex frågor vi faktiskt vill ha svar på.
+            *@
+            <details class="rest">
+                <summary>Fler frågor — @EkonomiEnkat.Fragor.Count(x => !x.Dyr) st, svara om du orkar</summary>
+                <p class="hint">
+                    Mindre bråttom än de fyra ovan, men lika välkomna.
+                </p>
+                @foreach (var f in EkonomiEnkat.Fragor.Where(x => !x.Dyr))
+                {
+                    nr++;
+                    <div class="q">
+                        <div class="q-head">
+                            <span class="q-id">@nr</span>
+                            <span class="q-title">@f.Rubrik</span>
+                        </div>
+                        <p>@f.Text</p>
+                        <textarea name="svar@(f.Id)" aria-label="Svar på fråga @nr">@Posted("svar" + f.Id)</textarea>
+                    </div>
+                }
+            </details>
 
             <label class="field">
                 <span class="lbl">Något annat vi borde tänka på?</span>

@@ -183,7 +183,14 @@ namespace HpskSite.Models
         };
 
         /// <summary>
-        /// Frågorna, i dokumentets ordning. Id:t är också formulärfältets namn.
+        /// Frågorna, i dokumentets ordning. Id:t är formulärfältets namn och lagringsnyckeln.
+        ///
+        /// <para><b>⚠️⚠️ ID:T ÄR PERMANENT OCH ÅTERANVÄNDS ALDRIG. Numret på skärmen är POSITIONEN,
+        /// inte id:t.</b> När F8 togs bort 2026-09-16 (frågan blev besvarad) hade en omnumrering
+        /// betytt att svar lagrade i <c>SvarF9</c> plötsligt visades under en annan fråga — alltså
+        /// tyst omtolkad data, det värsta slaget av fel i den här kodbasen. Därför: ta bort en fråga
+        /// ur listan och lämna luckan i id-serien. Kolumnen får ligga kvar tom i databasen; att
+        /// släppa en kolumn med svar i vore att radera någons text.</para>
         ///
         /// <para><b>⚠️ VARJE FRÅGA MÅSTE KLARA TESTET "ändrar svaret vad vi bygger?"</b> Är svaret
         /// redan känt är det ett KRAV och hör i backloggen, inte här. Att fråga om något vi ändå
@@ -197,21 +204,20 @@ namespace HpskSite.Models
         /// </summary>
         public static readonly (string Id, string Rubrik, bool Dyr, string Text)[] Fragor =
         {
-            ("F1", "Nummerserier — hur ska de delas upp?", true,
+            ("F1", "Nummerserier — vad ska föreningen kunna ställa in?", true,
              "Vi tänker oss flera serier som var och en är obruten för sig: en för betalningar som " +
-             "systemet självt registrerar (deltagaravgifter via Swish), en för sådant föreningen bokför " +
-             "manuellt — till exempel ett kvitto från järnhandeln. Numren följer registreringsordning, " +
-             "inte händelsedatum, så ingenting infogas mellan befintliga nummer. Är den uppdelningen " +
-             "rätt, eller vill du hellre se en enda serie för hela föreningen? Och behöver kvitton till " +
-             "deltagarna dessutom en egen obruten serie, eller räcker det att varje kvitto pekar på sin " +
-             "verifikation?"),
+             "systemet självt registrerar, en för sådant föreningen bokför manuellt — till exempel ett " +
+             "kvitto från järnhandeln. Numren följer registreringsordning, inte händelsedatum, så " +
+             "ingenting infogas mellan befintliga nummer. Vi har också fått tipset att varje förening " +
+             "bör kunna välja en egen prefixbokstav för sina serier. " +
+             "Vad av det här bör vara en INSTÄLLNING per förening, och vad är i så fall ett rimligt " +
+             "förval för den som inte vill välja? Och behöver kvitton till deltagarna en egen obruten " +
+             "serie, eller räcker det att varje kvitto pekar på sin verifikation?"),
 
-            ("F2", "Ska raden bära ett intäktsdatum skilt från betaldatumet?", true,
-             "En avgift betalas ibland i förskott för en aktivitet som ligger senare — ibland efter " +
-             "årsskiftet, till exempel en tävlingsanmälan i december för en tävling i maj. Behöver vi " +
-             "registrera aktivitetens datum separat för att kunna periodisera? Vi är mest hjälpta av en " +
-             "regel vi kan koda: vid vilket belopp eller vilken omfattning ska en förskottsbetald avgift " +
-             "periodiseras, och när kan den bokföras rakt av?"),
+            // ⚠️ F2 (fakturerings- kontra kontantmetoden) är BORTTAGEN 2026-09-16: besvarad och
+            // avgjord — kontantmetoden, och obetalda fakturor bokförs som kundfordran vid bokslut.
+            // Id:t F2 återanvänds ALDRIG och kolumnen SvarF2 ligger kvar i databasen med sina svar.
+
 
             ("F3", "En rättelse som upptäcks efter fastställt bokslut — var bokförs den?", true,
              "Vi låser året när årsmötet fastställt resultat- och balansräkningen; ingenting ska kunna " +
@@ -223,10 +229,11 @@ namespace HpskSite.Models
             ("F4", "Kontoplan, avskrivningar och ändamålsbestämda medel", true,
              "Vi tänker använda BAS-kontoplanen i den version som passar ideella föreningar. " +
              "Kontoplanen bestämmer varje kontering vi någonsin skriver, så den behöver vara rätt från " +
-             "början — vilken vill du se? " +
+             "början — vilken vill du se, och hur mycket bör en förening kunna lägga till egna konton? " +
              "En klubb äger dessutom saker som ska synas i balansräkningen: klubbstuga, kulfångsvall, " +
-             "klubbvapen, gräsklippare. Hur bör vi hantera avskrivningar, och var går gränsen för vad " +
-             "som får kostnadsföras direkt? " +
+             "klubbvapen, gräsklippare. Vi har förstått att avskrivningstiden är ett beslut klubben " +
+             "fattar, och att mindre inköp kan kostnadsföras direkt — vad ska då vara inställbart per " +
+             "tillgång, och vad är rimliga förval? " +
              "Och: många klubbar har öronmärkta medel — en banfond, en ungdomsfond. Ska de redovisas " +
              "som ändamålsbestämt eget kapital eller som en avsättning?"),
 
@@ -249,12 +256,10 @@ namespace HpskSite.Models
              "behöver dokumenteras vid dagsavslut och insättning för att du ska godta hanteringen? " +
              "Svaret avgör om vi bygger stöd för kontanter alls eller om vi ska avråda från dem."),
 
-            ("F8", "Pengar som bara passerar genom föreningen", false,
-             "Klubben samlar in licensavgifter från sina medlemmar och betalar dem vidare till förbundet. " +
-             "Pengarna är aldrig klubbens egna. Vi tänker oss att de bokförs som en skuld tills de " +
-             "skickas vidare, och alltså aldrig går över resultaträkningen som en intäkt — så att " +
-             "årsmötet inte får ett uppblåst resultat. Är det rätt hanterat, och finns det andra poster " +
-             "av samma slag vi borde tänka på?"),
+            // ⚠️ F8 (genomströmningsposter — licensavgifter som skuld eller intäkt) är BORTTAGEN
+            // 2026-09-16: frågan är besvarad och avgjord (intäkt + kostnad, inte skuld). Id:t F8
+            // återanvänds ALDRIG och kolumnen SvarF8 ligger kvar i databasen med sina svar — se
+            // varningen ovanför listan.
 
             ("F9", "Vad behöver den som faktureras — en klubb eller en krets?", false,
              "Två fall med samma form. En klubb anmäler trettio av sina medlemmar till en tävling och " +
