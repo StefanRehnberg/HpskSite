@@ -322,9 +322,17 @@
                     '<td>' + (b.number == null ? '—' : b.number) + '</td>' +
                     '<td>' + esc(b.firearmAlias) + '</td>' +
                     '<td class="small">' + esc(b.from) + ' – ' + esc(b.to.slice(-5)) + '</td>' +
-                    '<td><span class="badge ' + (b.isOut ? 'bg-warning' :
-                        b.isActive ? 'bg-primary' : 'bg-secondary') + '">' +
-                        esc(b.statusLabel) + '</span></td>' +
+                    // ⚠️ En reservation vars tid gått är inte ett kommande lån. Står den kvar som
+                    // "Reserverad" tror medlemmen att hon har ett vapen bokat — och vapnet är
+                    // ledigt för alla andra sedan fönstret passerade. Läget sägs, statusen skrivs
+                    // inte om: det är hon som kan avboka raden.
+                    '<td>' + (b.hasLapsed
+                        ? '<span class="badge bg-warning-subtle text-warning-emphasis ' +
+                          'border border-warning-subtle" title="Tiden har passerat och du hämtade ' +
+                          'aldrig ut vapnet. Bokningen gäller inte längre.">Ej uthämtad</span>'
+                        : '<span class="badge ' + (b.isOut ? 'bg-warning' :
+                            b.isActive ? 'bg-primary' : 'bg-secondary') + '">' +
+                            esc(b.statusLabel) + '</span>') + '</td>' +
                     '<td class="text-end">';
                 // ⚠️ Avboka erbjuds bara för RESERVERAD. Ett utlämnat vapen ska återlämnas, inte
                 // avbokas — servern vägrar det ändå, men en knapp som nekas är sämre än ingen.

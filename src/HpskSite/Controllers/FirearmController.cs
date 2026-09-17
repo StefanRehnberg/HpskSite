@@ -819,6 +819,10 @@ namespace HpskSite.Controllers
                     to = b.ToTime.ToString("yyyy-MM-dd HH:mm"),
                     status = b.Status, statusLabel = b.StatusLabel,
                     occasion = b.OccasionDisplay, b.Note, b.IsActive, b.IsOut,
+
+                    // Reservation vars tid gått utan att vapnet hämtades. Medlemmen ska se att den
+                    // raden är kvarglömd och inte ett kommande lån — det är hon som kan avboka den.
+                    b.HasLapsed,
                 }),
             });
         }

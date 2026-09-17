@@ -7481,6 +7481,39 @@ det i dag. Stefans begäran samma dag.
   den som ser listan är redan klubbadmin, men `/lanevapen` visar med flit bara nummer, namn på
   vapnet och om det är ledigt — **aldrig vem som bokat**.
 
+### ⚠️ Den kvarglömda reservationen (2026-09-17)
+
+Rapporterat från prod: ett lån som bokades på en evenemangssida och varken checkades ut eller in
+stod kvar som **Reserverad** i *Alla lån* i evighet, medan vapenlistan på samma sida visade vapnet
+som **Tillgängligt**.
+
+**Ingen av cellerna ljög.** Vapenlistan tar bara med en reservation som täcker *nu* (regeln en nivå
+upp), och bokningsraden visade sin sanna status. Felet var att **inget sa vilken som gällde** — och
+två celler om samma vapen som säger olika saker är hur en lista slutar gå att lita på, samma kritik
+som redan står om `Firearm.Status`-motsägelsen ovan.
+
+- **`FirearmBooking.HasLapsed` är HÄRLETT** — `Reserverad` och `ToTime < nu`. Ingen kolumn, inget
+  svep. Skärmen visar **"Ej uthämtad"**, och titeln säger att vapnet räknas som ledigt medan
+  bokningen står kvar tills någon stänger den.
+- **⚠️ Statusen skrivs ALDRIG om till `Avbokad` av ett svep.** Ingen har avbokat något, och ett
+  register som hittar på en handling är sämre än ett som visar en kvarglömd rad. Samma skäl som att
+  ingen automatik gissar en återlämning: **systemet ska registrera, inte grinda.**
+- **⚠️ Bara `Reserverad`.** Ett `Utlamnad`-lån vars fönster passerat är inte kvarglömt — vapnet är
+  faktiskt ute, och det är hela skälet den grenen saknar tidsvillkor överallt annars.
+- **Kvarglömda rader räknas INTE bland de reserverade i sammanfattningen**, utan får en egen post
+  ("N bokningar att stänga"). Att räkna dem som reserverade var vad som lät siffran växa i evighet
+  medan vapnen stod lediga. **Posten syns på sidan, inte bara i modalen** — ingen öppnar en
+  historikmodal för att leta efter rader ingen har berättat om.
+- **Avboka står FÖRST på en kvarglömd rad.** Lämna ut står kvar, för den andra hälften av fallen är
+  att vapenansvarig glömde registrera en utlämning som faktiskt skedde.
+- **Medlemmens egen lista säger samma sak.** En reservation som står kvar som "Reserverad" får
+  skytten att tro att hon har ett vapen bokat — och vapnet är ledigt för alla andra sedan fönstret
+  passerade.
+- ⚠️ **Sviten skapar läget via den riktiga bokningen**: dagens datum, sluttid `00:01`. Spärren "Du
+  kan inte boka bakåt i tiden" mäter DATUMET, så det går. En SQL-insert förbi spärren hade mätt en
+  rad ingen användare kan skapa. Kontrollproven: en kommande reservation och ett återlämnat lån är
+  **inte** kvarglömda, annars säger flaggan ingenting.
+
 ⚠️ **`vapen-verify.mjs` klickade `[data-vap-action="cf-add"]` direkt** och tidsgränsade på "element
 is not visible" när knappen blev ett menyval. Sviten öppnar nu menyn först — `force: true` hade
 fungerat och samtidigt slutat mäta att knappen går att NÅ, alltså gömt exakt det fel som uppstod.

@@ -1063,6 +1063,10 @@ namespace HpskSite.Controllers
             status = b.Status, statusLabel = b.StatusLabel,
             occasion = b.OccasionDisplay, occasionKind = b.OccasionKind, b.OccasionId,
             b.Note, b.IsActive, b.IsOut,
+
+            // ⚠️ Kvarglömd reservation: fönstret har passerat, vapnet lämnades aldrig ut. Härlett,
+            // aldrig skrivet — se FirearmBooking.HasLapsed.
+            b.HasLapsed,
             source = b.Source, sourceLabel = FirearmBookingSource.Label(b.Source),
             b.HandedOutBySelf,
             b.LeavesTheClub, b.AwaitsEscort, b.EscortMemberId, b.EscortName,

@@ -616,6 +616,53 @@ const main = async () => {
     ok('lånet är markerat som väntande på den utsedde', extRow && extRow.awaitsEscort === true);
     ok('lånet är markerat som att vapnet lämnar klubben', extRow && extRow.leavesTheClub === true);
 
+    // ── Den kvarglömda reservationen ───────────────────────────────────────────────────────────
+    //
+    // ⚠️ Rapporterat från prod 2026-09-17: ett lån som bokades på en evenemangssida och varken
+    // checkades ut eller in stod kvar som "Reserverad" i Alla lån i EVIGHET, medan vapenlistan på
+    // samma sida visade vapnet som "Tillgängligt". Ingen av cellerna ljög — vapenlistan tar bara
+    // med en reservation som täcker NU — men inget sa vilken som gällde.
+    section('Kvarglömd reservation');
+
+    // ⚠️ Fönstret måste ligga bakåt UTAN att bokningen nekas. Spärren "Du kan inte boka bakåt i
+    // tiden" mäter DATUMET, så dagens datum med en sluttid som redan passerat är enda vägen dit
+    // via den riktiga bokningen. En SQL-insert förbi spärren hade mätt en rad ingen användare kan
+    // skapa. (Körs sviten mellan 00:00 och 00:01 är fönstret inte passerat — då faller det här
+    // avsnittet, och det är rätt: flaggan ÄR en tidsjämförelse.)
+    //
+    // ⚠️ Ett NAMNGIVET vapen, inte en platsbokning. Motsägelsen som rapporterades stod mellan
+    // historiken och VAPENLISTAN, och en bokning utan vapen kan aldrig visa sig där — påståendet
+    // om vapenlistan nedan hade då varit evigt grönt.
+    const lapsedBooking = await api('/umbraco/surface/Firearm/BookLoanWeapon',
+      { firearmId: wB.id, clubId: CLUB_ID, occasionKind: 'Fritt', occasionId: 0,
+        from: `${day(0)} 00:00`, to: `${day(0)} 00:01` });
+    ok('en bokning vars tid redan gått kan skapas', lapsedBooking.success, lapsedBooking.message);
+
+    const lapsedRows = await api(`/umbraco/surface/FirearmAdmin/GetClubBookings?clubId=${CLUB_ID}`);
+    const lapsedRow = (lapsedRows.bookings || []).find(b => b.id === lapsedBooking.bookingId);
+    // ⚠️ STATUSEN SKRIVS INTE OM. Ingen har avbokat bokningen, och ett register som hittar på en
+    // handling är sämre än ett som visar en kvarglömd rad. Faller det här har någon lagt in ett
+    // svep som stänger bokningar åt folk.
+    eq('statusen är fortfarande Reserverad', lapsedRow && lapsedRow.status, 'Reserverad');
+    eq('raden är markerad som ej uthämtad', lapsedRow && lapsedRow.hasLapsed, true);
+
+    // ⚠️ KONTROLLPROVET. Utan det är påståendet ovan grönt även på en implementation som stämplar
+    // VARJE reservation som kvarglömd — och en flagga som alltid är sann säger ingenting.
+    const futureRow = (lapsedRows.bookings || []).find(b => b.id === namedId);
+    eq('den kommande reservationen är INTE kvarglömd', futureRow && futureRow.hasLapsed, false);
+    // Och flaggan gäller bara reservationer: ett avslutat lån är inte kvarglömt, det är klart.
+    const closedRow = (lapsedRows.bookings || []).find(b => b.id === poolBookingId);
+    eq('ett återlämnat lån är inte kvarglömt', closedRow && closedRow.hasLapsed, false);
+
+    // ⚠️ VAPENLISTAN RÄKNAR INTE DEN PASSERADE RESERVATIONEN — och det är rätt. Det var det här
+    // benet av motsägelsen som fick vapnet att stå som ledigt medan historiken höll kvar lånet.
+    // Faller påståendet har någon tagit bort tidsvillkoret på reservationsgrenen i
+    // ActiveClaimsForClub, och då ser varje vapen med en gammal bokning utlånat ut för alltid.
+    const clLapsed = await api(`/umbraco/surface/FirearmAdmin/GetClubFirearms?clubId=${CLUB_ID}`);
+    const lapsedFirearm = (clLapsed.firearms || []).find(f => f.id === wB.id);
+    eq('vapnet hålls inte av den passerade reservationen',
+       lapsedFirearm && lapsedFirearm.loan, null);
+
     // ── Kurstilldelning ────────────────────────────────────────────────────────────────────────
     section('Kurstilldelning');
     const grp = await api('/umbraco/surface/TrainingGroup/CreateTrainingGroup',

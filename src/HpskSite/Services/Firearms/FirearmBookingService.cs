@@ -218,6 +218,29 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         [Ignore] public bool AwaitsEscort =>
             LeavesTheClub && EscortMemberId.HasValue && EscortAcceptedAt is null;
+
+        /// <summary>
+        /// En reservation vars fönster har passerat utan att vapnet någonsin lämnades ut.
+        ///
+        /// <para><b>⚠️ HÄRLETT, ingen kolumn och ingen automatisk statusändring.</b> Rapporterat
+        /// från prod 2026-09-17: ett lån som bokades på en evenemangssida och varken checkades ut
+        /// eller in stod kvar som <c>Reserverad</c> i <em>Alla lån</em> i evighet, medan
+        /// vapenlistan på samma sida visade vapnet som ledigt. Ingen av de två ljög — vapenlistan
+        /// tar bara med en reservation som täcker NU — men inget sa vilken som gällde, och det är
+        /// hur en lista slutar gå att lita på.</para>
+        ///
+        /// <para><b>⚠️ Statusen får INTE skrivas om till <c>Avbokad</c> av ett svep.</b> Ingen har
+        /// avbokat något, och ett register som hittar på en handling är sämre än ett som visar en
+        /// kvarglömd rad. Samma skäl som att ingen automatik gissar en återlämning: systemet ska
+        /// registrera, inte grinda. Raden får därför ett <em>läge</em> på skärmen, och en människa
+        /// stänger den med Lämna ut, Återlämnad eller Avboka.</para>
+        ///
+        /// <para><b>⚠️ Bara <c>Reserverad</c>.</b> Ett <c>Utlamnad</c>-lån vars fönster passerat är
+        /// inte kvarglömt i registret — vapnet är faktiskt ute, och det är hela poängen med att den
+        /// grenen saknar tidsvillkor överallt annars.</para>
+        /// </summary>
+        [Ignore] public bool HasLapsed =>
+            Status == FirearmBookingStatus.Reserverad && ToTime < DateTime.Now;
     }
 
     /// <summary>Hur ett lån uppstod. Bär ingen behörighet — bara ursprunget, för valvlistan.</summary>
