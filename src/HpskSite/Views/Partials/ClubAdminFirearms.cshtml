@@ -559,7 +559,28 @@
                     Utlämning och återlämning på träningskvällen görs i
                     <a href="/valvet" id="vapBookVaultLink" target="_blank" rel="noopener">valvet</a>,
                     som är byggt för telefonen. Knapparna här finns för att <strong>rätta i
-                    efterhand</strong> — till exempel ett lån någon glömde stänga.
+                    efterhand</strong>:
+                </p>
+                @*
+                    ⚠️ TEXTEN FÅR BARA ANVÄNDA ORD SOM STÅR PÅ EN KNAPP.
+                    Den sa förut "ett lån någon glömde stänga". Ordet *stänga* finns inte på någon
+                    knapp någonstans — knapparna heter Lämna ut, Avboka och Återlämnad — så läsaren
+                    letade efter en knapp som inte fanns. Dessutom beskrev exemplet en UTLÄMNAD rad,
+                    medan den vanligaste raden att rätta är en som aldrig hämtades ut och där
+                    åtgärden är en helt annan. Rapporterat 2026-09-17.
+
+                    ⚠️ Sista meningen förklarar varför två rader visar olika knappar. Utan den läses
+                    en saknad knapp som att funktionen fattas, inte som att den inte hör till
+                    radens tillstånd.
+                *@
+                <ul class="small text-muted mb-3">
+                    <li><strong>Lämna ut</strong> — vapnet gick ut, men ingen hann registrera det.</li>
+                    <li><strong>Avboka</strong> — vapnet hämtades aldrig ut.</li>
+                    <li><strong>Återlämnad</strong> — vapnet kom tillbaka utan att någon tryckte i valvet.</li>
+                </ul>
+                <p class="text-muted small">
+                    Vilka knappar en rad visar följer dess status: en bokning som inte är uthämtad kan
+                    lämnas ut eller avbokas, en utlämnad kan bara återlämnas.
                 </p>
                 <div id="vapBookBody"><div class="text-muted small">Laddar…</div></div>
             </div>
@@ -2020,17 +2041,54 @@
         if (!sum) return;
         var list = (bookState && bookState.bookings) || [];
         var out = list.filter(function (b) { return b.isOut; }).length;
-        var res = list.filter(function (b) { return b.status === 'Reserverad'; }).length;
+        // ⚠️ En kvarglömd reservation räknas INTE som reserverad. Fönstret har passerat, vapnet
+        // ligger i skåpet, och att räkna den bland de reserverade är precis vad som fick siffran
+        // att växa i evighet medan vapenlistan visade samma vapen som ledigt.
+        var res = list.filter(function (b) {
+            return b.status === 'Reserverad' && !b.hasLapsed; }).length;
+        var lapsed = list.filter(function (b) { return b.hasLapsed; }).length;
         var loanable = (lwState && lwState.loanable) || 0;
 
         var parts = [];
         // Ordningen är inte slumpmässig: det som är UTE är det enda som kan vara ett problem.
         if (out) parts.push('<strong>' + out + (out === 1 ? ' vapen är ute' : ' vapen är ute') + '</strong>');
         if (res) parts.push(res + (res === 1 ? ' reserverat' : ' reserverade'));
+        // ⚠️ Kvarglömda rader SÄGS, de göms inte. Ingen öppnar en historikmodal för att leta efter
+        // dem, och den som aldrig får veta att de finns städar dem aldrig.
+        if (lapsed) parts.push('<span class="text-warning-emphasis">' + lapsed +
+            (lapsed === 1 ? ' bokning att stänga' : ' bokningar att stänga') + '</span>');
         if (!parts.length) parts.push('Inget utlånat just nu');
         parts.push(loanable + (loanable === 1 ? ' lånebart vapen' : ' lånebara vapen'));
 
         sum.innerHTML = parts.join(' · ');
+    }
+
+    /*
+        Statuscellen i historiken.
+
+        ⚠️ EN RESERVATION VARS TID GÅTT ÄR INTE SAMMA SAK SOM EN KOMMANDE. Rapporterat från prod
+        2026-09-17: ett lån som bokades på en evenemangssida och varken checkades ut eller in stod
+        kvar som "Reserverad" här i evighet, medan vapenlistan på samma sida visade vapnet som
+        "Tillgängligt". Ingen av cellerna ljög — vapenlistan tar bara med en reservation som täcker
+        NU — men två celler om samma vapen som säger olika saker, utan att något säger vilken som
+        gäller, är sämre än en cell. Läget SÄGS därför här, och skälet står i titeln.
+
+        ⚠️ Statusen skrivs INTE om. Ingen har avbokat bokningen, och ett register som hittar på en
+        handling är sämre än ett som visar en kvarglömd rad. Den stängs av en människa med
+        knapparna intill.
+    */
+    function statusCell(b) {
+        if (b.hasLapsed)
+            return '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" ' +
+                // ⚠️ Namnge en KNAPP som finns. Texten sa förut "tills någon stänger den", och
+                // ordet stänga står inte på någon knapp någonstans — läsaren letade efter en
+                // knapp som inte fanns.
+                'title="Tiden har passerat och vapnet lämnades aldrig ut. Vapnet räknas som ' +
+                'ledigt. Tryck Avboka för att ta bort raden, eller Lämna ut om vapnet ändå gick ut.">' +
+                '<i class="bi bi-exclamation-triangle me-1"></i>Ej uthämtad</span>';
+
+        return '<span class="badge ' + (b.isOut ? 'bg-warning text-dark' :
+            b.isActive ? 'bg-primary' : 'bg-secondary') + '">' + esc(b.statusLabel) + '</span>';
     }
 
     function renderBookings() {
@@ -2053,19 +2111,24 @@
                 '<td>' + esc(b.firearmAlias) + '</td>' +
                 '<td>' + esc(b.memberName || ('Medlem ' + b.memberId)) + '</td>' +
                 '<td class="small">' + esc(b.from) + ' \u2013 ' + esc(String(b.to).slice(-5)) + '</td>' +
-                '<td><span class="badge ' + (b.isOut ? 'bg-warning text-dark' :
-                    b.isActive ? 'bg-primary' : 'bg-secondary') + '">' +
-                    esc(b.statusLabel) + '</span></td>' +
+                '<td>' + statusCell(b) + '</td>' +
                 '<td class="text-end">';
 
             // ⚠️ Knapparna följer TILLSTÅNDET, inte tillfället. En reserverad bokning kan lämnas ut
             // eller avbokas; en utlämnad kan bara återlämnas — den får inte avbokas, för då tappas
             // spåret till vem som har vapnet.
             if (b.status === 'Reserverad') {
-                html += '<button type="button" class="btn btn-sm btn-outline-success me-1" ' +
-                    'data-vap-action="bk-handout" data-booking-id="' + b.id + '">L\u00e4mna ut</button>' +
-                    '<button type="button" class="btn btn-sm btn-outline-danger" ' +
-                    'data-vap-action="bk-cancel" data-booking-id="' + b.id + '">Avboka</button>';
+                // Ordningen foljer vad som FAKTISKT hande: ett lan vars tid gatt hamtades i nastan
+                // alla fall aldrig ut, sa dar ar avbokningen det vanliga klicket och utlamningen
+                // efterhandsrattelsen. Bada star kvar, for den andra halften ar att vapenansvarig
+                // glomde registrera en utlamning som skedde.
+                var handout = '<button type="button" class="btn btn-sm btn-outline-success' +
+                    (b.hasLapsed ? '' : ' me-1') + '" data-vap-action="bk-handout" ' +
+                    'data-booking-id="' + b.id + '">L\u00e4mna ut</button>';
+                var cancel = '<button type="button" class="btn btn-sm btn-outline-danger' +
+                    (b.hasLapsed ? ' me-1' : '') + '" data-vap-action="bk-cancel" ' +
+                    'data-booking-id="' + b.id + '">Avboka</button>';
+                html += b.hasLapsed ? cancel + handout : handout + cancel;
             } else if (b.status === 'Utlamnad') {
                 html += '<button type="button" class="btn btn-sm btn-success" ' +
                     'data-vap-action="bk-return" data-booking-id="' + b.id + '">\u00c5terl\u00e4mnad</button>';
