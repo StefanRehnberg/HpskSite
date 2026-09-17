@@ -7521,6 +7521,35 @@ fungerat och samtidigt slutat mäta att knappen går att NÅ, alltså gömt exak
 Endast vy + en tjänstemetod och ett fält i en befintlig endpoint → **full ombyggnad** (C# tillkom).
 Ingen SQL, ingen doctype-egenskap.
 
+### ⚠️ "Lämna ut" frågade efter ett nummer som inte gick att ange (2026-09-17)
+
+Rapporterat direkt efter föregående fix: en platsbokning — en bokning där skytten inte önskat
+något bestämt vapen — gick inte att lämna ut. Knappen postade inget vapen, servern föll tillbaka
+på bokningens önskade vapen (som en platsbokning saknar) och svarade *"Ange vilket vapen som
+lämnas ut."* på en yta utan något sätt att ange det.
+
+**Modellen var rätt, ytan saknade halvan.** `FirearmId = NULL` är ett fullgott läge (önskat ≠
+tilldelat), och valvet är där vapnet väljs — men *Alla lån och historik* hade ingen väljare.
+
+- **Väljaren hör HIT, inte bara i `/valvet`.** Valvtavlan visar dagens eller ett tillfälles lån,
+  så en bokning från förra veckan syns inte där. Historikmodalen finns just för att rätta i
+  efterhand, och då måste den kunna göra det den erbjuder.
+- **⚠️ Dialogen stängs INTE vid fel.** Stängdes den skulle operatören få börja om från raden för
+  att läsa vad som gick snett.
+- Alternativen bygger på klubbens REDAN hämtade vapenlista (`clubState`), inte på en ny endpoint,
+  och ett vapen som är ute just nu märks ut i stället för att gömmas — vapenansvarig kan ha
+  registrerat fel vapen först.
+- Ett önskat vapen förväljs; en platsbokning får inget förval som utger sig för att vara ett val.
+
+**⚠️ FIXTURSVÄLT I DEV:** klubb 2604 har noll AKTIVA lånebara klubbvapen (alla `IsActive=0` efter
+tidigare sviter), så väljaren sa korrekt *"Klubben har inga lånevapen"* och tre påståenden föll på
+en hel implementation. Mät **båda riktningarna** — att väljaren öppnas OCH att utlämningen
+registreras: ett påstående om att "en dialog visas" är grönt även om den inte kan spara.
+Verifierat 10/10 mot en platsbokning, med `AssignedFirearmId` läst ur databasen efteråt; fixturen
+(bokning + tillfälligt aktiverade vapen) återställd.
+
+Endast vy → **ingen ombyggnad**. Ingen SQL, ingen doctype-egenskap.
+
 ### Menyerna: två rälsposter ur EN partial
 
 Uppdelat 2026-09-02 på Stefans begäran: *Vapen & lånevapen* blev **Klubbvapen** (sektionen

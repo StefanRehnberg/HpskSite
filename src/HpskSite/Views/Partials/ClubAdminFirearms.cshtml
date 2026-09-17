@@ -591,6 +591,45 @@
     </div>
 </div>
 
+@*
+    ⚠️⚠️ UTLÄMNINGEN MÅSTE FRÅGA VILKET VAPEN SOM GICK UT.
+    Knappen "Lämna ut" postade förut ingen vapenuppgift alls, och servern föll tillbaka på
+    bokningens ÖNSKADE vapen. En PLATSBOKNING ("vilket som helst") har inget önskat vapen, så
+    utlämningen svarade "Ange vilket vapen som lämnas ut" — på en yta som inte hade något sätt
+    att ange det. Knappen erbjöds alltså på en rad där den omöjligt kunde lyckas.
+    Rapporterat 2026-09-17.
+
+    ⚠️ Att i stället hänvisa till /valvet vore en återvändsgränd: valvtavlan visar dagens eller
+    ett tillfälles lån, så en bokning från förra veckan syns inte där. Den här modalen är
+    efterhandsrättelsen, och då måste väljaren finnas här.
+*@
+<div class="modal fade" id="vapHandoutModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-box-arrow-right me-2"></i>Vilket vapen gick ut?</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted" id="vapHandoutWho"></p>
+                <label class="form-label small fw-semibold" for="vapHandoutSelect">Vapen</label>
+                <select class="form-select" id="vapHandoutSelect"></select>
+                <p class="small text-muted mt-2 mb-0">
+                    Registret ska peka på det vapen som <strong>faktiskt</strong> lämnades ut — inte
+                    på det som var önskat.
+                </p>
+                <div id="vapHandoutWarn" class="small text-warning-emphasis mt-2 d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" data-vap-action="bk-handout-confirm">
+                    Registrera utlämning
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="vapCfModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -1033,7 +1072,8 @@
             return;
         }
 
-        if (action === 'bk-handout') { await setBookingState(btn.getAttribute('data-booking-id'), 'handout'); return; }
+        if (action === 'bk-handout') { openHandoutPicker(btn.getAttribute('data-booking-id')); return; }
+        if (action === 'bk-handout-confirm') { await confirmHandout(btn); return; }
         if (action === 'bk-return')  { await setBookingState(btn.getAttribute('data-booking-id'), 'return'); return; }
         if (action === 'bk-cancel')  { await setBookingState(btn.getAttribute('data-booking-id'), 'cancel'); return; }
 
@@ -2143,6 +2183,88 @@
         });
 
         body.innerHTML = html + '</tbody></table></div>';
+    }
+
+    // Bokningen som utlämningsdialogen står på. Bara ett id — inget objekt som kan bli inaktuellt
+    // medan listan laddas om under fötterna.
+    var handoutBookingId = null;
+
+    /*
+        Väljaren för "Lämna ut". Se kommentaren vid #vapHandoutModal för varför den finns.
+
+        ⚠️ Listan kommer ur klubbens REDAN HÄMTADE vapenlista (clubState), inte ur en ny endpoint.
+        Fliken har alltid laddat den innan lånemodalen går att öppna, och ett extra anrop här hade
+        bara gett ytterligare ett ställe som kan fallera mitt i en rättelse.
+
+        ⚠️ Vapen som är UTE visas ändå, men märkta. Servern avvisar dem (ett vapen kan inte vara
+        hos två personer), och att dölja dem hade gjort avslaget obegripligt: operatören ser vapnet
+        i listan över klubbens vapen men inte här, utan att något säger varför.
+    */
+    function openHandoutPicker(bookingId) {
+        var b = ((bookState && bookState.bookings) || [])
+            .filter(function (x) { return String(x.id) === String(bookingId); })[0];
+        if (!b) { alert('Bokningen kunde inte läsas. Ladda om sidan.'); return; }
+
+        handoutBookingId = bookingId;
+
+        var who = document.getElementById('vapHandoutWho');
+        if (who) {
+            who.textContent = (b.memberName || ('Medlem ' + b.memberId)) + ' · ' + b.from
+                + (b.wishedNumber != null
+                    ? ' · önskade nr ' + b.wishedNumber
+                    : ' · önskade inget särskilt vapen');
+        }
+
+        var sel = document.getElementById('vapHandoutSelect');
+        var warn = document.getElementById('vapHandoutWarn');
+        if (!sel) return;
+
+        var vapen = ((clubState && clubState.firearms) || [])
+            .filter(function (f) { return f.isLoanable; });
+
+        if (vapen.length === 0) {
+            sel.innerHTML = '<option value="">Klubben har inga lånevapen</option>';
+        } else {
+            sel.innerHTML = vapen.map(function (f) {
+                var ute = f.loan && f.loan.isOut;
+                var namn = (f.number == null ? '' : 'nr ' + f.number + ' — ') + (f.alias || '');
+                // ⚠️ Förval = det önskade vapnet när ett sådant finns. Det är rätt gissning i de
+                // allra flesta fall, men den går att ändra: det som ska registreras är vad som
+                // FAKTISKT gick ut.
+                var vald = b.wishedFirearmId && f.id === b.wishedFirearmId ? ' selected' : '';
+                return '<option value="' + f.id + '"' + vald + '>'
+                     + esc(namn) + (ute ? ' (är utlämnat just nu)' : '') + '</option>';
+            }).join('');
+        }
+
+        if (warn) {
+            warn.classList.toggle('d-none', vapen.length > 0);
+            warn.textContent = vapen.length === 0
+                ? 'Inget av klubbens vapen är markerat som lånevapen, så det finns inget att lämna ut.'
+                : '';
+        }
+
+        new bootstrap.Modal(document.getElementById('vapHandoutModal')).show();
+    }
+
+    async function confirmHandout(btn) {
+        var sel = document.getElementById('vapHandoutSelect');
+        var firearmId = sel ? parseInt(sel.value, 10) : 0;
+        if (!firearmId) { alert('Välj vilket vapen som lämnades ut.'); return; }
+
+        btn.disabled = true;
+        var j = await post('/umbraco/surface/FirearmAdmin/SetBookingState', null, {
+            clubId: vapClubId(), bookingId: handoutBookingId, action: 'handout',
+            reason: '', firearmId: firearmId
+        });
+        btn.disabled = false;
+
+        // ⚠️ Dialogen stängs INTE vid fel. Servern avvisar bland annat ett vapen som redan är ute,
+        // och då ska operatören kunna välja ett annat direkt i stället för att börja om.
+        if (!j.success) { alert(j.message || 'Kunde inte registrera utlämningen.'); return; }
+
+        bootstrap.Modal.getInstance(document.getElementById('vapHandoutModal'))?.hide();
+        await loadBookings();
     }
 
     async function setBookingState(bookingId, action) {
