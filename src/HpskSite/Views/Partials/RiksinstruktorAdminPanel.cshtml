@@ -2,6 +2,10 @@
     Site-admin Riksinstruktör panel: per-area list with target counts (Syd/Vast/Ost = 2,
     Nord = 3) and a grant + appoint flow. Uses the CertificationController endpoints.
     Site-admin only — already gated by AdminPage.
+
+    Renders as a card section inside the Utbildning tab (UtbildningManagement),
+    shaped like "Granskare – fullständig åtkomst" next to it. It used to be its own
+    admin tab; it belongs with the rest of utbildningen.
 *@
 
 <!-- Flatpickr Date Picker (sv-SE) — AdminPage doesn't load it globally, so include here -->
@@ -9,9 +13,10 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
-<div class="riksinstruktor-admin">
-    <div class="d-flex align-items-center mb-3">
-        <h5 class="mb-0"><i class="bi bi-mortarboard-fill me-2"></i>Riksinstruktörer</h5>
+<div class="riksinstruktor-admin card mt-4">
+    <div class="card-header d-flex align-items-center">
+        <i class="bi bi-mortarboard-fill me-2"></i>
+        <strong>Riksinstruktörer</strong>
         <button type="button" class="btn btn-sm btn-outline-secondary ms-auto me-2" id="riksRefreshBtn">
             <i class="bi bi-arrow-clockwise"></i>
         </button>
@@ -19,18 +24,19 @@
             <i class="bi bi-plus-circle me-1"></i>Tilldela ny
         </button>
     </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Riksinstruktörer utbildar kretsinstruktörer och är källan till sanning för regelverk.
+            Mål: 2 per område (Syd, Väst, Öst) och 3 i Nord. Tilldelning sker enbart av siteadmin.
+        </p>
 
-    <div class="alert alert-info small">
-        Riksinstruktörer utbildar kretsinstruktörer och är källan till sanning för regelverk.
-        Mål: 2 per område (Syd, Väst, Öst) och 3 i Nord. Granter:s sker enbart av siteadmin.
+        <div id="riksLoading" class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="ms-2 small text-muted">Laddar...</span>
+        </div>
+
+        <div id="riksContent" style="display:none;" class="row g-3"></div>
     </div>
-
-    <div id="riksLoading" class="text-center py-3">
-        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-        <span class="ms-2 small text-muted">Laddar...</span>
-    </div>
-
-    <div id="riksContent" style="display:none;" class="row g-3"></div>
 </div>
 
 <!-- Grant modal -->

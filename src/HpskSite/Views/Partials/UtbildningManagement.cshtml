@@ -25,6 +25,9 @@
         <div class="text-center py-4"><div class="spinner-border" role="status"></div><p class="mt-2">Laddar kurser...</p></div>
     </div>
 
+    @* Riksinstruktörer: egen tabb tidigare, nu en sektion här bland utbildningen. *@
+    @await Html.PartialAsync("RiksinstruktorAdminPanel")
+
     <!-- Reviewers: site-admin-granted full access to ALL course material -->
     <div class="card mt-4">
         <div class="card-header d-flex align-items-center">
