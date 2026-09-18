@@ -87,3 +87,22 @@ appsettings.Development.json
 # men aldrig deras beroenden. Playwright drar in 160+ filer och browsrarna laddas
 # separat med `npx playwright install`.
 /hpsk-verify/node_modules/
+
+# ⚠️⚠️ PERSONUPPGIFTER FÅR INTE IN I DET HÄR REPOT — det är PUBLIKT på GitHub.
+# SSMData/ är underlaget till SSM 2026-testdatat: 280 rader med namngivna skyttar, deras
+# klubb och deras resultat. Resultaten är visserligen publicerade på pistol.nu, men en CSV
+# i ett publikt repo är en annan spridning, och git-historiken går inte att städa i
+# efterhand utan att skriva om main. Filerna behövs bara lokalt för att seeda dev.
+# Samma regel gäller varje nytt exportunderlag: hör det hemma i en databas, inte i git.
+/SSMData/
+
+# Skärmdumpar som klistras in i reporoten under felsökning. De är arbetsmaterial, och en
+# skärmdump från en inloggad yta bär nästan alltid någons namn.
+/Screenshot*.jpg
+/Screenshot*.png
+
+# Arbetsmaterial till ekonomibygget: verkliga klubbars bokföringsexempel, kontoplaner och
+# underlag som delats för att vi ska förstå hur en kassör faktiskt arbetar. Det är någon
+# annans räkenskapsinformation och hör inte i ett publikt repo. Planen och besluten som
+# kommer UR materialet hör i notes/ekonomi-plan-2026-09-17.md, inte här.
+/Ekonomi Exempel/
