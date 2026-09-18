@@ -169,9 +169,15 @@ namespace HpskSite.Services.Ledger
                 // 3. ⚠️ TRIGGARNA. En tabell utan sina triggers ser fullständigt frisk ut: den tar
                 //    emot poster, den läser tillbaka dem, ingenting felar. Det enda som är borta är
                 //    garantin att siffrorna inte kan ändras i efterhand.
+                // ⚠️⚠️ `is_disabled = 0` ÄR INTE EN DETALJ — EN AVSTÄNGD TRIGGER ÄR INGEN GARANTI.
+                // Frågan läste tidigare bara namnet, och `DISABLE TRIGGER` tar inte bort raden ur
+                // sys.triggers. En operatör som stänger av spärren för att rätta en rad och glömmer
+                // slå på den igen lämnar alltså liggaren helt oskyddad medan /health/ledger svarar
+                // OK — vilket är sämre än ingen kontroll, för då litar någon på svaret. En avstängd
+                // trigger räknas därför som SAKNAD.
                 var existingTriggers = FetchNames(
                     db,
-                    "SELECT name FROM sys.triggers WHERE name IN (@0)",
+                    "SELECT name FROM sys.triggers WHERE name IN (@0) AND is_disabled = 0",
                     RequiredTriggers);
 
                 var missingTriggers = RequiredTriggers
