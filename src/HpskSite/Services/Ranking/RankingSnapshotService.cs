@@ -567,13 +567,26 @@ namespace HpskSite.Services.Ranking
                 using var scope = _scopeProvider.CreateScope();
                 foreach (var k in list)
                 {
+                    // ⚠️⚠️ ANVÄND ALDRIG @@ROWCOUNT (eller någon annan @@-funktion) I NPoco-SQL.
+                    //    NPoco parsar ut parametrar på @-tecknet och läser `@@ROWCOUNT` som den
+                    //    namngivna parametern `@ROWCOUNT`, som ingen skickar in. Resultatet är
+                    //    `Must declare the scalar variable "@ROWCOUNT"` — VARJE körning, tyst
+                    //    sväljt av catch-blocket nedan.
+                    //
+                    //    Det kostade oss push-loggen helt: skrivningen föll alltid, baselinen blev
+                    //    aldrig satt, och samma förbättring kunde annonseras om och om igen — exakt
+                    //    det den här tabellen finns för att förhindra. Upptäckt 2026-09-18, hade då
+                    //    felat dagligen 01:00 och ~06:55.
+                    //
+                    //    Formuleras i stället som UPDATE + villkorad INSERT, utan @@.
                     await scope.Database.ExecuteAsync(
                         @"UPDATE RankingPushLog
                              SET NotifiedIndex = @3, NotifiedAt = GETUTCDATE()
                            WHERE MemberId = @0 AND Discipline = @1 AND WeaponGroup = @2;
-                          IF @@ROWCOUNT = 0
-                             INSERT INTO RankingPushLog (MemberId, Discipline, WeaponGroup, NotifiedIndex)
-                             VALUES (@0, @1, @2, @3);",
+                          INSERT INTO RankingPushLog (MemberId, Discipline, WeaponGroup, NotifiedIndex)
+                          SELECT @0, @1, @2, @3
+                           WHERE NOT EXISTS (SELECT 1 FROM RankingPushLog
+                                              WHERE MemberId = @0 AND Discipline = @1 AND WeaponGroup = @2);",
                         k.memberId, k.discipline, k.group, k.index);
                 }
                 scope.Complete();
