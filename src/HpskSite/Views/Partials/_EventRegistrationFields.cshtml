@@ -1,4 +1,4 @@
-@*
+﻿@*
     Anmälningsinställningarna för ett klubb-/kretsevenemang: krävs anmälan, extern länk, max antal
     deltagare, obligatoriskt deltagande.
 
@@ -50,6 +50,19 @@
             <option value="Open">Vem som helst, även utan konto</option>
         </select>
         <div class="form-text" id="@(regPrefix)EventAudienceHelp"></div>
+    </div>
+
+    @* ⚠️ SWISH-NUMRET ÄR EN ÅSIDOSÄTTNING, inte ett obligatoriskt fält. Klubben och kretsen bär
+       redan `swishNumber`, så tomt betyder "använd vårt vanliga konto". Ett tvingande fält hade
+       betytt att arrangören skriver om numret varje gång — och en felskrivning skickar pengarna
+       till fel konto TYST, eftersom vi inte har någon Swish-API som kan säga emot. *@
+    <div class="mb-3">
+        <label for="@(regPrefix)SwishNumber" class="form-label">Swish-nummer (valfritt)</label>
+        <input type="text" class="form-control" id="@(regPrefix)SwishNumber"
+               placeholder="Lämna tom = klubbens/kretsens nummer" maxlength="20" autocomplete="off">
+        <div class="form-text" id="@(regPrefix)SwishNumberHelp">
+            Fyll bara i om betalningen ska gå till ett annat konto än klubbens vanliga.
+        </div>
     </div>
 
     <div class="mb-3">
@@ -212,6 +225,17 @@
                 aud.value = 'Club';
             }
             hpskEventRegAudienceHint(prefix, d.audiencePropertyExists === false);
+
+            // Swish-numret. ⚠️ Samma no-op-fälla som de andra operatörstillagda egenskaperna.
+            var sw = el(prefix, 'SwishNumber');
+            if (sw) sw.value = d.eventSwishNumber || '';
+            if (d.swishPropertyExists === false && sw) {
+                sw.disabled = true;
+                var swHelp = el(prefix, 'SwishNumberHelp');
+                if (swHelp) swHelp.innerHTML = '<span class="text-warning">Egenskapen \'swishNumber\' '
+                    + 'saknas på händelsetypen i Umbraco — kontakta en administratör. Betalningen '
+                    + 'går tills vidare till klubbens nummer.</span>';
+            }
 
             hpskEventPriceFill(prefix, d);
 
@@ -415,6 +439,8 @@
             // "arrangören valde klubben".
             var aud = el(prefix, 'EventAudience');
             formData.append('eventAudience', aud ? aud.value : 'Club');
+            var sw = el(prefix, 'SwishNumber');
+            formData.append('eventSwishNumber', sw ? sw.value.trim() : '');
             return formData;
         };
 
@@ -441,7 +467,9 @@
                  + '&eventAudience=' + encodeURIComponent(
                         el(prefix, 'EventAudience') ? el(prefix, 'EventAudience').value : 'Club')
                  + '&eventPrices=' + encodeURIComponent(
-                        JSON.stringify(hpskEventPriceCollect(prefix)));
+                        JSON.stringify(hpskEventPriceCollect(prefix)))
+                 + '&eventSwishNumber=' + encodeURIComponent(
+                        el(prefix, 'SwishNumber') ? el(prefix, 'SwishNumber').value.trim() : '');
         };
     })();
     </script>

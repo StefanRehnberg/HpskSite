@@ -227,6 +227,167 @@ namespace HpskSite.Tests
 
         // ── Ensam medlem ────────────────────────────────────────────────────────────────────────
 
+        // ── ⚠️ Betalningen: det som avgör om anmälan är giltig ──────────────────────────────────
+
+        private static HpskSite.Models.Ledger.LedgerPayment Betalning(
+            int payerId, decimal amount, bool claimed = false, bool confirmed = false,
+            bool voided = false, decimal? actual = null) => new()
+            {
+                Id = 1,
+                SourceType = HpskSite.Models.Ledger.LedgerSourceType.Event,
+                SourceId = 99,
+                PayerMemberId = payerId,
+                Amount = amount,
+                ActualAmount = actual,
+                ClaimedUtc = claimed || confirmed ? DateTime.UtcNow : null,
+                ConfirmedUtc = confirmed ? DateTime.UtcNow : null,
+                VoidedUtc = voided ? DateTime.UtcNow : null,
+            };
+
+        private static ClubEventRoster Sallskap450() => Roster(
+            Priser(("vuxen", "Vuxen", 180m), ("barn", "Barn 7-15", 90m)),
+            Medlem(Hugo, 180m),
+            Gast(201, Hugo, "Karin", 180m, "Vuxen"),
+            Gast(202, Hugo, "Emil", 90m, "Barn 7-15"));
+
+        /// <summary>
+        /// ⚠️ Utan betalning är skulden HELA summan och anmälan inte giltig. Det är den här regeln
+        /// spärren vilar på — faller den kan någon stå som anmäld utan att ha betalat.
+        /// </summary>
+        [Fact]
+        public void Utan_betalning_ar_hela_summan_skuld_och_anmalan_ogiltig()
+        {
+            var p = ClubEventParticipationService.BuildParty(Sallskap450(), Hugo);
+            p.Total.Should().Be(450m);
+            p.Outstanding.Should().Be(450m);
+            p.IsPaidUp.Should().BeFalse();
+        }
+
+        /// <summary>
+        /// ⚠️ EN betalning för HELA sällskapet. Hugo swishar 450 en gång — en betalning per rad
+        /// hade gett tre QR-koder för en överföring.
+        /// </summary>
+        [Fact]
+        public void En_bekraftad_betalning_tacker_hela_sallskapet()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 450m, confirmed: true) });
+
+            p.ConfirmedPaid.Should().Be(450m);
+            p.Outstanding.Should().Be(0m);
+            p.IsPaidUp.Should().BeTrue();
+            p.AwaitingConfirmation.Should().BeFalse();
+        }
+
+        /// <summary>
+        /// ⚠️⚠️ ETT PÅSTÅENDE RÄCKER FÖR SPÄRREN, men det är INTE pengar. Utan Swish-API kan
+        /// spärren inte kräva mer än att medlemmen säger att hen betalat — att vänta på arrangörens
+        /// bekräftelse hade gjort varje kvällsanmälan ogiltig till dagen efter. Men summan hålls
+        /// SKILD från den bekräftade, annars kan arrangörens avprickningslista inte skilja den som
+        /// betalat från den som sagt det.
+        /// </summary>
+        [Fact]
+        public void Ett_pastaende_gor_anmalan_giltig_men_ar_inte_pengar()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 450m, claimed: true) });
+
+            p.ClaimedPaid.Should().Be(450m);
+            p.ConfirmedPaid.Should().Be(0m, "ett pastaende ar inte pengar");
+            p.IsPaidUp.Should().BeTrue("sparren kan inte krava mer an ett pastaende");
+            p.AwaitingConfirmation.Should().BeTrue();
+        }
+
+        /// <summary>
+        /// ⚠️ En MAKULERAD betalning är inte pengar och får inte göra anmälan giltig — annars står
+        /// någon som anmäld på en betalning arrangören uttryckligen strukit.
+        ///
+        /// <para><b>⚠️ MÄTT 2026-09-18: det här testet faller INTE när <c>BuildParty</c>s eget
+        /// makuleringsfilter tas bort.</b> Skyddet ligger en nivå ned — <c>IsMoney</c> och
+        /// <c>IsClaimedOnly</c> kontrollerar båda <c>VoidedUtc</c>. Filtret i <c>BuildParty</c> är
+        /// alltså dubbel säkring, inte det testet bevisar. Skriv inte om modellens predikat i tron
+        /// att det här testet vaktar dem.</para>
+        /// </summary>
+        [Fact]
+        public void Makulerad_betalning_raknas_inte()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 450m, confirmed: true, voided: true) });
+
+            p.ConfirmedPaid.Should().Be(0m);
+            p.Outstanding.Should().Be(450m);
+            p.IsPaidUp.Should().BeFalse();
+        }
+
+        /// <summary>⚠️ NÅGON ANNANS betalning får aldrig täcka mitt sällskap.</summary>
+        [Fact]
+        public void En_annans_betalning_tacker_inte_mitt_sallskap()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Annan, 450m, confirmed: true) });
+
+            p.ConfirmedPaid.Should().Be(0m);
+            p.IsPaidUp.Should().BeFalse();
+        }
+
+        /// <summary>
+        /// Arrangören tog emot ett annat belopp än det begärda — då är det MOTTAGET som gäller.
+        /// Betalade Hugo 400 av 450 är anmälan inte betald.
+        /// </summary>
+        [Fact]
+        public void Mottaget_belopp_gar_fore_begart()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 450m, confirmed: true, actual: 400m) });
+
+            p.ConfirmedPaid.Should().Be(400m);
+            p.Outstanding.Should().Be(50m);
+            p.IsPaidUp.Should().BeFalse();
+        }
+
+        /// <summary>Delbetalningar summerar.</summary>
+        [Fact]
+        public void Flera_betalningar_summerar()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo,
+                new[] { Betalning(Hugo, 180m, confirmed: true), Betalning(Hugo, 270m, claimed: true) });
+
+            p.ConfirmedPaid.Should().Be(180m);
+            p.ClaimedPaid.Should().Be(270m);
+            p.Outstanding.Should().Be(0m);
+            p.IsPaidUp.Should().BeTrue();
+            p.AwaitingConfirmation.Should().BeTrue("180 av 450 ar bekraftat");
+        }
+
+        /// <summary>
+        /// ⚠️ Ett GRATIS sällskap är alltid giltigt — noll att betala är betalt. Utan den här
+        /// regeln hade spärren låst varje avgiftsfritt evenemang.
+        /// </summary>
+        [Fact]
+        public void Gratis_sallskap_ar_alltid_betalt()
+        {
+            var roster = Roster(Gratis(), Medlem(Hugo, null), Gast(201, Hugo, "Karin", null, null));
+            var p = ClubEventParticipationService.BuildParty(roster, Hugo);
+
+            p.Total.Should().Be(0m);
+            p.Outstanding.Should().Be(0m);
+            p.IsPaidUp.Should().BeTrue();
+            p.AwaitingConfirmation.Should().BeFalse();
+        }
+
+        /// <summary>⚠️ Överbetalning ger inte en negativ skuld — det hade läst som ett tillgodo
+        /// sällskapet inte har.</summary>
+        [Fact]
+        public void Overbetalning_ger_noll_i_skuld_aldrig_negativt()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 500m, confirmed: true) });
+
+            p.Outstanding.Should().Be(0m);
+            p.IsPaidUp.Should().BeTrue();
+        }
+
         [Fact]
         public void Medlem_utan_gaster_ar_ett_sallskap_pa_en()
         {

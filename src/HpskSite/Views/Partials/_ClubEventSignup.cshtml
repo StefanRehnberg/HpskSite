@@ -343,6 +343,47 @@
             return h;
         }
 
+        // Betalningen. ⚠️ EN knapp för HELA sällskapet — Hugo swishar 450 en gång, inte tre
+        // gånger. Beloppet kommer alltid från servern; ett belopp i klienten hade gått att ändra.
+        function paymentBlock(d) {
+            const p = d.party, pay = d.payment;
+            if (!p || !pay) return '';
+
+            // Betalt och klart: säg det, men ta inte plats.
+            if (p.outstanding <= 0) {
+                if (p.awaitingConfirmation) {
+                    return '<div class="alert alert-info py-2 px-3 mb-2 small">'
+                         + '<i class="bi bi-hourglass-split me-1"></i>Du har markerat att du betalat. '
+                         + 'Arrangören stämmer av och skickar kvitto.</div>';
+                }
+                if (p.total > 0) {
+                    return '<div class="small text-success mb-2">'
+                         + `<i class="bi bi-check-circle me-1"></i>Betalt ${kr(p.confirmedPaid)}.</div>`;
+                }
+                return '';
+            }
+
+            // ⚠️ Skuld men ingen möjlighet att betala här — säg VAD som saknas i stället för att
+            // visa en knapp som inte kan fungera. Utan Swish-nummer är det klubben som måste agera.
+            if (!pay.swishAvailable) {
+                return '<div class="alert alert-warning py-2 px-3 mb-2 small">'
+                     + `Att betala: <strong>${kr(p.outstanding)}</strong>. `
+                     + 'Evenemanget saknar Swish-nummer — kontakta arrangören för betalning.</div>';
+            }
+
+            let h = '<div class="border rounded p-2 mb-2">'
+                  + '<div class="d-flex justify-content-between align-items-center mb-2">'
+                  + '<span class="fw-semibold">Att betala</span>'
+                  + `<span class="fs-5 fw-semibold">${kr(p.outstanding)}</span></div>`;
+
+            h += '<button type="button" class="btn btn-primary w-100" id="ces-pay">'
+              +  '<i class="bi bi-qr-code me-1"></i>Betala med Swish</button>';
+
+            // Rutan fylls av StartPayment — numret och referensen kommer därifrån, aldrig härifrån.
+            h += '<div class="d-none mt-2" id="ces-pay-box"></div>';
+            return h + '</div>';
+        }
+
         function render(d) {
             // The card only exists for events that actually take sign-ups. An event with an
             // external registration link keeps that link (the page renders it separately) — we must
@@ -400,11 +441,23 @@
                             : `Anmälan är öppen för medlemmar i ${esc(d.event.ownerName)}.`)
                      +  '</div>';
             } else if (d.me && d.me.signedUp) {
-                html += '<div class="alert ' + (d.me.isReserve ? 'alert-warning' : 'alert-success') + ' py-2 px-3 mb-2">'
-                     +  (d.me.isReserve
-                            ? '<i class="bi bi-hourglass-split me-1"></i>Du står som <strong>reserv</strong>. Blir en plats ledig flyttas du upp automatiskt.'
-                            : '<i class="bi bi-check-circle me-1"></i>Du är <strong>anmäld</strong>.')
-                     +  '</div>';
+                // ⚠️⚠️ "ANMÄLD" ÄR VILLKORAT AV BETALNING. Så länge sällskapet har en skuld är
+                // anmälan PÅBÖRJAD, inte klar — och det måste stå i den gröna rutans ställe, inte
+                // som en fotnot under. En medlem som läser "Du är anmäld" och sedan en betalrad
+                // längre ned drar slutsatsen att betalningen kan vänta.
+                var unpaid = d.party && d.party.outstanding > 0;
+                if (unpaid) {
+                    html += '<div class="alert alert-warning py-2 px-3 mb-2">'
+                         +  '<i class="bi bi-exclamation-triangle me-1"></i>'
+                         +  'Din anmälan är <strong>inte klar</strong> — den blir giltig när avgiften är betald.'
+                         +  '</div>';
+                } else {
+                    html += '<div class="alert ' + (d.me.isReserve ? 'alert-warning' : 'alert-success') + ' py-2 px-3 mb-2">'
+                         +  (d.me.isReserve
+                                ? '<i class="bi bi-hourglass-split me-1"></i>Du står som <strong>reserv</strong>. Blir en plats ledig flyttas du upp automatiskt.'
+                                : '<i class="bi bi-check-circle me-1"></i>Du är <strong>anmäld</strong>.')
+                         +  '</div>';
+                }
                 if (d.me.feeAmount !== null && d.me.feeAmount !== undefined) {
                     // Vad hen valde och vad det kostade DA. Hojs priset efterat star medlemmen kvar
                     // pa sitt belopp - snapshotten ar overenskommelsen, inte dagens prislista.
@@ -417,6 +470,9 @@
                 // Sallskapet star DIREKT under det egna priset: "du betalar 180" och "ni ar tre och
                 // det blir 450" hor ihop, och ett block langre ner hade last som en annan sak.
                 html += partyBlock(d);
+                // ⚠️ Betalningen ligger DIREKT under sällskapet: "ni är tre och det blir 450" och
+                // "att betala 450" hör ihop. Ett block längre ned läses som en annan sak.
+                html += paymentBlock(d);
                 html += myLoanBlock(d);
                 // ⚠️ Knappen följer `cancelOpen`, INTE `signupOpen`. Efter sista anmälningsdag är
                 // anmälan stängd men avbokningen öppen till evenemangsdagens slut — den som inte
@@ -511,6 +567,54 @@
                     : `Vill du avboka din anmälan? ${n === 1 ? 'Din gäst' : `Dina ${n} gäster`} avanmäls samtidigt.`;
                 if (!confirm(fraga)) return;
                 act(cancelBtn, 'Cancel', { eventId });
+            });
+
+            // ── Betalning ────────────────────────────────────────────────────────────────────
+            const payBtn = document.getElementById('ces-pay');
+            if (payBtn) payBtn.addEventListener('click', async () => {
+                payBtn.disabled = true;
+                payBtn.innerHTML = 'Hämtar…';
+                const r = await post('StartPayment', { eventId });
+                if (!r.success) {
+                    payBtn.disabled = false;
+                    payBtn.innerHTML = 'Betala med Swish';
+                    alert(r.message || 'Betalningen kunde inte startas.');
+                    return;
+                }
+                const box = document.getElementById('ces-pay-box');
+                // ⚠️⚠️ QR:EN GENERERAS PÅ SERVERN ur betalningens egen rad. En bild byggd av
+                // nummer och belopp i klienten hade gått att ändra i webbläsaren, och pengarna
+                // hamnat någon annanstans utan att något sa ifrån.
+                //
+                // ⚠️ Och det är en SWISH-QR (C-formatet), inte en djuplänk. De två payloaderna är
+                // olika; appen svarar "Felaktig länk" om man kodar djuplänken i en QR.
+                const qrSrc = '/umbraco/surface/ClubEvent/GetPaymentQr'
+                            + `?eventId=${eventId}&paymentId=${r.paymentId}`;
+                box.innerHTML =
+                    '<div class="text-center">'
+                  + `<img src="${qrSrc}" alt="Swish-QR" class="img-fluid" style="max-width:200px;">`
+                  + `<div class="small mt-2">Swish <strong>${esc(r.swishNumber)}</strong></div>`
+                  + `<div class="small">Belopp <strong>${kr(r.amount)}</strong></div>`
+                  + `<div class="small text-muted">Meddelande: ${esc(r.reference)}</div>`
+                  // Betalar man PÅ telefonen är QR:en oanvändbar — då öppnar djuplänken appen
+                  // direkt. Egen payload, se servern.
+                  + (r.appUrl
+                        ? `<a href="${esc(r.appUrl)}" class="btn btn-sm btn-outline-primary w-100 mt-2 d-md-none">`
+                          + 'Öppna Swish-appen</a>'
+                        : '')
+                  // ⚠️ Texten säger rakt ut att knappen inte är ett kvitto. Vi har ingen Swish-API,
+                  // så tryckningen är ett PÅSTÅENDE som arrangören sedan stämmer av.
+                  + '<div class="form-text mt-2">Har du swishat? Tryck nedan, så vet arrangören '
+                  + 'att betalningen är på väg. Kvittot kommer när hen stämt av.</div>'
+                  + `<button type="button" class="btn btn-outline-success w-100 mt-2" id="ces-paid" `
+                  + `data-payment="${r.paymentId}">Jag har betalat</button>`
+                  + '</div>';
+                box.classList.remove('d-none');
+                payBtn.classList.add('d-none');
+
+                const paidBtn = document.getElementById('ces-paid');
+                paidBtn.addEventListener('click', () => act(paidBtn, 'ClaimPayment',
+                    { eventId, paymentId: parseInt(paidBtn.dataset.payment, 10) }));
             });
 
             // ── Gäster ───────────────────────────────────────────────────────────────────────

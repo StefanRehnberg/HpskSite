@@ -471,7 +471,8 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
+            string eventSwishNumber = "")
         {
             try
             {
@@ -516,7 +517,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
@@ -763,6 +764,12 @@ namespace HpskSite.Controllers
                             eventAudience = HpskSite.Models.EventAudience.Normalise(
                                 evt.Value<string>(HpskSite.Models.EventAudience.Property)),
                             audiencePropertyExists = evt.HasProperty(HpskSite.Models.EventAudience.Property),
+                            // Åsidosättningen. Tomt = ägarens nummer används — det avgörs vid
+                            // läsning i ClubEventParticipationService, inte här.
+                            eventSwishNumber = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty)
+                                ? (evt.Value<string>(HpskSite.Models.ClubEvents.SwishProperty) ?? "")
+                                : "",
+                            swishPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty),
                             mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
                             // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
                             // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
@@ -925,7 +932,8 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
+            string eventSwishNumber = "")
         {
             try
             {
@@ -960,7 +968,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
@@ -2218,6 +2226,12 @@ namespace HpskSite.Controllers
                             eventAudience = HpskSite.Models.EventAudience.Normalise(
                                 evt.Value<string>(HpskSite.Models.EventAudience.Property)),
                             audiencePropertyExists = evt.HasProperty(HpskSite.Models.EventAudience.Property),
+                            // Åsidosättningen. Tomt = ägarens nummer används — det avgörs vid
+                            // läsning i ClubEventParticipationService, inte här.
+                            eventSwishNumber = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty)
+                                ? (evt.Value<string>(HpskSite.Models.ClubEvents.SwishProperty) ?? "")
+                                : "",
+                            swishPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty),
                             mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
                             // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
                             // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
@@ -2260,7 +2274,8 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
+            string eventSwishNumber = "")
         {
             try
             {
@@ -2301,7 +2316,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
@@ -2359,7 +2374,8 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
+            string eventSwishNumber = "")
         {
             try
             {
@@ -2405,7 +2421,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
@@ -2597,6 +2613,10 @@ namespace HpskSite.Controllers
                         eventAudience = HpskSite.Models.EventAudience.Normalise(
                             eventContent.GetValue<string>(HpskSite.Models.EventAudience.Property)),
                         audiencePropertyExists = eventContent.HasProperty(HpskSite.Models.EventAudience.Property),
+                        eventSwishNumber = eventContent.HasProperty(HpskSite.Models.ClubEvents.SwishProperty)
+                            ? (eventContent.GetValue<string>(HpskSite.Models.ClubEvents.SwishProperty) ?? "")
+                            : "",
+                        swishPropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.SwishProperty),
                         // Avgiften. ⚠️ null och 0 är olika svar — se hpskEventRegFill.
                         eventPrices = HpskSite.Models.EventPrices
                             .Parse(eventContent.GetValue<string>(HpskSite.Models.EventPrices.Property)).Rows,
@@ -2639,7 +2659,7 @@ namespace HpskSite.Controllers
             Umbraco.Cms.Core.Models.IContent eventContent,
             bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl,
             bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "",
-            string eventAudience = "")
+            string eventAudience = "", string eventSwishNumber = "")
         {
             eventContent.SetValue("registrationRequired", registrationRequired);
             eventContent.SetValue("registrationUrl", registrationUrl ?? "");
@@ -2736,6 +2756,19 @@ namespace HpskSite.Controllers
             else if (priceRows.Count > 0)
                 missing.Add(HpskSite.Models.EventPrices.Property);
 
+            // Swish-numret. ⚠️ TOMT ÄR ETT GILTIGT VÄRDE och betyder "använd ägarens nummer" —
+            // därför skrivs tom sträng i stället för att raden hoppas över. Utan det gick en
+            // åsidosättning inte att TA BORT igen.
+            //
+            // ⚠️ Numret valideras INTE hårt här: en klubb kan ha ett företagsnummer (123…) eller
+            // ett mobilnummer, och formatkontrollen bor i SwishQrCodeGenerator. Ett felaktigt
+            // nummer fångas när betalningen begärs, med ett besked som säger vad som är fel — att
+            // vägra sparningen hade hindrat arrangören från att skriva klart resten av formuläret.
+            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.SwishProperty))
+                eventContent.SetValue(HpskSite.Models.ClubEvents.SwishProperty, (eventSwishNumber ?? "").Trim());
+            else if (!string.IsNullOrWhiteSpace(eventSwishNumber))
+                missing.Add(HpskSite.Models.ClubEvents.SwishProperty);
+
             // Vem som får anmäla sig.
             //
             // ⚠️⚠️ ETT OKÄNT VÄRDE FÅR ALDRIG SKRIVAS. `Normalise` faller till "klubbens
@@ -2772,7 +2805,8 @@ namespace HpskSite.Controllers
             string equipmentRequired = "", string targetAudience = "",
             bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "",
             bool isMandatory = false, int maxParticipants = 0,
-            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
+            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
+            string eventSwishNumber = "")
         {
             try
             {
@@ -2829,7 +2863,7 @@ namespace HpskSite.Controllers
                 // den tysta glidningen ApplyEventRegistrationFields finns för att förhindra.
                 var regFieldError = ApplyEventRegistrationFields(
                     eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl,
-                    lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
+                    lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
 
                 if (regFieldError != null)
                 {

@@ -400,6 +400,55 @@ namespace HpskSite.Services.Ledger
             };
         }
 
+        /// <summary>
+        /// Kan den här utställaren bokföra på det här datumet? <c>null</c> = ja, annars skälet i
+        /// klartext.
+        ///
+        /// <para><b>⚠️ FINNS FÖR ATT PENGAR INTE SKA TAS EMOT SOM INTE GÅR ATT BOKFÖRA.</b>
+        /// <see cref="Post"/> vägrar korrekt när räkenskapsåret saknas — men då har betalaren redan
+        /// swishat, och arrangören står med pengar hen inte kan kvittera. Den här kontrollen låter
+        /// anroparen fråga FÖRE hen erbjuder betalning.</para>
+        ///
+        /// <para><b>⚠️ SAMMA regler som <see cref="Post"/>, aldrig en avskrift.</b> Två
+        /// uppfattningar om när bokföring är möjlig är fria att glida isär, och då skulle
+        /// betalningen erbjudas precis när den inte går att ta emot. Lägger du en spärr i
+        /// <c>Post</c> ska den speglas här.</para>
+        ///
+        /// <para>⚠️ Svarar <c>null</c> vid läsfel: en trasig kontroll får inte stänga av
+        /// betalningen för en förening vars liggare är hel. <see cref="Post"/> är den som verkligen
+        /// vägrar.</para>
+        /// </summary>
+        public string? PostingBlockedReason(int issuerType, int issuerId, DateTime accountingDate)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+
+                var year = db.FirstOrDefault<LedgerFiscalYear>(
+                    @"SELECT * FROM dbo.LedgerFiscalYear
+                       WHERE IssuerType = @0 AND IssuerId = @1
+                         AND StartDate <= @2 AND EndDate >= @2
+                       ORDER BY Year",
+                    issuerType, issuerId, accountingDate.Date);
+
+                if (year is null)
+                    return $"Det finns inget räkenskapsår som omfattar {accountingDate:yyyy-MM-dd}. "
+                         + "Lägg upp året i ekonomiinställningarna först.";
+
+                if (year.Status == LedgerFiscalYearStatus.Established)
+                    return $"Räkenskapsåret {year.Year} är fastställt av årsmötet och tar inte emot fler poster.";
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Kunde inte kontrollera bokföringsberedskap för utställare {Type}/{Id}.",
+                    issuerType, issuerId);
+                return null;
+            }
+        }
+
         private static LedgerFiscalYear? ResolveFiscalYear(IDatabase db, LedgerPostingRequest request)
             => db.FirstOrDefault<LedgerFiscalYear>(
                 @"SELECT * FROM dbo.LedgerFiscalYear

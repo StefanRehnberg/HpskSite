@@ -36,6 +36,14 @@ namespace HpskSite.Controllers
         private readonly ITimeLimitedDataProtector _attendanceProtector;
         private readonly AdminAuthorizationService _auth;
 
+        // ⚠️ Betalningarna går genom LIGGAREN, aldrig genom en egen EventPayment-tabell. Ramen är
+        // uttrycklig: en verifikationsliggare som bär klubbens hela ekonomi, med betalningsraden
+        // som källdokument och en verifikation under den. En tabell vid sidan om hade betytt att
+        // evenemangsintäkterna aldrig kom med i bokslutet.
+        private readonly HpskSite.Services.Ledger.LedgerPaymentService _payments;
+        private readonly HpskSite.Services.Ledger.LedgerIssuerResolver _issuers;
+        private readonly HpskSite.Services.Ledger.LedgerPostingService _posting;
+
         public ClubEventController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -52,7 +60,10 @@ namespace HpskSite.Controllers
             MemberClubService memberClubs,
             ILogger<ClubEventController> logger,
             IDataProtectionProvider dataProtectionProvider,
-            AdminAuthorizationService auth)
+            AdminAuthorizationService auth,
+            HpskSite.Services.Ledger.LedgerPaymentService payments,
+            HpskSite.Services.Ledger.LedgerIssuerResolver issuers,
+            HpskSite.Services.Ledger.LedgerPostingService posting)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth;
@@ -66,6 +77,34 @@ namespace HpskSite.Controllers
             _logger = logger;
             _attendanceProtector = dataProtectionProvider
                 .CreateProtector("ClubEvent.AttendanceQr.v1").ToTimeLimitedDataProtector();
+            _payments = payments;
+            _issuers = issuers;
+            _posting = posting;
+        }
+
+        /// <summary>
+        /// Sällskapet med betalningarna inräknade.
+        ///
+        /// <para>⚠️ Betalningarna läses EN gång per anrop och skickas in i <c>BuildParty</c>, som är
+        /// ren. Ett uppslag per rad hade blivit en fråga per gäst, och en hämtning inuti den rena
+        /// metoden hade gjort reglerna omätbara utan en riktig liggare.</para>
+        ///
+        /// <para>⚠️ Ett fel i liggaren får INTE ta ner anmälningskortet. Saldot blir då noll
+        /// betalt, alltså "inte betald" — det är åt det säkra hållet: en obetald anmälan syns och
+        /// kan rättas, en felaktigt betald syns inte.</para>
+        /// </summary>
+        private ClubEventParty BuildPartyWithPayments(ClubEventRoster roster, int memberId, int eventId)
+        {
+            List<HpskSite.Models.Ledger.LedgerPayment>? payments = null;
+            try
+            {
+                payments = _payments.ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa betalningar för evenemang {EventId}.", eventId);
+            }
+            return ClubEventParticipationService.BuildParty(roster, memberId, payments);
         }
 
         private async Task<int> CurrentMemberIdAsync()
@@ -101,7 +140,7 @@ namespace HpskSite.Controllers
 
             // Medlemmens sällskap: hen själv plus de hen tagit med. Summan läses ur radernas
             // snapshots, aldrig ur dagens prislista.
-            var party = mine != null ? ClubEventParticipationService.BuildParty(roster, me) : null;
+            var party = mine != null ? BuildPartyWithPayments(roster, me, ctx.EventId) : null;
 
             // The roster is visible to the owning club's own members (it is their club's event) and
             // to functionaries. Everyone else sees the COUNT — that is what tells a visitor whether
@@ -168,12 +207,30 @@ namespace HpskSite.Controllers
                 // Sällskapet — medlemmens egna gäster och vad de tillsammans kostar. Bara till den
                 // det gäller: gästernas namn är inte allmän information, och `party` byggs bara när
                 // `mine` finns.
+                // Kan evenemanget ta betalt alls? Kräver BÅDE ett Swish-nummer och en avgift —
+                // `SwishFromOwner` säger att numret kom från klubben, så arrangörens skärm slipper
+                // visa ett tomt fält som läses som att betalning saknas.
+                payment = new
+                {
+                    swishAvailable = ctx.CanTakeSwish,
+                    swishFromOwner = ctx.SwishFromOwner,
+                    // ⚠️ Numret lämnas ALDRIG ut till en utloggad. Det är inte hemligt, men ett
+                    // publikt fält är en inbjudan att skrapa, och den som ska betala är inloggad.
+                    swishNumber = me > 0 ? ctx.SwishNumber : "",
+                },
                 party = party == null ? null : new
                 {
                     people = party.People,
                     total = party.Total,
                     missingPrice = party.MissingPrice,
                     maxGuests = ClubEvents.MaxGuestsPerMember,
+                    // ⚠️ TRE TAL, inte ett. "Bekräftat" är pengar, "påstått" är ett påstående, och
+                    // att slå ihop dem gör arrangörens avprickningslista oanvändbar som kontroll.
+                    confirmedPaid = party.ConfirmedPaid,
+                    claimedPaid = party.ClaimedPaid,
+                    outstanding = party.Outstanding,
+                    isPaidUp = party.IsPaidUp,
+                    awaitingConfirmation = party.AwaitingConfirmation,
                     guests = party.Guests.Select(g => new
                     {
                         id = g.Id,
@@ -896,6 +953,285 @@ namespace HpskSite.Controllers
             return Json(new { success = ok, message = ok ? "Din närvaro är registrerad." : msg });
         }
 
+        // ── Betalning ─────────────────────────────────────────────────
+        //
+        // ⚠️⚠️ TRE STEG, OCH DE FÅR ALDRIG SLÅS IHOP:
+        //   Request       — det som ska betalas finns. Inga pengar har rört sig.
+        //   RegisterClaim — betalaren SÄGER att hen betalat. Fortfarande inga pengar.
+        //   Confirm       — arrangören har sett pengarna. NU blir det kvitto och bokföring.
+        //
+        // Vi har ingen Swish-API och ingen callback, så steg två är allt vi vet tills en människa
+        // tittat i appen. Ett kvitto vid QR-visning hade varit en urkund på en betalning som
+        // kanske aldrig gjordes.
+
+        /// <summary>
+        /// POST /umbraco/surface/ClubEvent/StartPayment — begär betalning för HELA sällskapet.
+        ///
+        /// <para>⚠️ Beloppet räknas på servern ur sällskapets skuld, aldrig ur klienten. Ett postat
+        /// belopp hade låtit vem som helst anmäla sig för en krona.</para>
+        ///
+        /// <para>⚠️ Idempotent i praktiken: finns redan en obetald begäran återanvänds den i
+        /// stället för att en andra rad skapas. Två rader hade dubblat skulden och gjort
+        /// arrangörens lista obegriplig.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> StartPayment([FromBody] SignUpRequest request)
+        {
+            int me = await CurrentMemberIdAsync();
+            if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            if (!ctx.CanTakeSwish)
+                return Json(new { success = false, message = "Evenemanget kan inte ta betalt — kontakta arrangören." });
+
+            // ⚠️ Numret valideras FÖRE en betalningsrad skapas. Ett felskrivet klubbnummer får
+            // SwishQrCodeGenerator att kasta, och då hade raden legat kvar som en skuld utan väg
+            // att betala den. Säg i stället vad som är fel, med en gång.
+            if (!SwishQrCodeGenerator.IsValidSwishNumber(ctx.SwishNumber))
+                return Json(new
+                {
+                    success = false,
+                    message = "Swish-numret hos arrangören ser inte giltigt ut — kontakta klubben.",
+                });
+
+            var roster = await _participation.BuildRosterAsync(ctx);
+            var party = BuildPartyWithPayments(roster, me, ctx.EventId);
+            if (party.Self == null)
+                return Json(new { success = false, message = "Du är inte anmäld till evenemanget." });
+            if (party.Outstanding <= 0)
+                return Json(new { success = false, message = "Det finns inget kvar att betala." });
+
+            var issuer = _issuers.ResolveForEvent(ctx.EventId);
+            if (issuer == null)
+                return Json(new { success = false, message = "Arrangören går inte att avgöra — kontakta klubben." });
+
+            // ⚠️⚠️ FRÅGA LIGGAREN FÖRE VI BER OM PENGAR. `Confirm` vägrar korrekt när
+            // räkenskapsåret saknas — men då har medlemmen redan swishat, och arrangören står med
+            // pengar hen inte kan kvittera eller kvitto för. Kontrollen är liggarens egen, inte en
+            // avskrift, så de två kan inte glida isär.
+            var blocked = _posting.PostingBlockedReason(issuer.Value.Type, issuer.Value.Id, DateTime.Today);
+            if (blocked != null)
+                return Json(new
+                {
+                    success = false,
+                    message = "Klubben kan inte ta emot betalningen än: " + blocked,
+                });
+
+            // ⚠️ Återanvänd en öppen begäran. En ny rad per klick hade blivit fem rader för fem
+            // otåliga tryck, och skulden hade sett fem gånger för stor ut.
+            var existing = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .FirstOrDefault(p => p.PayerMemberId == me
+                                     && p.VoidedUtc is null && p.ConfirmedUtc is null
+                                     && p.Amount == party.Outstanding);
+
+            int paymentId;
+            if (existing != null) paymentId = existing.Id;
+            else
+            {
+                var member = _memberService.GetById(me);
+                var id = _payments.Request(new HpskSite.Models.Ledger.LedgerPayment
+                {
+                    IssuerType = issuer.Value.Type,
+                    IssuerId = issuer.Value.Id,
+                    SourceType = HpskSite.Models.Ledger.LedgerSourceType.Event,
+                    SourceId = ctx.EventId,
+                    PayerMemberId = me,
+                    PayerName = member?.Name ?? $"Medlem {me}",
+                    Amount = party.Outstanding,
+                    Method = HpskSite.Models.Ledger.LedgerPaymentMethod.Swish,
+                });
+                if (id is null)
+                    return Json(new { success = false, message = "Betalningen kunde inte skapas." });
+                paymentId = id.Value;
+            }
+
+            return Json(new
+            {
+                success = true,
+                paymentId,
+                amount = party.Outstanding,
+                swishNumber = ctx.SwishNumber,
+                reference = PaymentReference(ctx, paymentId),
+                // ⚠️⚠️ DJUPLÄNKEN OCH QR-KODEN ÄR OLIKA PAYLOADS. `swish://payment?data=` vill ha
+                // JSON; QR-koden vill ha C-formatet. Byter man plats på dem svarar appen
+                // "Felaktig länk" — det står i SwishQrCodeGenerator och har redan kostat en gång.
+                // Djuplänken är för den som betalar PÅ telefonen; QR:en för den som har appen i en
+                // annan enhet.
+                appUrl = SwishQrCodeGenerator.GetSwishAppUrl(
+                    ctx.SwishNumber, SwishAmount(party.Outstanding), PaymentReference(ctx, paymentId)),
+            });
+        }
+
+        // Formatreglerna bor i EventPaymentFormat — se den klassen för varför de inte är privata
+        // metoder här. Båda har redan kraschat en gång.
+        private static string SwishAmount(decimal amount) => EventPaymentFormat.Amount(amount);
+
+        private static string PaymentReference(ClubEventContext ctx, int paymentId)
+            => EventPaymentFormat.Reference(ctx.EventName, paymentId);
+
+        /// <summary>
+        /// GET /umbraco/surface/ClubEvent/GetPaymentQr — Swish-QR:en för en betalning.
+        ///
+        /// <para>⚠️ Bilden byggs på SERVERN ur betalningens egen rad. En QR som klienten satte ihop
+        /// av nummer och belopp hade gått att ändra i webbläsaren, och pengarna hamnat någon
+        /// annanstans utan att något sa ifrån.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPaymentQr(int eventId, int paymentId)
+        {
+            int me = await CurrentMemberIdAsync();
+            if (me <= 0) return NotFound();
+
+            var ctx = _participation.GetEventContext(eventId);
+            if (ctx == null || !ctx.CanTakeSwish) return NotFound();
+
+            var row = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId)
+                .FirstOrDefault(p => p.Id == paymentId);
+            if (row == null) return NotFound();
+
+            // ⚠️ Betalaren, eller en funktionär. Utan kontrollen kunde vem som helst hämta en QR
+            // för någon annans betalning — ofarligt i sig, men det är en annans belopp och namn.
+            if (row.PayerMemberId != me && !await _participation.CanManageAsync(ctx, me))
+                return NotFound();
+
+            try
+            {
+                var png = SwishQrCodeGenerator.GeneratePng(
+                    ctx.SwishNumber, SwishAmount(row.Amount), PaymentReference(ctx, row.Id));
+                return File(png, "image/png");
+            }
+            catch (ArgumentException ex)
+            {
+                // Ett ogiltigt klubbnummer är ett KONFIGURATIONSFEL, inte ett fel i begäran.
+                _logger.LogWarning(ex,
+                    "Swish-QR kunde inte skapas för evenemang {EventId}: numret {Number} är ogiltigt.",
+                    eventId, ctx.SwishNumber);
+                return NotFound();
+            }
+        }
+
+        /// <summary>
+        /// POST /umbraco/surface/ClubEvent/ClaimPayment — "jag har betalat".
+        ///
+        /// <para><b>⚠️⚠️ DET HÄR ÄR INTE PENGAR</b> och får aldrig utfärda ett kvitto eller bokföra.
+        /// Se <c>LedgerPaymentService.RegisterClaim</c>.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ClaimPayment([FromBody] PaymentRequest request)
+        {
+            int me = await CurrentMemberIdAsync();
+            if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+
+            // ⚠️ Betalningen måste tillhöra DET HÄR evenemanget OCH den inloggade. Utan båda
+            // kontrollerna kunde ett postat id kvittera någon annans betalning.
+            var mine = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0) && p.PayerMemberId == me);
+            if (mine == null) return Json(new { success = false, message = "Betalningen hittades inte." });
+
+            var ok = _payments.RegisterClaim(mine.Id, me);
+            return Json(ok
+                ? new { success = true, message = "Tack! Arrangören stämmer av betalningen." }
+                : new { success = false, message = "Betalningen är redan kvitterad eller avslutad." });
+        }
+
+        /// <summary>
+        /// POST /umbraco/surface/ClubEvent/ConfirmPayment — arrangören har sett pengarna.
+        ///
+        /// <para><b>Nu</b> blir det pengar, kvitto och verifikation. Grinden är
+        /// <c>CanManageAsync</c>: den som håller uppropet är den som ser Swish-appen.</para>
+        ///
+        /// <para>⚠️ Bokföringen kan VÄGRA (stängt räkenskapsår, saknad kontoroll), och då ska
+        /// ingenting ha hänt — varken kvitto eller bekräftad betalning. Ordningen ligger i
+        /// <c>LedgerPaymentService.Confirm</c>; här handlar det bara om att svara ärligt om vad som
+        /// gick fel, i stället för ett "kunde inte spara".</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ConfirmPayment([FromBody] PaymentRequest request)
+        {
+            int me = await CurrentMemberIdAsync();
+            if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            if (!await _participation.CanManageAsync(ctx, me))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            // ⚠️ Betalningen måste tillhöra DET HÄR evenemanget — annars kunde ett postat id
+            // bekräfta en betalning i en annan klubbs liggare.
+            var row = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0));
+            if (row == null) return Json(new { success = false, message = "Betalningen hittades inte." });
+
+            DateTime? when = null;
+            if (!string.IsNullOrWhiteSpace(request?.PaymentDate))
+            {
+                if (!DateTime.TryParse(request.PaymentDate, out var parsed))
+                    return Json(new { success = false, message = "Betalningsdatumet gick inte att läsa. Ingenting bokfördes." });
+                when = parsed.Date;
+            }
+
+            var result = _payments.Confirm(row.Id, me, when, request?.ActualAmount);
+            if (result.Error != null)
+                return Json(new { success = false, message = result.Error });
+
+            return Json(new { success = true, message = "Betalningen är bokförd." });
+        }
+
+        /// <summary>
+        /// GET /umbraco/surface/ClubEvent/GetPayments — arrangörens avprickningslista.
+        ///
+        /// <para>⚠️ Den ersätter de Pending-fakturor som är arbetslistan idag, och därför måste den
+        /// skilja <b>påstådd</b> från <b>bekräftad</b>. Slås de ihop kan arrangören inte se vilka
+        /// som faktiskt betalat, och listan är inte längre en kontroll.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPayments(int eventId)
+        {
+            var ctx = _participation.GetEventContext(eventId);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+
+            int me = await CurrentMemberIdAsync();
+            if (!await _participation.CanManageAsync(ctx, me))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var rows = _payments.ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId);
+            var (expected, settled, outstanding) =
+                _payments.Completeness(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId);
+
+            return Json(new
+            {
+                success = true,
+                expected,
+                settled,
+                outstanding,
+                payments = rows.Select(p => new
+                {
+                    id = p.Id,
+                    payerMemberId = p.PayerMemberId,
+                    payerName = p.PayerName,
+                    amount = p.Amount,
+                    actualAmount = p.ActualAmount,
+                    // ⚠️ Tre skilda tillstånd, aldrig en boolean. "Väntar" och "påstådd" är olika
+                    // arbetsuppgifter för arrangören: den ena ska påminnas, den andra stämmas av.
+                    claimed = p.ClaimedUtc,
+                    confirmed = p.ConfirmedUtc,
+                    voided = p.VoidedUtc,
+                    receiptId = p.ReceiptId,
+                })
+            });
+        }
+
         /// <summary>
         /// Beskedet när någon inte får anmäla sig.
         ///
@@ -977,6 +1313,21 @@ namespace HpskSite.Controllers
             /// <summary>Radens id vid avbokning av en enskild gäst. Ett namn duger inte: två gäster
             /// kan heta likadant.</summary>
             public int ParticipantId { get; set; }
+        }
+
+        /// <summary>Betalningssteget. <b>Inget belopp</b> — det räknas alltid på servern, annars
+        /// hade vem som helst kunnat anmäla sig för en krona.</summary>
+        public class PaymentRequest
+        {
+            public int EventId { get; set; }
+            public int PaymentId { get; set; }
+
+            /// <summary>Arrangörens bekräftelse: vad som faktiskt kom in, när det skiljer sig.
+            /// Null = ingen avvikelse.</summary>
+            public decimal? ActualAmount { get; set; }
+
+            /// <summary>Betalningsdagen, när arrangören bokför i efterhand.</summary>
+            public string? PaymentDate { get; set; }
         }
 
         public class AttendanceRequest

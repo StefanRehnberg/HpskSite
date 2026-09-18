@@ -3910,6 +3910,92 @@ Verifierat **26 enhetstest** (`EventAudienceTests`) + **21/21
   in — att en bredare nivå vägras och NAMNGER egenskapen, med kontrollprov att standardvalet ändå
   går igenom. Det läget går inte att framkalla igen utan att ta bort egenskapen.
 
+#### Betalning vid evenemangsanmälan — genom liggaren (2026-09-18)
+
+Stefan: *"Vi behöver också kunna ta betalt vid anmälan till ett event som kostar pengar, om det
+anges Swish-nr … kom ihåg att vi nu ska använda kontantmetoden och inte skapa fakturor."*
+
+Det här är **första anroparen av `LedgerPaymentService`**, som byggdes med P1 och haft noll
+anropare. Ramen ([[payment-two-shapes-not-two-payers]]) säger *"evenemang först, tävling efter"*,
+och evenemang är direktbetalningens standardfall: betalningsrad + kvitto, **ingen faktura**.
+
+**⚠️⚠️ INGEN NY TABELL.** Ramen är uttrycklig: en verifikationsliggare som bär klubbens hela
+ekonomi, **aldrig en `EventPayment`-tabell**. Ingen migrering behövdes — `LedgerSourceType.Event`
+och `LedgerIssuerResolver.ResolveForEvent` fanns redan.
+
+**⚠️⚠️ TRE STEG SOM ALDRIG FÅR SLÅS IHOP:**
+
+| Steg | Vad som är sant |
+|---|---|
+| `Request` | Skulden finns. Inga pengar har rört sig |
+| `RegisterClaim` | Betalaren SÄGER att hen betalat. Fortfarande inga pengar, inget kvitto |
+| `Confirm` | Arrangören har sett pengarna. **Nu** kvitto och verifikation |
+
+Vi har ingen Swish-API och ingen callback, så steg två är allt vi vet tills en människa tittat i
+appen. Ett kvitto vid QR-visning hade varit en urkund på en betalning som kanske aldrig gjordes.
+
+**⚠️ SKULDEN ÄR PER SÄLLSKAP, inte per rad.** Hugo swishar 450 EN gång — en betalning per rad hade
+gett tre QR-koder för en överföring. `ClubEventParty.Outstanding = Total − bekräftat − påstått`,
+härlett enligt ramens *"saldo = dokument − betalningar, alltid härlett"*.
+- **Ett PÅSTÅENDE räknas bort i skulden men INTE i `ConfirmedPaid`.** Spärren kan inte kräva mer än
+  ett påstående (mer vet vi inte), men slås de två ihop kan arrangörens avprickningslista inte
+  skilja den som betalat från den som sagt det — och då är listan inte en kontroll.
+- **`BuildParty` tar betalningarna som INPARAMETER.** Ett databasanrop inuti hade gjort varje
+  påstående om summan beroende av en riktig liggare, och då hade reglerna bara gått att mäta genom
+  hela stacken.
+
+**⚠️⚠️ FRÅGA LIGGAREN INNAN DU BER OM PENGAR.** `LedgerPostingService.PostingBlockedReason` är ny
+och anropas i `StartPayment`. `Confirm` vägrar korrekt när räkenskapsåret saknas — men då har
+medlemmen redan swishat, och arrangören står med pengar hen inte kan kvittera. Kontrollen ligger i
+liggaren och är **inte en avskrift**: lägger du en spärr i `Post` ska den speglas där, annars
+erbjuds betalningen precis när den inte går att ta emot.
+
+**⚠️⚠️ SWISH HAR TVÅ OLIKA PAYLOADS, och båda formatreglerna har redan kraschat.**
+- QR-koden vill ha `C…;belopp;meddelande;0`; djuplänken `swish://payment?data=` vill ha JSON.
+  Byter man plats på dem svarar appen *"Felaktig länk"* — det står i `SwishQrCodeGenerator` sedan
+  tidigare, och jag gick ändå i fällan. QR:en genereras nu **på servern** (`GetPaymentQr`),
+  djuplänken är en egen knapp på mobil.
+- **Beloppet måste vara exakt två decimaler med PUNKT.** `IsAmountOk` jämför STRÄNGEN mot
+  `d.ToString("0.00")`, så `"450"` och `"450,00"` avvisas båda — med ett **undantag**, inte ett
+  felmeddelande, alltså en krasch vid första klicket. Kulturen måste vara invariant: svensk kultur
+  ger komma.
+- **Referensen kapas vid 50 tecken, och NUMRET får aldrig kapas** — det är det som gör betalningen
+  härledbar till en anmälan. Namnet förkortas i stället.
+- Reglerna bor i `Models/EventPaymentFormat.cs` och inte som privata metoder i en controller: en
+  regel som bara går att pröva genom hela stacken blir inte prövad.
+
+**⚠️ QR:en byggs av SERVERN ur betalningens egen rad.** En bild som klienten satte ihop av nummer
+och belopp hade gått att ändra i webbläsaren, och pengarna hamnat någon annanstans utan att något
+sa ifrån. `StartPayment` är dessutom idempotent — ett andra klick återanvänder raden, annars hade
+fem otåliga tryck blivit fem skulder.
+
+**Swish-numret ärvs:** händelsens eget, annars **ägarens** (klubben eller kretsen bär redan
+`swishNumber`). Ett obligatoriskt fält per händelse hade tvingat fram en omskrivning varje gång,
+och en felskrivning skickar pengarna till fel konto **tyst**.
+- ⚠️ **Fältet lästes först men SKREVS ALDRIG** — jag la det i läsvägen och glömde skrivvägen,
+  alltså exakt den fältlista-som-glömmer som bitit den här ytan tre gånger. Nu i alla tre
+  dialogerna och i `ApplyEventRegistrationFields`, med **tomt som giltigt värde** så en
+  åsidosättning går att ta bort igen.
+
+**⛔⛔ BLOCKERARE: INGEN KLUBB KAN TA BETALT ÄN.** `LedgerSetupService.EnsureIssuer` har **noll
+anropare** (mätt 2026-09-18), så ingen förening har räkenskapsår eller kontomappning — och
+`PostingBlockedReason` vägrar då korrekt. Kedjan är byggd och mätt, men **oanvändbar tills P2:s
+ekonomiskärmar finns**. Skapa INTE året automatiskt: kodens egen kommentar säger varför
+(*"ett år har start- och slutdatum som bara föreningen känner … ett gissat år är fel i tysthet"*).
+
+Verifierat **35 enhetstest** (`ClubEventPartyTests` betalningsdelen + `EventPaymentFormatTests`).
+**A/B: 3 av 18 respektive 9 av 17 faller.** Plus **31/32
+`hpsk-verify/event-payment-verify.mjs`** i körningen före beredskapsspärren — hela kedjan
+`Request → Claim → avprickningslista` bevisad, med `Confirm` vägrad av liggaren av rätt skäl.
+- ⚠️ **Efter spärren når sviten inte längre hela kedjan** i dev, eftersom den vägras tidigare. Det
+  är en täckningsförlust orsakad av en korrekt produktändring — full körning kräver en förening med
+  uppsatt liggare.
+- ⚠️ **Sviten avslöjade VAKUÖSA GRÖNA i sig själv:** när `StartPayment` misslyckades jämförde
+  *"ett andra klick återanvänder samma betalning"* `undefined` mot `undefined` och blev grönt.
+  Den avbryter nu i stället. **Ett påstående som inte kan falla är värre än inget.**
+- ⚠️ Betalningsrader går INTE att radera (det är en verifikationsliggare) — svitens fixturrader
+  ligger kvar med flit.
+
 ### Att beställa och dela ut — klubbens årslista över märken OCH medaljer (2026-08-31)
 
 Klubben måste en gång om året svara på två frågor: *vad beställer vi från förbundet* och *vad delar
