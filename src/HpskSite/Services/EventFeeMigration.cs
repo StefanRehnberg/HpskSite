@@ -89,14 +89,27 @@ namespace HpskSite.Services
             // Första versionen lät punkten passera in i sifferkontrollen nedan, som accepterade
             // den — "1.200" hade migrerats som 1,20 kr. Enhetstestet fångade det innan en enda rad
             // rördes, vilket är hela skälet tolkningen ligger som ren funktion.
+            // ⚠️⚠️ ORDNINGEN MELLAN DE HÄR TVÅ KONTROLLERNA ÄR INTE GODTYCKLIG — SKÄLET LÄSES AV EN
+            // MÄNNISKA SOM SKA BESTÄMMA VAD SOM SKA GÖRAS.
+            // Prod bar "180 spann per vuxen, 90 for barn och smattingar gratis." Punktkontrollen låg
+            // först och fyrade på meningens SLUTPUNKT, så rapporten sa "innehaller punkt, som ar
+            // tvetydig (tusental eller decimal)" om en mening med tre olika priser i. Sant om tecknet,
+            // vilseledande om problemet — och den som läser det letar efter fel sak.
+            //
+            // Frågan "är det här över huvud taget ett tal?" måste alltså komma FÖRST. Punktens
+            // tvetydighet är bara intressant när strängen i övrigt ÄR ett tal.
+            if (!Regex.IsMatch(work, @"^[\d.,]+$"))
+                return new Result(FeeParse.Unparseable, 0m,
+                    $"\"{s}\" ar inte ett belopp utan en text - t.ex. villkorade priser eller en "
+                    + "betalningsinstruktion. Satt avgiften som ett tal och skriv villkoren i beskrivningen.");
+
             if (work.Contains('.'))
                 return new Result(FeeParse.Unparseable, 0m,
                     $"\"{s}\" innehaller punkt, som ar tvetydig (tusental eller decimal) - kontrollera for hand");
 
             work = work.Replace(',', '.');
 
-            // ⚠️ Kvar får bara vara ett tal. Finns en bokstav eller ett extra ord kvar är strängen
-            // ett VILLKOR och inte ett pris — den ska läsas av en människa, inte gissas på.
+            // Sista nätet: rätt tecken men fel form, t.ex. "1,2,3".
             if (!Regex.IsMatch(work, @"^\d+(\.\d+)?$"))
                 return new Result(FeeParse.Unparseable, 0m, $"\"{s}\" ar inte ett entydigt belopp");
 

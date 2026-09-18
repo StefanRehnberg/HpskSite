@@ -143,5 +143,51 @@ namespace HpskSite.Tests
             P("300 kr").Reason.Should().NotBeNullOrWhiteSpace();
             P("Gratis for juniorer").Reason.Should().Contain("Gratis for juniorer");
         }
+
+        // ── ⚠️ VERKLIGA VÄRDEN UR PROD (torrkörning 2026-09-18) ──────────────────────────────
+        //
+        // De bästa testfallen som finns, och de kom inte ur fantasin. Fritextfältet har funnits i
+        // åratal och det här är vad föreningar faktiskt skrev i det.
+
+        [Theory]
+        [InlineData("200", 200)]
+        [InlineData("300", 300)]
+        [InlineData("60", 60)]
+        public void Prod_de_entydiga_migreras(string raw, decimal expected)
+        {
+            var r = P(raw);
+            r.Outcome.Should().Be(EventFeeMigration.FeeParse.Parsed, r.Reason);
+            r.Amount.Should().Be(expected);
+        }
+
+        /// <summary>
+        /// ⚠️⚠️ SKÄLET MÅSTE NAMNGE RÄTT PROBLEM, inte bara stämma.
+        ///
+        /// <para>Den här strängen rapporterades först som "innehaller punkt, som ar tvetydig
+        /// (tusental eller decimal)" — punktkontrollen fyrade på meningens SLUTPUNKT. Sant om
+        /// tecknet, vilseledande om problemet: det här är tre olika priser i en mening, och den som
+        /// läser skälet ska förstå att texten ska flyttas till beskrivningen, inte att en decimal
+        /// behöver rättas.</para>
+        /// </summary>
+        [Fact]
+        public void Prod_villkorat_pris_namnger_att_det_ar_en_text_inte_ett_decimalfel()
+        {
+            var r = P("180 spann per vuxen, 90 for barn och smattingar gratis.");
+            r.Outcome.Should().Be(EventFeeMigration.FeeParse.Unparseable);
+            r.Reason.Should().Contain("text");
+            r.Reason.Should().NotContain("tusental");
+        }
+
+        /// <summary>
+        /// Belopp + betalningsinstruktion + ett privat telefonnummer, i ett fält som visas publikt.
+        /// Ett tal går inte att plocka ut ur det utan att slänga resten.
+        /// </summary>
+        [Fact]
+        public void Prod_belopp_med_betalningsinstruktion_rapporteras()
+        {
+            var r = P("900:- Betala med Swish till Tobbe pa 0708781387");
+            r.Outcome.Should().Be(EventFeeMigration.FeeParse.Unparseable);
+            r.Reason.Should().Contain("text");
+        }
     }
 }
