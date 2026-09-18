@@ -66,8 +66,9 @@ namespace HpskSite.Services.Ledger
 
             var accounts = LoadAccounts(db, request.IssuerType, request.IssuerId);
             var roles = LoadRoleMap(db, request.IssuerType, request.IssuerId);
+            var projects = LoadProjects(db, request.IssuerType, request.IssuerId);
 
-            var built = BuildLines(request, accounts, roles, out var buildError);
+            var built = BuildLines(request, accounts, roles, projects, out var buildError);
             if (buildError is not null) return LedgerPostingResult.Failed(buildError);
 
             var imbalance = LedgerAmounts.Imbalance(built);
@@ -81,6 +82,12 @@ namespace HpskSite.Services.Ledger
 
                 var roundingLine = BuildRoundingLine(imbalance, accounts, roles, out var roundError);
                 if (roundError is not null) return LedgerPostingResult.Failed(roundError);
+
+                // Öresdifferensen hör till verifikationen som helhet, inte till någon enskild rad,
+                // så den får begärans projekt — aldrig en enskild rads. Delar verifikationen sig
+                // mellan två projekt finns det inget sant svar på vilket öret tillhör, och då är
+                // "inget projekt" ärligare än att lägga det på det första.
+                StampProject(roundingLine!, request.ProjectId, projects);
                 built.Add(roundingLine!);
             }
 
@@ -210,31 +217,52 @@ namespace HpskSite.Services.Ledger
                 CreatedByMemberId = byMemberId
             };
 
-            // Raderna byggs med UTTRYCKLIGA kontonummer och inte med roller: rättelsen ska träffa
-            // exakt de konton originalet träffade, även om föreningen pekat om en roll sedan dess.
-            foreach (var line in lines)
-            {
-                request.Lines.Add(new LedgerPostingLine
-                {
-                    AccountNumber = line.AccountNumber,
-                    Debit = line.Credit,
-                    Credit = line.Debit,
-                    Text = line.Text,
-                    // Momsen är redan uträknad i originalet och ligger på en egen rad; en ny
-                    // uträkning här skulle lägga moms på momsen.
-                    VatRate = 0
-                });
-            }
+            request.Lines.AddRange(BuildCorrectionLines(lines));
 
             return Post(request);
         }
 
+        /// <summary>
+        /// Vänder originalets rader till en rättelse. <b>Ren funktion</b>, av samma skäl som
+        /// <see cref="BuildLines"/>: det är den här mappningen som är lätt att tappa något i, och
+        /// det den tappar syns inte förrän någon jämför två rapporter.
+        ///
+        /// <para>Raderna byggs med UTTRYCKLIGA kontonummer och inte med roller: rättelsen ska
+        /// träffa exakt de konton originalet träffade, även om föreningen pekat om en roll sedan
+        /// dess.</para>
+        /// </summary>
+        internal static List<LedgerPostingLine> BuildCorrectionLines(
+            IEnumerable<LedgerJournalEntryLine> original)
+            => original.Select(line => new LedgerPostingLine
+            {
+                AccountNumber = line.AccountNumber,
+                // Debet och kredit byter plats — det är hela rättelsen.
+                Debit = line.Credit,
+                Credit = line.Debit,
+                Text = line.Text,
+                // Momsen är redan uträknad i originalet och ligger på en egen rad; en ny uträkning
+                // här skulle lägga moms på momsen.
+                VatRate = 0,
+                // ⚠️ PROJEKTET MÅSTE FÖLJA MED, per rad och ur ORIGINALET. En rättelse som tappar
+                // projektet lämnar kostnaden kvar i projektets resultat medan den är borta ur
+                // bokföringens — och då visar projektrapporten ett underskott som ingen kan hitta i
+                // böckerna. Samma familj av fel som momsen ovan.
+                ProjectId = line.ProjectId
+            }).ToList();
+
         // ── Uppbyggnaden ────────────────────────────────────────────────────────────────────
 
-        private List<LedgerJournalEntryLine> BuildLines(
+        /// <summary>
+        /// Bygger konteringsraderna ur begäran. <b>Rör ingen databas</b> — allt den behöver kommer
+        /// in som färdiga uppslagstabeller, och därför går den att pröva som en ren funktion.
+        /// <c>internal</c> just för det; publik hade inbjudit anropare att gå förbi
+        /// <see cref="Post"/>, som är den enda vägen in i liggaren.
+        /// </summary>
+        internal static List<LedgerJournalEntryLine> BuildLines(
             LedgerPostingRequest request,
             IReadOnlyDictionary<int, LedgerAccount> accounts,
             IReadOnlyDictionary<string, int> roles,
+            IReadOnlyDictionary<int, LedgerProject> projects,
             out string? error)
         {
             error = null;
@@ -281,11 +309,22 @@ namespace HpskSite.Services.Ledger
                     return result;
                 }
 
+                // Radens eget projekt vinner över begärans. Det är så en betalning som täcker två
+                // projekt bokförs; den vanliga vägen är att bara begäran bär ett projekt.
+                var projectId = line.ProjectId ?? request.ProjectId;
+                if (projectId is int wanted && !projects.ContainsKey(wanted))
+                {
+                    // Namnger id:t: ett projekt som tillhör en ANNAN förening ser likadant ut här
+                    // som ett som inte finns, och båda är fel att bokföra på.
+                    error = $"Projektet {wanted} finns inte hos föreningen.";
+                    return result;
+                }
+
                 var gross = line.Debit > 0 ? line.Debit : line.Credit;
                 var rate = line.VatRate ?? account.DefaultVatRate ?? 0m;
                 var (net, vat) = LedgerAmounts.SplitGross(gross, rate);
 
-                result.Add(new LedgerJournalEntryLine
+                var posted = new LedgerJournalEntryLine
                 {
                     // ⚠️ Nummer OCH namn som snapshot — kontoplanen får byggas om utan att
                     // historiken skrivs om.
@@ -296,7 +335,10 @@ namespace HpskSite.Services.Ledger
                     Text = line.Text,
                     VatRate = vat > 0 ? rate : null,
                     VatAmount = vat > 0 ? vat : null
-                });
+                };
+
+                StampProject(posted, projectId, projects);
+                result.Add(posted);
 
                 if (vat <= 0) continue;
 
@@ -312,7 +354,7 @@ namespace HpskSite.Services.Ledger
                     return result;
                 }
 
-                result.Add(new LedgerJournalEntryLine
+                var vatLine = new LedgerJournalEntryLine
                 {
                     AccountNumber = vatAccount.Number,
                     AccountName = vatAccount.Name,
@@ -320,13 +362,19 @@ namespace HpskSite.Services.Ledger
                     Debit = line.Debit > 0 ? vat : 0m,
                     Credit = line.Credit > 0 ? vat : 0m,
                     Text = $"Moms {rate:0.##} %"
-                });
+                };
+
+                // ⚠️ Momsraden ärver källradens projekt. Gjorde den inte det skulle projektets
+                // resultat inte gå ihop med bokföringens — kioskens intäkt hade legat på projektet
+                // och dess moms utanför.
+                StampProject(vatLine, projectId, projects);
+                result.Add(vatLine);
             }
 
             return result;
         }
 
-        private LedgerJournalEntryLine? BuildRoundingLine(
+        internal static LedgerJournalEntryLine? BuildRoundingLine(
             decimal imbalance,
             IReadOnlyDictionary<int, LedgerAccount> accounts,
             IReadOnlyDictionary<string, int> roles,
@@ -365,6 +413,35 @@ namespace HpskSite.Services.Ledger
                     "SELECT * FROM dbo.LedgerAccount WHERE IssuerType = @0 AND IssuerId = @1",
                     issuerType, issuerId)
                  .ToDictionary(a => a.Number);
+
+        /// <summary>
+        /// Sätter projektets id och namnsnapshot på en rad. Null lämnar raden omärkt, vilket är
+        /// det normala för en förening som inte använder projekt.
+        /// </summary>
+        private static void StampProject(
+            LedgerJournalEntryLine line,
+            int? projectId,
+            IReadOnlyDictionary<int, LedgerProject> projects)
+        {
+            if (projectId is not int id || !projects.TryGetValue(id, out var project)) return;
+
+            line.ProjectId = project.Id;
+            line.ProjectName = project.Name;
+        }
+
+        /// <summary>
+        /// Föreningens projekt, <b>inklusive stängda</b>.
+        ///
+        /// <para>⚠️ Ett stängt projekt tas bort ur väljaren, men inte ur bokföringen. En kostnad
+        /// för en tävling kommer ofta in flera veckor efter att den avslutats — Hallands krets
+        /// bokförde SSM-fakturor en månad efteråt — och att vägra den posten hade tvingat den till
+        /// "inget projekt", vilket är sämre än att låta den träffa rätt projekt sent.</para>
+        /// </summary>
+        private static Dictionary<int, LedgerProject> LoadProjects(IDatabase db, int issuerType, int issuerId)
+            => db.Fetch<LedgerProject>(
+                    "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1",
+                    issuerType, issuerId)
+                 .ToDictionary(p => p.Id);
 
         private static Dictionary<string, int> LoadRoleMap(IDatabase db, int issuerType, int issuerId)
             => db.Fetch<LedgerAccountRole>(

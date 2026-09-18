@@ -101,6 +101,16 @@ namespace HpskSite.Models.Ledger
         public string? Text { get; set; }
 
         public decimal? VatRate { get; set; }
+
+        /// <summary>
+        /// Projektet raden ska bokföras på. Se <see cref="LedgerProject"/>.
+        ///
+        /// <para>Bara id:t, ingen namnsnapshot. Ett utkast är mutabelt och läses alltid mot levande
+        /// data, så en snapshot här hade kunnat hinna bli inaktuell innan posten ens bokförts.
+        /// Namnet fryses först i <see cref="LedgerJournalEntryLine.ProjectName"/>, när raden
+        /// skrivs.</para>
+        /// </summary>
+        public int? ProjectId { get; set; }
     }
 
     /// <summary>

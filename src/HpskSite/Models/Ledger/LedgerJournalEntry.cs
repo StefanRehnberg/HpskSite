@@ -143,5 +143,34 @@ namespace HpskSite.Models.Ledger
 
         /// <summary>Momsbeloppet som hör till raden. Se <see cref="VatRate"/>.</summary>
         public decimal? VatAmount { get; set; }
+
+        /// <summary>
+        /// Projektet raden hör till, eller null. Se <see cref="LedgerProject"/> för varför
+        /// dimensionen finns.
+        ///
+        /// <para><b>⚠️ DIMENSIONEN SITTER PÅ RADEN, INTE PÅ VERIFIKATIONEN.</b> En och samma
+        /// betalning kan höra till två projekt — en bankdragning som täcker både tävlingen och
+        /// kansliet — och SIE lägger dimensioner på <c>#TRANS</c>, alltså på raden. På
+        /// verifikationen hade det varit billigare och fel.</para>
+        ///
+        /// <para><b>Det här är vad rapporterna grupperar på</b>, inte namnet. Döper föreningen om
+        /// "SSM 2025" till "SSM Fältskytte 2025" följer hela historiken med namnbytet, i stället
+        /// för att projektet delas i två poster i sin egen resultatrapport.</para>
+        /// </summary>
+        public int? ProjectId { get; set; }
+
+        /// <summary>
+        /// Vad projektet hette när posten bokfördes. <b>Snapshot</b> — men av ett annat skäl än
+        /// <see cref="AccountName"/>.
+        ///
+        /// <para>Kontonamnet är snapshot för att historiken inte ska skrivas om. Projektnamnet är
+        /// det bara för <b>handlingar som redan lämnat systemet</b>: en utskriven
+        /// verifikationslista, en SIE-fil, en bilaga till årsmötet. Den som läser om ett papper
+        /// från 2025 ska se det som stod där då. Levande rapporter läser namnet ur
+        /// <see cref="ProjectId"/>.</para>
+        ///
+        /// <para>Tom sträng när raden saknar projekt.</para>
+        /// </summary>
+        public string ProjectName { get; set; } = "";
     }
 }

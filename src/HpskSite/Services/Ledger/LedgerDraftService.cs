@@ -205,7 +205,11 @@ namespace HpskSite.Services.Ledger
                         Debit = l.Debit,
                         Credit = l.Credit,
                         Text = l.Text,
-                        VatRate = l.VatRate
+                        VatRate = l.VatRate,
+                        // Projektet sitter per rad även i utkastet — ett utkast ska kunna beskriva
+                        // en betalning som delar sig mellan två projekt, annars går den inte att
+                        // förbereda alls.
+                        ProjectId = l.ProjectId
                     }).ToList()
                 });
             }

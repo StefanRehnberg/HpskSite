@@ -37,6 +37,21 @@ namespace HpskSite.Models.Ledger
 
         public int? PaymentId { get; set; }
 
+        /// <summary>
+        /// Projektet som gäller för HELA verifikationen, om inget annat sägs per rad. Se
+        /// <see cref="LedgerProject"/>.
+        ///
+        /// <para><b>Det här är den ergonomiska halvan av dimensionen.</b> Nästan varje postning
+        /// hör i sin helhet till ett projekt — en anmälningsavgift till tävlingen den avser, ett
+        /// utlägg till det man köpte in till. Anroparen sätter det en gång här i stället för på
+        /// varje rad, och en systemgenererad postning ur en tävling kan därmed märka sina rader
+        /// utan att någon människa väljer något.</para>
+        ///
+        /// <para>En rad som sätter <see cref="LedgerPostingLine.ProjectId"/> vinner över det här
+        /// värdet. Det är så en betalning som täcker två projekt bokförs.</para>
+        /// </summary>
+        public int? ProjectId { get; set; }
+
         public int CreatedByMemberId { get; set; }
 
         /// <summary>
@@ -82,6 +97,17 @@ namespace HpskSite.Models.Ledger
         /// (inköp). Null = härled ur kontoklassen (3 = intäkt → utgående, annars ingående).
         /// </summary>
         public bool? VatIsOutgoing { get; set; }
+
+        /// <summary>
+        /// Projekt för just den här raden. Null = ärv <see cref="LedgerPostingRequest.ProjectId"/>.
+        ///
+        /// <para>Sätts bara när en verifikation delar sig mellan projekt. Den vanliga vägen är att
+        /// låta hela begäran bära projektet.</para>
+        ///
+        /// <para>⚠️ Momsraden och avrundningsraden som tjänsten lägger till ärver källradens
+        /// projekt. Annars hade projektets resultat inte gått ihop med bokföringens.</para>
+        /// </summary>
+        public int? ProjectId { get; set; }
     }
 
     /// <summary>Vad bokföringen resulterade i. <see cref="Error"/> är null när det gick.</summary>

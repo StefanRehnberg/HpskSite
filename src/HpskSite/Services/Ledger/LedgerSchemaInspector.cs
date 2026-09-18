@@ -44,6 +44,7 @@ namespace HpskSite.Services.Ledger
             typeof(LedgerFiscalYear),
             typeof(LedgerAccount),
             typeof(LedgerAccountRole),
+            typeof(LedgerProject),
             typeof(LedgerJournalEntry),
             typeof(LedgerJournalEntryLine),
             typeof(LedgerAttachment),
@@ -71,7 +72,8 @@ namespace HpskSite.Services.Ledger
         // Båda skripten namnges: en saknad momskolumn kommer ur det andra, och ett meddelande som
         // pekar på fel skript skickar operatören att köra om ett som inte hjälper.
         public const string MigrationScript =
-            "Migrations/create-ledger-tables.sql + add-vat-to-ledger.sql + create-ledger-draft-tables.sql + create-ledger-payment-tables.sql";
+            "Migrations/create-ledger-tables.sql + add-vat-to-ledger.sql + create-ledger-draft-tables.sql "
+            + "+ create-ledger-payment-tables.sql + add-project-dimension-to-ledger.sql";
 
         /// <summary>Hur länge en låsbegäran får vänta. Blockerar något är det svaret vi vill ha.</summary>
         private const int LockTimeoutMs = 3000;
@@ -240,7 +242,7 @@ namespace HpskSite.Services.Ledger
 
         /// <summary>
         /// ⚠️ <c>IN (@0)</c> med en array expanderar NPoco till en parameter per element. Taket
-        /// ligger kring 2100 och nås tyst; här är listorna 15 respektive 4 och alltså aldrig nära.
+        /// ligger kring 2100 och nås tyst; här är listorna 16 respektive 4 och alltså aldrig nära.
         /// </summary>
         private static HashSet<string> FetchNames(IUmbracoDatabase db, string sql, string[] values)
             => new HashSet<string>(db.Fetch<string>(sql, new object[] { values }), StringComparer.OrdinalIgnoreCase);

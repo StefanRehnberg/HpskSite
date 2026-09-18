@@ -23,6 +23,7 @@ namespace HpskSite.Composers
             builder.Services.AddSingleton<LedgerSchemaInspector>();
             builder.Services.AddScoped<LedgerSetupService>();
             builder.Services.AddScoped<LedgerPostingService>();
+            builder.Services.AddScoped<LedgerProjectService>();
             builder.Services.AddScoped<LedgerDraftService>();
             builder.Services.AddScoped<LedgerIssuerResolver>();
             builder.Services.AddScoped<LedgerPaymentService>();
