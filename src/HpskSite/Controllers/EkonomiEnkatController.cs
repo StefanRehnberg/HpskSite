@@ -281,6 +281,27 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Svaren, tyngsta bakgrunden först. Sajtadmin bara — raderna bär namn och e-post.
         /// </summary>
+        /// <summary>
+        /// <c>/ekonomifragor/wf</c> — "Tre sorters klubbar", underlaget som förklarar varför en
+        /// klubb med bankkopplat bokföringsprogram INTE ska flytta in sin bokföring hos oss.
+        ///
+        /// <para><b>Öppen, av samma skäl som frågesidan själv:</b> länken ska fungera direkt ur ett
+        /// mejl. En kassör ska inte behöva ett konto för att läsa ett underlag vi bett hen om
+        /// synpunkter på — det är samma tröskel som redan kostat oss svar en gång.</para>
+        ///
+        /// <para><b>⚠️ Sidan bär <c>noindex</c>.</b> Den är adresserad till en namngiven person och
+        /// citerar hen; att den råkar bli sökbar är en annan sak än att den är nåbar för den som
+        /// fått länken.</para>
+        ///
+        /// <para>Gjord för att både läsas och skrivas ut — print-CSS ligger i vyn, så mottagaren kan
+        /// spara den som PDF om hen hellre vill ha en fil.</para>
+        /// </summary>
+        [HttpGet("wf")]
+        public IActionResult Wireframes()
+        {
+            return View("~/Views/EkonomiEnkatWireframes.cshtml");
+        }
+
         [HttpGet("svar")]
         public async Task<IActionResult> Svar(int raderat = 0, string? fel = null)
         {

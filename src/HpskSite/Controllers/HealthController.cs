@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using HpskSite.Services.Ledger;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Infrastructure.Scoping;
 
@@ -49,11 +50,16 @@ namespace HpskSite.Controllers
         private const int CommandTimeoutSeconds = 10;
 
         private readonly IScopeProvider _scopeProvider;
+        private readonly LedgerSchemaInspector _ledgerSchema;
         private readonly ILogger<HealthController> _logger;
 
-        public HealthController(IScopeProvider scopeProvider, ILogger<HealthController> logger)
+        public HealthController(
+            IScopeProvider scopeProvider,
+            LedgerSchemaInspector ledgerSchema,
+            ILogger<HealthController> logger)
         {
             _scopeProvider = scopeProvider;
+            _ledgerSchema = ledgerSchema;
             _logger = logger;
         }
 
@@ -108,6 +114,91 @@ namespace HpskSite.Controllers
 
                 return Fail(ex.Message, sw);
             }
+        }
+
+        /// <summary>
+        /// <c>GET /health/ledger</c> — verifikationsliggarens schema, på begäran.
+        ///
+        /// <para><b>⚠️⚠️ FINNS FÖR ATT STARTKONTROLLEN ÄR OSYNLIG PÅ PROD.</b>
+        /// <see cref="LedgerSchemaGuardHostedService"/> skriker på <c>Critical</c> om schemat är
+        /// trasigt, men skriver sin framgångsrad på <c>Information</c> — och prod kör Serilog på
+        /// <c>Warning</c> och uppåt. Där går alltså "allt är helt" inte att skilja från "kontrollen
+        /// kördes aldrig", vilket är precis den tystnad guarden finns för att bryta. Den här
+        /// endpointen svarar när man frågar.</para>
+        ///
+        /// <para><b>⚠️ 503 BARA NÄR SCHEMAT ÄR TRASIGT.</b> "Inte migrerad ännu" är ett väntat
+        /// tillstånd före att bokföringen tas i bruk, och en ofullständig rollmappning är en
+        /// inställning som saknas — inget av dem är ett driftavbrott, och ett larm som lyser på
+        /// dem slutar betyda något. De svarar 200 med <c>INFO</c> respektive <c>WARN</c> som
+        /// första ord, så en människa ser skillnaden direkt.</para>
+        ///
+        /// <para>Anonym av samma skäl som <see cref="Db"/>: övervakaren kan inte logga in. Den
+        /// lämnar inte ut någon bokföringsdata — bara namnen på våra egna tabeller och triggrar,
+        /// och bara när de SAKNAS.</para>
+        /// </summary>
+        [HttpGet("ledger")]
+        public IActionResult Ledger()
+        {
+            // Övervakning får aldrig läsa ett cachat svar — hela poängen är läget just nu.
+            Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+
+            var sw = Stopwatch.StartNew();
+            var report = _ledgerSchema.Inspect();
+            sw.Stop();
+
+            var ms = sw.ElapsedMilliseconds;
+
+            // ⚠️ charset måste stå med. Svaret är svensk text, och utan den läser en webbläsare
+            //    det som Latin-1 — då blir "spärrar" till "spÃ¤rrar" i exakt det meddelande någon
+            //    ska agera på klockan sju på morgonen.
+            const string PlainText = "text/plain; charset=utf-8";
+
+            switch (report.Status)
+            {
+                case LedgerSchemaStatus.Ok:
+                    return Content(
+                        $"OK ledger {ms}ms tables={_ledgerSchema.TableCount} triggers={_ledgerSchema.TriggerCount}\n",
+                        PlainText);
+
+                case LedgerSchemaStatus.NotMigrated:
+                    return Content(
+                        $"INFO ledger {ms}ms: inte migrerad ännu — ingen av de {_ledgerSchema.TableCount} "
+                        + $"tabellerna finns. Kör {LedgerSchemaInspector.MigrationScript} när bokföringen "
+                        + "ska tas i bruk.\n",
+                        PlainText);
+
+                case LedgerSchemaStatus.RolesIncomplete:
+                    return Content(
+                        $"WARN ledger {ms}ms: {report.IssuerRoleGaps.Count} utställare bokför men saknar "
+                        + $"kontoroller ({string.Join("; ", report.IssuerRoleGaps)}). Schemat är helt. "
+                        + "Komplettera mappningen i ekonomiinställningarna.\n",
+                        PlainText);
+
+                case LedgerSchemaStatus.CouldNotCheck:
+                    // Kunde inte fråga. Det är inte samma sak som ett trasigt schema, men det är
+                    // heller inte "friskt" — en övervakare ska titta.
+                    _logger.LogWarning("Hälsokontroll: liggarens schema kunde inte läsas ({Ms} ms).", ms);
+                    Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    return Content($"FAIL ledger {ms}ms: kunde inte läsa schemat: {report.Error}\n", PlainText);
+            }
+
+            // Kvar: de tre trasiga lägena. Skriv ut VAD som saknas och VILKET skript som lagar det —
+            // det är det första en människa behöver, och ett meddelande som pekar på fel skript
+            // skickar operatören att köra om ett som inte hjälper.
+            var what = report.Status switch
+            {
+                LedgerSchemaStatus.HalfMigrated => "tabeller saknas: " + string.Join(", ", report.MissingTables),
+                LedgerSchemaStatus.MissingColumns => "kolumner saknas: " + string.Join(", ", report.MissingColumns),
+                _ => "SPÄRRAR SAKNAS (verifikationer går att ändra och radera): "
+                     + string.Join(", ", report.MissingTriggers)
+            };
+
+            _logger.LogWarning("Hälsokontroll: liggarens schema är ofullständigt — {Vad}", what);
+
+            Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return Content(
+                $"FAIL ledger {ms}ms: {what}\nKör {LedgerSchemaInspector.MigrationScript} (guardad, säker att köra om).\n",
+                PlainText);
         }
 
         private IActionResult Fail(string reason, Stopwatch sw)

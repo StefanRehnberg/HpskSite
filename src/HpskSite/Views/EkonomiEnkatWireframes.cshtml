@@ -1,0 +1,368 @@
+@{
+    Layout = null;
+}
+@*
+    /ekonomifragor/wf - "Tre sorters klubbar".
+
+    Underlaget till Fredrik, Varbergs PK, efter hans svar 2026-09-16. Ligger som en OPPEN sida av
+    samma skal som /ekonomifragor sjalv: lanken ska fungera direkt ur ett mejl, utan inloggning
+    och utan att nagon behover dela en artefakt.
+
+    ROUTAD MVC, ingen Umbraco-nod - samma monster som /ekonomifragor, ReceiptController och
+    FaltskyttePrintController. Inget operatorssteg, ingen doctype, ingen publicering.
+
+    VARNING: varje @@ i CSS:en ar ETT at-tecken. I en Razor-vy startar ett ensamt @ foljt av en
+    bokstav ett C#-uttryck, och @@media/@@font-face spracker da vyns runtime-kompilering med ett
+    meddelandelost UmbracoCompilationException. Vyer kompileras i runtime, sa dotnet build sager
+    ingenting - sidladdningen AR kompileringskontrollen.
+
+    Sidan ar gjord for att bade lasas i webblasaren och skrivas ut till PDF (print-CSS langst ned
+    i style-blocket), sa den funkar aven om mottagaren hellre vill ha en fil.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Tre sorters klubbar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;600&display=swap">
+<style>
+  :root {
+    --paper:    #F7F6F3;
+    --surface:  #FFFFFF;
+    --ink:      #1B1B19;
+    --ink-soft: #5E5E58;
+    --line:     #DCDAD3;
+    --line-soft:#ECEAE4;
+    --rail:     #EFEDE7;
+    --attn:     #B45309;
+    --attn-bg:  #FBF4EC;
+    --attn-line:#E8D5BE;
+    --attn-ink: #7A4A12;
+    --ok:       #2F6B4A;
+    --ok-bg:    #F0F5F1;
+    --ok-line:  #C3D9C9;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans:  "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  @@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #15161A; --surface: #1D1F24; --ink: #ECEAE4; --ink-soft: #A5A39C;
+      --line: #33363D; --line-soft: #292C32; --rail: #1A1C21;
+      --attn: #E0A566; --attn-bg: #2A2118; --attn-line: #4A3A24; --attn-ink: #E8C79A;
+      --ok: #7FBF9A; --ok-bg: #17261E; --ok-line: #2C4636;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #15161A; --surface: #1D1F24; --ink: #ECEAE4; --ink-soft: #A5A39C;
+    --line: #33363D; --line-soft: #292C32; --rail: #1A1C21;
+    --attn: #E0A566; --attn-bg: #2A2118; --attn-line: #4A3A24; --attn-ink: #E8C79A;
+    --ok: #7FBF9A; --ok-bg: #17261E; --ok-line: #2C4636;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-block: 40px 64px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .sheet { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
+
+  h1, h2, h3 { font-family: var(--serif); margin: 0; text-wrap: balance; }
+  h1 { font-size: clamp(30px, 5vw, 40px); font-weight: 600; line-height: 1.15; }
+  h2 { font-size: clamp(21px, 3.4vw, 25px); font-weight: 600; }
+  h3 { font-size: 17px; font-weight: 600; }
+  p  { margin: 0; max-width: 66ch; }
+  .lede { font-size: 17.5px; color: var(--ink-soft); max-width: 62ch; }
+
+  .eyebrow {
+    font-size: 11.5px; letter-spacing: 0.11em; text-transform: uppercase;
+    color: var(--ink-soft); font-weight: 600;
+  }
+  header { display: flex; flex-direction: column; gap: 12px;
+           border-bottom: 2px solid var(--ink); padding-bottom: 22px; }
+  header .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13.5px; color: var(--ink-soft); }
+
+  section { display: flex; flex-direction: column; gap: 16px; }
+
+  blockquote {
+    margin: 0; padding: 16px 20px; background: var(--surface);
+    border: 1px solid var(--line); border-left: 3px solid var(--attn);
+    font-family: var(--serif); font-size: 17px; line-height: 1.55;
+  }
+  blockquote cite { display: block; margin-top: 8px; font-family: var(--sans);
+                    font-size: 13px; font-style: normal; color: var(--ink-soft); }
+
+  /* De tre sorterna — numreringen är äkta: den följer hur mycket vi gör. */
+  .shapes { display: grid; gap: 14px; }
+  .shape {
+    display: grid; grid-template-columns: 44px 1fr; gap: 18px;
+    background: var(--surface); border: 1px solid var(--line);
+    padding: 18px 20px; align-items: start;
+  }
+  .shape.is-yours { border-color: var(--ok); border-width: 2px; background: var(--ok-bg); }
+  .shape .num { font-family: var(--serif); font-size: 30px; font-weight: 600;
+                color: var(--ink-soft); line-height: 1; }
+  .shape.is-yours .num { color: var(--ok); }
+  .shape .body { display: flex; flex-direction: column; gap: 6px; }
+  .shape .who { font-weight: 700; font-size: 16.5px; }
+  .shape .we  { font-size: 14.5px; color: var(--ink-soft); }
+  .shape .tag { align-self: flex-start; margin-top: 4px; font-size: 12px; font-weight: 700;
+                letter-spacing: 0.04em; text-transform: uppercase;
+                color: var(--ok); border: 1px solid var(--ok-line);
+                background: var(--surface); padding: 3px 9px; border-radius: 20px; }
+
+  .callout { background: var(--attn-bg); border: 1px solid var(--attn-line);
+             padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .callout h3 { color: var(--attn-ink); }
+  .callout p  { color: var(--attn-ink); }
+
+  /* Skärmbilden */
+  .screen { border: 1px solid var(--line); background: var(--surface); }
+  .screen-cap { font-size: 12.5px; color: var(--ink-soft); padding: 9px 14px;
+                border-bottom: 1px solid var(--line-soft); background: var(--rail); }
+  .screen-body { display: flex; }
+  .screen-rail { width: 132px; flex-shrink: 0; background: var(--rail);
+                 border-right: 1px solid var(--line-soft); padding: 14px 0; font-size: 12.5px; }
+  .screen-rail .club { padding: 0 14px 12px; font-weight: 700; font-size: 13.5px; }
+  .screen-rail a { display: block; padding: 7px 14px; color: var(--ink); text-decoration: none; }
+  .screen-rail .on { font-weight: 700; background: var(--surface);
+                     box-shadow: inset 3px 0 0 var(--attn); }
+  .screen-main { flex-grow: 1; padding: 16px 18px; display: flex; flex-direction: column;
+                 gap: 14px; min-width: 0; }
+  .screen-h { font-family: var(--serif); font-size: 20px; font-weight: 600; }
+  .panels { display: grid; grid-template-columns: 200px 1fr; gap: 14px; }
+  .panel { border: 1px solid var(--line-soft); padding: 12px 14px;
+           display: flex; flex-direction: column; gap: 8px; }
+  .panel .lbl { font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+  .big { font-family: var(--serif); font-size: 31px; font-weight: 600; color: var(--attn);
+         line-height: 1; }
+  .rows { display: flex; flex-direction: column; font-size: 12.5px; }
+  .rows > div { display: flex; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line-soft); }
+  .rows > div:last-child { border-bottom: 0; }
+  .rows .grow { flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+  .rows .num2 { font-variant-numeric: tabular-nums; }
+  .kvitto { color: var(--ok); font-weight: 700; font-size: 11.5px; }
+
+  .tablewrap { overflow-x: auto; }
+  table.per { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.per th { text-align: left; font-size: 11px; letter-spacing: 0.04em;
+                 text-transform: uppercase; color: var(--ink-soft);
+                 background: var(--rail); padding: 7px 10px; font-weight: 700; }
+  table.per td { padding: 8px 10px; border-top: 1px solid var(--line-soft); }
+  table.per td.n, table.per th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  table.per tr.gap td { background: var(--attn-bg); }
+  table.per td.miss { color: var(--attn); font-weight: 700; }
+  table.per td.fine { color: var(--ok); font-weight: 600; }
+
+  .ask { background: var(--surface); border: 1px solid var(--line); padding: 20px 22px;
+         display: flex; flex-direction: column; gap: 14px; }
+  .ask ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .ask li::marker { font-weight: 700; color: var(--attn); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 18px;
+           font-size: 13px; color: var(--ink-soft); }
+
+  @@media (max-width: 640px) {
+    .panels { grid-template-columns: 1fr; }
+    .screen-body { flex-direction: column; }
+    .screen-rail { width: auto; border-right: 0; border-bottom: 1px solid var(--line-soft);
+                   display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 10px 6px; }
+    .screen-rail .club { padding: 0 8px; }
+    .screen-rail a { padding: 5px 9px; }
+    .screen-rail .on { box-shadow: inset 0 -3px 0 var(--attn); }
+    .shape { grid-template-columns: 34px 1fr; gap: 12px; }
+  }
+
+  @@media print {
+    :root { --paper: #FFFFFF; }
+    body { padding: 0; font-size: 11.5pt; }
+    .sheet { max-width: none; gap: 26px; }
+    section, .screen, .ask, .callout, .shape { break-inside: avoid; }
+    .page-break { break-before: page; }
+    a { text-decoration: none; color: inherit; }
+  }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <header>
+    <div class="eyebrow">Underlag till Varbergs Pistolklubb</div>
+    <h1>Tre sorters klubbar</h1>
+    <p class="lede">Varför ni inte ska flytta in er bokföring hos oss — och vad vi skulle göra i stället.</p>
+    <div class="meta">
+      <span>Pistol.nu</span>
+      <span>18 september 2026</span>
+      <span>Skiss, inte en färdig produkt</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Ditt svar ändrade designen</h2>
+    <p>Du skrev att du hellre stannar i SpeedLedger och använder pistol.nu som ett debiterings- och kontrollsystem. Jag tog först det som en invändning att bemöta. Det var fel — det var ett svar, och ett bättre svar än det vi hade.</p>
+    <blockquote>
+      Att bokföra dessa mängder av kontohändelser i ett system som inte är kopplat skulle för kassören bli ganska betungande arbete. För egen del skulle jag ha svårt att se fördelen med att flytta in i pistol.nu helt och hållet.
+      <cite>Fredrik, Varbergs PK</cite>
+    </blockquote>
+    <p>När vi tittade närmare visade det sig att klubbarna inte är två sorter utan tre — och att det som skiljer dem <strong>inte är storleken</strong>, utan om deras bokföringsprogram redan hämtar bankdatat självt.</p>
+  </section>
+
+  <section>
+    <h2>De tre sorterna</h2>
+    <div class="shapes">
+
+      <div class="shape">
+        <div class="num">1</div>
+        <div class="body">
+          <div class="who">Ingen bokföring i ett program</div>
+          <div class="we">Pärm, Excel, eller ett program på en privatpersons licens. Där blir pistol.nu bokföringen: verifikationer, avstämning, resultat- och balansräkning, bokslut.</div>
+        </div>
+      </div>
+
+      <div class="shape">
+        <div class="num">2</div>
+        <div class="body">
+          <div class="who">Program utan bankkoppling</div>
+          <div class="we">Klubben har ett bokföringsprogram, men det läser inte kontot. Då måste våra uppgifter dit — vi lämnar över en SIE-fil och håller reda på vad som redan är överlämnat, så inget bokförs två gånger.</div>
+        </div>
+      </div>
+
+      <div class="shape is-yours">
+        <div class="num">3</div>
+        <div class="body">
+          <div class="who">Program med bankkoppling</div>
+          <div class="we">SpeedLedger läser varje kontohändelse och bokför den automatiskt. Vi skickar <strong>ingenting</strong> som ska bokföras. Vi är bara det som säger vad som borde komma in.</div>
+          <span class="tag">Det här är ni</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Varför ni inte ska ha en export</h2>
+    <div class="callout">
+      <h3>En fil från oss skulle bokföras två gånger</h3>
+      <p>Anmälningsavgifterna landar på ert konto, och SpeedLedger bokför dem redan därifrån. Skickade vi er en SIE-fil med samma transaktioner skulle de bokföras en gång till. Exporten är alltså inte en funktion för er — den är en risk, och vi bygger den inte för er.</p>
+    </div>
+    <p>Kvar blir precis det du själv efterfrågade:</p>
+    <blockquote>
+      Det vore en fördel att koppla anmälning, betalning och kvitto i mjukvaran. Att man skapar ett fordringskonto helt enkelt. Många gånger är det för kassören okänt vilka som deltar i en tävling, hur många anmälningsavgifter som förväntas komma och därmed finns risken också att någon avgift inte kommer in.
+      <cite>Fredrik, Varbergs PK</cite>
+    </blockquote>
+  </section>
+
+  <section class="page-break">
+    <h2>Så skulle det se ut för Varberg</h2>
+    <p>Tre saker på skärmen, och tre poster i menyn. Ingen bokföring, ingen avstämning, inget bokslut.</p>
+
+    <div class="screen">
+      <div class="screen-cap">Skiss — siffrorna är påhittade</div>
+      <div class="screen-body">
+
+        <div class="screen-rail">
+          <div class="club">Varbergs PK</div>
+          <a href="#" class="on">Översikt</a>
+          <a href="#">Avgifter</a>
+          <a href="#">Inställningar</a>
+        </div>
+
+        <div class="screen-main">
+          <div class="screen-h">Vad har vi att få in?</div>
+
+          <div class="panels">
+            <div class="panel">
+              <div class="lbl">1 · Att få in</div>
+              <div class="big">4 350 kr</div>
+              <div class="rows">
+                <div><span class="grow">Anmälningsavgifter, 5</span><span class="num2">2 250</span></div>
+                <div><span class="grow">Medlemsavgifter, 3</span><span class="num2">1 500</span></div>
+                <div><span class="grow">Lagavgift, 1</span><span class="num2">600</span></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="lbl">2 · Kommit in — kvitto skickas automatiskt</div>
+              <div class="rows">
+                <div><span class="num2">18 sep</span><span class="grow">Anna Bergström · Höstfältet</span><span class="num2">150</span><span class="kvitto">K-212</span></div>
+                <div><span class="num2">18 sep</span><span class="grow">Lars Ohlsson · Höstfältet</span><span class="num2">150</span><span class="kvitto">K-211</span></div>
+                <div><span class="num2">17 sep</span><span class="grow">Karin Wahlberg · Medlemsavgift</span><span class="num2">500</span><span class="kvitto">K-210</span></div>
+                <div><span class="num2">17 sep</span><span class="grow">Tomelilla PK · Lagavgift</span><span class="num2">600</span><span class="kvitto">K-209</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="lbl">3 · Per tävling — saknas någon avgift?</div>
+            <div class="tablewrap">
+              <table class="per">
+                <thead>
+                  <tr>
+                    <th>Tävling</th>
+                    <th class="n">Anmälda</th>
+                    <th class="n">Betalt</th>
+                    <th class="n">Saknas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="gap">
+                    <td>Höstfältet 13 september</td><td class="n">48</td><td class="n">44</td>
+                    <td class="n miss">4 · 600 kr</td>
+                  </tr>
+                  <tr class="gap">
+                    <td>Måndagsträning, september</td><td class="n">31</td><td class="n">30</td>
+                    <td class="n miss">1 · 150 kr</td>
+                  </tr>
+                  <tr>
+                    <td>Klubbmästerskap precision</td><td class="n">26</td><td class="n">26</td>
+                    <td class="n fine">Inget</td>
+                  </tr>
+                  <tr>
+                    <td>Torsdagstävling 11 september</td><td class="n">22</td><td class="n">22</td>
+                    <td class="n fine">Inget</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <p>Den tredje raden är poängen. <strong>48 anmälda, 44 betalt, 4 saknas</strong> — det är siffran du beskrev som okänd, och den kan inte finnas i bokföringen. Bokföringen ser vad som kom in; den kan aldrig se vad som borde ha kommit in.</p>
+  </section>
+
+  <section>
+    <h2>Vad nyttan blir, ärligt</h2>
+    <p>Din fråga var vad vi tillför i förhållande till hur ni har det i dag. Svaret är: <strong>ingenting på bokföringen</strong> — den fungerar redan hos er, och en bankkoppling kommer vi inte att bygga. All nytta ligger i den tredje punkten ovan, plus att skytten får sitt kvitto automatiskt utan att någon skriver det.</p>
+    <p>SIE-fil finns ändå, under Åtgärder, om revisorn vill se underlaget eller vid ett årsskifte. Men inget ni behöver röra löpande.</p>
+  </section>
+
+  <section>
+    <div class="ask">
+      <h2>Två frågor till dig</h2>
+      <ol>
+        <li><strong>Stämmer det här?</strong> Är de tre punkterna på skärmen vad du menade med ett fordringskonto — eller har vi missat något ni faktiskt behöver?</li>
+        <li><strong>Nu vet du vilken hatt du har på dig.</strong> Du skrev att du gärna svarar på frågeformuläret om du vet vilken vardag vi förutsätter. Det är den här. Men de här två frågorna är viktigare än formuläret.</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer>
+    Pistol.nu · Skiss framtagen 18 september 2026 efter Fredriks svar. Siffror och namn i skärmbilden är påhittade — vi har ingen åtkomst till klubbens konton eller uppgifter.
+  </footer>
+
+</div>
+</body>
+</html>
