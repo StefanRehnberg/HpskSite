@@ -134,7 +134,7 @@ const main = async () => {
     s = await state();
     eq('skulden är 180', s.party.outstanding, 180);
     eq('inget är betalt', s.party.confirmedPaid, 0);
-    eq('och anmälan är INTE giltig än', s.party.isPaidUp, false);
+    eq('och anmälan är INTE giltig än', s.party.isPaymentPresented, false);
 
     // Gästen läggs till FÖRE betalningen — hela poängen med att skulden är per sällskap.
     const g = await json('/umbraco/surface/ClubEvent/AddGuest',
@@ -185,8 +185,14 @@ const main = async () => {
     ok('och är en PNG med innehåll', qr.type === 'image/png' && qr.size > 500, JSON.stringify(qr));
 
     s = await state();
+    // ⚠️⚠️ HÄR ÄR REGELN: koden har visats, alltså är anmälan giltig — utan att någon betalat och
+    // utan att någon bekräftat. Stefan 2026-09-18.
+    eq('anmälan är GILTIG så snart koden visats', s.party.isPaymentPresented, true);
+    eq('och hela summan har presenterats', s.party.amountPresented, 270);
+    // ⚠️ Men en begäran är INTE pengar, och arrangören väntar fortfarande på hela beloppet.
     eq('en begäran är INTE en betalning', s.party.outstanding, 270);
-    eq('och anmälan är fortfarande ogiltig', s.party.isPaidUp, false);
+    eq('inget är bekräftat', s.party.confirmedPaid, 0);
+    eq('och inget är avstämt', s.party.isSettled, false);
 
     // ── Claim ─────────────────────────────────────────────────────────────────────────────────
     section('Betalaren säger att hen betalat');
@@ -195,12 +201,14 @@ const main = async () => {
     ok('påståendet registreras', claim.success, claim.message);
 
     s = await state();
-    eq('skulden är borta — anmälan är giltig', s.party.outstanding, 0);
-    eq('anmälan är giltig', s.party.isPaidUp, true);
-    // ⚠️⚠️ KÄRNAN: ett påstående är INTE pengar. Går det här igenom som bekräftat är
+    // ⚠️⚠️ KÄRNAN: ett påstående är INTE pengar. Räknades det som bekräftat vore
     // avprickningslistan värdelös som kontroll.
+    eq('påståendet syns', s.party.claimedPaid, 270);
     eq('men det är INTE pengar', s.party.confirmedPaid, 0);
+    eq('arrangören väntar fortfarande på 270', s.party.outstanding, 270);
     eq('och det syns att bekräftelse saknas', s.party.awaitingConfirmation, true);
+    // ⚠️ Inget kvar att be om: hen har sagt att hen betalat allt.
+    eq('ingen ny begäran behövs', s.party.remainingToRequest ?? 0, 0);
 
     const dubbel = await json('/umbraco/surface/ClubEvent/ClaimPayment',
       { eventId: evId, paymentId: start.paymentId });

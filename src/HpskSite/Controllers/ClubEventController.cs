@@ -228,8 +228,16 @@ namespace HpskSite.Controllers
                     // att slå ihop dem gör arrangörens avprickningslista oanvändbar som kontroll.
                     confirmedPaid = party.ConfirmedPaid,
                     claimedPaid = party.ClaimedPaid,
+                    // ⚠️⚠️ TVÅ SKILDA FRÅGOR, och kortet använder olika svar på dem:
+                    //   isPaymentPresented — får personen stå på listan? (Swish-koden har visats)
+                    //   outstanding        — vad väntar arrangören fortfarande på? (bara bekräftat)
+                    // Drevs båda av samma tal vore antingen varje kvällsanmälan ogiltig till dagen
+                    // efter, eller så vore avprickningslistan blind för dem som aldrig betalade.
+                    amountPresented = party.AmountPresented,
+                    isPaymentPresented = party.IsPaymentPresented,
                     outstanding = party.Outstanding,
-                    isPaidUp = party.IsPaidUp,
+                    isSettled = party.IsSettled,
+                    remainingToRequest = party.RemainingToRequest,
                     awaitingConfirmation = party.AwaitingConfirmation,
                     guests = party.Guests.Select(g => new
                     {
@@ -1000,7 +1008,7 @@ namespace HpskSite.Controllers
             var party = BuildPartyWithPayments(roster, me, ctx.EventId);
             if (party.Self == null)
                 return Json(new { success = false, message = "Du är inte anmäld till evenemanget." });
-            if (party.Outstanding <= 0)
+            if (party.RemainingToRequest <= 0)
                 return Json(new { success = false, message = "Det finns inget kvar att betala." });
 
             var issuer = _issuers.ResolveForEvent(ctx.EventId);
@@ -1019,13 +1027,24 @@ namespace HpskSite.Controllers
                     message = "Klubben kan inte ta emot betalningen än: " + blocked,
                 });
 
-            // ⚠️ Återanvänd en öppen begäran. En ny rad per klick hade blivit fem rader för fem
-            // otåliga tryck, och skulden hade sett fem gånger för stor ut.
-            var existing = _payments
+            // Mina öppna begäranden: varken påstådda, bekräftade eller makulerade.
+            var open = _payments
                 .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
-                .FirstOrDefault(p => p.PayerMemberId == me
-                                     && p.VoidedUtc is null && p.ConfirmedUtc is null
-                                     && p.Amount == party.Outstanding);
+                .Where(p => p.PayerMemberId == me
+                            && p.VoidedUtc is null && p.ConfirmedUtc is null && p.ClaimedUtc is null)
+                .ToList();
+
+            // ⚠️ Återanvänd den som redan gäller rätt belopp. En ny rad per klick hade blivit fem
+            // rader för fem otåliga tryck, och arrangörens lista hade sett fem gånger för lång ut.
+            var existing = open.FirstOrDefault(p => p.Amount == party.RemainingToRequest);
+
+            // ⚠️⚠️ OCH MAKULERA DE SOM GÄLLER FEL BELOPP. Lägger Hugo till en gäst efter att koden
+            // visats växer skulden från 270 till 450 — utan det här ligger BÅDA kvar, och
+            // `Completeness` rapporterar två förväntade betalningar på 720 för ett sällskap som är
+            // skyldigt 450. En verifikationsliggare raderar ingenting, så raden makuleras med ett
+            // skäl i stället för att tas bort.
+            foreach (var stale in open.Where(p => p.Amount != party.RemainingToRequest))
+                _payments.Void(stale.Id, me, "Sällskapet ändrades — ersatt av en ny begäran.");
 
             int paymentId;
             if (existing != null) paymentId = existing.Id;
@@ -1040,7 +1059,7 @@ namespace HpskSite.Controllers
                     SourceId = ctx.EventId,
                     PayerMemberId = me,
                     PayerName = member?.Name ?? $"Medlem {me}",
-                    Amount = party.Outstanding,
+                    Amount = party.RemainingToRequest,
                     Method = HpskSite.Models.Ledger.LedgerPaymentMethod.Swish,
                 });
                 if (id is null)
@@ -1052,7 +1071,7 @@ namespace HpskSite.Controllers
             {
                 success = true,
                 paymentId,
-                amount = party.Outstanding,
+                amount = party.RemainingToRequest,
                 swishNumber = ctx.SwishNumber,
                 reference = PaymentReference(ctx, paymentId),
                 // ⚠️⚠️ DJUPLÄNKEN OCH QR-KODEN ÄR OLIKA PAYLOADS. `swish://payment?data=` vill ha
@@ -1061,7 +1080,7 @@ namespace HpskSite.Controllers
                 // Djuplänken är för den som betalar PÅ telefonen; QR:en för den som har appen i en
                 // annan enhet.
                 appUrl = SwishQrCodeGenerator.GetSwishAppUrl(
-                    ctx.SwishNumber, SwishAmount(party.Outstanding), PaymentReference(ctx, paymentId)),
+                    ctx.SwishNumber, SwishAmount(party.RemainingToRequest), PaymentReference(ctx, paymentId)),
             });
         }
 

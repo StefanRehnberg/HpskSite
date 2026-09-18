@@ -3934,12 +3934,36 @@ och `LedgerIssuerResolver.ResolveForEvent` fanns redan.
 Vi har ingen Swish-API och ingen callback, så steg två är allt vi vet tills en människa tittat i
 appen. Ett kvitto vid QR-visning hade varit en urkund på en betalning som kanske aldrig gjordes.
 
+**⚠️⚠️ SPÄRREN ÄR ATT SWISH-KODEN VISATS, inte att någon bekräftat.** Stefans regel 2026-09-18:
+*"betalningen behöver inte bekräftas, men swish-koden måste ha visats eller mailats, annars kan vi
+inte förutsätta att det har betalats."* Har koden aldrig visats har medlemmen aldrig fått en chans
+att betala, och då är det inte rimligt att hålla hen till betalningen.
+
+**⚠️ BETALNINGSRADENS EXISTENS ÄR BEVISET att koden visats.** `StartPayment` skapar raden och
+returnerar QR-uppgifterna i SAMMA anrop — det finns ingen väg att få en rad utan att uppgifterna
+lämnats ut. Därför behövs ingen egen `PresentedUtc`-kolumn, och därmed **ingen migrering på en
+liggartabell som redan står i prod**. (Mejlvägen är ännu inte byggd; när den byggs måste den skapa
+raden på samma sätt.)
+
+**⚠️⚠️ FYRA TAL SOM SVARAR PÅ OLIKA FRÅGOR — blanda dem inte:**
+
+| Fält | Frågan det svarar på |
+|---|---|
+| `AmountPresented` | Har medlemmen fått medlet att betala? → **spärren** |
+| `Outstanding` = Total − **bekräftat** | Vad väntar arrangören på? → **avprickningslistan** |
+| `RemainingToRequest` = Total − bekräftat − påstått | Vad ska nästa QR gälla? |
+| `ClaimedPaid` | Vad har medlemmen sagt sig ha betalat? |
+
+Drevs spärren och avprickningen av samma tal vore antingen **varje kvällsanmälan ogiltig till dagen
+efter** (arrangören hinner inte stämma av), eller så vore **listan blind för dem som aldrig
+betalade**. Det är två frågor och de måste ha två svar.
+
 **⚠️ SKULDEN ÄR PER SÄLLSKAP, inte per rad.** Hugo swishar 450 EN gång — en betalning per rad hade
-gett tre QR-koder för en överföring. `ClubEventParty.Outstanding = Total − bekräftat − påstått`,
-härlett enligt ramens *"saldo = dokument − betalningar, alltid härlett"*.
-- **Ett PÅSTÅENDE räknas bort i skulden men INTE i `ConfirmedPaid`.** Spärren kan inte kräva mer än
-  ett påstående (mer vet vi inte), men slås de två ihop kan arrangörens avprickningslista inte
-  skilja den som betalat från den som sagt det — och då är listan inte en kontroll.
+gett tre QR-koder för en överföring.
+- **⚠️ Växer sällskapet efter att koden visats MAKULERAS den gamla begäran.** Utan det ligger både
+  270 och 450 kvar, och `Completeness` rapporterar två förväntade betalningar på 720 för ett
+  sällskap som är skyldigt 450. En verifikationsliggare raderar ingenting — raden makuleras med ett
+  skäl. Påstådda och bekräftade rader rörs ALDRIG.
 - **`BuildParty` tar betalningarna som INPARAMETER.** Ett databasanrop inuti hade gjort varje
   påstående om summan beroende av en riktig liggare, och då hade reglerna bara gått att mäta genom
   hela stacken.

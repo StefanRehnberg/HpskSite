@@ -732,6 +732,16 @@ namespace HpskSite.Services
             party.ConfirmedPaid = mine.Where(p => p.IsMoney).Sum(p => p.SettledAmount);
             party.ClaimedPaid = mine.Where(p => p.IsClaimedOnly).Sum(p => p.Amount);
 
+            // ⚠️⚠️ ATT RADEN FINNS BETYDER ATT KODEN VISATS. `StartPayment` skapar raden och
+            // returnerar QR-uppgifterna i SAMMA anrop — det finns ingen väg att få en betalningsrad
+            // utan att Swish-uppgifterna lämnats ut. Därför behövs ingen egen "presenterad"-kolumn,
+            // och därmed ingen migrering på en liggartabell som redan står i prod.
+            //
+            // ⚠️ Bekräftade räknas på det MOTTAGNA beloppet ovan, men här på det BEGÄRDA: frågan är
+            // vad medlemmen ombetts betala, inte vad som kom in. Betalade hen 400 av 450 har hen
+            // ändå fått medlet att betala 450.
+            party.AmountPresented = mine.Sum(p => p.Amount);
+
             return party;
         }
 
@@ -954,24 +964,50 @@ namespace HpskSite.Services
         public decimal ClaimedPaid { get; set; }
 
         /// <summary>
-        /// Vad som återstår innan anmälan är giltig. <b>Härlett, aldrig lagrat</b> — ramen kräver
-        /// att saldot alltid är dokument minus betalningar.
+        /// Belopp som medlemmen har FÅTT MEDLET ATT BETALA — en betalningsrad finns, alltså har
+        /// Swish-koden visats (eller mejlats). Räknar även påstådda och bekräftade, som per
+        /// definition har passerat det steget.
         ///
-        /// <para>⚠️ Ett PÅSTÅENDE räknas bort här, till skillnad från i arrangörens lista. Spärren
-        /// kan inte kräva mer än ett påstående, för mer vet vi inte — och att låta medlemmen vänta
-        /// på arrangörens bekräftelse innan anmälan blir giltig hade gjort varje kvällsanmälan
-        /// ogiltig till dagen efter.</para>
+        /// <para><b>⚠️⚠️ DET HÄR ÄR SPÄRRENS TAL, och det är INTE pengar.</b> Stefans regel
+        /// 2026-09-18: <i>"betalningen behöver inte bekräftas, men swish-koden måste ha visats
+        /// eller mailats, annars kan vi inte förutsätta att det har betalats."</i> Har koden aldrig
+        /// visats har medlemmen aldrig fått en chans att betala, och då är det inte rimligt att
+        /// hålla hen till betalningen.</para>
         /// </summary>
-        public decimal Outstanding => Math.Max(0m, Total - ConfirmedPaid - ClaimedPaid);
+        public decimal AmountPresented { get; set; }
 
         /// <summary>
-        /// Är anmälan giltig? <b>Det är den här som betalningen är villkor för.</b>
-        /// Gratis sällskap är alltid giltiga — noll att betala är betalt.
+        /// ⚠️⚠️ SPÄRREN: är anmälan giltig? Gratis sällskap alltid; annars krävs att Swish-koden
+        /// visats för hela summan.
+        ///
+        /// <para><b>Skild från <see cref="IsSettled"/> med flit.</b> Den ena frågan är "får den här
+        /// personen stå på listan", den andra är "har pengarna kommit". Drevs båda av samma tal
+        /// vore antingen anmälan ogiltig tills arrangören hunnit stämma av — alltså varje
+        /// kvällsanmälan ogiltig till dagen efter — eller så vore arrangörens avprickningslista
+        /// blind för dem som aldrig betalade.</para>
         /// </summary>
-        public bool IsPaidUp => Outstanding <= 0m;
+        public bool IsPaymentPresented => Total <= 0m || AmountPresented >= Total;
 
-        /// <summary>Väntar på arrangörens bekräftelse. Medlemmen är anmäld, pengarna är ännu
-        /// bara påstådda.</summary>
+        /// <summary>
+        /// Vad arrangören fortfarande väntar på. <b>Bara BEKRÄFTADE pengar räknas bort</b> — ett
+        /// påstående och en visad QR är inte pengar, och den som ska stämma av ett bankkonto måste
+        /// se skillnaden.
+        /// </summary>
+        public decimal Outstanding => Math.Max(0m, Total - ConfirmedPaid);
+
+        /// <summary>Pengarna har kommit och är bokförda.</summary>
+        public bool IsSettled => Outstanding <= 0m;
+
+        /// <summary>
+        /// Vad en NY betalningsbegäran ska gälla.
+        ///
+        /// <para>⚠️ Drar bort både bekräftat och PÅSTÅTT: har medlemmen sagt att hen betalat 270 och
+        /// sedan lägger till en gäst för 180, ska nästa QR gälla 180 — inte 450. En begäran på hela
+        /// summan hade bett hen betala det hon redan sagt sig ha betalat.</para>
+        /// </summary>
+        public decimal RemainingToRequest => Math.Max(0m, Total - ConfirmedPaid - ClaimedPaid);
+
+        /// <summary>Medlemmen har sagt att hen betalat, men arrangören har inte stämt av.</summary>
         public bool AwaitingConfirmation => ClaimedPaid > 0m && ConfirmedPaid < Total;
     }
 

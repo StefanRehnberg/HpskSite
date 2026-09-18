@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using HpskSite.Models;
 using HpskSite.Services;
 using Xunit;
@@ -251,16 +251,56 @@ namespace HpskSite.Tests
             Gast(202, Hugo, "Emil", 90m, "Barn 7-15"));
 
         /// <summary>
-        /// ⚠️ Utan betalning är skulden HELA summan och anmälan inte giltig. Det är den här regeln
-        /// spärren vilar på — faller den kan någon stå som anmäld utan att ha betalat.
+        /// ⚠️⚠️ SPÄRREN ÄR ATT SWISH-KODEN VISATS, inte att någon bekräftat pengarna.
+        ///
+        /// <para>Stefans regel 2026-09-18: <i>"betalningen behöver inte bekräftas, men swish-koden
+        /// måste ha visats eller mailats, annars kan vi inte förutsätta att det har betalats."</i>
+        /// Utan visad kod har medlemmen aldrig fått en chans att betala, och då är det inte rimligt
+        /// att hålla hen till betalningen.</para>
         /// </summary>
         [Fact]
-        public void Utan_betalning_ar_hela_summan_skuld_och_anmalan_ogiltig()
+        public void Utan_visad_kod_ar_anmalan_inte_giltig()
         {
             var p = ClubEventParticipationService.BuildParty(Sallskap450(), Hugo);
             p.Total.Should().Be(450m);
+            p.AmountPresented.Should().Be(0m);
+            p.IsPaymentPresented.Should().BeFalse("koden har aldrig visats");
+            p.Outstanding.Should().Be(450m, "och arrangoren vantar fortfarande pa pengarna");
+        }
+
+        /// <summary>
+        /// ⚠️⚠️ KÄRNAN: en VISAD kod räcker för spärren, utan påstående och utan bekräftelse.
+        /// Betalningsraden ÄR beviset att koden visats — <c>StartPayment</c> skapar raden och
+        /// returnerar QR-uppgifterna i samma anrop.
+        /// </summary>
+        [Fact]
+        public void En_visad_kod_racker_for_sparren()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 450m) });
+
+            p.AmountPresented.Should().Be(450m);
+            p.IsPaymentPresented.Should().BeTrue("koden har visats for hela summan");
+            // ⚠️ Men det är INTE pengar, och arrangören väntar fortfarande.
+            p.ConfirmedPaid.Should().Be(0m);
+            p.ClaimedPaid.Should().Be(0m);
             p.Outstanding.Should().Be(450m);
-            p.IsPaidUp.Should().BeFalse();
+            p.IsSettled.Should().BeFalse();
+        }
+
+        /// <summary>
+        /// ⚠️ En kod visad för DELAR av summan räcker inte. Lägger Hugo till sonen efter att ha
+        /// hämtat koden för 360 är de sista 90 kronorna något han aldrig ombetts betala.
+        /// </summary>
+        [Fact]
+        public void En_kod_for_bara_delar_av_summan_racker_inte()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 360m) });
+
+            p.AmountPresented.Should().Be(360m);
+            p.IsPaymentPresented.Should().BeFalse();
+            p.RemainingToRequest.Should().Be(450m, "inget ar betalt eller pastatt an");
         }
 
         /// <summary>
@@ -275,27 +315,45 @@ namespace HpskSite.Tests
 
             p.ConfirmedPaid.Should().Be(450m);
             p.Outstanding.Should().Be(0m);
-            p.IsPaidUp.Should().BeTrue();
+            p.IsSettled.Should().BeTrue();
+            p.IsPaymentPresented.Should().BeTrue("en bekraftad betalning har passerat kodsteget");
             p.AwaitingConfirmation.Should().BeFalse();
         }
 
         /// <summary>
-        /// ⚠️⚠️ ETT PÅSTÅENDE RÄCKER FÖR SPÄRREN, men det är INTE pengar. Utan Swish-API kan
-        /// spärren inte kräva mer än att medlemmen säger att hen betalat — att vänta på arrangörens
-        /// bekräftelse hade gjort varje kvällsanmälan ogiltig till dagen efter. Men summan hålls
-        /// SKILD från den bekräftade, annars kan arrangörens avprickningslista inte skilja den som
-        /// betalat från den som sagt det.
+        /// ⚠️⚠️ ETT PÅSTÅENDE ÄR INTE PENGAR. Det håller anmälan giltig och tar bort beloppet ur
+        /// nästa begäran, men <c>Outstanding</c> — det arrangören stämmer av mot bankkontot — rörs
+        /// INTE. Slås de ihop kan avprickningslistan inte skilja den som betalat från den som
+        /// sagt det.
         /// </summary>
         [Fact]
-        public void Ett_pastaende_gor_anmalan_giltig_men_ar_inte_pengar()
+        public void Ett_pastaende_ar_inte_pengar()
         {
             var p = ClubEventParticipationService.BuildParty(
                 Sallskap450(), Hugo, new[] { Betalning(Hugo, 450m, claimed: true) });
 
             p.ClaimedPaid.Should().Be(450m);
             p.ConfirmedPaid.Should().Be(0m, "ett pastaende ar inte pengar");
-            p.IsPaidUp.Should().BeTrue("sparren kan inte krava mer an ett pastaende");
+            p.IsPaymentPresented.Should().BeTrue();
+            p.Outstanding.Should().Be(450m, "arrangoren vantar fortfarande");
+            p.IsSettled.Should().BeFalse();
             p.AwaitingConfirmation.Should().BeTrue();
+            p.RemainingToRequest.Should().Be(0m, "hen har redan sagt att hen betalat allt");
+        }
+
+        /// <summary>
+        /// ⚠️ Nästa begäran gäller BARA det som återstår. Har Hugo sagt att han betalat 270 och
+        /// sedan lägger till en gäst för 180 ska QR:en gälla 180 — en begäran på hela summan hade
+        /// bett honom betala det han redan sagt sig ha betalat.
+        /// </summary>
+        [Fact]
+        public void Nasta_begaran_galler_bara_det_som_aterstar()
+        {
+            var p = ClubEventParticipationService.BuildParty(
+                Sallskap450(), Hugo, new[] { Betalning(Hugo, 270m, claimed: true) });
+
+            p.RemainingToRequest.Should().Be(180m);
+            p.IsPaymentPresented.Should().BeFalse("bara 270 av 450 har visats");
         }
 
         /// <summary>
@@ -316,7 +374,7 @@ namespace HpskSite.Tests
 
             p.ConfirmedPaid.Should().Be(0m);
             p.Outstanding.Should().Be(450m);
-            p.IsPaidUp.Should().BeFalse();
+            p.IsSettled.Should().BeFalse();
         }
 
         /// <summary>⚠️ NÅGON ANNANS betalning får aldrig täcka mitt sällskap.</summary>
@@ -327,7 +385,7 @@ namespace HpskSite.Tests
                 Sallskap450(), Hugo, new[] { Betalning(Annan, 450m, confirmed: true) });
 
             p.ConfirmedPaid.Should().Be(0m);
-            p.IsPaidUp.Should().BeFalse();
+            p.IsSettled.Should().BeFalse();
         }
 
         /// <summary>
@@ -342,10 +400,12 @@ namespace HpskSite.Tests
 
             p.ConfirmedPaid.Should().Be(400m);
             p.Outstanding.Should().Be(50m);
-            p.IsPaidUp.Should().BeFalse();
+            p.IsSettled.Should().BeFalse();
         }
 
-        /// <summary>Delbetalningar summerar.</summary>
+        /// <summary>
+        /// Delbetalningar summerar — och de tre talen svarar på tre olika frågor samtidigt.
+        /// </summary>
         [Fact]
         public void Flera_betalningar_summerar()
         {
@@ -355,8 +415,14 @@ namespace HpskSite.Tests
 
             p.ConfirmedPaid.Should().Be(180m);
             p.ClaimedPaid.Should().Be(270m);
-            p.Outstanding.Should().Be(0m);
-            p.IsPaidUp.Should().BeTrue();
+            p.AmountPresented.Should().Be(450m);
+
+            p.IsPaymentPresented.Should().BeTrue("hela summan har visats");
+            p.RemainingToRequest.Should().Be(0m, "inget kvar att be om");
+            // ⚠️ Men bara 180 är PENGAR. Arrangören väntar fortfarande på 270, och det är den
+            // siffran som ska stämmas av mot bankkontot.
+            p.Outstanding.Should().Be(270m);
+            p.IsSettled.Should().BeFalse();
             p.AwaitingConfirmation.Should().BeTrue("180 av 450 ar bekraftat");
         }
 
@@ -372,7 +438,7 @@ namespace HpskSite.Tests
 
             p.Total.Should().Be(0m);
             p.Outstanding.Should().Be(0m);
-            p.IsPaidUp.Should().BeTrue();
+            p.IsSettled.Should().BeTrue();
             p.AwaitingConfirmation.Should().BeFalse();
         }
 
@@ -385,7 +451,7 @@ namespace HpskSite.Tests
                 Sallskap450(), Hugo, new[] { Betalning(Hugo, 500m, confirmed: true) });
 
             p.Outstanding.Should().Be(0m);
-            p.IsPaidUp.Should().BeTrue();
+            p.IsSettled.Should().BeTrue();
         }
 
         [Fact]

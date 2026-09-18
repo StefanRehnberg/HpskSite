@@ -349,32 +349,42 @@
             const p = d.party, pay = d.payment;
             if (!p || !pay) return '';
 
-            // Betalt och klart: säg det, men ta inte plats.
+            if (p.total <= 0) return '';
+
+            // Pengarna har kommit och är bokförda.
             if (p.outstanding <= 0) {
-                if (p.awaitingConfirmation) {
-                    return '<div class="alert alert-info py-2 px-3 mb-2 small">'
-                         + '<i class="bi bi-hourglass-split me-1"></i>Du har markerat att du betalat. '
-                         + 'Arrangören stämmer av och skickar kvitto.</div>';
-                }
-                if (p.total > 0) {
-                    return '<div class="small text-success mb-2">'
-                         + `<i class="bi bi-check-circle me-1"></i>Betalt ${kr(p.confirmedPaid)}.</div>`;
-                }
-                return '';
+                return '<div class="small text-success mb-2">'
+                     + `<i class="bi bi-check-circle me-1"></i>Betalt ${kr(p.confirmedPaid)}.</div>`;
+            }
+
+            // ⚠️ Koden är visad och sällskapet betalt enligt medlemmen — men pengarna är inte
+            // avstämda. Säg det i stället för "betalt", annars ser ett kvitto ut att finnas.
+            if (p.awaitingConfirmation) {
+                return '<div class="alert alert-info py-2 px-3 mb-2 small">'
+                     + '<i class="bi bi-hourglass-split me-1"></i>Du har markerat att du betalat. '
+                     + 'Arrangören stämmer av och skickar kvitto.</div>';
+            }
+
+            // ⚠️ Koden HAR visats men ingen har sagt något. Anmälan är giltig — påminn utan att
+            // påstå att något är fel.
+            if (p.isPaymentPresented) {
+                return '<div class="alert alert-light border py-2 px-3 mb-2 small">'
+                     + `Avgift <strong>${kr(p.total)}</strong>. Har du swishat? `
+                     + '<a href="#" id="ces-pay-again">Visa koden igen</a>.</div>';
             }
 
             // ⚠️ Skuld men ingen möjlighet att betala här — säg VAD som saknas i stället för att
             // visa en knapp som inte kan fungera. Utan Swish-nummer är det klubben som måste agera.
             if (!pay.swishAvailable) {
                 return '<div class="alert alert-warning py-2 px-3 mb-2 small">'
-                     + `Att betala: <strong>${kr(p.outstanding)}</strong>. `
+                     + `Att betala: <strong>${kr(p.total)}</strong>. `
                      + 'Evenemanget saknar Swish-nummer — kontakta arrangören för betalning.</div>';
             }
 
             let h = '<div class="border rounded p-2 mb-2">'
                   + '<div class="d-flex justify-content-between align-items-center mb-2">'
                   + '<span class="fw-semibold">Att betala</span>'
-                  + `<span class="fs-5 fw-semibold">${kr(p.outstanding)}</span></div>`;
+                  + `<span class="fs-5 fw-semibold">${kr(p.total - p.confirmedPaid)}</span></div>`;
 
             h += '<button type="button" class="btn btn-primary w-100" id="ces-pay">'
               +  '<i class="bi bi-qr-code me-1"></i>Betala med Swish</button>';
@@ -441,15 +451,19 @@
                             : `Anmälan är öppen för medlemmar i ${esc(d.event.ownerName)}.`)
                      +  '</div>';
             } else if (d.me && d.me.signedUp) {
-                // ⚠️⚠️ "ANMÄLD" ÄR VILLKORAT AV BETALNING. Så länge sällskapet har en skuld är
-                // anmälan PÅBÖRJAD, inte klar — och det måste stå i den gröna rutans ställe, inte
-                // som en fotnot under. En medlem som läser "Du är anmäld" och sedan en betalrad
-                // längre ned drar slutsatsen att betalningen kan vänta.
-                var unpaid = d.party && d.party.outstanding > 0;
-                if (unpaid) {
+                // ⚠️⚠️ "ANMÄLD" FÖLJER ATT SWISH-KODEN VISATS, inte att någon bekräftat pengarna.
+                // Stefans regel: betalningen behöver inte bekräftas, men koden måste ha visats —
+                // annars kan vi inte förutsätta att det betalats, och då är det inte rimligt att
+                // hålla medlemmen till betalningen.
+                //
+                // ⚠️ Det är därför `isPaymentPresented` och inte `outstanding` som styr rutan.
+                // `outstanding` är arrangörens tal (vad som inte kommit in ännu) och skulle hålla
+                // varje kvällsanmälan ogiltig till dagen efter.
+                var needsCode = d.party && d.party.isPaymentPresented === false;
+                if (needsCode) {
                     html += '<div class="alert alert-warning py-2 px-3 mb-2">'
                          +  '<i class="bi bi-exclamation-triangle me-1"></i>'
-                         +  'Din anmälan är <strong>inte klar</strong> — den blir giltig när avgiften är betald.'
+                         +  'Din anmälan är <strong>inte klar</strong> — hämta Swish-koden nedan och betala avgiften.'
                          +  '</div>';
                 } else {
                     html += '<div class="alert ' + (d.me.isReserve ? 'alert-warning' : 'alert-success') + ' py-2 px-3 mb-2">'
@@ -570,18 +584,22 @@
             });
 
             // ── Betalning ────────────────────────────────────────────────────────────────────
-            const payBtn = document.getElementById('ces-pay');
-            if (payBtn) payBtn.addEventListener('click', async () => {
+            // ⚠️ EN funktion, två ingångar. Första versionen bytte ut länken mot en knapp och
+            // klickade den — men lyssnaren satt på det GAMLA elementet, så "visa koden igen" gjorde
+            // ingenting alls. En delad funktion kan inte gå i den fällan.
+            const startPayment = async (payBtn, box) => {
                 payBtn.disabled = true;
                 payBtn.innerHTML = 'Hämtar…';
                 const r = await post('StartPayment', { eventId });
                 if (!r.success) {
                     payBtn.disabled = false;
                     payBtn.innerHTML = 'Betala med Swish';
+                    // ⚠️ Vägras betalningen för att klubbens liggare inte är uppsatt är det INTE
+                    // medlemmens fel och inte något hen kan åtgärda — servern säger vad som fattas,
+                    // så meddelandet visas som det är i stället för ett allmänt "gick inte".
                     alert(r.message || 'Betalningen kunde inte startas.');
                     return;
                 }
-                const box = document.getElementById('ces-pay-box');
                 // ⚠️⚠️ QR:EN GENERERAS PÅ SERVERN ur betalningens egen rad. En bild byggd av
                 // nummer och belopp i klienten hade gått att ändra i webbläsaren, och pengarna
                 // hamnat någon annanstans utan att något sa ifrån.
@@ -615,6 +633,19 @@
                 const paidBtn = document.getElementById('ces-paid');
                 paidBtn.addEventListener('click', () => act(paidBtn, 'ClaimPayment',
                     { eventId, paymentId: parseInt(paidBtn.dataset.payment, 10) }));
+            };
+
+            // Två ingångar till samma funktion: knappen första gången, och "visa koden igen" för
+            // den som tappat bort QR:en. StartPayment är idempotent, så den andra vägen ger SAMMA
+            // betalning och inte en ny skuld.
+            const payBtn = document.getElementById('ces-pay');
+            const payBox = document.getElementById('ces-pay-box');
+            if (payBtn && payBox) payBtn.addEventListener('click', () => startPayment(payBtn, payBox));
+
+            const payAgain = document.getElementById('ces-pay-again');
+            if (payAgain) payAgain.addEventListener('click', e => {
+                e.preventDefault();
+                startPayment(payAgain, payAgain.closest('.alert'));
             });
 
             // ── Gäster ───────────────────────────────────────────────────────────────────────
