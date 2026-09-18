@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly MemberClubService _memberClubs;
         private readonly ILogger<ClubEventController> _logger;
         private readonly ITimeLimitedDataProtector _attendanceProtector;
+        private readonly AdminAuthorizationService _auth;
 
         public ClubEventController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -49,9 +50,11 @@ namespace HpskSite.Controllers
             ClubEventParticipationService participation,
             MemberClubService memberClubs,
             ILogger<ClubEventController> logger,
-            IDataProtectionProvider dataProtectionProvider)
+            IDataProtectionProvider dataProtectionProvider,
+            AdminAuthorizationService auth)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _auth = auth;
             _memberManager = memberManager;
             _memberService = memberService;
             _bookings = bookings;
@@ -801,6 +804,112 @@ namespace HpskSite.Controllers
             /// <summary>Present / Absent / Excused, or empty to clear.</summary>
             public string? Status { get; set; }
             public string? Note { get; set; }
+        }
+
+        // ═════════════════════════════════════════════════════════════════════════════════════
+        // ENGÅNGSMIGRERING: fritextavgiften (feeAmount) → det debiterbara talet (eventFee)
+        // ═════════════════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// <c>GET /umbraco/surface/ClubEvent/MigrateEventFee</c> — flyttar den gamla fritextade
+        /// <c>feeAmount</c> till den numeriska <c>eventFee</c>. Sajtadmin.
+        ///
+        /// <para><b>⚠️⚠️ TORRKÖRNING SOM STANDARD.</b> Utan <c>?apply=true</c> skrivs ingenting —
+        /// den rapporterar bara vad som SKULLE hända. Prod-datat går inte att läsa i förväg, och
+        /// fältets platshållare har i åratal inbjudit till "100 kr" och "Gratis för juniorer".
+        /// Läs listan över otolkbara värden INNAN du kör skarpt, och innan någon raderar
+        /// <c>feeAmount</c> — en borttagen doctype-egenskap tar sitt data med sig, oåterkalleligt.</para>
+        ///
+        /// <para><b>⚠️ GÅR VIA <see cref="IContentService"/>, ALDRIG VIA SQL.</b> En direktskrivning
+        /// i <c>umbracoPropertyData</c> uppdaterar inte den publicerade cachen, så appen hade
+        /// fortsatt servera de gamla värdena tills någon publicerade om varje nod — och ingenting
+        /// hade sagt ifrån.</para>
+        ///
+        /// <para><b>⚠️ PUBLICERAR BARA DET SOM REDAN VAR PUBLICERAT.</b> Att publicera ett utkast
+        /// som sidoeffekt av en migrering gör ett opublicerat evenemang publikt. Samma regel som
+        /// <c>RegistrationClubPropagationService</c> följer.</para>
+        ///
+        /// <para>⚠️ Skriver aldrig över ett <c>eventFee</c> som redan har ett värde — den som satt
+        /// det för hand har sett båda fälten och valt.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> MigrateEventFee(bool apply = false)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast sajtadministratörer." });
+
+            var type = Services.ContentTypeService?.Get(ClubEvents.EventAlias);
+            if (type == null)
+                return Json(new { success = false, message = $"Doctypen {ClubEvents.EventAlias} hittades inte." });
+
+            // ⚠️ Egenskapen måste finnas INNAN något skrivs. SetValue på en saknad egenskap är en
+            // TYST no-op, så utan den här kontrollen rapporterar migreringen lyckat och har inte
+            // gjort någonting alls.
+            if (!type.PropertyTypeExists(ClubEvents.FeeProperty))
+                return Json(new
+                {
+                    success = false,
+                    message = $"Doctypen saknar egenskapen '{ClubEvents.FeeProperty}' (Decimal). "
+                            + "Lägg till den i backoffice först — annars skriver migreringen ingenting."
+                });
+
+            var migrated = new List<object>();
+            var needsHuman = new List<object>();
+            var skipped = 0;
+            var pageIndex = 0L;
+            long total;
+
+            do
+            {
+                var page = Services.ContentService!.GetPagedOfType(type.Id, pageIndex, 200, out total, null);
+                foreach (var node in page)
+                {
+                    var raw = node.GetValue<string>("feeAmount");
+                    var existing = node.GetValue<decimal?>(ClubEvents.FeeProperty);
+
+                    if (existing.HasValue) { skipped++; continue; }
+
+                    var parsed = EventFeeMigration.Parse(raw);
+                    if (parsed.Outcome == EventFeeMigration.FeeParse.Empty) { skipped++; continue; }
+
+                    if (parsed.Outcome == EventFeeMigration.FeeParse.Unparseable)
+                    {
+                        needsHuman.Add(new { id = node.Id, name = node.Name, raw, reason = parsed.Reason });
+                        continue;
+                    }
+
+                    migrated.Add(new { id = node.Id, name = node.Name, raw, amount = parsed.Amount });
+
+                    if (!apply) continue;
+
+                    node.SetValue(ClubEvents.FeeProperty, parsed.Amount);
+
+                    // Publicerat → spara och publicera om. Utkast → spara bara.
+                    // ⚠️ `SaveAndPublish` finns inte i Umbraco 16 — det är Save följt av
+                    // Publish(node, new[]{"*"}, -1), samma form som Fältskyttes controller använder.
+                    Services.ContentService.Save(node);
+                    if (node.Published) Services.ContentService.Publish(node, new[] { "*" }, -1);
+                }
+                pageIndex++;
+            }
+            while (pageIndex * 200 < total);
+
+            _logger.LogInformation(
+                "MigrateEventFee ({Lage}): {Migrerade} flyttade, {Handpalaggning} kraver handpaläggning, {Hoppade} orörda.",
+                apply ? "SKARPT" : "torrkörning", migrated.Count, needsHuman.Count, skipped);
+
+            return Json(new
+            {
+                success = true,
+                applied = apply,
+                message = apply
+                    ? $"{migrated.Count} avgifter flyttade. {needsHuman.Count} kräver handpåläggning."
+                    : $"TORRKÖRNING — ingenting skrevs. {migrated.Count} skulle flyttas, "
+                      + $"{needsHuman.Count} kräver handpåläggning. Kör om med ?apply=true när listan ser rätt ut.",
+                migrated,
+                needsHuman,
+                skipped
+            });
         }
     }
 }
