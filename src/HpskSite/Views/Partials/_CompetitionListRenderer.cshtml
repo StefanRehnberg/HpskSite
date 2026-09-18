@@ -28,6 +28,7 @@
     Upload buttons appear only where the page actually has the upload modals, detected at
     render time — so a surface gets them by including the modals, not by editing this file.
 *@
+@await Html.PartialAsync("_SortableTableHeader")
 @if (ViewData["_hpskCompListRendererRendered"] == null)
 {
     ViewData["_hpskCompListRendererRendered"] = true;
@@ -204,13 +205,65 @@
             return html;
         };
 
+        // Startdatum i millisekunder, eller null när datumet saknas eller inte går att läsa.
+        // Null och inte 0 — 0 är 1970 och hade sorterat en odaterad tävling mitt i listan.
+        const compTime = comp => {
+            if (!comp || !comp.startDate) return null;
+            const d = new Date(comp.startDate);
+            return isNaN(d.getTime()) ? null : d.getTime();
+        };
+
+        // ⚠️ Status sorteras på sitt LOPP genom tävlingen, inte alfabetiskt. Bokstavsordning
+        // ger Avslutad, Pågående, Schemalagd, Utkast — en ordning som inte betyder något.
+        const STATUS_ORDER = { 'Draft': 0, 'Scheduled': 1, 'Active': 2, 'Completed': 3 };
+
+        window.HPSK_COMP_COLUMNS = [
+            { key: 'name',   label: 'Namn',        sort: c => (c.name || '').toLowerCase() },
+            { key: 'type',   label: 'Typ',         sort: c => (window.hpskCompetitionTypeLabel(c.type) || '').toLowerCase() },
+            { key: 'date',   label: 'Startdatum',  sort: c => compTime(c) },
+            { key: 'status', label: 'Status',      sort: c => STATUS_ORDER[c.status] !== undefined ? STATUS_ORDER[c.status] : 99 },
+            { key: 'regs',   label: 'Anmälningar', thClass: 'text-center', sort: c => c.registrationCount || 0 }
+        ];
+
+        // Nyast först, äldst längst ner. Listan handlar om det som är på gång; det som redan
+        // varit är historik och hör nedåt.
+        window.hpskCompSort = { key: 'date', dir: -1 };
+
+        // Anropas av rubrikcellernas onclick. Vilken lista som ska ritas om vet bara ytan, så
+        // den lämnar sitt funktionsnamn i scope.rerender — se hpskRenderCompetitionTable.
+        window.hpskSortCompetitionList = function (key) {
+            window.hpskSortToggle(window.hpskCompSort, key);
+            const fn = window[window._hpskCompRerender];
+            if (typeof fn === 'function') fn();
+        };
+
         // Whole table incl. <thead>, for the krets and klubb panels which render into a bare
         // container. Same header row the site list has in markup.
+        //
+        // ⚠️ Rubrikerna blir klickbara BARA när ytan angett scope.rerender. En rubrik som ser
+        // sorterbar ut och inte gör något är sämre än en som inte ser sorterbar ut, och den
+        // som ritar om listan är den enda som kan veta hur den byggs (klubblistan lägger t.ex.
+        // en notis ovanför tabellen som inte får försvinna vid en sortering).
         window.hpskRenderCompetitionTable = function (competitions, scope) {
+            scope = scope || {};
+            const sortable = !!scope.rerender && typeof window.hpskSortableTh === 'function';
+            let rows = competitions || [];
+            let head;
+
+            if (sortable) {
+                window._hpskCompRerender = scope.rerender;
+                rows = window.hpskSortRows(rows, window.HPSK_COMP_COLUMNS, window.hpskCompSort);
+                head = window.HPSK_COMP_COLUMNS
+                    .map(col => window.hpskSortableTh(col, window.hpskCompSort, 'hpskSortCompetitionList'))
+                    .join('');
+            } else {
+                head = '<th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th>'
+                     + '<th class="text-center">Anmälningar</th>';
+            }
+
             return '<div class="table-responsive"><table class="table table-striped">'
-                + '<thead><tr><th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th>'
-                + '<th class="text-center">Anmälningar</th><th class="text-end">Åtgärder</th></tr></thead>'
-                + '<tbody>' + window.hpskRenderCompetitionRows(competitions, scope) + '</tbody>'
+                + '<thead><tr>' + head + '<th class="text-end">Åtgärder</th></tr></thead>'
+                + '<tbody>' + window.hpskRenderCompetitionRows(rows, scope) + '</tbody>'
                 + '</table></div>';
         };
     }

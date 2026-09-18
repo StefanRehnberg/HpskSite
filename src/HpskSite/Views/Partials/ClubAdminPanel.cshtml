@@ -11,6 +11,10 @@
 
 @await Html.PartialAsync("_CompetitionTypeCatalogue")
 @await Html.PartialAsync("_CompetitionListRenderer")
+@* Händelselistan sorteras med samma hjälpare som tävlingslistan — inkluderas här och inte
+   bara via _CompetitionListRenderer, så händelsefliken inte tyst tappar sorteringen den dagen
+   tävlingsrenderaren flyttas eller tas bort. Guardad, dubbelinkludering är ofarlig. *@
+@await Html.PartialAsync("_SortableTableHeader")
 @* Delad renderare för aktivitetssammanställningen (medlemsdialogens intygsunderlag). *@
 @await Html.PartialAsync("_MemberActivitySummary")
 
@@ -214,6 +218,39 @@
                 <button class="btn btn-primary" onclick="showCreateEventModal()">
                     <i class="bi bi-plus-circle me-2"></i>Ny Händelse
                 </button>
+            </div>
+
+            <!-- Filter Section -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label for="clubEventYearFilter" class="form-label">År</label>
+                            <select class="form-select" id="clubEventYearFilter" onchange="onClubEventYearFilterChange()">
+                                <!-- Populated by JavaScript -->
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="clubEventTypeFilter" class="form-label">Typ av händelse</label>
+                            <select class="form-select" id="clubEventTypeFilter" onchange="onClubEventTypeFilterChange()">
+                                <option value="">Alla typer</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="clubEventShowCompleted" onchange="onClubEventShowCompletedChange()">
+                                <label class="form-check-label" for="clubEventShowCompleted">
+                                    Visa avslutade
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-secondary w-100" onclick="clearClubEventFilters()">
+                                <i class="bi bi-x-circle me-1"></i>Rensa filter
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div id="eventsTableContainer">
@@ -3579,19 +3616,171 @@ function loadEvents() {
         });
 }
 
-function displayEvents(events) {
-    const container = document.getElementById('eventsTableContainer');
+// Filter och sortering för händelselistan. Båda arbetar på den redan hämtade listan:
+// GetClubEvents svarar med klubbens alla händelser, så ett filterbyte kostar ingen rundtur.
+// Standardläge speglar Tävlingar-fliken: innevarande år, alla typer, avslutade dolda.
+let clubEventFilters = { year: new Date().getFullYear(), type: '', includeCompleted: false };
+// Nyast först, äldst längst ner — samma ordning som tävlingslistan.
+let clubEventSort = { key: 'date', dir: -1 };
 
+// Tiden för en händelse i millisekunder, eller null när datumet saknas. Umbraco svarar
+// med 0001-01-01 för ett ofyllt datumfält, därav årtalsspärren.
+function clubEventTime(evt) {
+    if (!evt || !evt.date) return null;
+    const d = new Date(evt.date);
+    if (isNaN(d.getTime()) || d.getFullYear() <= 1900) return null;
+    return d.getTime();
+}
+
+// Sorterbara kolumner. `sort` ger värdet vi ordnar på: sträng för textkolumnerna,
+// tidsstämpel för datumkolumnen.
+const CLUB_EVENT_COLUMNS = [
+    { key: 'name',  label: 'Namn',  sort: e => (e.name || '').toLowerCase() },
+    { key: 'type',  label: 'Typ',   sort: e => (e.type || '').toLowerCase() },
+    { key: 'date',  label: 'Datum', sort: e => clubEventTime(e) },
+    { key: 'venue', label: 'Plats', sort: e => (e.venue || '').toLowerCase() }
+];
+
+function sortClubEvents(key) {
+    window.hpskSortToggle(clubEventSort, key);
+    renderEvents();
+}
+
+function onClubEventYearFilterChange() {
+    const v = document.getElementById('clubEventYearFilter').value;
+    clubEventFilters.year = v ? parseInt(v) : null;
+    renderEvents();
+}
+
+function onClubEventTypeFilterChange() {
+    clubEventFilters.type = document.getElementById('clubEventTypeFilter').value;
+    renderEvents();
+}
+
+function onClubEventShowCompletedChange() {
+    clubEventFilters.includeCompleted = document.getElementById('clubEventShowCompleted').checked;
+    renderEvents();
+}
+
+function clearClubEventFilters() {
+    const currentYear = new Date().getFullYear();
+    clubEventFilters = { year: currentYear, type: '', includeCompleted: false };
+    const yearSelect = document.getElementById('clubEventYearFilter');
+    if (yearSelect) yearSelect.value = currentYear.toString();
+    const typeSelect = document.getElementById('clubEventTypeFilter');
+    if (typeSelect) typeSelect.value = '';
+    const completed = document.getElementById('clubEventShowCompleted');
+    if (completed) completed.checked = false;
+    renderEvents();
+}
+
+// ⚠️ "Rensa filter" duger inte som väg ut ur en tom lista: den återställer till
+// standardläget, som självt filtrerar (innevarande år, avslutade dolda). Den här lyfter
+// varje filter, så är listan fortfarande tom är "inga händelser har skapats" sant.
+function showAllClubEvents() {
+    clubEventFilters = { year: null, type: '', includeCompleted: true };
+    const yearSelect = document.getElementById('clubEventYearFilter');
+    if (yearSelect) yearSelect.value = '';
+    const typeSelect = document.getElementById('clubEventTypeFilter');
+    if (typeSelect) typeSelect.value = '';
+    const completed = document.getElementById('clubEventShowCompleted');
+    if (completed) completed.checked = true;
+    renderEvents();
+}
+
+// Åren byggs ur klubbens egna händelser (plus innevarande år och nästa), så ett år
+// långt bak i tiden går att välja utan att listan behöver ett fast startår.
+function populateClubEventYearFilter() {
+    const select = document.getElementById('clubEventYearFilter');
+    if (!select) return;
+    const currentYear = new Date().getFullYear();
+    // Det valda året är alltid med, även ett år utan händelser — annars hade listrutan
+    // visat ett annat år än det filtret faktiskt gäller.
+    const years = new Set([currentYear, currentYear + 1]);
+    if (clubEventFilters.year) years.add(clubEventFilters.year);
+    allEvents.forEach(evt => {
+        const t = clubEventTime(evt);
+        if (t !== null) years.add(new Date(t).getFullYear());
+    });
+    let html = '<option value="">Alla år</option>';
+    Array.from(years).sort((a, b) => b - a).forEach(year => {
+        const selected = year === clubEventFilters.year ? 'selected' : '';
+        html += `<option value="${year}" ${selected}>${year}</option>`;
+    });
+    select.innerHTML = html;
+}
+
+// Typerna är standardkatalogen plus de egna typer klubben skrivit in via "Annat...",
+// annars hade en egen typ gått att skapa men aldrig att filtrera på.
+function populateClubEventTypeFilter() {
+    const select = document.getElementById('clubEventTypeFilter');
+    if (!select) return;
+    const types = new Set(Object.keys(eventTypeColors).filter(t => t !== 'default'));
+    allEvents.forEach(evt => { if (evt.type) types.add(evt.type); });
+    // Byggs som DOM-noder, inte som HTML-sträng: en egen typ är fritext från klubben och
+    // ett citattecken i den hade brutit attributet om den skrevs in i markupen.
+    select.innerHTML = '';
+    const anyOpt = document.createElement('option');
+    anyOpt.value = '';
+    anyOpt.textContent = 'Alla typer';
+    select.appendChild(anyOpt);
+    Array.from(types).sort((a, b) => a.localeCompare(b, 'sv')).forEach(type => {
+        const opt = document.createElement('option');
+        opt.value = type;
+        opt.textContent = type;
+        if (type === clubEventFilters.type) opt.selected = true;
+        select.appendChild(opt);
+    });
+}
+
+function clubEventMatchesFilters(evt) {
+    const t = clubEventTime(evt);
+
+    // En händelse utan datum hör inte till något år och räknas aldrig som avslutad —
+    // den ska inte kunna försvinna tyst ur listan.
+    if (clubEventFilters.year && t !== null && new Date(t).getFullYear() !== clubEventFilters.year) return false;
+    if (clubEventFilters.type && evt.type !== clubEventFilters.type) return false;
+    if (!clubEventFilters.includeCompleted && t !== null) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (t < today.getTime()) return false;
+    }
+    return true;
+}
+
+function displayEvents(events) {
     // Store events globally for editing
     allEvents = events || [];
+    renderEvents();
+}
 
-    if (!events || events.length === 0) {
+function renderEvents() {
+    const container = document.getElementById('eventsTableContainer');
+    if (!container) return;
+
+    populateClubEventYearFilter();
+    populateClubEventTypeFilter();
+
+    if (!allEvents.length) {
         container.innerHTML = '<div class="alert alert-info">Inga händelser har skapats ännu.</div>';
         return;
     }
 
+    const events = window.hpskSortRows(
+        allEvents.filter(clubEventMatchesFilters), CLUB_EVENT_COLUMNS, clubEventSort);
+
     let html = '<div class="table-responsive"><table class="table table-striped">';
-    html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th>Åtgärder</th></tr></thead><tbody>';
+    html += '<thead><tr>';
+    CLUB_EVENT_COLUMNS.forEach(col => {
+        html += window.hpskSortableTh(col, clubEventSort, 'sortClubEvents');
+    });
+    html += '<th>Åtgärder</th></tr></thead><tbody>';
+
+    if (!events.length) {
+        html += `<tr><td colspan="${CLUB_EVENT_COLUMNS.length + 1}" class="text-center text-muted py-4">`
+             + 'Ingen händelse matchar filtret. Prova ett annat år eller kryssa i "Visa avslutade" — '
+             + 'eller <a href="#" onclick="showAllClubEvents(); return false;">visa alla händelser</a>.</td></tr>';
+    }
 
     events.forEach(event => {
         const dateObj = event.date ? new Date(event.date) : null;
@@ -4140,8 +4329,54 @@ function loadClubCompetitions() {
 }
 
 
+// ⚠️ Servern filtrerar tävlingslistan, så en tom lista säger INGENTING om huruvida klubben
+// har några tävlingar alls — bara att inga matchar filtret. "Inga tävlingar har skapats ännu"
+// är därför ett falskt påstående så fort ett filter är aktivt, och standardläget ÄR ett
+// aktivt filter (innevarande år + avslutade dolda). Påståendet får bara stå kvar när
+// ingenting filtrerar bort något.
+function emptyClubCompetitionsMessage() {
+    const filtered = clubCompetitionsFilters.year
+        || clubCompetitionsFilters.type
+        || !clubCompetitionsFilters.includeCompleted;
+
+    if (!filtered) {
+        return '<div class="alert alert-info">Inga tävlingar har skapats ännu för denna klubb.</div>';
+    }
+
+    return '<div class="alert alert-info">'
+        + 'Ingen tävling matchar filtret. Prova ett annat år eller kryssa i "Visa avslutade tävlingar" — '
+        + 'eller <a href="#" onclick="showAllClubCompetitions(); return false;">visa alla tävlingar</a>.'
+        + '</div>';
+}
+
+// ⚠️ "Rensa filter" duger INTE som väg ut här: den återställer till standardläget, som
+// självt filtrerar (innevarande år, avslutade dolda) — alltså en återvändsgränd som inte
+// visar något nytt. Den här lyfter varje filter, så är listan fortfarande tom är
+// påståendet "inga tävlingar har skapats ännu" sant.
+function showAllClubCompetitions() {
+    clubCompetitionsFilters = { year: null, includeCompleted: true, type: '' };
+    const yearSelect = document.getElementById('clubYearFilter');
+    if (yearSelect) yearSelect.value = '';
+    const typeSelect = document.getElementById('clubTypeFilter');
+    if (typeSelect) typeSelect.value = '';
+    const completed = document.getElementById('clubShowCompleted');
+    if (completed) completed.checked = true;
+    loadClubCompetitions();
+}
+
+// Senast renderade listan, så en sortering inte kostar en ny rundtur till servern (och inte
+// heller kan visa något annat än det som redan står på skärmen, om datat hunnit ändras).
+let clubCompetitionsData = [];
+let clubCompetitionsNoClub = [];
+
+function rerenderClubCompetitions() {
+    displayClubCompetitions(clubCompetitionsData, clubCompetitionsNoClub);
+}
+
 function displayClubCompetitions(competitions, noClubComps) {
     const container = document.getElementById('competitionsTableContainer');
+    clubCompetitionsData = competitions || [];
+    clubCompetitionsNoClub = noClubComps || [];
 
     // Hint: comps the user manages that have no club (krets/nationell) don't appear in this
     // club list. Point them to where those are managed instead.
@@ -4155,7 +4390,7 @@ function displayClubCompetitions(competitions, noClubComps) {
     }
 
     if (!competitions || competitions.length === 0) {
-        container.innerHTML = noClubHint + '<div class="alert alert-info">Inga tävlingar har skapats ännu för denna klubb.</div>';
+        container.innerHTML = noClubHint + emptyClubCompetitionsMessage();
         return;
     }
 
@@ -4167,7 +4402,8 @@ function displayClubCompetitions(competitions, noClubComps) {
         editArgs: 'typeOnly',
         copy: 'copyClubCompetition',
         copyArgs: 'idAndType',
-        del: 'deleteClubCompetition'
+        del: 'deleteClubCompetition',
+        rerender: 'rerenderClubCompetitions'
     });
 }
 

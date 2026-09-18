@@ -1330,8 +1330,15 @@
     }
 
 
+    // Senast renderade listan, så en sortering inte kostar en ny rundtur till servern.
+    var regionCompetitionsData = [];
+    window.rerenderRegionCompetitions = function () {
+        displayRegionCompetitions(regionCompetitionsData);
+    };
+
     function displayRegionCompetitions(competitions) {
         var container = document.getElementById('regionAdminCompetitionsTableContainer');
+        regionCompetitionsData = competitions || [];
         if (!competitions || competitions.length === 0) {
             container.innerHTML = '<div class="alert alert-info">Inga tävlingar i kretsen för valda filter.</div>';
             return;
@@ -1342,7 +1349,8 @@
             kind: 'krets',
             edit: 'editRegionCompetition',
             copy: 'copyRegionCompetition',
-            del: 'deleteRegionCompetition'
+            del: 'deleteRegionCompetition',
+            rerender: 'rerenderRegionCompetitions'
         });
     }
 

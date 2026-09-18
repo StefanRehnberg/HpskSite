@@ -1,0 +1,78 @@
+@*
+ * Klickbara kolumnrubriker, en gång.
+ *
+ * Mönstret fanns redan i klubbens medlemstabell (`club-member-sort`), och när händelse- och
+ * tävlingslistorna skulle få samma sak var alternativet en tredje och fjärde kopia av samma
+ * jämförelseregel, samma caret-ikoner och samma tangentbordshantering. Två kopior av en regel
+ * glider isär — och den regel som glider här är "vad räknas som tomt", alltså vilka rader som
+ * hamnar sist. Det syns inte som ett fel, bara som en lista i oväntad ordning.
+ *
+ * ⚠️ CSS:en injiceras i runtime, inte som ett top-level <style>: ett sådant i en partial
+ * får vyn att 500:a (se razor-partial-styles). Egen klass `hpsk-sort-th`, eftersom
+ * `.club-member-sort` är scopad till `.club-admin-panel` och därmed död på kretsens sida.
+ *
+ * Exponerar:
+ *   hpskSortToggle(state, key)         -> vänder riktning på samma kolumn, annars ny kolumn stigande
+ *   hpskSortCompare(va, vb, dir)       -> jämförelse där TOMMA värden alltid hamnar sist
+ *   hpskSortRows(rows, columns, state) -> sorterar en KOPIA av listan
+ *   hpskSortableTh(col, state, fnName) -> <th> med caret, aria-sort och tangentbordsstöd
+ *
+ * En kolumn är { key, label, sort: row => värde, thClass? }.
+ * Guardad, så dubbelinkludering är ofarlig.
+*@
+@await Html.PartialAsync("_HtmlEscape")
+<script>
+if (!window.hpskSortableTh) {
+    (function () {
+        const style = document.createElement('style');
+        style.textContent =
+            '.hpsk-sort-th{cursor:pointer;user-select:none;white-space:nowrap}' +
+            '.hpsk-sort-th:hover{color:var(--bs-primary)}';
+        document.head.appendChild(style);
+    })();
+
+    window.hpskSortToggle = function (state, key) {
+        if (state.key === key) {
+            state.dir = -state.dir;
+        } else {
+            state.key = key;
+            state.dir = 1;
+        }
+        return state;
+    };
+
+    // ⚠️ Tomma celler hamnar sist åt BÅDA hållen. Sorterar man dem som "" eller 0 hamnar de
+    // först i stigande ordning, och då ser listan ut att börja med skräp.
+    window.hpskSortCompare = function (va, vb, dir) {
+        const ea = (va === null || va === undefined || va === '');
+        const eb = (vb === null || vb === undefined || vb === '');
+        if (ea !== eb) return ea ? 1 : -1;
+        if (ea) return 0;
+        if (typeof va === 'string') return va.localeCompare(vb, 'sv') * dir;
+        return (va - vb) * dir;
+    };
+
+    // Sorterar en KOPIA — anroparen äger ofta originallistan (den cachade serverlistan), och
+    // en sortering på plats hade gjort ordningen beroende av hur många gånger man klickat.
+    window.hpskSortRows = function (rows, columns, state) {
+        const col = columns.find(c => c.key === state.key) || columns[0];
+        return (rows || []).slice().sort((a, b) =>
+            window.hpskSortCompare(col.sort(a), col.sort(b), state.dir));
+    };
+
+    // `fnName` är namnet på sidans egen sorteringsfunktion — en JS-identifierare, aldrig
+    // användartext, så den får gå in i attributet.
+    window.hpskSortableTh = function (col, state, fnName) {
+        const active = col.key === state.key;
+        const icon = active
+            ? (state.dir === 1 ? 'bi-caret-up-fill' : 'bi-caret-down-fill')
+            : 'bi-arrow-down-up opacity-25';
+        const ariaSort = active ? (state.dir === 1 ? 'ascending' : 'descending') : 'none';
+        const label = window.hpskEsc(col.label);
+        return `<th class="hpsk-sort-th ${col.thClass || ''}" aria-sort="${ariaSort}" role="button" tabindex="0"`
+            + ` title="Sortera efter ${label}" onclick="${fnName}('${col.key}')"`
+            + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${fnName}('${col.key}');}">`
+            + `${label} <i class="bi ${icon} small"></i></th>`;
+    };
+}
+</script>
