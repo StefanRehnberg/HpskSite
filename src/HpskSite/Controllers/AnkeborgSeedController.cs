@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -635,7 +635,12 @@ VALUES
                     node.SetValue("isActive", true);
                     node.SetValue("registrationRequired", e.Registration);
                     if (e.MaxParticipants > 0) node.SetValue("maxParticipants", e.MaxParticipants);
-                    if (e.Fee > 0) node.SetValue("feeAmount", e.Fee);
+                    // Prisraderna, inte fritexten. Seed-data som skriver det gamla faltet hade
+                    // gjort varje ny demoklubb till en ny migrering att kora.
+                    if (e.Fee > 0)
+                        node.SetValue(HpskSite.Models.EventPrices.Property,
+                            HpskSite.Models.EventPrices.Serialize(
+                                new[] { new HpskSite.Models.EventPrice("avgift", "Avgift", e.Fee) }));
                     node.SetValue("lanevapenOffered", e.LoanWeapons);
                     node.SetValue("isMandatory", e.Mandatory);
                     if (e.Registration && e.Date > today)

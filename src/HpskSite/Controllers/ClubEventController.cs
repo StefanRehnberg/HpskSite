@@ -18,9 +18,10 @@ namespace HpskSite.Controllers
     /// share). Kept out of <see cref="ClubController"/>, which owns the event CONTENT — creating and
     /// editing an event is the arrangör's act, signing up and being ticked off is everyone else's.
     ///
-    /// ⚠️ Two doctype properties are operator-added (<c>isMandatory</c>, <c>eventFee</c>). Reading a
-    /// missing property is harmless (default), but <c>SetValue</c> on one is a SILENT no-op — so the
-    /// write endpoints report the missing property instead of reporting a save that never happened.
+    /// ⚠️ Three doctype properties are operator-added (<c>isMandatory</c>,
+    /// <c>registrationDeadline</c>, <c>eventPrices</c>). Reading a missing property is harmless
+    /// (default), but <c>SetValue</c> on one is a SILENT no-op — so the write endpoints report the
+    /// missing property instead of reporting a save that never happened.
     /// </summary>
     public class ClubEventController : SurfaceController
     {
@@ -122,7 +123,10 @@ namespace HpskSite.Controllers
                     // beskedet som får någon att anmäla sig i tid. Ett kort som bara säger "stängd"
                     // efteråt är för sent för precis den det gällde.
                     registrationDeadline = ctx.RegistrationDeadline?.ToString("yyyy-MM-dd"),
-                    fee = ctx.Fee,
+                    // ⚠️ Prisraderna, inte ett tal. Ett evenemang kan ha flera priser, och `fee`
+                    // som ett enda belopp hade tvingat klienten att välja en rad åt medlemmen.
+                    prices = ctx.Prices.Rows,
+                    pricesUnreadable = ctx.Prices.Unreadable,
                     ownerName = ctx.OwnerName,
                     isRegion = ctx.IsRegionOwned
                 },
@@ -836,22 +840,23 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> MigrateEventFee(bool apply = false)
         {
             if (!await _auth.IsCurrentUserAdminAsync())
-                return Json(new { success = false, message = "Endast sajtadministratörer." });
+                return Json(new { success = false, message = "Endast sajtadministratorer." });
 
             var type = Services.ContentTypeService?.Get(ClubEvents.EventAlias);
             if (type == null)
                 return Json(new { success = false, message = $"Doctypen {ClubEvents.EventAlias} hittades inte." });
 
-            // ⚠️ Egenskapen måste finnas INNAN något skrivs. SetValue på en saknad egenskap är en
-            // TYST no-op, så utan den här kontrollen rapporterar migreringen lyckat och har inte
-            // gjort någonting alls.
-            if (!type.PropertyTypeExists(ClubEvents.FeeProperty))
+            // Egenskapen maste finnas INNAN nagot skrivs. SetValue pa en saknad egenskap ar en TYST
+            // no-op, sa utan kontrollen rapporterar migreringen lyckat och har inte gjort nagot.
+            if (!type.PropertyTypeExists(EventPrices.Property))
                 return Json(new
                 {
                     success = false,
-                    message = $"Doctypen saknar egenskapen '{ClubEvents.FeeProperty}' (Decimal). "
-                            + "Lägg till den i backoffice först — annars skriver migreringen ingenting."
+                    message = $"Doctypen saknar egenskapen '{EventPrices.Property}' (Textarea). "
+                            + "Lagg till den i backoffice forst - annars skriver migreringen ingenting."
                 });
+
+            var hasLegacyFee = type.PropertyTypeExists(ClubEvents.FeeProperty);
 
             var migrated = new List<object>();
             var needsHuman = new List<object>();
@@ -864,29 +869,56 @@ namespace HpskSite.Controllers
                 var page = Services.ContentService!.GetPagedOfType(type.Id, pageIndex, 200, out total, null);
                 foreach (var node in page)
                 {
-                    var raw = node.GetValue<string>("feeAmount");
-                    var existing = node.GetValue<decimal?>(ClubEvents.FeeProperty);
-
-                    if (existing.HasValue) { skipped++; continue; }
-
-                    var parsed = EventFeeMigration.Parse(raw);
-                    if (parsed.Outcome == EventFeeMigration.FeeParse.Empty) { skipped++; continue; }
-
-                    if (parsed.Outcome == EventFeeMigration.FeeParse.Unparseable)
+                    // Redan migrerat? Ror det aldrig - listan kan ha redigerats for hand efterat.
+                    var current = EventPrices.Parse(node.GetValue<string>(EventPrices.Property));
+                    if (current.Rows.Count > 0) { skipped++; continue; }
+                    if (current.Unreadable)
                     {
-                        needsHuman.Add(new { id = node.Id, name = node.Name, raw, reason = parsed.Reason });
+                        needsHuman.Add(new { id = node.Id, name = node.Name, raw = "(eventPrices)",
+                            reason = "Prisraderna gar inte att lasa - kontrollera innehallet for hand." });
                         continue;
                     }
 
-                    migrated.Add(new { id = node.Id, name = node.Name, raw, amount = parsed.Amount });
+                    decimal amount;
+                    string source;
+
+                    // PRECEDENS: eventFee forst. Den sattes av forra migreringen ur samma fritext
+                    // och ar redan ett rent tal, sa den behover ingen tolkning.
+                    var legacyFee = hasLegacyFee ? node.GetValue<decimal?>(ClubEvents.FeeProperty) : null;
+                    var raw = node.GetValue<string>("feeAmount");
+
+                    if (legacyFee.HasValue)
+                    {
+                        amount = legacyFee.Value;
+                        source = $"eventFee {legacyFee.Value:0.##}";
+                    }
+                    else
+                    {
+                        var parsed = EventFeeMigration.Parse(raw);
+                        if (parsed.Outcome == EventFeeMigration.FeeParse.Empty) { skipped++; continue; }
+                        if (parsed.Outcome == EventFeeMigration.FeeParse.Unparseable)
+                        {
+                            needsHuman.Add(new { id = node.Id, name = node.Name, raw, reason = parsed.Reason });
+                            continue;
+                        }
+                        amount = parsed.Amount;
+                        source = $"feeAmount \"{raw}\"";
+                    }
+
+                    // EN rad, med en neutral etikett. Migreringen hittar ALDRIG pa kategorier -
+                    // "Vuxen"/"Barn" ar arrangorens beslut, och att gissa dem ur ett enda tal vore
+                    // att uppfinna en prissattning som ingen bestamt.
+                    var rows = new[] { new EventPrice("avgift", "Avgift", amount) };
+
+                    migrated.Add(new { id = node.Id, name = node.Name, source, amount });
 
                     if (!apply) continue;
 
-                    node.SetValue(ClubEvents.FeeProperty, parsed.Amount);
+                    node.SetValue(EventPrices.Property, EventPrices.Serialize(rows));
 
-                    // Publicerat → spara och publicera om. Utkast → spara bara.
-                    // ⚠️ `SaveAndPublish` finns inte i Umbraco 16 — det är Save följt av
-                    // Publish(node, new[]{"*"}, -1), samma form som Fältskyttes controller använder.
+                    // Publicerat -> spara och publicera om. Utkast -> spara bara: att publicera ett
+                    // utkast som sidoeffekt av en migrering gor ett opublicerat evenemang publikt.
+                    // SaveAndPublish finns inte i Umbraco 16 - det ar Save + Publish(node, ["*"], -1).
                     Services.ContentService.Save(node);
                     if (node.Published) Services.ContentService.Publish(node, new[] { "*" }, -1);
                 }
@@ -895,17 +927,17 @@ namespace HpskSite.Controllers
             while (pageIndex * 200 < total);
 
             _logger.LogInformation(
-                "MigrateEventFee ({Lage}): {Migrerade} flyttade, {Handpalaggning} kraver handpaläggning, {Hoppade} orörda.",
-                apply ? "SKARPT" : "torrkörning", migrated.Count, needsHuman.Count, skipped);
+                "MigrateEventFee ({Lage}): {Migrerade} flyttade, {Handpalaggning} kraver handpalaggning, {Hoppade} ororda.",
+                apply ? "SKARPT" : "torrkorning", migrated.Count, needsHuman.Count, skipped);
 
             return Json(new
             {
                 success = true,
                 applied = apply,
                 message = apply
-                    ? $"{migrated.Count} avgifter flyttade. {needsHuman.Count} kräver handpåläggning."
-                    : $"TORRKÖRNING — ingenting skrevs. {migrated.Count} skulle flyttas, "
-                      + $"{needsHuman.Count} kräver handpåläggning. Kör om med ?apply=true när listan ser rätt ut.",
+                    ? $"{migrated.Count} avgifter flyttade till prisrader. {needsHuman.Count} kraver handpalaggning."
+                    : $"TORRKORNING - ingenting skrevs. {migrated.Count} skulle flyttas, "
+                      + $"{needsHuman.Count} kraver handpalaggning. Kor om med ?apply=true nar listan ser ratt ut.",
                 migrated,
                 needsHuman,
                 skipped

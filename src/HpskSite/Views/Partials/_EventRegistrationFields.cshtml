@@ -45,11 +45,37 @@
     @* ⚠️ AVGIFTEN LIGGER HÄR, I DEN DELADE PARTIALEN, och inte i en enskild dialog.
        Den gamla fritextavgiften (feeAmount) satt bara i evenemangets egen modal, så en klubbadmin
        som skapade en händelse från klubbpanelen kunde inte sätta någon avgift alls. Samma
-       fältlista-som-glömmer som Luleå PK rapporterade om lånevapen. *@
+       fältlista-som-glömmer som Luleå PK rapporterade om lånevapen.
+
+       ⚠️⚠️ TVÅ LÄGEN, EN LAGRING. Ett evenemang kan ha flera priser ("Vuxen 180, Barn 90, under
+       7 år gratis"), men 276 av 281 har ingen avgift alls och tre har ett enda pris. Därför visas
+       en vanlig beloppsruta som standard, med raderna ett klick bort. Under ytan är det ALLTID en
+       lista — ett pris är en lista med en rad. Sortera, göm inte. *@
     <div class="mb-2">
-        <label for="@(regPrefix)EventFee" class="form-label">Avgift (kr)</label>
-        <input type="number" class="form-control" id="@(regPrefix)EventFee" min="0" step="1" placeholder="Lämna tom = ingen avgift">
-        <div class="form-text" id="@(regPrefix)EventFeeHelp">Ett belopp, inte en text. Skriv 0 för att säga att evenemanget är gratis.</div>
+        <label class="form-label" for="@(regPrefix)PriceSingle">Avgift (kr)</label>
+
+        @* Enkelt läge: ett belopp, ingen etikett att fylla i. *@
+        <div id="@(regPrefix)PriceSimple">
+            <input type="number" class="form-control" id="@(regPrefix)PriceSingle" min="0" step="1" placeholder="Lämna tom = ingen avgift">
+            <div class="form-text" id="@(regPrefix)PriceHelp">
+                Skriv 0 för att säga att evenemanget är gratis.
+                <a href="#" onclick="return hpskEventPriceExpand('@regPrefix')">Fler prisalternativ…</a>
+            </div>
+        </div>
+
+        @* Radläge: namngivna priser. Medlemmen väljer en rad vid anmälan. *@
+        <div id="@(regPrefix)PriceRows" style="display:none">
+            <div id="@(regPrefix)PriceRowsBody"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
+                    onclick="hpskEventPriceAddRow('@regPrefix')">
+                <i class="bi bi-plus-lg me-1"></i>Lägg till pris
+            </button>
+            <div class="form-text">
+                Ge varje pris ett namn som medlemmen känner igen, t.ex. <em>Vuxen</em> eller
+                <em>Barn 7–15</em>. Medlemmen väljer ett av dem när hen anmäler sig.
+            </div>
+        </div>
+
         <div class="form-text">Är det fullt kan man fortfarande anmäla sig — men hamnar som reserv, och flyttas upp automatiskt om någon avbokar.</div>
     </div>
     <div class="form-check mb-3">
@@ -152,16 +178,7 @@
                 if (help) help.innerHTML = '<span class="text-warning">Egenskapen \'isMandatory\' saknas på händelsetypen i Umbraco — kontakta en administratör innan den kan användas.</span>';
             }
 
-            // Avgift. ⚠️ Tomt fält och 0 är OLIKA svar: tomt = ingen avgift angiven, 0 = arrangören
-            // har sagt att evenemanget är gratis. Samma regel som tävlingarnas juniorAvgift, och
-            // skälet fältet inte defaultar till 0.
-            var fee = el(prefix, 'EventFee');
-            if (fee) fee.value = (d.eventFee === null || d.eventFee === undefined) ? '' : d.eventFee;
-            if (d.eventFeePropertyExists === false && fee) {
-                fee.disabled = true;
-                var feeHelp = el(prefix, 'EventFeeHelp');
-                if (feeHelp) feeHelp.innerHTML = '<span class="text-warning">Egenskapen \'eventFee\' saknas på händelsetypen i Umbraco — kontakta en administratör innan avgift kan användas.</span>';
-            }
+            hpskEventPriceFill(prefix, d);
 
             // Lånevapen: samma mönster som isMandatory ovan, av samma skäl.
             var lw = el(prefix, 'LanevapenOffered');
@@ -179,6 +196,144 @@
             window.hpskEventRegFill(prefix, {});
         };
 
+        // ── Prisraderna ─────────────────────────────────────────────────────────────────────
+        //
+        // ⚠️ RADERNA BYGGS MED DOM, ALDRIG MED innerHTML. Etiketten är arrangörens fritext, och
+        // ett `innerHTML` med den i hade varit samma lucka som gav kodexekvering i Fältskyttes
+        // "lägg till skytt". Här når användartext aldrig markup — den sätts som .value.
+        //
+        // ⚠️ NYA RADER SKICKAS UTAN id, och servern genererar det. Klienten äger alltså inte
+        // id-reglerna: två uppsättningar slug-regler hade glidit isär, och id:t är det som binder
+        // en redan gjord anmälan till sin prisrad. BEFINTLIGA id:n skickas tillbaka oförändrade —
+        // att döpa om en etikett får aldrig flytta id:t.
+
+        var priceState = {};
+
+        function priceRowEl(prefix, row, index) {
+            var wrap = document.createElement('div');
+            wrap.className = 'input-group input-group-sm mb-1';
+
+            var label = document.createElement('input');
+            label.type = 'text';
+            label.className = 'form-control';
+            label.placeholder = 'Namn, t.ex. Vuxen';
+            label.value = row.label || '';
+            label.oninput = function () { priceState[prefix][index].label = label.value; };
+
+            var amount = document.createElement('input');
+            amount.type = 'number';
+            amount.className = 'form-control';
+            amount.style.maxWidth = '9rem';
+            amount.min = '0'; amount.step = '1';
+            amount.placeholder = 'kr';
+            amount.value = (row.amount === null || row.amount === undefined) ? '' : row.amount;
+            amount.oninput = function () {
+                priceState[prefix][index].amount = amount.value === '' ? null : parseFloat(amount.value);
+            };
+
+            var del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'btn btn-outline-danger';
+            del.title = 'Ta bort priset';
+            del.innerHTML = '<i class="bi bi-trash"></i>';
+            del.onclick = function () {
+                priceState[prefix].splice(index, 1);
+                hpskEventPriceRender(prefix);
+            };
+
+            wrap.appendChild(label); wrap.appendChild(amount); wrap.appendChild(del);
+            return wrap;
+        }
+
+        window.hpskEventPriceRender = function (prefix) {
+            var body = el(prefix, 'PriceRowsBody');
+            if (!body) return;
+            body.textContent = '';
+            (priceState[prefix] || []).forEach(function (row, i) {
+                body.appendChild(priceRowEl(prefix, row, i));
+            });
+        };
+
+        window.hpskEventPriceExpand = function (prefix) {
+            var simple = el(prefix, 'PriceSimple'), rows = el(prefix, 'PriceRows');
+            if (!simple || !rows) return false;
+
+            // Beloppet som redan står i den enkla rutan följer med som första rad — annars tappar
+            // arrangören det hen just skrev genom att klicka på länken.
+            var single = el(prefix, 'PriceSingle');
+            var v = single && single.value !== '' ? parseFloat(single.value) : null;
+            priceState[prefix] = (priceState[prefix] && priceState[prefix].length)
+                ? priceState[prefix]
+                : [{ id: '', label: v === null ? '' : 'Avgift', amount: v }];
+
+            simple.style.display = 'none';
+            rows.style.display = '';
+            hpskEventPriceRender(prefix);
+            return false;
+        };
+
+        window.hpskEventPriceAddRow = function (prefix) {
+            priceState[prefix] = priceState[prefix] || [];
+            priceState[prefix].push({ id: '', label: '', amount: null });
+            hpskEventPriceRender(prefix);
+        };
+
+        window.hpskEventPriceFill = function (prefix, d) {
+            var rows = (d && d.eventPrices) || [];
+            priceState[prefix] = rows.map(function (r) {
+                return { id: r.id || '', label: r.label || '', amount: r.amount };
+            });
+
+            var simple = el(prefix, 'PriceSimple'), rowsBox = el(prefix, 'PriceRows'),
+                single = el(prefix, 'PriceSingle'), help = el(prefix, 'PriceHelp');
+
+            // ⚠️ Oläsbara prisrader får INTE se ut som "ingen avgift". Då hade en arrangör sparat
+            // över en trasig lista utan att veta att något gick förlorat.
+            if (d && d.eventPricesUnreadable) {
+                if (simple) simple.style.display = '';
+                if (rowsBox) rowsBox.style.display = 'none';
+                if (single) { single.value = ''; single.disabled = true; }
+                if (help) help.innerHTML = '<span class="text-danger">Prisraderna går inte att läsa. Kontakta en administratör — spara inte, då skrivs de över.</span>';
+                return;
+            }
+
+            if (d && d.eventPricesPropertyExists === false) {
+                if (single) { single.value = ''; single.disabled = true; }
+                if (help) help.innerHTML = '<span class="text-warning">Egenskapen \'eventPrices\' saknas på händelsetypen i Umbraco — kontakta en administratör innan avgift kan användas.</span>';
+                return;
+            }
+            if (single) single.disabled = false;
+
+            if (priceState[prefix].length > 1) {
+                if (simple) simple.style.display = 'none';
+                if (rowsBox) rowsBox.style.display = '';
+                hpskEventPriceRender(prefix);
+            } else {
+                if (simple) simple.style.display = '';
+                if (rowsBox) rowsBox.style.display = 'none';
+                var only = priceState[prefix][0];
+                if (single) single.value = (only && only.amount !== null && only.amount !== undefined) ? only.amount : '';
+            }
+        };
+
+        window.hpskEventPriceCollect = function (prefix) {
+            var rowsBox = el(prefix, 'PriceRows');
+            var inRowMode = rowsBox && rowsBox.style.display !== 'none';
+
+            if (!inRowMode) {
+                var single = el(prefix, 'PriceSingle');
+                if (!single || single.value === '') return [];      // ingen avgift
+                // Behåll id:t från en befintlig ensam rad, annars föds den på nytt och varje
+                // redan gjord anmälan tappar sin koppling.
+                var existing = (priceState[prefix] || [])[0];
+                return [{ id: (existing && existing.id) || '', label: 'Avgift', amount: parseFloat(single.value) }];
+            }
+
+            return (priceState[prefix] || [])
+                .filter(function (r) { return (r.label || '').trim() !== '' || r.amount !== null; })
+                .map(function (r) { return { id: r.id || '', label: (r.label || '').trim(), amount: r.amount === null ? 0 : r.amount }; });
+        };
+
         // Lägger fälten på en FormData med de namn serverns endpoints tar emot.
         window.hpskEventRegAppend = function (prefix, formData) {
             var req = el(prefix, 'RegistrationRequired');
@@ -193,10 +348,10 @@
             formData.append('lanevapenOffered', lw ? lw.checked : false);
             var dl = el(prefix, 'RegistrationDeadline');
             formData.append('registrationDeadline', dl ? dl.value.trim() : '');
-            // ⚠️ Skickas som TOM STRÄNG när fältet är tomt, aldrig som 0. Servern behöver kunna
-            // skilja "ingen avgift angiven" från "gratis" — se hpskEventRegFill ovan.
-            var fee = el(prefix, 'EventFee');
-            formData.append('eventFee', fee ? fee.value.trim() : '');
+            // ⚠️ Prisraderna skickas som JSON. Tom lista = ingen avgift; en rad med beloppet 0 =
+            // arrangören har sagt att det är gratis. De två får aldrig slås ihop — se
+            // EventPriceList i modellen.
+            formData.append('eventPrices', JSON.stringify(hpskEventPriceCollect(prefix)));
             return formData;
         };
 

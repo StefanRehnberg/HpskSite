@@ -84,7 +84,8 @@ namespace HpskSite.Services
             // than throw — GetValue on an unknown alias returns default, so this is safe by
             // construction, but the WRITE side is what silently no-ops (see the controller).
             ctx.IsMandatory = node.GetValue<bool>(ClubEvents.MandatoryProperty);
-            ctx.Fee = node.GetValue<decimal?>(ClubEvents.FeeProperty);
+            // Prisraderna. En lista, inte ett tal - se EventPrices for varfor.
+            ctx.Prices = EventPrices.Parse(node.GetValue<string>(EventPrices.Property));
             // ⚠️ RealDate, inte råvärdet: en tom Umbraco-DateTime läses som DateTime.MinValue, och
             // en deadline år 1 hade stängt anmälan på varje händelse ingen satt en deadline på.
             ctx.RegistrationDeadline = ClubEvents.RealDate(node.GetValue<DateTime?>(ClubEvents.DeadlineProperty));
@@ -358,7 +359,12 @@ namespace HpskSite.Services
             existing.MemberName = member.Name ?? existing.MemberName;
             // Snapshot the fee as it stands now, so changing the event later cannot rewrite what
             // somebody already signed up to.
-            existing.FeeAmount = ctx.Fee;
+            //
+            // Bara nar evenemanget har EXAKT ETT pris. Har det flera ar det deltagaren som valjer,
+            // och valjaren ar inte byggd an - att plocka den forsta raden hade satt ett belopp
+            // ingen pekat pa, och snapshotten ar just det som ska overleva en senare prisandring.
+            // Tills valjaren finns lamnas beloppet null och uppropet visar "ej valt".
+            existing.FeeAmount = ctx.SinglePrice;
             existing.UpdatedDate = now;
 
             if (existing.Id > 0) await db.UpdateAsync(existing);
@@ -453,7 +459,18 @@ namespace HpskSite.Services
         public string RegistrationUrl { get; set; } = "";
 
         public bool IsMandatory { get; set; }
-        public decimal? Fee { get; set; }
+        /// <summary>
+        /// Evenemangets prisrader. Tom lista = ingen avgift; <c>Unreadable</c> = gar inte att lasa,
+        /// vilket ALDRIG far renderas som gratis.
+        /// </summary>
+        public EventPriceList Prices { get; set; } = new();
+
+        /// <summary>
+        /// Det ENDA priset, nar evenemanget bara har ett. Null nar det saknas avgift OCH nar det
+        /// finns flera - i det senare fallet ar det deltagaren som valjer, och att plocka det forsta
+        /// hade debiterat efter en rad ingen pekat pa.
+        /// </summary>
+        public decimal? SinglePrice => Prices.IsSingle ? Prices.Rows[0].Amount : (decimal?)null;
 
         /// <summary>
         /// Sista anmälningsdag, <b>inklusive dagen själv</b> (operator-added doctype property; null

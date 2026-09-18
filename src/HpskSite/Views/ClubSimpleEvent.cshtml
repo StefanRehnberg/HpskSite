@@ -30,18 +30,15 @@
     // ClubEventParticipationService.IsSignupOpen; här visas den bara.
     var registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
         Model.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty));
-    @* ⚠️ Avgiften läses ur det NUMERISKA eventFee, inte ur den gamla fritexten feeAmount.
-       Två fält som båda påstår vad det kostar blir förr eller senare oense, och så fort en
-       betalning drivs av talet läser medlemmen ett belopp och debiteras ett annat. Fritexten
-       migrerades av ClubEvent/MigrateEventFee och är på väg bort.
-       ⚠️ null och 0 är OLIKA: null = ingen avgift angiven (raden visas inte), 0 = arrangören har
-       sagt att evenemanget är gratis (raden visas, och säger Gratis). *@
-    var eventFee = Model.Value<decimal?>(HpskSite.Models.ClubEvents.FeeProperty);
-    var feeText = eventFee == null
-        ? ""
-        : eventFee.Value == 0m
-            ? "Gratis"
-            : eventFee.Value.ToString("#,##0", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")) + " kr";
+    @* ⚠️ Avgiften läses ur PRISRADERNA, inte ur den gamla fritexten feeAmount och inte ur ett
+       enskilt tal. Ett evenemang kan ha flera priser ("Vuxen 180, Barn 90, under 7 år gratis"),
+       och två fält som båda påstår vad det kostar blir förr eller senare oense — så fort en
+       betalning drivs av det ena läser medlemmen det andra.
+       ⚠️ Oläsbara rader får ALDRIG renderas som "ingen avgift". Se EventPriceList. *@
+    var priceList = HpskSite.Models.EventPrices.Parse(
+        Model.Value<string>(HpskSite.Models.EventPrices.Property));
+    var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+    string PriceText(decimal a) => a == 0m ? "Gratis" : a.ToString("#,##0", sv) + " kr";
     var equipmentRequired = Model.Value<string>("equipmentRequired") ?? "";
     var targetAudience = Model.Value<string>("targetAudience") ?? "";
 
@@ -465,14 +462,44 @@
                         }
 
                         <!-- Fee -->
-                        @if (!string.IsNullOrEmpty(feeText))
+                        @if (priceList.Unreadable)
+                        {
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-exclamation-triangle fs-4 me-3 text-danger"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Avgift</small>
+                                        <strong class="text-danger">Avgiften kunde inte läsas</strong>
+                                        <div class="small text-secondary">Kontakta arrangören.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        else if (priceList.Rows.Count == 1)
                         {
                             <div class="col-md-6 mb-3">
                                 <div class="d-flex align-items-start">
                                     <i class="bi bi-wallet2 fs-4 me-3" style="color: @eventTypeColor;"></i>
                                     <div>
                                         <small class="text-secondary d-block">Avgift</small>
-                                        <strong>@feeText</strong>
+                                        <strong>@PriceText(priceList.Rows[0].Amount)</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        else if (priceList.Rows.Count > 1)
+                        {
+                            @* Flera priser: alla raderna, med arrangörens egna namn. Att bara visa
+                               "från 90 kr" hade gömt att vuxna betalar 180. *@
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-wallet2 fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Avgift</small>
+                                        @foreach (var row in priceList.Rows)
+                                        {
+                                            <div><strong>@PriceText(row.Amount)</strong> <span class="text-secondary">@row.Label</span></div>
+                                        }
                                     </div>
                                 </div>
                             </div>

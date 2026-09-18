@@ -471,7 +471,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventFee = "")
+            string registrationDeadline = "", string eventPrices = "")
         {
             try
             {
@@ -516,7 +516,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventFee);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
@@ -767,10 +767,11 @@ namespace HpskSite.Controllers
                             deadlinePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty),
                             // Avgiften. null = ingen avgift angiven, 0 = arrangoren har sagt gratis.
                             // De far INTE slas ihop - se hpskEventRegFill i _EventRegistrationFields.
-                            eventFee = evt.HasProperty(HpskSite.Models.ClubEvents.FeeProperty)
-                                ? evt.Value<decimal?>(HpskSite.Models.ClubEvents.FeeProperty)
-                                : null,
-                            eventFeePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.FeeProperty)
+                            eventPrices = HpskSite.Models.EventPrices
+                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Rows,
+                            eventPricesUnreadable = HpskSite.Models.EventPrices
+                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Unreadable,
+                            eventPricesPropertyExists = evt.HasProperty(HpskSite.Models.EventPrices.Property)
                         });
                     }
                 }
@@ -917,7 +918,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventFee = "")
+            string registrationDeadline = "", string eventPrices = "")
         {
             try
             {
@@ -952,7 +953,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventFee);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
@@ -2214,10 +2215,11 @@ namespace HpskSite.Controllers
                             deadlinePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty),
                             // Avgiften. null = ingen avgift angiven, 0 = arrangoren har sagt gratis.
                             // De far INTE slas ihop - se hpskEventRegFill i _EventRegistrationFields.
-                            eventFee = evt.HasProperty(HpskSite.Models.ClubEvents.FeeProperty)
-                                ? evt.Value<decimal?>(HpskSite.Models.ClubEvents.FeeProperty)
-                                : null,
-                            eventFeePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.FeeProperty)
+                            eventPrices = HpskSite.Models.EventPrices
+                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Rows,
+                            eventPricesUnreadable = HpskSite.Models.EventPrices
+                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Unreadable,
+                            eventPricesPropertyExists = evt.HasProperty(HpskSite.Models.EventPrices.Property)
                         });
                     }
                 }
@@ -2244,7 +2246,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventFee = "")
+            string registrationDeadline = "", string eventPrices = "")
         {
             try
             {
@@ -2285,7 +2287,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventFee);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
@@ -2343,7 +2345,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventFee = "")
+            string registrationDeadline = "", string eventPrices = "")
         {
             try
             {
@@ -2389,7 +2391,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventFee);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
@@ -2552,7 +2554,7 @@ namespace HpskSite.Controllers
                         contactEmail = eventContent.GetValue<string>("contactEmail") ?? "",
                         contactPhone = eventContent.GetValue<string>("contactPhone") ?? "",
                         // Extended fields
-                        feeAmount = eventContent.GetValue<string>("feeAmount") ?? "",
+                        // feeAmount returneras INTE langre - fritextavgiften ar ersatt av eventPrices.
                         equipmentRequired = eventContent.GetValue<string>("equipmentRequired") ?? "",
                         targetAudience = eventContent.GetValue<string>("targetAudience") ?? "",
                         registrationRequired = eventContent.GetValue<bool>("registrationRequired"),
@@ -2578,10 +2580,11 @@ namespace HpskSite.Controllers
                             && eventContent.GetValue<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                         lanevapenPropertyExists = eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                         // Avgiften. ⚠️ null och 0 är olika svar — se hpskEventRegFill.
-                        eventFee = eventContent.HasProperty(HpskSite.Models.ClubEvents.FeeProperty)
-                            ? eventContent.GetValue<decimal?>(HpskSite.Models.ClubEvents.FeeProperty)
-                            : null,
-                        eventFeePropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.FeeProperty)
+                        eventPrices = HpskSite.Models.EventPrices
+                            .Parse(eventContent.GetValue<string>(HpskSite.Models.EventPrices.Property)).Rows,
+                        eventPricesUnreadable = HpskSite.Models.EventPrices
+                            .Parse(eventContent.GetValue<string>(HpskSite.Models.EventPrices.Property)).Unreadable,
+                        eventPricesPropertyExists = eventContent.HasProperty(HpskSite.Models.EventPrices.Property)
                     }
                 });
             }
@@ -2603,10 +2606,21 @@ namespace HpskSite.Controllers
         /// fält som inte går att spara — den som aldrig använder funktionen ska inte gnatas på.
         /// Ett meddelande betyder att ANROPAREN ska avbryta sparningen; ingenting är publicerat än.
         /// </summary>
+        /// <summary>
+        /// Prisraden som klienten skickar. <b>Id kan vara tomt</b> — servern genererar det for en ny
+        /// rad. Egen typ sa deserialiseringen inte hanger pa EventPrice-recordets konstruktor.
+        /// </summary>
+        private sealed class IncomingPrice
+        {
+            public string? Id { get; set; }
+            public string? Label { get; set; }
+            public decimal? Amount { get; set; }
+        }
+
         private static string? ApplyEventRegistrationFields(
             Umbraco.Cms.Core.Models.IContent eventContent,
             bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl,
-            bool lanevapenOffered = false, string registrationDeadline = "", string eventFee = "")
+            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "")
         {
             eventContent.SetValue("registrationRequired", registrationRequired);
             eventContent.SetValue("registrationUrl", registrationUrl ?? "");
@@ -2651,31 +2665,57 @@ namespace HpskSite.Controllers
             else if (deadline != null)
                 missing.Add(HpskSite.Models.ClubEvents.DeadlineProperty);
 
-            // Avgiften. Tom = ingen avgift (skrivs som null, så den går att TA BORT igen).
+            // Prisraderna. Tom lista = ingen avgift, och den ska kunna TAS BORT igen - darfor
+            // skrivs tom strang i stallet for att raden hoppas over.
             //
-            // ⚠️⚠️ STRIKT PARSNING, OCH ÅTERANVÄND ALDRIG EventFeeMigration.Parse HÄR.
-            // Den tolken finns för att läsa GAMMAL fritext en gång ("300 kr", "Gratis") och är
-            // medvetet tolerant. Släpps den in i det här formuläret blir fritexten en permanent
-            // ingång igen, och då kan "Gratis för juniorer" skrivas in på nytt i ett fält som ska
-            // debitera. Här är fältet ett tal, och något annat är ett fel som ska namnges.
+            // ATERANVAND ALDRIG EventFeeMigration.Parse HAR. Den tolken finns for att lasa GAMMAL
+            // fritext en gang ("300 kr", "Gratis") och ar medvetet tolerant. Slapps den in i
+            // formularet blir fritexten en permanent ingang igen, och "Gratis for juniorer" kan
+            // skrivas in pa nytt i ett falt som ska debitera.
             //
-            // ⚠️ Ett oläsbart belopp skrivs INTE som null — det hade sett ut som "arrangören tog
-            // bort avgiften" och tyst gjort evenemanget gratis. Samma regel som deadlinen ovan.
-            decimal? fee = null;
-            if (!string.IsNullOrWhiteSpace(eventFee))
+            // SERVERN AGER ID-GENERERINGEN. Klienten skickar tomt id for en NY rad och behaller
+            // id:t pa en befintlig. Tva uppsattningar slug-regler hade glidit isar, och id:t ar
+            // det som binder en redan gjord anmalan till sin prisrad - flyttar det, tappar
+            // deltagaren vad hen valde.
+            //
+            // En ogiltig lista skrivs INTE som tom. Det hade sett ut som "arrangoren tog bort
+            // avgiften" och tyst gjort evenemanget gratis. Samma regel som deadlinen ovan.
+            var priceRows = new List<HpskSite.Models.EventPrice>();
+            if (!string.IsNullOrWhiteSpace(eventPrices))
             {
-                var cleaned = eventFee.Trim().Replace(',', '.');
-                if (!decimal.TryParse(cleaned, System.Globalization.NumberStyles.Number,
-                        System.Globalization.CultureInfo.InvariantCulture, out var parsedFee) || parsedFee < 0)
-                    return $"\"{eventFee}\" går inte att läsa som ett belopp. Skriv avgiften som ett "
-                         + "tal i kronor, t.ex. 300, eller lämna fältet tomt. Ingenting sparades.";
-                fee = parsedFee;
+                List<IncomingPrice>? incoming;
+                try
+                {
+                    incoming = System.Text.Json.JsonSerializer.Deserialize<List<IncomingPrice>>(
+                        eventPrices,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    return "Prisraderna kunde inte lasas. Ladda om sidan och forsok igen. Ingenting sparades.";
+                }
+
+                foreach (var row in incoming ?? new List<IncomingPrice>())
+                {
+                    var label = (row.Label ?? "").Trim();
+                    if (label.Length == 0 && row.Amount == null) continue;   // helt tom rad = struken
+
+                    var id = string.IsNullOrWhiteSpace(row.Id)
+                        ? HpskSite.Models.EventPrices.NewId(label, priceRows.Select(x => x.Id))
+                        : row.Id.Trim();
+
+                    priceRows.Add(new HpskSite.Models.EventPrice(id, label, row.Amount ?? 0m));
+                }
+
+                var priceError = HpskSite.Models.EventPrices.Validate(priceRows);
+                if (priceError != null) return priceError + " Ingenting sparades.";
             }
 
-            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.FeeProperty))
-                eventContent.SetValue(HpskSite.Models.ClubEvents.FeeProperty, fee);
-            else if (fee != null)
-                missing.Add(HpskSite.Models.ClubEvents.FeeProperty);
+            if (eventContent.HasProperty(HpskSite.Models.EventPrices.Property))
+                eventContent.SetValue(HpskSite.Models.EventPrices.Property,
+                    priceRows.Count == 0 ? "" : HpskSite.Models.EventPrices.Serialize(priceRows));
+            else if (priceRows.Count > 0)
+                missing.Add(HpskSite.Models.EventPrices.Property);
 
             if (missing.Count == 0) return null;
             return $"Egenskapen '{string.Join("' och '", missing)}' saknas på händelsetypen i "
@@ -2691,10 +2731,10 @@ namespace HpskSite.Controllers
             string eventName = "", string pageName = "", string eventType = "",
             string eventDate = "", string venue = "", string description = "",
             string contactPerson = "", string contactEmail = "", string contactPhone = "",
-            string feeAmount = "", string equipmentRequired = "", string targetAudience = "",
+            string equipmentRequired = "", string targetAudience = "",
             bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "",
-            bool isMandatory = false, string eventFee = "", int maxParticipants = 0,
-            bool lanevapenOffered = false, string registrationDeadline = "")
+            bool isMandatory = false, int maxParticipants = 0,
+            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "")
         {
             try
             {
@@ -2741,7 +2781,9 @@ namespace HpskSite.Controllers
                 }
 
                 // Save extended fields
-                eventContent.SetValue("feeAmount", feeAmount);
+                // feeAmount skrivs INTE langre - fritextavgiften ar ersatt av prisraderna
+                // (eventPrices), som ApplyEventRegistrationFields ager. Lagg aldrig tillbaka en
+                // avgiftsskrivning har: da finns tva falt som bada pastar vad det kostar.
                 eventContent.SetValue("equipmentRequired", equipmentRequired);
                 eventContent.SetValue("targetAudience", targetAudience);
                 // ⚠️ `lanevapenOffered` MÅSTE skickas med. Utan den skrev den här dialogen false
@@ -2749,7 +2791,7 @@ namespace HpskSite.Controllers
                 // den tysta glidningen ApplyEventRegistrationFields finns för att förhindra.
                 var regFieldError = ApplyEventRegistrationFields(
                     eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl,
-                    lanevapenOffered, registrationDeadline, eventFee);
+                    lanevapenOffered, registrationDeadline, eventPrices);
 
                 if (regFieldError != null)
                 {
